@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Qualify the real browser workbench and its durable recovery workflow.
+"""Qualify the real browser workbench, its durable recovery workflow, and the
+results a saved project keeps in the browser's own storage across a reload.
 
 Serve the normal web entry and production worker, with the UI built using
 `browser-qualification`. The optional observer exposes rendered controls only.
@@ -11,7 +12,9 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import copy
+import csv
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
@@ -464,18 +467,27 @@ def run_with_saved_provider(browser, decision):
     waveforms = analysis["waveforms"]
     if not analysis["success"] or analysis.get("error_message") or not waveforms:
         raise AssertionError("The saved-provider analysis has no successful transient samples")
+    # The checkpoint names the run's samples in its results store; their values
+    # are read back from the reopened project once it has been saved and reloaded.
     for waveform in waveforms:
         x, y = waveform["x"], waveform["y"]
-        if (len(x) < 2 or len(x) != len(y) or not all(math.isfinite(v) for v in x + y)
-                or any(b < a for a, b in zip(x, x[1:]))
-                or not math.isclose(x[-1], 0.001, rel_tol=0, abs_tol=1e-12)):
+        if not stored_window_pair(x, y):
             raise AssertionError("The saved-provider transient samples are incomplete or invalid")
-    if not any(w["name"].upper().startswith("V(") and
-               all(math.isclose(v, 5.0, rel_tol=0, abs_tol=1e-6) for v in w["y"])
-               for w in waveforms):
-        raise AssertionError("The saved-provider simulation did not retain the authored 5 V output")
+    if not any(w["name"].upper().startswith("V(") for w in waveforms):
+        raise AssertionError("The saved-provider simulation did not retain the authored output")
     (browser.output / "model-provider-results.rspiceproj").write_bytes(raw)
-    return {"worker_run": "passed", "waveforms": {w["name"]: len(w["x"]) for w in waveforms}}
+    return {"worker_run": "passed", "waveforms": {w["name"]: w["x"]["rows"] for w in waveforms}}
+
+
+def stored_window_pair(x, y):
+    """Whether a waveform's axis and values are windows of the same stored segment: the axis its
+    first column, the values another, both holding the same two or more rows."""
+    fields = {"segment", "column", "column_rows", "first", "rows"}
+    if not all(isinstance(values, dict) and fields <= set(values) for values in (x, y)):
+        return False
+    return (x["segment"] == y["segment"] and x["column"] == 0 and y["column"] > 0
+            and x["rows"] >= 2 and x["rows"] == y["rows"] and x["first"] == y["first"]
+            and x["column_rows"] == y["column_rows"] >= x["first"] + x["rows"])
 
 
 def create_and_resolve_review(browser):
@@ -695,6 +707,262 @@ def configuration_opening_input(browser):
                         for control in controls(browser.snapshot())), "the schematic canvas")
 
 
+SAVE_PAGE = "Save, streaming & retention policy"
+KEPT = "kept in this browser's storage"
+HELD_ELSEWHERE = "another tab holds this project's results store"
+UNREAD = "cannot be read"
+
+
+def results_storage(rendered):
+    """The Save page's Results storage statement: what the page holds in memory, and whether the
+    project's results store in the browser's own storage keeps it."""
+    statements = {text for control in rendered for text in (control["label"], control["value"])
+                  if " in this page's memory · " in text}
+    if len(statements) > 1:
+        raise AssertionError(f"The Save page states its results storage twice: {sorted(statements)}")
+    return next(iter(statements), None)
+
+
+def segments_named(project):
+    """Every results store segment the saved project's runs read, by digest."""
+    named = set()
+    for run in project["simulation_results"]["runs"]:
+        for analysis in run["analyses"]:
+            for waveform in analysis["waveforms"]:
+                for values in (waveform["x"], waveform["y"]):
+                    if not isinstance(values, dict) or "segment" not in values:
+                        raise AssertionError(f"{waveform['name']} is not a stored window: {values}")
+                    named.add(values["segment"])
+    return named
+
+
+def results_store_files(browser, store):
+    result = browser.call("POST", "/execute/async", {"args": [store], "script": """
+        const done = arguments[arguments.length - 1];
+        const store = arguments[0];
+        (async () => {
+            const root = await navigator.storage.getDirectory();
+            let directory;
+            try {
+                directory = await (await root.getDirectoryHandle('rspice-results'))
+                    .getDirectoryHandle(store);
+            } catch (error) { if (error.name === 'NotFoundError') return {}; throw error; }
+            const files = {};
+            const walk = async (folder, prefix) => {
+                for await (const [name, handle] of folder.entries()) {
+                    if (handle.kind === 'directory') await walk(handle, prefix + name + '/');
+                    else files[prefix + name] = true;
+                }
+            };
+            await walk(directory, '');
+            return files;
+        })().then(files => done({files}), error => done({error: String(error)}));
+    """})
+    if "error" in result:
+        raise AssertionError("Results store observation failed: " + result["error"])
+    return sorted(result["files"])
+
+
+def stated_storage(browser, wanted, description, timeout=120):
+    choose_command(browser, SAVE_PAGE)
+
+    def statement():
+        text = results_storage(controls(browser.snapshot()))
+        return text if text and wanted in text else None
+
+    return wait_for(statement, description, timeout)
+
+
+def results_survive_reload(browser):
+    """The run the saved project holds keeps its samples in the browser's own storage: saved,
+    reloaded and reopened, the project's run reads them, and nothing says they cannot be read."""
+    before = stated_storage(browser, KEPT, "the run's results kept in this browser's storage")
+    browser.capture("results-kept")
+    choose_command(browser, "Save all")
+    wait_for(lambda: not unsaved(browser.snapshot()), "the project saved with its run", 60)
+    files = canonical_projects(browser)
+    if len(files) != 1:
+        raise AssertionError(f"Expected one saved browser project, found {sorted(files)}")
+    project = json.loads(next(iter(files.values())))
+    named = segments_named(project)
+    if not named:
+        raise AssertionError("The saved project names no results store segment")
+    store = project["workspace"]["project"]["id"]
+    kept = results_store_files(browser, store)
+    if "manifest.rsm" not in kept or not any(name.startswith("runs/") for name in kept):
+        raise AssertionError(f"The project's results store keeps no segment: {kept}")
+    browser.click("Expand console", "button")
+    clear_console(browser)
+    browser.click("Collapse console", "button")
+    browser.call("POST", "/refresh", {})
+    wait_until_ready(browser)
+    browser.click("Schematic canvas", "canvas")
+    after = stated_storage(browser, KEPT, "the reopened run's results read from this browser's storage")
+    browser.click("Expand console", "button")
+    reopened = browser.capture("results-reopened")
+    browser.click("Collapse console", "button")
+    if reports(controls(reopened), UNREAD):
+        raise AssertionError("The reopened project says its run's results cannot be read")
+    if json.loads(next(iter(canonical_projects(browser).values()))) != project:
+        raise AssertionError("Reopening changed the saved project")
+    samples = verify_exported_samples(exported_dataset(browser))
+    return {"store": store, "segments": sorted(named), "store_files": kept,
+            "before_reload": before, "after_reload": after, "exported_samples": samples}
+
+
+def exported_dataset(browser):
+    """The reopened run's samples, as Export result dataset… writes them to a CSV download."""
+    choose_command(browser, "Open results workspace")
+    choose_command(browser, "Export result dataset…")
+    wait_for(lambda: any(c["label"] == "Export…" for c in controls(browser.snapshot())),
+             "the export result dataset form")
+    every = [c for c in controls(browser.snapshot()) if c["label"].startswith("All (")]
+    if len(every) != 1:
+        raise AssertionError(f"Expected one choice of every signal to export; got {every}")
+    browser.click(every[0]["label"], every[0]["role"])
+    browser.capture("results-export-form")
+    browser.click("Export…", "button")
+
+    def download():
+        files = list(browser.downloads.glob("*.csv"))
+        if len(files) > 1:
+            raise AssertionError(f"Unexpected extra dataset downloads: {files}")
+        return files[0] if files and not list(browser.downloads.glob("*.crdownload")) else None
+
+    return wait_for(download, "the exported result dataset", 60).read_text(encoding="utf-8")
+
+
+def verify_exported_samples(text):
+    """The exported transient runs to 1 ms on a rising time axis and holds the authored 5 V
+    output at every sample."""
+    rows = [row for row in csv.reader(io.StringIO(text)) if row]
+    if len(rows) < 3:
+        raise AssertionError(f"The exported dataset holds fewer than two samples: {rows[:3]}")
+    header, samples = rows[0], [[float(value) for value in row] for row in rows[1:]]
+    if any(len(row) != len(header) for row in samples):
+        raise AssertionError("The exported dataset has rows of different widths")
+    time_axis = [row[0] for row in samples]
+    if (not all(math.isfinite(v) for v in time_axis) or any(b < a for a, b in zip(time_axis, time_axis[1:]))
+            or not math.isclose(time_axis[-1], 0.001, rel_tol=0, abs_tol=1e-12)):
+        raise AssertionError("The exported transient samples are incomplete or invalid")
+    if not any(name.strip().upper().startswith("V(")
+               and all(math.isclose(row[column], 5.0, rel_tol=0, abs_tol=1e-6) for row in samples)
+               for column, name in enumerate(header) if column):
+        raise AssertionError("The reopened run did not retain the authored 5 V output")
+    return {"signals": header[1:], "rows": len(samples)}
+
+
+def second_tab_refused(browser):
+    """A second tab that opens the project finds its results store held by the first, and keeps
+    nothing of its own in it."""
+    first = browser.call("GET", "/window")
+    second = browser.call("POST", "/window/new", {"type": "tab"})["handle"]
+    browser.call("POST", "/window", {"handle": second})
+    try:
+        browser.navigate(browser.origin)
+        wait_until_ready(browser)
+        browser.click("Schematic canvas", "canvas")
+        statement = stated_storage(browser, HELD_ELSEWHERE, "the second tab refused the results store")
+        browser.capture("second-tab-refused")
+    finally:
+        browser.call("DELETE", "/window")
+        browser.call("POST", "/window", {"handle": first})
+    stated_storage(browser, KEPT, "the first tab still holding the results store")
+    return {"second_tab": statement}
+
+
+QUOTA_WRITE = """
+    const done = arguments[arguments.length - 1];
+    (async () => {
+        const worker = new Worker(window.__RSPICE_SIM_WORKER_URL, {type: 'module'});
+        const pending = new Map();
+        let next = 1;
+        worker.onmessage = ({data}) => {
+            const waiting = pending.get(data.id);
+            if (!waiting) return;
+            pending.delete(data.id);
+            if (data.type === 'results-store-result') waiting.resolve(data);
+            else waiting.reject(new Error(String(data.error)));
+        };
+        const ask = (request, buffers = []) => new Promise((resolve, reject) => {
+            const id = next++;
+            pending.set(id, {resolve, reject});
+            worker.postMessage({type: 'results-store', id, request: JSON.stringify(request), buffers},
+                               buffers.map(view => view.buffer));
+        }).then(answer => JSON.parse(answer.response));
+        const store = 'quota-' + crypto.randomUUID();
+        try {
+            const opened = await ask({op: 'open', store});
+            if (opened.standing.kind !== 'held') throw new Error(JSON.stringify(opened));
+            const signals = 3, rows = (8 << 20) / ((signals + 1) * 8);
+            const begun = await ask({op: 'begin', digest: '0'.repeat(64), schema: {
+                x: ['time', 's'], analysis: 'tran', sweep: [], seed: null, options: [],
+                signals: [0, 1, 2].map(signal => ({
+                    name: 'v(n' + signal + ')', unit: 'V', complex: false, quantity: '', path: ''}))
+            }});
+            if (begun.kind !== 'begun') throw new Error(JSON.stringify(begun));
+            let state = 7, chunks = 0, full = false;
+            const random = () => {
+                state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+                return (state >>> 0) / 4294967296;
+            };
+            while (!full && chunks < 64) {
+                const x = new Float64Array(rows), values = new Float64Array(rows * signals);
+                for (let row = 0; row < rows; row++) x[row] = (chunks * rows + row) * 1e-9;
+                for (let i = 0; i < values.length; i++) values[i] = random();
+                const taken = await ask({op: 'rows', write: begun.write}, [x, values]);
+                if (taken.kind !== 'taken') throw new Error(JSON.stringify(taken));
+                full = taken.full;
+                chunks++;
+            }
+            const finished = await ask({op: 'finish', write: begun.write});
+            if (finished.kind !== 'finished') throw new Error(JSON.stringify(finished));
+            await ask({op: 'close'});
+            await ask({op: 'open', store});
+            const checked = await ask({op: 'check', digest: finished.record.digest});
+            return {chunks, full: finished.full, record: finished.record, checked};
+        } finally {
+            await ask({op: 'close'}).catch(() => {});
+            worker.terminate();
+            const root = await navigator.storage.getDirectory();
+            await (await root.getDirectoryHandle('rspice-results'))
+                .removeEntry(store, {recursive: true}).catch(() => {});
+        }
+    })().then(done, error => done({error: String(error)}));
+"""
+
+
+def verify_quota_stop(result, quota):
+    if "error" in result:
+        raise AssertionError("The quota write failed: " + result["error"])
+    if not result["full"] or result["record"]["rows"] <= 0:
+        raise AssertionError(f"The quota did not stop the write on rows it kept: {result}")
+    if result["checked"].get("kind") != "checked" or result["checked"]["len"] <= 0:
+        raise AssertionError(f"The rows the full store kept did not read back: {result}")
+    if result["checked"]["len"] > quota:
+        raise AssertionError(f"The full store kept more than the quota allows: {result}")
+    return {"quota_bytes": quota, "rows_kept": result["record"]["rows"],
+            "bytes_kept": result["checked"]["len"], "chunks_sent": result["chunks"]}
+
+
+def quota_stop_keeps_rows(browser):
+    """Writing past the origin's quota closes the write on the rows it took: the store keeps them,
+    and they read back checked against their digest once the store is opened again."""
+    estimate = browser.call("POST", "/execute/async", {"args": [], "script": """
+        const done = arguments[arguments.length - 1];
+        navigator.storage.estimate().then(done, error => done({error: String(error)}));
+    """})
+    if "error" in estimate:
+        raise AssertionError("The storage estimate failed: " + estimate["error"])
+    quota = int(estimate["usage"]) + (24 << 20)
+    browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin, "quotaSize": quota})
+    try:
+        result = browser.call("POST", "/execute/async", {"args": [], "script": QUOTA_WRITE})
+    finally:
+        browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin})
+    return verify_quota_stop(result, quota)
+
+
 def wait_until_ready(browser):
     def ready():
         status = browser.script("""
@@ -757,6 +1025,9 @@ def run(browser):
     validated_save = validated_save_clock(browser, review_intervals)
     model_validation = model_validation_clock(browser)
     provider_decision = provider_decision_clock(browser)
+    results_reload = results_survive_reload(browser)
+    second_tab = second_tab_refused(browser)
+    quota_stop = quota_stop_keeps_rows(browser)
     return {"startup": "passed", "checkpoint_export": "passed", "checkpoint_restore": "passed",
             "revision_history": "opened",
             "configuration_opening_input": "passed",
@@ -764,6 +1035,8 @@ def run(browser):
             "validated_save": validated_save,
             "model_validation": model_validation,
             "provider_decision": provider_decision,
+            "results_survive_reload": results_reload, "results_store_second_tab": second_tab,
+            "results_store_quota_stop": quota_stop,
             "review_post_and_resolution": "passed", "review_intervals_ms": review_intervals,
             "checkpoint": manifest, "export": exported.name, "project_version": project["version"]}
 

@@ -13,7 +13,8 @@ from unittest.mock import Mock, patch
 
 from browser_workbench import WorkbenchBrowser, controls, unsaved
 from check_browser_workbench import (
-    run_with_saved_provider, verify_checkpoint, verify_clock_rejection, verify_recovery_copy,
+    results_storage, run_with_saved_provider, segments_named, stored_window_pair, verify_checkpoint,
+    verify_clock_rejection, verify_exported_samples, verify_quota_stop, verify_recovery_copy,
     wait_for_checkpoint_publication,
 )
 from check_browser_release import ReleaseHandler, startup_ready, verify_worker_urls
@@ -190,11 +191,12 @@ class BrowserWorkbenchTests(unittest.TestCase):
 
     def test_saved_provider_waits_for_manifest_after_snapshot_publication(self):
         decision = {"provider": "retained"}
+        window = {"segment": "ab" * 32, "column": 1, "column_rows": 2, "first": 0, "rows": 2}
         project = {"workspace": {"project": {"id": "source", "name": "Source", "revision": 1}},
                    "execution_context": {"model_resolution_records": [decision]},
                    "simulation_results": {"runs": [{"success": True, "lifecycle": "completed",
                        "analyses": [{"success": True, "waveforms": [
-                           {"name": "V(out)", "x": [0.0, 0.001], "y": [5.0, 5.0]}]}]}]}}
+                           {"name": "V(out)", "x": {**window, "column": 0}, "y": window}]}]}]}}
         raw = json.dumps(project).encode("utf-8")
         manifest = {"schema_version": 2, "reason": "manual", "pinned": False, "created_unix_ms": 105,
                     "project_id": "source", "project_name": "Source", "project_revision": 1,
@@ -241,6 +243,57 @@ class BrowserWorkbenchTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             verify_recovery_copy(original, recovered, "recovered.rspiceproj")
         self.assertEqual(original["workspace"]["circuit"]["resistance"], "10k")
+
+    def test_results_storage_is_the_save_page_statement_and_only_one(self):
+        def rendered(*texts):
+            return [{"label": text, "value": ""} for text in texts]
+
+        kept = "1.2 MiB of 32 MiB in this page's memory \u00b7 4.0 KiB kept in this browser's storage"
+        self.assertEqual(results_storage(rendered("Results storage", kept)), kept)
+        self.assertIsNone(results_storage(rendered("Results storage", "Retention")))
+        held = "0 B of 32 MiB in this page's memory \u00b7 another tab holds this project's results store"
+        with self.assertRaisesRegex(AssertionError, "twice"):
+            results_storage(rendered(kept, held))
+
+    def test_a_saved_run_names_its_segments_and_samples_in_the_file_fail(self):
+        window = {"segment": "ab" * 32, "column": 1, "column_rows": 3, "first": 0, "rows": 3}
+        project = {"simulation_results": {"runs": [{"analyses": [{"waveforms": [
+            {"name": "V(out)", "x": {**window, "column": 0}, "y": window}]}]}]}}
+        self.assertEqual(segments_named(project), {"ab" * 32})
+        project["simulation_results"]["runs"][0]["analyses"][0]["waveforms"][0]["y"] = [1.0, 2.0]
+        with self.assertRaisesRegex(AssertionError, "not a stored window"):
+            segments_named(project)
+
+    def test_a_waveform_reads_its_axis_and_values_from_one_segment(self):
+        window = {"segment": "ab" * 32, "column": 2, "column_rows": 4, "first": 1, "rows": 3}
+        axis = {**window, "column": 0}
+        self.assertTrue(stored_window_pair(axis, window))
+        for x, y in ((window, window), (axis, {**window, "segment": "cd" * 32}),
+                     (axis, {**window, "rows": 2}), ({**axis, "rows": 1}, {**window, "rows": 1}),
+                     (axis, {**window, "column_rows": 3}), ([0.0, 1e-3], [5.0, 5.0])):
+            self.assertFalse(stored_window_pair(x, y))
+
+    def test_exported_samples_must_hold_the_authored_output_to_the_end_of_the_run(self):
+        exported = "time,V(out),I(V1)\n0,5,0\n0.0005,5,0\n0.001,5.0000001,0\n"
+        self.assertEqual(verify_exported_samples(exported),
+                         {"signals": ["V(out)", "I(V1)"], "rows": 3})
+        for wrong in ("time,V(out)\n0,5\n", "time,V(out)\n0,5\n0.0005,5\n0.0009,5\n",
+                      "time,V(out)\n0,5\n0.001,5\n0.0005,5\n", "time,V(out)\n0,5\n0.0005,4.9\n0.001,5\n",
+                      "time,I(V1)\n0,5\n0.0005,5\n0.001,5\n"):
+            with self.assertRaises(AssertionError):
+                verify_exported_samples(wrong)
+
+    def test_a_quota_stop_must_keep_rows_that_read_back_within_the_quota(self):
+        kept = {"chunks": 3, "full": True, "record": {"rows": 524288},
+                "checked": {"kind": "checked", "len": 9 << 20}}
+        self.assertEqual(verify_quota_stop(kept, 24 << 20)["rows_kept"], 524288)
+        for wrong in ({**kept, "full": False}, {**kept, "record": {"rows": 0}},
+                      {**kept, "checked": {"kind": "failed", "reason": "damaged"}},
+                      {"error": "QuotaExceededError"}):
+            with self.assertRaises(AssertionError):
+                verify_quota_stop(wrong, 24 << 20)
+        with self.assertRaisesRegex(AssertionError, "more than the quota"):
+            verify_quota_stop(kept, 8 << 20)
 
 
 if __name__ == "__main__":
