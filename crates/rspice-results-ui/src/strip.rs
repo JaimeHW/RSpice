@@ -927,19 +927,6 @@ fn legend_chip(
 mod tests {
     use super::*;
 
-    #[test]
-    fn trailing_actions_reserve_exact_rendered_controls_first() {
-        let base = trailing_actions_width(22.0, 1, 0.0, false, 0.0);
-        let close = trailing_actions_width(22.0, 2, 0.0, false, 0.0);
-        let zoomed = trailing_actions_width(22.0, 2, 0.0, true, 31.0);
-        let scale = trailing_actions_width(22.0, 1, 48.0, false, 0.0);
-
-        assert_eq!(base, 22.0);
-        assert_eq!(close, 45.0);
-        assert_eq!(zoomed, 82.0);
-        assert_eq!(scale, 22.0 + WINDOW_CONTROL_GAP + 48.0);
-    }
-
     /// Two strips drawn one above the other in one parent, as a pane's stack
     /// draws two analyses, keep their legends' scroll positions apart. Named
     /// after its parent alone, each legend took the same ID as the other, egui

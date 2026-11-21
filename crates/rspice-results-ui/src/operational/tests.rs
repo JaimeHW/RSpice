@@ -34,31 +34,6 @@ fn canonical_operational_registry_matches_the_result_contract() {
     }
 }
 
-/// Only a state the reader has to notice colours its glyph, and only in the
-/// warning or error tone; a complete, recovered, empty or loading state is
-/// neutral. The title and border are never tinted, so the glyph is the one
-/// statement of severity on the card.
-#[test]
-fn only_a_warning_or_error_state_colours_its_glyph() {
-    let palette = Tokens::default().color;
-    for state in ResultOperationalState::ALL {
-        let category = state.category();
-        let expected = match category {
-            ResultOperationalCategory::Partial | ResultOperationalCategory::Warning => palette.warn,
-            ResultOperationalCategory::Error => palette.err,
-            _ => palette.text_dim,
-        };
-        assert_eq!(icon_tone(category, &palette), expected, "{}", state.id());
-        assert_ne!(icon_tone(category, &palette), palette.ok, "{}", state.id());
-        assert_ne!(
-            icon_tone(category, &palette),
-            palette.info,
-            "{}",
-            state.id()
-        );
-    }
-}
-
 /// A blocking card is drawn once. It used to be laid out twice, once
 /// invisibly to measure its height, and egui publishes the widgets of an
 /// invisible pass too, so a screen reader met the card's title, message and

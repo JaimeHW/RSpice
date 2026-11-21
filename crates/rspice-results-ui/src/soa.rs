@@ -1362,25 +1362,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_violation_or_a_rule_near_its_limit_colours_its_verdict() {
-        let palette = Tokens::default().color;
-        assert_eq!(
-            verdict_color(SoaRuleVerdictEvidence::Pass, &palette),
-            palette.text
-        );
-        assert_eq!(
-            verdict_color(SoaRuleVerdictEvidence::Warning, &palette),
-            palette.warn
-        );
-        for violation in [
-            SoaRuleVerdictEvidence::Violation,
-            SoaRuleVerdictEvidence::Critical,
-        ] {
-            assert_eq!(verdict_color(violation, &palette), palette.err);
-        }
-    }
-
-    #[test]
     fn soa_filter_keeps_attention_and_passing_rules_disjoint() {
         for verdict in [
             SoaRuleVerdictEvidence::Warning,

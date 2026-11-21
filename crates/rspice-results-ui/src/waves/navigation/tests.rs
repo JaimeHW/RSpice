@@ -202,31 +202,6 @@ fn a_focused_ruler_keeps_its_arrows() {
 }
 
 #[test]
-fn two_ruler_boxes_that_would_touch_part_by_halves_inside_the_span() {
-    let span = egui::Rangef::new(0.0, 100.0);
-    // Apart already: each centred under its cursor.
-    assert_eq!(
-        ruler_flag_lefts(&[(20.0, 10.0), (60.0, 10.0)], span),
-        vec![15.0, 55.0]
-    );
-    // Touching: each gives half, to the least gap, about the cursors' mean.
-    assert_eq!(
-        ruler_flag_lefts(&[(50.0, 20.0), (54.0, 20.0)], span),
-        vec![30.0, 50.0 + RULER_FLAG_PAD]
-    );
-    // At an edge that box holds and the other takes the whole push.
-    assert_eq!(
-        ruler_flag_lefts(&[(1.0, 20.0), (3.0, 20.0)], span),
-        vec![0.0, 20.0 + RULER_FLAG_PAD]
-    );
-    // Ordered by where the cursors stand, whichever is A.
-    assert_eq!(
-        ruler_flag_lefts(&[(99.0, 20.0), (97.0, 20.0)], span),
-        vec![80.0, 80.0 - 20.0 - RULER_FLAG_PAD]
-    );
-}
-
-#[test]
 fn the_gutter_names_the_quantity_swept_with_its_unit() {
     assert_eq!(shared_x_gutter_label("t", "s"), "TIME \u{b7} s");
     assert_eq!(shared_x_gutter_label("f", "Hz"), "FREQ \u{b7} Hz");

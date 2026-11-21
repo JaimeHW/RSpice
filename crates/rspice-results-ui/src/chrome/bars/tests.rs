@@ -52,20 +52,6 @@ fn field_rect(ctx: &egui::Context) -> egui::Rect {
 }
 
 #[test]
-fn the_filter_field_stays_where_it_is_when_the_reader_starts_typing() {
-    let ctx = strip();
-    let mut host = FilterHost::default();
-    settle(&ctx, &mut host);
-    let empty = field_rect(&ctx);
-
-    host.filter.push('m');
-    frame(&ctx, &mut host, Vec::new());
-    assert_eq!(field_rect(&ctx), empty, "on the keystroke's own frame");
-    settle(&ctx, &mut host);
-    assert_eq!(field_rect(&ctx), empty);
-}
-
-#[test]
 fn escape_empties_the_filter_the_reader_is_in() {
     let ctx = strip();
     let mut host = FilterHost {

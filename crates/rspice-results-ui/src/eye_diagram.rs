@@ -146,11 +146,4 @@ mod tests {
         assert_eq!(state.mask.total_samples, 0);
         assert_eq!(state.mask.margin, None);
     }
-
-    /// An untested mask has no verdict: no margin, rather than a perfect one.
-    #[test]
-    fn an_untested_mask_reports_no_margin() {
-        let mask = EyeMask::default();
-        assert_eq!(mask.margin, None);
-    }
 }

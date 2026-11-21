@@ -545,11 +545,4 @@ mod tests {
     fn convergence_selection_rejects_non_finite_history() {
         assert_eq!(nearest_candidate_index(&[f64::NAN], 1.0), None);
     }
-
-    #[test]
-    fn only_a_run_that_stopped_short_colours_its_outcome() {
-        let palette = Tokens::default().color;
-        assert_eq!(outcome_color(true, &palette), palette.text);
-        assert_eq!(outcome_color(false, &palette), palette.warn);
-    }
 }

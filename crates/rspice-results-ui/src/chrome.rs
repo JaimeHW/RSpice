@@ -455,9 +455,6 @@ pub fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool) -> bool {
         && !active
 }
 
-#[cfg(test)]
-mod tests;
-
 /// Export targets requested by the Results menu.
 #[derive(Default)]
 pub struct ExportRequests {

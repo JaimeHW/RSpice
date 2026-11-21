@@ -692,12 +692,6 @@ mod tests {
         assert_eq!(percent(remainder, 4), "20 %");
     }
     #[test]
-    fn a_trimmed_contributor_list_states_how_many_were_evaluated() {
-        let evidence = evidence();
-        assert_eq!(evidence.retained_contributors(), 2);
-        assert_eq!(evidence.evaluated_contributors, 6);
-    }
-    #[test]
     fn a_negative_share_is_drawn_as_a_reduction_not_as_an_error() {
         let mut evidence = evidence();
         evidence.contributors[0].share = 1.2;

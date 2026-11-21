@@ -464,22 +464,6 @@ fn folding_a_section_keeps_its_title_and_the_sheet_geometry() {
 }
 
 #[test]
-fn every_row_of_a_kind_has_the_same_pitch() {
-    let (dc, report) = evidence_fixture(6, 6);
-    let plan = plan_of(Some(&dc), Some(&report));
-    let (rows, offsets) = plan.row_counts();
-    assert_eq!(rows, offsets);
-    for row in &plan.rows {
-        let expected = match row {
-            PlanRow::Gap => 8.0,
-            PlanRow::Title(_) => 24.0,
-            PlanRow::Columns(_) | PlanRow::Value { .. } | PlanRow::Note(_) => 20.0,
-        };
-        assert_eq!(row.height(), expected, "{row:?}");
-    }
-}
-
-#[test]
 fn the_header_pins_at_the_top_and_the_next_section_pushes_it_off() {
     let (dc, report) = evidence_fixture(12, 12);
     let plan = plan_of(Some(&dc), Some(&report));

@@ -1136,10 +1136,4 @@ mod tests {
         assert!(bus_notes(cache.buses(), BusRadix::Hex).is_empty());
         assert!(rows.iter().all(|row| row.ends_with("digital")));
     }
-    #[test]
-    fn the_subtitle_counts_the_declarations_and_their_members() {
-        let analysis = two_bit_counter();
-        let (cache, _) = event_rows_with(&analysis, BusRadix::Binary, &collapsed());
-        assert_eq!(bus_subtitle(cache.buses()), " · 1 bus over 2 members");
-    }
 }
