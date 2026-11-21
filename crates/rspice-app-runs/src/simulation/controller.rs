@@ -394,7 +394,9 @@ impl SimulationController {
 
         // Update running state
         let is_running = self.runner.is_running();
-        let live_window = self.live_window().filter(|_| is_running);
+        let live_window = self
+            .live_window()
+            .filter(|_| is_running && self.streams_live());
         let execution = &mut state.model_mut().simulation.execution;
         execution.progress =
             Self::ui_progress_fraction(self.runner.progress_fraction(), is_running);
@@ -1080,13 +1082,12 @@ impl SimulationController {
                     .periodic_state()
                     .ok()
                     .map(|state| state.operating_point().analysis().result.frequency);
-                let stream_transient_samples = self.current_save_policy.live_streaming_enabled()
-                    && self.current_saved_output_contracts.iter().any(|contract| {
-                        contract.streaming()
-                            == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-                            || contract.policy()
+                let stream_transient_samples = self.streams_live()
+                    || (self.current_save_policy.live_streaming_enabled()
+                        && self.current_saved_output_contracts.iter().any(|contract| {
+                            contract.policy()
                                 == crate::state::SavedOutputPolicy::FailureDiagnosticsOnly
-                    });
+                        }));
                 self.runner
                     .start_prepared(dispatch, stream_transient_samples)
                     .map_err(Box::new)
@@ -1521,13 +1522,7 @@ impl SimulationController {
         if !self.live_publish_due {
             return;
         }
-        if !self.current_saved_output_contracts.iter().any(|contract| {
-            contract.streaming()
-                == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-        }) {
-            return;
-        }
-        if !self.current_save_policy.live_streaming_enabled() {
+        if !self.streams_live() {
             return;
         }
         if self
@@ -1545,6 +1540,24 @@ impl SimulationController {
             note = Some(note.map_or_else(|| words.to_owned(), |note| format!("{note} {words}")));
         }
         model.simulation.execution.live_preview_note = note;
+    }
+
+    /// Whether the running task's samples are drawn while it runs: the outputs its plan
+    /// streams, or every column of a manual deck, unless live delivery is turned off.
+    fn streams_live(&self) -> bool {
+        self.current_save_policy.live_streaming_enabled()
+            && (self.plots_every_column()
+                || self.current_saved_output_contracts.iter().any(|contract| {
+                    contract.streaming()
+                        == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+                }))
+    }
+
+    /// A manual deck's task, which names no outputs of its own: its result is every column
+    /// the engine writes, and so is its live plot.
+    fn plots_every_column(&self) -> bool {
+        self.current_source_domain == AnalysisResultSourceDomain::ManualDeck
+            && self.current_saved_output_contracts.is_empty()
     }
 
     /// Forget the running task's live samples and the rows followed for it.
@@ -1663,7 +1676,11 @@ impl SimulationController {
                 false,
             )
         };
-        let waveforms = materialize_live_saved_outputs(&source, &contracts);
+        let waveforms = if self.plots_every_column() {
+            source.waveforms.clone()
+        } else {
+            materialize_live_saved_outputs(&source, &contracts)
+        };
         let events = self.live_transient.event_payload(analysis_type);
         if waveforms.is_empty() && events.is_none() {
             return held_back;

@@ -1534,6 +1534,51 @@ fn points_the_live_queue_let_go_of_leave_a_gap_in_the_trace_and_are_counted() {
             thinned_to: None,
         }
     );
+    assert_eq!(
+        accumulator.gaps().note().as_deref(),
+        Some(
+            "The live plot could not keep up and left out 6 points; the trace breaks where \
+             they were (1 gap). The finished result has every point."
+        )
+    );
+}
+
+/// A manual deck names no outputs of its own: it keeps every column the engine writes, so
+/// its transient is drawn while it runs, every column of it.
+#[test]
+fn a_manual_deck_transient_is_drawn_while_it_runs_every_column_of_it() {
+    let mut state = RunTestHost::default();
+    state.model.simulation.source.netlist_content =
+        "deck\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 1u\n.tran 1u 10m\n.end\n".to_string();
+    state.model.simulation.execution.request_manual_deck_run();
+    let mut controller = SimulationController::new();
+    controller
+        .prepare_deck_run(&state)
+        .expect("explicit validation authorizes the exact manual deck");
+    controller.start_simulation(&mut state);
+    let streams = controller.streams_live();
+    let window = controller.live_window();
+    controller
+        .live_transient
+        .ingest((0..3).map(two_signal_point).collect());
+    controller.publish_live_preview(&mut state.model);
+    let drawn = state.model.simulation.active_run().and_then(|run| {
+        run.analyses
+            .iter()
+            .find(|analysis| analysis.is_live_partial())
+            .map(|analysis| {
+                analysis
+                    .waveforms
+                    .iter()
+                    .map(|waveform| waveform.name.clone())
+                    .collect::<Vec<_>>()
+            })
+    });
+    controller.abort();
+
+    assert!(streams, "a deck's transient offers its samples live");
+    assert_eq!(window, Some((0.0, 10e-3)));
+    assert_eq!(drawn, Some(vec!["out".to_owned(), "ref".to_owned()]));
 }
 
 #[test]
