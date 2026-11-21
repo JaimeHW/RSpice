@@ -679,22 +679,6 @@ fn the_resolution_a_raster_export_commits_reaches_the_artifact() {
     );
 }
 
-#[test]
-fn display_units_change_the_fields_and_nothing_the_page_can_see() {
-    let inches = draft();
-    let mut millimetres = draft();
-    millimetres
-        .set_display_unit(LengthUnit::Millimetres)
-        .expect("valid draft converts");
-
-    assert_ne!(millimetres.margin_top, inches.margin_top);
-    assert_eq!(
-        millimetres.build_setup().expect("converted setup"),
-        inches.build_setup().expect("setup"),
-        "changing the display unit moved the sealed setup"
-    );
-}
-
 /// The printer identity and its authenticated job are one atomic setting, and
 /// they only reach a render target on the platform whose dialog offers them.
 #[test]

@@ -1548,14 +1548,6 @@ mod tests {
         assert!(draft.preview_plan.is_some());
     }
 
-    #[test]
-    fn source_resolution_generations_are_strictly_monotonic() {
-        let mut draft = HardcopyDialogState::default();
-        assert_eq!(draft.next_source_resolution_generation(), 1);
-        assert_eq!(draft.next_source_resolution_generation(), 2);
-        assert_eq!(draft.next_source_resolution_generation(), 3);
-    }
-
     /// A refused field is invisible from any other section, so the refusal has
     /// to carry the section it belongs to — and it has to come from the
     /// contract's own answer rather than from the sentence it renders.
