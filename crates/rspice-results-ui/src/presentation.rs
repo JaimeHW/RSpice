@@ -254,25 +254,33 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     let inset = panel_inset(ui);
     let (name_width, value_width) = stat_column_widths(width, inset);
     for (i, (name, value, highlight)) in rows.iter().enumerate() {
+        let value_font = theme::mono(
+            tokens::FS_1,
+            if *highlight {
+                FontWeight::SemiBold
+            } else {
+                FontWeight::Regular
+            },
+        );
+        // A value keeps one line: when it is wider than its column, the
+        // name's column gives way to it rather than the value wrapping.
+        let natural = ui
+            .painter()
+            .layout_no_wrap(value.clone(), value_font.clone(), c.text)
+            .size()
+            .x;
+        let content = name_width + value_width;
+        let value_width = natural.clamp(value_width, content);
+        let name_width = content - value_width;
         let name_galley = ui.painter().layout(
             (*name).to_owned(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
             if *highlight { c.text } else { c.text_dim },
             name_width,
         );
-        let value_galley = ui.painter().layout(
-            value.clone(),
-            theme::mono(
-                tokens::FS_1,
-                if *highlight {
-                    FontWeight::SemiBold
-                } else {
-                    FontWeight::Regular
-                },
-            ),
-            c.text,
-            value_width,
-        );
+        let value_galley = ui
+            .painter()
+            .layout(value.clone(), value_font, c.text, value_width);
         let row_height = PANEL_ROW_H.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
         if !ui.is_rect_visible(rect) {

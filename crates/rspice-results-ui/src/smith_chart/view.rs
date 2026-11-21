@@ -1056,6 +1056,9 @@ pub fn right_panel(
         )
     };
     let first = marked.first().map(|(_, trace, index)| point(trace, *index));
+    // A marker reads at the trace's resolution, as ADS's marker readout
+    // does, each value on one line; the reader's setting can only lower it.
+    let marker_digits = digits.min(MARKER_DIGITS);
     for &(number, trace, index) in &marked {
         // A marker on another locus than m1's names it.
         let heading = if trace.name == marked[0].1.name {
@@ -1065,13 +1068,18 @@ pub fn right_panel(
         };
         section_header(ui, &heading, None);
         let (gamma, frequency) = point(trace, index);
-        let mut rows = sample_rows(trace, index, grid, quantity_policy, digits);
+        let mut rows = sample_rows(trace, index, grid, quantity_policy, marker_digits);
         // The trace's Z₀ heads the panel already; the hover card keeps it
         // because it stands alone.
         rows.retain(|(key, _)| key != "Z₀");
         if let Some(reference) = trace.reference_impedance_ohm {
-            rows.extend(markers::match_rows(gamma, digits));
-            rows.extend(markers::element_rows(gamma, reference, frequency, digits));
+            rows.extend(markers::match_rows(gamma, marker_digits));
+            rows.extend(markers::element_rows(
+                gamma,
+                reference,
+                frequency,
+                marker_digits,
+            ));
         }
         if number > 1
             && let Some(first) = first
@@ -1080,7 +1088,7 @@ pub fn right_panel(
                 (gamma, frequency),
                 first,
                 quantity_policy,
-                digits,
+                marker_digits,
             ));
         }
         let table = rows
@@ -1091,6 +1099,9 @@ pub fn right_panel(
     }
     two_port_rows(ui, figures, circles, quantity_policy, digits);
 }
+
+/// The significant digits a marker's readout carries.
+const MARKER_DIGITS: usize = 4;
 
 /// K, μ, μ′, the maximum gain, the noise parameters and the stability
 /// circles at the circles' frequency.
