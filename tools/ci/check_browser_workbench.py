@@ -1270,15 +1270,7 @@ def rawfile_import_streams(browser):
     if any(IMPORT_WORKER in name for name in resources):
         raise AssertionError("The page loaded the import worker before any import started")
     # The imported run is the only one, so the dataset exported after the reload is its.
-    browser.click("Results", "menuItem")
-    items = wait_for(lambda: [c for c in controls(browser.snapshot())
-                              if c["label"].startswith("Clear result history")], "the Results menu")
-    click_control(browser, items[0])
-    deletes = wait_for(lambda: [c for c in controls(browser.snapshot())
-                                if re.fullmatch(r"Delete \d+ runs?", c["label"]) and c["role"] == "button"],
-                       "the clear result history confirmation")
-    click_control(browser, deletes[0])
-    wait_for(lambda: reports(controls(browser.snapshot()), "Deleted "), "the cleared result history")
+    clear_result_history(browser)
     columns = write_rawfile(browser.output / IMPORTED_RAWFILE)
     # Each import worker the page starts is recorded: its store requests, answer and release.
     browser.script("""
