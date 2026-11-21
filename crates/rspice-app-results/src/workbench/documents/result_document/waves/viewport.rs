@@ -189,17 +189,31 @@ pub(crate) fn fit_y_to_visible_x(state: &mut ResultsParts<'_>) {
     }
 }
 
+/// A cursor jump whose search walks a stored trace on a Results job; the cursor moves when it
+/// answers.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingJump {
+    pub(crate) search: rspice_results_ui::waves::navigation::JumpSearch,
+    pub(crate) job: crate::workbench::results_job::ResultsJob<Result<f64, String>>,
+}
+
 /// Move the stepping cursor to `jump` on the trace it reads: the selected
 /// trace, else the one cursor A was anchored to, else the active pane's.
 ///
 /// The arrow keys step it sample by sample, Shift+arrow from peak to peak
 /// and Alt+arrow from crossing to crossing; the Results commands move it to
 /// the maximum, the minimum, a peak or a crossing.
+///
+/// A step to a neighbouring sample, and any jump on a trace in memory, lands now: `Some` of
+/// where. A peak, crossing or extreme of a stored trace is searched on a Results job, since the
+/// search reads the trace from its start; `None`, and [`poll_cursor_jump`] moves the cursor
+/// when the job answers. A jump asked while another searches replaces it.
 pub(crate) fn jump_cursor(
     state: &mut ResultsParts<'_>,
     tokens: &Tokens,
     jump: rspice_results_ui::waves::navigation::CursorJump,
-) -> Result<f64, String> {
+) -> Result<Option<f64>, String> {
+    use rspice_results_ui::waves::navigation::{land_jump, prepare_jump};
     let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
         &state.model.simulation,
@@ -207,7 +221,98 @@ pub(crate) fn jump_cursor(
         presentation.complex_number_display(),
         tokens,
     );
-    rspice_results_ui::waves::navigation::jump_cursor(&mut state.results.session, &models, jump)
+    if let Some(running) = state.results.cursor_jump.take() {
+        running.job.cancel();
+    }
+    let search = prepare_jump(&state.results.session, &models, jump)?;
+    if !search.walks_store() {
+        let x = search.run()?;
+        land_jump(&mut state.results.session, &models, &search, x);
+        return Ok(Some(x));
+    }
+    let work = search.clone();
+    let job = crate::workbench::results_job::ResultsJob::start("cursor-jump", move |job| {
+        job.step(&format!("Searching {}", work.trace_name()), 0);
+        Ok(work.run())
+    });
+    state.results.cursor_jump = Some(PendingJump { search, job });
+    // A job that ran as it started, as the browser's do, answers now.
+    poll_cursor_jump(state, tokens);
+    Ok(None)
+}
+
+/// Move the cursor a jump's search found, once its job has answered, or say on the status bar
+/// why it found nothing. Whether a search is still running.
+pub(crate) fn poll_cursor_jump(state: &mut ResultsParts<'_>, tokens: &Tokens) -> bool {
+    use crate::workbench::results_job::JobOutcome;
+    let Some(pending) = state.results.cursor_jump.as_ref() else {
+        return false;
+    };
+    if !pending.job.is_finished() {
+        return true;
+    }
+    let Some(pending) = state.results.cursor_jump.take() else {
+        return false;
+    };
+    match pending.job.take_outcome() {
+        Some(JobOutcome::Done(Ok(x))) => {
+            let presentation = state.results_reads().presentation_policy();
+            let models = cached_models(
+                &state.model.simulation,
+                state.results,
+                presentation.complex_number_display(),
+                tokens,
+            );
+            rspice_results_ui::waves::navigation::land_jump(
+                &mut state.results.session,
+                &models,
+                &pending.search,
+                x,
+            );
+        }
+        Some(JobOutcome::Done(Err(refusal))) => state.prompt(format!("{refusal}.")),
+        Some(JobOutcome::Failed(reason)) => state.prompt(format!(
+            "{} could not be searched: {reason}.",
+            pending.search.trace_name()
+        )),
+        Some(JobOutcome::Cancelled) | None => {}
+    }
+    false
+}
+
+/// Wait for a cursor jump's search and land it as [`poll_cursor_jump`] does: the search's
+/// answer, or `None` when none was running.
+#[cfg(test)]
+pub(crate) fn settle_cursor_jump(
+    state: &mut ResultsParts<'_>,
+    tokens: &Tokens,
+) -> Option<Result<f64, String>> {
+    use crate::workbench::results_job::JobOutcome;
+    let pending = state.results.cursor_jump.take()?;
+    assert!(
+        pending.job.wait(std::time::Duration::from_secs(60)),
+        "the search answers"
+    );
+    let answer = match pending.job.take_outcome() {
+        Some(JobOutcome::Done(answer)) => answer,
+        outcome => panic!("the search ended {outcome:?}"),
+    };
+    if let Ok(x) = answer {
+        let presentation = state.results_reads().presentation_policy();
+        let models = cached_models(
+            &state.model.simulation,
+            state.results,
+            presentation.complex_number_display(),
+            tokens,
+        );
+        rspice_results_ui::waves::navigation::land_jump(
+            &mut state.results.session,
+            &models,
+            &pending.search,
+            x,
+        );
+    }
+    Some(answer)
 }
 
 /// Whether a cursor jump has a waveform sheet to work on, or why not.

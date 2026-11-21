@@ -105,7 +105,7 @@ fn finite_span(trace: &StripTrace) -> (f64, f64) {
         })
 }
 
-/// Move the stepping cursor to `jump` on the trace [`jump_trace`] picks.
+/// Move the stepping cursor to `jump` on the trace [`jump_trace`] picks, searching now.
 ///
 /// The strip is the cursor's own, or, before any cursor is placed, the
 /// active pane's, else the first. A jump starts from the stepping cursor, or
@@ -118,6 +118,98 @@ pub fn jump_cursor(
     models: &[StripModel],
     jump: CursorJump,
 ) -> Result<f64, String> {
+    let search = prepare_jump(session, models, jump)?;
+    let x = search.run()?;
+    land_jump(session, models, &search, x);
+    Ok(x)
+}
+
+/// A cursor jump's search, owned whole so it can run off the frame: the trace's columns, where
+/// it starts, what it looks for, and the cursor it moves.
+#[derive(Clone)]
+pub struct JumpSearch {
+    jump: CursorJump,
+    feature: Feature,
+    from: f64,
+    excursion: f64,
+    x: rspice_results::waveform::SharedWaveformValues,
+    y: rspice_results::waveform::SharedWaveformValues,
+    trace_name: String,
+    strip: usize,
+    anchor: rspice_results::result_presentation::WaveformPresentationKey,
+    cursor: CursorId,
+    /// The strip and the cursor's place when the search began.
+    began: (Option<usize>, Option<f64>),
+}
+
+impl std::fmt::Debug for JumpSearch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JumpSearch")
+            .field("jump", &self.jump)
+            .field("from", &self.from)
+            .field("trace", &self.trace_name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl JumpSearch {
+    /// Whether the search walks a stored column: every jump but a step to the next or previous
+    /// sample reads the trace from its start, so over a stored trace it runs off the frame.
+    #[must_use]
+    pub fn walks_store(&self) -> bool {
+        !matches!(self.jump, CursorJump::Sample(_)) && (self.x.is_stored() || self.y.is_stored())
+    }
+
+    /// The trace searched, as the status bar names it.
+    #[must_use]
+    pub fn trace_name(&self) -> &str {
+        &self.trace_name
+    }
+
+    /// Search the trace: where the cursor lands, or why nothing was found. A stored trace is
+    /// read a block at a time, never held whole.
+    pub fn run(&self) -> Result<f64, String> {
+        let direction = match self.jump {
+            CursorJump::Peak(direction)
+            | CursorJump::Crossing(direction)
+            | CursorJump::Sample(direction) => Some(direction),
+            CursorJump::Maximum | CursorJump::Minimum => None,
+        };
+        let (x, y) = (
+            feature_search::WindowedCurve::new(&self.x),
+            feature_search::WindowedCurve::new(&self.y),
+        );
+        feature_search::find(&x, &y, self.from, self.feature, self.excursion)
+            .map(|found| found.x)
+            .map_err(|refusal| match refusal {
+                SearchRefusal::NotFound => {
+                    let side = match direction {
+                        Some(Direction::Next) => " after the cursor",
+                        Some(Direction::Previous) => " before the cursor",
+                        None => "",
+                    };
+                    let which = match direction {
+                        Some(Direction::Next) => "next ",
+                        Some(Direction::Previous) => "previous ",
+                        None => "",
+                    };
+                    format!(
+                        "{} has no {which}{}{side}",
+                        self.trace_name,
+                        self.jump.noun()
+                    )
+                }
+                refusal => format!("{}: {refusal}", self.trace_name),
+            })
+    }
+}
+
+/// The search [`jump_cursor`] makes for `jump`, ready to run here or off the frame.
+pub fn prepare_jump(
+    session: &ResultViewerState,
+    models: &[StripModel],
+    jump: CursorJump,
+) -> Result<JumpSearch, String> {
     let model = session
         .cursor_strip
         .and_then(|index| models.iter().find(|model| model.analysis_index == index))
@@ -158,44 +250,52 @@ pub fn jump_cursor(
         },
     };
     let (low, high) = finite_span(trace);
-    let excursion = feature_search::excursion_of_span(low, high);
-    // A stored trace is searched a block at a time from its start, never held whole.
-    let (x, y) = (
-        feature_search::WindowedCurve::new(&trace.x),
-        feature_search::WindowedCurve::new(&trace.y),
-    );
-    let found =
-        feature_search::find(&x, &y, from, feature, excursion).map_err(
-            |refusal| match refusal {
-                SearchRefusal::NotFound => {
-                    let side = match direction {
-                        Some(Direction::Next) => " after the cursor",
-                        Some(Direction::Previous) => " before the cursor",
-                        None => "",
-                    };
-                    let which = match direction {
-                        Some(Direction::Next) => "next ",
-                        Some(Direction::Previous) => "previous ",
-                        None => "",
-                    };
-                    format!("{} has no {which}{}{side}", trace.name, jump.noun())
-                }
-                refusal => format!("{}: {refusal}", trace.name),
-            },
-        )?;
+    Ok(JumpSearch {
+        jump,
+        feature,
+        from,
+        excursion: feature_search::excursion_of_span(low, high),
+        x: trace.x.clone(),
+        y: trace.y.clone(),
+        trace_name: trace.name.clone(),
+        strip: model.analysis_index,
+        anchor: anchor_key(model, trace),
+        cursor: id,
+        began: (session.cursor_strip, session.cursors.get(id)),
+    })
+}
 
-    if !same_strip {
+/// Move the cursor `search` was made for to `x`, its answer, onto its strip in `models`, armed
+/// and scrolled into view. A search that the reader overtook, by moving the cursor, choosing
+/// another strip or another stepping cursor while it ran, lands nothing: `false`.
+pub fn land_jump(
+    session: &mut ResultViewerState,
+    models: &[StripModel],
+    search: &JumpSearch,
+    x: f64,
+) -> bool {
+    let id = search.cursor;
+    let overtaken = session.stepping_cursor != id
+        || (session.cursor_strip, session.cursors.get(id)) != search.began;
+    let Some(model) = models
+        .iter()
+        .find(|model| model.analysis_index == search.strip)
+        .filter(|_| !overtaken)
+    else {
+        return false;
+    };
+    if session.cursor_strip != Some(search.strip) {
         session.clear_cursors();
-        session.cursor_strip = Some(model.analysis_index);
+        session.cursor_strip = Some(search.strip);
         session.stepping_cursor = id;
     }
     session.arm_cursor_tool();
-    session.cursors.set(id, found.x);
+    session.cursors.set(id, x);
     if id == CursorId::A {
-        session.cursor_a_anchor = Some(anchor_key(model, trace));
+        session.cursor_a_anchor = Some(search.anchor.clone());
     }
-    follow(session, model, found.x);
-    Ok(found.x)
+    follow(session, model, x);
+    true
 }
 
 /// Where a step along `model`'s strip starts: the stepping cursor, else the

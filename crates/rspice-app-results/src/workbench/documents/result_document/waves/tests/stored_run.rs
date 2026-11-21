@@ -330,7 +330,8 @@ fn exercise(name: &str, rows: u64, reserve: u64, beyond_budget: bool) -> RunCost
             &tokens,
             CursorJump::Sample(Direction::Next),
         )
-        .unwrap_or_else(|refusal| panic!("step {taken}: {refusal}"));
+        .unwrap_or_else(|refusal| panic!("step {taken}: {refusal}"))
+        .expect("a step lands on the frame");
         step = step.max(started.elapsed());
         assert_eq!(
             at.to_bits(),

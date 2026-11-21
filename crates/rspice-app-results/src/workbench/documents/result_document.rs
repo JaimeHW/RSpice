@@ -1550,6 +1550,8 @@ pub struct ResultsState {
     /// The comparison running on its worker, while its form is open.
     /// Transient.
     compare_run: Option<std::sync::Arc<document_edit::compare::Running>>,
+    /// The cursor jump searching a stored trace, until it answers. Transient.
+    cursor_jump: Option<waves::PendingJump>,
     /// The comparison that last answered, until another does. Transient.
     last_comparison: Option<std::sync::Arc<document_edit::compare::Finished>>,
     /// Source-aware statistics per selected trace; see
@@ -1613,6 +1615,10 @@ pub use rspice_results_ui::waveform::waveform_color;
 
 /// Render the Results workspace center view (docbar + active viewer).
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>, run_controller: &mut SimulationController) {
+    if waves::poll_cursor_jump(state, &Tokens::get(ui.ctx())) {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(30));
+    }
     record_key_area(ui, state.results);
     show_with_chrome(ui, state, run_controller, ResultChrome::Full);
     waves::marker_dialog::show(ui.ctx(), state);

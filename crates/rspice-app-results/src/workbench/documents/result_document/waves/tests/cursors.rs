@@ -438,7 +438,7 @@ fn the_next_crossing_on_a_corpus_transient_is_the_calculators_cross() {
     place_cursors(&mut state, Some(x[0]), None);
     let tokens = Tokens::default();
     for (n, expected) in crossings.iter().enumerate() {
-        let at = jump_cursor(
+        let at = jump_now(
             &mut state.results_parts(),
             &tokens,
             CursorJump::Crossing(Direction::Next),
@@ -452,7 +452,7 @@ fn the_next_crossing_on_a_corpus_transient_is_the_calculators_cross() {
         );
     }
     assert!(
-        jump_cursor(
+        jump_now(
             &mut state.results_parts(),
             &tokens,
             CursorJump::Crossing(Direction::Next),
@@ -460,6 +460,115 @@ fn the_next_crossing_on_a_corpus_transient_is_the_calculators_cross() {
         .is_err(),
         "and there is no crossing past the last"
     );
+}
+
+/// A peak search reads its trace from the start, so on a stored trace it runs on a Results job:
+/// the cursor stays where it was until the job answers, and then moves to the peak.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_peak_of_a_stored_trace_is_searched_off_the_frame_and_the_cursor_moves_when_it_answers() {
+    use crate::workbench::documents::result_document::test_fixtures::stored_transient;
+    use crate::workbench::results_job::hold_jobs_for_tests;
+    // A 10 kHz sine sampled every microsecond peaks at 25 us, sample 25.
+    let time: Vec<f64> = (0..=200).map(|step| f64::from(step) * 1.0e-6).collect();
+    let sine: Vec<f64> = time.iter().map(|t| (2.0 * PI * 1.0e4 * t).sin()).collect();
+    let peak = time[25];
+    let (analysis, _columns) =
+        stored_transient(time, vec![("V(out)".to_owned(), sine)], Some([5; 32]));
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.start_run().add_analysis(analysis);
+    place_cursors(&mut state, Some(0.0), None);
+    let tokens = Tokens::default();
+
+    hold_jobs_for_tests(true);
+    let jumped = jump_cursor(
+        &mut state.results_parts(),
+        &tokens,
+        CursorJump::Peak(Direction::Next),
+    );
+    hold_jobs_for_tests(false);
+    assert_eq!(
+        jumped,
+        Ok(None),
+        "the search runs on a job, not on the frame"
+    );
+    assert!(
+        poll_cursor_jump(&mut state.results_parts(), &tokens),
+        "a frame finds it still searching"
+    );
+    assert_eq!(
+        state.results.results.session.cursors.a,
+        Some(0.0),
+        "the cursor waits for the answer"
+    );
+
+    state
+        .results
+        .results
+        .cursor_jump
+        .as_ref()
+        .expect("the search is held")
+        .job
+        .release();
+    let answer = settle_cursor_jump(&mut state.results_parts(), &tokens);
+    assert_eq!(answer, Some(Ok(peak)));
+    assert_eq!(
+        state.results.results.session.cursors.a,
+        Some(peak),
+        "the cursor moves to the peak the search found"
+    );
+}
+
+/// A search the reader overtook, by moving the cursor while it ran, lands nothing.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_search_answering_after_the_cursor_moved_leaves_the_cursor_where_the_reader_put_it() {
+    use crate::workbench::documents::result_document::test_fixtures::stored_transient;
+    use crate::workbench::results_job::hold_jobs_for_tests;
+    let time: Vec<f64> = (0..=200).map(|step| f64::from(step) * 1.0e-6).collect();
+    let sine: Vec<f64> = time.iter().map(|t| (2.0 * PI * 1.0e4 * t).sin()).collect();
+    let (analysis, _columns) =
+        stored_transient(time, vec![("V(out)".to_owned(), sine)], Some([6; 32]));
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.start_run().add_analysis(analysis);
+    place_cursors(&mut state, Some(0.0), None);
+    let tokens = Tokens::default();
+
+    hold_jobs_for_tests(true);
+    let jumped = jump_cursor(
+        &mut state.results_parts(),
+        &tokens,
+        CursorJump::Crossing(Direction::Next),
+    );
+    hold_jobs_for_tests(false);
+    assert_eq!(jumped, Ok(None));
+    state.results.results.session.cursors.a = Some(120.0e-6);
+    state
+        .results
+        .results
+        .cursor_jump
+        .as_ref()
+        .expect("the search is held")
+        .job
+        .release();
+    assert!(
+        settle_cursor_jump(&mut state.results_parts(), &tokens)
+            .is_some_and(|answer| answer.is_ok())
+    );
+    assert_eq!(state.results.results.session.cursors.a, Some(120.0e-6));
+}
+
+/// Move the stepping cursor to `jump` and wait for a search that runs off the frame: where it
+/// landed, or why it found nothing.
+pub(super) fn jump_now(
+    state: &mut ResultsParts<'_>,
+    tokens: &Tokens,
+    jump: CursorJump,
+) -> Result<f64, String> {
+    match jump_cursor(state, tokens, jump)? {
+        Some(at) => Ok(at),
+        None => settle_cursor_jump(state, tokens).expect("the jump searches"),
+    }
 }
 
 /// Every text the frame painted, with where it stands.
