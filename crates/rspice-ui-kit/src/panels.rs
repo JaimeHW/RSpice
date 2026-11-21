@@ -1725,7 +1725,7 @@ pub fn property_row_input_action(
 
     let action_response = ui.interact(
         action_rect,
-        ui.id().with(("property-row-action", action_label)),
+        ui.id().with(("property-row-action", label, action_label)),
         if action_enabled {
             Sense::click()
         } else {
