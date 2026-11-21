@@ -5,7 +5,7 @@
 
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::verify::raster::{
-    VerifyStage, seed_corner, seed_monte_carlo, seed_soa,
+    VerifyStage, seed_monte_carlo, seed_soa,
 };
 use rspice_app_simulate::workbench::surfaces::verify::show;
 use rspice_app_state::state::VerificationPage;
@@ -23,13 +23,6 @@ pub(super) fn monte_carlo_app() -> RSpiceApp {
 pub(super) fn soa_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     seed_soa(&mut app.state.model);
-    app
-}
-
-/// A seven-corner run of four limited outputs and two node voltages.
-pub(super) fn corner_app() -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    seed_corner(&mut app.state.model);
     app
 }
 

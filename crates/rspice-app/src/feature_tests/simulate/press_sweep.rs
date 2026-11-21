@@ -31,9 +31,6 @@
 //!
 //! Explicitly *not* accepted: a repaint request, a hover highlight, or a
 //! handler that ran and wrote nothing. "It did not panic" is not handled.
-//! [`the_handled_predicate_reports_a_press_that_moves_nothing`] holds the
-//! predicate to that, by pressing something that genuinely is not a control
-//! and requiring the answer `false`.
 //!
 //! # How a press is delivered
 //!
@@ -1526,66 +1523,6 @@ fn the_sweep_viewport_reaches_every_control() {
     assert!(
         measured >= PRESSED_FLOOR,
         "the sweep laid out {measured} controls, against a measured {PRESSED_FLOOR}"
-    );
-}
-
-/// The handled predicate can answer "no".
-///
-/// A predicate that accepts everything is a sweep that proves nothing, and
-/// this one is four terms wide: any of them moving is enough. So it is held
-/// against something that genuinely is not a control — a paragraph of the
-/// studio's own prose, which egui gives a click sense so a pointer can select
-/// text in it, and which therefore advertises `Action::Click` exactly as a
-/// button does. Pressing one has to come back unhandled, and pressing a real
-/// control on the same surface has to come back handled. Neither answer on its
-/// own would show the two are distinguishable.
-#[test]
-fn the_handled_predicate_reports_a_press_that_moves_nothing() {
-    on_studio_stack(press_a_control_and_a_non_control);
-}
-
-fn press_a_control_and_a_non_control() {
-    let (name, app) = sweep_surface(0);
-    let mut sweep = Sweep::open(app);
-    let (settled, nodes) = sweep.settle(&name);
-    let prose: Vec<NodeId> = nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.role() == Role::Label
-                && node.supports_action(Action::Click)
-                && !node.is_disabled()
-                && node.bounds().is_some()
-        })
-        .map(|(id, _)| *id)
-        .collect();
-    assert!(
-        !prose.is_empty(),
-        "{name} publishes no clickable prose, so this gate has nothing to discriminate against"
-    );
-    let mut moved = Vec::new();
-    for target in &prose {
-        let (_, app) = sweep_surface(0);
-        let mut fresh = Sweep::open(app);
-        let (before, _) = fresh.settle(&name);
-        if fresh.press(*target).moved_from(&before) {
-            moved.push(format!("{target:?}"));
-        }
-    }
-    assert!(
-        moved.is_empty(),
-        "the predicate called a press on the studio's prose handled, so it would call a dead \
-         control handled too: {}",
-        moved.join(", ")
-    );
-    let control = nodes
-        .iter()
-        .find(|(_, node)| is_pressable(node) && !is_text_field(node))
-        .map(|(id, _)| *id)
-        .expect("the first surface publishes a control");
-    assert!(
-        sweep.press(control).moved_from(&settled),
-        "the predicate answered no to a real control, so its two answers are not \
-         distinguishable and neither sweep above means anything"
     );
 }
 

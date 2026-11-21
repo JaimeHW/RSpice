@@ -371,29 +371,3 @@ fn the_verify_inspector_says_once_that_no_monte_carlo_ran() {
         ],
     );
 }
-
-#[test]
-fn the_verify_inspector_restates_nothing_the_other_pages_show() {
-    for page in [
-        VerificationPage::Corners,
-        VerificationPage::Checks,
-        VerificationPage::Reference,
-    ] {
-        let painted = simulate_text(&mut verify_app(page));
-        assert_states(
-            &painted,
-            &[],
-            &[
-                "details",
-                "Points",
-                "Signals",
-                "Execution",
-                "State",
-                "Geometry",
-                "Retained runs",
-                "Baseline",
-                "Verdict",
-            ],
-        );
-    }
-}

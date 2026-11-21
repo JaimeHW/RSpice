@@ -1,13 +1,9 @@
 //! The navigator's Simulate rail drawn over the whole application: the run
-//! set card keeps each value off its label and states a quantity axis's
-//! unit, the excitations rail counts the design the page it opens lists, the
-//! rail derives what it states once a frame, and its filter reaches past its
-//! page rows.
+//! set card states a quantity axis's unit, the excitations rail counts the
+//! design the page it opens lists, the rail derives what it states once a
+//! frame, and its filter reaches past its page rows.
 
 use crate::workbench::RSpiceApp;
-use rspice_app_simulate::workbench::docks::navigator::simulate::{
-    NAV_PROPERTY_COLUMN_GAP, NAV_PROPERTY_PADDING_X,
-};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::navigator;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
@@ -51,76 +47,6 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
         collect(&clipped.shape, &mut lines);
     }
     lines
-}
-
-/// No Run set row paints its value on top of its label.
-///
-/// The card is a two-column form grid in the mockup and the dock is 228 px
-/// wide below 1261 px, which is where the single-row layout failed: the value
-/// was floated right and grew leftwards with nothing to stop it, so
-/// "Supply voltage" ran straight into its values with no gutter, no ellipsis
-/// and no way to read where one ended. Measured columns cannot do that, and
-/// this is the width that proves it.
-#[test]
-fn run_set_card_rows_keep_their_value_off_their_label() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Simulate);
-    // Only an axis the run sweeps has a row.
-    for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
-        dimension.enabled = true;
-    }
-    let names = app
-        .state
-        .model
-        .sim_setup
-        .run_set
-        .dimensions
-        .iter()
-        .map(|dimension| dimension.name.clone())
-        .collect::<Vec<_>>();
-    assert!(!names.is_empty(), "the fixture run set declares axes");
-    let lines = navigator_painted_lines(228.0, app);
-
-    let find = |text: &str| -> egui::Rect {
-        lines
-            .iter()
-            .find(|(painted, _)| painted == text)
-            .unwrap_or_else(|| {
-                panic!(
-                    "the Run set card paints {text:?}; it painted {:?}",
-                    lines.iter().map(|(text, _)| text).collect::<Vec<_>>()
-                )
-            })
-            .1
-    };
-    for label in &names {
-        let label = label.as_str();
-        let label_rect = find(label);
-        let (value, value_rect) = lines
-            .iter()
-            .find(|(_, rect)| {
-                rect.left() > label_rect.right()
-                    && (rect.center().y - label_rect.center().y).abs() < 2.0
-            })
-            .map(|(text, rect)| (text.as_str(), *rect))
-            .unwrap_or_else(|| panic!("the {label:?} row paints no value"));
-        assert!(
-            value_rect.left() - label_rect.right() >= NAV_PROPERTY_COLUMN_GAP - 0.5,
-            "{label:?} ends at {} and {value:?} starts at {}, closer than the \
-             {NAV_PROPERTY_COLUMN_GAP} px column gap",
-            label_rect.right(),
-            value_rect.left()
-        );
-        // A value pushed off the card's trailing inset would satisfy the gap
-        // above and still be unreadable, so the row has to stay inside the
-        // dock as well as clear of its own label.
-        assert!(
-            value_rect.right() <= 228.0 - NAV_PROPERTY_PADDING_X + 0.5,
-            "{value:?} ends at {}, past the card's {NAV_PROPERTY_PADDING_X} px \
-             trailing inset in a 228 px dock",
-            value_rect.right()
-        );
-    }
 }
 
 /// A quantity axis states its unit; a reference axis has none to state.

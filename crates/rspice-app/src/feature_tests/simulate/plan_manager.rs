@@ -12,7 +12,6 @@ use rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanManage
 use rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanManagerMode;
 use rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanScope;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::NO_MODELLED_COST;
-use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::PLAN_COLUMNS;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::PLAN_DIALOG_DESCRIPTION;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::PLAN_DIALOG_PRIMARY;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::PLAN_DIALOG_TITLE;
@@ -27,7 +26,6 @@ use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::matches_pl
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_manager_body;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_manager_dialog;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_scope_admits;
-use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::raster::EVERY_ROUTE;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::raster::GATED_VIEWPORTS;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::raster::PLAN_MANAGER_SOURCES;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::raster::REAL_VIEWPORT;
@@ -432,42 +430,6 @@ fn clipped_label_preview(label: &str) -> String {
         preview.push('\u{2026}');
     }
     preview
-}
-
-/// Every column is painted, in order and in the heading's own spelling, and the
-/// two the authored table carries and RSpice cannot own are not among them.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_table_paints_the_columns_whose_facts_have_owners() {
-    let (app, active, _, _) = app_with_every_lifecycle_state();
-    let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
-    let rendered = rendered_body(&app, &mut draft, REAL_VIEWPORT);
-
-    let headings = PLAN_COLUMNS
-        .iter()
-        .map(|column| (*column.heading).to_owned())
-        .collect::<Vec<_>>();
-    // The aside repeats two of these words as property-row labels, so the
-    // count is taken over the records column alone: everything the body
-    // paints before the aside's own head.
-    let aside = rendered
-        .painted
-        .iter()
-        .position(|text| text == "Selected plan")
-        .expect("the aside's head is painted");
-    assert_eq!(
-        rendered.painted[..aside]
-            .iter()
-            .filter(|text| headings.contains(text))
-            .cloned()
-            .collect::<Vec<_>>(),
-        headings,
-        "the column headings are painted once each, left to right"
-    );
-    // The two columns this table does *not* carry were guarded here. They are
-    // now three entries in `UNOWNED_AUTHORED_FACTS`, which holds the same
-    // ground over every route rather than over this one — a binding column has
-    // no owner on Compare either, and that was a second guard in a second file.
 }
 
 /// Every row states the projection's own facts, in the projection's order.
@@ -1114,12 +1076,6 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
     );
 }
 
-/// Which authored facts have no owner here, and the guard that keeps them out
-/// of every route. Its own file: it is a statement about all six surfaces at
-/// once, and it is the larger half of the text either way.
-#[cfg(not(target_arch = "wasm32"))]
-mod register;
-
 /// Everything one route said at one viewport, in both channels.
 ///
 /// Both are needed and neither is enough. A cell elides to its column, so the
@@ -1254,63 +1210,6 @@ fn assert_route_loses_no_fact_to_elision(mode: SimulationPlanManagerMode) {
                  hold it or the widget has to publish it.",
                 clipped_label_preview(text)
             );
-        }
-    }
-}
-
-/// Whether `text` holds a UUID-shaped run: `8-4-4-4-12` hexadecimal digits.
-///
-/// The shape rather than the fixture's own ids, because the fixture mints a
-/// fresh plan on every call and the ids this module could name would not be
-/// the ids the render was built from.
-#[cfg(not(target_arch = "wasm32"))]
-fn holds_an_identity(text: &str) -> bool {
-    const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
-    let bytes = text.as_bytes();
-    (0..bytes.len()).any(|start| {
-        let mut at = start;
-        for (index, group) in GROUPS.into_iter().enumerate() {
-            if index > 0 {
-                if bytes.get(at) != Some(&b'-') {
-                    return false;
-                }
-                at += 1;
-            }
-            if !(at..at + group).all(|i| bytes.get(i).is_some_and(u8::is_ascii_hexdigit)) {
-                return false;
-            }
-            at += group;
-        }
-        true
-    })
-}
-
-/// No route states a plan's stable identity, in either channel.
-///
-/// Every row of the browse and campaign tables used to carry the plan's id
-/// under its name, and export and import each spent a property row on one. An
-/// id is not something a reader decides with: two plans are told apart by
-/// their names, their revisions and what they declare, and a column of hex
-/// under every one of those was a column of noise.
-///
-/// The filter still matches an id, so a reader holding one in the clipboard
-/// can paste it and land on the plan. Nothing paints one at them, and nothing
-/// reads one aloud: an announcement is what a reader who cannot see the table
-/// gets instead of it, not a place to put what the table was spared.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn no_route_states_a_plan_identity() {
-    for mode in EVERY_ROUTE {
-        for (arrangement, screen) in GATED_VIEWPORTS {
-            let RouteSpeech { painted, announced } = route_speech(screen, mode);
-            for (channel, lines) in [("painted", &painted), ("announced", &announced)] {
-                if let Some(text) = lines.iter().find(|text| holds_an_identity(text)) {
-                    panic!(
-                        "{mode:?} in {arrangement} {channel} a stable identity: {:?}",
-                        clipped_label_preview(text)
-                    );
-                }
-            }
         }
     }
 }

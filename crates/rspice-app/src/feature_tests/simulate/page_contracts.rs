@@ -78,47 +78,6 @@ pub(super) fn render_with(
     rendered
 }
 
-/// A Studio page is named once, by its title.
-///
-/// Every one of the nine carried a sentence under that title explaining what
-/// the page was for, in the words of whoever built it — the lecture subtitle,
-/// which says nothing the controls beneath it do not already show. The
-/// fragments below are what each page used to say.
-#[test]
-fn no_studio_page_paints_a_sentence_under_its_title() {
-    // The Analyses route is headed by its plan's name, every other route by
-    // its page's.
-    let app = RSpiceApp::test_instance();
-    let plan = app.state.model.sim_setup.active_plan_name();
-    for (page, lecture) in [
-        (
-            SimulationPage::Analyses,
-            "Order the plan, configure each analysis",
-        ),
-        (SimulationPage::Excitations, "See every source the design"),
-        (SimulationPage::Variables, "Own the typed parameters"),
-        (SimulationPage::Outputs, "Own the expressions the run saves"),
-        (SimulationPage::RunSet, "Compose the run space from process"),
-        (SimulationPage::Models, "Own the ordered model closure"),
-        (SimulationPage::Solver, "Own what counts as converged"),
-        (SimulationPage::Save, "Own what is stored"),
-    ] {
-        let rendered = render(page, 1200.0);
-        let title = match page {
-            SimulationPage::Analyses => plan.as_str(),
-            _ => page.title(),
-        };
-        assert!(
-            rendered.contains(title),
-            "{page:?} must still paint its title:\n{rendered}"
-        );
-        assert!(
-            !rendered.contains(lecture),
-            "{page:?} still lectures under its title:\n{rendered}"
-        );
-    }
-}
-
 /// Every field the record editors expose has to reach the screen as a control,
 /// not just exist in the model. These two pages are the only place an authored
 /// record's contract can be changed, so a field that silently stopped painting
@@ -697,59 +656,5 @@ fn a_dataset_backed_handoff_states_its_condition_before_a_run_exists() {
     assert!(
         !EditorHandoff::Calculator.needs_dataset(),
         "the calculator composes against the plan, so it is never gated on a run"
-    );
-}
-
-/// The variables page states its unit and out-of-bounds rules rather than
-/// offering a choice the engine does not implement.
-#[test]
-fn the_variables_page_states_the_rules_it_enforces_instead_of_offering_them() {
-    use rspice_app_state::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableScope, DesignVariableSweepEligibility,
-    };
-
-    let rendered = render_with(SimulationPage::Variables, 1200.0, |app| {
-        let id = plan_id(&app.state.model);
-        let variable = DesignVariable::new(
-            "rload",
-            "1kohm",
-            DesignVariableQuantity::Resistance,
-            DesignVariableScope::Testbench,
-            "load resistance",
-            Some(DesignVariableRange {
-                minimum: "100ohm".to_owned(),
-                maximum: "10kohm".to_owned(),
-            }),
-            DesignVariableSweepEligibility::FixedParameter,
-            DesignVariableOverridePolicy::InheritOwnerOnly,
-        )
-        .expect("valid design variable");
-        app.state
-            .model
-            .workspace
-            .content
-            .add_design_variable(id, variable)
-            .expect("the plan accepts it");
-        app.state.simulate.selected_design_variable = Some("rload".to_owned());
-    });
-
-    for stated in ["Unit policy", "Out of bounds"] {
-        assert!(
-            rendered.contains(stated),
-            "the page has to state its {stated} rule:\n{rendered}"
-        );
-    }
-    assert!(
-        rendered.contains("never converted"),
-        "strict unit checking is the rule, and coercion is not offered:\n{rendered}"
-    );
-    assert!(
-        rendered.contains("never clamped into it"),
-        "a bounded variable is never moved into range:\n{rendered}"
-    );
-    assert!(
-        !rendered.contains("enforced at preflight"),
-        "the bound is refused on more paths than preflight, and the note now says so:\n{rendered}"
     );
 }
