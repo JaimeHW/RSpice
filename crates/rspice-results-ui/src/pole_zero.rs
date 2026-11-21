@@ -122,6 +122,50 @@ fn root_rows(
     (rows, omitted)
 }
 
+/// Q = 1/(2ζ) as a card prints it. A growing pair has ζ < 0, so its Q keeps
+/// its minus sign and says where it sits rather than reading like the
+/// decaying pair of the same magnitude.
+fn q_text(q: f64, digits: usize) -> String {
+    if q.is_infinite() {
+        "∞ · imaginary-axis pole".to_owned()
+    } else if q < 0.0 {
+        format!("{} · RHP", fmt_si_significant(q, "", digits))
+    } else {
+        fmt_si_significant(q, "", digits)
+    }
+}
+
+/// The hover card of one root: σ and jω in rad/s, as the s-plane measures
+/// them, beside fₙ in Hz, and the signed Q of a complex root off the axis.
+fn root_card_rows(
+    root: &ComplexRoot,
+    quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
+) -> Vec<(String, String)> {
+    let magnitude = root.natural_frequency();
+    let mut rows = vec![
+        (
+            "σ".to_owned(),
+            fmt_si_significant(root.real, "rad/s", digits),
+        ),
+        (
+            "jω".to_owned(),
+            fmt_si_significant(root.imag, "rad/s", digits),
+        ),
+        (
+            "fₙ".to_owned(),
+            frequency_readout(quantity_policy, magnitude / std::f64::consts::TAU, digits),
+        ),
+    ];
+    if root.imag.abs() > 1e-12 && root.real.abs() > 1e-12 {
+        rows.push((
+            "Q".to_owned(),
+            q_text(magnitude / (-2.0 * root.real), digits),
+        ));
+    }
+    rows
+}
+
 /// Render the s-plane map; the root card reads at the reader's
 /// `significant_digits`.
 pub fn show(
@@ -296,22 +340,7 @@ pub fn show(
         }
         painter.circle_stroke(pos, 6.0, egui::Stroke::new(1.5, c.accent));
 
-        let magnitude = (root.real * root.real + root.imag * root.imag).sqrt();
-        let digits = significant_digits;
-        let mut rows = vec![
-            ("σ".to_owned(), fmt_si_significant(root.real, "", digits)),
-            ("jω".to_owned(), fmt_si_significant(root.imag, "", digits)),
-            (
-                "fₙ".to_owned(),
-                frequency_readout(quantity_policy, magnitude / std::f64::consts::TAU, digits),
-            ),
-        ];
-        if root.imag.abs() > 1e-12 && root.real.abs() > 1e-12 {
-            rows.push((
-                "Q".to_owned(),
-                fmt_si_significant(magnitude / (2.0 * root.real.abs()), "", digits),
-            ));
-        }
+        let rows = root_card_rows(root, quantity_policy, significant_digits);
         let title = if root.is_pole() { "pole" } else { "zero" };
         crate::presentation::point_card(&plot_ui, response.plot_rect, pos, title, color, &rows);
     }
@@ -367,15 +396,7 @@ pub fn right_panel(
         ));
     }
     if let Some(q) = summary.worst_q {
-        summary_rows.push((
-            "Worst Q",
-            if q.is_infinite() {
-                "∞ · imaginary-axis pole".to_owned()
-            } else {
-                fmt_si_significant(q, "", digits)
-            },
-            false,
-        ));
+        summary_rows.push(("Worst Q", q_text(q, digits), false));
     }
     if let Some(gain) = data.gain {
         summary_rows.push(("Gain", fmt_si_significant(gain, "", digits), false));
@@ -443,6 +464,31 @@ mod tests {
         assert_eq!(rows.len(), 12);
         assert!(rows.iter().all(|root| root.imag > 0.0));
         assert_eq!(omitted, 2);
+    }
+
+    /// The hover card gives σ and jω in rad/s, so jω never reads as a
+    /// frequency in Hz beside fₙ, and a growing pair's Q keeps its sign.
+    #[test]
+    fn the_root_card_gives_s_plane_units_and_a_signed_q() {
+        let policy = QuantityPresentationPolicy::default();
+        let natural = std::f64::consts::TAU * 1.0e3;
+        let zeta = -0.1;
+        let root = ComplexRoot::pole(-zeta * natural, natural * (1.0f64 - zeta * zeta).sqrt());
+        let rows = root_card_rows(&root, &policy, 4);
+        let text: Vec<String> = rows.iter().map(|(k, v)| format!("{k} {v}")).collect();
+        assert_eq!(
+            text,
+            [
+                "σ 628.3 rad/s",
+                "jω 6.252 krad/s",
+                "fₙ 1 kHz",
+                "Q \u{2212}5 · RHP"
+            ]
+        );
+        let decaying = ComplexRoot::pole(zeta * natural, root.imag);
+        let rows = root_card_rows(&decaying, &policy, 4);
+        assert_eq!(rows[0].1, "\u{2212}628.3 rad/s");
+        assert_eq!(rows[3].1, "5");
     }
 
     /// The dominant pole reads at the reader's significant digits whether it
