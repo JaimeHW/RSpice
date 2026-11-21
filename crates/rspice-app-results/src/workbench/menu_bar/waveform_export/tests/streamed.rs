@@ -312,6 +312,8 @@ fn a_cancelled_export_leaves_the_destination_as_it_was() {
 
 /// A run of 10 GiB of samples, past what the computer can hold, exports as a rawfile written as
 /// it is read. Run by hand, alone; it needs about 16 GiB free on the target volume.
+// Run by hand to read its times, so it prints them.
+#[allow(clippy::print_stdout)]
 #[test]
 #[ignore = "writes a 10 GiB segment and an 11 GB rawfile; run by hand"]
 fn a_stored_run_larger_than_memory_exports_as_a_rawfile() {

@@ -28,8 +28,20 @@ fn write_rawfile(
     std::fs::write(path, bytes).unwrap();
 }
 
+/// A series' store, by digest and column, and the window it reads.
+type SeriesStorage = (Option<([u8; 32], u64)>, StoredWindow);
+
+/// A rawfile written for a case: its name, plot name, flags, variables (name and type) and rows.
+type RawCase<'a> = (
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a [(&'a str, &'a str)],
+    &'a [Vec<f64>],
+);
+
 /// The store each series of `parsed` reads, by digest and column, and the window it reads.
-fn storage(parsed: &ParsedResultDataset) -> Vec<(Option<([u8; 32], u64)>, StoredWindow)> {
+fn storage(parsed: &ParsedResultDataset) -> Vec<SeriesStorage> {
     parsed
         .waveforms
         .iter()
@@ -85,7 +97,7 @@ fn a_binary_rawfile_streams_into_the_segment_the_whole_file_import_keeps() {
     let sweep = (0..50)
         .map(|row| vec![5.0 - row as f64 * 0.1, row as f64 * 1.0e-3])
         .collect::<Vec<_>>();
-    let cases: [(&str, &str, &str, &[(&str, &str)], &[Vec<f64>]); 3] = [
+    let cases: [RawCase<'_>; 3] = [
         (
             "transient.raw",
             "Transient Analysis",
