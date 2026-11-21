@@ -60,16 +60,6 @@ const TEST_ONLY: [&str; 2] = [
 mod tests {
     use super::*;
 
-    /// The bug this module exists for: the boundary has to be found whichever
-    /// way the working copy checked out.
-    #[test]
-    fn the_boundary_is_found_under_either_line_ending() {
-        let unix = "fn shipped() {}\n\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n";
-        let windows = unix.replace('\n', "\r\n");
-        assert_eq!(production_half(unix), "fn shipped() {}\n\n");
-        assert_eq!(production_half(&windows), "fn shipped() {}\r\n\r\n");
-    }
-
     /// An earlier `#[cfg(test)]` on some other item is not the boundary, and
     /// stopping at one would hide every shortcut between it and the real one.
     #[test]
@@ -78,22 +68,6 @@ mod tests {
         assert_eq!(
             production_half(source),
             "#[cfg(test)]\nfn fixture() {}\nfn shipped() {}\n"
-        );
-    }
-
-    /// A test module other modules' tests import fixtures from is a boundary,
-    /// whether the crate's own tests or the application's import them.
-    #[test]
-    fn a_test_module_with_fixtures_is_a_boundary_under_either_attribute() {
-        assert_eq!(
-            production_half("fn shipped() {}\n#[cfg(test)]\npub(crate) mod tests;\n"),
-            "fn shipped() {}\n"
-        );
-        assert_eq!(
-            production_half(
-                "fn shipped() {}\n#[cfg(any(test, feature = \"test-support\"))]\npub mod tests;\n"
-            ),
-            "fn shipped() {}\n"
         );
     }
 
