@@ -187,7 +187,9 @@ pub fn follow(
 /// that the store keeps, so its runs open reading their samples. The segments are held until that
 /// project is open, and the store goes back to the project open now.
 pub async fn preload(bytes: &[u8]) {
-    let Some((store, named)) = names_in(bytes) else {
+    // A file that names no segment has nothing to wait for: its project opens at once, and its
+    // store opens once it is open.
+    let Some((store, named)) = names_in(bytes).filter(|(_, named)| !named.is_empty()) else {
         return;
     };
     let current = with(|client| {
