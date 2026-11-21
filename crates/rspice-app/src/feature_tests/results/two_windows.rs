@@ -216,11 +216,11 @@ fn a_shortcut_typed_in_a_second_window_acts_in_that_window() {
     let window = app.state.workbench.window_session.create_window(
         "Second",
         Workspace::Results,
-        layout.clone(),
+        layout,
         false,
     );
     app.capture_application_window_projection(primary);
-    assert!(app.project_application_window(window, layout.clone()));
+    assert!(app.project_application_window(window, layout));
 
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Windows);
