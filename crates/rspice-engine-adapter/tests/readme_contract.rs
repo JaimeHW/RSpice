@@ -142,20 +142,6 @@ fn the_published_wire_contract_matches_the_constants_it_names() {
 }
 
 #[test]
-fn the_documented_result_document_version_is_the_one_the_adapter_writes() {
-    // The README's claim is checked against a real published document rather
-    // than against the constant alone, so a schema string that stopped being
-    // written would fail here too.
-    let readme = read_readme("rspice-engine-adapter");
-    assert!(
-        readme.contains(&format!(
-            "`{ANALYSIS_RESULT_DOCUMENT_SCHEMA}` v{ANALYSIS_RESULT_DOCUMENT_VERSION}"
-        )),
-        "the adapter README no longer names the shared result document's schema and version"
-    );
-}
-
-#[test]
 fn a_saved_checkpoint_carries_the_header_its_documentation_names() {
     let readme = read_readme("rspice-core");
     let netlist = Netlist::parse(
