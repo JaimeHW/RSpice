@@ -92,13 +92,17 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
     }
     let viewer = presentation.viewer;
     let semantic_document = match viewer {
-        ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::SParameters => {
+        ResultViewer::Waves | ResultViewer::DcSweep => {
             HardcopySemanticDocument::Plot(quick_waveform_plot(
                 active,
                 viewer,
                 &presentation.overlay.for_analysis(active.analysis.id),
             )?)
         }
+        ResultViewer::SParameters => HardcopySemanticDocument::Plot(quick_network_plot(
+            active,
+            &presentation.overlay.for_analysis(active.analysis.id),
+        )?),
         ResultViewer::Bode => HardcopySemanticDocument::Plot(quick_bode_plot(
             active,
             &presentation.overlay.for_analysis(active.analysis.id),
@@ -220,6 +224,60 @@ fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
         series,
         Some(overlay),
         waveform_abscissa_scale(active.analysis.analysis_type),
+        AxisScale::Linear,
+    )
+}
+
+/// The S-parameter sheet on paper: each coefficient it draws, in dB against
+/// a decade frequency axis, as ADS prints dB(S(i,j)). The phase panes and
+/// any other column are left off, since one ordinate cannot carry decibels
+/// and degrees or ohms at once.
+fn quick_network_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
+    overlay: &RetainedQuickViewOverlay,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    let series = active
+        .analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| {
+            overlay.trace_is_visible(&waveform.as_ref().name, (active.is_visible)(waveform))
+        })
+        .map(AsRef::as_ref)
+        .filter_map(|waveform| {
+            let coefficient = &waveform.complex.as_ref()?.source_name;
+            rspice_results::network_matrix::trace_identity(coefficient)?;
+            Some(QuickResultSeries {
+                identity: format!(
+                    "{}:{}:{}:{}:magnitude-db",
+                    active.dataset_id, active.run_id, active.analysis.id, waveform.name
+                ),
+                label: format!("|{coefficient}| (dB)"),
+                points: waveform
+                    .x
+                    .samples(..)
+                    .zip(
+                        waveform
+                            .y
+                            .samples(..)
+                            .map(|magnitude| 20.0 * magnitude.log10()),
+                    )
+                    .collect(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if series.is_empty() {
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            "scattering coefficients",
+        ));
+    }
+    quick_plot_from_scaled_series(
+        ResultViewer::SParameters,
+        "Results",
+        0,
+        series,
+        Some(overlay),
+        AxisScale::Logarithmic,
         AxisScale::Linear,
     )
 }

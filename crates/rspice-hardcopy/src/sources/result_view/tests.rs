@@ -113,3 +113,54 @@ fn quick_view_binding_requires_one_successful_terminal_analysis_and_valid_contro
         Err(HardcopySourceError::InvalidVisualizationSource(_))
     ));
 }
+
+/// The S-parameter sheet prints each coefficient it draws in dB, as ADS
+/// prints dB(S(i,j)), and leaves the phase and noise columns off its one
+/// ordinate.
+#[test]
+fn the_s_parameter_sheet_prints_its_coefficients_in_decibels() {
+    let coefficient = |name: &str, magnitude: [f64; 2]| {
+        RetainedWaveform::new(format!("|{name}|"), vec![1.0e9, 2.0e9], magnitude.to_vec())
+            .with_complex_components(name, magnitude.to_vec(), vec![0.0, 0.0])
+    };
+    let analysis =
+        AnalysisResult::new(3, AnalysisType::SParameter, "SP", 0.0).with_waveforms(vec![
+            coefficient("S11", [0.5, 0.25]),
+            coefficient("S21", [10.0, 1.0]),
+            RetainedWaveform::new("phase(S21)", vec![1.0e9, 2.0e9], vec![0.0, 0.0]),
+            RetainedWaveform::new("F", vec![1.0e9, 2.0e9], vec![1.5, 1.6]),
+        ]);
+    let mut run: SimulationRun = SimulationRun::from_persisted_identity(
+        1,
+        "Run 1".to_owned(),
+        0.0,
+        RunId::new(),
+        DatasetId::new(),
+        None,
+        None,
+    );
+    run.analyses.push(analysis);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    let source = RetainedQuickViewSource::try_new(&run, 3, |_| true).unwrap();
+    let plot = quick_network_plot(&source, &RetainedQuickViewOverlay::default()).unwrap();
+    let labels = plot
+        .traces
+        .iter()
+        .map(|trace| trace.label.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(labels, ["|S11| (dB)", "|S21| (dB)"]);
+    let decibels = |trace: &SemanticPlotTrace| {
+        trace
+            .source_samples
+            .iter()
+            .map(|(_, y)| f64::from_bits(*y))
+            .collect::<Vec<_>>()
+    };
+    let s21 = decibels(&plot.traces[1]);
+    assert!(
+        (s21[0] - 20.0).abs() < 1e-12 && s21[1].abs() < 1e-12,
+        "{s21:?}"
+    );
+    let s11 = decibels(&plot.traces[0]);
+    assert!((s11[0] - 20.0 * 0.5f64.log10()).abs() < 1e-12, "{s11:?}");
+}
