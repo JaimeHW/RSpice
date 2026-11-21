@@ -7,12 +7,13 @@
 //! the same file, byte for byte.
 
 use super::*;
-use crate::state::run_store::{PushRows, keep_segment};
+use crate::state::run_store::{
+    Axis, PushRows, RunMeta, Schema, Signal, SignalKind, StoreError, keep_segment,
+};
 use rspice_formats::spice_raw::stream::{RawRowBlock, RawStreamReader, RawStreamStart};
 use rspice_results::result_import::waveforms::ImportedRowsCheck;
 use rspice_results::store_reader::{Segment, SegmentColumn};
 use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
-use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind, StoreError};
 use std::cell::Cell;
 
 /// The most of a file read before its header must have ended for its rows to be read as they

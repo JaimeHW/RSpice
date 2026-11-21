@@ -23,7 +23,9 @@ use rspice_results::store_reader::{Segment, SegmentColumn};
 #[cfg(any(test, target_arch = "wasm32"))]
 use rspice_results::store_reader::{SegmentBytes, StoreReader};
 use rspice_results::waveform::{RetainedWaveform, StoredWindow, WaveformValues, WindowLead};
-use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind, StoreError};
+/// The store's words for a segment's shape, so a caller of [`keep_segment`] names its schema
+/// without reaching the store itself.
+pub use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind, StoreError};
 #[cfg(any(test, target_arch = "wasm32"))]
 use rspice_results_store::{MemoryIo, SegmentReader, SegmentWriter};
 
