@@ -1835,126 +1835,50 @@ mod tests {
     }
 
     #[test]
-    fn xspice_resolver_rejects_scalar_model_param_for_known_vector_param() {
-        let netlist = Netlist::parse(
-            "xspice scalar where vector expected\n\
-             .model vp vector_probe (points=3)\n\
-             .end\n",
-        )
-        .expect("netlist parses");
-        let mut registry = crate::xspice::CodeModelRegistry::new();
-        registry.register(Arc::new(ParamOnlyModel::new(
-            "vector_probe",
-            vec![ParamSpec::real_vector("points", vec![0.0])],
-        )));
+    fn xspice_resolver_rejects_non_vector_model_params_for_known_vector_param() {
+        for (value, kind) in [
+            ("3", "scalar"),
+            ("\"bad\"", "string"),
+            ("{missing_param}", "expression"),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "xspice {kind} where vector expected\n\
+                 .model vp vector_probe (points={value})\n\
+                 .end\n"
+            ))
+            .expect("netlist parses");
+            let mut registry = crate::xspice::CodeModelRegistry::new();
+            registry.register(Arc::new(ParamOnlyModel::new(
+                "vector_probe",
+                vec![ParamSpec::real_vector("points", vec![0.0])],
+            )));
 
-        let err = match resolve_xspice_model_instance(
-            &ModelResolution::new(&netlist, &NoAbort),
-            &registry,
-            "vp",
-            XspiceInstanceParams {
-                params: &[],
-                expr_params: &[],
-                string_params: &[],
-                string_expr_params: &[],
-                string_vector_params: &[],
-                string_vector_expr_params: &[],
-                real_vector_params: &[],
-                real_vector_expr_params: &[],
-            },
-        ) {
-            Ok(_) => panic!("scalar value for known vector parameter must be rejected"),
-            Err(err) => err,
-        };
+            let err = match resolve_xspice_model_instance(
+                &ModelResolution::new(&netlist, &NoAbort),
+                &registry,
+                "vp",
+                XspiceInstanceParams {
+                    params: &[],
+                    expr_params: &[],
+                    string_params: &[],
+                    string_expr_params: &[],
+                    string_vector_params: &[],
+                    string_vector_expr_params: &[],
+                    real_vector_params: &[],
+                    real_vector_expr_params: &[],
+                },
+            ) {
+                Ok(_) => panic!("{kind} value for known vector parameter must be rejected"),
+                Err(err) => err,
+            };
 
-        let message = err.to_string();
-        let lowered = message.to_ascii_lowercase();
-        assert!(
-            lowered.contains("points") && lowered.contains("scalar"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[test]
-    fn xspice_resolver_rejects_string_model_param_for_known_vector_param() {
-        let netlist = Netlist::parse(
-            "xspice string where vector expected\n\
-             .model vp vector_probe (points=\"bad\")\n\
-             .end\n",
-        )
-        .expect("netlist parses");
-        let mut registry = crate::xspice::CodeModelRegistry::new();
-        registry.register(Arc::new(ParamOnlyModel::new(
-            "vector_probe",
-            vec![ParamSpec::real_vector("points", vec![0.0])],
-        )));
-
-        let err = match resolve_xspice_model_instance(
-            &ModelResolution::new(&netlist, &NoAbort),
-            &registry,
-            "vp",
-            XspiceInstanceParams {
-                params: &[],
-                expr_params: &[],
-                string_params: &[],
-                string_expr_params: &[],
-                string_vector_params: &[],
-                string_vector_expr_params: &[],
-                real_vector_params: &[],
-                real_vector_expr_params: &[],
-            },
-        ) {
-            Ok(_) => panic!("string value for known vector parameter must be rejected"),
-            Err(err) => err,
-        };
-
-        let message = err.to_string();
-        let lowered = message.to_ascii_lowercase();
-        assert!(
-            lowered.contains("points") && lowered.contains("string"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[test]
-    fn xspice_resolver_rejects_expr_model_param_for_known_vector_param() {
-        let netlist = Netlist::parse(
-            "xspice expression where vector expected\n\
-             .model vp vector_probe (points={missing_param})\n\
-             .end\n",
-        )
-        .expect("netlist parses");
-        let mut registry = crate::xspice::CodeModelRegistry::new();
-        registry.register(Arc::new(ParamOnlyModel::new(
-            "vector_probe",
-            vec![ParamSpec::real_vector("points", vec![0.0])],
-        )));
-
-        let err = match resolve_xspice_model_instance(
-            &ModelResolution::new(&netlist, &NoAbort),
-            &registry,
-            "vp",
-            XspiceInstanceParams {
-                params: &[],
-                expr_params: &[],
-                string_params: &[],
-                string_expr_params: &[],
-                string_vector_params: &[],
-                string_vector_expr_params: &[],
-                real_vector_params: &[],
-                real_vector_expr_params: &[],
-            },
-        ) {
-            Ok(_) => panic!("expression value for known vector parameter must be rejected"),
-            Err(err) => err,
-        };
-
-        let message = err.to_string();
-        let lowered = message.to_ascii_lowercase();
-        assert!(
-            lowered.contains("points") && lowered.contains("expression"),
-            "unexpected error: {message}"
-        );
+            let message = err.to_string();
+            let lowered = message.to_ascii_lowercase();
+            assert!(
+                lowered.contains("points") && lowered.contains(kind),
+                "unexpected error: {message}"
+            );
+        }
     }
 
     #[test]
