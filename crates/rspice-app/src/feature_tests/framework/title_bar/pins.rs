@@ -517,6 +517,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  DC sweep | result-dc-sweep |  | hidden",
             "  Bode | result-bode |  | hidden",
             "  Nyquist | result-nyquist |  | hidden",
+            "  S-parameters | result-s-parameters |  | hidden",
             "  Smith chart | result-smith |  | hidden",
             "  Polar response | result-polar |  | hidden",
             "  Pole-zero | result-pole-zero |  | hidden",

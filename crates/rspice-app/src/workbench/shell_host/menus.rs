@@ -766,11 +766,11 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::DcSweep), "DC sweep").access('D'),
     MenuEntry::offered(viewer(ResultViewer::Bode), "Bode").access('B'),
     MenuEntry::offered(viewer(ResultViewer::Nyquist), "Nyquist").access('Q'),
-    MenuEntry::offered(viewer(ResultViewer::SParameters), "S-parameters").access('X'),
+    MenuEntry::offered(viewer(ResultViewer::SParameters), "S-parameters").access('T'),
     MenuEntry::offered(viewer(ResultViewer::Smith), "Smith chart").access('S'),
     MenuEntry::offered(viewer(ResultViewer::Polar), "Polar response").access('R'),
     MenuEntry::offered(viewer(ResultViewer::PoleZero), "Pole-zero").access('Z'),
-    MenuEntry::offered(viewer(ResultViewer::TransferFunction), "Transfer function").access('T'),
+    MenuEntry::offered(viewer(ResultViewer::TransferFunction), "Transfer function").access('U'),
     MenuEntry::offered(viewer(ResultViewer::NetworkMatrix), "Network matrix").access('K'),
     MenuEntry::offered(viewer(ResultViewer::Fft), "FFT").access('F'),
     MenuEntry::offered(
