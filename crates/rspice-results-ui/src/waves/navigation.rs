@@ -38,7 +38,6 @@ const RULER_CAPTION_EDGE: f32 = 2.0;
 /// retained. The lane is fourteen pixels tall and a plot wide, so a denser
 /// curve would not reach the reader as anything but the same grey band.
 const SHARED_X_OVERVIEW_POINTS: usize = 160;
-pub const WAVE_SHARED_RIGHT_MARGIN: f32 = 14.0;
 /// The height of a ruler with no overview track: its row of ticks and its
 /// row of cursor boxes, with the caption in the gutter beside them.
 pub const WAVE_RULER_HEIGHT_WITHOUT_OVERVIEW: f32 = SHARED_X_LANE_TOP;

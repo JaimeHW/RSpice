@@ -197,9 +197,11 @@ impl Gutter {
     }
 
     /// What every plot of the strip keeps right of its area: the axes
-    /// standing there, or the breathing strip when none does.
+    /// standing there, the same on every strip of the stack so the plots
+    /// share one X, and nothing when none does. The X axis' last label is
+    /// held inside the plot rather than given a gutter of its own.
     pub fn right_margin(self) -> f32 {
-        navigation::WAVE_SHARED_RIGHT_MARGIN.max(self.right)
+        self.right
     }
 }
 
@@ -254,9 +256,7 @@ fn gutter_columns(ui: &Ui, host: &impl StackHost, model: &StripModel) -> (f32, f
     )
 }
 
-// Mockup gutter geometry: a 64 px left gutter carries the Y ticks and the
-// X-strip's band labels; the right edge keeps only a 14 px breathing strip
-// now that no pane owns a secondary axis.
+// A 64 px left gutter carries the Y ticks and the X ruler's caption.
 const WAVE_SHARED_LEFT_MARGIN: f32 = 64.0;
 
 /// The mockup's per-sheet left gutter: the noise sheet's nV/√Hz tick
@@ -461,6 +461,28 @@ pub fn active_pane<'a>(
         .map(|(ordinal, pane)| (model, ordinal, pane))
 }
 
+/// What a control that acts on one strip calls it: its curve, its two
+/// curves, or its first curve and how many more it draws, as the legend's
+/// trace list counts them; its unit when it draws no signal.
+pub fn pane_name(model: &StripModel, pane: &UnitPane) -> Option<String> {
+    let mut names: Vec<&str> = Vec::new();
+    for trace in pane
+        .all_traces()
+        .filter(|index| *index < model.signal_trace_count)
+        .filter_map(|index| model.traces.get(index))
+    {
+        if !names.contains(&trace.name.as_str()) {
+            names.push(&trace.name);
+        }
+    }
+    match names.as_slice() {
+        [] => Some(model.pane_axis_unit(pane.unit)).filter(|unit| !unit.is_empty() && unit != "1"),
+        [one] => Some((*one).to_owned()),
+        [first, second] => Some(format!("{first} and {second}")),
+        [first, rest @ ..] => Some(format!("{first} +{}", rest.len())),
+    }
+}
+
 fn pane_log_y_key(model: &StripModel, pane: &UnitPane) -> WavePanePresentationKey {
     WavePanePresentationKey {
         analysis: model.analysis_key,
@@ -515,11 +537,11 @@ pub fn set_shared_x_view(
 /// Its panes split what the shared X axis leaves equally, as ViVA's and
 /// EZwave's strips do: no pane's quantity is secondary to another's, and a
 /// pane weighted down was left too short to label its own axis.
+/// Two strips meet on the upper one's frame line, so no row goes to a seam.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct WaveStackGeometry {
     pane_height: f32,
     shared_x_height: f32,
-    seam_height: f32,
 }
 
 fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeometry {
@@ -527,17 +549,9 @@ fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeo
         return WaveStackGeometry {
             pane_height: 0.0,
             shared_x_height: 0.0,
-            seam_height: 0.0,
         };
     }
-    let available = available_height.max(0.0);
-    let seam_count = pane_count.saturating_sub(1) as f32;
-    let seam_height = if seam_count > 0.0 {
-        (available / seam_count).min(1.0)
-    } else {
-        0.0
-    };
-    let content = (available - seam_height * seam_count).max(0.0);
+    let content = available_height.max(0.0);
     // The normal 50 px navigator is retained when space permits and shrinks
     // proportionally in constrained multi-pane/multi-strip arrangements.
     // The sum is exact: this function never asks the parent to grow.
@@ -546,7 +560,6 @@ fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeo
     WaveStackGeometry {
         pane_height,
         shared_x_height,
-        seam_height,
     }
 }
 
@@ -566,6 +579,31 @@ pub fn expr_color(tokens: &Tokens, slot: usize) -> egui::Color32 {
 /// colour from the curve it named.
 pub fn expr_palette_slot(model: &StripModel, slot: usize) -> usize {
     model.traces.len() + slot
+}
+
+/// What an analysis' strip header says beside its kind tag: the run's label
+/// for the analysis and what follows it, less a label that only names the
+/// kind again ("SP" beside SP, "TRAN" or "Transient" beside TR), which
+/// would read twice.
+pub(crate) fn strip_subtitle(model: &StripModel) -> &str {
+    let kind = model.analysis_type;
+    let (label, rest) = model
+        .subtitle
+        .split_once(" · ")
+        .map_or((model.subtitle.as_str(), ""), |(label, rest)| (label, rest));
+    let label = label.trim();
+    let names_the_kind = [
+        kind.short_label(),
+        kind.spice_command().trim_start_matches('.'),
+        kind.display_name(),
+    ]
+    .iter()
+    .any(|name| label.eq_ignore_ascii_case(name));
+    if names_the_kind {
+        rest
+    } else {
+        &model.subtitle
+    }
 }
 
 /// What a strip says when every trace it holds is hidden.
@@ -661,6 +699,15 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
         })
         .collect();
     let mut close_xy: Option<usize> = None;
+    // With one strip there is nothing to tell apart.
+    let several = rows
+        .iter()
+        .map(|(model, xy)| match xy {
+            Some(_) => 1,
+            None => model.unit_panes().len().max(1),
+        })
+        .sum::<usize>()
+        > 1;
     let maximized = host.session().maximized_strip.is_some();
     let linked_cursor_domain = host
         .session()
@@ -700,7 +747,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                                 ui,
                                 host,
                                 model,
-                                (index, slots),
+                                (index, slots, several),
                                 linked_cursor_domain.as_ref(),
                                 options,
                                 &mut edits,
@@ -763,18 +810,19 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                         // Each pane's row ends under them.
                         let closable = pane_chrome && !maximized && n > 1;
                         let window_slots = 1 + usize::from(closable);
-                        let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
-                            .id_salt(model.analysis_key)
-                            .incomplete(model.incomplete)
-                            .maximized(maximized)
-                            .closable(closable)
-                            .zoomed(zoomed)
-                            .expr_action(pane_chrome)
-                            .removable_from(0)
-                            .chip_menu(&mut conversions)
-                            .pane_actions(pane_chrome)
-                            .x_scale(true)
-                            .show(ui);
+                        let header =
+                            StripHeader::new(&model.kind_tag, strip_subtitle(model), &legend)
+                                .id_salt(model.analysis_key)
+                                .incomplete(model.incomplete)
+                                .maximized(maximized)
+                                .closable(closable)
+                                .zoomed(zoomed)
+                                .expr_action(pane_chrome)
+                                .removable_from(0)
+                                .chip_menu(&mut conversions)
+                                .pane_actions(pane_chrome)
+                                .x_scale(true)
+                                .show(ui);
                         // The strip header owns the shared X axis, and with
                         // it the axis' scale toggle.
                         if let Some(rect) = header.scale_rect
@@ -831,7 +879,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                             show_strip_plot(
                                 ui,
                                 host,
-                                (model, window_slots),
+                                (model, window_slots, several),
                                 linked_cursor_domain.as_ref(),
                                 options,
                                 &mut edits,
@@ -968,6 +1016,9 @@ pub(crate) struct StripFrame<'a> {
     /// How many window controls the strip header keeps, so each pane's row
     /// ends under them on the same rule.
     pub(crate) window_slots: usize,
+    /// Whether the sheet shows more than one strip, so the one the bar's
+    /// actions reach is told from the others.
+    pub(crate) several: bool,
 }
 
 /// The share of a strip its ruler takes, up to the ruler's own height.
@@ -1140,7 +1191,7 @@ struct ExpressionEdits {
 fn show_strip_plot(
     ui: &mut Ui,
     host: &mut impl StackHost,
-    (model, window_slots): (&StripModel, usize),
+    (model, window_slots, several): (&StripModel, usize, bool),
     linked_cursor_domain: Option<&CursorDomain>,
     options: StackOptions,
     edits: &mut ExpressionEdits,
@@ -1213,6 +1264,7 @@ fn show_strip_plot(
         options,
         gutter,
         window_slots,
+        several,
     };
     // The strips share what is left by their weights, as the reader sized
     // them; a divider being dragged moves the line between two of them
@@ -1418,7 +1470,7 @@ fn show_xy_strip(
     ui: &mut Ui,
     host: &mut impl StackHost,
     model: &StripModel,
-    (index, slots): (usize, usize),
+    (index, slots, several): (usize, usize, bool),
     linked_cursor_domain: Option<&CursorDomain>,
     options: StackOptions,
     edits: &mut ExpressionEdits,
@@ -1517,6 +1569,7 @@ fn show_xy_strip(
         options,
         gutter,
         window_slots: slots,
+        several,
     };
 
     // The pane's header: its legend, its unit and its scale, which the strip
@@ -1537,6 +1590,7 @@ fn show_xy_strip(
     let input = pane_header::PaneHeader {
         height: WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
         active: false,
+        dimmed: false,
         log_y,
         log_y_available,
         cursor_a,
@@ -1746,14 +1800,12 @@ fn show_unit_pane(
         options,
         gutter,
         window_slots,
+        several,
     } = frame;
     let t = Tokens::get(ui.ctx());
     let presentation = options.readout;
     let quantity_policy = options.quantity;
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    // The pane's own top edge, kept so the active rail can span header and
-    // canvas together once the pane's full height is known.
-    let pane_top = ui.available_rect_before_wrap().top();
     // The expressions the strip's other axes read, each with its axis; the
     // rest, and any real lane's steps, read against its first.
     let all_exprs = exprs;
@@ -1816,6 +1868,7 @@ fn show_unit_pane(
     let input = pane_header::PaneHeader {
         height: WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
         active: host.session().active_wave_pane.as_ref() == Some(&pane_key),
+        dimmed: several && host.session().active_wave_pane.as_ref() != Some(&pane_key),
         log_y,
         log_y_available,
         cursor_a,
@@ -2151,8 +2204,6 @@ fn show_unit_pane(
             .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, slot)
             .y = range;
     }
-
-    paint_active_rail(ui, host, model, pane, pane_top, &t);
 }
 
 /// Draw the plot's menu over `plot`, kept where the right click that opened
@@ -2378,35 +2429,6 @@ pub(crate) fn abscissa_menu(
             .flatten()
             .map(|expr| expr.text.clone())
             .collect(),
-    }
-}
-
-/// The mockup's `.plot-pane.active::before`: a 2 px rail down the pane that
-/// received the instrument's actions. Painted last so it reads over the
-/// header fill and the canvas alike.
-fn paint_active_rail(
-    ui: &Ui,
-    host: &mut impl StackHost,
-    model: &StripModel,
-    pane: &UnitPane,
-    pane_top: f32,
-    t: &Tokens,
-) {
-    let pane_active = host.session_mut().active_wave_pane.as_ref()
-        == Some(&WavePanePresentationKey {
-            analysis: model.analysis_key,
-            unit: pane.unit.to_owned(),
-        });
-    if pane_active {
-        let bottom = ui.min_rect().bottom().max(pane_top);
-        ui.painter().rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(ui.min_rect().left(), pane_top),
-                egui::pos2(ui.min_rect().left() + 2.0, bottom),
-            ),
-            0.0,
-            t.color.accent,
-        );
     }
 }
 

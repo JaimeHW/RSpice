@@ -992,7 +992,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     let mut spec = PlotSpec::new(x_axis.clone(), x_scale, y_axis)
         .accessible_name("Signal versus signal plot")
         .accessible_detail(&detail)
-        .with_right_margin(super::navigation::WAVE_SHARED_RIGHT_MARGIN)
+        .with_right_margin(frame.gutter.right_margin())
         .without_x_axis_chrome();
     spec.left_margin = frame.gutter.width();
     if log_y {
@@ -1339,7 +1339,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             current: (x0, x1),
             height: ruler_height,
             left_margin: frame.gutter.width(),
-            right_margin: super::navigation::WAVE_SHARED_RIGHT_MARGIN,
+            right_margin: frame.gutter.right_margin(),
             quantity_policy: quantity,
             significant_digits,
             cursors: None,

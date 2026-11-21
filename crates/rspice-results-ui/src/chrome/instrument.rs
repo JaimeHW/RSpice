@@ -78,6 +78,10 @@ pub trait WaveInstrumentHost {
     fn sheet_controls(&mut self, _ui: &mut Ui) -> bool {
         false
     }
+    /// The name of the strip the bar's zoom and fit act on, which their
+    /// tooltips give: with several strips on the sheet, that is where the
+    /// reader learns which one they will move.
+    fn active_strip(&self) -> Option<String>;
 }
 
 pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl WaveInstrumentHost) {
@@ -175,7 +179,7 @@ struct BarControl {
     kind: ControlKind,
     /// What the control's menu row reads, and its tooltip on the bar.
     name: String,
-    tooltip: &'static str,
+    tooltip: String,
     on: bool,
     enabled: bool,
     action: fn() -> Option<InstrumentAction>,
@@ -205,11 +209,11 @@ impl BarControl {
 
     fn show_on_bar(&self, ui: &mut Ui) -> egui::Response {
         ui.add_enabled_ui(self.enabled, |ui| match &self.kind {
-            ControlKind::Text(label) => instrument_control(ui, label, self.on, self.tooltip),
+            ControlKind::Text(label) => instrument_control(ui, label, self.on, &self.tooltip),
             ControlKind::Glyph(icon) => IconButton::new(*icon)
                 .side(ResultBarMetrics::of(ui).instrument_control)
                 .on(self.on)
-                .tooltip(self.tooltip)
+                .tooltip(&self.tooltip)
                 .show(ui),
         })
         .inner
@@ -220,7 +224,7 @@ impl BarControl {
             self.enabled,
             egui::Button::selectable(self.on, self.name.as_str()),
         )
-        .on_hover_text(self.tooltip)
+        .on_hover_text(&self.tooltip)
     }
 }
 
@@ -230,11 +234,15 @@ fn bar_controls(
     host: &impl WaveInstrumentHost,
 ) -> Vec<BarControl> {
     let controls = host.controls();
-    let control = |group, kind, name: &str, tooltip, on, enabled, action| BarControl {
+    let strip = host.active_strip().map_or_else(
+        || "the active strip".to_owned(),
+        |name| format!("the {name} strip"),
+    );
+    let control = |group, kind, name: &str, tooltip: &str, on, enabled, action| BarControl {
         group,
         kind,
         name: name.to_owned(),
-        tooltip,
+        tooltip: tooltip.to_owned(),
         on,
         enabled,
         action,
@@ -282,7 +290,7 @@ fn bar_controls(
             2,
             ControlKind::Glyph(Icon::ZoomIn),
             "Zoom in",
-            "Zoom active pane in 2x",
+            &format!("Zoom {strip} in 2x"),
             false,
             true,
             || Some(InstrumentAction::Zoom(0.5)),
@@ -291,7 +299,7 @@ fn bar_controls(
             2,
             ControlKind::Glyph(Icon::ZoomOut),
             "Zoom out",
-            "Zoom active pane out 2x",
+            &format!("Zoom {strip} out 2x"),
             false,
             true,
             || Some(InstrumentAction::Zoom(2.0)),
@@ -300,7 +308,7 @@ fn bar_controls(
             2,
             ControlKind::Glyph(Icon::ZoomFit),
             "Fit",
-            "Fit active waveform pane",
+            &format!("Fit {strip}"),
             false,
             true,
             || Some(InstrumentAction::Fit),
@@ -383,7 +391,7 @@ fn fold(ui: &Ui, controls: &[BarControl], width: f32) -> (usize, bool) {
         group: u8::MAX,
         kind: ControlKind::Text(MORE.to_owned()),
         name: String::new(),
-        tooltip: "",
+        tooltip: String::new(),
         on: false,
         enabled: true,
         action: || None,

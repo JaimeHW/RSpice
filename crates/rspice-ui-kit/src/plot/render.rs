@@ -126,9 +126,11 @@ pub const Y_LABEL_GAP: f32 = 7.0;
 /// The least gap between two Y tick labels that are both drawn.
 const Y_TICK_LABEL_GAP: f32 = 2.0;
 const MARGIN_BOTTOM: f32 = 26.0;
-/// What a packed strip keeps above and below its plot, so a curve at the
-/// fit's edge never touches the strip's header or the strip below.
-const PACKED_MARGIN: f32 = 4.0;
+/// What a packed strip keeps above and below its plot: nothing. Its frame
+/// stands on the strip's edges, the bottom line the strip's separator, and
+/// the fit's own headroom keeps a curve off the frame, so a strip spends its
+/// height on its curves.
+const PACKED_MARGIN: f32 = 0.0;
 const MARGIN_RIGHT_PLAIN: f32 = 16.0;
 
 /// A point marker a curve carries besides its colour.
@@ -1489,7 +1491,10 @@ pub fn show(
     // ---- frame + axis units
     if spec.frame {
         painter.vline(plot_rect.left(), plot_rect.y_range(), frame);
-        painter.hline(plot_rect.x_range(), plot_rect.bottom(), frame);
+        // On the plot's last row rather than the row under it: a packed
+        // strip's bottom line is the separator from the strip below, which
+        // starts on that next row and would paint over it.
+        painter.hline(plot_rect.x_range(), plot_rect.bottom() - 0.5, frame);
     }
     if let Some(galley) = y_chrome {
         let caption = Rect::from_min_size(

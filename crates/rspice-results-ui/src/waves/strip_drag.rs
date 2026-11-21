@@ -68,8 +68,10 @@ pub(crate) fn divider_offset(ctx: &egui::Context, model: &StripModel, index: usi
 }
 
 /// The divider between strip `index` and the one under it, `heights` the
-/// two strips' heights as drawn: a hairline seam that a drag resizes the
-/// two by, a double-click evens every strip out, and arrow keys nudge.
+/// two strips' heights as drawn: the upper strip's bottom frame line, which
+/// a drag resizes the two by, a double-click evens every strip out, and
+/// arrow keys nudge. It takes no row of its own: lit while it is held, it
+/// lights that line across the strip.
 pub(crate) fn divider(
     ui: &mut Ui,
     host: &mut impl StackHost,
@@ -79,12 +81,10 @@ pub(crate) fn divider(
     locked: bool,
 ) {
     let t = Tokens::get(ui.ctx());
-    let (seam, _) = ui.allocate_exact_size(
-        egui::vec2(
-            ui.available_width(),
-            1.0_f32.min(ui.available_height().max(0.0)),
-        ),
-        Sense::hover(),
+    let top = ui.cursor().top();
+    let seam = Rect::from_min_max(
+        egui::pos2(ui.max_rect().left(), top - 1.0),
+        egui::pos2(ui.max_rect().right(), top),
     );
     let reach = Rect::from_center_size(seam.center(), egui::vec2(seam.width(), DIVIDER_REACH));
     let id = divider_id(model, index);
@@ -97,16 +97,9 @@ pub(crate) fn divider(
         )
     });
     theme::paint_focus_ring(ui, &response, reach);
-    let active = !locked && (response.hovered() || response.dragged());
-    ui.painter().rect_filled(
-        seam,
-        0.0,
-        if active {
-            t.color.accent
-        } else {
-            t.color.canvas_grid
-        },
-    );
+    if !locked && (response.hovered() || response.dragged()) {
+        ui.painter().rect_filled(seam, 0.0, t.color.accent);
+    }
     if locked {
         response.on_hover_text("A locked strip keeps its height. Unlock it in the strip's menu.");
         return;

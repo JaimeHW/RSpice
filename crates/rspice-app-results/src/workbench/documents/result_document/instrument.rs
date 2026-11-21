@@ -20,6 +20,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if !envelope_available {
         state.results.session.show_family_envelope = false;
     }
+    let active_strip = waves::active_strip_name(state, &t);
 
     instrument::show(
         ui,
@@ -32,6 +33,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             state,
             tokens: &t,
             ctx: ui.ctx().clone(),
+            active_strip,
         },
     );
 }
@@ -40,6 +42,7 @@ struct Host<'a, 'p> {
     state: &'a mut ResultsParts<'p>,
     tokens: &'a Tokens,
     ctx: egui::Context,
+    active_strip: Option<String>,
 }
 
 impl WaveInstrumentHost for Host<'_, '_> {
@@ -103,5 +106,8 @@ impl WaveInstrumentHost for Host<'_, '_> {
 
     fn hidden_strip_count(&self) -> usize {
         hidden_wave_strip_count(self.state.results_reads())
+    }
+    fn active_strip(&self) -> Option<String> {
+        self.active_strip.clone()
     }
 }

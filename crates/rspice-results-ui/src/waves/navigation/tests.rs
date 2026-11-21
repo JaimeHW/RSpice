@@ -171,7 +171,7 @@ fn a_focused_ruler_keeps_its_arrows() {
                             current,
                             height: WAVE_RULER_HEIGHT_WITHOUT_OVERVIEW,
                             left_margin: 56.0,
-                            right_margin: WAVE_SHARED_RIGHT_MARGIN,
+                            right_margin: 0.0,
                             quantity_policy: QuantityPresentationPolicy::default(),
                             significant_digits: 4,
                             cursors: None,

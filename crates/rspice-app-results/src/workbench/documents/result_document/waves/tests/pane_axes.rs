@@ -356,6 +356,104 @@ fn a_bode_strip_names_each_trace_in_the_pane_that_draws_it() {
     assert_eq!(names, expected, "each name once, in the pane that draws it");
 }
 
+/// A dimensionless curve on a strip's second axis is read against a column
+/// that names no unit: its top label is a number, never a number and "1".
+#[test]
+fn a_dimensionless_second_axis_names_no_unit() {
+    use rspice_results::visualization_document::{Strip, StripAxis, StripMember};
+    let ctx = context(crate::ui::Theme::default());
+    let time: Vec<f64> = (0..=200).map(|index| f64::from(index) * 1.0e-6).collect();
+    let sine: Vec<f64> = time.iter().map(|t| (2.0e4 * t).sin()).collect();
+    let ratio: Vec<f64> = time.iter().map(|t| 4.0 * t / 2.0e-4).collect();
+    let mut state = transient(vec![
+        RetainedTrace::new("V(out)", time.clone(), sine, "#fff"),
+        RetainedTrace::new("gain", time, ratio, "#fff").with_unit("1"),
+    ]);
+    let member = |name: &str| StripMember::Signal {
+        name: name.to_owned(),
+        form: Default::default(),
+    };
+    let key = analysis(&mut state);
+    state.results.results.session.strip_layouts.insert(
+        key,
+        vec![Strip {
+            key: "strip-1".to_owned(),
+            weight: None,
+            locked: false,
+            axes: vec![
+                StripAxis {
+                    unit: "V".to_owned(),
+                    members: vec![member("V(out)")],
+                },
+                StripAxis {
+                    unit: "1".to_owned(),
+                    members: vec![member("gain")],
+                },
+            ],
+        }],
+    );
+    // The models are drawn again for the arrangement.
+    state.model.simulation.view.data_version += 1;
+    let output = settled(&ctx, &mut state, FRAME);
+    let words = texts(&output);
+    let gain = words
+        .iter()
+        .find(|(text, _)| text == "gain")
+        .map(|(_, rect)| *rect)
+        .expect("the gain's legend entry");
+    let volts = words
+        .iter()
+        .find(|(text, _)| text == "V(out)")
+        .map(|(_, rect)| *rect)
+        .expect("the output's legend entry");
+    assert!(
+        (gain.center().y - volts.center().y).abs() < 1.0,
+        "one strip names both curves"
+    );
+    let right: Vec<String> = words
+        .into_iter()
+        .filter(|(_, rect)| rect.left() >= gain.left() + 500.0)
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        right.iter().any(|text| text == "4"),
+        "the second axis is labelled: {right:?}"
+    );
+    assert!(
+        right.iter().all(|text| !text.ends_with(" 1")),
+        "no unit on a dimensionless axis: {right:?}"
+    );
+}
+
+/// A strip's header names its analysis once: a run's label that only names
+/// the kind again ("TRAN" beside TR, "SP" beside SP) is not repeated beside
+/// the kind tag, and a label of the run's own stays.
+#[test]
+fn a_strip_header_names_its_analysis_once() {
+    let ctx = context(crate::ui::Theme::default());
+    let time: Vec<f64> = (0..=20).map(|index| f64::from(index) * 1.0e-6).collect();
+    let mut state = transient(vec![RetainedTrace::new(
+        "V(out)",
+        time.clone(),
+        vec![1.0; 21],
+        "#fff",
+    )]);
+    state.model.simulation.retained.runs[0].analyses[0].label = "TRAN".to_owned();
+    let words: Vec<String> = texts(&settled(&ctx, &mut state, FRAME))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(words.iter().any(|text| text == "TR"), "{words:?}");
+    assert!(!words.iter().any(|text| text == "TRAN"), "{words:?}");
+    state.model.simulation.retained.runs[0].analyses[0].label = "Startup".to_owned();
+    state.model.simulation.view.data_version += 1;
+    let words: Vec<String> = texts(&settled(&ctx, &mut state, FRAME))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(words.iter().any(|text| text == "Startup"), "{words:?}");
+}
+
 /// The values the H pane's Y axis is labelled with.
 fn field_ticks(ctx: &egui::Context, state: &mut ResultsTestHost) -> Vec<f64> {
     let output = settled(ctx, state, FRAME);

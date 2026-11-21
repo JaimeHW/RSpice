@@ -88,6 +88,10 @@ pub struct PaneExpression {
 pub struct PaneHeader {
     pub height: f32,
     pub active: bool,
+    /// Whether the legend reads in the dim text colour: on a sheet of
+    /// several strips, every strip but the active one, so the strip the
+    /// instrument bar acts on is the one whose names read at full contrast.
+    pub dimmed: bool,
     pub log_y: bool,
     pub log_y_available: bool,
     pub cursor_a: Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
@@ -239,6 +243,7 @@ pub fn show_header(
     let PaneHeader {
         height,
         active,
+        dimmed,
         log_y,
         log_y_available,
         cursor_a: cursor_a_value,
@@ -445,7 +450,14 @@ pub fn show_header(
                     .map_or(0.0, |label| chip_width(ui, &label) + 3.0)
             });
             for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
-                entry.show(ui, chip, (model, arrange), &display_name, host, &mut output);
+                entry.show(
+                    ui,
+                    chip,
+                    (model, arrange, dimmed),
+                    &display_name,
+                    host,
+                    &mut output,
+                );
             }
             let Some(label) = trace_list_label(chips.len() - fitted, hidden_count, folded) else {
                 return;
@@ -624,7 +636,7 @@ impl Entry<'_> {
         &self,
         ui: &mut Ui,
         chip: &LegendEntry,
-        (model, arrange): (&StripModel, bool),
+        (model, arrange, dimmed): (&StripModel, bool, bool),
         display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
         host: &mut impl PaneHeaderHost,
         output: &mut UnitPaneHeaderResponse,
@@ -644,9 +656,11 @@ impl Entry<'_> {
             .flatten()
             .map(|curve| (model, curve));
         match self {
-            Self::Signal(trace) => legend_chip(ui, trace, chip, curve, display_name, host, output),
+            Self::Signal(trace) => {
+                legend_chip(ui, (trace, chip, dimmed), curve, display_name, host, output)
+            }
             Self::Expression(expression) => {
-                expression_chip(ui, expression, chip, curve, host, output);
+                expression_chip(ui, (expression, chip, dimmed), curve, host, output);
             }
         }
     }
@@ -725,8 +739,7 @@ fn expression_entry(ui: &Ui, expression: &PaneExpression, name_budget: f32) -> L
 /// Remove. The expression as typed is on hover.
 fn expression_chip(
     ui: &mut Ui,
-    expression: &PaneExpression,
-    entry: &LegendEntry,
+    (expression, entry, dimmed): (&PaneExpression, &LegendEntry, bool),
     curve: Option<(&StripModel, super::strip_layout::Curve)>,
     host: &mut impl PaneHeaderHost,
     output: &mut UnitPaneHeaderResponse,
@@ -756,7 +769,7 @@ fn expression_chip(
         output.toggle_expression = Some(expression.slot);
     }
     let label = ui
-        .selectable_label(false, entry.label.as_str())
+        .selectable_label(false, legend_text(ui, &entry.label, dimmed))
         .on_hover_text(&expression.text);
     let label = drag_curve(label, curve);
     if label.clicked() {
@@ -912,10 +925,20 @@ fn trace_list_row(
 
 /// A plotted trace's chip: its swatch, which hides it, then its name and
 /// value, which select it. The full name is on hover.
+/// A legend entry's name: in the dim text colour on a strip that is not the
+/// active one, as the row's own ink otherwise.
+fn legend_text(ui: &Ui, label: &str, dimmed: bool) -> egui::RichText {
+    let text = egui::RichText::new(label);
+    if dimmed {
+        text.color(Tokens::get(ui.ctx()).color.text_dim)
+    } else {
+        text
+    }
+}
+
 fn legend_chip(
     ui: &mut Ui,
-    trace: &StripTrace,
-    entry: &LegendEntry,
+    (trace, entry, dimmed): (&StripTrace, &LegendEntry, bool),
     curve: Option<(&StripModel, super::strip_layout::Curve)>,
     display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
     host: &mut impl PaneHeaderHost,
@@ -948,7 +971,7 @@ fn legend_chip(
     }
     let selected = host.trace_selected(trace);
     let label = ui
-        .selectable_label(selected, entry.label.as_str())
+        .selectable_label(selected, legend_text(ui, &entry.label, dimmed))
         .on_hover_text(&*shown);
     let label = drag_curve(label, curve);
     if label.clicked() {

@@ -80,7 +80,8 @@ use super::{
 #[cfg(test)]
 use rspice_results_ui::waves::stack::set_pane_log_y;
 use rspice_results_ui::waves::stack::{
-    PaneFit, active_pane, model_is_visible, pane_fit, pane_log_y, set_shared_x_view, shared_x_view,
+    PaneFit, active_pane, model_is_visible, pane_fit, pane_log_y, pane_name, set_shared_x_view,
+    shared_x_view,
 };
 mod stack_host;
 

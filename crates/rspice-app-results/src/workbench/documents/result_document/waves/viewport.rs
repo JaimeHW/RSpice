@@ -55,6 +55,20 @@ pub(super) fn scaled_range(
 /// Y is the pane's own, and a pane drawing decades has to be scaled in
 /// decades: scaling a logarithmic pane's endpoints linearly moves its
 /// geometric centre, so a zoom in and a zoom back out did not return.
+/// The name of the strip the active pane belongs to, as the instrument bar's
+/// zoom and fit tooltips give it.
+pub(crate) fn active_strip_name(state: &mut ResultsParts<'_>, t: &Tokens) -> Option<String> {
+    let presentation = state.results_reads().presentation_policy();
+    let models = cached_models(
+        &state.model.simulation,
+        state.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    let (model, _, pane) = active_pane(&models, &state.results.session)?;
+    pane_name(model, &pane)
+}
+
 pub(crate) fn zoom_active_pane(state: &mut ResultsParts<'_>, t: &Tokens, factor: f64) {
     let presentation = state.results_reads().presentation_policy();
     let models = cached_models(

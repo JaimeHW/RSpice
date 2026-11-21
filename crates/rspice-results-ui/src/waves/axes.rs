@@ -19,7 +19,6 @@ use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::Tokens;
 
 use super::StripModel;
-use super::navigation::WAVE_SHARED_RIGHT_MARGIN;
 use super::pane::SecondaryPlot;
 use super::stack::Gutter;
 
@@ -193,7 +192,7 @@ pub(crate) fn fit_axes(strip_width: f32, (name, value): (f32, f32), room: AxisRo
             ),
             Side::Right => (fit.left, fit.right + width),
         };
-        let plot = strip_width - name - value - left - WAVE_SHARED_RIGHT_MARGIN.max(right);
+        let plot = strip_width - name - value - left - right;
         if plot < floor {
             break;
         }
@@ -378,8 +377,9 @@ pub(crate) fn secondary_axes(
                     labels.push((label_y, label));
                 }
             }
-            // The axis names its unit on its top label, as the first does.
-            let unit = if axis.unit.is_empty() { "1" } else { axis.unit };
+            // The axis names its unit on its top label, as the first does; a
+            // dimensionless axis names none, whose `1` would read as a value.
+            let unit = if axis.unit == "1" { "" } else { axis.unit };
             if let Some((_, top)) = labels.last_mut() {
                 *top = plot::tick_with_unit(top, unit);
             }
