@@ -315,7 +315,7 @@ pub fn editable_select_mono(
     let c = t.color;
     let value_font = theme::field_mono();
     let field = ui.add_sized(
-        vec2(width, t.metrics.ctl_h),
+        vec2(width, super::control_height(ui)),
         egui::TextEdit::singleline(value)
             .id(ui.make_persistent_id(("rspice.editable_select", id_salt)))
             .font(value_font.clone())
@@ -460,7 +460,7 @@ fn select_with_font(
     let height = if compact {
         super::compact_height(&t.metrics)
     } else {
-        t.metrics.ctl_h
+        super::control_height(ui)
     };
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     response.widget_info(|| {

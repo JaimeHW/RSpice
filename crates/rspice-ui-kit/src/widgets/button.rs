@@ -37,6 +37,10 @@ pub struct Button<'a> {
     accessible_label: Option<&'a str>,
 }
 
+/// The least room a standard button keeps above and below its label, when
+/// the row it stands in is shorter than the theme's control.
+const LABEL_GAP: f32 = 3.0;
+
 /// The chevron a menu button paints after its label, and the gap before it.
 const MENU_CHEVRON: f32 = 11.0;
 const MENU_CHEVRON_GAP: f32 = 4.0;
@@ -45,6 +49,15 @@ const MENU_CHEVRON_GAP: f32 = 4.0;
 /// what it takes off each side of its label against a standard button.
 const COMPACT_ROW_GAP: f32 = 3.0;
 const COMPACT_PADDING_RELIEF: f32 = 6.0;
+
+/// The height of a standard control in `ui`: the theme's control height,
+/// unless the row the control stands in set its own through
+/// `interact_size`, as a bar shorter than a control does. Every standard kit
+/// control and every egui button in that row then stands at one height.
+#[must_use]
+pub fn control_height(ui: &Ui) -> f32 {
+    ui.spacing().interact_size.y
+}
 
 /// The height of a compact control in a row of the design's row height: the
 /// row's last point is its rule, and what is left takes an equal gap above
@@ -293,7 +306,7 @@ impl<'a> Button<'a> {
         let height = if self.compact_relief(&t, 1.0) > 0.0 {
             compact_height(&t.metrics).max(galley.size().y + 4.0)
         } else {
-            t.metrics.ctl_h.max(galley.size().y + 8.0)
+            control_height(ui).max(galley.size().y + 2.0 * LABEL_GAP)
         }
         .max(self.min_height);
         let (rect, mut response) = ui.allocate_exact_size(

@@ -27,12 +27,17 @@ fn padded_width(t: &Tokens, text: f32) -> f32 {
     (text + 18.0).max(floor)
 }
 
-/// A 22 px toggle chip with a mono label. Returns the response; the caller
-/// owns the toggle state (`on`).
+/// A 22 px toggle chip with a mono label, or as tall as the row's own
+/// controls in a row that set a control height shorter than the theme's, so
+/// it stands level with the selects beside it. Returns the response; the
+/// caller owns the toggle state (`on`).
 pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
     let t = Tokens::get(ui.ctx());
+    let row = super::control_height(ui);
     let height = if t.metrics.is_touch() {
         t.metrics.touch_target()
+    } else if row < t.metrics.ctl_h {
+        row
     } else {
         22.0
     };

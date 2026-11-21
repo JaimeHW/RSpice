@@ -51,7 +51,7 @@ pub fn segmented(
     sizing: SegmentedWidth,
 ) -> bool {
     let t = Tokens::get(ui.ctx());
-    let height = t.metrics.ctl_h;
+    let height = super::control_height(ui);
     let natural_widths = options
         .iter()
         .map(|label| {
