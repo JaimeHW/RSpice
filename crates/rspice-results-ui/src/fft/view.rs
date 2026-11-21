@@ -14,46 +14,16 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable, SortKey};
+use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use crate::presentation::well_hint;
 use crate::strip::{self, LegendChip};
 
 mod bar;
+pub(crate) mod columns;
 pub use bar::{RecordCursors, domain_bar};
-
-/// A phase strip's axis: a whole turn reads in quarter turns, as a phase is
-/// read; a zoomed span takes the plot's own ticks.
-pub(crate) fn phase_axis(lo: f64, hi: f64) -> Axis {
-    if (lo, hi) == (-180.0, 180.0) {
-        Axis::with_ticks(lo, hi, "°", &[-180.0, -90.0, 0.0, 90.0, 180.0])
-    } else {
-        Axis::linear_with(lo, hi, "°", 5)
-    }
-}
-
-/// Width of a table's leading key column: a harmonic's order, a line's name,
-/// and the least a column of numbers narrows to.
-pub(crate) const KEY_COLUMN_WIDTH: f32 = 48.0;
-
-/// A column of numbers sharing what the key column and the scroll bar leave
-/// with its siblings, so the table fills the details pane at any width.
-pub(crate) fn number_column(head: impl Into<String>) -> Column {
-    Column::name(head, KEY_COLUMN_WIDTH).align(Align::Right)
-}
-
-/// A column of levels in `unit`: a unit that takes a prefix stays on each
-/// value, so `625 µV` reads as itself; a decibel states its unit once in the
-/// head and each value is the bare number, so the column fits the details
-/// pane at the reader's digits.
-pub(crate) fn level_column(unit: &str) -> (Column, &str) {
-    if rspice_results::number_format::unit_takes_prefix(unit) {
-        (number_column("Level"), unit)
-    } else {
-        (number_column(unit).tooltip(format!("Level, in {unit}")), "")
-    }
-}
+use columns::{Fitting, HUNDREDTH};
 
 /// The arrays the active FFT draws, keyed on the FFT state's spectrum
 /// revision and the scale they are drawn in — the FFT can be recomputed
@@ -169,6 +139,7 @@ fn build_model(fft: &FftState, series: &mut Option<FftSeries>) -> Option<FftMode
         Some((f0, db0)) if f0 > 0.0 => analysis
             .harmonics
             .iter()
+            .filter(|harmonic| harmonic.above_floor)
             .map(|harmonic| (harmonic.order, harmonic.frequency, harmonic.level_db - db0))
             .collect(),
         Some(_) | None => Vec::new(),
@@ -464,8 +435,9 @@ pub fn show(
             })
             .inner;
         crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
-        let mut phase_spec = PlotSpec::new(x_axis, x_scale, phase_axis(-180.0, 180.0))
-            .accessible_name("FFT phase plot");
+        let mut phase_spec =
+            PlotSpec::new(x_axis, x_scale, Axis::linear_with(-180.0, 180.0, "°", 5))
+                .accessible_name("FFT phase plot");
         phase_spec.traces.push(
             Trace::new(&model.frequency, &model.phase, c.traces[1])
                 .thin()
@@ -629,9 +601,15 @@ pub fn right_panel(
         ],
     );
 
+    // The tables print at the transform's resolution: a frequency to the
+    // decade under its bin, a level to the hundredth of a decibel.
+    let resolution = fft
+        .data
+        .as_ref()
+        .map_or(f64::NAN, crate::fft::data::FftData::frequency_resolution);
     if analysis.fundamental_frequency.is_some() && !analysis.harmonics.is_empty() {
         section_header(ui, "Harmonics", None);
-        harmonic_table(ui, analysis, quantity_policy, digits);
+        harmonic_table(ui, analysis, resolution, quantity_policy, level_unit);
     }
     let peaks = spectral_peaks(fft);
     if !peaks.is_empty() {
@@ -640,84 +618,219 @@ pub fn right_panel(
             ui,
             &peaks,
             analysis.fundamental_db,
+            resolution,
             quantity_policy,
             level_unit,
-            digits,
         );
     }
 }
 
-/// Every measured harmonic: its order, frequency and level under the
-/// fundamental, as an analyser's harmonic table reads them; the
-/// fundamental's own level is the Signal row above. The table scrolls;
-/// nothing is left off.
+/// The head of a level column: the unit, spelled out on hover.
+fn level_head(unit: &str, what: &str) -> (String, Option<String>) {
+    (unit.to_owned(), Some(format!("{what}, in {unit}")))
+}
+
+/// What a harmonic under the noise floor reads in place of a level.
+const BELOW_FLOOR: &str = "below floor";
+
+/// Every measured harmonic: its order, its frequency, its order times the
+/// fundamental's, and its level and its level under the fundamental, each
+/// read at the harmonic's own bin. A harmonic that does not rise out of the
+/// noise floor says so, with the floor on hover, rather than print a noise
+/// bin's level. The table scrolls; nothing is left off.
 fn harmonic_table(
     ui: &mut Ui,
     analysis: &crate::fft::data::SpectrumAnalysis,
+    resolution: f64,
     quantity_policy: &QuantityPresentationPolicy,
-    digits: usize,
+    level_unit: &str,
 ) {
-    let columns = [
-        Column::number("HD", KEY_COLUMN_WIDTH),
-        number_column("Frequency"),
-        number_column("dBc").tooltip("Level under the fundamental, in dBc"),
-    ];
+    let harmonics = &analysis.harmonics;
     let db0 = analysis.fundamental_db.unwrap_or(0.0);
-    let rows = analysis.harmonics.len();
+    let frequency = columns::frequencies(
+        &harmonics.iter().map(|h| h.frequency).collect::<Vec<_>>(),
+        columns::decade_step(resolution),
+        quantity_policy,
+    );
+    let level = columns::at_resolution(
+        &harmonics
+            .iter()
+            .map(|h| h.above_floor.then_some(h.level_db))
+            .collect::<Vec<_>>(),
+        HUNDREDTH,
+        level_unit,
+    );
+    let dbc = columns::at_resolution(
+        &harmonics
+            .iter()
+            .map(|h| h.above_floor.then_some(h.level_db - db0))
+            .collect::<Vec<_>>(),
+        HUNDREDTH,
+        "dBc",
+    );
+    let floor = analysis.noise_floor_db.map_or_else(
+        || "The harmonic does not rise out of the noise floor".to_owned(),
+        |floor| {
+            let floor = columns::at_resolution(&[Some(floor - db0)], HUNDREDTH, "dBc");
+            format!(
+                "The harmonic does not rise out of the noise floor, at {} dBc",
+                floor.cells[0].as_deref().unwrap_or("\u{2014}")
+            )
+        },
+    );
+    let orders = harmonics
+        .iter()
+        .map(|h| format!("HD{}", h.order))
+        .collect::<Vec<_>>();
+    let text = |cells: &[Option<String>], absent: &str| {
+        cells
+            .iter()
+            .map(|cell| {
+                (
+                    cell.clone().unwrap_or_else(|| absent.to_owned()),
+                    cell.is_some(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let (level_title, level_tooltip) = level_head(&level.unit, "Level");
+    let columns = columns::fitted(
+        ui,
+        vec![
+            Fitting {
+                head: "HD".to_owned(),
+                tooltip: Some("Harmonic order".to_owned()),
+                align: Align::Left,
+                cells: orders.iter().map(|order| (order.clone(), true)).collect(),
+            },
+            Fitting {
+                head: frequency.unit.clone(),
+                tooltip: Some(format!("Frequency, in {}", frequency.unit)),
+                align: Align::Right,
+                cells: text(&frequency.cells, ""),
+            },
+            Fitting {
+                head: level_title,
+                tooltip: level_tooltip,
+                align: Align::Right,
+                cells: text(&level.cells, "\u{2014}"),
+            },
+            Fitting {
+                head: "dBc".to_owned(),
+                tooltip: Some("Level under the fundamental, in dBc".to_owned()),
+                align: Align::Right,
+                cells: text(&dbc.cells, BELOW_FLOOR),
+            },
+        ],
+    );
     let height = (ui.available_height() * 0.5).max(96.0);
     with_table_state(ui, "fft.harmonics", |ui, state| {
-        DataTable::new("rspice.results.fft.harmonics", &columns, rows)
+        DataTable::new("rspice.results.fft.harmonics", &columns, harmonics.len())
             .state(state)
             .max_height(height)
             .show(ui, |index| {
-                let harmonic = &analysis.harmonics[index];
+                let harmonic = &harmonics[index];
+                #[allow(clippy::cast_precision_loss)]
+                let order = harmonic.order as f64;
+                let dbc_key = SortKey::Number(harmonic.level_db - db0);
                 vec![
-                    Cell::number(format!("HD{}", harmonic.order))
-                        .sort_by(SortKey::Number(harmonic.order as f64)),
-                    Cell::number(frequency_readout(
-                        quantity_policy,
-                        harmonic.frequency,
-                        digits,
-                    ))
-                    .sort_by(SortKey::Number(harmonic.frequency)),
-                    Cell::number(fmt_si_significant(harmonic.level_db - db0, "", digits))
-                        .sort_by(SortKey::Number(harmonic.level_db - db0)),
+                    Cell::number(orders[index].clone()).sort_by(SortKey::Number(order)),
+                    Cell::number(frequency.cells[index].clone().unwrap_or_default())
+                        .sort_by(SortKey::Number(harmonic.frequency)),
+                    level.cells[index]
+                        .clone()
+                        .map_or_else(Cell::absent, |level| {
+                            Cell::number(level).sort_by(SortKey::Number(harmonic.level_db))
+                        }),
+                    match dbc.cells[index].clone() {
+                        Some(dbc) => Cell::number(dbc).sort_by(dbc_key),
+                        None => Cell::text(BELOW_FLOOR).hint(floor.clone()).sort_by(dbc_key),
+                    },
                 ]
             });
     });
 }
 
-/// Every spectral peak rising over the noise floor, loudest first.
+/// Every spectral peak rising over the noise floor, loudest first, at the
+/// transform's resolution.
 fn peak_table(
     ui: &mut Ui,
     peaks: &[(f64, f64)],
     carrier_db: Option<f64>,
+    resolution: f64,
     quantity_policy: &QuantityPresentationPolicy,
     level_unit: &str,
-    digits: usize,
 ) {
-    let (level, level_unit) = level_column(level_unit);
-    let columns = [
-        number_column("Frequency"),
-        level,
-        number_column("dBc").tooltip("Level under the fundamental, in dBc"),
-    ];
+    let frequency = columns::frequencies(
+        &peaks
+            .iter()
+            .map(|(frequency, _)| *frequency)
+            .collect::<Vec<_>>(),
+        columns::decade_step(resolution),
+        quantity_policy,
+    );
+    let level = columns::at_resolution(
+        &peaks
+            .iter()
+            .map(|(_, level)| Some(*level))
+            .collect::<Vec<_>>(),
+        HUNDREDTH,
+        level_unit,
+    );
+    let dbc = columns::at_resolution(
+        &peaks
+            .iter()
+            .map(|(_, level)| carrier_db.map(|carrier| level - carrier))
+            .collect::<Vec<_>>(),
+        HUNDREDTH,
+        "dBc",
+    );
+    let text = |cells: &[Option<String>]| {
+        cells
+            .iter()
+            .map(|cell| (cell.clone().unwrap_or_else(|| "\u{2014}".to_owned()), true))
+            .collect::<Vec<_>>()
+    };
+    let (level_title, level_tooltip) = level_head(&level.unit, "Level");
+    let columns = columns::fitted(
+        ui,
+        vec![
+            Fitting {
+                head: frequency.unit.clone(),
+                tooltip: Some(format!("Frequency, in {}", frequency.unit)),
+                align: Align::Right,
+                cells: text(&frequency.cells),
+            },
+            Fitting {
+                head: level_title,
+                tooltip: level_tooltip,
+                align: Align::Right,
+                cells: text(&level.cells),
+            },
+            Fitting {
+                head: "dBc".to_owned(),
+                tooltip: Some("Level under the fundamental, in dBc".to_owned()),
+                align: Align::Right,
+                cells: text(&dbc.cells),
+            },
+        ],
+    );
     let height = ui.available_height().max(96.0);
     with_table_state(ui, "fft.peaks", |ui, state| {
         DataTable::new("rspice.results.fft.peaks", &columns, peaks.len())
             .state(state)
             .max_height(height)
             .show(ui, |index| {
-                let (frequency, level) = peaks[index];
+                let (at, level_db) = peaks[index];
+                let cell = |cells: &[Option<String>], key: f64| {
+                    cells[index].clone().map_or_else(Cell::absent, |text| {
+                        Cell::number(text).sort_by(SortKey::Number(key))
+                    })
+                };
                 vec![
-                    Cell::number(frequency_readout(quantity_policy, frequency, digits))
-                        .sort_by(SortKey::Number(frequency)),
-                    Cell::number(fmt_si_significant(level, level_unit, digits))
-                        .sort_by(SortKey::Number(level)),
-                    carrier_db.map_or_else(Cell::absent, |carrier| {
-                        Cell::number(fmt_si_significant(level - carrier, "", digits))
-                            .sort_by(SortKey::Number(level - carrier))
-                    }),
+                    cell(&frequency.cells, at),
+                    cell(&level.cells, level_db),
+                    cell(&dbc.cells, level_db - carrier_db.unwrap_or(0.0)),
                 ]
             });
     });
@@ -1069,12 +1182,14 @@ mod tests {
             .iter()
             .find(|row| row.starts_with("HD: HD40,"))
             .expect("HD40 listed");
-        assert!(last.contains("dBc: −60"), "{last}");
+        // HD40 stands at forty times 64 Hz, and every row of a column prints
+        // at the one precision the 1 Hz bin resolves.
+        assert!(
+            last.ends_with("kHz: 2.560, dBV rms: −63.01, dBc: −60"),
+            "{last}"
+        );
         // Each harmonic rises over the floor, so each is a peak as well.
-        let peaks = rows
-            .iter()
-            .filter(|row| row.starts_with("Frequency: "))
-            .count();
+        let peaks = rows.iter().filter(|row| row.starts_with("kHz: ")).count();
         assert_eq!(peaks, 40, "{rows:?}");
     }
 

@@ -57,6 +57,7 @@ use crate::tokens::Tokens;
 use crate::widgets::{Problem, paint_problem_mark};
 
 pub use geometry::Span;
+pub use head::SORT_MARK_ROOM;
 pub use state::{Group, RowKey, Selection, Sort, SortDirection, SortKey, TableState};
 
 use geometry::Columns;
@@ -973,6 +974,21 @@ impl<'a> DataTable<'a> {
         ui: &mut Ui,
         mut row_at: impl FnMut(usize) -> Vec<Cell>,
     ) -> TableResponse {
+        // A table on a panel body's inset runs to the panel's edges, as the
+        // body's bands do: its edge inset is the panel's, so its first and
+        // last columns' words stand where the rows around it stand theirs.
+        let given = ui.available_rect_before_wrap();
+        let bled = crate::panels::panel_bleed(ui, given);
+        if bled != given {
+            let mut edge = ui.new_child(egui::UiBuilder::new().max_rect(bled).layout(*ui.layout()));
+            let response = self.show(&mut edge, row_at);
+            let height = edge.min_rect().height();
+            ui.advance_cursor_after_rect(Rect::from_min_size(
+                given.min,
+                vec2(given.width(), height),
+            ));
+            return response;
+        }
         let t = Tokens::get(ui.ctx());
         let LineHeights {
             head: head_h,
@@ -1143,8 +1159,13 @@ impl<'a> DataTable<'a> {
         let bands_h = band_h * self.bands.len() as f32;
         let body_max = (self.max_height - bands_h - head_h).max(row_h);
         let lines_h = row_h * lines.len() as f32;
-        let bar = if lines_h > body_max + 0.5 {
-            ui.spacing().scroll.allocated_width()
+        // A floating bar rides the last column's edge inset, which holds no
+        // words, so the columns keep their width whether it shows or not.
+        let scroll_style = ui.spacing().scroll;
+        let bar_rides_inset = scroll_style.floating
+            && scroll_style.bar_width + scroll_style.bar_outer_margin <= TABLE_EDGE_INSET;
+        let bar = if lines_h > body_max + 0.5 && !bar_rides_inset {
+            scroll_style.allocated_width()
         } else {
             0.0
         };
@@ -1372,6 +1393,9 @@ impl<'a> DataTable<'a> {
         if state.is_some() {
             ui.ctx().accesskit_node_builder(table_id, |_| ());
         }
+        if bar_rides_inset {
+            ui.spacing_mut().scroll.floating_allocated_width = 0.0;
+        }
         let output = scroll.show_viewport(ui, |ui, viewport| {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
             ui.set_min_width(geometry.content_width());
@@ -1474,6 +1498,7 @@ impl<'a> DataTable<'a> {
             });
             view
         });
+        ui.spacing_mut().scroll = scroll_style;
         let view = View {
             offset: if scrolls_x {
                 output.state.offset.x

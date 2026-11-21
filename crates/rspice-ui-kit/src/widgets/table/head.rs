@@ -16,9 +16,10 @@ use crate::tokens::{self, Tokens};
 use super::geometry::Columns;
 use super::{Align, CELL_PAD, DataTable, Sort, SortDirection, View, Words, paint_words};
 
-/// The width of a sort mark, and the room it takes beside a head's words.
+/// The width of a sort mark, and the room it takes beside a head's words,
+/// which a page sizing a column to its head adds to them.
 const SORT_MARK_W: f32 = 7.0;
-const SORT_MARK_ROOM: f32 = SORT_MARK_W + 4.0;
+pub const SORT_MARK_ROOM: f32 = SORT_MARK_W + 4.0;
 /// The width of the strip over a column's right edge that a press drags.
 const EDGE_GRIP: f32 = 6.0;
 

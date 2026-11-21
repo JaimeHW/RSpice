@@ -26,6 +26,16 @@ const QUANTITIES: [CoefficientQuantity; 3] = [
     CoefficientQuantity::Other,
 ];
 
+/// A phase strip's axis: a whole turn reads in quarter turns, as a phase is
+/// read; a zoomed span takes the plot's own ticks.
+fn phase_axis(lo: f64, hi: f64) -> Axis {
+    if (lo, hi) == (-180.0, 180.0) {
+        Axis::with_ticks(lo, hi, "°", &[-180.0, -90.0, 0.0, 90.0, 180.0])
+    } else {
+        Axis::linear_with(lo, hi, "°", 5)
+    }
+}
+
 /// How many periods of its lowest line the rebuilt waveform spans.
 const WAVEFORM_PERIODS: f64 = 2.0;
 
@@ -278,7 +288,7 @@ fn show_strip(
         Axis::linear(x0, x1, "Hz").with_display_transform(scale, offset, frequency_unit)
     };
     let y_axis = if form == SignalForm::Phase {
-        crate::fft::view::phase_axis(y0, y1)
+        phase_axis(y0, y1)
     } else {
         Axis::linear_with(y0, y1, unit, 7)
     };

@@ -3,7 +3,7 @@
 //! and every line of each signal in a table of its own.
 
 use super::{HarmonicBalanceModel, HarmonicTrace};
-use crate::fft::view::{KEY_COLUMN_WIDTH, level_column, number_column};
+use crate::fft::view::columns::{self, Fitting, HUNDREDTH};
 use crate::presentation::{frequency_readout, with_table_state};
 use egui::Ui;
 use rspice_results::harmonic_spectrum::lines::{
@@ -13,7 +13,7 @@ use rspice_results::harmonic_spectrum::lines::{
 use rspice_results::harmonic_spectrum::settings::{CoefficientQuantity, CoefficientSettings};
 use rspice_ui_kit::panels::{section_header, section_header_action};
 use rspice_ui_kit::plot::fmt_si_significant;
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey};
+use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// One row of a signal's line table.
@@ -109,10 +109,13 @@ pub(super) fn show(
 
 /// One signal's lines, one signal to a table so each column fits the pane:
 /// on one tone's grid each harmonic by its order, the fundamental standing
-/// under Distortion; on several tones' grid each line by its frequency;
-/// then its level in the bar's scale and its phase. Copy takes every
-/// column, the frequency and the level under the carrier too. `share` is
-/// how many tables still stand in the height left, this one among them.
+/// under Distortion; on several tones' grid each line by its frequency, to
+/// the decade under the grid's closest two lines; then its level in the
+/// bar's scale, a decibel to its hundredth and an amplitude to the reader's
+/// digits of the strongest line, and its phase to the hundredth of a
+/// degree. Copy takes every column, the frequency and the level under the
+/// carrier too. `share` is how many tables still stand in the height left,
+/// this one among them.
 fn lines(
     ui: &mut Ui,
     trace: &HarmonicTrace,
@@ -137,16 +140,64 @@ fn lines(
         ui.ctx().copy_text(table_text(&rows, digits));
     }
     let one_tone = single_tone_fundamental(&trace.lines).is_some();
-    let (level, level_unit) = level_column(settings.unit(trace.quantity()));
-    let columns = [
-        if one_tone {
-            Column::words("Line", KEY_COLUMN_WIDTH)
-        } else {
-            number_column("Frequency")
-        },
-        level,
-        number_column("Phase (°)"),
-    ];
+    let unit = settings.unit(trace.quantity());
+    let levels = rows.iter().map(|row| Some(row.level)).collect::<Vec<_>>();
+    let level_step = if rspice_results::number_format::unit_takes_prefix(unit) {
+        columns::significant_step(&levels, digits)
+    } else {
+        HUNDREDTH
+    };
+    let level = columns::at_resolution(&levels, level_step, unit);
+    let phase = columns::at_resolution(
+        &rows.iter().map(|row| Some(row.phase)).collect::<Vec<_>>(),
+        HUNDREDTH,
+        "°",
+    );
+    let frequencies = rows.iter().map(|row| row.frequency).collect::<Vec<_>>();
+    let frequency = columns::frequencies(
+        &frequencies,
+        columns::decade_step(closest_spacing(&frequencies)),
+        quantity_policy,
+    );
+    let numbers = |cells: &[Option<String>]| {
+        cells
+            .iter()
+            .map(|cell| (cell.clone().unwrap_or_default(), true))
+            .collect::<Vec<_>>()
+    };
+    let key = if one_tone {
+        Fitting {
+            head: "Line".to_owned(),
+            tooltip: Some("The line's place on the grid: DC or its harmonic order".to_owned()),
+            align: Align::Left,
+            cells: rows.iter().map(|row| (row.line.clone(), true)).collect(),
+        }
+    } else {
+        Fitting {
+            head: frequency.unit.clone(),
+            tooltip: Some(format!("Frequency, in {}", frequency.unit)),
+            align: Align::Right,
+            cells: numbers(&frequency.cells),
+        }
+    };
+    let columns = columns::fitted(
+        ui,
+        vec![
+            key,
+            Fitting {
+                head: level.unit.clone(),
+                tooltip: Some(format!("Level, in {}", level.unit)),
+                align: Align::Right,
+                cells: numbers(&level.cells),
+            },
+            Fitting {
+                head: format!("Phase ({})", phase.unit),
+                tooltip: Some("Phase, in degrees".to_owned()),
+                align: Align::Right,
+                cells: numbers(&phase.cells),
+            },
+        ],
+    );
     let height = (ui.available_height() / share).max(120.0);
     let id = format!("rspice.results.harmonic-balance.lines.{}", trace.name);
     with_table_state(ui, &id, |ui, state| {
@@ -155,20 +206,35 @@ fn lines(
             .max_height(height)
             .show(ui, |index| {
                 let row = &rows[index];
+                let printed = |cells: &[Option<String>]| cells[index].clone().unwrap_or_default();
                 vec![
                     if one_tone {
-                        Cell::text(row.line.clone()).sort_by(SortKey::Number(row.order))
+                        Cell::number(row.line.clone()).sort_by(SortKey::Number(row.order))
                     } else {
-                        Cell::number(frequency_readout(quantity_policy, row.frequency, digits))
+                        Cell::number(printed(&frequency.cells))
                             .sort_by(SortKey::Number(row.frequency))
                     },
-                    Cell::number(fmt_si_significant(row.level, level_unit, digits))
-                        .sort_by(SortKey::Number(row.level)),
-                    Cell::number(fmt_si_significant(row.phase, "", digits))
-                        .sort_by(SortKey::Number(row.phase)),
+                    Cell::number(printed(&level.cells)).sort_by(SortKey::Number(row.level)),
+                    Cell::number(printed(&phase.cells)).sort_by(SortKey::Number(row.phase)),
                 ]
             });
     });
+}
+
+/// The closest two distinct frequencies of a grid lie apart: the resolution
+/// its lines are told apart at.
+fn closest_spacing(frequencies: &[f64]) -> f64 {
+    let mut sorted = frequencies
+        .iter()
+        .copied()
+        .filter(|frequency| frequency.is_finite())
+        .collect::<Vec<_>>();
+    sorted.sort_by(f64::total_cmp);
+    sorted
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .filter(|spacing| *spacing > 0.0)
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// Each one-tone signal's fundamental and THD under its name, the THD in

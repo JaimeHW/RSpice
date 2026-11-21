@@ -45,10 +45,17 @@ pub enum HarmonicCoverage {
 pub struct HarmonicMeasurement {
     /// Integer multiple of the selected carrier.
     pub order: usize,
-    /// Interpolated frequency in hertz.
+    /// The harmonic's own frequency in hertz: its order times the
+    /// fundamental's.
     pub frequency: f64,
-    /// Level in the spectrum's selected display normalization.
+    /// Level in the spectrum's selected display normalization, read at the
+    /// harmonic's own bin as the fundamental's is read at its.
     pub level_db: f64,
+    /// Whether the harmonic stands out of what lies under it: its own bin is
+    /// the highest its measurement reads, and its level rises over what the
+    /// noise floor alone reads across those bins. A harmonic under the floor
+    /// reads the floor, or a neighbour's skirt, not itself.
+    pub above_floor: bool,
 }
 
 /// How a spectrum's figures are measured, beyond the record itself: the
@@ -266,11 +273,16 @@ impl SpectrumAnalysis {
                 break;
             }
 
-            let Some((harm_idx, harm_freq, harm_mag, harm_db)) =
-                Self::measure_bin(fft, center, guard_bins)
+            let Some((harm_idx, _, harm_mag, harm_db)) = Self::measure_bin(fft, center, guard_bins)
             else {
                 continue;
             };
+            // A tone peaks at its own bin; the floor and a neighbour's skirt
+            // have their highest bin anywhere else.
+            let own = fft.points[center].magnitude;
+            let peaks_at_its_bin = fft.points[start.max(1)..=end]
+                .iter()
+                .all(|point| point.magnitude <= own);
             harmonic_norm.add_log(physical_log_magnitude(fft, harm_idx, harm_mag)?);
             harmonic_binary_norm.add(physical_binary_magnitude(fft, harm_idx, harm_mag)?);
             try_reserve_for_push(
@@ -279,8 +291,9 @@ impl SpectrumAnalysis {
             )?;
             analysis.harmonics.push(HarmonicMeasurement {
                 order,
-                frequency: harm_freq,
+                frequency: target,
                 level_db: harm_db,
+                above_floor: peaks_at_its_bin,
             });
             Self::exclude_bin_region(&mut excluded_for_noise, harm_idx, guard_bins);
         }
@@ -377,6 +390,20 @@ impl SpectrumAnalysis {
         });
 
         analysis.noise_floor_db = mean_power_db(&noise_db_bins);
+        if let Some(floor) = analysis.noise_floor_db {
+            // What the floor alone reads where a harmonic is read: its one
+            // bin through the rectangular window, else the power of the
+            // bins either side over the window's noise bandwidth.
+            let floor_read = if fft.window == WindowFunction::Rectangular {
+                floor
+            } else {
+                let bins = (2 * guard_bins + 1) as f64;
+                floor + 10.0 * (bins / fft.equivalent_noise_bandwidth_bins()).log10()
+            };
+            for harmonic in &mut analysis.harmonics {
+                harmonic.above_floor &= harmonic.level_db > floor_read;
+            }
+        }
 
         // The window spreads each noise bin's power over its equivalent noise
         // bandwidth, so summing the bins counts broadband noise ENBW times
@@ -1725,5 +1752,31 @@ mod tests {
             (measured - floor).abs() < 0.2,
             "floor {measured} against {floor}"
         );
+    }
+
+    /// Each harmonic stands at its order times the fundamental and is read
+    /// at its own bin: HD2 at 1 % and HD3 at 0.1 % rise out of 1 mV of
+    /// noise, while HD4 to HD10, which the record does not hold, read the
+    /// floor and say so rather than a noise bin's level at a noise bin's
+    /// frequency.
+    #[test]
+    fn a_harmonic_stands_at_its_order_and_one_under_the_floor_says_so() {
+        let (samples, _) =
+            coherent_record(4096, 64, 1.0, &[(2, 0.01, 0.3), (3, 0.001, 1.1)], 1.0e-3, 7);
+        let analysis = SpectrumAnalysis::analyze(&spectrum(&samples, WindowFunction::KAISER), 10)
+            .expect("figures");
+        let fundamental = analysis.fundamental_frequency.expect("a fundamental");
+        for harmonic in &analysis.harmonics {
+            assert_eq!(
+                harmonic.frequency,
+                fundamental * harmonic.order as f64,
+                "{harmonic:?}"
+            );
+            assert_eq!(harmonic.above_floor, harmonic.order <= 3, "{harmonic:?}");
+        }
+        assert_eq!(analysis.harmonics.len(), 9);
+        let fundamental_db = analysis.fundamental_db.expect("a level");
+        let hd2 = analysis.harmonics[0].level_db - fundamental_db;
+        assert!((hd2 + 40.0).abs() < 0.05, "HD2 {hd2} dBc");
     }
 }
