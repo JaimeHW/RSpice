@@ -46,10 +46,10 @@ struct Group {
 }
 
 /// Pushes rows (their x, then their value columns row-major) into a segment's writer.
-type PushRows<'a> = dyn FnMut(&[f64], &[f64]) -> Result<(), StoreError> + 'a;
+pub type PushRows<'a> = dyn FnMut(&[f64], &[f64]) -> Result<(), StoreError> + 'a;
 
 /// Fills a segment through the [`PushRows`] it is handed.
-type FillSegment<'a> = dyn FnMut(&mut PushRows<'_>) -> Result<(), StoreError> + 'a;
+pub type FillSegment<'a> = dyn FnMut(&mut PushRows<'_>) -> Result<(), StoreError> + 'a;
 
 /// Makes a finished segment of a schema from the rows its filler pushes.
 type MakeSegment = fn(&Schema, &RunMeta, &mut FillSegment<'_>) -> Result<Arc<Segment>, String>;
@@ -219,6 +219,17 @@ where
     W: AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
 {
     store_analysis_with(analysis, process_segment)
+}
+
+/// A finished segment kept as [`store_analysis`] keeps one, its rows pushed by `fill` as they
+/// arrive: what an import that keeps its source as it reads it writes, holding no more of it than
+/// one push. When `fill` fails nothing is kept.
+pub fn keep_segment(
+    schema: &Schema,
+    meta: &RunMeta,
+    fill: &mut FillSegment<'_>,
+) -> Result<Arc<Segment>, String> {
+    process_segment(schema, meta, fill)
 }
 
 /// [`store_analysis`] into segments held in memory, as the browser build keeps them.

@@ -20,7 +20,7 @@ fn archive_expanded_bytes() -> u64 {
     u64::try_from(source_capacity()).unwrap_or(u64::MAX)
 }
 
-fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
+pub(super) fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
     format!("{} import: {detail}", format.canonical_id())
 }
 

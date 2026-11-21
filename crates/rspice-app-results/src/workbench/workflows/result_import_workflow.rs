@@ -25,6 +25,9 @@ use std::{io::Read as _, path::Path};
 
 #[path = "result_import_adapters.rs"]
 mod adapters;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "result_import_streamed.rs"]
+mod streamed;
 
 pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
     "Result dataset",
@@ -230,6 +233,9 @@ pub(crate) fn import_result_dataset_from_path(state: &mut ResultsParts<'_>, path
     let source = path.to_path_buf();
     let source_name = display_name.clone();
     let job = ResultsJob::start("result-import", move |job| {
+        if let Some(staged) = streamed::stream_spice_raw(job, &source, &source_name)? {
+            return Ok(staged);
+        }
         let bytes = read_native_file(&source, job)?;
         let log = companion_log(&source, job)?;
         stage_source(job, &source_name, &bytes, log.as_deref())
