@@ -2418,24 +2418,17 @@ mod tests {
         assert!(!card.detect_subharmonics);
     }
 
-    /// Every line the Studio wrote states `EIGENTOL=`. It still parses, and
-    /// it parses to the card the line would be without it.
+    /// Every line the Studio wrote states `EIGENTOL=` and `NMULTS=`. Each still
+    /// parses, and parses to the card the line would be without it.
     #[test]
-    fn pstb_retired_pstb_eigentol_reads_as_absent() {
-        assert_eq!(
-            pstb(".PSS FUND=1G\n.PSTB PROBE=l1 EIGENTOL=1e-12"),
-            pstb(".PSS FUND=1G\n.PSTB PROBE=l1")
-        );
-    }
-
-    /// Every line the Studio wrote states `NMULTS=`. It still parses, and it
-    /// parses to the card the line would be without it.
-    #[test]
-    fn pstb_retired_pstb_nmults_reads_as_absent() {
-        assert_eq!(
-            pstb(".PSS FUND=1G\n.PSTB PROBE=l1 NMULTS=3"),
-            pstb(".PSS FUND=1G\n.PSTB PROBE=l1")
-        );
+    fn pstb_retired_keywords_read_as_absent() {
+        for retired in ["EIGENTOL=1e-12", "NMULTS=3"] {
+            assert_eq!(
+                pstb(&format!(".PSS FUND=1G\n.PSTB PROBE=l1 {retired}")),
+                pstb(".PSS FUND=1G\n.PSTB PROBE=l1"),
+                "{retired}"
+            );
+        }
     }
 
     #[test]

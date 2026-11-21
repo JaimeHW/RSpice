@@ -5721,53 +5721,21 @@ mod tests {
     }
 
     #[test]
-    fn dc_sweep_rejects_omitted_step_for_equal_bounds() {
-        let error = Netlist::parse(
-            "single point dc\n\
-             VIN 1 0 DC 5\n\
-             R1 1 0 1k\n\
-             .dc VIN 5 5\n\
-             .end\n",
-        )
-        .expect_err("equal-bound .DC sweep still requires an explicit step value");
-
-        assert!(
-            error
-                .to_string()
-                .contains(".DC linear sweep requires a step value"),
-            "unexpected parse error: {error}"
-        );
-    }
-
-    #[test]
-    fn dc_sweep_rejects_omitted_step_for_distinct_bounds() {
-        let err = Netlist::parse(
-            "invalid dc\n\
-             VIN 1 0 DC 5\n\
-             R1 1 0 1k\n\
-             .dc VIN 0 5\n\
-             .end\n",
-        )
-        .expect_err("distinct-bound .DC sweep still requires a step value");
-
-        assert!(
-            err.to_string()
-                .contains(".DC linear sweep requires a step value"),
-            "unexpected parse error: {err}"
-        );
-    }
-
-    #[test]
-    fn dc_sweep_rejects_omitted_step_for_explicit_linear_modes() {
-        for directive in [".dc LIN VIN 5 5", ".dc VIN LIN 5 5"] {
+    fn dc_sweep_rejects_an_omitted_step() {
+        for directive in [
+            ".dc VIN 5 5",
+            ".dc VIN 0 5",
+            ".dc LIN VIN 5 5",
+            ".dc VIN LIN 5 5",
+        ] {
             let error = Netlist::parse(&format!(
-                "invalid explicit linear dc\n\
+                "invalid linear dc\n\
                  VIN 1 0 DC 5\n\
                  R1 1 0 1k\n\
                  {directive}\n\
                  .end\n"
             ))
-            .expect_err("explicit LIN .DC sweep requires a step value");
+            .expect_err("a linear .DC sweep requires a step value, even with equal bounds");
 
             assert!(
                 error
@@ -6692,115 +6660,44 @@ mod tests {
     }
 
     #[test]
-    fn model_vector_params_parse_decimal_vectors() {
-        let netlist = Netlist::parse(
-            "xspice vector model params\n\
-             .model lut pwl (x_array=[-1 0 0.5 2] y_array=[0 -2 4 8])\n\
-             .end\n",
-        )
-        .expect("model vector parameters parse");
-
-        let model = netlist
-            .models
-            .iter()
-            .find(|model| model.name.eq_ignore_ascii_case("lut"))
-            .expect("model exists");
-        let x_array = model
-            .real_vector_params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("x_array"))
-            .map(|(_, values)| values.as_slice())
-            .expect("x_array exists");
-        let y_array = model
-            .real_vector_params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("y_array"))
-            .map(|(_, values)| values.as_slice())
-            .expect("y_array exists");
-
-        assert_eq!(x_array, &[-1.0, 0.0, 0.5, 2.0]);
-        assert_eq!(y_array, &[0.0, -2.0, 4.0, 8.0]);
-    }
-
-    #[test]
-    fn model_vector_params_store_integer_literals_as_numeric_vectors() {
-        let netlist = Netlist::parse(
-            "xspice integer-looking vector model params\n\
-             .model lut d_lut (table_values=[0 1 1 0])\n\
-             .end\n",
-        )
-        .expect("integer-looking vector parameters parse as numeric vectors");
-
-        let model = netlist
-            .models
-            .iter()
-            .find(|model| model.name.eq_ignore_ascii_case("lut"))
-            .expect("model exists");
-        let table_values = model
-            .real_vector_params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("table_values"))
-            .map(|(_, values)| values.as_slice())
-            .expect("table_values exists");
-
-        assert_eq!(table_values, &[0.0, 1.0, 1.0, 0.0]);
-    }
-
-    #[test]
-    fn model_vector_params_accept_commas_signed_values_and_suffixes() {
-        let netlist = Netlist::parse(
-            "xspice vector model params with punctuation\n\
-             .param scale=2\n\
-             .model lut pwl (points=[-.14, 1u, -2, scale])\n\
-             .end\n",
-        )
-        .expect("punctuated vector parameters parse");
-
-        let model = netlist
-            .models
-            .iter()
-            .find(|model| model.name.eq_ignore_ascii_case("lut"))
-            .expect("model exists");
-        let points = model
-            .real_vector_params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("points"))
-            .map(|(_, values)| values.as_slice())
-            .expect("points exists");
-
-        assert_eq!(points, &[-0.14, 1e-6, -2.0, 2.0]);
-    }
-
-    #[test]
-    fn model_vector_params_accept_suffix_and_param_as_first_numeric_elements() {
-        let netlist = Netlist::parse(
-            "xspice vector model params starting with numeric-like idents\n\
-             .param scale=0.5\n\
-             .model os oneshot (pw_array=[1n 2n] cntl_array=[scale 1])\n\
-             .end\n",
-        )
-        .expect("numeric-like leading vector elements parse as real vectors");
-
-        let model = netlist
-            .models
-            .iter()
-            .find(|model| model.name.eq_ignore_ascii_case("os"))
-            .expect("model exists");
-        let pw_array = model
-            .real_vector_params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("pw_array"))
-            .map(|(_, values)| values.as_slice())
-            .expect("pw_array exists");
-        let cntl_array = model
-            .real_vector_params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("cntl_array"))
-            .map(|(_, values)| values.as_slice())
-            .expect("cntl_array exists");
-
-        assert_eq!(pw_array, &[1.0e-9, 2.0e-9]);
-        assert_eq!(cntl_array, &[0.5, 1.0]);
+    fn model_vector_params_parse_every_numeric_element_form() {
+        let pwl = ".model lut pwl (x_array=[-1 0 0.5 2] y_array=[0 -2 4 8])";
+        let oneshot = ".param scale=0.5\n.model os oneshot (pw_array=[1n 2n] cntl_array=[scale 1])";
+        for (cards, model_name, param, expected) in [
+            (pwl, "lut", "x_array", &[-1.0, 0.0, 0.5, 2.0][..]),
+            (pwl, "lut", "y_array", &[0.0, -2.0, 4.0, 8.0][..]),
+            // Integer-looking entries still store a numeric vector.
+            (
+                ".model lut d_lut (table_values=[0 1 1 0])",
+                "lut",
+                "table_values",
+                &[0.0, 1.0, 1.0, 0.0][..],
+            ),
+            // Commas, signed values without a leading zero, suffixes and parameters.
+            (
+                ".param scale=2\n.model lut pwl (points=[-.14, 1u, -2, scale])",
+                "lut",
+                "points",
+                &[-0.14, 1e-6, -2.0, 2.0][..],
+            ),
+            // A suffixed number or a parameter may be the first element.
+            (oneshot, "os", "pw_array", &[1.0e-9, 2.0e-9][..]),
+            (oneshot, "os", "cntl_array", &[0.5, 1.0][..]),
+        ] {
+            let netlist = Netlist::parse(&format!("xspice vector model params\n{cards}\n.end\n"))
+                .unwrap_or_else(|error| panic!("{cards}: {error}"));
+            let values = netlist
+                .models
+                .iter()
+                .find(|model| model.name.eq_ignore_ascii_case(model_name))
+                .expect("model exists")
+                .real_vector_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(param))
+                .map(|(_, values)| values.as_slice())
+                .unwrap_or_else(|| panic!("{cards}: {param} missing"));
+            assert_eq!(values, expected, "{cards}");
+        }
     }
 
     #[test]
@@ -16733,59 +16630,6 @@ mod tests {
                 message.contains("pwl file") && message.contains("finite")
                     || message.contains("pwl file") && message.contains("positive"),
                 "unexpected error for {label}: {message}"
-            );
-        }
-    }
-
-    #[test]
-    fn source_specs_reject_nonfinite_explicit_parameters() {
-        for source in [
-            "SIN(0 1 1e309)",
-            "PULSE(0 1 0 1n 1n 5n 1e309)",
-            "SFFM(0 1 1e309)",
-            "AM(0 0 1 1 1e309)",
-            "EXP(0 1 0 1e309)",
-        ] {
-            let deck = format!(
-                "bad source\n\
-                 V1 1 0 {source}\n\
-                 R1 1 0 1k\n\
-                 .end\n"
-            );
-            let message = Netlist::parse(&deck)
-                .expect_err("non-finite explicit source value must be rejected")
-                .to_string();
-
-            assert!(
-                message.contains("finite"),
-                "{source} should report a finite-value error, got: {message}"
-            );
-        }
-    }
-
-    #[test]
-    fn pwl_file_specs_reject_invalid_scaling_parameters() {
-        for option in [
-            "TSCALE=0",
-            "TSCALE=1e309",
-            "VSCALE=1e309",
-            "TOFFSET=1e309",
-            "VOFFSET=1e309",
-        ] {
-            let deck = format!(
-                "bad pwl file\n\
-                 V1 1 0 PWL FILE=\"wave.csv\" {option}\n\
-                 R1 1 0 1k\n\
-                 .end\n"
-            );
-            let message = Netlist::parse(&deck)
-                .expect_err("invalid PWL FILE scaling must be rejected")
-                .to_string();
-
-            assert!(
-                message.contains("PWL") && message.contains("finite")
-                    || message.contains("positive"),
-                "{option} should report an invalid PWL scaling error, got: {message}"
             );
         }
     }

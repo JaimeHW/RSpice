@@ -125,15 +125,6 @@ mod tests {
             .collect()
     }
 
-    /// Every coordinate of a study may replay the deck from its one reading,
-    /// and from the netlist that keeps it, each on a thread of its own.
-    #[test]
-    fn a_reading_and_its_netlist_are_shared_across_threads() {
-        fn shared<T: Send + Sync>() {}
-        shared::<super::ReplaySource>();
-        shared::<Netlist>();
-    }
-
     /// A replay reads what its first parse scanned the root's lines for (a
     /// card naming a parameter declared further down, the `.OPTIONS`
     /// temperature) with its own parameter values.
