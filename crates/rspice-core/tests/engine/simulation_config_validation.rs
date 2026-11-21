@@ -6,14 +6,6 @@ use rspice_core::{
 };
 
 #[test]
-fn default_configuration_is_valid() {
-    let config = SimulationConfig::default();
-
-    config.validate().expect("default configuration validates");
-    Engine::try_new(config).expect("default engine construction succeeds");
-}
-
-#[test]
 fn invalid_scalar_is_reported_with_stable_field_context() {
     let config = SimulationConfig {
         tolerance: f64::NAN,

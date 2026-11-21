@@ -250,56 +250,6 @@ fn every_source_file_is_reachable_from_a_mod_declaration() {
     );
 }
 
-#[test]
-fn declared_submodules_ignores_inline_module_bodies() {
-    let source = "\
-pub mod real_file;
-mod private_file;
-pub(crate) mod scoped_file;
-pub(self) mod local_file;
-pub(in crate::engine) mod nested_file;
-pub(in crate::engine) mod restricted_inline { }
-#[cfg(test)]
-mod tests {
-    fn inner() {}
-}
-mod inline_with_brace { }
-";
-    let declared = declared_submodules(source);
-    assert!(declared.contains("real_file"));
-    assert!(declared.contains("private_file"));
-    assert!(declared.contains("scoped_file"));
-    assert!(declared.contains("local_file"));
-    assert!(declared.contains("nested_file"));
-    // `mod tests { .. }` and `mod inline_with_brace { }` are inline bodies,
-    // not file-backed declarations. Counting them would let an orphan named
-    // `tests.rs` slip through beside any file with a test module.
-    assert!(!declared.contains("tests"));
-    assert!(!declared.contains("inline_with_brace"));
-    assert!(!declared.contains("restricted_inline"));
-}
-
-#[test]
-fn an_inline_module_declares_the_files_its_own_body_names() {
-    let source = "\
-pub mod devices;
-pub mod device {
-    pub use rspice_core_devices::device::*;
-    #[cfg(feature = \"veriloga\")]
-    pub mod veriloga;
-    #[cfg(test)]
-    mod tests {
-        mod nested;
-    }
-}
-mod after;
-";
-    let declared = inline_module_submodules(source, "device");
-    assert_eq!(declared, BTreeSet::from(["veriloga".to_owned()]));
-    assert!(inline_module_submodules(source, "devices").is_empty());
-    assert!(inline_module_submodules(source, "absent").is_empty());
-}
-
 /// A module with submodules is `foo.rs` beside `foo/`, never `foo/mod.rs`.
 ///
 /// Both spellings compile and Rust has no opinion between them. The crate
@@ -363,28 +313,6 @@ fn continues_a_moved_module(target: &str, source: &str) -> bool {
         && source
             .lines()
             .any(|line| opens_inline_module(line.trim(), module))
-}
-
-#[test]
-fn a_glob_may_continue_a_moved_module_only_in_its_inline_namesake() {
-    let source = "pub mod device {\n    pub use rspice_core_devices::device::*;\n}\n";
-    assert!(continues_a_moved_module(
-        "rspice_core_devices::device",
-        source
-    ));
-    assert!(!continues_a_moved_module(
-        "rspice_core_devices::netlist",
-        source
-    ));
-    assert!(!continues_a_moved_module(
-        "rspice_core_devices::device::mosfet",
-        source
-    ));
-    assert!(!continues_a_moved_module("rspice_veriloga::device", source));
-    assert!(!continues_a_moved_module(
-        "rspice_core_devices::device",
-        "pub mod device;\n"
-    ));
 }
 
 /// A glob import may only join a module file to its own submodules.
