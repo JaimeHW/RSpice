@@ -357,9 +357,11 @@ fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
 /// table holds, how a coefficient reads, which frequency sample it shows,
 /// the Display menu and the sampled passivity check.
 ///
-/// The representation leads the bar when there is more than one and the bar
-/// has room for it beside the rest; otherwise it is the first thing in the
-/// Display menu, so nothing wraps to a second row.
+/// The representation leads the bar when there is more than one, and the
+/// form follows it as a segmented control. When the bar is short of room the
+/// form gives way first, to a select that still shows it; then the
+/// representation moves to the head of the Display menu, so nothing wraps to
+/// a second row or runs under the Export button.
 pub fn domain_bar(
     ui: &mut Ui,
     analysis: &AnalysisResult<RetainedTrace>,
@@ -378,16 +380,41 @@ pub fn domain_bar(
         .fold(0.0, f32::max)
         + SELECT_CHROME)
         .min(REPRESENTATION_MOST_WIDTH);
-    // What the rest of the bar took last frame. Its parts keep one width
-    // whatever they show, so last frame's measure is this frame's.
-    let rest_id = ui.id().with("rspice.results.network-matrix.bar-rest");
-    let rest = ui.data(|data| data.get_temp::<f32>(rest_id));
-    if chooses && rest.is_none() {
+    let forms = offered_forms(&blocks[controls.block], matrix.references().len()).len();
+    let spacing = ui.spacing().item_spacing.x;
+    let form_select_width = NetworkForm::ALL
+        .iter()
+        .map(|form| text_width(ui, form.label(), &sans))
+        .fold(0.0, f32::max)
+        + SELECT_CHROME;
+    // What the form took as a segmented control when last drawn so, and what
+    // the rest of the bar took last frame. Each keeps one width whatever it
+    // shows, so the last measure is this frame's.
+    let measures_id = ui
+        .id()
+        .with(("rspice.results.network-matrix.bar-measures", forms));
+    let measures = ui.data(|data| data.get_temp::<(f32, f32)>(measures_id));
+    if (chooses || forms > 1) && measures.is_none() {
         ui.ctx()
             .request_discard("the matrix bar measures its controls before it lays them out");
     }
-    let folded =
-        chooses && ui.available_width() < representation_width + GROUP_GAP + rest.unwrap_or(0.0);
+    let (segmented_form, rest) = measures.unwrap_or((0.0, 0.0));
+    let available = ui.available_width();
+    let representation = if chooses {
+        representation_width + spacing + GROUP_GAP
+    } else {
+        0.0
+    };
+    let (form_wide, form_narrow) = if forms > 1 {
+        (
+            segmented_form + GROUP_GAP,
+            form_select_width + spacing + GROUP_GAP,
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let compact_form = available < representation + form_wide + rest;
+    let folded = chooses && available < representation + form_narrow + rest;
     if chooses && !folded {
         if let Some(picked) = select(
             ui,
@@ -401,7 +428,6 @@ pub fn domain_bar(
         }
         ui.add_space(GROUP_GAP);
     }
-    let start = ui.cursor().left();
     let block = &blocks[controls.block];
     let grid = held(&analysis.waveforms[block.cells()[0]].x);
     if let Some(grid) = grid.as_deref() {
@@ -411,22 +437,43 @@ pub fn domain_bar(
     if !offered.contains(&controls.form) {
         controls.form = NetworkForm::S;
     }
+    let mut drawn_form = segmented_form;
     if offered.len() > 1 {
-        let labels = offered.iter().map(|form| form.label()).collect::<Vec<_>>();
-        let mut chosen = offered
-            .iter()
-            .position(|form| *form == controls.form)
-            .unwrap_or(0);
-        segmented(
-            ui,
-            "rspice.results.network-matrix.form",
-            &labels,
-            &mut chosen,
-            SegmentedWidth::Natural,
-        );
-        controls.form = offered[chosen];
+        if compact_form {
+            let labels = offered
+                .iter()
+                .map(|form| form.label().to_owned())
+                .collect::<Vec<_>>();
+            if let Some(picked) = select(
+                ui,
+                "rspice.results.network-matrix.form",
+                "Parameters",
+                controls.form.label(),
+                &labels,
+                form_select_width,
+            ) {
+                controls.form = offered[picked];
+            }
+        } else {
+            let labels = offered.iter().map(|form| form.label()).collect::<Vec<_>>();
+            let mut chosen = offered
+                .iter()
+                .position(|form| *form == controls.form)
+                .unwrap_or(0);
+            let left = ui.cursor().left();
+            segmented(
+                ui,
+                "rspice.results.network-matrix.form",
+                &labels,
+                &mut chosen,
+                SegmentedWidth::Natural,
+            );
+            drawn_form = ui.cursor().left() - left;
+            controls.form = offered[chosen];
+        }
         ui.add_space(GROUP_GAP);
     }
+    let start = ui.cursor().left();
     segmented(
         ui,
         "rspice.results.network-matrix.format",
@@ -461,7 +508,7 @@ pub fn domain_bar(
         ));
     }
     let measured = check.rect.right() - start;
-    ui.data_mut(|data| data.insert_temp(rest_id, measured));
+    ui.data_mut(|data| data.insert_temp(measures_id, (drawn_form, measured)));
 }
 
 /// The frequency as a stepper: the arrows move one sample, the readout
@@ -833,8 +880,8 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
     use rspice_results::analysis_type::AnalysisType;
+    use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
     use rspice_results::network_matrix::resolve;
 
     /// A two-port of one sample with the given S11, S12, S21, S22.
