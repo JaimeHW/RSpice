@@ -1702,6 +1702,9 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
                 || super::harmonic_balance_analysis_is_renderable(analysis)
         }
         "viewer-phase-noise" => super::phase_noise_analysis_is_renderable(analysis),
+        "viewer-s-parameters" => {
+            super::view_context::analysis_supports_viewer(ResultViewer::SParameters, analysis)
+        }
         "viewer-smith" => super::smith::analysis_is_renderable(analysis),
         "viewer-polar" => {
             super::view_context::analysis_supports_viewer(ResultViewer::Polar, analysis)

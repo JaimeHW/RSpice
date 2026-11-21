@@ -173,6 +173,28 @@
       }
     },
     {
+      "id": "viewer-s-parameters",
+      "canonical": {
+        "group": "RF & network",
+        "art": "bode",
+        "title": "S-parameters",
+        "domain": "SP · HBSP · PSP",
+        "x": "Frequency · Hz",
+        "y": "Magnitude · dB / phase · °"
+      },
+      "capability": {
+        "classification": "release-target"
+      },
+      "inputAuthority": {
+        "analysisIds": [
+          "sp",
+          "hbsp",
+          "psp"
+        ],
+        "externalCapabilityId": null
+      }
+    },
+    {
       "id": "viewer-smith",
       "canonical": {
         "group": "RF & network",
@@ -881,6 +903,7 @@
       "description": "Smith, polar, network matrices, spectra, TDR, and producer-gated RF views",
       "defaultViewerId": "viewer-smith",
       "viewerIds": [
+        "viewer-s-parameters",
         "viewer-smith",
         "viewer-polar",
         "viewer-load-pull",
@@ -981,7 +1004,7 @@
     }
   },
   "counts": {
-    "viewerDocuments": 40,
+    "viewerDocuments": 41,
     "creationFamilies": 9
   }
 }

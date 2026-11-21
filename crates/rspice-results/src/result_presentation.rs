@@ -193,14 +193,9 @@ impl ResultViewer {
     /// Studio's own said `viewer-spectrum`, which the catalog rejects for a
     /// `noise` analysis. Whether a noise sheet could be pinned into a
     /// document depended on which path asked.
-    ///
-    /// The S-parameter sheet is dataset-native: the catalog's Bode
-    /// document refuses a network run, and no catalog document draws the
-    /// rectangular sheet, so it is not offered as a pane rather than offered
-    /// as one that fails.
     pub const fn viewer_document_id(self) -> Option<&'static str> {
         Some(match self {
-            ResultViewer::Manifest | ResultViewer::SParameters => return None,
+            ResultViewer::Manifest => return None,
             ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
             ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
                 "viewer-bode"
@@ -212,6 +207,7 @@ impl ResultViewer {
             ResultViewer::Op | ResultViewer::Table => "viewer-table",
             ResultViewer::Contribution => "viewer-contribution",
             ResultViewer::TransferFunction => "viewer-transfer-function",
+            ResultViewer::SParameters => "viewer-s-parameters",
             ResultViewer::Smith => "viewer-smith",
             ResultViewer::Polar => "viewer-polar",
             ResultViewer::NetworkMatrix => "viewer-mixed-mode-network",
@@ -236,6 +232,7 @@ impl ResultViewer {
             "viewer-bode" => ResultViewer::Bode,
             "viewer-spectrum" => ResultViewer::Fft,
             "viewer-phase-noise" => ResultViewer::PhaseNoise,
+            "viewer-s-parameters" => ResultViewer::SParameters,
             "viewer-smith" => ResultViewer::Smith,
             "viewer-polar" => ResultViewer::Polar,
             "viewer-mixed-mode-network" => ResultViewer::NetworkMatrix,

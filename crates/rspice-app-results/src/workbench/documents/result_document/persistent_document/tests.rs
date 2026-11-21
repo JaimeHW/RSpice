@@ -134,7 +134,7 @@ fn every_release_target_has_an_exact_native_renderer_identity() {
         .iter()
         .filter(|viewer| viewer.release == ViewerReleaseClass::ReleaseTarget)
         .collect::<Vec<_>>();
-    assert_eq!(release_targets.len(), 18);
+    assert_eq!(release_targets.len(), 19);
     for viewer in release_targets {
         let native = ResultViewer::from_viewer_document_id(viewer.id);
         assert!(

@@ -277,6 +277,7 @@ const fn viewer_uses_analysis_stack(viewer: ResultViewer) -> bool {
         ResultViewer::Waves
             | ResultViewer::DcSweep
             | ResultViewer::Bode
+            | ResultViewer::SParameters
             | ResultViewer::NoiseContrib
     )
 }
