@@ -1064,23 +1064,3 @@ fn the_event_tables_state_their_numbers_at_the_readers_digits() {
         "the copy is not exact: {copied:?}"
     );
 }
-
-/// The event sheet for review, written under `RSPICE_PICTURES` when it is
-/// set.
-#[test]
-#[ignore = "writes the review pictures"]
-fn write_the_event_sheet_picture() {
-    let directory = std::env::var("RSPICE_PICTURES")
-        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-    let mut state = mixed_event_state();
-    let canvas = rspice_ui_kit::raster::render_themed(
-        crate::ui::Theme::default(),
-        egui::vec2(1200.0, 760.0),
-        |ui, _| show(ui, &mut state.results_parts()),
-    );
-    std::fs::write(
-        format!("{directory}/event-sheet.png"),
-        canvas.png(canvas.height()),
-    )
-    .expect("the picture is written");
-}

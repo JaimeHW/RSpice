@@ -4,7 +4,7 @@ use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use rspice_results_ui::session::ResultViewerState;
 use rspice_results_ui::waves::dock::{self, MarkerActions, ReadoutInput};
 #[cfg(test)]
-pub(super) use rspice_results_ui::waves::dock::{MARKER_ROW_H, READOUT_HEADER_H, READOUT_MAX_H};
+pub(super) use rspice_results_ui::waves::dock::{MARKER_ROW_H, READOUT_HEADER_H};
 #[cfg(test)]
 pub(super) use rspice_results_ui::waves::readout::{
     MAX_READOUT_BRANCHES, READOUT_ABSENT, READOUT_ROW_H, ReadoutRow, measurement_values,
@@ -131,26 +131,6 @@ pub(super) fn readout_row_count(state: &mut ResultsTestHost) -> usize {
         need_models,
         dock::readout_row_count,
     )
-}
-
-#[cfg(test)]
-pub(super) fn marker_body_height(state: &mut ResultsTestHost) -> f32 {
-    let session = &state.results.results.session;
-    let need_models = session.cursor_readout_active() && session.cursor_strip.is_some();
-    with_readout(
-        &mut state.results_parts(),
-        &Tokens::default(),
-        need_models,
-        dock::marker_body_height,
-    )
-}
-
-#[cfg(test)]
-pub(super) fn visible_markers(state: &ResultsTestHost) -> Vec<MarkerView<'_>> {
-    on_screen_strips(state.results_reads())
-        .into_iter()
-        .flat_map(|analysis| state.results.results.session.strip_markers(analysis))
-        .collect()
 }
 
 #[cfg(test)]

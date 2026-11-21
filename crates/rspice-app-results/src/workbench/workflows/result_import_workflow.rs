@@ -2039,12 +2039,4 @@ mod tests {
     fn a_64_mib_rawfile_imports_through_the_job_and_cancels_cleanly() {
         import_a_generated_rawfile(1 << 20);
     }
-
-    /// A 1 GiB rawfile. Run on its own: it writes and reads a gigabyte.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    #[ignore = "writes and imports a 1 GiB rawfile; run on its own"]
-    fn a_1_gib_rawfile_imports_through_the_job_and_cancels_cleanly() {
-        import_a_generated_rawfile(1 << 24);
-    }
 }

@@ -115,13 +115,11 @@ fn gate_tracks_coordinates(kind: AnalysisType, gate: StructuralGate) {
     assert_eq!(state.model.simulation.view.data_version, version);
 }
 
+/// The noise-shape gate and the Bode structural gate both follow the
+/// retained frequency grid.
 #[test]
-fn retained_memo_noise_shape_tracks_the_retained_frequency_grid() {
+fn retained_memo_structural_gates_track_the_retained_frequency_grid() {
     gate_tracks_coordinates(AnalysisType::Noise, StructuralGate::OrdinaryNoiseSpectrum);
-}
-
-#[test]
-fn retained_memo_structural_gate_tracks_the_retained_frequency_grid() {
     gate_tracks_coordinates(AnalysisType::Disto, StructuralGate::BodeResponse);
 }
 

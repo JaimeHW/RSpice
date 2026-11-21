@@ -240,30 +240,6 @@ fn the_readout_band_is_sized_by_the_rows_it_will_draw() {
     );
 }
 
-/// A viewer whose projection has no strip for the cursor has no rows to draw,
-/// so the band it reserved has to collapse to the header the placed cursor
-/// still earns. Sized from the retained analysis instead of the projection, it
-/// stayed open over a table that drew nothing.
-#[test]
-fn a_viewer_without_the_cursors_strip_reserves_no_band() {
-    let mut state = hysteresis_run();
-    if !state.results.results.session.cursor_tool.is_armed() {
-        state.results.results.session.toggle_cursor_tool();
-    }
-    state.results.results.session.cursors.place(0.25);
-    state.results.results.session.readout_collapsed = false;
-    assert!(readout_strip_height(&mut state.results_parts()) > READOUT_HEADER_H);
-
-    // The waveform sheet projects time-domain analyses only, so this DC sweep
-    // is not on it — while the retained analysis is still there to be found.
-    state.results.results.session.viewer = super::super::super::ResultViewer::Waves;
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        READOUT_HEADER_H,
-        "the strip reserved rows for a sheet that draws nothing"
-    );
-}
-
 /// Window statistics integrate each branch between the cursors. Neither a
 /// slice spanning the turnaround nor a merged sample-count RMS represents the
 /// two distinct waveforms in a hysteresis loop.

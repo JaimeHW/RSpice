@@ -3,14 +3,12 @@
 //! `code` bus as an `analog()` staircase against the capacitor DAC, and both
 //! conversions offered from the menus of the frame the reader sees.
 
-use super::lanes::{
-    ANALOG, BITS, FRAME, frame, history, host, sar_run, sar_strip, strip, theme_context,
-};
+use super::lanes::{ANALOG, BITS, frame, history, host, sar_run, sar_strip, strip, theme_context};
 use super::*;
 use crate::state::ComplexExpressionPolicy;
 use egui::epaint::ClippedShape;
 use rspice_results::result_presentation::ExprTrace;
-use rspice_results::visualization_document::{BusRadix, BusValueName};
+use rspice_results::visualization_document::BusRadix;
 use rspice_results_ui::waves::lanes::lane_specs;
 
 const NS: f64 = 1e-9;
@@ -361,124 +359,4 @@ fn the_staircase_has_a_pane_of_its_own() {
         [&(String::new(), false, 0, vec![0])],
         "only the staircase is on a pane, and it is a plain number's"
     );
-}
-
-/// The pictures for review, written under `RSPICE_PICTURES` when it is set:
-/// the analog clock with its `digital()` lane, the `code` bus as a staircase
-/// beside the DAC's top plate, the bus with named words, and the octal and
-/// ASCII radixes.
-#[test]
-#[ignore = "writes the review pictures"]
-fn write_the_conversion_pictures() {
-    let directory = std::env::var("RSPICE_PICTURES")
-        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-    let run = sar_run();
-    let eoc = history(run, "EOC");
-    let samp = history(run, "SAMP");
-    // The first conversion ends where eoc first rises.
-    let done = eoc
-        .iter()
-        .find(|(_, code)| *code == 1)
-        .expect("the first conversion ends")
-        .0;
-    let write = |name: &str, state: &mut ResultsTestHost| {
-        let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
-            super::lanes::well(ui);
-            show(ui, &mut state.results_parts());
-        });
-        std::fs::write(
-            format!("{directory}/{name}.png"),
-            canvas.png(canvas.height()),
-        )
-        .expect("the picture is written");
-    };
-
-    // An analog clock and its digital() lane, with a hysteresis band.
-    let mut state = host(run, &["CLK"]);
-    let key = strip(&mut state)[0].analysis_key;
-    add_expression(&mut state, key, CLOCK);
-    add_expression(&mut state, key, "digital(V(CLK), 1.2, 0.6, 0.2n)");
-    super::lanes::place_cursors(&mut state, Some(150.5 * NS), Some(250.5 * NS));
-    write("digital-clock", &mut state);
-    // One rising edge up close, cursors on the two thresholds: the
-    // hysteresis lane holds 0 for its time to X after V(CLK) enters the band
-    // at 0.6 V, reads X, and goes high where V(CLK) crosses 1.2 V.
-    set_shared_x_view(
-        &mut state.results.results.session,
-        key,
-        1,
-        Some((99.9 * NS, 101.1 * NS)),
-    );
-    super::lanes::place_cursors(
-        &mut state,
-        Some((100.0 + 1.0 / 3.0) * NS),
-        Some((100.0 + 2.0 / 3.0) * NS),
-    );
-    write("digital-clock-edge", &mut state);
-
-    // The code bus as a staircase beside the DAC's top plate.
-    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
-    add_expression(&mut state, key, "analog(D(code))");
-    super::lanes::place_cursors(
-        &mut state,
-        Some(samp[1].0),
-        Some(eoc[eoc.len() - 1].0 + 1e-9),
-    );
-    write("analog-code-dac", &mut state);
-
-    // A bus with named words.
-    let (mut state, key) = sar_strip(BusRadix::Hex, false);
-    let result: Vec<Option<u8>> = BITS
-        .iter()
-        .map(|net| {
-            history(run, net)
-                .iter()
-                .rev()
-                .find(|(time, _)| *time <= done)
-                .map(|(_, code)| *code)
-        })
-        .collect();
-    let result = rspice_results::events::projection::word_unsigned(&result)
-        .expect("the first conversion ends on a resolved code");
-    named(&mut state, key, result);
-    super::lanes::place_cursors(&mut state, Some(done + 1e-9), None);
-    write("value-names", &mut state);
-
-    // The octal and ASCII radixes.
-    for (name, radix) in [
-        ("radix-octal", BusRadix::Octal),
-        ("radix-ascii", BusRadix::Ascii),
-    ] {
-        let (mut state, _) = sar_strip(radix, false);
-        super::lanes::place_cursors(&mut state, Some(done + 1e-9), None);
-        write(name, &mut state);
-    }
-}
-
-/// Names for the code words a conversion starts from and tries first, and
-/// the one it ends on (`result`).
-fn named(state: &mut ResultsTestHost, key: AnalysisPresentationKey, result: u64) {
-    let mut names: Vec<BusValueName> =
-        [(0x00, "ZERO"), (0x01, "LSB"), (0x40, "QTR"), (0x80, "MID")]
-            .into_iter()
-            .map(|(value, name)| BusValueName {
-                value,
-                name: name.to_owned(),
-            })
-            .collect();
-    if !names.iter().any(|name| name.value == result) {
-        names.push(BusValueName {
-            value: result,
-            name: "RESULT".to_owned(),
-        });
-        names.sort_by_key(|name| name.value);
-    }
-    let layout = state
-        .results
-        .results
-        .session
-        .event_lanes
-        .get_mut(&key)
-        .expect("the strip has lanes");
-    layout.value_names.insert("code".to_owned(), names);
 }

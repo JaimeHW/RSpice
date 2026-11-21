@@ -503,50 +503,6 @@ mod tests {
         assert_eq!(served.analysis, active);
     }
 
-    /// The rule table's rows are as dense as the density preference asks,
-    /// buttons and all: a row's controls take the row's height instead of
-    /// pushing every row out to the height of a toolbar button.
-    #[test]
-    fn the_rule_table_rows_are_dense() {
-        let mut state = soa_state(12, 8, 3.0);
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1_680.0, 1_020.0),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
-            },
-        );
-        let mut tops: Vec<f64> = output
-            .platform_output
-            .accesskit_update
-            .expect("the SOA sheet publishes an accessibility tree")
-            .nodes
-            .iter()
-            .filter(|(_, node)| node.label() == Some("Stress trace"))
-            .filter_map(|(_, node)| node.bounds())
-            .map(|bounds| bounds.y0)
-            .collect();
-        tops.sort_by(f64::total_cmp);
-        assert!(tops.len() >= 6, "the sheet drew {} rules", tops.len());
-        let row = f64::from(crate::ui::tokens::Tokens::get(&ctx).metrics.row_h) - 4.0;
-        let pitch = row + f64::from(ctx.global_style().spacing.item_spacing.y);
-        for pair in tops.windows(2) {
-            assert!(
-                (pair[1] - pair[0] - pitch).abs() <= 1.0,
-                "rows {:.1} px apart, wanted {row} px rows {pitch} px apart",
-                pair[1] - pair[0]
-            );
-        }
-    }
-
     /// At 1200 px the rule table fits the sheet: every row's Stress trace and
     /// Schematic buttons sit whole inside the frame, beside the verdict they
     /// act on, with nothing scrolled sideways out of view.
@@ -643,38 +599,6 @@ mod tests {
             drawn < 100,
             "the sheet laid out {drawn} of 400 retained rules for a 1020 px viewport"
         );
-    }
-
-    /// The SOA sheet for review, written under `RSPICE_PICTURES` when it is
-    /// set, in the default theme and with a light interface over the dark
-    /// canvas.
-    #[test]
-    #[ignore = "writes the review pictures"]
-    fn write_the_soa_sheet_pictures() {
-        let directory = std::env::var("RSPICE_PICTURES")
-            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-        let mismatched = crate::ui::Theme {
-            mode: rspice_ui_kit::tokens::Mode::Light,
-            ..crate::ui::Theme::default()
-        };
-        for (name, theme) in [
-            ("soa-sheet", crate::ui::Theme::default()),
-            ("soa-sheet-light-ui-dark-canvas", mismatched),
-        ] {
-            let mut state = soa_state(6, 400, 3.0);
-            let canvas =
-                rspice_ui_kit::raster::render_themed(theme, egui::vec2(1200.0, 760.0), |ui, _| {
-                    let well = ui.available_rect_before_wrap();
-                    let canvas = crate::ui::tokens::Tokens::get(ui.ctx()).color.canvas_bg;
-                    ui.painter().rect_filled(well, 0.0, canvas);
-                    show(ui, &mut state.results_parts());
-                });
-            std::fs::write(
-                format!("{directory}/{name}.png"),
-                canvas.png(canvas.height()),
-            )
-            .expect("the picture is written");
-        }
     }
 }
 

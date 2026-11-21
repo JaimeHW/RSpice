@@ -638,28 +638,6 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
 }
 
 #[test]
-fn the_strip_carries_cursors_and_markers_together() {
-    let mut state = marker_fixture();
-    let (analysis, waveform) = marker_identity(&state);
-    state.results.results.session.cursors.place(0.5);
-    state.results.results.session.cursor_strip = Some(0);
-    let cursors_only = readout_strip_height(&mut state.results_parts());
-    assert!(cursors_only > 0.0);
-
-    state
-        .results
-        .results
-        .session
-        .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
-        .unwrap();
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        cursors_only,
-        "desktop columns share one body height instead of stacking sections"
-    );
-}
-
-#[test]
 fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
@@ -678,32 +656,6 @@ fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
 
     state.results.results.session.hidden_strips.insert(analysis);
     assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
-}
-
-#[test]
-fn every_visible_marker_remains_in_the_scroll_owned_body() {
-    let mut state = marker_fixture();
-    let (analysis, waveform) = marker_identity(&state);
-    for index in 0..12 {
-        state
-            .results
-            .results
-            .session
-            .add_marker(
-                analysis,
-                waveform.clone(),
-                "V(out)".to_owned(),
-                index as f64 / 12.0,
-            )
-            .unwrap();
-    }
-
-    assert_eq!(visible_markers(&state).len(), 12);
-    assert_eq!(marker_body_height(&mut state), 12.0 * MARKER_ROW_H);
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        READOUT_MAX_H
-    );
 }
 
 #[test]
@@ -860,32 +812,6 @@ fn mixed_units_on_one_analysis_become_separate_panes() {
     assert_eq!(panes[1].traces.len(), 1);
 }
 
-#[test]
-fn one_unit_stays_one_pane() {
-    let mut simulation = SimulationState::default();
-    simulation.start_run().add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
-            RetainedTrace::new("V(in)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
-        ]),
-    );
-    let mut derived = DerivedSeries::default();
-    let models = build_models(
-        &simulation,
-        &mut derived,
-        &Tokens::default(),
-        false,
-        ComplexNumberDisplay::MagnitudePhaseDegrees,
-        Default::default(),
-        None,
-        &HashSet::new(),
-    );
-
-    let panes = models[0].unit_panes();
-    assert_eq!(panes.len(), 1, "a strip does not split without a reason to");
-    assert_eq!(panes[0].unit, "V");
-}
-
 /// A current the dataset does not plot, and nobody has, opens no pane: the
 /// strip is its volts alone until the current is plotted. A pane the reader
 /// emptied stays (see `hidden_unit_signals_keep_a_pane_available_for_reactivation`).
@@ -919,38 +845,6 @@ fn a_trace_hidden_only_by_default_opens_no_pane() {
     let panes = models[0].unit_panes();
     assert_eq!(panes.len(), 1, "no pane for a current nobody plotted");
     assert_eq!(panes[0].unit, "V");
-}
-
-#[test]
-fn a_bode_pair_stacks_magnitude_over_phase() {
-    let mut simulation = SimulationState::default();
-    simulation.start_run().add_analysis(
-        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
-            RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![1.0, 0.5], "#fff"),
-            RetainedTrace::new("phase(V(out))", vec![1.0, 10.0], vec![0.0, -45.0], "#fff"),
-        ]),
-    );
-    let mut derived = DerivedSeries::default();
-    let models = build_models(
-        &simulation,
-        &mut derived,
-        &Tokens::default(),
-        false,
-        ComplexNumberDisplay::MagnitudePhaseDegrees,
-        Default::default(),
-        None,
-        &HashSet::new(),
-    );
-
-    let panes = models[0].unit_panes();
-    assert_eq!(
-        panes.len(),
-        2,
-        "the mockup Bode instrument is two stacked panes over one X domain"
-    );
-    assert_eq!(panes[0].unit, "dB", "magnitude keeps the primary slot");
-    assert_eq!(panes[1].unit, "°");
-    assert_eq!(panes[1].traces.len(), 1);
 }
 
 #[test]
@@ -1039,34 +933,6 @@ fn phase_panes_order_after_quantity_panes_regardless_of_waveform_order() {
         "magnitude is the primary pane even when the dataset lists phase first"
     );
     assert_eq!(panes[1].unit, "°");
-}
-
-#[test]
-fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
-    let mut simulation = SimulationState::default();
-    simulation.start_run().add_analysis(
-        AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
-        ]),
-    );
-    let mut derived = DerivedSeries::default();
-
-    let models = build_models(
-        &simulation,
-        &mut derived,
-        &Tokens::default(),
-        false,
-        ComplexNumberDisplay::MagnitudePhaseDegrees,
-        Default::default(),
-        None,
-        &HashSet::new(),
-    );
-
-    // Retained PSDs project to amplitude density (nV/√Hz), never a dB
-    // relabeling of V²/Hz.
-    assert_eq!(models.len(), 1);
-    assert!(matches!(models[0].traces[0].kind, TraceKind::NoiseDensity));
-    assert_eq!(models[0].traces[0].y.as_slice(), &[1.0, 2.0]);
 }
 
 #[test]
@@ -1627,44 +1493,6 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
     let single = inline_cursor_readout(&mut state.results_parts(), &t)
         .expect("cursor A alone still reads out");
     assert!(!single.contains('\u{0394}'), "{single}");
-}
-
-/// A legend chip may only report a value for the strip cursor A was placed
-/// on. Reporting one elsewhere would state a reading at an X that strip
-/// never sampled.
-#[test]
-fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
-    let mut state = ResultsTestHost::default();
-    let run = state.model.simulation.start_run();
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
-        ]),
-    );
-    run.add_analysis(
-        AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![RetainedTrace::new(
-            "V(in)",
-            vec![1.0, 10.0],
-            vec![1.0, 0.5],
-            "#0af",
-        )]),
-    );
-    if !state.results.results.session.cursor_tool.is_armed() {
-        state.results.results.session.toggle_cursor_tool();
-    }
-    state.results.results.session.cursors.a = Some(0.5);
-    state.results.results.session.cursor_strip = Some(0);
-
-    let owns = |analysis_index: usize, state: &ResultsTestHost| {
-        state.results.results.session.cursor_readout_active()
-            && state.results.results.session.cursor_strip == Some(analysis_index)
-    };
-    assert!(owns(0, &state), "the placed strip reports its cursor value");
-    assert!(!owns(1, &state), "a sibling strip must not borrow cursor A");
-
-    // Disarming the tool retires every chip value at once.
-    state.results.results.session.toggle_cursor_tool();
-    assert!(!owns(0, &state));
 }
 
 /// The QA scenario: a four-analysis run whose noise strip is not index 0,

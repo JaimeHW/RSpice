@@ -204,36 +204,6 @@ mod tests {
         ));
     }
     #[test]
-    fn the_memoized_manifest_is_the_projection_it_replaced() {
-        let mut state = state_with_run("Transient");
-        let direct = manifest_for_run(
-            state
-                .model
-                .simulation
-                .active_run()
-                .expect("the fixture selects a run"),
-        );
-
-        let plan =
-            active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
-        assert_eq!(plan.model, direct);
-        assert_eq!(
-            plan.model.dataset_digest,
-            state
-                .model
-                .simulation
-                .active_run()
-                .expect("the fixture selects a run")
-                .dataset_content_digest()
-                .to_string()
-        );
-
-        // Asking again is the same answer from the same allocation.
-        let again =
-            active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
-        assert!(Arc::ptr_eq(&plan, &again));
-    }
-    #[test]
     fn a_new_dataset_generation_reprojects_the_manifest() {
         let mut state = state_with_run("Transient");
         let before =

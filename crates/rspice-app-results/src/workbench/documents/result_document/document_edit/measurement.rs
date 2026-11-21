@@ -915,50 +915,6 @@ mod tests {
         }
     }
 
-    /// The picture for review, written under `RSPICE_PICTURES` when it is
-    /// set: the form with `rms(V(out))` typed and its value in volts.
-    #[test]
-    #[ignore = "writes the review picture"]
-    fn write_the_result_line_picture() {
-        let directory = std::env::var("RSPICE_PICTURES")
-            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-        let mut run = SimulationRun::new(1);
-        run.add_analysis(
-            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-                RetainedTrace::new("V(out)", vec![0.0, 1.0e-3, 2.0e-3], vec![1.5; 3], "#fff"),
-            ]),
-        );
-        let mut host = ResultsTestHost::default();
-        host.model.simulation.retained.runs = vec![run].into();
-        assert!(host.model.simulation.select_run(0));
-        assert!(host.model.simulation.select_analysis(0));
-        host.workbench.workspace = Workspace::Results;
-        *host.results_parts().result_document_dialog =
-            Some(ResultDocumentDialog::Measurement(MeasurementDraft {
-                expression: "rms(V(out))".to_owned(),
-                ..MeasurementDraft::default()
-            }));
-        let size = egui::vec2(900.0, 420.0);
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut output = None;
-        for _ in 0..12 {
-            let input = rspice_ui_kit::raster::display_input(size, 2.0);
-            output = Some(ctx.run_ui(input, |ctx| {
-                crate::workbench::documents::result_document::show_document_dialog(
-                    ctx,
-                    &mut host.results_parts(),
-                );
-            }));
-        }
-        let canvas = rspice_ui_kit::raster::rasterize(&ctx, size, &output.expect("a frame"));
-        std::fs::write(
-            format!("{directory}/add-measurement-unit.png"),
-            canvas.png(canvas.height()),
-        )
-        .expect("the picture is written");
-    }
-
     /// The population's result document, one histogram pane of `gain_dc`,
     /// with the yield against [39, 41.2] dB kept on it through the form.
     fn kept_yield() -> (ResultsTestHost, crate::product::ResultDocumentId) {
@@ -1039,56 +995,6 @@ mod tests {
         let text = picture(&mut host, document, crate::ui::Mode::Dark).1;
         for expected in ["LSL 39", "USL 41.2", "retained spec limit"] {
             assert!(text.contains(expected), "missing {expected}: {text}");
-        }
-    }
-
-    /// The review pictures, written under `RSPICE_PICTURES` when it is set:
-    /// the population's document with its kept yield, and the same pane with
-    /// one bin's trials picked.
-    #[test]
-    #[ignore = "writes the review pictures"]
-    fn write_the_family_pictures() {
-        let directory = std::env::var("RSPICE_PICTURES")
-            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-        let (mut host, document) = kept_yield();
-        let modes = [
-            (crate::ui::Mode::Dark, "dark"),
-            (crate::ui::Mode::Light, "light"),
-        ];
-        for (mode, suffix) in modes {
-            let (canvas, _) = picture(&mut host, document, mode);
-            let path = format!("{directory}/family-yield-{suffix}.png");
-            std::fs::write(&path, canvas.png(canvas.height())).expect("the picture is written");
-        }
-
-        // The trials of the bin at 40.5 dB, picked as a click on its bar
-        // picks them.
-        let reads = host.results_reads();
-        let histogram = super::super::super::hist::active_histogram(reads).expect("a histogram");
-        let bin = histogram.bin_of(40.5).expect("40.5 dB is binned");
-        let simulation = &reads.model.simulation;
-        let analysis = simulation.active_analysis().unwrap();
-        let key = super::super::super::AnalysisPresentationKey::new(
-            simulation.active_run().unwrap().dataset_id,
-            analysis,
-        );
-        let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-            &analysis.family_metadata
-        else {
-            unreachable!("a Monte Carlo analysis");
-        };
-        let rows: Vec<usize> = variables[0]
-            .samples
-            .iter()
-            .enumerate()
-            .filter(|(_, sample)| histogram.bin_of(**sample) == Some(bin))
-            .map(|(row, _)| row)
-            .collect();
-        *host.results.results.session.members.on(key) = rows;
-        for (mode, suffix) in modes {
-            let (canvas, _) = picture(&mut host, document, mode);
-            let path = format!("{directory}/histogram-picked-bin-{suffix}.png");
-            std::fs::write(&path, canvas.png(canvas.height())).expect("the picture is written");
         }
     }
 }

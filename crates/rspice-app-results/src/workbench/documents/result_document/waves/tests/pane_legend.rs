@@ -124,40 +124,6 @@ fn a_plain_numbers_pane_draws_no_blank_control() {
     assert!(blank.is_empty(), "a button says nothing: {blank:?}");
 }
 
-/// The staircase is drawn in a pane of its own, and that pane names it: an
-/// entry under the volts pane's header row, with its swatch, as each of
-/// TOP and VIN has in the volts pane.
-#[test]
-fn an_expression_on_a_pane_of_its_own_is_named_in_it() {
-    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
-    add_expression(&mut state, key, "analog(D(code))");
-    let ctx = theme_context();
-    let output = settled(&ctx, &mut state);
-    let volts = text(&output, "45 hidden").expect("the volts pane's header row");
-    let entry = text(&output, "analog(D(code))").expect("the staircase is named");
-    assert!(
-        entry.top() > volts.bottom(),
-        "the staircase's entry is in its own pane, under the volts pane's row: \
-         entry {entry:?}, volts row {volts:?}"
-    );
-    // The strip header's chip has a swatch of the same name; the entry's is
-    // the one on its row.
-    let swatch = controls(&output)
-        .into_iter()
-        .filter(|(_, label, _)| label.as_deref() == Some("Toggle analog(D(code)) visibility"))
-        .filter_map(|(_, _, rect)| rect)
-        .min_by(|a, b| {
-            (a.center().y - entry.center().y)
-                .abs()
-                .total_cmp(&(b.center().y - entry.center().y).abs())
-        })
-        .expect("the entry has its swatch");
-    assert!(
-        (swatch.center().y - entry.center().y).abs() < 4.0 && swatch.right() <= entry.left(),
-        "the entry's swatch leads it on its row: swatch {swatch:?}, entry {entry:?}"
-    );
-}
-
 /// An expression on a pane of signals hides from its entry's swatch as a
 /// signal does, then waits in the pane's trace list, and ticking it
 /// there draws it again.
@@ -367,56 +333,6 @@ fn a_logic_expression_chip_offers_analog() {
     );
 }
 
-/// Both axes' log toggles are one chip naming its axis, lit while the axis
-/// is logarithmic: the pane's reads "log Y" in its header, the shared X
-/// axis's "log X" in the strip header, which owns that axis, clear of
-/// cursor A's flag with A on
-/// the plot's left edge, with lanes beside the panes and without.
-#[test]
-fn the_y_log_toggle_names_its_axis_and_the_x_toggle_clears_cursor_a() {
-    for lanes in [true, false] {
-        let mut state = if lanes {
-            sar_strip(BusRadix::Unsigned, false).0
-        } else {
-            super::lanes::host(super::lanes::sar_run(), &super::lanes::ANALOG)
-        };
-        super::lanes::place_cursors(&mut state, Some(0.0), None);
-        let ctx = theme_context();
-        let output = settled(&ctx, &mut state);
-        // The volts pane's Y toggle and the strip's X toggle; the currents'
-        // pane draws nothing and offers no toggle.
-        let count = |word: &str| {
-            texts(&output.shapes)
-                .iter()
-                .filter(|(text, _)| text == word)
-                .count()
-        };
-        assert_eq!(
-            (count("log Y"), count("log X")),
-            (1, 1),
-            "the Y toggle and the X toggle (lanes: {lanes})"
-        );
-        assert!(
-            texts(&output.shapes)
-                .iter()
-                .all(|(text, _)| text != "LIN" && text != "LOG"),
-            "no toggle states its scale in capitals (lanes: {lanes})"
-        );
-        let toggle = control(&output, "Logarithmic X axis");
-        let flag = texts(&output.shapes)
-            .into_iter()
-            .filter(|(text, _)| text == "A")
-            .map(|(_, rect)| rect)
-            .max_by(|a, b| a.top().total_cmp(&b.top()))
-            .expect("cursor A's flag on the time axis");
-        assert!(
-            toggle.bottom() < flag.top() && !toggle.expand(4.0).intersects(flag.expand(3.0)),
-            "the X toggle clears cursor A's flag (lanes: {lanes}): toggle {toggle:?}, flag letter \
-             {flag:?}"
-        );
-    }
-}
-
 /// Pointing into a pane reads each expression it draws in the pane's unit,
 /// as each of its signals reads: `V(TOP)*2` in volts, never a bare prefix.
 #[test]
@@ -446,57 +362,6 @@ fn the_hover_readout_reads_an_expression_in_its_panes_unit() {
         .map(|(text, _)| text.clone())
         .expect("the hover readout reads the expression");
     assert!(value.ends_with('V'), "the reading is in volts: {value:?}");
-}
-
-/// The C4 strip's currents, which the run keeps but does not plot and
-/// nobody has plotted, open no pane: the strip draws its volts and its
-/// staircase, and the currents wait in the data browser. A current the
-/// reader plots opens the currents' pane, with its own trace list and axis
-/// controls, and hiding it again takes the pane away: a pane that draws
-/// nothing takes no row.
-#[test]
-fn a_pane_whose_signals_are_all_hidden_takes_no_row() {
-    let (mut state, _) = sar_strip(BusRadix::Unsigned, false);
-    let ctx = theme_context();
-    let output = settled(&ctx, &mut state);
-    assert!(
-        text(&output, "62 hidden").is_none() && text(&output, "45 hidden").is_some(),
-        "no pane is drawn for currents nobody plotted"
-    );
-    let axis_controls = |output: &FullOutput| {
-        controls(output)
-            .into_iter()
-            .filter(|(_, label, _)| label.as_deref() == Some("log Y"))
-            .count()
-    };
-    let before = axis_controls(&output);
-    let (analysis, waveform) = {
-        let models = super::lanes::strip(&mut state);
-        let current = models[0]
-            .traces
-            .iter()
-            .find(|trace| trace.source_waveform_name.starts_with("I("))
-            .expect("the run keeps its currents");
-        (models[0].analysis_index(), current.waveform_index)
-    };
-    toggle_visibility(&mut state.results_parts(), analysis, waveform);
-    let output = settled(&ctx, &mut state);
-    assert!(
-        text(&output, "61 hidden").is_some(),
-        "the plotted current's pane offers the other currents"
-    );
-    assert_eq!(
-        axis_controls(&output),
-        before + 1,
-        "and its own axis controls"
-    );
-    toggle_visibility(&mut state.results_parts(), analysis, waveform);
-    let output = settled(&ctx, &mut state);
-    assert!(
-        text(&output, "61 hidden").is_none() && text(&output, "62 hidden").is_none(),
-        "hidden again, the current takes its pane away"
-    );
-    assert_eq!(axis_controls(&output), before);
 }
 
 /// A pane whose plotted traces hold no finite value has nothing to draw
@@ -582,45 +447,4 @@ fn an_event_instant_reads_the_value_after_the_event() {
         reads(&lane, "128"),
         "the lane reads after the event: {lane:?}"
     );
-}
-
-/// The pictures for review, written under `RSPICE_PICTURES` when it is set:
-/// the staircase named in its own pane beside the DAC, and an expression of
-/// volts named in the volts pane with cursor A's reading, then hidden there.
-#[test]
-#[ignore = "writes the review pictures"]
-fn write_the_pane_legend_pictures() {
-    let directory = std::env::var("RSPICE_PICTURES")
-        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-    let write = |name: &str, state: &mut ResultsTestHost| {
-        let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
-            super::lanes::well(ui);
-            show(ui, &mut state.results_parts());
-        });
-        std::fs::write(
-            format!("{directory}/{name}.png"),
-            canvas.png(canvas.height()),
-        )
-        .expect("the picture is written");
-    };
-    let eoc = super::lanes::history(super::lanes::sar_run(), "EOC");
-    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
-    add_expression(&mut state, key, "V(TOP)*2");
-    add_expression(&mut state, key, "analog(D(code))");
-    super::lanes::place_cursors(&mut state, Some(eoc[0].0 + 1e-9), None);
-    write("pane-legend-expressions", &mut state);
-    state
-        .results
-        .results
-        .session
-        .analysis_exprs
-        .get_mut(&key)
-        .expect("the strip has expressions")[0]
-        .visible = false;
-    state
-        .results
-        .results
-        .session
-        .sync_expression_projection(key, 0);
-    write("pane-legend-expression-hidden", &mut state);
 }

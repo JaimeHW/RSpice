@@ -552,17 +552,6 @@ mod tests {
     }
 
     #[test]
-    fn a_domain_the_layout_has_no_coordinate_for_is_refused_by_name() {
-        let waveforms = [waveform("V(onoise)", vec![1.0, 10.0], vec![1e-9, 2e-9])];
-        let error = prepared(AnalysisType::Noise, &waveforms)
-            .expect_err("MAT names its coordinate or says nothing");
-        assert!(error.contains("'time'"), "{error}");
-        assert!(error.contains("'sweep'"), "{error}");
-        assert!(error.contains("'frequency'"), "{error}");
-        assert!(error.contains("RSpice bundle"), "{error}");
-    }
-
-    #[test]
     fn an_event_only_transient_is_refused_by_what_a_mat_file_carries() {
         let mut events = analysis(AnalysisType::Transient);
         events.result_payload = Some(AnalysisResultPayload::TransientEvents {

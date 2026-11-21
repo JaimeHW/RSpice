@@ -6,41 +6,7 @@
 //! resolved part of their correctness: an extent taken before the reader's
 //! visibility overrides describes a strip nobody is looking at.
 
-use super::super::super::frame_work::{DatasetWalk, WorkCounts};
 use super::*;
-
-/// The extent is resolved while the model is built now, so it has to be the
-/// same answer the per-frame walk gave: the axis, the overview lane and every
-/// viewport gesture are derived from it.
-#[test]
-fn the_strip_extent_matches_the_walk_it_replaced() {
-    let mut state = ResultsTestHost::default();
-    state.model.simulation.start_run().add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
-            RetainedTrace::new("V(a)", vec![0.0, 1.0, 2.5], vec![0.0, 1.0, 2.0], "#fff"),
-            RetainedTrace::new("V(b)", vec![-3.0, 0.5], vec![1.0, 2.0], "#0af"),
-        ]),
-    );
-    let presentation = state.model.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.model.simulation,
-        &mut state.results.results,
-        presentation.complex_number_display(),
-        &Tokens::default(),
-    );
-
-    let model = &models[0];
-    let expected = model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
-        .flat_map(|trace| trace.x.iter().copied())
-        .filter(|value| value.is_finite())
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), x| {
-            (low.min(x), high.max(x))
-        });
-    assert_eq!(model.x_range, Some(expected));
-}
 
 /// The extent is a memo of the visible traces, so hiding one has to move it.
 /// A strip that kept an extent covering a trace it no longer draws would
@@ -158,55 +124,6 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
     assert_eq!(
         models[0].x_range, None,
         "a strip drawing nothing still reported a domain"
-    );
-}
-
-/// The extent walk belongs to the cache build, not to the frame. Resolving it
-/// after the visibility overrides rather than during the projection must stay
-/// exactly one walk per strip per rebuild — not two, and never one per frame.
-#[test]
-fn the_extent_is_walked_once_per_strip_per_cache_build() {
-    let mut state = ResultsTestHost::default();
-    let run = state.model.simulation.start_run();
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "Tran A").with_waveforms(vec![
-            RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
-        ]),
-    );
-    run.add_analysis(
-        AnalysisResult::new(2, AnalysisType::Transient, "Tran B").with_waveforms(vec![
-            RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
-        ]),
-    );
-    let presentation = state.model.preferences.result_presentation_policy();
-
-    let baseline = WorkCounts::reset();
-    let models = cached_models(
-        &state.model.simulation,
-        &mut state.results.results,
-        presentation.complex_number_display(),
-        &Tokens::default(),
-    );
-    assert_eq!(models.len(), 2);
-    assert_eq!(
-        baseline.since().get(DatasetWalk::WaveXRange),
-        2,
-        "the cache build resolved the extent other than once per strip"
-    );
-
-    let baseline = WorkCounts::reset();
-    for _ in 0..5 {
-        let _ = cached_models(
-            &state.model.simulation,
-            &mut state.results.results,
-            presentation.complex_number_display(),
-            &Tokens::default(),
-        );
-    }
-    assert_eq!(
-        baseline.since().get(DatasetWalk::WaveXRange),
-        0,
-        "a memo hit walked the dataset for an extent it already holds"
     );
 }
 

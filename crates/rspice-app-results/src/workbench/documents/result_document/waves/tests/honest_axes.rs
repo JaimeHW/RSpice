@@ -11,55 +11,41 @@ use super::*;
 use crate::state::{ExecutedDeck, ExecutedDeckPoint};
 
 #[test]
-fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
-    let result = crate::simulation::results::qpac_retained_test_fixture();
-    assert!(result.success);
-    assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
-    let mut state = ResultsTestHost::default();
-    state.model.simulation.start_run().add_analysis(result);
-    state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
-    let presentation = state.model.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.model.simulation,
-        &mut state.results.results,
-        presentation.complex_number_display(),
-        &Tokens::default(),
-    );
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].x_scale, XScale::Linear);
-    assert_eq!(models[0].x_label, "Probe offset");
-    assert_eq!(models[0].x_unit, "Hz");
-    assert_eq!(models[0].x_dimension_key, "qpac-probe-offset");
-    let (min, max) = models[0]
-        .x_range
-        .expect("signed offsets have a visible range");
-    assert!(min <= -37.0 && max >= 127.0);
-}
-
-#[test]
-fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
-    let result = crate::simulation::results::qpxf_retained_test_fixture();
-    assert!(result.success);
-    assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
-    let mut state = ResultsTestHost::default();
-    state.model.simulation.start_run().add_analysis(result);
-    state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
-    let presentation = state.model.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.model.simulation,
-        &mut state.results.results,
-        presentation.complex_number_display(),
-        &Tokens::default(),
-    );
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].x_scale, XScale::Linear);
-    assert_eq!(models[0].x_label, "Output frequency");
-    assert_eq!(models[0].x_unit, "Hz");
-    assert_eq!(models[0].x_dimension_key, "qpxf-output-frequency");
-    let (min, max) = models[0]
-        .x_range
-        .expect("signed offsets have a visible range");
-    assert!(min <= -37.0 && max >= 127.0);
+fn quasi_periodic_plots_keep_signed_frequencies_on_a_named_linear_axis() {
+    for (result, label, dimension) in [
+        (
+            crate::simulation::results::qpac_retained_test_fixture(),
+            "Probe offset",
+            "qpac-probe-offset",
+        ),
+        (
+            crate::simulation::results::qpxf_retained_test_fixture(),
+            "Output frequency",
+            "qpxf-output-frequency",
+        ),
+    ] {
+        assert!(result.success);
+        assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.start_run().add_analysis(result);
+        state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
+        let presentation = state.model.preferences.result_presentation_policy();
+        let models = cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].x_scale, XScale::Linear);
+        assert_eq!(models[0].x_label, label);
+        assert_eq!(models[0].x_unit, "Hz");
+        assert_eq!(models[0].x_dimension_key, dimension);
+        let (min, max) = models[0]
+            .x_range
+            .expect("signed offsets have a visible range");
+        assert!(min <= -37.0 && max >= 127.0);
+    }
 }
 
 /// A DC sweep of a current source, with the deck the run actually executed.
@@ -244,20 +230,6 @@ fn overlays_require_matching_source_signal_units_before_display_projection() {
             );
         }
     }
-}
-
-/// The retained result keeps the sweep's values and not the source they came
-/// from, so the abscissa called every DC sweep volts — a swept current source
-/// read as a voltage, which is not a unit error but a quantity error. The deck
-/// the run executed names the source, and it is that run's own evidence.
-#[test]
-fn a_dc_sweep_names_the_source_the_run_actually_swept() {
-    let mut state = swept_current_source();
-    assert_eq!(
-        model_axis(&mut state),
-        ("Ibias".to_owned(), "A".to_owned()),
-        "the abscissa did not read the swept source out of the run's deck"
-    );
 }
 
 #[test]

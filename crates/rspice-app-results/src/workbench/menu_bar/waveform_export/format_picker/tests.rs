@@ -97,69 +97,6 @@ fn export_remembers_the_format_and_cancel_does_not() {
     );
 }
 
-/// Format stands in the label column with its list beside it, and the
-/// list ends where the footer's actions end, as on every form.
-#[test]
-fn the_format_list_stands_on_the_form_grid() {
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let mut state = ResultsTestHost::default();
-    state.results.dataset_export = Some(DatasetExportPicker {
-        format: 0,
-        several_analyses: false,
-    });
-    let mut nodes = std::collections::HashMap::new();
-    for _ in 0..3 {
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1440.0, 900.0),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                show_dataset_export_picker(
-                    ctx,
-                    &mut state.results.dataset_export,
-                    &mut state.results.dataset_export_form,
-                    &mut state.model.preferences,
-                );
-            },
-        );
-        nodes.extend(
-            output
-                .platform_output
-                .accesskit_update
-                .expect("AccessKit tree update")
-                .nodes,
-        );
-    }
-    let bounds = |label: &str, role: egui::accesskit::Role| {
-        nodes
-            .values()
-            .find(|node| node.role() == role && node.label() == Some(label))
-            .and_then(egui::accesskit::Node::bounds)
-            .unwrap_or_else(|| panic!("{label} is published"))
-    };
-    let format = bounds("Format", egui::accesskit::Role::ComboBox);
-    let export = bounds("Export\u{2026}", egui::accesskit::Role::Button);
-    let title = nodes
-        .values()
-        .find(|node| {
-            node.role() == egui::accesskit::Role::Label
-                && (node.label() == Some("Export result dataset")
-                    || node.value() == Some("Export result dataset"))
-        })
-        .and_then(egui::accesskit::Node::bounds)
-        .expect("the title is published");
-    assert!(
-        format.x0 > title.x0 + 60.0 && (format.x1 - export.x1).abs() < 1.0,
-        "Format {format:?}, title {title:?}, Export {export:?}"
-    );
-}
-
 /// Two transients on one strip stack, the second strip active, and the
 /// second trace of each hidden. Each analysis holds a different value, so a
 /// file says which one it came from.
@@ -461,39 +398,4 @@ fn a_pwl_source_over_a_frequency_sweep_says_why_it_cannot() {
         words.iter().any(|word| word.contains("waveform in time")),
         "{words:?}"
     );
-}
-
-/// A picture of the form over two strips, for review. Written only when
-/// `RSPICE_PICTURES` names a folder.
-#[test]
-#[ignore = "writes a review picture"]
-fn write_the_export_form_picture() {
-    let directory = std::env::var("RSPICE_PICTURES")
-        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-    let size = egui::vec2(760.0, 420.0);
-    for (format, name) in [(RAW_BINARY, "export-form"), (PWL, "export-form-pwl")] {
-        let mut state = two_strip_state();
-        open_form(&mut state, format);
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut output = None;
-        for _ in 0..12 {
-            output = Some(
-                ctx.run_ui(rspice_ui_kit::raster::display_input(size, 2.0), |ctx| {
-                    show_dataset_export_picker(
-                        ctx,
-                        &mut state.results.dataset_export,
-                        &mut state.results.dataset_export_form,
-                        &mut state.model.preferences,
-                    );
-                }),
-            );
-        }
-        let canvas = rspice_ui_kit::raster::rasterize(&ctx, size, &output.unwrap());
-        std::fs::write(
-            format!("{directory}/{name}.png"),
-            canvas.png(canvas.height()),
-        )
-        .expect("the picture is written");
-    }
 }

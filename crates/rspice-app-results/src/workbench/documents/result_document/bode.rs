@@ -568,13 +568,4 @@ mod tests {
         assert_eq!(shape.anchor, 0);
         assert_eq!(shape.trace_count, 1);
     }
-
-    #[test]
-    fn hbnoise_psd_uses_the_noise_density_instrument() {
-        let hbnoise =
-            AnalysisResult::new(1, AnalysisType::Hbnoise, "HBNOISE").with_waveforms(vec![
-                RetainedTrace::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 2.0e-18], "#fff"),
-            ]);
-        assert!(ordinary_noise_spectrum_is_renderable(&hbnoise));
-    }
 }

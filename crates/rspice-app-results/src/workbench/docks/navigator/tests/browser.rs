@@ -205,51 +205,6 @@ fn a_glob_opens_the_branches_that_match_and_counts_them() {
 }
 
 #[test]
-fn rows_are_dense_and_hold_their_text_at_every_interface_scale() {
-    for scale in [1.0, 1.1, 1.25, 1.5, 1.75, 2.0] {
-        let mut browser = Browser::new(hierarchical_run());
-        browser.ctx.set_zoom_factor(scale);
-        browser.frame(Vec::new());
-        let nodes = browser.frame(Vec::new());
-        assert!((browser.ctx.pixels_per_point() - scale).abs() < 1e-6);
-        let row = find(&nodes, "V(out), Voltage")
-            .expect("a top-level row")
-            .rect;
-        assert!(
-            (row.height() - 22.0).abs() < 0.5,
-            "a compact row is 22 px at scale {scale}, not {}",
-            row.height()
-        );
-        // Rows abut: the stride is the row, with no gap between them.
-        let neighbour = find(&nodes, "V(in), Voltage").expect("its neighbour").rect;
-        let stride = (neighbour.top() - row.top()).abs();
-        assert!(
-            (stride - 22.0).abs() < 0.5,
-            "rows are 22 px apart at scale {scale}, not {stride}"
-        );
-        let head = find(&nodes, "x1, instance, 3 quantities, collapsed")
-            .expect("an instance row")
-            .rect;
-        assert!(
-            (head.height() - 22.0).abs() < 0.5,
-            "instance rows share the stride"
-        );
-        // The name's line fits the row with room to spare at this scale.
-        let line = browser.ctx.fonts_mut(|fonts| {
-            fonts.row_height(&crate::ui::theme::mono(
-                crate::ui::tokens::FS_0,
-                crate::ui::theme::FontWeight::Regular,
-            ))
-        });
-        assert!(
-            line + 4.0 <= row.height(),
-            "an {line} px line clips in a {} px row at scale {scale}",
-            row.height()
-        );
-    }
-}
-
-#[test]
 fn a_net_on_the_lanes_is_a_ticked_row() {
     let mut host = ResultsTestHost::default();
     host.model

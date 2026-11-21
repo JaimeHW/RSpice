@@ -1940,24 +1940,12 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
     }
 }
 
+/// NumPy (6, 7), VCD (5), HDF5 and MATLAB (8, 9) and the native formats
+/// (3, 4) each refuse a stacked export rather than omit the other analyses,
+/// and offer the one displayed analysis instead.
 #[test]
-fn numpy_stacked_binary_export_does_not_omit_other_analyses() {
-    assert_stacked_binary_export_is_not_silently_truncated(&[6, 7]);
-}
-
-#[test]
-fn vcd_stacked_binary_export_does_not_omit_other_event_schedules() {
-    assert_stacked_binary_export_is_not_silently_truncated(&[5]);
-}
-
-#[test]
-fn hdf5_and_matlab_stacked_binary_export_give_a_supported_alternative() {
-    assert_stacked_binary_export_is_not_silently_truncated(&[8, 9]);
-}
-
-#[test]
-fn native_stacked_binary_export_gives_a_supported_alternative() {
-    assert_stacked_binary_export_is_not_silently_truncated(&[3, 4]);
+fn stacked_binary_export_is_never_silently_truncated() {
+    assert_stacked_binary_export_is_not_silently_truncated(&[6, 7, 5, 8, 9, 3, 4]);
 }
 
 #[test]

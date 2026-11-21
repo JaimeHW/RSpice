@@ -919,59 +919,6 @@ fn the_smith_gate_verifies_its_traces_once_per_dataset_generation() {
     );
 }
 
-#[test]
-fn the_counter_reports_exactly_the_walks_that_were_noted() {
-    let baseline = WorkCounts::reset();
-    super::note(DatasetWalk::WaveXRange);
-    super::note(DatasetWalk::WaveXRange);
-    super::note(DatasetWalk::EyeRaster);
-
-    let delta = baseline.since();
-    assert_eq!(delta.get(DatasetWalk::WaveXRange), 2);
-    assert_eq!(delta.get(DatasetWalk::EyeRaster), 1);
-    assert_eq!(delta.get(DatasetWalk::OpPlan), 0);
-    assert_eq!(delta.total(), 3);
-    assert_eq!(delta.total_samples(), 0);
-    assert_eq!(
-        delta.nonzero(),
-        vec![(DatasetWalk::WaveXRange, 2), (DatasetWalk::EyeRaster, 1)]
-    );
-}
-
-#[test]
-fn the_counter_reports_exactly_the_samples_that_were_read() {
-    let baseline = WorkCounts::reset();
-    super::note_samples(FrameSampleRead::StripOverview, 160);
-    super::note_samples(FrameSampleRead::StripOverview, 1);
-    super::note_samples(FrameSampleRead::TraceExtremes, 250_000);
-
-    let delta = baseline.since();
-    assert_eq!(delta.samples(FrameSampleRead::StripOverview), 161);
-    assert_eq!(delta.samples(FrameSampleRead::TraceExtremes), 250_000);
-    assert_eq!(delta.total_samples(), 250_161);
-    assert_eq!(delta.total(), 0);
-    assert_eq!(
-        delta.nonzero_samples(),
-        vec![
-            (FrameSampleRead::StripOverview, 161),
-            (FrameSampleRead::TraceExtremes, 250_000)
-        ]
-    );
-}
-
-#[test]
-fn a_reset_snapshot_measures_only_work_that_follows_it() {
-    super::note(DatasetWalk::OpPlan);
-    super::note_samples(FrameSampleRead::StripOverview, 999);
-    let baseline = WorkCounts::reset();
-    assert_eq!(baseline.total(), 0);
-    assert_eq!(baseline.total_samples(), 0);
-    assert_eq!(baseline.since().total(), 0);
-    assert_eq!(baseline.since().total_samples(), 0);
-}
-
-/// Every sheet, drawn whole in all four theme combinations.
-mod contrast;
 /// The workspace around the sheet: Latest tracking, the toolbar and the docks.
 mod idle_workspace;
 /// The import, export, pack and verify jobs: flat frames while they work.

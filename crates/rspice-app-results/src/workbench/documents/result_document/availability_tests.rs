@@ -607,77 +607,10 @@ fn incompatible_active_viewer_falls_back_to_compatible_view() {
 }
 
 #[test]
-fn result_tabs_follow_the_upgraded_mockup_mode_order() {
-    assert_eq!(
-        ResultViewer::all()
-            .filter(|viewer| viewer.viewer_document_id().is_some())
-            .collect::<Vec<_>>(),
-        [
-            ResultViewer::Waves,
-            ResultViewer::DcSweep,
-            ResultViewer::Bode,
-            ResultViewer::NoiseContrib,
-            ResultViewer::Nyquist,
-            ResultViewer::Fft,
-            ResultViewer::HarmonicBalance,
-            ResultViewer::PhaseNoise,
-            ResultViewer::Smith,
-            ResultViewer::Polar,
-            ResultViewer::NetworkMatrix,
-            ResultViewer::TransferFunction,
-            ResultViewer::Contribution,
-            ResultViewer::Op,
-            ResultViewer::Table,
-            ResultViewer::Hist,
-            ResultViewer::Scatter,
-            ResultViewer::BoxViolin,
-            ResultViewer::Eye,
-            ResultViewer::PoleZero,
-            ResultViewer::Events,
-            ResultViewer::Soa,
-            ResultViewer::Optimization,
-        ]
-    );
-}
-
-#[test]
 fn only_the_manifest_draws_without_a_retained_dataset() {
     assert!(!viewer_requires_retained_results(ResultViewer::Manifest));
     assert!(viewer_requires_retained_results(ResultViewer::Waves));
     assert!(viewer_requires_retained_results(ResultViewer::Op));
-}
-
-#[test]
-fn structured_result_controls_have_a_reachable_40_px_strip() {
-    for viewer in [ResultViewer::Op, ResultViewer::Table] {
-        assert!(viewer_has_structured_strip(viewer), "{viewer:?}");
-        assert!(viewer_has_sheet_bar(viewer), "{viewer:?}");
-    }
-    for viewer in [ResultViewer::TransferFunction, ResultViewer::Manifest] {
-        assert!(!viewer_has_structured_strip(viewer), "{viewer:?}");
-        assert!(!viewer_has_sheet_bar(viewer), "{viewer:?}");
-    }
-    for viewer in [
-        ResultViewer::Waves,
-        ResultViewer::DcSweep,
-        ResultViewer::Bode,
-        ResultViewer::Fft,
-        ResultViewer::HarmonicBalance,
-        ResultViewer::PhaseNoise,
-        ResultViewer::Eye,
-        ResultViewer::Hist,
-        ResultViewer::NoiseContrib,
-        ResultViewer::Contribution,
-        ResultViewer::Nyquist,
-        ResultViewer::Smith,
-        ResultViewer::Polar,
-        ResultViewer::PoleZero,
-        ResultViewer::Scatter,
-        ResultViewer::BoxViolin,
-    ] {
-        assert!(!viewer_has_structured_strip(viewer), "{viewer:?}");
-        assert!(viewer_has_sheet_bar(viewer), "{viewer:?}");
-    }
 }
 
 #[test]

@@ -193,8 +193,6 @@ use rspice_results::result_presentation::{
 };
 use rspice_results_ui::chrome;
 use rspice_results_ui::chrome::bars::viewer_has_sheet_bar;
-#[cfg(test)]
-use rspice_results_ui::chrome::bars::viewer_has_structured_strip;
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;

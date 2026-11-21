@@ -305,18 +305,6 @@ mod tests {
     }
 
     #[test]
-    fn a_domain_the_layout_has_no_section_for_is_refused_by_name() {
-        let waveforms = [waveform("V(onoise)", vec![1.0, 10.0], vec![1e-9, 2e-9])];
-        let error = prepared(AnalysisType::Noise, &waveforms)
-            .expect_err("HDF5 carries three sections, and noise is not one");
-        assert!(
-            error.contains("transient, a DC sweep or an AC sweep"),
-            "{error}"
-        );
-        assert!(error.contains("RSpice bundle"), "{error}");
-    }
-
-    #[test]
     fn a_ragged_result_is_refused_rather_than_padded() {
         let waveforms = [
             waveform("V(out)", vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]),

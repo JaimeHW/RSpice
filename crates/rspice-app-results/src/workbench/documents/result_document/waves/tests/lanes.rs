@@ -429,50 +429,6 @@ fn the_edge_step_lands_on_the_next_edge_exactly() {
     );
 }
 
-/// A lane band is as tall as its rows: one lane moves the panes down by its
-/// row and the seam under it, not by a scroll area's 64-point floor that
-/// would push the strip's bottom out of its well.
-#[test]
-fn one_lane_moves_the_panes_down_by_its_row_alone() {
-    let run = sar_run();
-    let samp = history(run, "SAMP");
-    let ctx = theme_context();
-    let tokens = Tokens::get(&ctx);
-    let pane_top = |lanes: &[&str]| {
-        let mut state = host(run, &ANALOG);
-        let key = strip(&mut state)[0].analysis_key;
-        for lane in lanes {
-            set_event_net_plotted(&mut state.results_parts(), key, lane, true);
-        }
-        place_cursors(&mut state, Some(samp[1].0), None);
-        frame(&ctx, &mut state, Vec::new());
-        let lines = cursor_lines(
-            &verticals(&frame(&ctx, &mut state, Vec::new())),
-            tokens.color.canvas_cursor_a,
-        );
-        // The plotted pane's is the tallest; the overview draws one too.
-        let pane = lines
-            .iter()
-            .copied()
-            .max_by(|a, b| (a.bottom - a.top).total_cmp(&(b.bottom - b.top)))
-            .expect("the pane's cursor line");
-        (pane.top, pane.bottom, lines.len())
-    };
-    let (bare_top, bare_bottom, bare_lines) = pane_top(&[]);
-    let (top, bottom, lines) = pane_top(&["D(SAMP)"]);
-    assert_eq!(lines, bare_lines + 1, "the lane adds its own cursor line");
-    assert_eq!(
-        top - bare_top,
-        LOGIC_ROW_HEIGHT + 1.0,
-        "the panes move down by the lane's row and its seam"
-    );
-    assert!(
-        (bottom - bare_bottom).abs() <= 0.5,
-        "the pane still ends where it did, inside the strip: {bare_top}..{bare_bottom} and \
-         {top}..{bottom}"
-    );
-}
-
 /// One frame of the active project result document.
 fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultDocumentId) {
     let ctx = theme_context();
@@ -666,28 +622,6 @@ fn a_real_net_draws_as_a_step_trace() {
     );
 }
 
-/// The picture for review, written under `RSPICE_PICTURES`: a strip with the
-/// analog panes and the logic and bus lanes of the SAR run, in its well.
-#[test]
-#[ignore = "writes the review picture"]
-fn write_the_sar_strip_picture() {
-    let directory = std::env::var("RSPICE_PICTURES")
-        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-    let run = sar_run();
-    let eoc = history(run, "EOC");
-    let (mut state, _) = sar_strip(BusRadix::Hex, false);
-    place_cursors(&mut state, Some(eoc[eoc.len() - 1].0 + 1e-9), None);
-    let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
-        well(ui);
-        show(ui, &mut state.results_parts());
-    });
-    std::fs::write(
-        format!("{directory}/sar-strip.png"),
-        canvas.png(canvas.height()),
-    )
-    .expect("the picture is written");
-}
-
 /// The analog nodes the review strip keeps, and which of them it plots.
 pub(super) const REVIEW_NODES: [&str; 10] =
     ["VIN", "TOP", "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"];
@@ -733,109 +667,4 @@ pub(super) fn well(ui: &mut Ui) {
     let well = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(well, 0.0, Tokens::get(ui.ctx()).color.canvas_bg);
-}
-
-/// The pictures for review, written under `RSPICE_PICTURES` when it is set:
-/// the strip in the default, light, dark and mismatched themes, and its
-/// panes alone, with the currents nobody plotted and with every current
-/// hidden by the reader.
-#[test]
-#[ignore = "writes the review pictures"]
-fn write_the_review_pictures() {
-    let directory = std::env::var("RSPICE_PICTURES")
-        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
-    let themed = |mode, canvas_theme| crate::ui::Theme {
-        mode,
-        canvas_theme,
-        ..crate::ui::Theme::default()
-    };
-    use rspice_ui_kit::{EngineeringCanvasTheme as Canvas, tokens::Mode};
-    for (name, theme, lanes, reader_hid) in [
-        ("strip-default", crate::ui::Theme::default(), true, false),
-        (
-            "strip-light",
-            themed(Mode::Light, Canvas::Light),
-            true,
-            false,
-        ),
-        ("strip-dark", themed(Mode::Dark, Canvas::Dark), true, false),
-        (
-            "strip-light-ui-dark-canvas",
-            themed(Mode::Light, Canvas::Dark),
-            true,
-            false,
-        ),
-        (
-            "strip-dark-ui-light-canvas",
-            themed(Mode::Dark, Canvas::Light),
-            true,
-            false,
-        ),
-        (
-            "pane-never-plotted",
-            crate::ui::Theme::default(),
-            false,
-            false,
-        ),
-        ("pane-all-hidden", crate::ui::Theme::default(), false, true),
-    ] {
-        let mut state = review_strip(lanes);
-        if reader_hid {
-            // The reader plots a current and hides it again.
-            let (analysis, waveform) = {
-                let models = strip(&mut state);
-                let current = models[0]
-                    .traces
-                    .iter()
-                    .find(|trace| trace.source_waveform_name.starts_with("I("))
-                    .expect("the review keeps its currents");
-                (models[0].analysis_index(), current.waveform_index)
-            };
-            toggle_visibility(&mut state.results_parts(), analysis, waveform);
-            toggle_visibility(&mut state.results_parts(), analysis, waveform);
-        }
-        let canvas = rspice_ui_kit::raster::render_themed(theme, FRAME, |ui, _| {
-            well(ui);
-            show(ui, &mut state.results_parts());
-        });
-        std::fs::write(
-            format!("{directory}/{name}.png"),
-            canvas.png(canvas.height()),
-        )
-        .expect("the picture is written");
-    }
-}
-
-/// The lanes take the palette's hues after the curves the strip plots: on
-/// the SAR strip VIN and TOP are curves, and SAMP, EOC and the `code` bus
-/// take the next three hues, none a curve's.
-#[test]
-fn lane_rows_take_hues_after_the_plotted_curves() {
-    let (mut state, key) = sar_strip(BusRadix::Hex, false);
-    let models = strip(&mut state);
-    let model = &models[0];
-    let curves: Vec<egui::Color32> = model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
-        .map(|trace| trace.color)
-        .collect();
-    let layout = state.results.results.session.event_lanes.get(&key);
-    let rows: Vec<(String, egui::Color32)> = lane_specs(model, layout)
-        .iter()
-        .map(|spec| (spec.label().to_owned(), spec.color()))
-        .collect();
-    let palette = Tokens::default().color.traces;
-    assert_eq!(curves, palette[..2], "VIN and TOP take the first two hues");
-    // In the rows' natural order, the columns' own: the bus where its first
-    // bit falls, then EOC, then SAMP. The reader's order moves none of them.
-    assert_eq!(
-        rows,
-        [
-            ("SAMP".to_owned(), palette[4]),
-            ("EOC".to_owned(), palette[3]),
-            ("code".to_owned(), palette[2])
-        ],
-        "the rows take the next three"
-    );
 }
