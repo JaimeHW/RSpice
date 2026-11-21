@@ -571,6 +571,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  The previous 2 runs | overlay-previous-2-runs |  | off: open a result in Results | unselected",
             "  The previous 3 runs | overlay-previous-3-runs |  | off: open a result in Results | unselected",
             "Fit Y to visible X | fit-y-to-visible-x |  | off: open a waveform sheet in Results",
+            "Plot against… | plot-against |  | off: click a waveform strip in Results",
             "Plot properties… | plot-properties |  | off: open a result in Results",
             "Calculator… | calculator | E | on",
             "Selected trace >",

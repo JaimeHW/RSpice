@@ -226,6 +226,24 @@ fn a_copy_draws_the_curve_on_both_strips() {
     );
 }
 
+/// A removed curve leaves every strip that listed it, its copy's too, and
+/// plotted again it goes back to its unit's strip.
+#[test]
+fn a_removed_curve_leaves_every_strip_and_comes_back_to_its_units() {
+    let mut model = rail_and_ripple();
+    let ripple = trace(&model, "V(ripple)");
+    model.arrangement = copy_to_new_strip(&model, ripple).expect("a copy");
+    model.arrangement = move_to_new_axis(&model, ripple).expect("an axis of its own");
+    model.arrangement = remove(&model, ripple).expect("removed");
+    let Curve::Trace(index) = ripple else {
+        unreachable!()
+    };
+    model.traces[index].visible = false;
+    assert_eq!(drawn(&model), [[["V(rail)"]]]);
+    model.traces[index].visible = true;
+    assert_eq!(drawn(&model), [[["V(rail)", "V(ripple)"]]]);
+}
+
 #[test]
 fn a_hidden_curve_comes_back_to_the_strip_that_listed_it() {
     let mut model = model(&[

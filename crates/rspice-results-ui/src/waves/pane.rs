@@ -637,6 +637,20 @@ fn paint_tolerance(painter: &egui::Painter, mapper: &plot::PlotMapper, band: &To
 pub struct PanePlotResponse<'a> {
     pub response: plot::PlotResponse,
     pub nearest_trace: Option<&'a StripTrace>,
+    /// What a right click on the plot found this frame.
+    pub context: Option<PlotContext<'a>>,
+}
+
+/// Where a right click on the plot landed and what it found there: what the
+/// plot's menu acts on.
+pub struct PlotContext<'a> {
+    pub x: f64,
+    /// The value of the pane's first axis at the height clicked.
+    pub y: f64,
+    /// The curve nearest the click.
+    pub trace: Option<&'a StripTrace>,
+    /// What the hover readout reads at `x`.
+    pub values: Vec<(String, String)>,
 }
 
 /// Draw source curves, envelopes, expressions and markers with the exact retained readout.
@@ -1258,9 +1272,24 @@ pub fn show_plot<'a>(
                 interpolation,
             )
         });
+    let context = response.context_at.map(|(x, y)| PlotContext {
+        x,
+        y,
+        trace: nearest_drawn_trace(
+            &pane_traces,
+            x,
+            response.response.interact_pointer_pos().map(|pos| pos.y),
+            response.plot_rect,
+            y_scale,
+            (y0, y1),
+            interpolation,
+        ),
+        values: readout(x),
+    });
     PanePlotResponse {
         response,
         nearest_trace,
+        context,
     }
 }
 

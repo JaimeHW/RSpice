@@ -34,6 +34,24 @@ pub trait PaneHeaderHost {
     fn activate_pane(&mut self);
     /// Add an expression to the strip, as a trace's menu asks.
     fn add_expression(&mut self, _text: String) {}
+    /// Whether the host runs a trace's menu's measure, spectrum and
+    /// calculator entries, which the menu then offers.
+    fn offers_trace_commands(&self) -> bool {
+        false
+    }
+    /// Run `command` on `trace`, as its menu asks.
+    fn trace_command(&mut self, _trace: &StripTrace, _command: TraceCommand) {}
+}
+
+/// What a trace's menu hands the host to do with the trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceCommand {
+    /// Measure the trace.
+    Measure,
+    /// Take the trace's spectrum.
+    Spectrum,
+    /// Hand the trace to the waveform calculator.
+    SendToCalculator,
 }
 
 /// One of the strip's expressions on this pane, as its legend entry states
@@ -909,23 +927,73 @@ fn legend_chip(
         host.select_trace(trace);
     }
     crate::context_menu::context_menu(&label, |ui| {
-        if let Some((model, curve)) = curve {
-            output.arrange = output
-                .arrange
-                .take()
-                .or_else(|| super::strip_drag::curve_menu(ui, model, curve));
-            ui.separator();
-        }
-        rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
-            if let Some(text) =
-                super::logic::convert::digital_form(ui, &trace.source_waveform_name, || {
-                    trace_middle(trace)
-                })
-            {
-                host.add_expression(text);
-            }
-        });
+        trace_menu(ui, trace, curve, host, output);
     });
+}
+
+/// A plotted trace's menu: hide it, move it to another strip or axis,
+/// measure it, take its spectrum, hand it to the calculator, read it as a
+/// logic signal, or take it off the plot, as ViVA's trace menu offers.
+fn trace_menu(
+    ui: &mut Ui,
+    trace: &StripTrace,
+    curve: Option<(&StripModel, super::strip_layout::Curve)>,
+    host: &mut impl PaneHeaderHost,
+    output: &mut UnitPaneHeaderResponse,
+) {
+    if ui.button("Hide").clicked() {
+        host.toggle_trace_visibility(trace);
+        ui.close();
+    }
+    if let Some((model, curve)) = curve {
+        output.arrange = output
+            .arrange
+            .take()
+            .or_else(|| super::strip_drag::curve_menu(ui, model, curve));
+    }
+    ui.separator();
+    if host.offers_trace_commands() {
+        let mut command = None;
+        if ui.button("Measure\u{2026}").clicked() {
+            command = Some(TraceCommand::Measure);
+        }
+        // A spectrum is taken of a waveform over time.
+        let over_time = curve.is_some_and(|(model, _)| {
+            model.analysis_type == rspice_results::analysis_type::AnalysisType::Transient
+        });
+        if over_time && ui.button("Spectrum").clicked() {
+            command = Some(TraceCommand::Spectrum);
+        }
+        if ui.button("Send to calculator").clicked() {
+            command = Some(TraceCommand::SendToCalculator);
+        }
+        if let Some(command) = command {
+            host.trace_command(trace, command);
+            ui.close();
+        }
+    }
+    rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
+        if let Some(text) =
+            super::logic::convert::digital_form(ui, &trace.source_waveform_name, || {
+                trace_middle(trace)
+            })
+        {
+            host.add_expression(text);
+        }
+    });
+    if let Some((model, curve)) = curve {
+        ui.separator();
+        let remove = ui.button("Remove").on_hover_text(
+            "Take the curve off the plot; plotted again from the trace list, it goes back to its unit's strip",
+        );
+        if remove.clicked() {
+            if let Ok(strips) = super::strip_layout::remove(model, curve) {
+                output.arrange = Some(strips);
+            }
+            host.toggle_trace_visibility(trace);
+            ui.close();
+        }
+    }
 }
 
 /// A legend entry's name, which a drag carries onto another strip or

@@ -625,6 +625,9 @@ pub struct ResultViewerState {
     pub cursor_a_anchor: Option<WaveformPresentationKey>,
     /// Unit-scoped waveform pane receiving instrument actions.
     pub active_wave_pane: Option<WavePanePresentationKey>,
+    /// A waveform pane whose "Plot against" choices the command list asked
+    /// for: the stack opens them over the pane the next time it draws it.
+    pub plot_against_request: Option<WavePanePresentationKey>,
     /// The cursor the arrow keys and the jump commands move. A click that
     /// places a cursor makes it the stepping one, as does dragging it.
     pub stepping_cursor: CursorId,

@@ -460,6 +460,21 @@ pub fn move_to_new_strip(model: &StripModel, curve: Curve) -> Result<Vec<Strip>,
     Ok(arranging.finish())
 }
 
+/// "Remove": `curve` off every strip that lists it. Plotted again, it goes
+/// where a curve no strip lists goes: to its unit's strip.
+pub fn remove(model: &StripModel, curve: Curve) -> Result<Vec<Strip>, String> {
+    let mut arranging = Arranging::of(model);
+    let member = curve
+        .member(model)
+        .ok_or_else(|| "That curve is no longer drawn.".to_owned())?;
+    for strip in &mut arranging.strips {
+        for axis in 0..strip.axes.len() {
+            take(strip, axis, &member);
+        }
+    }
+    Ok(arranging.finish())
+}
+
 /// "Copy to new strip": `curve` also on a new strip under its own.
 pub fn copy_to_new_strip(model: &StripModel, curve: Curve) -> Result<Vec<Strip>, String> {
     let mut arranging = Arranging::of(model);

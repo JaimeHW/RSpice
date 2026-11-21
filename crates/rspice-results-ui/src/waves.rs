@@ -26,6 +26,7 @@ pub mod logic;
 pub mod marker_dialog;
 pub mod navigation;
 pub mod pane;
+mod plot_menu;
 mod policy;
 mod projection;
 pub mod readout;

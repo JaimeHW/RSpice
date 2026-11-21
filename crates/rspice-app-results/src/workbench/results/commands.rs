@@ -84,6 +84,8 @@ pub enum ResultsCommand {
     FitYToVisibleX,
     /// Go forward to the waveform view Zoom previous stepped back from.
     ZoomNext,
+    /// Offer what the active strip's curves may be plotted against.
+    PlotAgainst,
     /// Keep the view in front as a result document of the project.
     SaveViewAsDocument,
     /// Give the saved result document shown another name.
@@ -156,7 +158,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 68] = [
+    pub const ALL: [Self; 69] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -214,6 +216,7 @@ impl ResultsCommand {
         Self::MarkerAtCursor,
         Self::FitYToVisibleX,
         Self::ZoomNext,
+        Self::PlotAgainst,
         Self::SaveViewAsDocument,
         Self::RenameDocument,
         Self::DuplicateDocument,
@@ -269,6 +272,7 @@ impl ResultsCommand {
             Self::MarkerAtCursor => CommandKey::new("marker-at-cursor"),
             Self::FitYToVisibleX => CommandKey::new("fit-y-to-visible-x"),
             Self::ZoomNext => CommandKey::new("zoom-next"),
+            Self::PlotAgainst => CommandKey::new("plot-against"),
             Self::SaveViewAsDocument => CommandKey::new("save-view-as-document"),
             Self::RenameDocument => CommandKey::new("rename-result-document"),
             Self::DuplicateDocument => CommandKey::new("duplicate-result-document"),
@@ -451,6 +455,13 @@ impl ResultsCommand {
             ),
             Self::ZoomNext => (
                 "Zoom next",
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::PlotAgainst => (
+                "Plot against\u{2026}",
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,

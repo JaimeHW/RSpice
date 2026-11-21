@@ -69,6 +69,9 @@ pub struct PlotResponse {
     pub response: Response,
     /// Data-space X of a primary click inside the plot area, this frame.
     pub clicked_x: Option<f64>,
+    /// Data-space X and left-axis Y of a right click inside the plot area,
+    /// this frame: where the plot's context menu acts.
+    pub context_at: Option<(f64, f64)>,
     /// A horizontal cursor a click or drag placed or moved: its slot (0 is
     /// H1, 1 is H2) and its new left-axis value.
     pub horizontal_cursor: Option<(usize, f64)>,
@@ -1032,6 +1035,7 @@ pub fn show(
     let mut out = PlotResponse {
         response,
         clicked_x: None,
+        context_at: None,
         horizontal_cursor: None,
         cursor_drag: None,
         plot_rect,
@@ -1797,6 +1801,14 @@ pub fn show(
         }
         if out.response.clicked() {
             out.clicked_x = Some(data_x);
+        }
+        if out.response.secondary_clicked() {
+            let fraction = ((plot_rect.bottom() - pointer.y) / plot_rect.height()).clamp(0.0, 1.0);
+            out.context_at = Some((
+                data_x,
+                spec.y_scale
+                    .denormalize(f64::from(fraction), spec.y.min, spec.y.max),
+            ));
         }
         if spec.horizontal_cursor_interactive && grabbed.is_none() {
             // The slot is chosen where the gesture starts and kept for the

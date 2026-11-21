@@ -82,6 +82,15 @@ pub trait StackHost {
     /// Say why an arrangement of the strips the reader asked for cannot be
     /// made: a fifth unit on a strip, say.
     fn refuse(&mut self, _reason: String) {}
+    /// Whether the host takes a note added at a point of a plot, which the
+    /// plot's menu then offers.
+    fn offers_notes(&self) -> bool {
+        false
+    }
+    /// Add a note at (`x`, `y`) of `pane`'s plot, `y` read on its first axis.
+    fn add_note(&mut self, _model: &StripModel, _pane: &UnitPane, _x: f64, _y: f64) {}
+    /// Hand `trace` to the waveform calculator, as the plot's menu asks.
+    fn send_to_calculator(&mut self, _model: &StripModel, _trace: &StripTrace) {}
     /// Evaluate `text` as the abscissa a pane is drawn against, once per
     /// member of the strip. A host without a calculator has none to offer.
     fn resolve_abscissa_expression(
@@ -1933,6 +1942,14 @@ fn show_unit_pane(
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
     let response = drawn.response;
     note_plot_stop(ui.ctx(), response.response.id);
+    let plot_choice = plot_menu(
+        ui,
+        host,
+        model,
+        pane,
+        (&response.response, drawn.context.as_ref()),
+        (options.pane_chrome, window),
+    );
     let secondary_views =
         super::axes::secondary_axes(ui, model, &secondary, response.plot_rect, gutter, &t);
     // A pane becomes the active one when the reader acts on it: a click, a
@@ -2000,14 +2017,19 @@ fn show_unit_pane(
         session.stepping_cursor = cursor;
     }
 
-    if response.view.reset {
+    let fit = plot_choice == Some(super::plot_menu::PlotChoice::Fit);
+    if let Some(choice) = plot_choice.filter(|_| !fit) {
+        act_on_plot_choice(ui, host, model, pane, choice);
+    }
+    if response.view.reset || fit {
+        // A fit reaches every axis the strip reads: its first and the
+        // columns beside it.
         set_shared_x_view(host.session_mut(), model.analysis_key, None);
-        let view = host.session_mut().analysis_plot_view_pane_mut(
-            ResultViewer::Waves,
-            model.analysis_key,
-            pane.slot,
-        );
-        view.y = None;
+        for slot in std::iter::once(pane.slot).chain(secondary.iter().map(|axis| axis.slot)) {
+            host.session_mut()
+                .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, slot)
+                .y = None;
+        }
     } else if response.view.any() {
         if let Some(x) = response.view.x {
             set_shared_x_view(host.session_mut(), model.analysis_key, Some(x));
@@ -2029,6 +2051,158 @@ fn show_unit_pane(
     }
 
     paint_active_rail(ui, host, model, pane, pane_top, &t);
+}
+
+/// Draw the plot's menu over `plot`, kept where the right click that opened
+/// it landed, and return what the reader chose from it. Opened from the
+/// keyboard, it acts on the middle of `window`.
+fn plot_menu(
+    ui: &mut Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    pane: &UnitPane,
+    (plot, context): (&egui::Response, Option<&pane_view::PlotContext<'_>>),
+    (chrome, window): (bool, (f64, f64)),
+) -> Option<super::plot_menu::PlotChoice> {
+    use super::plot_menu::{MenuOffers, MenuPlace};
+    let place_id = plot.id.with("plot-menu-place");
+    if let Some(context) = context {
+        let place = MenuPlace {
+            x: context.x,
+            y: context.y,
+            trace: context.trace.and_then(|trace| {
+                model
+                    .traces
+                    .iter()
+                    .position(|held| std::ptr::eq(held, trace))
+            }),
+            values: context.values.clone(),
+        };
+        ui.data_mut(|data| data.insert_temp(place_id, place));
+    }
+    let place = ui
+        .data(|data| data.get_temp::<MenuPlace>(place_id))
+        .unwrap_or(MenuPlace {
+            x: 0.5 * (window.0 + window.1),
+            y: f64::NAN,
+            trace: None,
+            values: Vec::new(),
+        });
+    let against = chrome.then(|| abscissa_menu(host.session(), model, pane, None));
+    let offers = MenuOffers {
+        notes: host.offers_notes(),
+        against: against.as_ref().map(|menu| {
+            (
+                menu,
+                pane.quantity_unit(),
+                plot.id.with("plot-against-draft"),
+            )
+        }),
+    };
+    let choice = crate::context_menu::context_menu(plot, |ui| {
+        super::plot_menu::show(ui, model, &place, &offers)
+    })
+    .and_then(|inner| inner.inner);
+    // "Plot against" from the command list opens the choices over the pane
+    // it was asked for.
+    let against_id = plot.id.with("plot-against-menu");
+    let pane_key = WavePanePresentationKey {
+        analysis: model.analysis_key,
+        unit: pane.unit.to_owned(),
+    };
+    if host.session().plot_against_request.as_ref() == Some(&pane_key) {
+        host.session_mut().plot_against_request = None;
+        egui::Popup::open_id(ui.ctx(), against_id);
+    }
+    let against_choice = offers.against.and_then(|(menu, unit, draft_id)| {
+        egui::Popup::new(against_id, ui.ctx().clone(), plot, ui.layer_id())
+            .kind(egui::PopupKind::Menu)
+            .layout(egui::Layout::top_down_justified(egui::Align::Min))
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .open_memory(None)
+            .show(|ui| {
+                pane_header::abscissa_choices(
+                    ui,
+                    unit,
+                    menu,
+                    &|name: &str| name.to_owned(),
+                    draft_id,
+                )
+            })
+            .and_then(|inner| inner.inner)
+    });
+    if against_choice.is_some() {
+        egui::Popup::close_id(ui.ctx(), against_id);
+    }
+    let choice = choice.or(against_choice.map(super::plot_menu::PlotChoice::PlotAgainst));
+    choice.map(|choice| match choice {
+        super::plot_menu::PlotChoice::CopyValues => {
+            ui.ctx()
+                .copy_text(super::plot_menu::copied_values(&place.values));
+            super::plot_menu::PlotChoice::CopyValues
+        }
+        super::plot_menu::PlotChoice::Note => {
+            host.add_note(model, pane, place.x, place.y);
+            super::plot_menu::PlotChoice::Note
+        }
+        super::plot_menu::PlotChoice::Cursor(cursor) => {
+            place_cursor(host, model, cursor, place.x, place.trace);
+            super::plot_menu::PlotChoice::Cursor(cursor)
+        }
+        super::plot_menu::PlotChoice::Marker(index) => {
+            if let Some(trace) = model.traces.get(index) {
+                host.place_marker(model, trace, place.x);
+            }
+            super::plot_menu::PlotChoice::Marker(index)
+        }
+        other => other,
+    })
+}
+
+/// Do what the plot's menu was asked beyond what [`plot_menu`] does itself.
+fn act_on_plot_choice(
+    ui: &Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    pane: &UnitPane,
+    choice: super::plot_menu::PlotChoice,
+) {
+    match choice {
+        super::plot_menu::PlotChoice::Calculator(index) => {
+            if let Some(trace) = model.traces.get(index) {
+                host.send_to_calculator(model, trace);
+            }
+        }
+        super::plot_menu::PlotChoice::PlotAgainst(abscissa) => {
+            open_xy_strip(ui.ctx(), host.session_mut(), model, pane.axis, abscissa);
+        }
+        _ => {}
+    }
+}
+
+/// Put `cursor` at `x` on `model`'s strip, as a click there places one: a
+/// pair standing on another strip starts afresh here, and A rides the
+/// curve nearest the click.
+fn place_cursor(
+    host: &mut impl StackHost,
+    model: &StripModel,
+    cursor: CursorId,
+    x: f64,
+    nearest: Option<usize>,
+) {
+    let anchor = nearest
+        .and_then(|index| model.traces.get(index))
+        .map(|trace| anchor_key(model, trace));
+    let session = host.session_mut();
+    if session.cursor_strip != Some(model.analysis_index) {
+        session.cursors = CursorPair::default();
+    }
+    session.cursor_strip = Some(model.analysis_index);
+    session.cursors.set(cursor, x);
+    if cursor == CursorId::A {
+        session.cursor_a_anchor = anchor;
+    }
+    session.stepping_cursor = cursor;
 }
 
 /// Plot the `unit` pane's curves of `model` against `abscissa` in a strip of

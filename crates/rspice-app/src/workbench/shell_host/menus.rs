@@ -677,6 +677,7 @@ const RESULTS_MENU: &[MenuEntry] = &[
     MenuEntry::submenu("Cursors", CURSORS_MENU).access('U'),
     MenuEntry::submenu("Overlay previous runs", OVERLAY_MENU).access('O'),
     results(ResultsCommand::FitYToVisibleX).access('Y'),
+    results(ResultsCommand::PlotAgainst).access('G'),
     results(ResultsCommand::VisualizationDocumentProperties).access('P'),
     results(ResultsCommand::WaveformCalculator).access('C'),
     MenuEntry::submenu("Selected trace", TRACE_MENU).access('L'),

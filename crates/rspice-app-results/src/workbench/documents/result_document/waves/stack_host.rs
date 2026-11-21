@@ -99,6 +99,14 @@ impl StackHost for WaveStackHost<'_, '_> {
     fn refuse(&mut self, reason: String) {
         self.0.prompt(reason);
     }
+    fn send_to_calculator(&mut self, model: &StripModel, trace: &StripTrace) {
+        run_on_trace(
+            self.0,
+            model,
+            trace,
+            crate::workbench::results::commands::ResultsCommand::SendTraceToCalculator,
+        );
+    }
     fn event_lane_height(&self, model: &StripModel) -> f32 {
         super::lanes::lane_height(self.0, model)
     }
@@ -187,6 +195,22 @@ fn show_unit_pane_header(
         fn add_expression(&mut self, text: String) {
             super::expressions::add_strip_expression(self.state, self.model.analysis_key, text);
         }
+
+        fn offers_trace_commands(&self) -> bool {
+            true
+        }
+
+        fn trace_command(&mut self, trace: &StripTrace, command: pane_header::TraceCommand) {
+            use crate::workbench::results::commands::ResultsCommand;
+            let command = match command {
+                pane_header::TraceCommand::Measure => ResultsCommand::MeasurementLibrary,
+                pane_header::TraceCommand::Spectrum => ResultsCommand::TraceSpectrum,
+                pane_header::TraceCommand::SendToCalculator => {
+                    ResultsCommand::SendTraceToCalculator
+                }
+            };
+            run_on_trace(self.state, self.model, trace, command);
+        }
     }
     pane_header::show_header(
         ui,
@@ -200,4 +224,22 @@ fn show_unit_pane_header(
             pane_key,
         },
     )
+}
+
+/// Select `trace` and run `command`, which acts on the selected trace, once
+/// the frame is drawn.
+fn run_on_trace(
+    state: &mut ResultsParts<'_>,
+    model: &StripModel,
+    trace: &StripTrace,
+    command: crate::workbench::results::commands::ResultsCommand,
+) {
+    state.results.session.selected_trace = Some(SelectedResultTrace::from_identity(
+        model.analysis_key,
+        trace.source_waveform_name.clone(),
+    ));
+    state
+        .workbench
+        .outbox
+        .push(crate::workbench::framework::feature::Execute(command.key()));
 }

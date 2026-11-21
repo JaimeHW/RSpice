@@ -754,6 +754,12 @@ impl CommandSet for ResultsCommand {
                 zoom_next_available(state),
                 "Zoom previous has not stepped back from a later view",
             ),
+            Self::PlotAgainst => available_or(
+                workbench.workspace == Workspace::Results
+                    && state.results.session.active_wave_pane.is_some()
+                    && zoom_gesture_available(state),
+                "click a waveform strip in Results",
+            ),
             Self::ResultViewer(ResultViewer::Waves) => CommandAvailability::Available,
             Self::ResultViewer(viewer) => {
                 if viewer_is_available(state, viewer) {
@@ -913,6 +919,10 @@ impl CommandSet for ResultsCommand {
             Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
             Self::FitYToVisibleX => fit_y_to_visible_x(&mut results_parts(cx)),
             Self::ZoomNext => zoom_next(&mut results_parts(cx)),
+            Self::PlotAgainst => {
+                let session = &mut cx.state.results.session;
+                session.plot_against_request = session.active_wave_pane.clone();
+            }
             Self::OpenProducingPlan => {
                 match producing_plan_hop(cx.state.reads(cx.model, cx.wb)) {
                     Ok(hop) => {
