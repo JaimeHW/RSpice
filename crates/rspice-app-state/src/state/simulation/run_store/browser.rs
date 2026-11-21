@@ -1090,15 +1090,19 @@ fn pending(error: &StoreError) -> bool {
     )
 }
 
+/// A piece of a kept segment: the segment's digest and the piece's index in it.
+type PieceKey = ([u8; 32], u64);
+
 /// The pieces of kept segments the page holds, for the reads it makes of them itself, under a
 /// quarter of the loaded results budget, the least recently read let go first.
 #[derive(Default)]
 struct Pieces {
-    held: HashMap<([u8; 32], u64), (Arc<[u8]>, u64)>,
+    /// Each piece by its segment's digest and its index, with the tick it was last read at.
+    held: HashMap<PieceKey, (Arc<[u8]>, u64)>,
     bytes: u64,
     tick: u64,
     /// Pieces a read found missing, each with its segment's length, to be fetched.
-    wanted: BTreeMap<([u8; 32], u64), u64>,
+    wanted: BTreeMap<PieceKey, u64>,
     fetching: bool,
 }
 
