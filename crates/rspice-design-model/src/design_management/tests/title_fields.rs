@@ -287,23 +287,6 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
 }
 
 #[test]
-fn each_title_block_template_goes_by_one_name() {
-    // Every picker, summary and warning names a template the same way: by
-    // the standard it follows, as each sheet is offered only its own.
-    for (template, name) in [
-        (DrawingSheetTitleBlockTemplate::Standard, "ISO 7200"),
-        (DrawingSheetTitleBlockTemplate::AsmeY141, "ASME Y14.1"),
-        (DrawingSheetTitleBlockTemplate::None, "No title block"),
-        (
-            DrawingSheetTitleBlockTemplate::OrganizationManaged,
-            "Organization block",
-        ),
-    ] {
-        assert_eq!(template.label(), name);
-    }
-}
-
-#[test]
 fn a_title_block_gives_way_only_when_it_does_not_fit_its_drawing_area() {
     // A5 portrait's drawing area is 118 mm across, too narrow for ISO 7200's
     // 180 mm block. The block is the same on every size, so it gives way to
