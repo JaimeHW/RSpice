@@ -51,6 +51,11 @@ struct ViewScratch {
     lanes: HashMap<AnalysisPresentationKey, EventLaneLayout>,
     pins: readout_pins::Pins,
     strips: HashMap<AnalysisPresentationKey, Vec<Strip>>,
+    family: HashMap<
+        AnalysisPresentationKey,
+        crate::results::visualization_document::FamilyPresentationPolicy,
+    >,
+    maximized: Option<AnalysisPresentationKey>,
 }
 
 /// The view the quick view last drew, the run it drew it over, and the
@@ -777,6 +782,21 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
         } else if session.strip_layouts.get(&key) != Some(&pane.strips) {
             session.strip_layouts.insert(key, pane.strips.clone());
         }
+        // The family slice and the maximized strip are the view's too.
+        match &pane.family_policy {
+            Some(policy) if session.family_policies.get(&key) != Some(policy) => {
+                session.family_policies.insert(key, policy.clone());
+            }
+            Some(_) => {}
+            None => {
+                session.family_policies.remove(&key);
+            }
+        }
+        if pane.maximized {
+            session.maximized_strip = Some(key);
+        } else if session.maximized_strip == Some(key) {
+            session.maximized_strip = None;
+        }
 
         for marker in document
             .markers()
@@ -888,6 +908,13 @@ fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)
             .filter(|(key, _)| shown(key))
             .map(|(key, strips)| (*key, strips.clone()))
             .collect(),
+        family: session
+            .family_policies
+            .iter()
+            .filter(|(key, _)| shown(key))
+            .map(|(key, policy)| (*key, policy.clone()))
+            .collect(),
+        maximized: session.maximized_strip.filter(|key| shown(key)),
     }
 }
 
@@ -999,6 +1026,17 @@ fn capture_edits(state: &ResultsParts<'_>, binding: &QuickViewBinding) -> Vec<Do
                 pane_id,
                 strips: strips.to_vec(),
             });
+        }
+        let policy = session.family_policies.get(&key);
+        if policy != pane.family_policy.as_ref() {
+            edits.push(DocumentEdit::SetPaneFamilyPresentation {
+                pane_id,
+                policy: policy.cloned(),
+            });
+        }
+        let maximized = session.maximized_strip == Some(key);
+        if maximized != pane.maximized {
+            edits.push(DocumentEdit::SetPaneMaximized { pane_id, maximized });
         }
     }
     edits

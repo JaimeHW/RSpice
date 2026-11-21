@@ -204,6 +204,7 @@ impl VisualizationDocument {
             family_policy: None,
             hidden: false,
             strips: Vec::new(),
+            maximized: false,
         });
         Ok(id)
     }
@@ -636,6 +637,10 @@ impl VisualizationDocument {
             DocumentEdit::SetPaneStrips { pane_id, strips } => {
                 super::strips::validate_strips(&strips)?;
                 self.pane_mut(pane_id)?.strips = strips;
+                Ok(())
+            }
+            DocumentEdit::SetPaneMaximized { pane_id, maximized } => {
+                self.pane_mut(pane_id)?.maximized = maximized;
                 Ok(())
             }
             DocumentEdit::AddBoundPane(pane) => {

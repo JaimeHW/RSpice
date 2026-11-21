@@ -999,6 +999,21 @@ pub fn project_pane_presentation(
             .iter()
             .map(|trace| super::trace_style::look_of(trace)),
     );
+    // The strips the document arranged the pane's stack into.
+    let strips = state
+        .model
+        .workspace
+        .content
+        .visualization_document(pane.document_id)
+        .and_then(|document| document.panes().iter().find(|held| held.id == pane.id))
+        .map(|held| held.strips.clone())
+        .unwrap_or_default();
+    let session = &mut state.results.session;
+    if strips.is_empty() {
+        session.strip_layouts.remove(&analysis_key);
+    } else if session.strip_layouts.get(&analysis_key) != Some(&strips) {
+        session.strip_layouts.insert(analysis_key, strips);
+    }
     // The expressions this pane keeps are the ones its strip draws.
     if let Some(document) = state
         .model
@@ -1283,6 +1298,25 @@ pub fn capture_pane_presentation(
         edits.extend(lanes::lane_edits(
             document, pane.id, &names, layout, &plotted,
         ));
+    }
+    // The strips as the reader arranged them, kept as the document's.
+    if let Some(run) = state.model.simulation.active_run()
+        && let Some(analysis) = state.model.simulation.active_analysis()
+        && let Some(held) = document.panes().iter().find(|held| held.id == pane.id)
+    {
+        let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+        let strips = state
+            .results
+            .session
+            .strip_layouts
+            .get(&analysis_key)
+            .map_or(&[][..], Vec::as_slice);
+        if strips != held.strips.as_slice() {
+            edits.push(DocumentEdit::SetPaneStrips {
+                pane_id: pane.id,
+                strips: strips.to_vec(),
+            });
+        }
     }
     edits.extend(expression_edits(state, document, pane));
     edits.extend(x_scale_edit(state, document, pane));

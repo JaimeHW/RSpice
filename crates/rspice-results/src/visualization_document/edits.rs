@@ -150,6 +150,11 @@ pub enum DocumentEdit {
         pane_id: PaneId,
         strips: Vec<Strip>,
     },
+    /// Maximize a pane's strip over the others, or give the others back.
+    SetPaneMaximized {
+        pane_id: PaneId,
+        maximized: bool,
+    },
     AddPaneOnNewPage {
         page: NewPage,
         pane: NewPagePane,

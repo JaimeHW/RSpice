@@ -1449,6 +1449,9 @@ pub struct Pane {
     /// to bottom. Empty, the stack gives each unit a strip of its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub strips: Vec<Strip>,
+    /// The reader maximized the pane's strip over the others.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maximized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2703,6 +2706,7 @@ impl VisualizationDocument {
                 family_policy: None,
                 hidden: false,
                 strips: Vec::new(),
+                maximized: false,
             }],
             axes: Vec::new(),
             traces: Vec::new(),

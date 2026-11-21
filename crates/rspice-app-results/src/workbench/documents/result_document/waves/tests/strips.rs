@@ -128,3 +128,38 @@ fn strips_survive_a_rerun_and_a_restart_and_undo_puts_the_last_ones_back() {
     state.quick_frame();
     assert_eq!(strips_drawn(&mut state), [["V(rail)", "V(ripple)"]]);
 }
+
+/// A maximized strip is the view's: it stays maximized across a restart,
+/// and giving the others back is kept as well.
+#[test]
+fn a_maximized_strip_is_kept_by_the_view_across_a_restart() {
+    let plan = crate::product::SimulationPlanId::new();
+    let analysis = crate::product::AnalysisInstanceId::new();
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs = vec![planned_run(1, plan, analysis)].into();
+    assert!(state.model.simulation.select_run(0));
+    state.quick_frame();
+    let key = models(&mut state)[0].analysis_key;
+    state.results.results.session.maximized_strip = Some(key);
+    state.quick_frame();
+    let maximized = |state: &ResultsTestHost| {
+        state
+            .working_view()
+            .expect("the run's view")
+            .panes()
+            .iter()
+            .any(|pane| pane.maximized)
+    };
+    assert!(maximized(&state), "the view keeps the maximized strip");
+
+    let mut reopened = state.reopened();
+    reopened.quick_frame();
+    assert_eq!(
+        reopened.results.results.session.maximized_strip,
+        Some(key),
+        "the strip comes back maximized"
+    );
+    reopened.results.results.session.maximized_strip = None;
+    reopened.quick_frame();
+    assert!(!maximized(&reopened), "giving the others back is kept");
+}
