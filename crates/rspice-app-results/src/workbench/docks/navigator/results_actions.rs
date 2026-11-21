@@ -792,7 +792,7 @@ fn taken_from_signal_rows(
                 .on_disabled_hover_text(reason);
         }
         None => {
-            ui.menu_button("Plot against", |ui| {
+            rspice_ui_kit::widgets::menu_button(ui, "Plot against", |ui| {
                 let t = crate::ui::tokens::Tokens::get(ui.ctx());
                 egui::ScrollArea::vertical()
                     .max_height(t.metrics.row_h * 16.0)
