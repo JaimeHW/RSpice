@@ -19,6 +19,7 @@ import json
 import math
 import re
 from pathlib import Path
+import struct
 import time
 import uuid
 
@@ -1233,6 +1234,141 @@ def quota_refusal_keeps_nothing(browser):
     return {"quota_bytes": quota, "finding": line, "reopened": points(reopened)[0]["value"]}
 
 
+IMPORT_WORKER = "import-worker.js"
+IMPORTED_RAWFILE = "browser-import.raw"
+IMPORTED_ROWS = 400_000
+
+
+def write_rawfile(path):
+    """A binary rawfile of one transient plot at `path`, large enough that its rows reach the
+    store in several reads and requests. Answers its columns, by name, in the file's order."""
+    columns = {
+        "time": [index * 2.5e-9 for index in range(IMPORTED_ROWS)],
+        "V(out)": [3.3 * math.sin(index * 1e-3) for index in range(IMPORTED_ROWS)],
+        "I(R1)": [index * 1e-6 - 0.2 for index in range(IMPORTED_ROWS)],
+    }
+    header = (f"Title: browser import\nDate: today\nPlotname: Transient Analysis\nFlags: real\n"
+              f"No. Variables: {len(columns)}\nNo. Points: {IMPORTED_ROWS}\nVariables:\n"
+              "\t0\ttime\ttime\n\t1\tV(out)\tvoltage\n\t2\tI(R1)\tcurrent\nBinary:\n")
+    flat = [value for row in zip(*columns.values()) for value in row]
+    path.write_bytes(header.encode("ascii") + struct.pack(f"<{len(flat)}d", *flat))
+    return columns
+
+
+def import_workers(browser):
+    """What the page's import workers did: each one's store requests by kind, its answer and
+    whether the page let it go."""
+    return browser.script("return window.__rspiceImportWorkers || null;")
+
+
+def rawfile_import_streams(browser):
+    """A binary rawfile import streams in an import worker of its own: the page starts it when
+    the import starts, relays the rows it reads to the results store, and lets it go when the
+    import ends. Saved and reopened, the imported run reads back every sample the file holds."""
+    resources = browser.script(
+        "return performance.getEntriesByType('resource').map(entry => entry.name);")
+    if any(IMPORT_WORKER in name for name in resources):
+        raise AssertionError("The page loaded the import worker before any import started")
+    # The imported run is the only one, so the dataset exported after the reload is its.
+    browser.click("Results", "menuItem")
+    items = wait_for(lambda: [c for c in controls(browser.snapshot())
+                              if c["label"].startswith("Clear result history")], "the Results menu")
+    click_control(browser, items[0])
+    deletes = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                if re.fullmatch(r"Delete \d+ runs?", c["label"]) and c["role"] == "button"],
+                       "the clear result history confirmation")
+    click_control(browser, deletes[0])
+    wait_for(lambda: reports(controls(browser.snapshot()), "Deleted "), "the cleared result history")
+    columns = write_rawfile(browser.output / IMPORTED_RAWFILE)
+    # Each import worker the page starts is recorded: its store requests, answer and release.
+    browser.script("""
+        window.__rspiceImportWorkers = [];
+        const Native = window.Worker;
+        window.Worker = class extends Native {
+            constructor(url, options) {
+                super(url, options);
+                if (!String(url).includes('import-worker.js')) return;
+                const record = {url: String(url), requests: {}, outcome: null, terminated: false};
+                window.__rspiceImportWorkers.push(record);
+                this.addEventListener('message', event => {
+                    const data = event.data || {};
+                    if (data.type === 'store') {
+                        const op = JSON.parse(data.request).op;
+                        record.requests[op] = (record.requests[op] || 0) + 1;
+                    } else if (data.type === 'imported') {
+                        record.outcome = JSON.parse(data.outcome).kind;
+                    } else if (data.type === 'failed') {
+                        record.outcome = 'failed: ' + data.error;
+                    }
+                });
+                const terminate = this.terminate.bind(this);
+                this.terminate = () => { record.terminated = true; terminate(); };
+            }
+        };
+    """)
+    # The picker the import opens is answered here, not by a chooser on the desktop.
+    browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": True})
+    try:
+        choose_command(browser, "Open results workspace")
+        choose_command(browser, "Import result dataset\u2026")
+        picker = wait_for(lambda: browser.call("POST", "/elements",
+                                               {"using": "css selector", "value": "#rfd-input"}),
+                          "the result dataset picker")
+        element = next(iter(picker[0].values()))
+        browser.call("POST", f"/element/{element}/value",
+                     {"text": str((browser.output / IMPORTED_RAWFILE).resolve())})
+        for step in ("Map signals", "Validate import", "Import"):
+            wait_for(lambda: any(c["label"] == step and c["role"] == "button"
+                                 for c in controls(browser.snapshot())),
+                     f"the import review's {step}", 120)
+            browser.click(step, "button")
+    finally:
+        browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": False})
+    wait_for(lambda: not any(c["label"] == "Import result dataset" and c["role"] == "dialog"
+                             for c in controls(browser.snapshot())), "the import committed", 60)
+    browser.capture("rawfile-imported")
+    workers = import_workers(browser)
+    if not workers or len(workers) != 1:
+        raise AssertionError(f"The import ran in {len(workers or [])} import workers: {workers}")
+    worker = workers[0]
+    if worker["outcome"] != "kept":
+        raise AssertionError(f"The import worker did not keep the rawfile: {worker}")
+    requests = worker["requests"]
+    if requests.get("begin") != 1 or requests.get("finish") != 1 or requests.get("rows", 0) < 2:
+        raise AssertionError(f"The import worker did not stream its rows to the store: {requests}")
+    if not worker["terminated"]:
+        raise AssertionError("The page kept the import worker after the import ended")
+    running = [target for target in browser.cdp("Target.getTargets", {})["targetInfos"]
+               if IMPORT_WORKER in target.get("url", "")]
+    if running:
+        raise AssertionError(f"The import worker outlived its import: {running}")
+    browser.click("Schematic", "button")
+    choose_command(browser, "Save all")
+    wait_for(lambda: not unsaved(browser.snapshot()), "the project saved with the imported run", 60)
+    project = json.loads(next(iter(canonical_projects(browser).values())))
+    if len(segments_named(project)) != 1:
+        raise AssertionError("The imported run does not read one results store segment")
+    browser.call("POST", "/refresh", {})
+    wait_until_ready(browser)
+    browser.click("Schematic canvas", "canvas")
+    rows = [row for row in csv.reader(io.StringIO(exported_dataset(browser)))
+            if row and not row[0].startswith("#")]
+    header, samples = rows[0], rows[1:]
+    if len(samples) != IMPORTED_ROWS:
+        raise AssertionError(f"The reopened import reads {len(samples)} of {IMPORTED_ROWS} rows")
+    for column, name in enumerate(header):
+        wanted = columns["time"] if column == 0 else next(
+            (values for key, values in columns.items() if key.lower() in name.lower()), None)
+        if wanted is None:
+            raise AssertionError(f"The reopened import exports a column the file lacks: {name!r}")
+        read = [float(row[column]) for row in samples]
+        if read != wanted:
+            first = next(index for index, (a, b) in enumerate(zip(read, wanted)) if a != b)
+            raise AssertionError(f"{name} differs from the file at row {first}: "
+                                 f"{read[first]!r} for {wanted[first]!r}")
+    return {"requests": requests, "signals": header[1:], "rows": len(samples)}
+
+
 def quota_stop_keeps_rows(browser):
     """Writing past the origin's quota closes the write on the rows it took: the store keeps them,
     and they read back checked against their digest once the store is opened again."""
@@ -1324,6 +1460,7 @@ def run(browser):
     quota_stop = quota_stop_keeps_rows(browser)
     quota_page_run = quota_stop_cuts_a_page_run(browser)
     quota_refusal = quota_refusal_keeps_nothing(browser)
+    rawfile_import = rawfile_import_streams(browser)
     return {"startup": "passed", "checkpoint_export": "passed", "checkpoint_restore": "passed",
             "revision_history": "opened",
             "configuration_opening_input": "passed",
@@ -1334,6 +1471,7 @@ def run(browser):
             "results_survive_reload": results_reload, "results_store_second_tab": second_tab,
             "restored_checkpoint_run": checkpoint_run,
             "results_store_quota_stop": quota_stop, "results_store_quota_page_run": quota_page_run, "results_store_quota_refusal": quota_refusal,
+            "rawfile_import_worker": rawfile_import,
             "review_post_and_resolution": "passed", "review_intervals_ms": review_intervals,
             "checkpoint": manifest, "export": exported.name, "project_version": project["version"]}
 
@@ -1348,9 +1486,10 @@ def main():
                         help="Use SwiftShader for functional CI, without qualifying physical GPU support")
     args = parser.parse_args()
     inputs = {}
-    for name in ("index.html", "simulation-worker.js", "wasm-loader.js",
+    for name in ("index.html", "simulation-worker.js", "import-worker.js", "wasm-loader.js",
                  "pkg/rspice-ui.js", "pkg/rspice-ui_bg.wasm",
-                 "pkg/rspice-ui-worker.js", "pkg/rspice-ui-worker_bg.wasm"):
+                 "pkg/rspice-ui-worker.js", "pkg/rspice-ui-worker_bg.wasm",
+                 "pkg/rspice-ui-import-worker.js", "pkg/rspice-ui-import-worker_bg.wasm"):
         data = (args.web_root / name).read_bytes()
         inputs[name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
     with WorkbenchBrowser(args.web_root, args.output, args.driver, args.browser,
