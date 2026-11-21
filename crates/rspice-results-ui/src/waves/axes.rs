@@ -54,7 +54,7 @@ pub(crate) enum Side {
 /// the right edge, the third outside the first on the left, the fourth
 /// outside the second on the right.
 pub(crate) const fn column_side(index: usize) -> Side {
-    if index % 2 == 0 {
+    if index.is_multiple_of(2) {
         Side::Right
     } else {
         Side::Left

@@ -489,12 +489,12 @@ fn trace_style_rows(
     let field = property_row_input_with_hint(ui, "Shown as", &mut draft, signal, false);
     if field.lost_focus() {
         ui.data_mut(|data| data.remove::<String>(draft_id));
-        if draft.trim() != look.name.as_deref().unwrap_or_default() {
-            if let Err(error) = crate::workbench::documents::result_document::rename_trace(
+        if draft.trim() != look.name.as_deref().unwrap_or_default()
+            && let Err(error) = crate::workbench::documents::result_document::rename_trace(
                 state, analysis, signal, &draft,
-            ) {
-                state.prompt(error);
-            }
+            )
+        {
+            state.prompt(error);
         }
     } else if field.has_focus() {
         ui.data_mut(|data| data.insert_temp(draft_id, draft));

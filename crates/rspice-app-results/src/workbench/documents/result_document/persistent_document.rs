@@ -995,9 +995,7 @@ pub fn project_pane_presentation(
     );
     state.results.project_waveform_looks(
         analysis_key,
-        pane.traces
-            .iter()
-            .map(|trace| super::trace_style::look_of(trace)),
+        pane.traces.iter().map(super::trace_style::look_of),
     );
     // The strips the document arranged the pane's stack into.
     let strips = state
