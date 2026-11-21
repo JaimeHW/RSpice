@@ -25,8 +25,8 @@ use crate::workbench::documents::result_document::{
     cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
     hide_selected_trace, jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
     opening_sheet, place_marker_at_cursor, request_view_gesture, selected_trace_on_sheet,
-    viewer_is_available, viewer_unavailability_reason, zoom_gesture_available, zoom_previous,
-    zoom_previous_available,
+    viewer_is_available, viewer_unavailability_reason, zoom_gesture_available, zoom_next,
+    zoom_next_available, zoom_previous, zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -747,6 +747,13 @@ impl CommandSet for ResultsCommand {
                 workbench.workspace == Workspace::Results && zoom_gesture_available(state),
                 "open a waveform sheet in Results",
             ),
+            Self::ZoomNext if workbench.workspace != Workspace::Results => {
+                CommandAvailability::Hidden
+            }
+            Self::ZoomNext => available_or(
+                zoom_next_available(state),
+                "Zoom previous has not stepped back from a later view",
+            ),
             Self::ResultViewer(ResultViewer::Waves) => CommandAvailability::Available,
             Self::ResultViewer(viewer) => {
                 if viewer_is_available(state, viewer) {
@@ -905,6 +912,7 @@ impl CommandSet for ResultsCommand {
             }
             Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
             Self::FitYToVisibleX => fit_y_to_visible_x(&mut results_parts(cx)),
+            Self::ZoomNext => zoom_next(&mut results_parts(cx)),
             Self::OpenProducingPlan => {
                 match producing_plan_hop(cx.state.reads(cx.model, cx.wb)) {
                     Ok(hop) => {

@@ -625,6 +625,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::SwitchSteppingCursor.key(),
     ResultsCommand::MarkerAtCursor.key(),
     ResultsCommand::FitYToVisibleX.key(),
+    ResultsCommand::ZoomNext.key(),
     ResultsCommand::CursorToNextSample.key(),
     ResultsCommand::CursorToPreviousSample.key(),
     ResultsCommand::ToggleCursorTool.key(),

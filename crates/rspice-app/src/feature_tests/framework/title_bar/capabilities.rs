@@ -279,6 +279,59 @@ fn zoom_previous_steps_a_waveform_sheet_back_through_the_views_it_showed() {
     assert!(!app.is_enabled(key));
 }
 
+/// Zoom next goes forward again through the views Zoom previous stepped a
+/// waveform sheet back from, and a view of the reader's own ends the way
+/// forward.
+#[test]
+fn zoom_next_goes_forward_through_the_views_zoom_previous_left() {
+    let ctx = Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let (mut app, analysis) = waveform_sheet_app();
+    let view = |app: &RSpiceApp| {
+        let pane = app.state.results.results.session.analysis_plot_view_pane(
+            rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
+            analysis,
+            0,
+        );
+        (pane.x, pane.y)
+    };
+    let next = ResultsCommand::ZoomNext.key();
+    results_frame(&ctx, &mut app, 0.0);
+    assert_eq!(
+        app.availability(next),
+        CommandAvailability::Disabled("Zoom previous has not stepped back from a later view")
+    );
+    app.execute(ids::ZOOM_IN);
+    results_frame(&ctx, &mut app, 1.0);
+    app.execute(ids::ZOOM_IN);
+    results_frame(&ctx, &mut app, 2.0);
+    let nearest = view(&app);
+
+    app.execute(ids::ZOOM_PREVIOUS);
+    results_frame(&ctx, &mut app, 3.0);
+    app.execute(ids::ZOOM_PREVIOUS);
+    results_frame(&ctx, &mut app, 4.0);
+    let opened = view(&app);
+    app.execute(next);
+    results_frame(&ctx, &mut app, 5.0);
+    let nearer = view(&app);
+    assert_ne!(nearer, opened);
+    app.execute(next);
+    results_frame(&ctx, &mut app, 6.0);
+    assert_eq!(view(&app), nearest);
+    assert!(!app.is_enabled(next));
+
+    // Back once, forward once more is offered; a zoom of the reader's own
+    // takes it away.
+    app.execute(ids::ZOOM_PREVIOUS);
+    results_frame(&ctx, &mut app, 7.0);
+    assert_eq!(view(&app), nearer);
+    assert!(app.is_enabled(next));
+    app.execute(ids::ZOOM_OUT);
+    results_frame(&ctx, &mut app, 8.0);
+    assert!(!app.is_enabled(next));
+}
+
 /// Highlight net lights the net a selected wire is on, the one the canvas
 /// lights when the wire is clicked, and says why it cannot when the
 /// selection names no net or more than one.

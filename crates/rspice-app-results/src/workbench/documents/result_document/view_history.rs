@@ -1,7 +1,9 @@
-//! Zoom previous on the waveform sheets.
+//! Zoom previous and Zoom next on the waveform sheets.
 //!
 //! A waveform sheet keeps the views it showed, so View ▸ Zoom previous steps
-//! it back through them the way it steps a drawing back. One view is
+//! it back through them the way it steps a drawing back, and View ▸ Zoom
+//! next steps forward again through the views it stepped back from, until
+//! the reader changes the view. One view is
 //! everything a wheel, a zoom box, a pan, an axis drag, the zoom keys or a fit
 //! move: every strip's shared X window and every unit pane's Y window. The
 //! quick view keeps those windows in the session. A project result document
@@ -66,6 +68,12 @@ impl PartialEq for SheetView {
 #[derive(Debug, Clone, Default)]
 pub(super) struct WaveViewHistories {
     sheets: HashMap<WaveSheet, ViewHistory<SheetView>>,
+    /// The views Zoom previous stepped back from, the latest last: what Zoom
+    /// next goes forward to.
+    later: HashMap<WaveSheet, Vec<SheetView>>,
+    /// The view each sheet ended its last frame on, so a change of the
+    /// reader's own drops the views ahead of it.
+    shown: HashMap<WaveSheet, SheetView>,
     front: Option<WaveSheet>,
 }
 
@@ -79,6 +87,11 @@ pub(super) fn observe(ui: &Ui, state: &mut ResultsParts<'_>, sheet: WaveSheet) {
     let time = ui.input(|input| input.time);
     let histories = &mut state.results.view_histories;
     histories.front = Some(sheet);
+    if histories.shown.get(&sheet) != Some(&view) {
+        // The reader moved the view: there is no going forward past it.
+        histories.later.remove(&sheet);
+        histories.shown.insert(sheet, view.clone());
+    }
     histories
         .sheets
         .entry(sheet)
@@ -98,10 +111,11 @@ pub(crate) fn zoom_previous_available(state: ResultsReads<'_>) -> bool {
 
 /// Show the view the waveform sheet in front showed before this one.
 pub(crate) fn zoom_previous(state: &mut ResultsParts<'_>) {
-    let histories = &mut state.results.view_histories;
-    let Some(sheet) = histories.front else {
+    let Some(sheet) = state.results.view_histories.front else {
         return;
     };
+    let now = sheet_view(state.results_reads(), sheet);
+    let histories = &mut state.results.view_histories;
     let Some(view) = histories
         .sheets
         .get_mut(&sheet)
@@ -109,6 +123,41 @@ pub(crate) fn zoom_previous(state: &mut ResultsParts<'_>) {
     else {
         return;
     };
+    if let Some(now) = now {
+        histories.later.entry(sheet).or_default().push(now);
+    }
+    histories.shown.insert(sheet, view.clone());
+    restore(state, sheet, &view);
+}
+
+/// Whether Zoom previous stepped the waveform sheet in front back from a
+/// view it can go forward to again.
+pub(crate) fn zoom_next_available(state: ResultsReads<'_>) -> bool {
+    let histories = &state.results.view_histories;
+    zoom_gesture_available(state)
+        && histories
+            .front
+            .and_then(|sheet| histories.later.get(&sheet))
+            .is_some_and(|later| !later.is_empty())
+}
+
+/// Show the view Zoom previous last stepped the waveform sheet in front back
+/// from; the view it leaves is the one Zoom previous goes back to next.
+pub(crate) fn zoom_next(state: &mut ResultsParts<'_>) {
+    let histories = &mut state.results.view_histories;
+    let Some(sheet) = histories.front else {
+        return;
+    };
+    let Some(view) = histories.later.get_mut(&sheet).and_then(Vec::pop) else {
+        return;
+    };
+    // Noted as a gesture of its own, so the view it leaves is kept.
+    histories
+        .sheets
+        .entry(sheet)
+        .or_default()
+        .observe(view.clone(), f64::NEG_INFINITY);
+    histories.shown.insert(sheet, view.clone());
     restore(state, sheet, &view);
 }
 

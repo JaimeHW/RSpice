@@ -82,6 +82,8 @@ pub enum ResultsCommand {
     /// Let go of the Y ranges the active strip's panes were pinned to, so
     /// each refits to the X window in view.
     FitYToVisibleX,
+    /// Go forward to the waveform view Zoom previous stepped back from.
+    ZoomNext,
     /// Keep the view in front as a result document of the project.
     SaveViewAsDocument,
     /// Give the saved result document shown another name.
@@ -154,7 +156,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 67] = [
+    pub const ALL: [Self; 68] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -211,6 +213,7 @@ impl ResultsCommand {
         Self::SwitchSteppingCursor,
         Self::MarkerAtCursor,
         Self::FitYToVisibleX,
+        Self::ZoomNext,
         Self::SaveViewAsDocument,
         Self::RenameDocument,
         Self::DuplicateDocument,
@@ -265,6 +268,7 @@ impl ResultsCommand {
             Self::SwitchSteppingCursor => CommandKey::new("switch-stepping-cursor"),
             Self::MarkerAtCursor => CommandKey::new("marker-at-cursor"),
             Self::FitYToVisibleX => CommandKey::new("fit-y-to-visible-x"),
+            Self::ZoomNext => CommandKey::new("zoom-next"),
             Self::SaveViewAsDocument => CommandKey::new("save-view-as-document"),
             Self::RenameDocument => CommandKey::new("rename-result-document"),
             Self::DuplicateDocument => CommandKey::new("duplicate-result-document"),
@@ -440,6 +444,13 @@ impl ResultsCommand {
             Self::MarkerAtCursor => cursor_command("Place marker at cursor A", MARKER_AT_CURSOR),
             Self::FitYToVisibleX => (
                 "Fit Y to visible X",
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::ZoomNext => (
+                "Zoom next",
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,

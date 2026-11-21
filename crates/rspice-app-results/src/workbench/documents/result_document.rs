@@ -65,7 +65,9 @@ pub(crate) use network_matrix::exact_values as network_matrix_exact_values;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub(crate) use optimization::export_csv as export_optimization_csv;
-pub(crate) use view_history::{zoom_previous, zoom_previous_available};
+pub(crate) use view_history::{
+    zoom_next, zoom_next_available, zoom_previous, zoom_previous_available,
+};
 
 pub(crate) fn harmonic_balance_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     harmonic_balance::analysis_is_renderable(analysis)

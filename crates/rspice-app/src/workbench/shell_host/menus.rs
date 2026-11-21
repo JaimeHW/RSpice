@@ -354,6 +354,7 @@ const VIEW_MENU: &[MenuEntry] = &[
     workbench(WorkbenchCommand::ZoomToSelection).access('T'),
     workbench(WorkbenchCommand::ZoomBox).access('B'),
     workbench(WorkbenchCommand::ZoomPrevious).access('V'),
+    results(ResultsCommand::ZoomNext).access('X'),
     Separator,
     MenuEntry::submenu("Grid", GRID_MENU).access('G'),
     design(DesignCommand::VisibilityOptions).access('D'),
