@@ -101,6 +101,7 @@ pub fn never_wait_for_checks_here() {
 
 /// Whether a read here leaves each kept file not checked yet for a check of its own and waits
 /// for none: inside [`opening_unchecked`], and on a thread that never waits for a check.
+#[cfg(any(unix, windows))]
 pub(super) fn leaving_checks() -> bool {
     deferring() || NEVER_WAITS.with(Cell::get)
 }
