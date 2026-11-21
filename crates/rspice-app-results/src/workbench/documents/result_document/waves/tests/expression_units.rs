@@ -117,14 +117,17 @@ fn each_expression_is_drawn_on_the_axis_of_its_own_unit() {
             (String::new(), true, vec![3]),
         ]
     );
-    // Each pane states its unit as its Y axis' caption; the one whose unit
-    // cannot be stated says so there, and its reason is on the caption.
+    // Each pane states its unit on its Y axis' top tick label; the one whose
+    // unit cannot be stated says so in its caption, with its reason there.
     assert!(
         painted.iter().any(|text| text == "unit unknown")
             && labels.iter().any(|label| label == "unit unknown"),
         "the unlabeled pane says its unit is unknown: {painted:?} {labels:?}"
     );
-    assert!(painted.iter().any(|text| text == "W"), "{painted:?}");
+    assert!(
+        painted.iter().any(|text| text.ends_with(" mW")),
+        "the watts pane names its unit on its top tick: {painted:?}"
+    );
 }
 
 #[test]

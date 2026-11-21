@@ -101,7 +101,7 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
     );
     assert_eq!(
         pane_y_range(&mut results.session.derived, &after[0], &[0]),
-        Some((-3.2, 43.2))
+        Some((-1.6, 41.6))
     );
     let actual_stats = stats(&mut results, &after[0]).unwrap();
     assert_eq!((actual_stats.0, actual_stats.1), (0.0, 40.0));
