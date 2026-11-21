@@ -145,6 +145,12 @@ fn crashed_session_with(label: &str, new_cell: bool) -> (PathBuf, usize) {
     assert_eq!(autosaves, 1, "the crashed session left its autosave");
     let mut opened = RSpiceApp::test_instance();
     assert!(opened.state.load_project_from_path(&folder.join(PROJECT)));
+    // This open looks for recovered work on a thread of its own and pins the
+    // autosave it finds, which rewrites the autosave's record. Let it finish,
+    // so the open a test makes next is the only one reading that record.
+    frames_until(&offscreen(), &mut opened, |app| {
+        !app.state.platform.project_autosave.busy()
+    });
     let saved_parts = parts(&opened);
     drop(saved);
     (folder, saved_parts)
