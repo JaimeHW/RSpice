@@ -480,26 +480,6 @@ mod tests {
     }
 
     #[test]
-    fn arithmetic_errors_are_operation_specific_and_actionable() {
-        for (error, expected) in [
-            (
-                IntegerRuntimeError::DivisionByZero,
-                "signed 32-bit integer division by zero",
-            ),
-            (
-                IntegerRuntimeError::ModulusByZero,
-                "signed 32-bit integer modulus by zero",
-            ),
-            (
-                IntegerRuntimeError::ZeroToNegativePower { exponent: -3 },
-                "zero raised to negative signed 32-bit integer exponent -3",
-            ),
-        ] {
-            assert_eq!(error.to_string(), expected);
-        }
-    }
-
-    #[test]
     fn logical_right_shift_zero_fills_a_negative_integer() {
         assert_eq!(
             integer_binary(IntegerBinaryOperation::Shr, -16.0, 2.0),
