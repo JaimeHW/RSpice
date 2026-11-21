@@ -154,19 +154,27 @@ fn digest_of(hex: &str) -> Result<Digest, String> {
     Ok(Digest(digest))
 }
 
-fn records(manifest: &Manifest) -> Vec<KeptSegmentRecord> {
-    manifest
-        .members()
-        .iter()
-        .filter(|member| member.status.is_some())
-        .filter_map(|member| {
-            Some(KeptSegmentRecord {
-                digest: hex(member.digest.as_ref()?),
-                bytes: 0,
-                rows: 0,
-            })
-        })
-        .collect()
+/// Each segment `store` keeps, with its length: the page states what the store keeps from these.
+async fn records(store: &Store) -> Vec<KeptSegmentRecord> {
+    let mut records = Vec::new();
+    for member in store.manifest.members() {
+        let (Some(digest), Some(_)) = (member.digest.as_ref(), member.status.as_ref()) else {
+            continue;
+        };
+        let bytes = match &store.reading {
+            Some((open, io)) if open == digest => io.size().ok(),
+            _ => match store.dir.segment(member.index, false).await {
+                Ok(io) => io.size().ok(),
+                Err(_) => None,
+            },
+        };
+        records.push(KeptSegmentRecord {
+            digest: hex(digest),
+            bytes: bytes.unwrap_or(0),
+            rows: 0,
+        });
+    }
+    records
 }
 
 /// A store's name is a project's id: letters, digits and dashes, and never a path.
@@ -182,7 +190,7 @@ async fn open(store: &mut Option<Store>, name: String) -> Result<ResultsStoreRes
     if let Some(open) = store.as_ref()
         && open.name == name
     {
-        return Ok(opened(&open.manifest));
+        return Ok(opened(open).await);
     }
     store.take();
     if !valid_name(&name) {
@@ -220,8 +228,7 @@ async fn open(store: &mut Option<Store>, name: String) -> Result<ResultsStoreRes
         .await
         .map_err(|error| format!("the results store's manifest could not be read: {error}"))?
         .unwrap_or_default();
-    let response = opened(&manifest);
-    *store = Some(Store {
+    let open = store.insert(Store {
         name,
         dir,
         manifest,
@@ -231,13 +238,13 @@ async fn open(store: &mut Option<Store>, name: String) -> Result<ResultsStoreRes
         checked: BTreeSet::new(),
         reading: None,
     });
-    Ok(response)
+    Ok(opened(open).await)
 }
 
-fn opened(manifest: &Manifest) -> ResultsStoreResponse {
+async fn opened(store: &Store) -> ResultsStoreResponse {
     ResultsStoreResponse::Opened {
         standing: ResultsStoreStanding::Held,
-        segments: records(manifest),
+        segments: records(store).await,
     }
 }
 
