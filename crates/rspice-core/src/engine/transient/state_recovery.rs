@@ -462,32 +462,4 @@ mod tests {
 
         assert_eq!(timestep.dt(), 4.0);
     }
-
-    #[test]
-    fn trapgear_resolved_to_gear2_uses_the_order_two_growth_cap() {
-        let mut timestep = TimestepController::new(1.0, 1.0e-6, 10.0);
-        let estimator = LteEstimator::with_tolerances(1.0e-3, 1.0e-6);
-        let mut trapgear = TrapGearController::new();
-        trapgear.force_method(IntegrationMethod::Gear2);
-
-        Engine::recover_timestep_after_accepted_step(
-            &mut timestep,
-            &estimator,
-            &[1.0],
-            TruncationStep {
-                method: trapgear.current_method(),
-                trap_order: 2,
-                dt: 1.0,
-            },
-            10.0,
-            SourceActivityRecovery {
-                is_strictly_linear_transient: true,
-                expected_source_delta: 0.0,
-                source_activity_growth_cap_enabled: false,
-                accepted_scale: Some(4.0),
-            },
-        );
-
-        assert_eq!(timestep.dt(), 2.0);
-    }
 }

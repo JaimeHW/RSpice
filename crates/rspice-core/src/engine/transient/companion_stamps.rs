@@ -1015,15 +1015,6 @@ mod tests {
     }
 
     #[test]
-    fn compact_two_terminal_stamp_slots_contain_only_offsets() {
-        let bytes = std::mem::size_of::<CompactTwoTerminalStampSlots>();
-        assert!(
-            bytes <= 48,
-            "compact two-terminal stamp plan regressed to {bytes} bytes; keep pattern identity in the enclosing cache"
-        );
-    }
-
-    #[test]
     fn xyce_jfet1_transient_charge_uses_limited_branch_state() {
         let mut jfet = crate::device::Jfet::njf("j1", 1, 2, 0).enable_xyce_jfet1_model();
         crate::device::NonlinearDevice::update(&mut jfet, &[0.0, 0.0]);

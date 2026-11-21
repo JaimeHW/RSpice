@@ -1900,65 +1900,37 @@ mod tests {
 
     #[test]
     fn xyce_profile_preserves_an_explicit_backend_override() {
-        let mut options = SolverOptions {
-            real_backend: RealSolverBackend::Faer,
-            ..SolverOptions::default()
-        };
+        for backend in [RealSolverBackend::Faer, RealSolverBackend::Auto] {
+            let mut options = SolverOptions {
+                real_backend: backend,
+                ..SolverOptions::default()
+            };
 
-        apply_dialect_solver_profile(SpiceDialect::Xyce, 2, true, &mut options);
+            apply_dialect_solver_profile(SpiceDialect::Xyce, 2, true, &mut options);
 
-        assert_eq!(options.real_backend, RealSolverBackend::Faer);
-        assert_eq!(
-            options.numeric_factorization,
-            NumericFactorizationPolicy::FreshPivotSelection
-        );
-        assert_eq!(
-            options.factorization_division,
-            DivisionPolicy::DirectDivision
-        );
-        assert_eq!(options.diagonal_solve, DivisionPolicy::DirectDivision);
-        assert_eq!(
-            options.circuit_lu_orientation,
-            CircuitLuOrientation::AmesosRowCrs
-        );
-        assert_eq!(
-            options.circuit_lu_row_scaling,
-            CircuitLuRowScaling::Disabled
-        );
-        assert_eq!(
-            options.circuit_lu_robustness,
-            CircuitLuRobustness::BackendFaithful
-        );
-    }
-
-    #[test]
-    fn xyce_profile_preserves_explicit_automatic_backend_selection() {
-        let mut options = SolverOptions::default();
-
-        apply_dialect_solver_profile(SpiceDialect::Xyce, 2, true, &mut options);
-
-        assert_eq!(options.real_backend, RealSolverBackend::Auto);
-        assert_eq!(
-            options.numeric_factorization,
-            NumericFactorizationPolicy::FreshPivotSelection
-        );
-        assert_eq!(
-            options.factorization_division,
-            DivisionPolicy::DirectDivision
-        );
-        assert_eq!(options.diagonal_solve, DivisionPolicy::DirectDivision);
-        assert_eq!(
-            options.circuit_lu_orientation,
-            CircuitLuOrientation::AmesosRowCrs
-        );
-        assert_eq!(
-            options.circuit_lu_row_scaling,
-            CircuitLuRowScaling::Disabled
-        );
-        assert_eq!(
-            options.circuit_lu_robustness,
-            CircuitLuRobustness::BackendFaithful
-        );
+            assert_eq!(options.real_backend, backend);
+            assert_eq!(
+                options.numeric_factorization,
+                NumericFactorizationPolicy::FreshPivotSelection
+            );
+            assert_eq!(
+                options.factorization_division,
+                DivisionPolicy::DirectDivision
+            );
+            assert_eq!(options.diagonal_solve, DivisionPolicy::DirectDivision);
+            assert_eq!(
+                options.circuit_lu_orientation,
+                CircuitLuOrientation::AmesosRowCrs
+            );
+            assert_eq!(
+                options.circuit_lu_row_scaling,
+                CircuitLuRowScaling::Disabled
+            );
+            assert_eq!(
+                options.circuit_lu_robustness,
+                CircuitLuRobustness::BackendFaithful
+            );
+        }
     }
 
     #[test]

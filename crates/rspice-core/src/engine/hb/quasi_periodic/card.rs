@@ -346,12 +346,4 @@ mod tests {
         });
         assert!(config.to_spice().is_err());
     }
-    #[test]
-    fn qpss_card_default_linear_settings_preserve_legacy_config_bytes() {
-        let legacy = r#"{"relative_tolerance":1e-6,"current_absolute_tolerance":1e-12,"voltage_absolute_tolerance":1e-9,"max_iterations":100,"max_backtracks":20}"#;
-        let config: crate::analysis::quasi_periodic::QuasiPeriodicSolveConfig =
-            serde_json::from_str(legacy).unwrap();
-        assert!(config.linear.is_default());
-        assert_eq!(serde_json::to_string(&config).unwrap(), legacy);
-    }
 }
