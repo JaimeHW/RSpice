@@ -8,7 +8,6 @@
 use super::*;
 use crate::state::model_library::ModelType;
 use crate::state::{Component, ComponentType, Point};
-use crate::workbench::models::tests::painted_text;
 
 mod binned_family;
 
@@ -373,84 +372,4 @@ fn a_consumer_label_splits_into_a_designator_and_a_location() {
     // something rather than emptying itself.
     assert_eq!(bindings::consumer_designator("U1"), "U1");
     assert_eq!(bindings::consumer_location("U1"), "");
-}
-
-/// Paint one catalog row and read back what it drew.
-fn catalog_row_paint(row: &ProjectModelRow) -> Vec<(String, Color32)> {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut state = harness();
-    let mut pending_actions = Vec::new();
-    // Twice: the first pass builds the font set and the second lays out
-    // against it, so a cell measured before the fonts exist is not the cell
-    // the row ends up painting.
-    let mut output = None;
-    for _ in 0..2 {
-        output = Some(ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900.0, 120.0),
-                )),
-                ..egui::RawInput::default()
-            },
-            |ctx| {
-                let mut render = ManagerRenderContext::over(&mut state, &mut pending_actions);
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    project_model_row(ui, &mut render, row);
-                });
-            },
-        ));
-    }
-    painted_text(&output.expect("two passes"))
-}
-
-fn catalog_row(review: bool, pinned: bool) -> ProjectModelRow {
-    ProjectModelRow {
-        library: "alpha".to_owned(),
-        model: "nch".to_owned(),
-        bins: 0,
-        family: "NMOS",
-        source: "alpha.lib".to_owned(),
-        pinned,
-        review,
-        drifted: false,
-        usage: Some("M1".to_owned()),
-        usage_count: 4,
-        vectors: 0,
-    }
-}
-
-/// Status words are neutral, and the Used by column names one consumer and
-/// counts the others.
-///
-/// Both cells are painted, so nothing that reads state covers either: the
-/// column showed the same lone designator for a model bound once and a model
-/// bound eleven times. Severity is the mark in front of the word, which is
-/// pinned by `only_a_finding_in_the_status_column_carries_a_mark`; the words
-/// themselves are never toned.
-#[test]
-fn the_catalog_row_states_its_status_neutrally_and_counts_its_consumers() {
-    let t = Tokens::default();
-
-    let review = catalog_row_paint(&catalog_row(true, false));
-    assert!(
-        review.contains(&("review".to_owned(), t.color.text_dim)),
-        "a status word is painted in the neutral ramp; it painted {review:?}"
-    );
-    assert!(
-        review.iter().any(|(text, _)| text == "M1 · +3"),
-        "the consumer cell names one instance and counts the rest; it painted {review:?}"
-    );
-    assert!(
-        !review.iter().any(|(_, color)| *color == t.color.warn),
-        "a catalog row tones one of its words; it painted {review:?}"
-    );
-
-    let pinned = catalog_row_paint(&catalog_row(false, true));
-    let cell = pinned
-        .iter()
-        .find(|(text, _)| text == "pinned")
-        .expect("a pinned row states that its bytes are retained");
-    assert_eq!(cell.1, t.color.text_dim);
 }

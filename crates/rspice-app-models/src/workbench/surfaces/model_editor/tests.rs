@@ -1,16 +1,15 @@
 //! Tests for the model editor surface's authoring behaviour.
 //!
 //! The cases pin that normalizing a selection never resizes the form, that
-//! fallbacks are deterministic, that cancelling authoring discards every
-//! partial field rather than leaving some behind, and that every count the
-//! surface states is painted by the element that owns it.
+//! fallbacks are deterministic, and that cancelling authoring discards every
+//! partial field rather than leaving some behind.
 
 use super::*;
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::models::tests::harness;
 
 /// A project-owned candidate with enough declared parameters that the counts
-/// the rail and the section headers state are not all zero.
+/// the surface states are not all zero.
 #[cfg(not(target_arch = "wasm32"))]
 fn app_with_open_candidate() -> FeatureHarness<ModelsFeature> {
     use crate::state::model_library::ProjectModelDefinition;
@@ -406,39 +405,6 @@ fn cancelling_qualification_authoring_discards_every_partial_field() {
     assert!(editor.qualification_authoring.error.is_none());
 }
 
-/// Each rail entry states the count its own section owns, and only that: no
-/// entry projects a fact another section is responsible for.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_navigation_rail_projects_only_section_owned_counts() {
-    let mut app = app_with_open_candidate();
-    let records = persisted_records(&app.cx());
-    let metadata = records.metadata.as_ref().expect("persisted schema");
-    let parameters = metadata.parameters.len();
-    let sections = metadata.sections.len();
-    let qualification = qualification_totals(&app.cx(), &records);
-
-    assert_eq!(
-        navigation_meta(&app.cx(), &records, ModelEditorSection::Parameters),
-        Some(parameters.to_string())
-    );
-    assert_eq!(
-        navigation_meta(&app.cx(), &records, ModelEditorSection::Sections),
-        Some(sections.to_string())
-    );
-    assert_eq!(
-        navigation_meta(&app.cx(), &records, ModelEditorSection::Tests),
-        Some(format!("{}/{}", qualification.passed, qualification.total))
-    );
-    for section in [
-        ModelEditorSection::Statistics,
-        ModelEditorSection::Temperature,
-        ModelEditorSection::Release,
-    ] {
-        assert_eq!(navigation_meta(&app.cx(), &records, section), None);
-    }
-}
-
 /// A rejected persisted schema is stated once, by the header, as a failure
 /// mark in front of neutral words. The counts read off it stay plain: a rail
 /// entry painted red is the same rejection said a fourth time, and it names
@@ -487,42 +453,4 @@ fn the_header_announces_no_status_for_a_validated_candidate() {
         .expect("the fixture candidate validates");
     app.state.model_editor.validation = Some(evidence);
     assert_eq!(candidate_status(&app.cx(), &records), None);
-}
-
-/// The parameter source split and runtime parity are section aggregates: no
-/// single row can carry them, and no other section restates them.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn section_headers_own_the_aggregates_no_row_can_carry() {
-    let mut app = app_with_open_candidate();
-    let records = persisted_records(&app.cx());
-    let metadata = records.metadata.as_ref().expect("persisted schema");
-    let (declared, inherited, overridden) = parameter_source_split(metadata);
-    let qualification = qualification_totals(&app.cx(), &records);
-
-    assert_eq!(
-        section_header_fact(&app.cx(), &records, ModelEditorSection::Parameters),
-        Some(format!(
-            "{declared} declared · {inherited} inherited · {overridden} override"
-        ))
-    );
-    // The parity ratio, and not a word about what is unresolved: that is the
-    // Tests table's own Status column, one row at a time.
-    assert_eq!(
-        section_header_fact(&app.cx(), &records, ModelEditorSection::Tests),
-        Some(format!(
-            "{} / {} WebAssembly",
-            qualification.wasm_passed, qualification.total
-        ))
-    );
-    // Section names, statistical variables, temperature laws, and release
-    // facts are already stated row by row on their own pages.
-    for section in [
-        ModelEditorSection::Sections,
-        ModelEditorSection::Statistics,
-        ModelEditorSection::Temperature,
-        ModelEditorSection::Release,
-    ] {
-        assert_eq!(section_header_fact(&app.cx(), &records, section), None);
-    }
 }

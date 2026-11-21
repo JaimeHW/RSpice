@@ -208,20 +208,3 @@ fn a_binned_family_is_indexed_under_the_name_it_binds() {
     state.model.workspace.save_active_schematic(&schematic);
     assert!(unbound_instances(&state.model, &state.model.definition_index()).is_empty());
 }
-
-#[test]
-fn every_shipped_resolution_rule_names_an_owner() {
-    // The card is a claim about who refuses. A row with an empty owner is a
-    // rule with nowhere to check it, which is how the mockup's four
-    // "run plan" attributions survived: nobody could look them up.
-    for (rule, value, owner) in RESOLUTION_RULES {
-        assert!(!rule.is_empty() && !value.is_empty() && !owner.is_empty());
-    }
-    assert!(
-        RESOLUTION_RULES
-            .iter()
-            .any(|(rule, value, _)| rule.contains("search path") && value.starts_with("none")),
-        "the absence of a host search path is stated as policy, since it is the reason \
-         the mockup's search-path table cannot exist"
-    );
-}

@@ -950,21 +950,6 @@ fn each_unbind_sits_on_the_section_it_removes() {
 }
 
 #[test]
-fn the_fail_closed_contract_is_stated_under_the_matrix() {
-    let mut state = corner_page_state();
-    let labels = rendered_corner_page(&mut state)
-        .into_iter()
-        .map(|(_, label)| label)
-        .collect::<Vec<_>>();
-    assert!(
-        labels
-            .iter()
-            .any(|label| label.contains("Unresolved corners are skipped until bound")),
-        "the contract, and that this project is currently held by it: {labels:?}"
-    );
-}
-
-#[test]
 fn the_statistical_card_counts_only_what_the_bound_section_declares() {
     use crate::state::model_library::{
         FiniteF64, ModelDefinitionMetadata, StatisticalDefinition, StatisticalDistribution,

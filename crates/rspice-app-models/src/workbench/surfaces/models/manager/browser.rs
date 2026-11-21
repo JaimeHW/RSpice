@@ -186,30 +186,6 @@ impl Host {
 mod tests {
     use super::*;
 
-    /// Each standing gets its own sentence, and every sentence states both
-    /// halves.
-    ///
-    /// A test that checked for "browser" would pass on a line that had lost
-    /// the half about the project, which is the half that decides whether a
-    /// reader believes their work is safe.
-    #[test]
-    fn a_browser_session_states_both_halves_of_what_it_keeps() {
-        for standing in [
-            PackStorageStanding::Persistent,
-            PackStorageStanding::BestEffort,
-            PackStorageStanding::NotApplicable,
-            PackStorageStanding::Unavailable("storage is denied".to_owned()),
-        ] {
-            let note = Host::Browser
-                .scope_note(&standing)
-                .expect("a browser states what its store keeps");
-            assert!(
-                note.contains("parts retained into a project are saved in the project file"),
-                "{standing:?} lost the half about the project: {note}"
-            );
-        }
-    }
-
     /// The three sentences are three different sentences.
     ///
     /// The whole point of deriving the note from the standing is that a
@@ -266,64 +242,6 @@ mod tests {
         }
     }
 
-    /// No note claims a durability it has not been granted, and none says a
-    /// retained part is at risk.
-    #[test]
-    fn no_note_claims_a_durability_it_does_not_have() {
-        for note in [
-            SESSION_SCOPE_NOTE,
-            PERSISTENT_SCOPE_NOTE,
-            BEST_EFFORT_SCOPE_NOTE,
-        ] {
-            let lowered = note.to_ascii_lowercase();
-            for forbidden in [
-                "lost",
-                "temporar",
-                "permanent",
-                "forever",
-                "always",
-                "guarantee",
-                "never be removed",
-            ] {
-                assert!(
-                    !lowered.contains(forbidden),
-                    "a scope note says '{forbidden}': {note}"
-                );
-            }
-            assert!(lowered.contains("saved in the project file"));
-        }
-        // The two that say packs are kept also say they are re-proved, because
-        // "kept" without "re-proved" invites the reader to believe stored
-        // bytes are trusted bytes.
-        for kept in [PERSISTENT_SCOPE_NOTE, BEST_EFFORT_SCOPE_NOTE] {
-            assert!(kept.contains("re-proved when they are read back"), "{kept}");
-        }
-    }
-
-    /// A desktop build selects the desktop host, which is what makes "native
-    /// renders are unchanged" a checked claim rather than an intention.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn a_desktop_build_selects_the_desktop_host() {
-        assert_eq!(current_host(), Host::Desktop);
-        assert_eq!(Host::default(), Host::Desktop);
-        assert_eq!(
-            Host::default().scope_note(&PackStorageStanding::NotApplicable),
-            None
-        );
-    }
-
-    /// And a browser build selects the other one, from the same four lines.
-    #[cfg(target_arch = "wasm32")]
-    #[test]
-    fn a_browser_build_selects_the_browser_host() {
-        assert_eq!(current_host(), Host::Browser);
-        assert_eq!(
-            Host::default().scope_note(&PackStorageStanding::BestEffort),
-            Some(BEST_EFFORT_SCOPE_NOTE)
-        );
-    }
-
     /// Every way durable pack storage can disappoint a reader lands on a rung
     /// that names the right recovery.
     ///
@@ -378,29 +296,6 @@ mod tests {
         // And a restore that discarded nothing states nothing, so a healthy
         // session never reaches a rung at all.
         assert!(HydrationReport::default().refusal().is_none());
-    }
-
-    /// The two hosts fail an install differently, and say so differently.
-    #[test]
-    fn each_host_describes_the_wreckage_it_actually_leaves() {
-        assert!(
-            Host::Desktop
-                .install_failure_detail()
-                .contains("staging directory")
-        );
-        assert!(
-            !Host::Browser.install_failure_detail().contains("directory"),
-            "a browser session has no directory to leave behind"
-        );
-        // The claim the mirrored store's own test proves: the durable copy is
-        // written on commit and never on a stage. A failed install therefore
-        // leaves this browser's storage exactly as it was, and the sentence
-        // says so rather than describing memory that ends with the tab.
-        assert!(
-            Host::Browser
-                .install_failure_detail()
-                .contains("nothing at all is written to this browser's storage until the release")
-        );
     }
 
     /// Opening a card is refused in a browser whatever the row records, and

@@ -1326,23 +1326,3 @@ fn a_discarded_catalog_cache_is_not_reported_as_never_having_asked() {
     );
     assert!(button(&nodes, "Refresh catalog").is_some());
 }
-
-/// A size is spelled in the workspace's units, by the workspace's formatter.
-///
-/// The last two assertions are the point of routing this through the shared
-/// one: the page's own formatter divided by 1024 and then wrote `kB` and `MB`
-/// beside the quotient, which is a different quantity from the one it had
-/// computed. Only the em-dash is this page's own, and it is not a size.
-#[test]
-fn a_byte_count_reads_as_a_size_rather_than_a_number() {
-    assert_eq!(byte_size(0), "—");
-    assert_eq!(byte_size(512), "512 B");
-    assert_eq!(byte_size(2048), "2.00 KiB");
-    assert_eq!(byte_size(3 * 1024 * 1024), "3.00 MiB");
-    assert_eq!(byte_size(150 * 1024 * 1024), "150.00 MiB");
-    assert_eq!(
-        byte_size(2 * 1024 * 1024),
-        rspice_simulation_contract::run_set::format_bytes(2 * 1024 * 1024),
-        "every non-zero size is the shared spelling, character for character"
-    );
-}

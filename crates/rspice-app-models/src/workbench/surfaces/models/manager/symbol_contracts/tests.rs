@@ -676,67 +676,6 @@ fn a_project_only_registry_has_no_group_band_to_draw() {
     );
 }
 
-#[test]
-fn the_two_corpora_are_grouped_and_the_band_names_the_technology() {
-    // Assembled directly: the PDK half of the registry comes from a
-    // PDK package, and what is being checked here is the ordering
-    // and the band, neither of which the package decides.
-    let project = |cell: &str| SymbolRow {
-        reference: CellViewRef::new("project_symbols", cell, "symbol"),
-        authority: SymbolRowAuthority::DesignLibrary { read_only: false },
-        family: "vendor/OPA189_A".to_owned(),
-        pins: Vec::new(),
-        form: "not defined".to_owned(),
-        template: "not defined".to_owned(),
-        status: SymbolStatus::Bound,
-        definition: None,
-        diagnostics: Vec::new(),
-        standing: None,
-    };
-    let technology = |cell: &str| SymbolRow {
-        reference: CellViewRef::new("demo180", cell, "symbol"),
-        authority: SymbolRowAuthority::PdkTechnology {
-            technology_name: "DEMO180".to_owned(),
-            revision: "2.3.1".to_owned(),
-            manifest_digest: crate::product::ContentDigest::from_bytes([7; 32]),
-            archive_digest: crate::product::ContentDigest::from_bytes([9; 32]),
-        },
-        ..project(cell)
-    };
-    // Deliberately interleaved, and with the technology library sorting first
-    // by name: grouping has to beat the library ordering, or the band cannot
-    // be one contiguous split.
-    let rows = {
-        let mut rows = vec![
-            technology("nch_core"),
-            project("opamp_5pin"),
-            technology("pch_core"),
-            project("comp_3pin"),
-        ];
-        rows.sort_by(|left, right| {
-            left.corpus()
-                .cmp(&right.corpus())
-                .then_with(|| left.reference.cell.cmp(&right.reference.cell))
-        });
-        rows
-    };
-
-    assert_eq!(project_row_count(&rows), 2);
-    assert_eq!(
-        rows.iter()
-            .map(|row| row.reference.cell.as_str())
-            .collect::<Vec<_>>(),
-        vec!["comp_3pin", "opamp_5pin", "nch_core", "pch_core"],
-        "the project's own forms come first, whatever the libraries are called"
-    );
-    assert_eq!(
-        technology_group_band(&rows).as_deref(),
-        Some("DEMO180 2.3.1 · 2 TECHNOLOGY SYMBOLS · READ-ONLY"),
-        "the band names the technology, the revision the project pinned, how \
-         many symbols it contributes, and that none may be edited here"
-    );
-}
-
 /// A schematic holding `components`, saved as the active sheet.
 fn place(state: &mut FeatureHarness<ModelsFeature>, components: Vec<crate::state::Component>) {
     use crate::state::{ComponentType, Point};

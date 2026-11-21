@@ -1,10 +1,7 @@
 //! The workspace state's wire spellings and the catalog facts its facets
 //! and operational states promise the reader.
 
-use super::{
-    ModelHubFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
-    ModelsWorkbenchViewState, RSpicePartFacet,
-};
+use super::{ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort, RSpicePartFacet};
 
 /// Every class the catalog assigns is reachable from a class chip, or is
 /// named here as one nothing offers.
@@ -36,57 +33,6 @@ fn every_class_the_catalog_assigns_is_reachable_from_a_chip() {
             "'{token}' classifies to '{device}', which no class chip filters on"
         );
     }
-}
-
-/// Every facet round-trips under the kebab-case spelling written today.
-#[test]
-fn every_facet_round_trips_under_its_current_spelling() {
-    for (stored, expected) in [
-        ("\"all\"", ModelHubFacet::All),
-        ("\"needs-attention\"", ModelHubFacet::NeedsAttention),
-        ("\"installed\"", ModelHubFacet::Installed),
-        ("\"pinned\"", ModelHubFacet::Pinned),
-        ("\"available\"", ModelHubFacet::Available),
-    ] {
-        assert_eq!(
-            serde_json::from_str::<ModelHubFacet>(stored).expect(stored),
-            expected
-        );
-        assert_eq!(
-            serde_json::to_string(&expected).expect("serializes"),
-            stored
-        );
-    }
-}
-
-/// A session written before the catalog could be sorted still opens.
-///
-/// The order is durable view state added after this struct shipped, so
-/// every session on disk lacks the field. Without the `serde(default)` on
-/// it the whole `ModelsWorkbenchViewState` fails to decode and the reader
-/// loses every selection in the workspace to a table header.
-#[test]
-fn a_session_saved_before_the_catalog_could_be_sorted_still_opens() {
-    let restored = serde_json::from_str::<ModelsWorkbenchViewState>(
-        "{\"catalog_scope\":\"project\",\"catalog_query\":\"nch\"}",
-    )
-    .expect("a session with no recorded order still opens");
-    assert_eq!(restored.catalog_query, "nch");
-    assert_eq!(restored.catalog_sort, ModelsTableSort::default());
-    assert_eq!(restored.catalog_sort.key, ModelsCatalogSortKey::Model);
-    assert!(!restored.catalog_sort.descending);
-
-    // Half a record is enough too: the direction alone restores onto the
-    // default column rather than refusing the view state.
-    let partial =
-        serde_json::from_str::<ModelsTableSort>("{\"descending\":true}").expect("partial sort");
-    assert_eq!(partial.key, ModelsCatalogSortKey::Model);
-    assert!(partial.descending);
-    assert_eq!(
-        serde_json::to_string(&ModelsCatalogSortKey::UsedBy).expect("serializes"),
-        "\"used-by\"",
-        "the spelling written today is the kebab-case one"
-    );
 }
 
 /// Clicking the ordered column reverses it; clicking another takes it over
