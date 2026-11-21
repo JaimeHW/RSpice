@@ -356,7 +356,7 @@ fn prepare<'a>(
     analysis: Option<&crate::state::AnalysisResult>,
     owner: u64,
     sweep: Option<&TwoPortSweep>,
-    pin: Option<(usize, usize)>,
+    marker: Option<(usize, usize)>,
 ) -> Prepared<'a> {
     let mut traces = Vec::new();
     let empty = rspice_results::waveform::WaveformValues::default;
@@ -496,9 +496,9 @@ fn prepare<'a>(
             ),
         });
     }
-    // The circles follow the marker's frequency, else the sweep's middle.
+    // The circles follow the last marker's frequency, else the sweep's middle.
     let figures = sweep.and_then(|sweep| {
-        let marked = pin
+        let marked = marker
             .and_then(|(slot, index)| {
                 traces
                     .get(slot)
@@ -525,7 +525,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let owner = owner_key(state);
     let sweep = two_port(state, owner);
     let viewer = super::ResultViewer::Smith;
-    let mut pin = state.results.session.rf_pin.get(&viewer).copied();
+    let mut markers = state.results.session.smith.markers.clone();
     let analysis = state.model.simulation.active_analysis();
     let session = &mut state.results.session;
     let prepared = prepare(
@@ -535,7 +535,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         analysis,
         owner,
         sweep.as_deref(),
-        pin,
+        markers.last().copied(),
     );
     let mut view = session.plot_view(viewer, 0);
     let chart = view::SmithChart {
@@ -548,7 +548,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ui,
         &chart,
         &mut view,
-        &mut pin,
+        &mut markers,
         &mut session.cache,
         &quantity_policy,
         digits,
@@ -577,22 +577,14 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
     if let Some(name) = removed {
         results.session.smith.responses.retain(|text| *text != name);
-        results.session.rf_pin.remove(&viewer);
+        // The loci after it move up a slot, so a marker would land on another.
+        markers.clear();
     }
+    results.session.smith.markers = markers;
     if let Some(response) = response {
         super::record_drawn_axes(results, viewer, &response);
         if response.view.any() {
             *results.session.plot_view_mut(viewer, 0) = view;
-        }
-        if response.response.clicked() {
-            match pin {
-                Some(hit) => {
-                    results.session.rf_pin.insert(viewer, hit);
-                }
-                None => {
-                    results.session.rf_pin.remove(&viewer);
-                }
-            }
         }
     }
 }
@@ -604,12 +596,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let owner = owner_key(state);
     let sweep = two_port(state, owner);
-    let pin = state
-        .results
-        .session
-        .rf_pin
-        .get(&super::ResultViewer::Smith)
-        .copied();
+    let markers = state.results.session.smith.markers.clone();
     let analysis = state.model.simulation.active_analysis();
     let session = &mut state.results.session;
     let prepared = prepare(
@@ -619,7 +606,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         analysis,
         owner,
         sweep.as_deref(),
-        pin,
+        markers.last().copied(),
     );
     let chart = view::SmithChart {
         traces: &prepared.traces,
@@ -627,7 +614,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         figures: prepared.figures.as_ref(),
         circles: &prepared.circles,
     };
-    view::right_panel(ui, &chart, pin, &quantity_policy, digits);
+    view::right_panel(ui, &chart, &markers, &quantity_policy, digits);
 }
 
 #[cfg(test)]

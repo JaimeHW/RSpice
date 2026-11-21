@@ -2028,6 +2028,7 @@ pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
         results.session.rf_pin.clear();
+        results.session.smith.markers.clear();
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
         results.operational_condition = None;

@@ -141,6 +141,14 @@ pub struct SmithSheetState {
     /// The gain or noise value field's text while it is being edited.
     pub gain_draft: Option<String>,
     pub noise_draft: Option<String>,
+    /// The markers on the chart, m1 first: each a locus slot and a sample of it.
+    pub markers: Vec<(usize, usize)>,
+    /// Whether the constant-Q contours are drawn.
+    pub q_shown: bool,
+    /// The contours' Q values; empty is the automatic set.
+    pub q_values: Vec<f64>,
+    /// The Q field's text while it is being edited.
+    pub q_draft: Option<String>,
     /// The two-port the sheet resolved for the analysis it last drew, keyed
     /// by that analysis' cache owner, so a frame does not re-resolve four
     /// retained columns to place its circles.
@@ -166,9 +174,39 @@ impl Default for SmithSheetState {
             noise_db: Vec::new(),
             gain_draft: None,
             noise_draft: None,
+            markers: Vec::new(),
+            q_shown: false,
+            q_values: Vec::new(),
+            q_draft: None,
             two_port_cache: None,
         }
     }
+}
+
+impl SmithSheetState {
+    /// The constant-Q contours to draw: none when switched off, else the
+    /// typed values, or Q of 1, 2 and 5.
+    pub fn q_contours(&self) -> Vec<f64> {
+        match (self.q_shown, self.q_values.is_empty()) {
+            (false, _) => Vec::new(),
+            (true, true) => vec![1.0, 2.0, 5.0],
+            (true, false) => self.q_values.clone(),
+        }
+    }
+}
+
+/// Q values typed as numbers apart by spaces or commas; `None` unless every
+/// one is a positive, finite number.
+pub fn parse_q_values(text: &str) -> Option<Vec<f64>> {
+    text.split(|character: char| character == ',' || character.is_whitespace())
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            token
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite() && *value > 0.0)
+        })
+        .collect()
 }
 
 /// Smith chart viewer state.

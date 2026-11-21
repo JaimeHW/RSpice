@@ -88,6 +88,16 @@ pub fn domain_bar(
     ) {
         sheet.grid = SmithGrid::from_index(grid);
     }
+    ui.add_space(8.0);
+    if chip(ui, "Q", sheet.q_shown)
+        .on_hover_text("Constant-Q contours: where |X|/R, and so |B|/G, is the same")
+        .clicked()
+    {
+        sheet.q_shown = !sheet.q_shown;
+    }
+    if sheet.q_shown {
+        q_field(ui, sheet);
+    }
     let mut submitted = None;
     if let Some(retained) = offer.responses {
         ui.add_space(8.0);
@@ -293,6 +303,70 @@ fn decibel_field(
         *draft = None;
     }
     bar_label(ui, "dB");
+}
+
+/// The constant-Q contours' values; empty is the automatic set.
+fn q_field(ui: &mut Ui, sheet: &mut SmithSheetState) {
+    let current = sheet
+        .q_values
+        .iter()
+        .map(|value| format!("{value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut text = sheet.q_draft.clone().unwrap_or(current);
+    let field = ui
+        .add(
+            egui::TextEdit::singleline(&mut text)
+                .id_salt("rspice.results.smith.q")
+                .desired_width(56.0)
+                .font(theme::field_mono())
+                .hint_text("1 2 5"),
+        )
+        .on_hover_text("Q values of the contours; empty draws 1, 2 and 5");
+    if field.has_focus() {
+        sheet.q_draft = Some(text);
+    } else if field.lost_focus() || sheet.q_draft.is_some() {
+        if let Some(parsed) = super::state::parse_q_values(&text) {
+            sheet.q_values = parsed;
+        }
+        sheet.q_draft = None;
+    }
+}
+
+/// Each |Q| = q contour: the two arcs through Γ = ±1 centred on ±j/q, each
+/// tagged with its value where it passes nearest the chart's centre.
+fn paint_q_contours(
+    painter: &egui::Painter,
+    mapper: &plot::PlotMapper,
+    values: &[f64],
+    inks: ChartInks,
+) {
+    let stroke = egui::Stroke::new(1.0, inks.label.gamma_multiply(0.6));
+    for &q in values {
+        let radius = (1.0 + 1.0 / (q * q)).sqrt();
+        for sign in [1.0, -1.0] {
+            let center = Complex64::new(0.0, sign / q);
+            paint_polyline(
+                painter,
+                mapper,
+                &grid::arc_points(center, radius),
+                stroke,
+                false,
+            );
+            let nearest = center - Complex64::new(0.0, sign * radius);
+            painter.text(
+                egui::pos2(mapper.x(nearest.re), mapper.y(nearest.im)),
+                if sign > 0.0 {
+                    egui::Align2::CENTER_TOP
+                } else {
+                    egui::Align2::CENTER_BOTTOM
+                },
+                format!("Q {q}"),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                inks.label,
+            );
+        }
+    }
 }
 
 /// Inks for one frame of the chart, all resolved from the canvas theme so
@@ -652,13 +726,15 @@ fn vswr_text(magnitude: f64, digits: usize) -> String {
 }
 
 /// Draw the listed loci, the grid and the circles, and update only the
-/// sheet's local view and marker. The host owns source qualification and
-/// cache invalidation. Readouts use the reader's `significant_digits`.
+/// sheet's local view and markers. A click on a locus point puts a marker
+/// there, after the others; a click on a marker takes it away. The host
+/// owns source qualification and cache invalidation. Readouts use the
+/// reader's `significant_digits`.
 pub fn show(
     ui: &mut Ui,
     chart: &SmithChart<'_>,
     view: &mut PlotView,
-    pin: &mut Option<(usize, usize)>,
+    markers: &mut Vec<(usize, usize)>,
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
@@ -770,8 +846,10 @@ pub fn show(
 
     let inks = ChartInks::of(&t, sheet.grid);
     let mode = sheet.grid;
+    let q_contours = sheet.q_contours();
     spec.underlay = Some(Box::new(move |painter, mapper| {
         paint_grid(painter, mapper, mode, inks);
+        paint_q_contours(painter, mapper, &q_contours, inks);
         for circle in circles {
             paint_circle(painter, mapper, circle, inks);
         }
@@ -839,22 +917,25 @@ pub fn show(
         }
     }
 
-    if response.response.clicked() {
-        *pin = match hovered {
-            Some(hit) if *pin == Some(hit) => None,
-            Some(hit) => Some(hit),
-            None => None,
-        };
+    if response.response.clicked()
+        && let Some(hit) = hovered
+    {
+        match markers.iter().position(|marker| *marker == hit) {
+            Some(at) => {
+                markers.remove(at);
+            }
+            None => markers.push(hit),
+        }
     }
 
-    let pinned = pin.filter(|(slot, i)| {
-        traces
-            .get(*slot)
-            .is_some_and(|prepared| prepared.visible && *i < prepared.real.len())
-    });
     let painter = plot_ui.painter();
-    if let Some((slot, i)) = pinned {
-        let prepared = &traces[slot];
+    for (number, &(slot, i)) in markers.iter().enumerate() {
+        let Some(prepared) = traces
+            .get(slot)
+            .filter(|prepared| prepared.visible && i < prepared.real.len())
+        else {
+            continue;
+        };
         let pos = crate::presentation::xy_screen_pos(
             response.plot_rect,
             (prepared.real[i], prepared.imaginary[i]),
@@ -867,7 +948,7 @@ pub fn show(
         painter.text(
             pos + egui::vec2(7.0, -7.0),
             egui::Align2::LEFT_BOTTOM,
-            "m1",
+            format!("m{}", number + 1),
             theme::mono(tokens::FS_0, FontWeight::SemiBold),
             color,
         );
@@ -899,12 +980,12 @@ pub fn show(
     })
 }
 
-/// The marker's trace and sample, and the two-port figures at the circles'
-/// frequency, at the reader's `significant_digits`.
+/// The markers' traces and samples, and the two-port figures at the
+/// circles' frequency, at the reader's `significant_digits`.
 pub fn right_panel(
     ui: &mut Ui,
     chart: &SmithChart<'_>,
-    pin: Option<(usize, usize)>,
+    markers: &[(usize, usize)],
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
 ) {
@@ -917,14 +998,19 @@ pub fn right_panel(
     let grid = sheet.grid;
     let digits = significant_digits;
     section_header(ui, "Smith", None);
-    let marked = pin.and_then(|(slot, index)| {
-        traces
-            .get(slot)
-            .filter(|trace| trace.visible && index < trace.real.len())
-            .map(|trace| (trace, index))
-    });
+    let marked = markers
+        .iter()
+        .enumerate()
+        .filter_map(|(number, &(slot, index))| {
+            traces
+                .get(slot)
+                .filter(|trace| trace.visible && index < trace.real.len())
+                .map(|trace| (number + 1, trace, index))
+        })
+        .collect::<Vec<_>>();
     let Some(trace) = marked
-        .map(|(trace, _)| trace)
+        .first()
+        .map(|(_, trace, _)| *trace)
         .or_else(|| traces.iter().find(|trace| trace.visible))
     else {
         crate::presentation::panel_note(ui, "Trace metrics appear once a complex trace is drawn.");
@@ -963,16 +1049,42 @@ pub fn right_panel(
         }
     }
     crate::presentation::stat_table(ui, &rows);
-    if let Some((trace, index)) = marked {
-        section_header(ui, "Marker m1", None);
-        let rows = sample_rows(trace, index, grid, quantity_policy, digits)
-            .into_iter()
-            .collect::<Vec<_>>();
+    let point = |trace: &SmithPlotTrace<'_>, index: usize| {
+        (
+            Complex64::new(trace.real[index], trace.imaginary[index]),
+            trace.frequencies.get(index).copied().unwrap_or(0.0),
+        )
+    };
+    let first = marked.first().map(|(_, trace, index)| point(trace, *index));
+    for &(number, trace, index) in &marked {
+        // A marker on another locus than m1's names it.
+        let heading = if trace.name == marked[0].1.name {
+            format!("Marker m{number}")
+        } else {
+            format!("Marker m{number} · {}", trace.name)
+        };
+        section_header(ui, &heading, None);
+        let (gamma, frequency) = point(trace, index);
+        let mut rows = sample_rows(trace, index, grid, quantity_policy, digits);
         // The trace's Z₀ heads the panel already; the hover card keeps it
         // because it stands alone.
+        rows.retain(|(key, _)| key != "Z₀");
+        if let Some(reference) = trace.reference_impedance_ohm {
+            rows.extend(markers::match_rows(gamma, digits));
+            rows.extend(markers::element_rows(gamma, reference, frequency, digits));
+        }
+        if number > 1
+            && let Some(first) = first
+        {
+            rows.extend(markers::delta_rows(
+                (gamma, frequency),
+                first,
+                quantity_policy,
+                digits,
+            ));
+        }
         let table = rows
             .iter()
-            .filter(|(key, _)| key != "Z₀")
             .map(|(key, value)| (key.as_str(), value.clone(), false))
             .collect::<Vec<_>>();
         crate::presentation::stat_table(ui, &table);
@@ -1086,6 +1198,8 @@ fn two_port_rows(
 fn impedance_readout(resistance: f64, reactance: f64, significant_digits: usize) -> String {
     complex_readout(resistance, reactance, "Ω", significant_digits)
 }
+
+mod markers;
 
 #[cfg(test)]
 mod tests;

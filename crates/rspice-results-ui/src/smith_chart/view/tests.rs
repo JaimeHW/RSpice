@@ -134,7 +134,7 @@ fn render_chart(
             })
             .collect::<Vec<_>>();
         let mut view = PlotView::default();
-        let mut pin = pin;
+        let mut markers = pin.into_iter().collect::<Vec<_>>();
         let chart = SmithChart {
             traces: &views,
             sheet,
@@ -145,7 +145,7 @@ fn render_chart(
             ui,
             &chart,
             &mut view,
-            &mut pin,
+            &mut markers,
             &mut cache,
             &QuantityPresentationPolicy::default(),
             4,

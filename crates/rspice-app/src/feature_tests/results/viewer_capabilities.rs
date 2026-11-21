@@ -169,7 +169,7 @@ fn clearing_design_execution_context_clears_project_scoped_results_state() {
             series: Err("stale".to_string()),
         },
     );
-    results.session.rf_pin.insert(ResultViewer::Smith, (0, 1));
+    results.session.rf_pin.insert(ResultViewer::Nyquist, (0, 1));
     results.session.op_filter = "M1".to_string();
     results
         .session
