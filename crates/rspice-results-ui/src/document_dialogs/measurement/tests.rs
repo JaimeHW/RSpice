@@ -343,10 +343,10 @@ fn an_x_axis_argument_states_the_axis_unit_in_its_field() {
     assert!(words.iter().any(|word| word == "Hz"), "{words:?}");
     let words = words_in_field("settlingTime(V(out), 2, 1.2, 10u)", "s", "Start");
     assert!(words.iter().any(|word| word == "s"), "{words:?}");
-    let words = words_in_field("thd(V(out), 10, 1k)", "s", "Fundamental");
+    let words = words_in_field("thd(V(out), 0, 1m, 1024, 1k, 10)", "s", "Fundamental");
     assert!(words.iter().any(|word| word == "Hz"), "{words:?}");
     // A count beside them keeps no unit.
-    let words = words_in_field("thd(V(out), 10, 1k)", "s", "Harmonics");
+    let words = words_in_field("thd(V(out), 0, 1m, 1024, 1k, 10)", "s", "Harmonics");
     assert_eq!(words, ["10"]);
     assert_eq!(axis_frequency_unit("s"), "Hz");
     assert_eq!(axis_frequency_unit("V"), "1/V");

@@ -387,7 +387,17 @@ fn function_unit(
                 None => named("dB"),
             }
         }
-        "db10" | "gainmargin" => named("dB"),
+        "db10" | "gainmargin" | "snr" | "sinad" | "sfdr" => named("dB"),
+        "enob" => Ok(Unit::none()),
+        // The delay of a response swept in hertz is in seconds.
+        "groupdelay" => {
+            let x = x_unit()?;
+            if x == named("Hz")? {
+                named("s")
+            } else {
+                Ok(Unit::none().divided_by(&x))
+            }
+        }
         // The value chosen, which must read in one unit whichever is chosen.
         "if" => {
             let (chosen, otherwise) = (
@@ -708,6 +718,9 @@ mod tests {
             ("tanh(V(out)/V(in))", "s", ""),
             ("V(out) > 2.5", "s", ""),
             ("stddev(V(out))", "s", "V"),
+            ("sfdr(V(out))", "s", "dB"),
+            ("enob(V(out))", "s", ""),
+            ("groupDelay(V(out)/V(in))", "Hz", "s"),
             ("variance(I(vdd), \"sample\")", "s", "A²"),
             ("percentile(V(out), 90)", "s", "V"),
             ("kurtosis(V(out))", "s", ""),

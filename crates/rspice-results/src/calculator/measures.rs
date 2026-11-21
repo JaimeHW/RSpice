@@ -10,7 +10,7 @@ use super::complex_functions;
 use super::evaluator::EvaluationError;
 use super::series::Series;
 use super::value::{CalcValue, RealValue};
-use super::{catalogue, frequency_measures, statistics, time_measures};
+use super::{catalogue, frequency_measures, spectral, statistics, time_measures};
 
 /// One evaluated argument of a function call.
 #[derive(Debug, Clone, PartialEq)]
@@ -66,7 +66,7 @@ pub(super) type Reduction = fn(&str, &Series, &[Argument]) -> Result<RealValue, 
 
 /// The reduction `name` (lower-cased) runs, if it is one.
 pub(super) fn reduction(name: &str) -> Option<Reduction> {
-    statistics::lookup(name)
+    statistics::lookup(name).or_else(|| spectral::lookup(name))
 }
 
 /// Hold a reduction's call, trace included, to the argument count its

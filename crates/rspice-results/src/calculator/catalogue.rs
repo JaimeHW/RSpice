@@ -150,6 +150,27 @@ const LEVEL_ARGUMENTS: [ArgumentSpec; 3] = [
 /// `rise`, `fall` and `slewRate` read the 0 % and 100 % levels from where
 /// the trace starts and ends, as ViVA's riseTime does.
 const EDGE_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("first sample", "last sample");
+/// `(x, from, to, n, f0, harmonics)`, which the spectral scalars share,
+/// the first five in the order of ViVA's `thd`: the record is n samples from
+/// the window's start up to its stop.
+const SPECTRUM_ARGUMENTS: [ArgumentSpec; 6] = [
+    SIGNAL,
+    arg(
+        "Window from",
+        "from",
+        AxisPoint,
+        Derived("the first sample"),
+    ),
+    arg("Window to", "to", AxisPoint, Derived("the last sample")),
+    arg("Samples", "n", Number, Derived("the samples in the window")),
+    arg(
+        "Fundamental",
+        "f0",
+        AxisFrequency,
+        Derived("the largest tone"),
+    ),
+    arg("Harmonics", "harmonics", Number, Literal("10")),
+];
 /// Whether a deviation weighs the signal over its x-span or reads its
 /// samples as a statistical sample.
 const STATISTIC_TYPE: ArgumentSpec = arg(
@@ -481,18 +502,45 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         aliases: &[],
         group: MeasureGroup::Spectrum,
         summary: "% harmonic distortion",
-        description: "Total harmonic distortion of a periodic signal in percent, over the given \
-                      number of harmonics, at a fundamental found from the signal unless stated.",
-        arguments: &[
-            SIGNAL,
-            arg("Harmonics", "n", Number, Literal("10")),
-            arg(
-                "Fundamental",
-                "f0",
-                AxisFrequency,
-                Derived("found from the signal"),
-            ),
-        ],
+        description: "Total harmonic distortion in percent, as the FFT sheet reads it: n samples \
+                      over the window from its start up to its stop, the window taken as one \
+                      period. The fundamental is the largest tone; a stated one must be it.",
+        arguments: &SPECTRUM_ARGUMENTS,
+    },
+    MeasureSpec {
+        name: "snr",
+        aliases: &[],
+        group: MeasureGroup::Spectrum,
+        summary: "signal to noise, dB",
+        description: "The fundamental over the noise, the counted harmonics left out, in dB, \
+                      as the FFT sheet reads it.",
+        arguments: &SPECTRUM_ARGUMENTS,
+    },
+    MeasureSpec {
+        name: "sinad",
+        aliases: &[],
+        group: MeasureGroup::Spectrum,
+        summary: "signal to noise and distortion, dB",
+        description: "The fundamental over the noise and the counted harmonics together, in \
+                      dB, as the FFT sheet reads it.",
+        arguments: &SPECTRUM_ARGUMENTS,
+    },
+    MeasureSpec {
+        name: "sfdr",
+        aliases: &[],
+        group: MeasureGroup::Spectrum,
+        summary: "spur-free dynamic range, dB",
+        description: "The fundamental over the largest other bin, harmonics included, in dB, \
+                      as the FFT sheet reads it.",
+        arguments: &SPECTRUM_ARGUMENTS,
+    },
+    MeasureSpec {
+        name: "enob",
+        aliases: &[],
+        group: MeasureGroup::Spectrum,
+        summary: "effective bits",
+        description: "The effective number of bits, (SINAD - 1.76 dB) / 6.02 dB.",
+        arguments: &SPECTRUM_ARGUMENTS,
     },
 ];
 

@@ -16,6 +16,7 @@ mod measures;
 pub mod parser;
 pub mod retained;
 mod series;
+mod spectral;
 #[cfg(feature = "engine-evidence")]
 pub mod spice_parser;
 mod statistics;

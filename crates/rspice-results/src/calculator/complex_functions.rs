@@ -33,6 +33,10 @@ pub(super) fn dispatch(name: &str, args: Vec<CalcValue>) -> Result<CalcValue, Ev
         return project(args.into_iter().next().unwrap().into_complex(), &name)
             .map(CalcValue::Real);
     }
+    if name == "groupdelay" {
+        count(&name, &args, 1)?;
+        return group_delay(args.into_iter().next().unwrap());
+    }
     if name == "conj" {
         count(&name, &args, 1)?;
         return Ok(CalcValue::Complex(map_complex(
@@ -120,6 +124,28 @@ pub(super) fn dispatch(name: &str, args: Vec<CalcValue>) -> Result<CalcValue, Ev
     Err(EvaluationError::TypeMismatch(format!(
         "{name} requires a real-valued signal; apply real(), imag(), mag(), or phase() explicitly"
     )))
+}
+
+/// `groupDelay(h)` — the group delay of a complex response against
+/// frequency, -dφ/dω: the slope of its unwrapped phase, in degrees per
+/// hertz, over -360. ViVA's groupDelay is d(phase)/d(freq) in seconds.
+fn group_delay(value: CalcValue) -> Result<CalcValue, EvaluationError> {
+    let CalcValue::Complex(response @ ComplexValue::Waveform(..)) = value else {
+        return Err(EvaluationError::TypeMismatch(
+            "groupDelay reads a complex response against frequency, as an AC analysis gives"
+                .to_owned(),
+        ));
+    };
+    let phase = project(response, "phase")?;
+    let unwrapped = FunctionRegistry::dispatch("unwrap", vec![phase])?;
+    let RealValue::Waveform(x, slope) = FunctionRegistry::dispatch("deriv", vec![unwrapped])?
+    else {
+        return Err(EvaluationError::TypeMismatch(
+            "groupDelay needs a response with samples".to_owned(),
+        ));
+    };
+    let delay = slope.into_iter().map(|slope| -slope / 360.0).collect();
+    Ok(CalcValue::Real(RealValue::Waveform(x, delay)))
 }
 
 fn count(name: &str, args: &[CalcValue], expected: usize) -> Result<(), EvaluationError> {
@@ -316,5 +342,57 @@ mod tests {
         assert_eq!(x, [0.0, 1.0]);
         assert!(y[0].re.is_nan() && y[0].im.is_nan());
         assert_eq!(y[1], Complex64::new(0.0, 0.0));
+    }
+
+    fn response(x: &[f64], h: impl Fn(f64) -> Complex64) -> CalcValue {
+        CalcValue::Complex(ComplexValue::Waveform(
+            x.to_vec(),
+            x.iter().map(|&f| h(f)).collect(),
+        ))
+    }
+
+    fn delays(value: CalcValue) -> Vec<f64> {
+        match dispatch("groupDelay", vec![value]).unwrap() {
+            CalcValue::Real(RealValue::Waveform(_, y)) => y,
+            other => panic!("groupDelay returned {other:?}"),
+        }
+    }
+
+    /// A pure delay's phase falls linearly with frequency, wrapping many
+    /// times over the sweep; its group delay is the delay at every
+    /// frequency. A first-order low-pass delays by
+    /// 1 / (2π fc (1 + (f/fc)²)).
+    #[test]
+    fn group_delay_is_the_slope_of_the_unwrapped_phase() {
+        use std::f64::consts::PI;
+        let sweep = |points: usize, from: f64, to: f64| -> Vec<f64> {
+            (0..points)
+                .map(|i| from * (to / from).powf(i as f64 / (points - 1) as f64))
+                .collect()
+        };
+        let tau = 1e-6;
+        let x = sweep(2001, 1e3, 1e7);
+        for delay in delays(response(&x, |f| {
+            Complex64::from_polar(1.0, -2.0 * PI * f * tau)
+        })) {
+            assert!((delay - tau).abs() <= 1e-9 * tau, "{delay} for {tau}");
+        }
+        let fc = 1e3;
+        let x = sweep(4001, 1.0, 1e6);
+        let lowpass = response(&x, |f| Complex64::new(1.0, f / fc).inv());
+        for (f, delay) in x.iter().zip(delays(lowpass)) {
+            let expected = 1.0 / (2.0 * PI * fc * (1.0 + (f / fc).powi(2)));
+            assert!(
+                (delay - expected).abs() <= 1e-4 * expected,
+                "at {f} Hz: {delay} for {expected}"
+            );
+        }
+        assert!(matches!(
+            dispatch(
+                "groupDelay",
+                vec![CalcValue::Real(RealValue::Waveform(x.clone(), x))]
+            ),
+            Err(EvaluationError::TypeMismatch(_))
+        ));
     }
 }

@@ -121,6 +121,13 @@ pub const FUNCTIONS: &[FunctionSpec] = &[
         "running integral along the x-axis",
     ),
     function(
+        "groupDelay",
+        &[],
+        Signal,
+        X,
+        "-dφ/dω, the delay of a response",
+    ),
+    function(
         "clip",
         &[],
         Signal,
