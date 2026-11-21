@@ -29,6 +29,7 @@ pub use checks::{
     UncheckedSegment, awaiting_check, check_progress, checking, defer_check, opening_unchecked,
     take_unchecked_segments,
 };
+mod pending_sources;
 mod references;
 pub use references::parse_digest;
 pub(crate) use references::references_written;

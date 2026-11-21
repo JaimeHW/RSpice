@@ -3,14 +3,17 @@
 //! A project, a recovery or a session writes a stored waveform as the window of a column of a
 //! segment named by its logical digest, and a stored event history as a signal of one, and
 //! keeps the segments beside the file. Reading the file back finds each segment by its digest
-//! ([`super::kept_segment`]); one no folder holds reads as missing and names its file.
+//! ([`super::kept_segment`]); one still waiting for its first check reads as being checked until
+//! it has had it, and one no folder holds, or that failed its check, reads as missing and names
+//! its file.
 
 use std::cell::Cell;
 use std::sync::Arc;
 
 use rspice_results_store::Digest;
 
-use super::{MissingSegment, SegmentColumn, SegmentEvents, kept_segment};
+use super::pending_sources::{CheckingColumn, CheckingEvents};
+use super::{MissingSegment, Segment, SegmentColumn, SegmentEvents, kept_segment};
 use crate::events::points::{EventHistorySource, EventPoint, EventPoints};
 use crate::waveform::{ColumnSource, StoredWindow, WaveformValues, WindowLead};
 
@@ -100,7 +103,8 @@ impl ColumnReference {
     }
 
     /// The window, read from the kept segment it names, or showing as unavailable where no
-    /// folder holds the segment.
+    /// folder holds the segment. A segment still waiting for its first check is read once the
+    /// check ends.
     pub fn values(&self) -> Result<WaveformValues, String> {
         let digest = digest_of(&self.segment)?;
         let window = StoredWindow {
@@ -113,24 +117,13 @@ impl ColumnReference {
             },
         };
         let source: Arc<dyn ColumnSource> = match kept_segment(digest) {
-            Some(segment) if self.column_rows == segment.rows() => {
-                let slot = match self.column.checked_sub(1) {
-                    None => None,
-                    Some(slot) => Some(
-                        usize::try_from(slot)
-                            .map_err(|_| format!("column {} is out of range", self.column))?,
-                    ),
-                };
-                let name = column_name(&segment, slot);
-                SegmentColumn::new(segment, slot, name)
-            }
-            Some(_) => {
-                return Err(format!(
-                    "the results store {} does not hold the {} rows its result names",
-                    rspice_results_store::kept_segment_name(&digest),
-                    self.column_rows
-                ));
-            }
+            Some(segment) => segment_column(segment, digest, self.column, self.column_rows)?,
+            None if super::checking(digest.0) => CheckingColumn::new(
+                digest,
+                self.column,
+                self.column_rows,
+                format!("column {} of a results store being checked", self.column),
+            ),
             None => MissingSegment::new(
                 digest,
                 self.column,
@@ -142,7 +135,46 @@ impl ColumnReference {
     }
 }
 
-fn column_name(segment: &super::Segment, slot: Option<usize>) -> String {
+/// Column `column` of `segment`, whose logical digest is `digest`, as a result that names
+/// `column_rows` rows reads it. A segment of other rows is refused.
+pub(super) fn segment_column(
+    segment: Arc<Segment>,
+    digest: Digest,
+    column: u64,
+    column_rows: u64,
+) -> Result<Arc<dyn ColumnSource>, String> {
+    if column_rows != segment.rows() {
+        return Err(format!(
+            "the results store {} does not hold the {column_rows} rows its result names",
+            rspice_results_store::kept_segment_name(&digest),
+        ));
+    }
+    let slot = match column.checked_sub(1) {
+        None => None,
+        Some(slot) => {
+            Some(usize::try_from(slot).map_err(|_| format!("column {column} is out of range"))?)
+        }
+    };
+    let name = column_name(&segment, slot);
+    Ok(SegmentColumn::new(segment, slot, name))
+}
+
+/// Event signal `signal` of `segment`.
+pub(super) fn segment_events(
+    segment: Arc<Segment>,
+    signal: u64,
+) -> Result<Arc<dyn EventHistorySource>, String> {
+    let signal = usize::try_from(signal).map_err(|_| format!("signal {signal} is out of range"))?;
+    let name = segment
+        .reader()
+        .schema()
+        .ok()
+        .and_then(|schema| schema.signals.get(signal).map(|s| s.name.clone()))
+        .unwrap_or_else(|| format!("signal {signal}"));
+    Ok(SegmentEvents::new(segment, signal, name))
+}
+
+fn column_name(segment: &Segment, slot: Option<usize>) -> String {
     let Some(slot) = slot else {
         return "x axis".to_owned();
     };
@@ -185,22 +217,19 @@ impl EventsReference {
     }
 
     /// The history, read from the kept segment it names, or showing no points where no folder
-    /// holds the segment.
+    /// holds the segment. A segment still waiting for its first check is read once the check
+    /// ends.
     pub fn points<P: EventPoint>(&self) -> Result<EventPoints<P>, String> {
         let digest = digest_of(&self.segment)?;
         let from = self.from.unwrap_or(f64::NEG_INFINITY);
         let source: Arc<dyn EventHistorySource> = match kept_segment(digest) {
-            Some(segment) => {
-                let signal = usize::try_from(self.signal)
-                    .map_err(|_| format!("signal {} is out of range", self.signal))?;
-                let name = segment
-                    .reader()
-                    .schema()
-                    .ok()
-                    .and_then(|schema| schema.signals.get(signal).map(|s| s.name.clone()))
-                    .unwrap_or_else(|| format!("signal {signal}"));
-                SegmentEvents::new(segment, signal, name)
-            }
+            Some(segment) => segment_events(segment, self.signal)?,
+            None if super::checking(digest.0) => CheckingEvents::new(
+                digest,
+                self.signal,
+                self.changes,
+                format!("signal {} of a results store being checked", self.signal),
+            ),
             None => MissingSegment::new(
                 digest,
                 self.signal,

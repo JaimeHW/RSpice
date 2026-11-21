@@ -549,6 +549,59 @@ fn a_project_opens_before_its_results_are_checked_and_reads_them_once_they_are()
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A run whose kept segment still waits for its first check is never read as missing. Opened
+/// again while the job that checks it has not started, as a recovery reads a project again, it
+/// reads every sample: the read runs the check itself. The run the open restored reads every
+/// sample too, and the job, let go, reads the file no more.
+#[test]
+fn a_run_read_while_its_check_waits_joins_the_check() {
+    use crate::workbench::results_job::hold_jobs_for_tests;
+    let root = scratch_folder("read-joins-its-check");
+    let saved = root.join("pair.rspiceproj");
+    let (json, samples) = saved_and_closed(&saved, &[411]);
+    // Renamed, so no file of the folder is one this process has checked.
+    let file = root.join("moved.rspiceproj");
+    std::fs::rename(
+        root.join("results").join("pair"),
+        root.join("results").join("moved"),
+    )
+    .unwrap();
+    let loaded =
+        rspice_results::store_reader::opening_unchecked(|| load_project_text(&json, Some(&file)))
+            .expect("the project opens");
+    let opened = crate::io::simulation_state_from_results(loaded.file.simulation_results)
+        .expect("the history opens");
+    assert!(opened.retained.runs[0].checking_results().is_some());
+    hold_jobs_for_tests(true);
+    let mut checks = Vec::new();
+    crate::io::result_segments::start_segment_checks(&mut checks);
+    hold_jobs_for_tests(false);
+    assert_eq!(checks.len(), 1, "the open left one check");
+
+    let again = load_project_text(&json, Some(&file)).expect("the project reads again");
+    assert_eq!(again.file.simulation_results_warning, None);
+    let recovered = crate::io::simulation_state_from_results(again.file.simulation_results)
+        .expect("the history reads again");
+    let run = &recovered.retained.runs[0];
+    assert_eq!(run.unread_results(), None, "read again, the run is there");
+    assert_eq!(run_bits(run), samples[0]);
+    assert!(!checks[0].is_finished(), "the job never started");
+    assert_eq!(run_bits(&opened.retained.runs[0]), samples[0]);
+    assert_eq!(opened.retained.runs[0].checking_results(), None);
+
+    checks[0].release();
+    let mut simulation = opened;
+    assert!(checks[0].wait(std::time::Duration::from_secs(60)));
+    assert!(!crate::io::result_segments::poll_segment_checks(
+        &mut simulation,
+        &mut checks
+    ));
+    assert_eq!(simulation.retained.runs[0].unread_results(), None);
+    assert_eq!(run_bits(&simulation.retained.runs[0]), samples[0]);
+    drop((simulation, recovered));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A save into a folder that already holds a file under a run's segment name, not checked yet,
 /// goes on without reading it: the file is checked by a job of its own, which puts the run's own
 /// segment in its place when the file is not the segment.

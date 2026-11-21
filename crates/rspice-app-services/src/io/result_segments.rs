@@ -708,12 +708,13 @@ pub fn poll_segment_checks(
     });
     if ended {
         let runs = (0..simulation.retained.runs.len()).collect();
+        // A waveform whose segment is still being checked is left as it is: reading it would
+        // wait for that check here.
         read_runs_again(simulation, runs, &|values| {
-            if rspice_formats::project_results::readable(values) {
-                return None;
-            }
             let digest = values.stored_window()?.0.identity()?.0;
-            if rspice_results::store_reader::checking(digest) {
+            if rspice_results::store_reader::checking(digest)
+                || rspice_formats::project_results::readable(values)
+            {
                 return None;
             }
             rspice_formats::project_results::read_checked(values)

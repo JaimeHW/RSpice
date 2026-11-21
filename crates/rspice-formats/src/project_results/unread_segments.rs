@@ -151,10 +151,20 @@ impl ColumnSource for DamagedSegment {
     }
 }
 
+/// Whether a source of `identity` is a segment still waiting for its first check: reading it
+/// would wait for that check.
+fn being_checked(identity: Option<([u8; 32], u64)>) -> bool {
+    identity.is_some_and(|(digest, _)| rspice_results::store_reader::checking(digest))
+}
+
 /// The waveform `values` reads now that more folders may hold its segment: `None` when it reads
-/// already, or still cannot.
+/// already, or still cannot, or its segment is still being checked.
 pub fn read_again(values: &WaveformValues) -> Option<WaveformValues> {
-    if readable(values) {
+    if values
+        .stored_window()
+        .is_some_and(|(source, _)| being_checked(source.identity()))
+        || readable(values)
+    {
         return None;
     }
     let again = self::values(&ColumnReference::of(values)?).ok()?;
@@ -168,12 +178,12 @@ pub fn read_checked(values: &WaveformValues) -> Option<WaveformValues> {
 }
 
 /// The event history `points` reads now that more folders may hold its segment: `None` when it
-/// reads already, or still cannot.
+/// reads already, or still cannot, or its segment is still being checked.
 pub fn read_events_again<P: EventPoint>(points: &EventPoints<P>) -> Option<EventPoints<P>> {
     let unread = |points: &EventPoints<P>| {
-        points
-            .stored_source()
-            .is_some_and(|source| source.before(f64::NEG_INFINITY).is_err())
+        points.stored_source().is_some_and(|source| {
+            !being_checked(source.identity()) && source.before(f64::NEG_INFINITY).is_err()
+        })
     };
     if !unread(points) {
         return None;

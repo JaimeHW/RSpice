@@ -4,16 +4,20 @@
 //! digest ([`rspice_results_store::verify_segment`]), and that first check reads all of it.
 //! Opening a project would read every segment it names before the project showed. While
 //! [`opening_unchecked`] runs, a kept file not checked yet is left unread instead: it is queued
-//! on this thread for a check ([`take_unchecked_segments`]), and it reads as missing until that
-//! check finds it is the segment. Meanwhile [`checking`] says its digest is being checked and
-//! [`check_progress`] how far the check got, so its run says it is being checked rather than
-//! missing. [`check`] is the check, run wherever the caller runs its long work.
+//! on this thread for a check ([`take_unchecked_segments`]), and until that check ends it reads
+//! as being checked, never as missing: [`checking`] says its digest is being checked and
+//! [`check_progress`] how far the check got. [`check`] is the check, run wherever the caller runs
+//! its long work. A read of the file's samples outside [`opening_unchecked`] joins its check: it
+//! waits for the check under way, or runs the check itself when none has started, so the file
+//! is read whole once.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+#[cfg(any(unix, windows))]
+use std::sync::Condvar;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rspice_results_store::Digest;
 
@@ -34,10 +38,23 @@ struct Progress {
     total: AtomicU64,
 }
 
-/// Every file waiting for or under its check, by path: its digest and how far its check got.
-static AWAITING: Mutex<BTreeMap<PathBuf, (Digest, Arc<Progress>)>> = Mutex::new(BTreeMap::new());
+/// A file waiting for or under its check.
+struct Awaiting {
+    segment: UncheckedSegment,
+    progress: Arc<Progress>,
+    /// Whether its check has started: a job's, or a reader's that found none under way.
+    #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
+    started: bool,
+}
 
-fn awaiting() -> std::sync::MutexGuard<'static, BTreeMap<PathBuf, (Digest, Arc<Progress>)>> {
+/// Every file waiting for or under its check, by path.
+static AWAITING: Mutex<BTreeMap<PathBuf, Awaiting>> = Mutex::new(BTreeMap::new());
+
+/// Told each time a check ends, so whoever waits for one looks again.
+#[cfg(any(unix, windows))]
+static ENDED: Condvar = Condvar::new();
+
+fn awaiting() -> MutexGuard<'static, BTreeMap<PathBuf, Awaiting>> {
     AWAITING.lock().unwrap_or_else(|p| p.into_inner())
 }
 
@@ -63,7 +80,6 @@ pub fn opening_unchecked<T>(open: impl FnOnce() -> T) -> T {
 }
 
 /// Whether this thread is in [`opening_unchecked`].
-#[cfg(any(unix, windows))]
 pub(super) fn deferring() -> bool {
     OPENING.with(Cell::get) > 0
 }
@@ -78,7 +94,11 @@ pub fn defer_check(segment: UncheckedSegment) {
         }
         awaiting.insert(
             segment.path.clone(),
-            (segment.digest, Arc::new(Progress::default())),
+            Awaiting {
+                segment: segment.clone(),
+                progress: Arc::new(Progress::default()),
+                started: false,
+            },
         );
     }
     QUEUED.with(|queued| queued.borrow_mut().push(segment));
@@ -96,7 +116,9 @@ pub fn awaiting_check(path: &Path) -> bool {
 
 /// Whether a file of digest `digest` is waiting for or under its check.
 pub fn checking(digest: [u8; 32]) -> bool {
-    awaiting().values().any(|(held, _)| held.0 == digest)
+    awaiting()
+        .values()
+        .any(|held| held.segment.digest.0 == digest)
 }
 
 /// How far the check of a file of digest `digest` got, as work done of work known; `None` when
@@ -104,45 +126,108 @@ pub fn checking(digest: [u8; 32]) -> bool {
 pub fn check_progress(digest: [u8; 32]) -> Option<(u64, u64)> {
     awaiting()
         .values()
-        .find(|(held, _)| held.0 == digest)
-        .map(|(_, progress)| {
+        .find(|held| held.segment.digest.0 == digest)
+        .map(|held| {
             (
-                progress.done.load(Ordering::Relaxed),
-                progress.total.load(Ordering::Relaxed),
+                held.progress.done.load(Ordering::Relaxed),
+                held.progress.total.load(Ordering::Relaxed),
             )
         })
+}
+
+/// What a caller of [`claim`] does about a file's check.
+#[cfg(any(unix, windows))]
+enum Claim {
+    /// Runs it: nobody had started it.
+    Run(UncheckedSegment, Arc<Progress>),
+    /// Nothing: it ended, or the file was never left for one.
+    Ended,
+}
+
+/// Start the check of the file at `path` when nobody has; wait for the one under way to end
+/// when somebody has.
+#[cfg(any(unix, windows))]
+fn claim(path: &Path) -> Claim {
+    let mut awaiting = awaiting();
+    loop {
+        match awaiting.get_mut(path) {
+            None => return Claim::Ended,
+            Some(held) if !held.started => {
+                held.started = true;
+                return Claim::Run(held.segment.clone(), Arc::clone(&held.progress));
+            }
+            Some(_) => awaiting = ENDED.wait(awaiting).unwrap_or_else(|p| p.into_inner()),
+        }
+    }
+}
+
+/// The end of a claimed check, however it ends: the file waits no longer, and whoever waits for
+/// it looks again.
+#[cfg(any(unix, windows))]
+struct Ends<'a>(&'a Path);
+
+#[cfg(any(unix, windows))]
+impl Drop for Ends<'_> {
+    fn drop(&mut self) {
+        awaiting().remove(self.0);
+        ENDED.notify_all();
+    }
+}
+
+/// Wait for the check of the file at `path` to end, running it here when nobody has started it:
+/// what a read of the file's samples does, so the file is read whole once. Returns at once for
+/// a file not waiting for a check.
+#[cfg(any(unix, windows))]
+pub(super) fn join(path: &Path) {
+    if let Claim::Run(segment, shared) = claim(path) {
+        let _ = run(&segment, &shared, &mut |_, _| true);
+    }
 }
 
 /// Check `segment`: read the whole file and hash its stored bits, telling `progress` the work
 /// done of the work known, and remember what it found, so the file is read as the segment from
 /// then on, or as damaged. A file that is not the segment is replaced by `replace_from` where
-/// there is one. `None` when `progress` answered `false`: the check stopped, and the file is
-/// checked again the next time it is opened.
+/// there is one. A read that joined the check first ran it already; then this answers what it
+/// found without reading the file again. `None` when `progress` answered `false`: the check
+/// stopped, and the file is checked again the next time it is read.
 #[cfg(any(unix, windows))]
 pub fn check(
     segment: &UncheckedSegment,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Option<Result<(), String>> {
-    let shared = awaiting()
-        .get(&segment.path)
-        .map(|(_, shared)| Arc::clone(shared))
-        .unwrap_or_default();
+    match claim(&segment.path) {
+        Claim::Run(claimed, shared) => run(&claimed, &shared, progress),
+        // The check that ended remembered what it found, so this reads nothing again.
+        Claim::Ended => {
+            rspice_results_store::check_segment(&segment.path, &segment.digest, progress)
+                .map(|checked| checked.map_err(|error| error.to_string()))
+        }
+    }
+}
+
+/// Run the check of `segment`, claimed by the caller, reporting to `shared` as well as to
+/// `progress`.
+#[cfg(any(unix, windows))]
+fn run(
+    segment: &UncheckedSegment,
+    shared: &Progress,
+    progress: &mut dyn FnMut(u64, u64) -> bool,
+) -> Option<Result<(), String>> {
+    let _ends = Ends(&segment.path);
     let mut report = |done: u64, total: u64| {
         shared.done.store(done, Ordering::Relaxed);
         shared.total.store(total, Ordering::Relaxed);
         progress(done, total)
     };
     let checked = rspice_results_store::check_segment(&segment.path, &segment.digest, &mut report);
-    let outcome = match checked {
+    match checked {
         None => None,
         Some(Ok(())) => Some(Ok(())),
         Some(Err(error)) => match (&segment.replace_from, segment.path.parent()) {
             (Some(source), Some(folder)) => replace(source, folder, segment, &mut report),
             _ => Some(Err(error.to_string())),
         },
-    };
-    awaiting().remove(&segment.path);
-    outcome
+    }
 }
 
 /// Put the segment at `source` in place of the damaged file `segment` names.

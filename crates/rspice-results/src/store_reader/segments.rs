@@ -255,10 +255,37 @@ impl MissingSegment {
     }
 
     fn failure(&self) -> String {
-        format!(
-            "its results store {} is missing: it was deleted or moved outside RSpice",
-            rspice_results_store::kept_segment_name(&self.digest)
-        )
+        missing(self.digest)
+    }
+}
+
+/// Why no folder holds a segment of `digest`.
+fn missing(digest: Digest) -> String {
+    format!(
+        "its results store {} is missing: it was deleted or moved outside RSpice",
+        rspice_results_store::kept_segment_name(&digest)
+    )
+}
+
+/// Why no segment of `digest` reads, after its check ended: the file a folder holds is not the
+/// segment, or no folder holds one.
+pub(super) fn unread(digest: Digest) -> String {
+    let name = rspice_results_store::kept_segment_name(&digest);
+    let folders = KEPT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .folders
+        .clone();
+    match folders
+        .iter()
+        .map(|folder| folder.join(&name))
+        .find(|path| path.is_file())
+    {
+        Some(path) => format!(
+            "its results store {} is damaged: its rows are not the ones its name states",
+            path.display()
+        ),
+        None => missing(digest),
     }
 }
 
@@ -376,8 +403,10 @@ pub fn keep_segments_in(folder: &Path) {
 /// A file under the digest's name is the segment only when its stored bits hash to the digest
 /// ([`rspice_results_store::verify_segment`]): the first time a file is opened that reads all of
 /// it, on the calling thread, unless the caller is [`super::opening_unchecked`]. Then a file not
-/// checked yet is left for a check of its own, and reads as missing until it has had it, as does
-/// every file already left for one.
+/// checked yet is left for a check of its own, and `None` until it has had it, as is every file
+/// already left for one: its result reads as being checked ([`super::checking`]). Anywhere else, a
+/// file left for a check joins it: this waits for the check under way, or runs it when none has
+/// started, and then opens the file the check found to be the segment.
 #[cfg(any(unix, windows))]
 pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     let lock = || KEPT.lock().unwrap_or_else(|p| p.into_inner());
@@ -394,9 +423,13 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     // Checked without holding the lock, so a long first check does not stall other reads.
     let segment = folders.iter().find_map(|folder| {
         let path = folder.join(&name);
-        // A job of its own reads it whole; reading it here too would read it twice.
+        // A job of its own reads it whole; reading it here too would read it twice, so an open
+        // leaves it to that job, and anything else waits for the job or takes its place.
         if super::checks::awaiting_check(&path) {
-            return None;
+            if deferring {
+                return None;
+            }
+            super::checks::join(&path);
         }
         if deferring && !rspice_results_store::segment_verified(&path, &digest) {
             if unchecked.is_none() && path.is_file() {
