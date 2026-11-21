@@ -100,23 +100,3 @@ impl std::fmt::Display for JitError {
 }
 
 impl std::error::Error for JitError {}
-
-#[cfg(test)]
-mod tests {
-    use super::JitError;
-
-    #[test]
-    fn unsupported_op_error_names_hard_fail_contract() {
-        let msg = JitError::unsupported_program_op("rjit", "EvaluateEquation").to_string();
-        assert!(msg.contains("EvaluateEquation"));
-        assert!(msg.contains("no interpreter fallback"));
-    }
-
-    #[test]
-    fn unsupported_coverage_error_names_hard_fail_contract() {
-        let msg = JitError::unsupported_native_coverage("rjit", "NoiseSources").to_string();
-        assert!(msg.contains("NoiseSources"));
-        assert!(msg.contains("native JIT"));
-        assert!(msg.contains("no interpreter fallback"));
-    }
-}

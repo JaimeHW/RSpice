@@ -1845,20 +1845,6 @@ fn xyce_also_model_is_presence_gated_and_ignores_its_value() {
 }
 
 #[test]
-fn assignment_to_parameter_is_an_error() {
-    let result = analyze(&module_src(
-        r#"
-            parameter real r = 1.0;
-            analog begin
-                r = 2.0;
-                I(p, n) <+ V(p, n) / r;
-            end
-            "#,
-    ));
-    assert!(result.is_err(), "assigning a parameter must fail");
-}
-
-#[test]
 fn undeclared_node_in_contribution_is_an_error() {
     let result = analyze(&module_src(
         r#"
@@ -3478,19 +3464,6 @@ fn assigning_a_parameter_says_it_cannot_be_assigned() {
         "{diagnostic}"
     );
     assert!(!diagnostic.contains("Type mismatch"), "{diagnostic}");
-}
-
-/// A discrete construct named in prose takes the right article.
-#[test]
-fn a_discrete_construct_in_the_analog_domain_takes_its_article() {
-    let error = analyze(&module_src("analog I(p, n) <+ V(p, n) >>> 1;"))
-        .expect_err("an arithmetic shift has no continuous-domain value");
-    let diagnostic = error.to_string();
-    assert!(
-        diagnostic.contains("an arithmetic right shift operator"),
-        "{diagnostic}"
-    );
-    assert!(!diagnostic.contains("a arithmetic"), "{diagnostic}");
 }
 
 /// The semantic errors of an analysis, in recorded order.

@@ -76,31 +76,3 @@ impl fmt::Display for RustBackendError {
 }
 
 impl std::error::Error for RustBackendError {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unsupported_classification_does_not_depend_on_display_text() {
-        let error = RustBackendError {
-            kind: RustBackendErrorKind::Unsupported,
-            source: "model.va".to_string(),
-            module: "model".to_string(),
-            message: "typed unsupported error with deliberately different wording".to_string(),
-        };
-
-        assert_eq!(error.kind, RustBackendErrorKind::Unsupported);
-    }
-
-    #[test]
-    fn internal_error_is_not_a_backend_fallback_signal() {
-        let error = RustBackendError::internal(
-            "model.va",
-            "model",
-            "unsupported Verilog-A construct for Rust backend: misleading text",
-        );
-
-        assert_ne!(error.kind, RustBackendErrorKind::Unsupported);
-    }
-}

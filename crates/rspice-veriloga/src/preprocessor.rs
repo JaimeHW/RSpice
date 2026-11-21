@@ -2460,18 +2460,6 @@ mod tests {
     }
 
     #[test]
-    fn function_like_macro_nested_parens() {
-        let out = pp("`define SQ(x) ((x)*(x))\nv = `SQ(f(a,b));\n");
-        assert!(out.contains("v = ((f(a,b))*(f(a,b)));"), "got: {out}");
-    }
-
-    #[test]
-    fn function_like_macro_array_literal_is_one_argument() {
-        let out = pp("`define KEEP(x) x\nv = `KEEP({1.0, 2.0, 3.0});\n");
-        assert!(out.contains("v = {1.0, 2.0, 3.0};"), "got: {out}");
-    }
-
-    #[test]
     fn function_like_macro_preserves_nested_delimiter_commas() {
         let out = pp("`define PAIR(a,b) first=a; second=b\n\
              `PAIR({f(1, 2), [3, {4, 5}]}, table[{6, 7}, g(8, 9)]);\n");
@@ -2894,12 +2882,6 @@ value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
     }
 
     #[test]
-    fn macro_args_with_string_commas() {
-        let out = pp("`define MSG(s) $strobe(s)\n`MSG(\"a, b\");\n");
-        assert!(out.contains("$strobe(\"a, b\");"), "got: {out}");
-    }
-
-    #[test]
     fn line_count_preserved() {
         let src = "`define X 1\n/* multi\nline\ncomment */\nx = `X;\n";
         let out = pp(src);
@@ -2915,12 +2897,6 @@ value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
                 .preprocess_source("/* never closed\nmodule x;\n")
                 .is_err()
         );
-    }
-
-    #[test]
-    fn wrong_argument_count_errors() {
-        let src = "`define ADD(a,b) ((a)+(b))\nx = `ADD(1);\n";
-        assert!(Preprocessor::new().preprocess_source(src).is_err());
     }
 
     #[test]

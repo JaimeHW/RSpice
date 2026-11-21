@@ -2004,47 +2004,59 @@ mod tests {
     }
 
     #[test]
-    fn missing_parameter_slot_is_a_vm_error() {
-        let err = execute(vec![Instruction::PushParam(0)])
-            .expect_err("missing parameter slot must not evaluate as zero");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn missing_param_given_slot_is_a_vm_error() {
-        let err = execute(vec![Instruction::PushParamGiven(0)])
-            .expect_err("missing $param_given slot must not evaluate as false");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn missing_variable_slot_is_a_vm_error() {
-        let err = execute(vec![Instruction::PushVariable(0)])
-            .expect_err("missing variable slot must not evaluate as zero");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn missing_internal_voltage_slot_is_a_vm_error() {
-        let err = execute(vec![Instruction::PushInternalVoltage(0)])
-            .expect_err("missing internal voltage slot must not evaluate as zero");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
+    fn missing_runtime_storage_is_a_vm_error() {
+        let zi = crate::codegen::ZiRuntimeLayout::unit_coefficients(0);
+        for (storage, instructions) in [
+            ("parameter slot", vec![Instruction::PushParam(0)]),
+            ("$param_given slot", vec![Instruction::PushParamGiven(0)]),
+            ("variable slot", vec![Instruction::PushVariable(0)]),
+            (
+                "internal voltage slot",
+                vec![Instruction::PushInternalVoltage(0)],
+            ),
+            (
+                "branch current slot",
+                vec![Instruction::PushBranchCurrent(0)],
+            ),
+            (
+                "dynamic variable slot",
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushVariableDyn {
+                        base: 0,
+                        len: 1,
+                        lower: 1,
+                    },
+                ],
+            ),
+            (
+                "lookup table",
+                vec![Instruction::PushConst(0.5), Instruction::TableLookup(0)],
+            ),
+            (
+                "zi filter",
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::ZiState(zi),
+                ],
+            ),
+            (
+                "laplace filter",
+                vec![Instruction::PushConst(1.0), Instruction::LaplaceState(0)],
+            ),
+        ] {
+            let err = execute(instructions)
+                .expect_err("missing runtime storage must not evaluate as a default value");
+            assert!(
+                matches!(err, VmError::InvalidInstruction(_)),
+                "missing {storage}: expected invalid instruction error, got {err:?}"
+            );
+        }
     }
 
     #[test]
@@ -2076,17 +2088,6 @@ mod tests {
             )],
         )
         .expect_err("missing internal-node voltage must not evaluate as zero");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn missing_branch_current_slot_is_a_vm_error() {
-        let err = execute(vec![Instruction::PushBranchCurrent(0)])
-            .expect_err("missing branch current slot must not evaluate as zero");
 
         assert!(
             matches!(err, VmError::InvalidInstruction(_)),
@@ -2142,24 +2143,6 @@ mod tests {
 
         let err = execute_with_context(&mut context, vec![Instruction::PushCurrent(0, 1)])
             .expect_err("missing terminal-pair current must not alias first current");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn missing_dynamic_variable_slot_is_a_vm_error() {
-        let err = execute(vec![
-            Instruction::PushConst(1.0),
-            Instruction::PushVariableDyn {
-                base: 0,
-                len: 1,
-                lower: 1,
-            },
-        ])
-        .expect_err("missing dynamic variable slot must not evaluate as zero");
 
         assert!(
             matches!(err, VmError::InvalidInstruction(_)),
@@ -2358,39 +2341,6 @@ mod tests {
     }
 
     #[test]
-    fn missing_lookup_table_is_a_vm_error() {
-        let err = execute(vec![
-            Instruction::PushConst(0.5),
-            Instruction::TableLookup(0),
-        ])
-        .expect_err("missing lookup table must not evaluate as zero");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
-    fn missing_zi_filter_is_a_vm_error() {
-        let err = execute(vec![
-            Instruction::PushConst(1.0),
-            Instruction::PushConst(1.0),
-            Instruction::PushConst(1.0),
-            Instruction::PushConst(0.0),
-            Instruction::PushConst(1.0),
-            Instruction::PushConst(0.0),
-            Instruction::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
-        ])
-        .expect_err("missing zi filter must not evaluate as zero");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
-    }
-
-    #[test]
     fn zi_runtime_rejects_an_over_budget_layout_before_stack_arithmetic() {
         let layout = crate::codegen::ZiRuntimeLayout {
             filter_id: 0,
@@ -2405,20 +2355,6 @@ mod tests {
         // no Newton retry can make it executable.
         assert!(matches!(error, VmError::InvalidRuntimeOperation(_)));
         assert!(error.to_string().contains("platform-uniform maximum 1024"));
-    }
-
-    #[test]
-    fn missing_laplace_filter_is_a_vm_error() {
-        let err = execute(vec![
-            Instruction::PushConst(1.0),
-            Instruction::LaplaceState(0),
-        ])
-        .expect_err("missing laplace filter must not pass the input through");
-
-        assert!(
-            matches!(err, VmError::InvalidInstruction(_)),
-            "expected invalid instruction error, got {err:?}"
-        );
     }
 
     #[test]

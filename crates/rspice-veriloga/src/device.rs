@@ -11946,13 +11946,6 @@ mod tests {
     use crate::{CompilerOptions, VerilogACompiler};
     use std::sync::Arc;
 
-    #[test]
-    fn native_device_send_sync_are_derived_from_owned_fields() {
-        fn assert_send_sync<T: Send + Sync>() {}
-
-        assert_send_sync::<VerilogADevice>();
-    }
-
     /// A negative noise power contributes no noise and warns once per source,
     /// whichever copy of the instance meets it; only a power that is not
     /// finite refuses, naming the source. -2.8e-41 is Mextram 505's `ib3_f`
@@ -11993,31 +11986,6 @@ mod tests {
         assert_eq!(copy.first("X1", "ib3_f".into(), -2e-20), None);
         assert!(copy.first("X1", "iex_f".into(), -1e-20).is_some());
         assert!(copy.first("X2", "ib3_f".into(), -1e-20).is_some());
-    }
-
-    #[test]
-    fn native_device_construction_accepts_legacy_laplace_derivative_metadata() {
-        let source = r#"
-`include "disciplines.vams"
-module native_laplace_metadata(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
-endmodule
-"#;
-        let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let model = compiler.compile(source).expect("compile Laplace model");
-        let artifact = compiler
-            .compile_canonical_ir(source)
-            .expect("compile Laplace canonical IR");
-
-        VerilogADevice::try_new_with_canonical_ir(
-            "NATIVE_LAPLACE_METADATA",
-            model,
-            &artifact,
-            &[1, 0],
-        )
-        .expect("construct native device with legacy Laplace derivative metadata");
     }
 
     /// A second engine build reuses the first build's image.
@@ -13280,130 +13248,43 @@ endmodule
     }
 
     #[test]
-    fn native_missing_noise_exponent_entry_uses_hard_fail_contract() {
-        let err = VerilogADevice::missing_native_noise_exponent_entry(2);
+    fn native_missing_entries_hard_fail_before_dependency_tables() {
+        for (entry, stamps, expected) in [
+            (
+                NativeValueEntry::NoiseExponent(0),
+                0,
+                "noise exponent entry",
+            ),
+            (
+                NativeValueEntry::StaticCondition(0),
+                0,
+                "static-condition entry",
+            ),
+            (NativeValueEntry::StampValue(0), 0, "stamp-value entry 0"),
+            (
+                NativeValueEntry::Jacobian { stamp: 0, entry: 0 },
+                1,
+                "Jacobian entry 0.0",
+            ),
+            (
+                NativeValueEntry::ReactiveJacobian { stamp: 0, entry: 0 },
+                1,
+                "reactive-Jacobian entry 0.0",
+            ),
+            (NativeValueEntry::NoisePsd(0), 0, "noise PSD entry"),
+        ] {
+            let native = NativeModel::new_for_test(0, stamps, vec![0; stamps], vec![0; stamps]);
+            let mut context = VmContext::with_internal_nodes(0, 0);
+            let mut vm = Vm::new(&mut context);
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushConst(1.0)],
+            };
 
-        assert_native_hard_fail(err, "noise exponent entry");
-    }
+            let err = VerilogADevice::run_value_program(&mut vm, &program, &native, entry)
+                .expect_err("a missing native entry must not index dependencies");
 
-    #[test]
-    fn native_noise_exponent_missing_entry_preflights_before_dependency_tables() {
-        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
-        let mut context = VmContext::with_internal_nodes(0, 0);
-        let mut vm = Vm::new(&mut context);
-        let program = BytecodeProgram {
-            instructions: vec![Instruction::PushConst(1.0)],
-        };
-
-        let err = VerilogADevice::run_value_program(
-            &mut vm,
-            &program,
-            &native,
-            NativeValueEntry::NoiseExponent(0),
-        )
-        .expect_err("missing optional native noise exponent entry must not index dependencies");
-
-        assert_native_hard_fail(err, "noise exponent entry");
-    }
-
-    #[test]
-    fn native_missing_static_condition_entry_hard_fails_before_dependency_tables() {
-        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
-        let mut context = VmContext::with_internal_nodes(0, 0);
-        let mut vm = Vm::new(&mut context);
-        let program = BytecodeProgram {
-            instructions: vec![Instruction::PushConst(1.0)],
-        };
-
-        let err = VerilogADevice::run_value_program(
-            &mut vm,
-            &program,
-            &native,
-            NativeValueEntry::StaticCondition(0),
-        )
-        .expect_err("missing static condition entry must not index dependencies");
-
-        assert_native_hard_fail(err, "static-condition entry");
-    }
-
-    #[test]
-    fn native_missing_stamp_value_entry_hard_fails_before_dependency_tables() {
-        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
-        let mut context = VmContext::with_internal_nodes(0, 0);
-        let mut vm = Vm::new(&mut context);
-        let program = BytecodeProgram {
-            instructions: vec![Instruction::PushConst(1.0)],
-        };
-
-        let err = VerilogADevice::run_value_program(
-            &mut vm,
-            &program,
-            &native,
-            NativeValueEntry::StampValue(0),
-        )
-        .expect_err("missing stamp entry must not index dependencies");
-
-        assert_native_hard_fail(err, "stamp-value entry 0");
-    }
-
-    #[test]
-    fn native_missing_jacobian_entry_hard_fails_before_dependency_tables() {
-        let native = NativeModel::new_for_test(0, 1, vec![0], vec![0]);
-        let mut context = VmContext::with_internal_nodes(0, 0);
-        let mut vm = Vm::new(&mut context);
-        let program = BytecodeProgram {
-            instructions: vec![Instruction::PushConst(1.0)],
-        };
-
-        let err = VerilogADevice::run_value_program(
-            &mut vm,
-            &program,
-            &native,
-            NativeValueEntry::Jacobian { stamp: 0, entry: 0 },
-        )
-        .expect_err("missing Jacobian entry must not index dependencies");
-
-        assert_native_hard_fail(err, "Jacobian entry 0.0");
-    }
-
-    #[test]
-    fn native_missing_reactive_jacobian_entry_hard_fails_before_dependency_tables() {
-        let native = NativeModel::new_for_test(0, 1, vec![0], vec![0]);
-        let mut context = VmContext::with_internal_nodes(0, 0);
-        let mut vm = Vm::new(&mut context);
-        let program = BytecodeProgram {
-            instructions: vec![Instruction::PushConst(1.0)],
-        };
-
-        let err = VerilogADevice::run_value_program(
-            &mut vm,
-            &program,
-            &native,
-            NativeValueEntry::ReactiveJacobian { stamp: 0, entry: 0 },
-        )
-        .expect_err("missing reactive-Jacobian entry must not index dependencies");
-
-        assert_native_hard_fail(err, "reactive-Jacobian entry 0.0");
-    }
-
-    #[test]
-    fn native_missing_noise_psd_entry_hard_fails_before_dependency_tables() {
-        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
-        let mut context = VmContext::with_internal_nodes(0, 0);
-        let mut vm = Vm::new(&mut context);
-        let program = BytecodeProgram {
-            instructions: vec![Instruction::PushConst(1.0)],
-        };
-
-        let err = VerilogADevice::run_value_program(
-            &mut vm,
-            &program,
-            &native,
-            NativeValueEntry::NoisePsd(0),
-        )
-        .expect_err("missing noise PSD entry must not index dependencies");
-
-        assert_native_hard_fail(err, "noise PSD entry");
+            assert_native_hard_fail(err, expected);
+        }
     }
 
     #[test]

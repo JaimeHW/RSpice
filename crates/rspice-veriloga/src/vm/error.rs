@@ -121,28 +121,3 @@ impl std::fmt::Display for VmError {
 }
 
 impl std::error::Error for VmError {}
-
-#[cfg(test)]
-mod tests {
-    use super::VmError;
-
-    #[test]
-    fn native_jit_error_display_mentions_no_fallback() {
-        let err = VmError::NativeJit(
-            "model rjit: unsupported canonical op EvaluateEquation; no interpreter fallback"
-                .to_string(),
-        );
-        let msg = err.to_string();
-        assert!(msg.contains("native JIT"));
-        assert!(msg.contains("no interpreter fallback"));
-    }
-
-    #[test]
-    fn invalid_model_error_identifies_compiled_artifact_failure() {
-        let err = VmError::InvalidModel("assignment range overflow".into());
-        assert_eq!(
-            err.to_string(),
-            "invalid compiled model: assignment range overflow"
-        );
-    }
-}

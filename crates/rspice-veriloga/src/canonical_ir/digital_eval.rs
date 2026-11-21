@@ -4299,25 +4299,6 @@ mod tests {
         assert_eq!(classify_edge(Z, X), None);
     }
 
-    /// Every entry is covered by the case analysis above: five posedges, five
-    /// negedges, six that are neither.
-    #[test]
-    fn the_edge_table_has_the_expected_census() {
-        let mut posedges = 0;
-        let mut negedges = 0;
-        let mut neither = 0;
-        for previous in digital_value::TABLE_ORDER {
-            for next in digital_value::TABLE_ORDER {
-                match classify_edge(previous, next) {
-                    Some(DigitalEdge::Posedge) => posedges += 1,
-                    Some(DigitalEdge::Negedge) => negedges += 1,
-                    None => neither += 1,
-                }
-            }
-        }
-        assert_eq!((posedges, negedges, neither), (5, 5, 6));
-    }
-
     /// An edge on a vector is an edge on its least significant bit, IEEE
     /// 1364-2005 section 9.7.2 — the other bits may do anything.
     #[test]

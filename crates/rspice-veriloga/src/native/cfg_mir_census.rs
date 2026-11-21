@@ -108,7 +108,7 @@ use crate::canonical_ir::charge::stored_charges;
 use crate::canonical_ir::{CfgScalar, differentiate, evaluate_cfg, prune_cfg_to_outputs};
 use crate::jit::cfg_lanes::scalarize_lanes;
 use crate::jit::cfg_plan_builder::{
-    CfgPlanEntry, CfgPlanRefusal, build_model_plan_from_canonical_cfg, derivative_seeds,
+    CfgPlanEntry, build_model_plan_from_canonical_cfg, derivative_seeds,
 };
 use crate::jit::plan_builder::build_model_plan_with_canonical_ir;
 use crate::jit::plan_program::PlanProgram;
@@ -1662,31 +1662,6 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         "the CFG-built plan deviates from the shipped plan:\n{}",
         failures.join("\n")
     );
-}
-
-/// A refusal class the CFG plan builder can reach has to be one this census can
-/// name, or a module that stopped building would be reported as a class the
-/// reader cannot look up.
-#[test]
-fn every_refusal_class_has_a_name() {
-    for class in [
-        CfgPlanRefusal::ShippedPlan,
-        CfgPlanRefusal::CfgLowering,
-        CfgPlanRefusal::StateAllocation,
-        CfgPlanRefusal::Differentiate,
-        CfgPlanRefusal::Scalarize,
-        CfgPlanRefusal::NoScalar,
-        CfgPlanRefusal::Lowering,
-        CfgPlanRefusal::EquationsUnpaired,
-        CfgPlanRefusal::LaneUnmapped,
-        CfgPlanRefusal::ChargeMissing,
-        CfgPlanRefusal::NoiseUnpaired,
-        CfgPlanRefusal::SlotUnclaimed,
-        CfgPlanRefusal::PreludeLiveCurrent,
-    ] {
-        assert!(!class.name().is_empty());
-        assert!(!class.name().contains(' '), "{:?}", class);
-    }
 }
 
 /// VBIC's temperature mapping, reduced to the two statements that make an

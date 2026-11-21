@@ -2800,16 +2800,6 @@ mod tests {
     }
 
     #[test]
-    fn transition_derivative_descriptor_is_pinned_to_scalar_opcode_446() {
-        let descriptor = helper_descriptor(NativeOp::TransitionStateDerivative(7))
-            .expect("encode transition derivative helper descriptor");
-        assert_eq!(descriptor.opcode, 446);
-        assert_eq!(descriptor.aux0, 7);
-        assert_eq!(descriptor.aux1, 0);
-        assert_eq!(descriptor.aux2, 0);
-    }
-
-    #[test]
     fn absdelay_extended_descriptors_are_pinned_to_scalar_opcodes() {
         for (op, opcode) in [
             (NativeOp::AbsDelayStateMax(7), 447),

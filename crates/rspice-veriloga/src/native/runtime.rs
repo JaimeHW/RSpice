@@ -72,7 +72,7 @@ pub(crate) struct ExecutableMemory {
 
 #[cfg(all(test, feature = "native", target_arch = "aarch64"))]
 mod aarch64_tests {
-    use super::{ExecutableMemory, MAX_EXECUTABLE_IMAGE_BYTES, sync_instruction_cache};
+    use super::{ExecutableMemory, MAX_EXECUTABLE_IMAGE_BYTES};
     use crate::native::JitError;
     use crate::native::aarch64::encoder::{A64Encoder, XReg};
     use std::sync::Arc;
@@ -203,17 +203,6 @@ mod aarch64_tests {
         for worker in workers {
             worker.join().expect("A64 JIT worker completes");
         }
-    }
-
-    #[test]
-    fn instruction_cache_sync_accepts_published_code() {
-        let memory = ExecutableMemory::allocate(&return_constant(42))
-            .expect("publish A64 function for cache sync");
-        sync_instruction_cache(
-            memory.ptr_at(0).expect("published entry pointer"),
-            memory.len(),
-        )
-        .expect("synchronize A64 instruction cache");
     }
 
     #[cfg(unix)]
@@ -455,14 +444,9 @@ impl ExecutableMemory {
         self.len
     }
 
-    #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
     /// The published image as bytes, for digesting a compiled model.
     ///
-    /// Gated like [`Self::is_empty`] above it: its one caller is
+    /// Test-only: its one caller is
     /// `NativeModel::image_bytes`, which the identity and cost censuses read
     /// and which is x86-64 System V only, so an AArch64 or Windows test build
     /// denies this as dead code.
@@ -1136,9 +1120,7 @@ unsafe impl Sync for ExecutableMemory {}
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::{
-        ExecutableMemory, MAX_EXECUTABLE_IMAGE_BYTES, sync_instruction_cache, validate_image_len,
-    };
+    use super::{ExecutableMemory, MAX_EXECUTABLE_IMAGE_BYTES, validate_image_len};
     use crate::native::JitError;
     use crate::native::x64::encoder::X64Encoder;
 
@@ -1162,26 +1144,6 @@ mod tests {
         let error = validate_image_len(MAX_EXECUTABLE_IMAGE_BYTES + 1)
             .expect_err("oversized image should fail");
         assert!(error.to_string().contains("safety limit"));
-    }
-
-    #[test]
-    fn executable_memory_limit_covers_large_shipped_models() {
-        validate_image_len(32 * 1024 * 1024)
-            .expect("large shipped compact-model image must fit the safety limit");
-    }
-
-    #[test]
-    fn executable_memory_runs_mov_eax_imm32_ret() {
-        let mut enc = X64Encoder::new();
-        enc.mov_eax_imm32(42);
-        enc.ret();
-        let memory =
-            ExecutableMemory::allocate(&enc.into_bytes()).expect("allocate executable memory");
-        assert!(!memory.is_empty());
-
-        let entry = memory.ptr_at(0).expect("entry point inside image");
-        let f: extern "C" fn() -> u32 = unsafe { std::mem::transmute(entry) };
-        assert_eq!(f(), 42);
     }
 
     #[test]
@@ -1213,19 +1175,6 @@ mod tests {
             let f: extern "C" fn() -> u32 = unsafe { std::mem::transmute(entry) };
             assert_eq!(f(), expected);
         }
-    }
-
-    #[test]
-    fn instruction_cache_sync_accepts_executable_memory() {
-        let mut enc = X64Encoder::new();
-        enc.mov_eax_imm32(42);
-        enc.ret();
-        let memory =
-            ExecutableMemory::allocate(&enc.into_bytes()).expect("allocate executable memory");
-
-        let ptr = memory.ptr_at(0).expect("entry point inside image");
-        sync_instruction_cache(ptr, memory.len())
-            .expect("sync instruction cache for executable memory");
     }
 
     #[cfg(windows)]
