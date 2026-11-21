@@ -2637,10 +2637,17 @@ fn validate_readout_pin(pin: &ReadoutPin) -> Result<(), VisualizationError> {
     }
 }
 
-/// A Smith marker names a locus and sits at a finite, positive frequency.
+/// A Smith marker names a locus and sits at a finite, positive frequency,
+/// and the Bode card measures a response with a name.
 fn validate_sheet_setting(setting: &SheetSetting) -> Result<(), VisualizationError> {
-    let SheetSettingValue::Smith { markers } = &setting.setting else {
-        return Ok(());
+    let markers = match &setting.setting {
+        SheetSettingValue::Smith { markers } => markers,
+        SheetSettingValue::Bode { measured_signal } => {
+            return validate_label("sheet-setting.measured-signal", measured_signal);
+        }
+        SheetSettingValue::NetworkMatrix { .. } | SheetSettingValue::PoleZero { .. } => {
+            return Ok(());
+        }
     };
     ensure_maximum_len(
         "sheet-setting.markers",

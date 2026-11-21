@@ -744,3 +744,44 @@ fn a_stored_sweep_is_summarized_once_the_reader_service_has_read_it() {
         assert_eq!(stored.gain_db, memory.gain_db);
     });
 }
+
+/// The card offers every response the analysis can be measured as, under the
+/// names it measures them by, and the chosen one is what it measures.
+#[test]
+fn every_response_is_offered_by_name_and_the_chosen_one_is_measured() {
+    let x = [1.0, 10.0, 100.0];
+    let ac = ac_analysis(vec![
+        wave("|V(out)|", &x, &[10.0, 1.0, 0.1]),
+        wave("phase(V(out))", &x, &[0.0, -45.0, -90.0]),
+        wave("|V(mid)|", &x, &[100.0, 10.0, 1.0]),
+        wave("V(in)", &x, &[1.0, 1.0, 1.0]),
+    ]);
+    assert_eq!(
+        bode_responses(ac.analysis_type, &ac.waveforms),
+        ["V(out)", "V(mid)"]
+    );
+    let measuring = |signal: &str| {
+        ac_bode_shape_for_analysis(ac.analysis_type, &ac.waveforms, 0, |waveform| {
+            response_signal(ac.analysis_type, &waveform.name).as_deref() == Some(signal)
+        })
+        .expect("a response")
+    };
+    assert_eq!(measuring("V(out)").mag_index, 0);
+    assert_eq!(measuring("V(out)").phase_index, Some(1));
+    assert_eq!(measuring("V(mid)").mag_index, 2);
+
+    let stb = response_analysis(
+        AnalysisType::Stb,
+        vec![
+            wave("Loop Gain (dB) [segment 1]", &x, &[20.0, 0.0, -20.0]),
+            wave("Loop Gain (dB) [segment 2]", &x, &[20.0, 0.0, -20.0]),
+            wave("Loop Phase (deg) [segment 1]", &x, &[0.0, -90.0, -180.0]),
+            wave("Re(Loop Gain)", &x, &[1.0, 1.0, 1.0]),
+        ],
+    );
+    assert_eq!(
+        bode_responses(stb.analysis_type, &stb.waveforms),
+        ["Loop Gain [segment 1]", "Loop Gain [segment 2]"]
+    );
+    assert!(bode_responses(AnalysisType::Transient, &ac.waveforms).is_empty());
+}

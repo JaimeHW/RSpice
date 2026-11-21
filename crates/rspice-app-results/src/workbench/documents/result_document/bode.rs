@@ -6,12 +6,14 @@
 
 use egui::Ui;
 
-use crate::state::{AnalysisResult, AnalysisType, ac_bode_shape_for_selection};
+use crate::results::visualization_document::SheetSettingValue;
+use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, ac_bode_shape_for_selection};
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+use rspice_results::bode::retained::{self, bode_responses, response_signal};
 use rspice_results_ui::bode::inspector::{self, BodeInspector, BodeResponse, NoiseSpectrumModel};
 
-use super::{BodeDerived, ResultsParts, ResultsReads};
+use super::{BodeDerived, ResultViewer, ResultsParts, ResultsReads};
 
 /// The selected frequency-response signal pair's computed stability numbers.
 struct BodeModel {
@@ -26,6 +28,9 @@ struct BodeModel {
     /// Whether it is a stability analysis's loop gain, which alone has
     /// margins.
     loop_gain: bool,
+    /// Every response the analysis can be measured as, the measured one
+    /// among them.
+    candidates: Vec<String>,
 }
 
 pub(super) use rspice_results::noise_spectrum::NoiseSpectrumShape;
@@ -110,11 +115,8 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
         return Err(NoMargins::NoResponse);
     }
     let run = simulation.active_run().ok_or(NoMargins::NoResponse)?;
-    // Which traces, not what they measure. Resolving the summary here — and
-    // only then consulting the memo below — meant the memo saved nothing: the
-    // conversion and every crossing search had already happened by the time
-    // its key was known.
-    let shape = ac_bode_shape_for_selection(run, simulation.view.active_analysis_idx)
+    // Which analysis the selection names: its traces are measured below.
+    let selected = ac_bode_shape_for_selection(run, simulation.view.active_analysis_idx)
         .ok_or(NoMargins::NoResponse)?;
 
     // Fail closed, as every sibling sheet does. The shape resolves which
@@ -122,11 +124,35 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
     // ordinal selection.
     let analysis = run
         .analyses
-        .get(shape.analysis_index)
+        .get(selected.analysis_index)
         .ok_or(NoMargins::NoResponse)?;
     if !analysis.success {
         return Err(NoMargins::AnalysisFailed(analysis.error_message.clone()));
     }
+
+    // The response the reader chose, while the analysis still has it; else
+    // the one the run shows by default. Which traces, not what they measure:
+    // resolving the summary here — and only then consulting the memo below —
+    // meant the memo saved nothing, the conversion and every crossing search
+    // having happened by the time its key was known.
+    let candidates = bode_responses(analysis.analysis_type, &analysis.waveforms);
+    let measured = super::sheet_settings::measured_signal(state.results_reads())
+        .filter(|signal| candidates.iter().any(|candidate| candidate == signal));
+    let analysis_type = analysis.analysis_type;
+    let prefer = |waveform: &RetainedTrace| match &measured {
+        Some(signal) => {
+            response_signal(analysis_type, &waveform.as_ref().name).as_deref()
+                == Some(signal.as_str())
+        }
+        None => waveform.visible,
+    };
+    let shape = retained::ac_bode_shape_for_analysis(
+        analysis_type,
+        &analysis.waveforms,
+        selected.analysis_index,
+        &prefer,
+    )
+    .ok_or(NoMargins::NoResponse)?;
 
     let phase_available = shape
         .phase_index
@@ -146,10 +172,14 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
         }
         _ => {
             super::frame_work::note(super::frame_work::DatasetWalk::BodeMargins);
-            let metrics =
-                crate::state::ac_bode_summary_for_analysis(analysis, shape.analysis_index)
-                    .ok_or(NoMargins::NoResponse)?
-                    .metrics;
+            let metrics = retained::ac_bode_summary_for_analysis(
+                analysis_type,
+                &analysis.waveforms,
+                shape.analysis_index,
+                &prefer,
+            )
+            .ok_or(NoMargins::NoResponse)?
+            .metrics;
             let d = BodeDerived {
                 version,
                 analysis_index: shape.analysis_index,
@@ -165,7 +195,8 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
         phase_available,
         margins,
         signal: shape.signal,
-        loop_gain: analysis.analysis_type == AnalysisType::Stb,
+        loop_gain: analysis_type == AnalysisType::Stb,
+        candidates,
     })
 }
 
@@ -253,12 +284,23 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             phase_available: model.phase_available,
             signal: &model.signal,
             loop_gain: model.loop_gain,
-            candidates: &[],
+            candidates: &model.candidates,
         }),
         Err(NoMargins::NoResponse) => BodeInspector::NoResponse,
         Err(NoMargins::AnalysisFailed(reason)) => BodeInspector::AnalysisFailed(reason.as_deref()),
     };
-    inspector::right_panel(ui, inspector, &quantity_policy, digits);
+    let picked = inspector::right_panel(ui, inspector, &quantity_policy, digits);
+    if let (Some(index), Ok(model)) = (picked, &model)
+        && let Some(signal) = model.candidates.get(index)
+    {
+        super::sheet_settings::keep(
+            state,
+            ResultViewer::Bode,
+            Some(SheetSettingValue::Bode {
+                measured_signal: signal.clone(),
+            }),
+        );
+    }
 }
 
 pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
@@ -337,6 +379,53 @@ mod tests {
         let second = build_model(&mut state.results_parts()).expect("second model");
         assert_eq!(second.margins.analysis_index, 1);
         assert_eq!(second.margins.metrics.adc_db, Some(40.0));
+    }
+
+    /// The card measures the response the reader chose, and offers every
+    /// response the analysis holds; a choice the analysis no longer has falls
+    /// back to the run's default.
+    #[test]
+    fn the_card_measures_the_chosen_response() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+                RetainedTrace::new("|V(out)|", vec![1.0, 10.0], vec![10.0, 1.0], "#fff"),
+                RetainedTrace::new("|V(mid)|", vec![1.0, 10.0], vec![100.0, 10.0], "#fff"),
+            ]),
+        );
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        let measured = |state: &mut ResultsTestHost| {
+            let model = build_model(&mut state.results_parts()).expect("Bode model");
+            (model.signal, model.margins.metrics.adc_db, model.candidates)
+        };
+
+        let (signal, _, candidates) = measured(&mut state);
+        assert_eq!(candidates, ["V(out)", "V(mid)"]);
+        assert_eq!(
+            signal, "V(mid)",
+            "the run's default: the last visible response"
+        );
+
+        super::super::sheet_settings::keep(
+            &mut state.results_parts(),
+            ResultViewer::Bode,
+            Some(SheetSettingValue::Bode {
+                measured_signal: "V(out)".to_owned(),
+            }),
+        );
+        let (signal, adc_db, _) = measured(&mut state);
+        assert_eq!((signal.as_str(), adc_db), ("V(out)", Some(20.0)));
+
+        super::super::sheet_settings::keep(
+            &mut state.results_parts(),
+            ResultViewer::Bode,
+            Some(SheetSettingValue::Bode {
+                measured_signal: "V(gone)".to_owned(),
+            }),
+        );
+        assert_eq!(measured(&mut state).0, "V(mid)");
     }
 
     fn noise_result(analysis_type: AnalysisType, label: &str, name: &str) -> AnalysisResult {

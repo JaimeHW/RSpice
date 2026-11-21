@@ -1,5 +1,6 @@
 //! Active pole-zero source qualification and shared plot-view action ownership.
 
+use crate::results::visualization_document::SheetSettingValue;
 use crate::state::{AnalysisResultPayload, AnalysisType};
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
@@ -50,8 +51,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.results_reads().presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
-    let results = &mut state.results;
     let viewer = super::ResultViewer::PoleZero;
+    let logarithmic = super::sheet_settings::logarithmic_plane(state.results_reads());
+    let results = &mut state.results;
     let mut plot_view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();
     if let Some(response) = view::show(
@@ -62,6 +64,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &mut results.session.cache,
         &quantity_policy,
         digits,
+        logarithmic,
     ) {
         if response.fit_clicked {
             results.session.reset_plot_view(viewer, 0);
@@ -70,7 +73,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         if response.plot.view.any() {
             *results.session.plot_view_mut(viewer, 0) = plot_view;
         }
-        if response.plot.response.clicked() {
+        if response.pin_changed {
             match pin {
                 Some(hit) => {
                     results.session.rf_pin.insert(viewer, hit);
@@ -81,6 +84,22 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             }
         }
     }
+}
+
+/// The sheet's bar: the plane on linear or logarithmic axes. The choice is
+/// the view's; the zoom, made on the other plane's axes, is let go.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    let viewer = super::ResultViewer::PoleZero;
+    let logarithmic = super::sheet_settings::logarithmic_plane(state.results_reads());
+    if let Some(logarithmic) = view::domain_bar(ui, logarithmic) {
+        super::sheet_settings::keep(
+            state,
+            viewer,
+            Some(SheetSettingValue::PoleZero { logarithmic }),
+        );
+        state.results.session.reset_plot_view(viewer, 0);
+    }
+    true
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {

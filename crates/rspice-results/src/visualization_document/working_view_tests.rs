@@ -306,6 +306,73 @@ fn a_pinned_readout_stays_at_its_x_across_a_rerun_and_a_reload() {
     );
 }
 
+/// The Bode card's measured response and the pole-zero map's plane are kept
+/// as their sheets' settings, one per pane and sheet, across a re-run the
+/// view follows and a save; a later setting replaces the earlier, and a
+/// measured response with no name is refused.
+#[test]
+fn the_bode_and_pole_zero_settings_stay_across_a_rerun_and_a_reload() {
+    let TwoAnalyses {
+        mut document,
+        tran,
+        ac,
+    } = two_analyses();
+    let ac_pane = document.pane_of_analysis(ac).unwrap().id;
+    let keep = |setting: SheetSettingValue| DocumentEdit::SetSheetSetting {
+        pane_id: ac_pane,
+        sheet: setting.sheet(),
+        setting: Some(setting),
+    };
+    let measure = |signal: &str| SheetSettingValue::Bode {
+        measured_signal: signal.to_owned(),
+    };
+    let logarithmic = SheetSettingValue::PoleZero { logarithmic: true };
+    document
+        .transact(
+            document.revision(),
+            vec![
+                keep(measure("V(out)")),
+                keep(measure("V(mid)")),
+                keep(logarithmic.clone()),
+            ],
+        )
+        .expect("the settings are kept");
+    assert!(
+        document
+            .transact(document.revision(), vec![keep(measure(" "))])
+            .is_err()
+    );
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::FollowRun {
+                next: run(
+                    binding(2),
+                    &[
+                        (tran, AnalysisType::Transient, &["V(in)", "V(out)", "I(R1)"]),
+                        (ac, AnalysisType::Ac, &["V(out)", "V(mid)"]),
+                    ],
+                ),
+            }],
+        )
+        .expect("the view follows the re-run");
+    let json = serde_json::to_string(&document).unwrap();
+    let back: VisualizationDocument = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        back.sheet_settings(),
+        [
+            SheetSetting {
+                pane_id: ac_pane,
+                setting: measure("V(mid)"),
+            },
+            SheetSetting {
+                pane_id: ac_pane,
+                setting: logarithmic,
+            },
+        ]
+    );
+}
+
 /// The run a view reads, grown since (it was shown while still running and
 /// has more signals now, and a digest of its finished samples): the view
 /// reads it again in place, its traces kept, and plots the new signals.

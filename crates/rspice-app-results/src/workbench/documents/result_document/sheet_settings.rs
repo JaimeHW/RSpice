@@ -1,6 +1,7 @@
 //! What the reader left a settings-keeping sheet showing, per authored
-//! analysis: the Smith chart's markers and the network matrix's form and
-//! format.
+//! analysis: the Smith chart's markers, the network matrix's form and
+//! format, the response the Bode card measures and whether the pole-zero
+//! map is drawn on a logarithmic plane.
 //!
 //! They are the view's, as the readout pins are. Before the quick view
 //! draws, each pane's settings are taken into the session, and what the
@@ -38,6 +39,22 @@ pub(super) fn kept(state: ResultsReads<'_>, sheet: ResultViewer) -> Option<Sheet
         .sheet_settings
         .get(&(source, sheet))
         .cloned()
+}
+
+/// The response the reader chose for the Bode card to measure.
+pub(super) fn measured_signal(state: ResultsReads<'_>) -> Option<String> {
+    match kept(state, ResultViewer::Bode)? {
+        SheetSettingValue::Bode { measured_signal } => Some(measured_signal),
+        _ => None,
+    }
+}
+
+/// Whether the reader chose a logarithmic plane for the pole-zero map.
+pub(super) fn logarithmic_plane(state: ResultsReads<'_>) -> bool {
+    matches!(
+        kept(state, ResultViewer::PoleZero),
+        Some(SheetSettingValue::PoleZero { logarithmic: true })
+    )
 }
 
 /// Keep what the reader left `sheet` showing, or with `None` forget it.

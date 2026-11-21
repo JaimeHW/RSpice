@@ -55,6 +55,38 @@ pub fn is_stb_bode_trace(name: &str) -> bool {
         || stb_trace_suffix(name, "Loop Phase (deg)").is_some()
 }
 
+/// The response one retained trace measures, by the name a Bode card gives
+/// it, when the trace is a response's magnitude: a stability analysis's
+/// `Loop Gain (dB)` (or one of its segments) is the `Loop Gain`, and any
+/// other response's `|V(out)|` is `V(out)`.
+pub fn response_signal(analysis_type: AnalysisType, trace: &str) -> Option<String> {
+    if analysis_type == AnalysisType::Stb {
+        stb_trace_suffix(trace, "Loop Gain (dB)").map(|suffix| format!("Loop Gain{suffix}"))
+    } else {
+        trace.starts_with('|').then(|| {
+            trace
+                .trim_start_matches('|')
+                .trim_end_matches('|')
+                .to_owned()
+        })
+    }
+}
+
+/// Every response one analysis's retained traces can be measured as, by the
+/// name a Bode card gives it, in retained order. No sample is read.
+pub fn bode_responses<W: AsRef<RetainedWaveform>>(
+    analysis_type: AnalysisType,
+    waveforms: &[W],
+) -> Vec<String> {
+    if !analysis_type.is_bode_response() {
+        return Vec::new();
+    }
+    waveforms
+        .iter()
+        .filter_map(|waveform| response_signal(analysis_type, &waveform.as_ref().name))
+        .collect()
+}
+
 /// Resolve named magnitude/phase traces without scanning their samples.
 /// The caller supplies preference; the last matching trace wins equal preference.
 pub fn ac_bode_shape_for_analysis<W: AsRef<RetainedWaveform>>(

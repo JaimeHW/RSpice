@@ -98,8 +98,9 @@ pub const MAX_VISUALIZATION_XY_PLOTS: usize = 1_024;
 /// Maximum readouts pinned across all panes and sheets of one document.
 pub const MAX_VISUALIZATION_READOUT_PINS: usize = 1_024;
 /// Maximum sheet settings in one document: one for each pane and each sheet
-/// that keeps settings of its own (the Smith chart and the network matrix).
-pub const MAX_VISUALIZATION_SHEET_SETTINGS: usize = 2 * MAX_VISUALIZATION_PANES;
+/// that keeps settings of its own (the Smith chart, the network matrix, the
+/// Bode card and the pole-zero map).
+pub const MAX_VISUALIZATION_SHEET_SETTINGS: usize = 4 * MAX_VISUALIZATION_PANES;
 /// Maximum rows one pane's event-lane order names.
 pub const MAX_PANE_EVENT_LANES: usize = 4_096;
 /// Maximum event-lane rows ordered across all panes of one document.
@@ -1939,6 +1940,14 @@ pub enum SheetSettingValue {
         form: NetworkMatrixForm,
         format: NetworkMatrixFormat,
     },
+    /// The response the Bode card measures, by the name the card gives it:
+    /// a stability analysis's loop gain, or one AC response.
+    Bode {
+        #[serde(deserialize_with = "deserialize_label_string")]
+        measured_signal: String,
+    },
+    /// Whether the pole-zero map is drawn on a logarithmic plane.
+    PoleZero { logarithmic: bool },
 }
 
 impl SheetSettingValue {
@@ -1947,6 +1956,8 @@ impl SheetSettingValue {
         match self {
             Self::Smith { .. } => crate::result_presentation::ResultViewer::Smith,
             Self::NetworkMatrix { .. } => crate::result_presentation::ResultViewer::NetworkMatrix,
+            Self::Bode { .. } => crate::result_presentation::ResultViewer::Bode,
+            Self::PoleZero { .. } => crate::result_presentation::ResultViewer::PoleZero,
         }
     }
 }

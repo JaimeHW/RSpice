@@ -1,7 +1,7 @@
 //! Retained pole-zero map, root readouts and local plot interaction.
 
 use crate::{
-    presentation::{PlotView, frequency_readout, well_hint},
+    presentation::{PlotView, frequency_readout, well_hint, with_table_state},
     strip::{self, LegendChip},
 };
 use egui::Ui;
@@ -13,6 +13,10 @@ use rspice_ui_kit::{
     panels::section_header,
     plot::{self, Axis, PlotSpec, XScale, fmt_si_significant},
     tokens::Tokens,
+    widgets::{
+        SegmentedWidth, segmented,
+        table::{Cell, Column, DataTable, SortKey},
+    },
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
@@ -20,6 +24,100 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 pub struct PoleZeroResponse {
     pub plot: plot::PlotResponse,
     pub fit_clicked: bool,
+    /// The reader pinned a root, or let one go, on the map or in the table.
+    pub pin_changed: bool,
+}
+
+/// Where the map puts a root.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Plane {
+    /// σ and jω as they are.
+    Linear,
+    /// The angle kept and the radius `1 + log10(|s| / floor)`: the
+    /// half-planes, the axes and the damping ratio read as on the linear
+    /// plane, and roots decades apart stand apart instead of collapsing onto
+    /// the origin beside the largest. `floor` is the decade at or below the
+    /// smallest nonzero root, so every nonzero root sits outside the unit
+    /// radius and a root at the origin stays there.
+    Logarithmic { floor: f64 },
+}
+
+impl Plane {
+    fn of(data: &PoleZeroData, logarithmic: bool) -> Self {
+        if !logarithmic {
+            return Self::Linear;
+        }
+        let smallest = data
+            .roots
+            .iter()
+            .map(ComplexRoot::natural_frequency)
+            .filter(|magnitude| magnitude.is_finite() && *magnitude > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let floor = if smallest.is_finite() {
+            10f64.powf(smallest.log10().floor())
+        } else {
+            1.0
+        };
+        Self::Logarithmic { floor }
+    }
+
+    /// A root's place on the map.
+    fn place(self, real: f64, imaginary: f64) -> (f64, f64) {
+        let Self::Logarithmic { floor } = self else {
+            return (real, imaginary);
+        };
+        let magnitude = real.hypot(imaginary);
+        if !(magnitude.is_finite() && magnitude > 0.0) {
+            return (real, imaginary);
+        }
+        let radius = 1.0 + (magnitude / floor).log10().max(0.0);
+        (real / magnitude * radius, imaginary / magnitude * radius)
+    }
+
+    /// The axis over `[min, max]` of the map, quantity `label`, in rad/s.
+    fn axis(self, min: f64, max: f64, label: &str) -> Axis {
+        let Self::Logarithmic { floor } = self else {
+            return Axis::linear(min, max, "rad/s").with_label(label);
+        };
+        // A tick where each decade's circle crosses the axis, labelled with
+        // the value there, which on an axis is |s| signed.
+        let reach = min.abs().max(max.abs()).ceil().max(1.0) as i64;
+        let step = (reach / 4).max(1);
+        let mut axis = Axis::linear(min, max, "rad/s").with_label(label);
+        axis.ticks = (-reach..=reach)
+            .filter(|k| k % step == 0)
+            .map(|k| k as f64)
+            .filter(|k| (min..=max).contains(k))
+            .map(|k| {
+                let text = if k == 0.0 {
+                    "0".to_owned()
+                } else {
+                    rspice_results::number_format::si_tick_label(
+                        k.signum() * floor * 10f64.powf(k.abs() - 1.0),
+                        "",
+                        3,
+                    )
+                };
+                (k, text)
+            })
+            .collect();
+        axis
+    }
+}
+
+/// The sheet's own control in its bar: the plane on linear or logarithmic
+/// axes. Returns the reader's new choice, `true` for logarithmic.
+pub fn domain_bar(ui: &mut Ui, logarithmic: bool) -> Option<bool> {
+    crate::chrome::bars::bar_label(ui, "Plane");
+    let mut selected = usize::from(logarithmic);
+    segmented(
+        ui,
+        "rspice.results.pole-zero.plane",
+        &["Linear", "Logarithmic"],
+        &mut selected,
+        SegmentedWidth::Natural,
+    )
+    .then_some(selected == 1)
 }
 
 fn accessible_root_inventory(data: &PoleZeroData) -> String {
@@ -37,16 +135,6 @@ fn accessible_root_inventory(data: &PoleZeroData) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ")
-}
-
-fn retained_root_representatives(data: &PoleZeroData, limit: usize) -> (Vec<&ComplexRoot>, usize) {
-    let representatives = data
-        .roots
-        .iter()
-        .filter(|root| root.imag >= 0.0)
-        .collect::<Vec<_>>();
-    let omitted = representatives.len().saturating_sub(limit);
-    (representatives.into_iter().take(limit).collect(), omitted)
 }
 
 fn format_dominant_pole(
@@ -84,42 +172,83 @@ fn real_root_text(
     )
 }
 
-/// The Roots list: one row per root, conjugate pairs once, at most `limit`
-/// rows, and how many it left out.
-fn root_rows(
-    data: &PoleZeroData,
+/// The root table's names: poles p1, p2… and zeros z1, z2… in retained
+/// order, each root of a conjugate pair on its own row.
+fn root_names(data: &PoleZeroData) -> Vec<String> {
+    let (mut poles, mut zeros) = (0usize, 0usize);
+    data.roots
+        .iter()
+        .map(|root| {
+            if root.is_pole() {
+                poles += 1;
+                format!("p{poles}")
+            } else {
+                zeros += 1;
+                format!("z{zeros}")
+            }
+        })
+        .collect()
+}
+
+/// The root table's columns: σ and jω in rad/s as the s-plane measures
+/// them, f₀ in Hz, and ζ and Q of a root off the real axis.
+fn root_columns() -> [Column; 6] {
+    [
+        Column::words("Root", 56.0),
+        Column::number("σ", 116.0),
+        Column::number("jω", 116.0),
+        Column::number("f₀", 100.0),
+        Column::number("ζ", 76.0),
+        Column::number("Q", 92.0),
+    ]
+}
+
+/// Q in a table cell: [`q_text`] without the words a cell has no room for.
+fn q_cell(q: f64, digits: usize) -> String {
+    if q.is_infinite() {
+        "∞".to_owned()
+    } else {
+        q_text(q, digits)
+    }
+}
+
+/// One root's row: its name, σ and jω in rad/s, f₀ in Hz, and ζ and Q when
+/// it sits off the real axis.
+fn root_cells(
+    name: &str,
+    root: &ComplexRoot,
     quantity_policy: &QuantityPresentationPolicy,
     digits: usize,
-    limit: usize,
-) -> (Vec<(String, String, bool)>, usize) {
-    let mut rows: Vec<(String, String, bool)> = Vec::new();
-    let mut pole_index = 0usize;
-    let mut zero_index = 0usize;
-    let (representatives, omitted) = retained_root_representatives(data, limit);
-    for root in representatives {
-        let name = if root.is_pole() {
-            pole_index += 1;
-            format!("p{pole_index}")
+) -> Vec<Cell> {
+    let natural = root.natural_frequency();
+    let mut cells = vec![
+        Cell::text(name).sort_by(SortKey::Text(name.to_owned())),
+        Cell::number(fmt_si_significant(root.real, "rad/s", digits))
+            .sort_by(SortKey::Number(root.real)),
+        Cell::number(fmt_si_significant(root.imag, "rad/s", digits))
+            .sort_by(SortKey::Number(root.imag)),
+        Cell::number(frequency_readout(
+            quantity_policy,
+            natural / std::f64::consts::TAU,
+            digits,
+        ))
+        .sort_by(SortKey::Number(natural)),
+    ];
+    if root.is_real() {
+        cells.extend([Cell::empty(), Cell::empty()]);
+    } else {
+        let zeta = root.damping_ratio();
+        let q = if root.real.abs() > 1e-12 {
+            natural / (-2.0 * root.real)
         } else {
-            zero_index += 1;
-            format!("z{zero_index}")
+            f64::INFINITY
         };
-        let value = if root.is_real() {
-            real_root_text(root, quantity_policy, digits)
-        } else {
-            format!(
-                "ζ {} · f₀ {}",
-                fmt_si_significant(root.damping_ratio(), "", digits),
-                frequency_readout(
-                    quantity_policy,
-                    root.natural_frequency() / std::f64::consts::TAU,
-                    digits
-                )
-            )
-        };
-        rows.push((name, value, false));
+        cells.push(
+            Cell::number(fmt_si_significant(zeta, "", digits)).sort_by(SortKey::Number(zeta)),
+        );
+        cells.push(Cell::number(q_cell(q, digits)).sort_by(SortKey::Number(q)));
     }
-    (rows, omitted)
+    cells
 }
 
 /// Q = 1/(2ζ) as a card prints it. A growing pair has ζ < 0, so its Q keeps
@@ -166,8 +295,16 @@ fn root_card_rows(
     rows
 }
 
-/// Render the s-plane map; the root card reads at the reader's
-/// `significant_digits`.
+/// The least width beside the square map the root table takes; on a
+/// narrower sheet the table goes under the map.
+const TABLE_BESIDE_MIN_WIDTH: f32 = 540.0;
+/// The share of a narrow sheet's height the map takes above the table.
+const MAP_SHARE_ABOVE_TABLE: f32 = 0.58;
+
+/// Render the s-plane map, on logarithmic radial axes when `logarithmic`,
+/// and the table of every root beside or under it; the root card and the
+/// table read at the reader's `significant_digits`.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     data: Option<&PoleZeroData>,
@@ -176,6 +313,7 @@ pub fn show(
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
+    logarithmic: bool,
 ) -> Option<PoleZeroResponse> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -209,14 +347,20 @@ pub fn show(
         *view = PlotView::default();
     }
 
-    // Symmetric ranges around the roots.
+    // Symmetric ranges around the roots, where the plane puts them.
+    let plane = Plane::of(data, logarithmic);
+    let places: Vec<(f64, f64)> = data
+        .roots
+        .iter()
+        .map(|root| plane.place(root.real, root.imag))
+        .collect();
     let mut extent = 1.0f64;
-    for root in &data.roots {
-        if root.real.is_finite() && root.imag.is_finite() {
-            extent = extent.max(root.real.abs()).max(root.imag.abs());
+    for &(x, y) in &places {
+        if x.is_finite() && y.is_finite() {
+            extent = extent.max(x.abs()).max(y.abs());
         }
     }
-    let extent = extent * 1.25;
+    let extent = extent * if plane == Plane::Linear { 1.25 } else { 1.1 };
     let (x0, x1) = drawing_view.x.unwrap_or((-extent, extent));
     let (y0, y1) = drawing_view.y.unwrap_or((-extent, extent));
 
@@ -229,9 +373,9 @@ pub fn show(
         pole_stability(data).label()
     );
     let mut spec = PlotSpec::new(
-        Axis::linear(x0, x1, "σ"),
+        plane.axis(x0, x1, "σ"),
         XScale::Linear,
-        Axis::linear(y0, y1, "jω"),
+        plane.axis(y0, y1, "jω"),
     )
     .accessible_name("Pole-zero plot")
     .pinch_zooms_both_axes()
@@ -243,8 +387,14 @@ pub fn show(
         x1: 0.0_f64.clamp(x0, x1),
     });
 
-    // Root glyphs as an underlay: ✕ for poles, ○ for zeros.
+    // Root glyphs as an underlay: ✕ for poles, ○ for zeros; on the
+    // logarithmic plane, a circle at each decade.
     let roots = &data.roots;
+    let underlay_places = &places;
+    let decades = match plane {
+        Plane::Linear => 0,
+        Plane::Logarithmic { .. } => extent.ceil() as usize,
+    };
     let pole_color = c.traces[5];
     let zero_color = c.traces[1];
     let grid = c.canvas_grid;
@@ -254,8 +404,13 @@ pub fn show(
             egui::Rangef::new(mapper.rect.top(), mapper.rect.bottom()),
             egui::Stroke::new(1.0, grid),
         );
-        for root in roots {
-            let center = egui::pos2(mapper.x(root.real), mapper.y(root.imag));
+        let origin = egui::pos2(mapper.x(0.0), mapper.y(0.0));
+        for decade in 1..=decades {
+            let radius = (mapper.x(decade as f64) - mapper.x(0.0)).abs();
+            painter.circle_stroke(origin, radius, egui::Stroke::new(1.0, grid));
+        }
+        for (root, &(x, y)) in roots.iter().zip(underlay_places) {
+            let center = egui::pos2(mapper.x(x), mapper.y(y));
             if root.is_pole() {
                 let r = 4.5;
                 let stroke = egui::Stroke::new(1.8, pole_color);
@@ -273,9 +428,23 @@ pub fn show(
         }
     }));
 
-    // Region sized so the INNER plot area is square — σ and jω on one scale.
+    // The map's region sized so the INNER plot area is square — σ and jω on
+    // one scale — and the table beside it, or under it on a narrow sheet.
     let avail = ui.available_rect_before_wrap();
-    let rect = plot::square_outer_rect(avail, &spec);
+    let (map_area, table_area) = if avail.width() - avail.height() >= TABLE_BESIDE_MIN_WIDTH {
+        let map = egui::Rect::from_min_size(avail.min, egui::vec2(avail.height(), avail.height()));
+        (
+            map,
+            egui::Rect::from_min_max(egui::pos2(map.right(), avail.top()), avail.max),
+        )
+    } else {
+        let split = avail.top() + (avail.height() * MAP_SHARE_ABOVE_TABLE).round();
+        (
+            egui::Rect::from_min_max(avail.min, egui::pos2(avail.right(), split)),
+            egui::Rect::from_min_max(egui::pos2(avail.left(), split), avail.max),
+        )
+    };
+    let rect = plot::square_outer_rect(map_area, &spec);
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
@@ -296,13 +465,9 @@ pub fn show(
         && response.plot_rect.contains(pointer)
     {
         let mut best = 16.0f32 * 16.0;
-        for (i, root) in data.roots.iter().enumerate() {
-            let pos = crate::presentation::xy_screen_pos(
-                response.plot_rect,
-                (root.real, root.imag),
-                ranges.0,
-                ranges.1,
-            );
+        for (i, &place) in places.iter().enumerate() {
+            let pos =
+                crate::presentation::xy_screen_pos(response.plot_rect, place, ranges.0, ranges.1);
             let d2 = pos.distance_sq(pointer);
             if d2 < best {
                 best = d2;
@@ -311,11 +476,13 @@ pub fn show(
         }
     }
 
+    let mut pin_changed = false;
     if response.response.clicked() {
         *pin = match hovered {
             Some(hit) if *pin == Some(hit) => None,
             hit => hit,
         };
+        pin_changed = true;
     }
 
     let pinned = pin.filter(|(_, i)| *i < data.roots.len());
@@ -323,12 +490,8 @@ pub fn show(
 
     if let Some((_, i)) = target {
         let root = &data.roots[i];
-        let pos = crate::presentation::xy_screen_pos(
-            response.plot_rect,
-            (root.real, root.imag),
-            ranges.0,
-            ranges.1,
-        );
+        let pos =
+            crate::presentation::xy_screen_pos(response.plot_rect, places[i], ranges.0, ranges.1);
         let color = if root.is_pole() {
             c.traces[5]
         } else {
@@ -344,14 +507,66 @@ pub fn show(
         let title = if root.is_pole() { "pole" } else { "zero" };
         crate::presentation::point_card(&plot_ui, response.plot_rect, pos, title, color, &rows);
     }
+
+    let mut table_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(table_area)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    pin_changed |= root_table(
+        &mut table_ui,
+        data,
+        pin,
+        quantity_policy,
+        significant_digits,
+    );
     Some(PoleZeroResponse {
         plot: response,
         fit_clicked: header.fit_clicked,
+        pin_changed,
     })
 }
 
-/// Root table with damping and natural frequency, at the reader's
-/// `significant_digits`.
+/// Every root in a table, its selection the root pinned on the map. Returns
+/// whether the reader selected another root, or none, in the table.
+fn root_table(
+    ui: &mut Ui,
+    data: &PoleZeroData,
+    pin: &mut Option<(usize, usize)>,
+    quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
+) -> bool {
+    let names = root_names(data);
+    let columns = root_columns();
+    let revision = egui::Id::new(("pole-zero-roots", &data.name, data.roots.len(), digits)).value();
+    with_table_state(ui, "pole-zero-roots", |ui, state| {
+        let pinned = pin
+            .map(|(_, index)| index)
+            .filter(|index| *index < data.roots.len());
+        if state.selected_row() != pinned {
+            match pinned {
+                Some(index) => state.select(index, None),
+                None => state.selection = None,
+            }
+        }
+        let response = DataTable::new("rspice.results.pole-zero.roots", &columns, data.roots.len())
+            .state(state)
+            .freeze(1)
+            .revision(revision)
+            .max_height(ui.available_height())
+            .show(ui, |index| {
+                root_cells(&names[index], &data.roots[index], quantity_policy, digits)
+            });
+        if response.selection_changed {
+            *pin = state.selected_row().map(|index| (0, index));
+            return true;
+        }
+        false
+    })
+}
+
+/// The stability summary of the roots, at the reader's
+/// `significant_digits`; the sheet's table lists every root.
 pub fn right_panel(
     ui: &mut Ui,
     data: Option<&PoleZeroData>,
@@ -402,36 +617,101 @@ pub fn right_panel(
         summary_rows.push(("Gain", fmt_si_significant(gain, "", digits), false));
     }
     crate::presentation::stat_table(ui, &summary_rows);
-
-    section_header(ui, "Roots", None);
-    let (rows, omitted) = root_rows(data, quantity_policy, digits, 12);
-    let row_refs: Vec<(&str, String, bool)> = rows
-        .iter()
-        .map(|(k, v, h)| (k.as_str(), v.clone(), *h))
-        .collect();
-    crate::presentation::stat_table(ui, &row_refs);
-    if omitted > 0 {
-        crate::presentation::panel_note(ui, &format!("+{omitted} more"));
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The words of one row of the root table.
+    fn row_text(name: &str, root: &ComplexRoot) -> Vec<String> {
+        let policy = QuantityPresentationPolicy::default();
+        root_cells(name, root, &policy, 4)
+            .into_iter()
+            .map(|cell| cell.text)
+            .collect()
+    }
+
     /// A real root in the right half-plane reads differently from its
-    /// left-half-plane mirror, as the dominant-pole row already did.
+    /// left-half-plane mirror: σ keeps its sign.
     #[test]
     fn a_real_root_keeps_the_side_of_the_plane_it_sits_on() {
-        let mut data = PoleZeroData::new("Miller zero");
         let kilohertz = std::f64::consts::TAU * 1.0e3;
-        data.roots.push(ComplexRoot::zero(kilohertz, 0.0));
-        data.roots.push(ComplexRoot::zero(-kilohertz, 0.0));
-        let policy = QuantityPresentationPolicy::default();
-        let (rows, omitted) = root_rows(&data, &policy, 4, 12);
-        assert_eq!(omitted, 0);
-        let values: Vec<&str> = rows.iter().map(|(_, value, _)| value.as_str()).collect();
-        assert_eq!(values, ["+1 kHz", "\u{2212}1 kHz"]);
+        assert_eq!(
+            row_text("z1", &ComplexRoot::zero(kilohertz, 0.0))[1],
+            "6.283 krad/s"
+        );
+        assert_eq!(
+            row_text("z2", &ComplexRoot::zero(-kilohertz, 0.0))[1],
+            "\u{2212}6.283 krad/s"
+        );
+    }
+
+    /// Every root lists, each of a conjugate pair on its own row, with σ
+    /// and jω in rad/s, f₀ in Hz, and ζ and Q off the real axis.
+    #[test]
+    fn every_root_lists_with_its_units() {
+        let mut data = PoleZeroData::new("forty roots");
+        for index in 1..=10 {
+            let sigma = -(index as f64) * 1.0e3;
+            data.roots.push(ComplexRoot::pole(sigma, 4.0e3));
+            data.roots.push(ComplexRoot::pole(sigma, -4.0e3));
+            data.roots.push(ComplexRoot::zero(sigma * 10.0, 0.0));
+            data.roots.push(ComplexRoot::pole(sigma * 100.0, 0.0));
+        }
+        let names = root_names(&data);
+        assert_eq!(names.len(), 40);
+        assert_eq!(
+            names.iter().filter(|name| name.starts_with('p')).count(),
+            30
+        );
+        assert_eq!(names[39], "p30");
+
+        let natural = std::f64::consts::TAU * 1.0e3;
+        let pair = ComplexRoot::pole(-0.1 * natural, natural * 0.99f64.sqrt());
+        assert_eq!(
+            row_text("p1", &pair),
+            [
+                "p1",
+                "\u{2212}628.3 rad/s",
+                "6.252 krad/s",
+                "1 kHz",
+                "0.1",
+                "5"
+            ]
+        );
+        let real = row_text("p2", &ComplexRoot::pole(-natural, 0.0));
+        assert_eq!(real[4..], ["", ""], "a real root has no ζ or Q");
+    }
+
+    /// The logarithmic plane keeps each root's angle, so its half-plane
+    /// and its damping read as on the linear plane, and puts roots decades
+    /// apart a decade's radius apart.
+    #[test]
+    fn the_logarithmic_plane_keeps_angles_and_spreads_decades() {
+        let mut data = PoleZeroData::new("decades apart");
+        data.roots.push(ComplexRoot::pole(-1.0e3, 0.0));
+        data.roots.push(ComplexRoot::pole(-1.0e8, 0.0));
+        data.roots.push(ComplexRoot::zero(3.0e5, 4.0e5));
+        let plane = Plane::of(&data, true);
+        assert_eq!(plane, Plane::Logarithmic { floor: 1.0e3 });
+        let place = |root: &ComplexRoot| plane.place(root.real, root.imag);
+
+        let (x, y) = place(&data.roots[0]);
+        assert!((x + 1.0).abs() < 1e-12 && y == 0.0, "{x}, {y}");
+        let (x, _) = place(&data.roots[1]);
+        assert!((x + 6.0).abs() < 1e-12, "{x}");
+        let (x, y) = place(&data.roots[2]);
+        assert!(x > 0.0, "a right-half-plane zero stays right");
+        assert!((y.atan2(x) - 4f64.atan2(3.0)).abs() < 1e-12);
+        assert!((x.hypot(y) - (1.0 + 500.0f64.log10())).abs() < 1e-12);
+
+        assert_eq!(Plane::of(&data, false).place(3.0, 4.0), (3.0, 4.0));
+        let ticks = plane.axis(-7.0, 7.0, "σ").ticks;
+        assert!(
+            ticks.contains(&(-6.0, "\u{2212}100 M".to_owned())),
+            "{ticks:?}"
+        );
     }
 
     #[test]
@@ -445,25 +725,6 @@ mod tests {
         assert_eq!(summary.imaginary_axis_poles, 1);
         assert_eq!(summary.worst_q, Some(f64::INFINITY));
         assert!(accessible_root_inventory(&data).contains("pole 2"));
-    }
-
-    #[test]
-    fn root_table_filters_conjugates_before_applying_its_limit() {
-        let mut data = PoleZeroData::new("ordered roots");
-        for index in 1..=12 {
-            data.roots
-                .push(ComplexRoot::pole(-(index as f64), -(index as f64)));
-        }
-        for index in 1..=14 {
-            data.roots
-                .push(ComplexRoot::pole(-(index as f64), index as f64));
-        }
-
-        let (rows, omitted) = retained_root_representatives(&data, 12);
-
-        assert_eq!(rows.len(), 12);
-        assert!(rows.iter().all(|root| root.imag > 0.0));
-        assert_eq!(omitted, 2);
     }
 
     /// The hover card gives σ and jω in rad/s, so jω never reads as a
