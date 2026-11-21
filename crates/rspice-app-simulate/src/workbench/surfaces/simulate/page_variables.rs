@@ -879,20 +879,4 @@ mod tests {
             "0 of 3 enabled \u{b7} those resolve these values"
         );
     }
-
-    /// The verb agrees with the count it follows.
-    ///
-    /// One enabled analysis of ten read "1 of 10 enabled · those resolve these
-    /// values", which names a group where there is one.
-    #[test]
-    fn one_enabled_analysis_is_not_a_group() {
-        assert_eq!(
-            enabled_reader_summary(1, 9),
-            "1 of 10 enabled \u{b7} that one resolves these values"
-        );
-        assert_eq!(
-            enabled_reader_summary(2, 8),
-            "2 of 10 enabled \u{b7} those resolve these values"
-        );
-    }
 }

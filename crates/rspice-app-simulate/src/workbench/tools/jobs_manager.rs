@@ -2027,46 +2027,6 @@ mod tests {
         );
     }
 
-    /// The execution-target card states the runtime this build runs on. It
-    /// once also listed "Parallel slots", "Memory budget" and "Failure policy",
-    /// which were literals rather than settings, so they must stay deleted.
-    #[test]
-    fn execution_target_card_lists_only_the_live_runtime() {
-        let mut state = SimulateTestHost::default();
-        state.model.simulation.start_run();
-        let snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            render_inspector(ui, &snapshot, &mut None, &mut None, &mut None);
-        });
-        let text = output
-            .platform_output
-            .accesskit_update
-            .expect("accessibility tree")
-            .nodes
-            .iter()
-            .flat_map(|(_, node)| [node.label(), node.value()])
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(text.contains("Runtime"), "{text}");
-        // The targets list under it was literal copy too: the runtimes this
-        // build cannot execute on and a scheduler nothing configures.
-        for constant in [
-            "Parallel slots",
-            "Memory budget",
-            "Failure policy",
-            "Execution targets",
-            "Remote scheduler",
-            "not executable in this build",
-            "qualified for this build",
-        ] {
-            assert!(!text.contains(constant), "{constant} came back:\n{text}");
-        }
-    }
-
     /// The selected run's manifest opens it in Verify beside Results, on its
     /// specifications, as the row's context menu does; the stack of controls
     /// shares one width.

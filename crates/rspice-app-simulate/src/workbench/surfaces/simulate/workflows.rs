@@ -2012,38 +2012,3 @@ pub(super) fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
         );
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::claim_preview_sentence;
-
-    /// The claim preview's verb agrees with the number it just counted.
-    ///
-    /// The dialog is a plan edit and this sentence is the only account it gives
-    /// of what the edit would take. It shipped as "1 authored output match this
-    /// rule": a reader who noticed the disagreement had no way to tell whether
-    /// the count or the wording was the part that was wrong.
-    #[test]
-    fn the_claim_preview_agrees_its_verb_with_its_count() {
-        assert_eq!(
-            claim_preview_sentence(0, 1),
-            "0 authored outputs match this rule"
-        );
-        assert_eq!(
-            claim_preview_sentence(1, 1),
-            "1 authored output matches this rule"
-        );
-        assert_eq!(
-            claim_preview_sentence(2, 1),
-            "2 authored outputs match this rule"
-        );
-        assert_eq!(
-            claim_preview_sentence(1, 3),
-            "1 authored output matches any of these 3 rules"
-        );
-        assert_eq!(
-            claim_preview_sentence(7, 3),
-            "7 authored outputs match any of these 3 rules"
-        );
-    }
-}

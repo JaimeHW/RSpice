@@ -66,8 +66,6 @@ pub mod workbench {
             pub mod plan_removal;
         }
 
-        #[cfg(test)]
-        pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
         pub(crate) use dialogs::plan_removal::{
             PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
         };

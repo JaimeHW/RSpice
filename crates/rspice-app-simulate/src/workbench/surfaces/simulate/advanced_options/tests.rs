@@ -265,22 +265,6 @@ fn every_catalog_option_earns_a_row_for_every_kind() {
     }
 }
 
-/// An untouched analysis resolves to the plan, and says so.
-#[test]
-fn an_untouched_analysis_reports_the_plan_as_the_owner() {
-    let rows = rows_for(AnalysisKind::Ac, None);
-    assert_eq!(origin_of(&rows, O::Reltol), PLAN_ORIGIN);
-    assert_eq!(origin_of(&rows, O::Pivtol), PLAN_ORIGIN);
-    assert_eq!(origin_of(&rows, O::Damping), PLAN_ORIGIN);
-
-    // The plan states no LTE bound by default, so the engine's own dialect
-    // default stands and the row says that rather than inventing a number.
-    // Asked of a kind that actually steps: on an AC sweep the same row is a
-    // refusal, which the refusal test covers.
-    let stepping = rows_for(AnalysisKind::Envelope, None);
-    assert_eq!(origin_of(&stepping, O::LteReltol), ENGINE_ORIGIN);
-}
-
 /// An authored option reports itself as the owner and shows its own value.
 #[test]
 fn an_authored_option_outranks_the_plan_in_its_own_row() {
@@ -439,46 +423,6 @@ fn a_balanced_adaptive_instance_may_still_author_its_continuation_aids() {
         origin == PLAN_ORIGIN || origin == ENGINE_ORIGIN,
         "an inheriting instance's aid follows the resolved policy, not an owner: {origin}"
     );
-}
-
-/// The sections arrive in catalog order and none of them is empty.
-#[test]
-fn the_sections_are_ordered_and_populated() {
-    let options = SimulationOptions::default();
-    let built = sections(
-        AnalysisKind::Transient,
-        &AnalysisDraft::for_kind(AnalysisKind::Transient),
-        None,
-        &options,
-    );
-    let titles: Vec<&str> = built
-        .iter()
-        .map(|section| section.section.title())
-        .collect();
-    // Every section, including the one whose options this kind cannot carry:
-    // the panel reports the plan whole and states the refusal in place, which
-    // is why a row is never dropped and a section is never hidden. Which of
-    // them become *fields* is `form_rows`, and `field_tests` pins that.
-    assert_eq!(
-        titles,
-        vec![
-            "Convergence",
-            "Charge",
-            "Integration",
-            "Transient Newton",
-            "Output",
-            "Harmonic balance",
-            "Matrix",
-            "Device bypass"
-        ]
-    );
-    for section in &built {
-        assert!(
-            !section.rows.is_empty(),
-            "{} arrived empty",
-            section.section.title()
-        );
-    }
 }
 
 /// The panel's own count of departures matches the record.

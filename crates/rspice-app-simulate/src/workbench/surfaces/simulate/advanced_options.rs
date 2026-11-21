@@ -642,8 +642,8 @@ pub(super) fn commit(
 
 ///
 /// Two surfaces send a reader here — the Solver page's resolution ledger and a
-/// refused plan removal — and `page_tests/plan_removal.rs` pins this equal to
-/// `workbench::app::REVEAL_BLOCKER` so the two cannot word one hop two ways.
+/// refused plan removal — and the removal dialog words the hop the same way
+/// (`workbench::app::dialogs::plan_removal::REVEAL_BLOCKER`).
 pub(super) const REVEAL_ACTION: &str = "Open in Analyses";
 
 /// Show one analysis on the page that edits it.

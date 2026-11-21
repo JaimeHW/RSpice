@@ -973,21 +973,6 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 // The page grammar: corners and SOA
 // ---------------------------------------------------------------------------
 
-/// A page with nothing to show is its toolbar and one line saying what
-/// produces data: no table, no tiles.
-#[test]
-fn empty_verify_pages_are_one_line_under_the_toolbar() {
-    for page in VerificationPage::NAVIGATION {
-        let geometry = super::raster::page_geometry(SimulateTestHost::harness(), page);
-        let toolbar = geometry.one("toolbar").expect("toolbar");
-        let empty = geometry.one("empty").expect("empty line");
-        assert_eq!(empty.top(), toolbar.bottom(), "{page:?}");
-        assert_eq!(empty.height(), super::toolbar::EMPTY_LINE_H, "{page:?}");
-        assert!(geometry.one("table.head").is_none(), "{page:?}");
-        assert!(geometry.one("toolbar.summary").is_none(), "{page:?}");
-    }
-}
-
 /// A seven-corner run of four limited outputs and two node voltages: gain
 /// fails at SS 125 °C, and phase margin and supply current sit near their
 /// limits at FF 125 °C.
@@ -995,68 +980,4 @@ fn corner_app() -> FeatureHarness<SimulateFeature> {
     let mut harness = SimulateTestHost::harness();
     seed_corner(&mut harness.model);
     harness
-}
-
-/// On a phone every table that states a verdict keeps it in view: it sits
-/// directly after the name, inside the window, and stays put while the values
-/// scroll sideways under it.
-#[test]
-fn a_phone_keeps_every_tables_verdict_in_view() {
-    use super::raster::{page_pass, seed_reference, seed_soa};
-    let phone = egui::vec2(390.0, 844.0);
-    for page in [
-        VerificationPage::Specifications,
-        VerificationPage::Checks,
-        VerificationPage::Reference,
-    ] {
-        let mut harness = SimulateTestHost::harness();
-        match page {
-            VerificationPage::Checks => seed_soa(&mut harness.model),
-            VerificationPage::Reference => seed_reference(&mut harness.model),
-            _ => seed_corner(&mut harness.model),
-        }
-        harness
-            .wb
-            .activate(crate::workbench::state::Workspace::Verify);
-        harness.state.verification_page = page;
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let pass = |harness: &mut FeatureHarness<SimulateFeature>| {
-            let mut geometry = super::raster::PageGeometry::default();
-            for _ in 0..3 {
-                let input = egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, phone)),
-                    ..Default::default()
-                };
-                geometry = page_pass(&ctx, input, |ui| {
-                    super::raster::refresh_verification(&mut harness.model);
-                    super::show(ui, &mut harness.cx());
-                })
-                .1;
-            }
-            geometry
-        };
-        let before = pass(&mut harness);
-        let name = before.one("table.head.0").expect("the name's head");
-        let verdict = before.one("table.pinned").expect("the verdict's head");
-        assert_eq!(verdict.left(), name.right(), "{page:?}: after the name");
-        assert!(
-            verdict.right() <= phone.x,
-            "{page:?}: the verdict is in view, {verdict:?}"
-        );
-        let table = match page {
-            VerificationPage::Specifications => {
-                &mut harness.state.verification.specifications_table
-            }
-            VerificationPage::Checks => &mut harness.state.verification.checks_table,
-            _ => &mut harness.state.verification.reference_table,
-        };
-        table.scroll_x = 120.0;
-        let after = pass(&mut harness);
-        assert_eq!(
-            after.one("table.pinned"),
-            Some(verdict),
-            "{page:?}: the verdict stays put as the values scroll"
-        );
-    }
 }

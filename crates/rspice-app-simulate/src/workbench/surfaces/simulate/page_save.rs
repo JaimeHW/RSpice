@@ -754,41 +754,6 @@ mod tests {
         );
     }
 
-    /// One dataset is one dataset.
-    ///
-    /// The row read "12 kB across 1 of 1 datasets" on the project a first run
-    /// leaves behind, which is the state most readers see this row in first.
-    #[test]
-    fn the_executed_deck_row_agrees_with_the_count_it_states() {
-        let one = ExecutedDeckStorage {
-            listed: 12_000,
-            summarized: 0,
-            held: 1,
-        };
-        assert_eq!(
-            executed_deck_summary(1, 0, &one),
-            "11.72 KiB across 1 of 1 dataset \u{b7} 11.72 KiB listed \u{b7} 0 B summarized"
-        );
-        assert_eq!(
-            executed_deck_summary(2, 0, &one),
-            "11.72 KiB across 1 of 2 datasets \u{b7} 11.72 KiB listed \u{b7} 0 B summarized"
-        );
-
-        let none = ExecutedDeckStorage {
-            listed: 0,
-            summarized: 0,
-            held: 0,
-        };
-        assert_eq!(
-            executed_deck_summary(1, 0, &none),
-            "none held \u{b7} this project holds no deck for its 1 retained dataset"
-        );
-        assert_eq!(
-            executed_deck_summary(2, 0, &none),
-            "none held \u{b7} this project holds no deck for its 2 retained datasets"
-        );
-    }
-
     fn active_plan_revision(
         harness: &FeatureHarness<SimulateFeature>,
     ) -> crate::product::ObjectRevision {

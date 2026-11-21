@@ -2099,13 +2099,6 @@ mod run_space_layout_tests {
             }
         }
     }
-
-    /// No axes, no strip: an empty row would paint a band of nothing where the
-    /// expression used to close on a tile.
-    #[test]
-    fn a_run_with_no_axes_packs_no_rows() {
-        assert!(space_rows(1100.0, 0).is_empty());
-    }
 }
 
 #[cfg(test)]

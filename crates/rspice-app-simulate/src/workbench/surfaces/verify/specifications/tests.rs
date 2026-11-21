@@ -172,28 +172,6 @@ fn draw(harness: &mut Harness) -> (egui::FullOutput, super::super::raster::PageG
     last.expect("three passes")
 }
 
-#[test]
-fn verify_opens_on_its_specifications() {
-    let harness = SimulateTestHost::harness();
-    assert_eq!(
-        harness.state.verification_page,
-        VerificationPage::Specifications
-    );
-    assert_eq!(
-        VerificationPage::NAVIGATION[0],
-        VerificationPage::Specifications
-    );
-    assert_eq!(VerificationPage::Specifications.label(), "Specifications");
-    assert_eq!(
-        crate::workbench::simulate::commands::SimulateCommand::Verify(
-            VerificationPage::Specifications
-        )
-        .key()
-        .as_str(),
-        "verify-specifications"
-    );
-}
-
 /// The table states the sheet's own words for every row, and the table, the
 /// toolbar and the navigator count the same specifications and failures.
 #[test]

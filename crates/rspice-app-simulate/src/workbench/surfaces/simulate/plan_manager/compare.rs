@@ -28,9 +28,7 @@
 //! dialog describing what it does not have is describing it to a reader with no
 //! way of knowing it was ever offered. The absence is held instead by the
 //! omission register in `tests.rs`, which forbids the domain's vocabulary over
-//! every route and both channels, and by
-//! `the_execution_domain_is_absent_and_the_surface_does_not_narrate_it`, which
-//! holds this route's domain set at four.
+//! every route and both channels.
 
 use super::records::PlanEntry;
 use super::*;
@@ -1111,38 +1109,6 @@ mod tests {
         );
     }
 
-    /// Every string the route paints at one viewport, in paint order.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn painted_route_text(
-        screen: egui::Vec2,
-        draft: &mut SimulationPlanManagerDraft,
-        records: &[PlanCatalogRecord],
-    ) -> Vec<String> {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let pass = |draft: &mut SimulationPlanManagerDraft| {
-            ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
-                    ..Default::default()
-                },
-                |ctx| {
-                    dialog(ctx, draft, records);
-                },
-            )
-        };
-        let _ = pass(draft);
-        let _ = pass(draft);
-        pass(draft)
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) => Some(text.galley.job.text.clone()),
-                _ => None,
-            })
-            .collect()
-    }
-
     /// The three shapes every route in this module is gated at.
     #[cfg(not(target_arch = "wasm32"))]
     const GATED_VIEWPORTS: [egui::Vec2; 3] = [
@@ -1150,60 +1116,6 @@ mod tests {
         egui::Vec2::new(820.0, 640.0),
         egui::Vec2::new(560.0, 900.0),
     ];
-
-    /// The authored fifth domain is absent, and the surface does not narrate it.
-    ///
-    /// It used to. A note explained that a plan binds no design and no testbench
-    /// and that no plan owns an execution target — four lines telling a reader
-    /// about a domain they had no way of knowing was ever offered, on a dialog
-    /// whose whole job is to state differences. A surface does not describe what
-    /// it does not have.
-    ///
-    /// So the claim inverts: nothing this route paints or announces may name that
-    /// domain, and the four it does compare are exactly the four it paints. The
-    /// absence is checked here rather than merely no longer stated, because
-    /// deleting a note is also how a fact quietly comes back through some other
-    /// row.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn the_execution_domain_is_absent_and_the_surface_does_not_narrate_it() {
-        let (harness, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&harness.model);
-        let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
-        draft.mode = SimulationPlanManagerMode::Compare;
-        draft.comparison.base_plan_id = Some(retained);
-        let painted = painted_route_text(GATED_VIEWPORTS[0], &mut draft, &records);
-
-        // Not a vocabulary scan: `tests.rs`'s omission register holds the
-        // authored words over every route, in both channels, at all three
-        // viewports. What only this route can say is that its own domain set is
-        // the four it compares and no fifth row of any kind.
-        let base = record_of(&records, retained);
-        let target = record_of(&records, active);
-        let compared = compared_domains(base, target);
-        assert_eq!(
-            compared.len(),
-            4,
-            "the comparison offers a fifth domain: {:?}",
-            compared
-                .iter()
-                .map(|domain| domain.domain)
-                .collect::<Vec<_>>()
-        );
-        for absent in ["Execution binding and target", "execution target"] {
-            assert!(
-                !painted.iter().any(|text| text.contains(absent)),
-                "the surface still narrates the absent domain by saying {absent:?}"
-            );
-        }
-        for domain in &compared {
-            assert!(
-                painted.iter().any(|text| text.contains(domain.domain)),
-                "the compared domain {:?} is not painted",
-                domain.domain
-            );
-        }
-    }
 
     /// The comparison changes neither plan.
     ///

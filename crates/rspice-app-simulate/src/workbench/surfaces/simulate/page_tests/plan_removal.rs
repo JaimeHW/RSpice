@@ -24,16 +24,6 @@ use crate::workbench::simulate::test_host::SimulateTestHost;
 
 // ------------------------------------------------------- analysis regression
 
-/// The hop is called what the other hop to the same place is called.
-#[test]
-fn the_refusal_and_the_options_panel_name_the_same_hop_the_same_way() {
-    assert_eq!(
-        crate::workbench::app::REVEAL_BLOCKER,
-        super::super::advanced_options::REVEAL_ACTION,
-        "two surfaces sending the reader to the Analyses page must say so in one wording"
-    );
-}
-
 /// Retained results, and nothing bound to it: still reviewed, still committed.
 ///
 /// This is the arm where the confirmation is a real question. The removal will

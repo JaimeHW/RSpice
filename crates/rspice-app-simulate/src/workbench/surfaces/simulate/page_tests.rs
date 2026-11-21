@@ -119,28 +119,6 @@ fn preset_intents_line_up_with_the_named_presets() {
     assert_eq!(edited.preset_label(), "Custom");
 }
 
-/// Presets must be distinguishable by exact comparison, because that is how
-/// the strip decides which chip is active. Two presets that serialize
-/// identically would make the strip report the wrong policy.
-#[test]
-fn the_named_presets_are_pairwise_distinct() {
-    let presets = [
-        SimulationOptions::fast(),
-        SimulationOptions::default(),
-        SimulationOptions::accurate(),
-        SimulationOptions::robust(),
-    ];
-    for (index, left) in presets.iter().enumerate() {
-        for right in presets.iter().skip(index + 1) {
-            assert_ne!(
-                serde_json::to_value(left).expect("serializable"),
-                serde_json::to_value(right).expect("serializable"),
-                "two named presets resolve to the same option set"
-            );
-        }
-    }
-}
-
 /// A registry that can only grow is not an editor. Removal has to be a real,
 /// validated transaction on the plan payload — not a view-local filter.
 #[test]

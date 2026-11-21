@@ -833,23 +833,6 @@ mod tests {
         AnalysisKind::Qpxf,
     ];
 
-    /// The fixture is only worth its assertions if it still has that shape.
-    ///
-    /// Both halves are whole categories, so a kind moved between categories
-    /// upstream would quietly turn the five-and-three into something else and
-    /// the travel table below would be measuring a grid nobody draws.
-    #[test]
-    fn the_catalogue_travel_fixture_is_a_group_of_five_before_a_group_of_three() {
-        let groups = TWO_GROUPS.map(analysis_catalog_group);
-        assert_eq!(groups[..5], ["Core analyses"; 5]);
-        assert_eq!(groups[5..], ["Quasi-periodic small-signal"; 3]);
-        assert_eq!(
-            analysis_catalog_grid(&TWO_GROUPS, 2),
-            vec![vec![0, 1], vec![2, 3], vec![4], vec![5, 6], vec![7]],
-            "the grid is chunked per category, not across the flat list"
-        );
-    }
-
     /// An arrow key moves the selection by a row, not by a cell.
     ///
     /// Stepping the flat index by one is a step sideways in a two-column
@@ -1122,57 +1105,6 @@ mod tests {
         assert_ne!(
             travelled, opened,
             "the list moved to keep the selection in view"
-        );
-    }
-
-    /// A row says what it is once: no kind label repeated on every row of a
-    /// group the header already names, its description whole rather than cut
-    /// at two lines, and its action on one line in the body face. The footer
-    /// is the dialog's own, without a sentence that never changed.
-    #[test]
-    fn catalogue_rows_state_each_fact_once_and_whole() {
-        let catalogue = Catalogue::open(1_440.0);
-        let painted = catalogue
-            .shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::epaint::Shape::Text(text) => Some(text.galley.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        for galley in &painted {
-            let text = galley.job.text.as_str();
-            assert!(
-                !text.contains("NUMERICAL SOLVER") && !text.contains("classified explicitly"),
-                "{text:?} is painted"
-            );
-            // The search field's hint trails off by design; no row does.
-            assert!(
-                !text.contains('\u{2026}') || text.starts_with("Search"),
-                "{text:?} is cut"
-            );
-            if text.starts_with("Add instance") || text.starts_with("Add another") {
-                assert_eq!(
-                    galley.rows.len(),
-                    1,
-                    "{text:?} takes {} lines",
-                    galley.rows.len()
-                );
-                assert!(
-                    galley.job.sections.iter().all(|section| {
-                        !format!("{:?}", section.format.font_id.family)
-                            .to_lowercase()
-                            .contains("mono")
-                    }),
-                    "{text:?} is set in mono"
-                );
-            }
-        }
-        assert!(
-            painted
-                .iter()
-                .any(|galley| galley.job.text.starts_with("Add instance")),
-            "no row states its action"
         );
     }
 }

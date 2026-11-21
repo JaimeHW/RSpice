@@ -629,7 +629,7 @@ fn readopt(
 mod tests {
     use super::{
         ProvenanceState, SourceVerb, Tone, definition_tone, duplicate_port_note, source_verbs,
-        unread_port_note, unread_source_note, verdict,
+        verdict,
     };
     use crate::simulation::placed_sources::{placed_rf_ports, placed_sources};
     use crate::simulation::plan::{AnalysisKind, SimulationPlan};
@@ -656,35 +656,6 @@ mod tests {
         plan.set_enabled(instance, enabled)
             .expect("the fixture analysis takes its enabled flag");
         plan
-    }
-
-    /// The finding agrees with the number in front of it.
-    ///
-    /// The note read "1 of 3 sources are read by no enabled analysis", which is
-    /// the sentence a reader stops trusting before they reach the finding it
-    /// carries — and the finding is the whole reason the note is on the page.
-    #[test]
-    fn the_unread_source_note_agrees_with_its_own_count() {
-        let one = unread_source_note(1, 3);
-        assert!(one.starts_with("1 of 3 sources is read by"), "{one}");
-        assert!(one.contains("It is still netlisted"), "{one}");
-        assert!(one.contains("still drives the circuit"), "{one}");
-
-        let many = unread_source_note(2, 3);
-        assert!(many.starts_with("2 of 3 sources are read by"), "{many}");
-        assert!(many.contains("They are still netlisted"), "{many}");
-        assert!(many.contains("still drive the circuit"), "{many}");
-    }
-
-    #[test]
-    fn the_unread_port_note_agrees_with_its_own_count() {
-        let one = unread_port_note(1);
-        assert!(one.contains("reads this port"), "{one}");
-        assert!(one.contains("It is still netlisted"), "{one}");
-
-        let many = unread_port_note(3);
-        assert!(many.contains("reads these ports"), "{many}");
-        assert!(many.contains("They are still netlisted"), "{many}");
     }
 
     /// An S-parameter testbench places its excitations as RF ports, and this

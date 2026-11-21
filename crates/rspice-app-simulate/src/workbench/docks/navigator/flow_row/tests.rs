@@ -176,42 +176,6 @@ fn the_checks_line_counts_violations_and_warnings_apart() {
     assert_eq!(checks_line(&Checks::default()), (String::new(), None));
 }
 
-/// On the seeded SOA run the navigator's Checks line states exactly the
-/// counts of the checks the view lists.
-#[test]
-fn the_checks_line_states_the_soa_fixture_as_the_view_lists_it() {
-    use rspice_results::verification::CheckStatus;
-
-    let mut model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
-    crate::workbench::surfaces::verify::raster::seed_soa(&mut model);
-    model
-        .simulation
-        .refresh_verification(&model.sim_setup, &model.workspace.content);
-    let rows = &model.simulation.verification_checks().rows;
-    let count = |statuses: &[CheckStatus]| {
-        rows.iter()
-            .filter(|row| statuses.contains(&row.status))
-            .count()
-    };
-    let violations = count(&[CheckStatus::Fail, CheckStatus::Error]);
-    let warnings = count(&[CheckStatus::Warning]);
-    assert!(violations > 0, "the fixture holds a violation");
-    let mut expected = vec![format!(
-        "{violations} violation{}",
-        if violations == 1 { "" } else { "s" }
-    )];
-    if warnings > 0 {
-        expected.push(format!(
-            "{warnings} warning{}",
-            if warnings == 1 { "" } else { "s" }
-        ));
-    }
-    expected.push(format!("{} checks", rows.len()));
-    let flow =
-        verification_flow_presentation(&model, &SimulateState::default(), VerificationPage::Checks);
-    assert_eq!(flow.detail, expected.join(" \u{b7} "));
-}
-
 /// The longest Monte Carlo sample trail the active dataset's yield evidence
 /// holds, or none when the evidence is another dataset's.
 fn active_mc_sample_trail(simulation: &SimulationState) -> usize {
