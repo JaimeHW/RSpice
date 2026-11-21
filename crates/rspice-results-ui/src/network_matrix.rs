@@ -314,9 +314,15 @@ fn passivity(
                 SampledPassivity::Active => "active",
                 SampledPassivity::Boundary => "at the passivity boundary",
             };
+            // Reciprocity is judged at the same tolerance as passivity.
+            let reciprocity = if quality.reciprocity_residual <= quality.tolerance {
+                "reciprocal"
+            } else {
+                "not reciprocal"
+            };
             (
                 format!(
-                    "At {at}: {verdict} · largest singular value {} · reciprocity residual {}",
+                    "At {at}: {verdict} (largest singular value {}), {reciprocity} (residual {})",
                     fmt_si_significant(quality.largest_singular_value, "", significant_digits),
                     fmt_si_significant(quality.reciprocity_residual, "", significant_digits)
                 ),
@@ -827,6 +833,53 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_results::family_metadata::AnalysisResultFamilyMetadata;
+    use rspice_results::analysis_type::AnalysisType;
+    use rspice_results::network_matrix::resolve;
+
+    /// A two-port of one sample with the given S11, S12, S21, S22.
+    fn two_port(s: [num_complex::Complex64; 4]) -> AnalysisResult<RetainedTrace> {
+        let waveforms = ["S11", "S12", "S21", "S22"]
+            .into_iter()
+            .zip(s)
+            .map(|(name, value)| {
+                RetainedTrace::new(format!("|{name}|"), vec![1.0e9], vec![value.norm()], "#fff")
+                    .with_complex_components(name, vec![value.re], vec![value.im])
+            })
+            .collect::<Vec<_>>();
+        AnalysisResult::new(1, AnalysisType::SParameter, "SP", 0.0)
+            .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm: vec![50.0, 50.0],
+                noise_reference_temperature_kelvin: None,
+            })
+            .with_waveforms(waveforms)
+    }
+
+    /// The passivity line says in words whether the network is passive and
+    /// whether it is reciprocal, with its numbers at the sheet's digits: a
+    /// matched 6 dB attenuator is both, with a largest singular value of
+    /// one half; an isolator passes forward only, so it is not reciprocal.
+    #[test]
+    fn the_passivity_line_reads_in_words_at_the_sheets_digits() {
+        let zero = num_complex::Complex64::new(0.0, 0.0);
+        let half = num_complex::Complex64::new(0.5, 0.0);
+        let attenuator = two_port([zero, half, half, zero]);
+        let layout = resolve(&attenuator).expect("a two-port");
+        let line = passivity(&attenuator, &layout, 0, 0, 1.0e9, 4).line;
+        assert!(
+            line.starts_with(
+                "At 1 GHz: passive (largest singular value 0.5), reciprocal (residual 0"
+            ),
+            "{line}"
+        );
+        let isolator = two_port([zero, zero, num_complex::Complex64::new(0.9, 0.0), zero]);
+        let layout = resolve(&isolator).expect("a two-port");
+        let line = passivity(&isolator, &layout, 0, 0, 1.0e9, 4).line;
+        assert_eq!(
+            line,
+            "At 1 GHz: passive (largest singular value 0.9), not reciprocal (residual 0.9)"
+        );
+    }
 
     #[test]
     fn a_typed_frequency_reads_as_the_readout_prints_it() {
