@@ -2892,6 +2892,7 @@ impl VisualizationDocument {
         candidate.datasets = self.datasets.clone();
         candidate.next_serial = candidate.next_serial.max(self.next_serial);
         candidate.revision = committed_revision;
+        self.follow_into(&mut candidate)?;
         candidate.validate()?;
         *self = candidate;
         Ok(VisualizationTransactionReceipt {
@@ -2902,6 +2903,76 @@ impl VisualizationDocument {
             tombstoned: Vec::new(),
             edit_count: 0,
         })
+    }
+
+    /// Move what `candidate`, an earlier view of this document, read from a
+    /// run this document no longer holds onto the run it reads now: each
+    /// pane onto the binding the same pane has now, and each trace onto the
+    /// signal of the same name there. A view followed a newer run between
+    /// the two, so the earlier view is restored on the run now shown.
+    fn follow_into(&self, candidate: &mut Self) -> Result<(), VisualizationError> {
+        let held = |binding: &DatasetBinding| {
+            self.datasets
+                .iter()
+                .any(|dataset| dataset.binding.dataset_id == binding.dataset_id)
+        };
+        let mut stale = candidate
+            .panes
+            .iter()
+            .filter_map(|pane| pane.binding.map(|binding| binding.dataset))
+            .chain(candidate.traces.iter().map(|trace| trace.binding))
+            .chain(
+                candidate
+                    .expression_traces
+                    .iter()
+                    .flat_map(|expression| expression.datasets.iter().copied()),
+            )
+            .filter(|binding| !held(binding))
+            .collect::<Vec<_>>();
+        stale.sort_by_key(|binding| binding.dataset_id.as_uuid());
+        stale.dedup();
+        let Some(shown) = self.panes.iter().find_map(|pane| pane.binding) else {
+            return Ok(());
+        };
+        for previous in stale {
+            let now = |pane_id: PaneId| {
+                self.panes
+                    .iter()
+                    .find(|pane| pane.id == pane_id)
+                    .and_then(|pane| pane.binding)
+            };
+            let pairs = candidate
+                .panes
+                .iter()
+                .filter_map(|pane| {
+                    let before = pane.binding.filter(|binding| binding.dataset == previous)?;
+                    Some((before.analysis_id, now(pane.id)?))
+                })
+                .collect::<Vec<_>>();
+            let next = pairs.first().map_or(shown.dataset, |(_, now)| now.dataset);
+            let analyses = pairs
+                .iter()
+                .filter(|(_, now)| now.dataset == next)
+                .map(|(before, now)| (*before, now.analysis_id))
+                .collect::<HashMap<_, _>>();
+            let fallback = pairs
+                .iter()
+                .find(|(_, now)| now.dataset == next)
+                .map_or(shown.analysis_id, |(_, now)| now.analysis_id);
+            candidate.rebind_consumers(
+                previous,
+                next,
+                |from| {
+                    Some(
+                        from.and_then(|from| analyses.get(&from).copied())
+                            .unwrap_or(fallback),
+                    )
+                },
+                "shown",
+                true,
+            )?;
+        }
+        Ok(())
     }
 
     pub fn compare(

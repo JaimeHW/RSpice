@@ -1401,7 +1401,7 @@ impl VisualizationDocument {
     /// display signal of the same name there. With `keep_missing`, a trace
     /// whose signal `next` lacks stays, marked missing; without it, only a
     /// trace already marked missing may.
-    fn rebind_consumers(
+    pub(super) fn rebind_consumers(
         &mut self,
         previous: DatasetBinding,
         next: DatasetBinding,

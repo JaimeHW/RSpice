@@ -279,6 +279,81 @@ fn a_latest_document_moves_onto_a_run_that_lacks_its_signal() {
     );
 }
 
+/// A step taken before the view followed a re-run still undoes, on the
+/// new run: undo addresses the view, not the run it read.
+#[test]
+fn undo_survives_the_view_following_a_rerun() {
+    use rspice_app_state::results::visualization_document::DocumentEdit;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    use rspice_app_workbench::workbench::state::{Workspace, WorkspaceDocumentId};
+
+    let LatestFixture {
+        mut app,
+        document_id,
+        plan_id,
+        authored_analysis_id,
+        source_digest,
+    } = latest_tracking_fixture();
+    app.state.workbench.activate(Workspace::Results);
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
+    let trace_id = app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("retained document")
+        .traces()[0]
+        .id;
+    rspice_app_results::workbench::documents::result_document::document_edit::transact(
+        &mut app.state.results_parts(),
+        document_id,
+        vec![DocumentEdit::SetTraceVisibility {
+            trace_id,
+            visible: false,
+        }],
+    )
+    .expect("the reader hides the trace");
+    let project_revision = app.state.model.workspace.content.project.revision();
+    app.state.model.simulation.retained.runs.push(authored_run(
+        2,
+        plan_id,
+        project_revision,
+        source_digest,
+        authored_analysis_id,
+        "V(out)",
+    ));
+    let rerun = app.state.model.simulation.retained.runs[1].dataset_id;
+    assert!(matches!(
+        refresh_latest_binding(&mut app.state.results_parts(), document_id),
+        LatestBinding::Current
+    ));
+
+    app.execute_command_key(ids::UNDO);
+    let document = app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("retained document");
+    let trace = &document.traces()[0];
+    assert!(trace.visible, "the hidden trace shows again");
+    assert_eq!(trace.binding.dataset_id, rerun, "on the re-run");
+    assert!(
+        app.state.workbench.prompt.is_none(),
+        "nothing was dropped: {:?}",
+        app.state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| &prompt.text)
+    );
+}
+
 /// A refused retarget rebuilds the retained source dataset. Re-trying it
 /// every frame would pay for that rebuild every frame, so the refusal is
 /// held against the candidate that produced it.

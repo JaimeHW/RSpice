@@ -106,9 +106,10 @@ pub(crate) fn can_step(
         })
 }
 
-/// Take one undo or redo step of the view `document_id`. A step the view can
-/// no longer take, because it names a run the view no longer reads, is
-/// dropped and the reason returned.
+/// Take one undo or redo step of the view `document_id`. A step addresses
+/// the view, not the run it read: one taken before the view followed a
+/// newer run is put back on the run shown now. A step the view can no
+/// longer take is dropped and the reason returned.
 pub(crate) fn step(
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,

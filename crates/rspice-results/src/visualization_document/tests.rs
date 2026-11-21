@@ -528,6 +528,53 @@ fn restoring_a_view_puts_back_what_it_held_as_a_new_revision() {
     assert_eq!(document, unchanged);
 }
 
+/// An earlier view put back after the document followed a newer run is
+/// restored on the run now shown: the step addresses the view, not the run
+/// it read when the step was taken.
+#[test]
+fn an_earlier_view_restores_onto_the_run_the_document_follows_now() {
+    let (mut document, source, _) = provisioned_trace_document("V(out)");
+    let trace_id = document.traces()[0].id;
+    let shown = document.view_snapshot();
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTraceVisibility {
+                trace_id,
+                visible: false,
+            }],
+        )
+        .unwrap();
+    let next = binding(44);
+    let next_analysis = AnalysisInstanceId::new();
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous: source,
+                next: long_form_analysis_dataset(next, next_analysis, "V(out)", 2.0),
+                analysis_id: next_analysis,
+            }],
+        )
+        .unwrap();
+    assert_eq!(document.datasets().len(), 1, "the earlier run is let go");
+
+    document
+        .restore_view(document.revision(), &shown)
+        .expect("the step survives the view following the newer run");
+    let trace = &document.traces()[0];
+    assert!(trace.visible, "the hidden trace shows again");
+    assert_eq!(trace.binding, next, "on the run the document follows now");
+    assert!(!trace.missing);
+    assert_eq!(
+        document.panes()[0].binding,
+        Some(PaneDataBinding {
+            analysis_id: next_analysis,
+            dataset: next,
+        })
+    );
+}
+
 /// A document following the latest run keeps a plotted signal the new run
 /// lacks: the trace stays, marked missing, the document still moves onto the
 /// new run, and the first later run that has the signal draws it again.
