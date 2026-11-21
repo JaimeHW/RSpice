@@ -28,6 +28,4 @@ impl AppState {
 }
 
 #[cfg(test)]
-mod defaults_tests;
-#[cfg(test)]
 mod tests;

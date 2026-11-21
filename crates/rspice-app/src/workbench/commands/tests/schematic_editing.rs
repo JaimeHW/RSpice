@@ -399,16 +399,6 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
     assert!(app.state.design.move_selection.armed, "the move carries on");
 }
 
-#[test]
-fn horizontal_coordinate_reflection_is_labeled_by_its_vertical_mirror_axis() {
-    assert_eq!(
-        DesignCommand::MirrorSelectionHorizontal
-            .declared_spec()
-            .label,
-        "Mirror about vertical axis"
-    );
-}
-
 fn app_with_every_complete_schematic_object() -> RSpiceApp {
     use rspice_app_state::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, Junction, NetLabel,

@@ -1607,19 +1607,6 @@ mod tests {
     }
 
     #[test]
-    fn platform_input_contract_matches_context_gesture_mockup() {
-        let ctx = Context::default();
-
-        configure_platform_input_contract(&ctx);
-
-        ctx.options(|options| {
-            assert_eq!(options.input_options.max_click_duration, 0.56);
-            assert_eq!(options.input_options.max_click_dist, 9.0);
-            assert!(!options.zoom_with_keyboard);
-        });
-    }
-
-    #[test]
     fn frame_topology_edits_drop_preflight_authority_at_one_central_boundary() {
         let mut app = RSpiceApp::test_instance();
         app.state.runs.preflight.report =

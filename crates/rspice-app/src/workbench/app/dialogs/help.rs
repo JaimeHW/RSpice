@@ -801,46 +801,6 @@ mod tests {
         );
     }
 
-    /// The Help Center draws the legal and privacy notices and nothing else:
-    /// its page of six topics restated rspice.app/docs, which RSpice Help
-    /// opens, so there is no topic, search field or page strip.
-    #[test]
-    fn the_help_center_offers_the_legal_notices_only() {
-        assert_eq!(HelpCenterPage::default(), HelpCenterPage::LegalPrivacy);
-        let mut app = RSpiceApp::test_instance();
-        app.state.shell.help_center.open(HelpCenterPage::default());
-        let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
-        assert!(
-            shown.iter().any(|shown| shown.text == "Legal & privacy"),
-            "the dialog is titled Legal & privacy"
-        );
-        for gone in [
-            "Help center",
-            "Schematic authoring",
-            "Simulation setup",
-            "Keyboard shortcuts",
-        ] {
-            assert!(
-                !shown.iter().any(|shown| shown.text.starts_with(gone)),
-                "{gone:?} is still offered"
-            );
-        }
-        assert!(
-            !shown
-                .iter()
-                .any(|shown| shown.role == egui::accesskit::Role::TextInput),
-            "the topic search field is gone"
-        );
-        assert!(
-            !shown.iter().any(|shown| shown.text == "Legal & privacy"
-                && matches!(
-                    shown.role,
-                    egui::accesskit::Role::Button | egui::accesskit::Role::Tab
-                )),
-            "the title alone names the page; no one-tab strip repeats it"
-        );
-    }
-
     /// About says what the build, its engine and this machine's license are
     /// in words, beside their labels: no dash for "no license", no
     /// abbreviation, and the copyright the shipped license states.

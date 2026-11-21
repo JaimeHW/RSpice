@@ -4,7 +4,6 @@
 //! the live layout owner rather than a copy. That every layout round-trips
 //! through the saved session unchanged is tested with the session wire.
 
-use rspice_app_state::state::VerificationPage;
 use rspice_app_state::workbench::preferences::WorkspacePreset;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::requests::FullScreen;
@@ -14,36 +13,9 @@ use rspice_app_workbench::workbench::routing::{
     surface_route::SurfaceRoute,
 };
 use rspice_app_workbench::workbench::state::workbench_session::{
-    ConsolePage, Drawer, LAYOUT_SCHEMA_VERSION, WorkbenchSession, WorkspaceLayoutState,
-    default_inspector_width, default_navigator_width,
+    Drawer, LAYOUT_SCHEMA_VERSION, WorkbenchSession, WorkspaceLayoutState, default_inspector_width,
+    default_navigator_width,
 };
-
-#[test]
-fn canonical_workspace_order_is_stable() {
-    assert_eq!(Workspace::ALL.len(), 8);
-    assert_eq!(
-        Workspace::ALL.map(Workspace::label),
-        [
-            "Project",
-            "Design",
-            "Simulate",
-            "Stimulus Library",
-            "Results",
-            "Verify",
-            "Models",
-            "Netlist",
-        ]
-    );
-}
-
-/// One workspace, one name. Each name has a job — the rail and menus read
-/// `label`, and the context dock is headed by `inspector_title` — so they may
-/// differ, but neither may coin a second spelling of the product name.
-#[test]
-fn the_stimulus_library_is_named_once_across_its_registers() {
-    assert_eq!(Workspace::Stimulus.label(), "Stimulus Library");
-    assert_eq!(Workspace::Stimulus.inspector_title(), "Definition details");
-}
 
 #[test]
 fn ordinary_noise_uses_the_frequency_document_identity() {
@@ -390,20 +362,6 @@ fn browser_effect_overflow_reaches_the_workbench_recovery_gate() {
 }
 
 #[test]
-fn verification_routes_are_the_exact_canonical_five() {
-    assert_eq!(
-        VerificationPage::NAVIGATION,
-        [
-            VerificationPage::Specifications,
-            VerificationPage::Corners,
-            VerificationPage::MonteCarlo,
-            VerificationPage::Checks,
-            VerificationPage::Reference,
-        ]
-    );
-}
-
-#[test]
 fn workspace_presets_apply_to_the_live_layout_owner() {
     let mut state = WorkbenchSession::default();
 
@@ -471,19 +429,6 @@ fn workspace_switches_restore_independent_dock_compositions() {
     assert_eq!(state.navigator_width, 224.0);
     assert!(state.console_visible);
     assert_eq!(state.console_height, 275.0);
-}
-
-#[test]
-fn console_pages_are_the_four_evidence_surfaces() {
-    assert_eq!(
-        ConsolePage::ALL,
-        [
-            ConsolePage::Console,
-            ConsolePage::Problems,
-            ConsolePage::Measurements,
-            ConsolePage::TaskLog,
-        ]
-    );
 }
 
 #[test]

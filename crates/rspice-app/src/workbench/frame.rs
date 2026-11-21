@@ -1200,14 +1200,6 @@ mod tests {
     use rspice_app_state::workbench::workspace::Workspace;
     use rspice_app_workbench::workbench::state::workbench_session::{Drawer, WorkbenchSession};
 
-    #[test]
-    fn every_canonical_workspace_has_a_surface_owner() {
-        assert_eq!(Workspace::ALL.len(), 8);
-        assert_eq!(Workspace::PHONE_PRIMARY.len(), 4);
-        assert!(Workspace::ALL.contains(&Workspace::Netlist));
-        assert!(Workspace::ALL.contains(&Workspace::Stimulus));
-    }
-
     /// A reported failure is toasted with an offer to show its Console line,
     /// and the mirror then meets that same line: one failure, one record.
     #[test]

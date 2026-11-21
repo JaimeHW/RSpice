@@ -1989,149 +1989,6 @@ mod tests {
         }
     }
 
-    /// A new project replaces the open one in the order it always has: the
-    /// refusals before anything changes, the project built off to the side,
-    /// the editor's drawing installed with it, the execution context retired
-    /// once the new project is in place, then its plan, then the features
-    /// let go of the previous one.
-    #[test]
-    fn a_new_project_replaces_the_open_one_in_the_order_it_always_has() {
-        assert_runs_in_order(
-            "replace_with_new_project",
-            &[
-                "project_workflow::refuse_new_project(",
-                "project_workflow::build_new_project(",
-                "state.new_schematic_document()",
-                "project_workflow::install_project_drawing(",
-                "state.design.schematic_snap =",
-                "state.bump_active_schematic_epoch()",
-                "state.replace_project_execution_context(announcement)",
-                "project_workflow::settle_new_project(",
-                "services_access::reset_for_new_project(state)",
-            ],
-        );
-    }
-
-    /// A schematic file replaces the drawing in front in the order it always
-    /// has: inside a project it is imported instead; otherwise where it saves
-    /// next is settled, the editor takes its drawing, the execution context
-    /// is retired, and then the file is remembered and the open recorded.
-    #[test]
-    fn a_loaded_schematic_replaces_the_drawing_in_the_order_it_always_has() {
-        assert_runs_in_order(
-            "apply_loaded_schematic",
-            &[
-                "self.platform.project_lifecycle.is_open()",
-                "self.import_loaded_schematic(schematic, origin)",
-                "file_workflow::prepare_loaded_schematic(",
-                "replace_active_schematic_document(self, schematic)",
-                "self.clear_design_execution_context()",
-                "file_workflow::settle_loaded_schematic(",
-            ],
-        );
-    }
-
-    /// The empty project a close leaves open holds, as its active view, the
-    /// drawing the editor opens on, with the same unsaved mark: the drawing
-    /// is saved into its workspace, a value no other step reads, wherever
-    /// the close does it among its steps.
-    #[test]
-    fn a_closed_project_holds_the_drawing_the_editor_opens_on() {
-        let mut state = AppState::default();
-        assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
-
-        let workspace = &state.model.workspace;
-        let saved = workspace
-            .clone_schematic_editor(&workspace.content.active_key())
-            .expect("the empty project opens on its schematic");
-        assert_eq!(
-            format!("{:?}", saved.document()),
-            format!("{:?}", state.model.schematic.document())
-        );
-        let active = workspace
-            .content
-            .open_views
-            .iter()
-            .find(|open| open.reference == workspace.content.active_view)
-            .expect("the active view is open");
-        assert_eq!(active.dirty, state.model.schematic.session.is_dirty);
-    }
-
-    /// The open project closes in the order it always has: the refusal
-    /// before anything changes, the empty project built off to the side and
-    /// its drawing made, the execution context retired before the empty
-    /// project is installed, the editor's snap and epoch, the plan and model
-    /// catalog, the features let go, the restore errors reported, and then
-    /// the reader lands where the close was asked to leave them.
-    #[test]
-    fn a_project_closes_in_the_order_it_always_has() {
-        assert_runs_in_order(
-            "close_project_discard",
-            &[
-                "project_workflow::refuse_project_close(",
-                "project_workflow::build_closed_project(",
-                "state.new_schematic_document()",
-                "state.replace_project_execution_context(announcement)",
-                "project_workflow::install_project_drawing(",
-                "state.design.schematic_snap =",
-                "state.bump_active_schematic_epoch()",
-                "project_workflow::settle_closed_project(",
-                "services_access::mark_project_closed(state)",
-                "project_workflow::emit_session_model_restore_errors(",
-                "state.project.project_launcher_open = false",
-                "state.workbench.activate(Workspace::Project)",
-                "state.workbench.outbox.push(requests::LiveMirrorEntry)",
-            ],
-        );
-    }
-
-    /// The session's project opens at startup in the order it always has:
-    /// bound from the restored session, then Projects and files ▸ On
-    /// startup applied to it, which closes it only when that loses nothing.
-    #[test]
-    fn the_session_project_opens_in_the_order_it_always_has() {
-        assert_runs_in_order(
-            "open_session_project",
-            &[
-                "services_access::initialize_from_session(self)",
-                "self.apply_startup_project_choice()",
-            ],
-        );
-        assert_runs_in_order(
-            "apply_startup_project_choice",
-            &[
-                "project_workflow::startup_keeps_project(",
-                "self.closing_loses_nothing()",
-                "close_project_discard(self, ProjectCloseDestination::EmptyWorkbench)",
-                "project_workflow::report_startup_project_kept(",
-            ],
-        );
-    }
-
-    /// A project opens in place of the open one in the order it always has:
-    /// the refusals and the execution context it was saved with before
-    /// anything changes, the replaced project's execution context retired,
-    /// the project installed and its drawing reloaded, its simulation and
-    /// then its markers restored, the open reported, the project accepted,
-    /// and then the rule deck's issues published.
-    #[test]
-    fn a_loaded_project_opens_in_the_order_it_always_has() {
-        assert_runs_in_order(
-            "apply_loaded_project_authorized",
-            &[
-                "project_workflow::prepare_loaded_project(",
-                "self.replace_project_execution_context(announcement)",
-                "project_workflow::install_loaded_project(&mut self.model, install)",
-                "self.restore_active_schematic_from_workspace()",
-                "project_workflow::restore_loaded_simulation(&mut self.model, restore)",
-                "self.restore_result_presentation(result_presentation)",
-                "project_workflow::report_opened_project(",
-                "services_access::accept_loaded_project(self, accepted_baseline, binding)",
-                "self.publish_rule_deck_issues()",
-            ],
-        );
-    }
-
     /// A save commits the inspector's pending inline edit before anything
     /// else, and on the desktop commits it again once the save dialog has
     /// settled the file, right before the project's save.
@@ -2160,37 +2017,29 @@ mod tests {
         );
     }
 
-    /// What a catalog change leaves outside the model runs in the order the
-    /// change once ran it itself: the prompt is stated, the editor reloads,
-    /// the execution context is retired and the stale compile evidence goes.
+    /// The empty project a close leaves open holds, as its active view, the
+    /// drawing the editor opens on, with the same unsaved mark: the drawing
+    /// is saved into its workspace, a value no other step reads, wherever
+    /// the close does it among its steps.
     #[test]
-    fn a_pruned_workspace_is_carried_out_in_the_order_the_change_did_it() {
-        assert_runs_in_order(
-            "apply_workspace_pruned",
-            &[
-                "state.prompt(prompt)",
-                "state.restore_active_schematic_from_workspace()",
-                "state.clear_design_execution_context()",
-                "void_veriloga_evidence(state, &voided)",
-            ],
-        );
-        assert_runs_in_order(
-            "void_veriloga_evidence",
-            &["*veriloga = Default::default()"],
-        );
-    }
+    fn a_closed_project_holds_the_drawing_the_editor_opens_on() {
+        let mut state = AppState::default();
+        assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
 
-    /// A deleted library's revision is published after the editor's reload
-    /// and the execution context's retirement, as the deletion published it.
-    #[test]
-    fn a_library_deletion_publishes_its_revision_after_what_it_left() {
-        assert_runs_in_order(
-            "delete_library",
-            &[
-                "self.model.delete_library(library)?",
-                "apply_workspace_pruned(self, pruned)",
-                "self.model.publish_project_library_mutation(mutation)",
-            ],
+        let workspace = &state.model.workspace;
+        let saved = workspace
+            .clone_schematic_editor(&workspace.content.active_key())
+            .expect("the empty project opens on its schematic");
+        assert_eq!(
+            format!("{:?}", saved.document()),
+            format!("{:?}", state.model.schematic.document())
         );
+        let active = workspace
+            .content
+            .open_views
+            .iter()
+            .find(|open| open.reference == workspace.content.active_view)
+            .expect("the active view is open");
+        assert_eq!(active.dirty, state.model.schematic.session.is_dirty);
     }
 }

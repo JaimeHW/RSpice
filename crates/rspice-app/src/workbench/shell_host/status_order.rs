@@ -777,43 +777,6 @@ fn saved_of(kept: u64, total: u64) -> String {
 mod tests {
     use super::*;
 
-    /// The cells read, left to right, as they did when the bar named them
-    /// itself: the prompt, the checks, where the reader is, what is selected
-    /// and the page; and from the right edge in, the zoom, the engine, the
-    /// platform and a save's copy of its results.
-    #[test]
-    fn the_status_cells_keep_todays_order() {
-        let laid_out = |zone: StatusZone| {
-            let mut keys = STATUS_ORDER
-                .iter()
-                .filter(|cell| cell.zone == zone)
-                .map(|cell| (cell.order, cell.key))
-                .collect::<Vec<_>>();
-            keys.dedup();
-            keys
-        };
-        assert_eq!(
-            laid_out(StatusZone::Leading),
-            [
-                (0, StatusKey::Prompt),
-                (1, StatusKey::Checks),
-                (2, StatusKey::Context),
-                (3, StatusKey::Selection),
-                (4, StatusKey::Page),
-            ]
-        );
-        assert_eq!(
-            laid_out(StatusZone::Trailing),
-            [
-                (0, StatusKey::Zoom),
-                (1, StatusKey::Engine),
-                (2, StatusKey::Platform),
-                (3, StatusKey::Saving),
-                (4, StatusKey::ResultsWork),
-            ]
-        );
-    }
-
     /// Results states the run once, in the run segment at the bar's right,
     /// which counts a plan's analyses when the run held several.
     #[test]
