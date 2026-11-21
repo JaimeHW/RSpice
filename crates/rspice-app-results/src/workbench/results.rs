@@ -25,8 +25,8 @@ use crate::workbench::documents::result_document::{
     cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
     hide_selected_trace, jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
     opening_sheet, place_marker_at_cursor, request_view_gesture, selected_trace_on_sheet,
-    viewer_is_available,
-    viewer_unavailability_reason, zoom_gesture_available, zoom_previous, zoom_previous_available,
+    viewer_is_available, viewer_unavailability_reason, zoom_gesture_available, zoom_previous,
+    zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
