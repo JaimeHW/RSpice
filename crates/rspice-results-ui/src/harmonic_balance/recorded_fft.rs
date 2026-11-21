@@ -109,6 +109,12 @@ pub(super) fn inspector_rows(
     ));
     // A level takes no SI prefix: half a decibel is `0.5 dB`, not `500 mdB`.
     if let Some(metrics) = &spectrum.metrics {
+        // THD in percent and in dB, as the spectrum sheet reads it.
+        rows.push((
+            "THD",
+            fmt_si_significant(100.0 * metrics.thd_ratio, "%", digits),
+            false,
+        ));
         rows.push((
             "THD",
             fmt_si_significant(metrics.thd_db, "dB", digits),
@@ -310,8 +316,15 @@ mod tests {
                 .map(|(_, value, _)| value)
                 .expect("row present")
         };
-        assert_eq!(value(4, "THD"), "−60.12 dB");
-        assert_eq!(value(6, "THD"), "−60.1235 dB");
+        let thd = |digits| {
+            inspector_rows(&spectrum, &policy, digits)
+                .into_iter()
+                .filter(|(label, _, _)| *label == "THD")
+                .map(|(_, value, _)| value)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(thd(4), ["0.1 %", "−60.12 dB"]);
+        assert_eq!(thd(6), ["0.1 %", "−60.1235 dB"]);
         assert_eq!(value(4, "SNDR"), "0.5 dB");
         assert_eq!(value(4, "SFDR"), "70 dB");
         assert_eq!(value(3, "ENOB"), "9.88 bits");

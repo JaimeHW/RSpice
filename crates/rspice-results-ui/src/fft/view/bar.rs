@@ -1,6 +1,8 @@
 //! The spectrum sheet's bar: the signal, the window and its β and the
 //! amplitude, with the record, its samples and what the figures are measured
 //! over behind Display, as ViVA's spectrum assistant and Eldo's FFT set them.
+//! A bar too narrow for every control folds the amplitude, then the window,
+//! into the Display menu, so nothing runs under the export button.
 
 use egui::Ui;
 use rspice_results::fft::settings::{
@@ -8,6 +10,8 @@ use rspice_results::fft::settings::{
     SpectrumResampling, SpectrumSampling, SpectrumScale, SpectrumSettings, SpectrumWindow,
 };
 use rspice_results::fft::window::KaiserBeta;
+use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens;
 use rspice_ui_kit::widgets::{Button, select_with_response};
 use rspice_vocabulary::quantity::engineering::{
     EngineeringPrecision, format_engineering_value_with, parse_engineering_value,
@@ -15,7 +19,6 @@ use rspice_vocabulary::quantity::engineering::{
 
 use super::super::FftState;
 use super::super::pipeline::{MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES};
-use crate::chrome::ResultBarMetrics;
 use crate::chrome::bars::bar_label;
 
 /// Width of the source, window and amplitude selects: the longest choice of
@@ -25,6 +28,10 @@ const SELECT_WIDTH: f32 = 140.0;
 const NUMBER_WIDTH: f32 = 72.0;
 /// The source select's first entry: follow the first voltage plotted.
 const FIRST_PLOTTED: &str = "First plotted voltage";
+/// The gap between two groups of the bar.
+const GROUP_GAP: f32 = 8.0;
+/// What the Display button is taken to need before it was first drawn.
+const DISPLAY_WIDTH_GUESS: f32 = 80.0;
 
 /// What the reader may take a record from: the A and B cursors on the
 /// transient, when both are placed.
@@ -53,7 +60,7 @@ pub fn domain_bar(
 ) -> Option<SpectrumSettings> {
     let before = fft.settings();
     let mut settings = before.clone();
-    let control = ResultBarMetrics::of(ui).instrument_control;
+    let fold = Fold::measure(ui, &settings);
 
     bar_label(ui, "Source");
     let mut names = Vec::with_capacity(sources.len() + 1);
@@ -77,8 +84,68 @@ pub fn domain_bar(
         settings.source = (picked > 0).then(|| names[picked].clone());
     }
 
-    ui.add_space(8.0);
-    bar_label(ui, "Window");
+    if !fold.window {
+        ui.add_space(GROUP_GAP);
+        bar_label(ui, "Window");
+        window_controls(ui, &mut settings);
+    }
+    if !fold.amplitude {
+        ui.add_space(GROUP_GAP);
+        bar_label(ui, "Normalization");
+        amplitude_select(ui, &mut settings);
+    }
+
+    ui.add_space(GROUP_GAP);
+    let held = fft.source_cache.as_ref().map(|source| source.record);
+    display_menu(ui, &mut settings, cursors, held, fold);
+    (settings != before && settings.validate().is_ok()).then_some(settings)
+}
+
+/// Which of the bar's groups stand in the Display menu for want of room.
+#[derive(Debug, Clone, Copy, Default)]
+struct Fold {
+    window: bool,
+    amplitude: bool,
+}
+
+impl Fold {
+    /// What the bar's groups need against the width it has. Every control
+    /// stands at a fixed width, so the words beside them are all there is
+    /// to measure; the Display button is measured as it was last drawn.
+    fn measure(ui: &Ui, settings: &SpectrumSettings) -> Self {
+        let gap = ui.spacing().item_spacing.x;
+        let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+        let words = |text: &str| {
+            ui.painter()
+                .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+                + gap
+        };
+        let source = words("Source") + SELECT_WIDTH + gap;
+        let mut window = GROUP_GAP + words("Window") + SELECT_WIDTH + gap;
+        if settings.window == SpectrumWindow::Kaiser {
+            window += 4.0 + words("β") + NUMBER_WIDTH * 0.66 + gap;
+        }
+        let amplitude = GROUP_GAP + words("Normalization") + SELECT_WIDTH + gap;
+        let display = GROUP_GAP
+            + ui.data(|data| data.get_temp::<f32>(display_width_id(ui)))
+                .unwrap_or(DISPLAY_WIDTH_GUESS);
+        let room = ui.available_width();
+        let amplitude_folds = room < source + window + amplitude + display;
+        Self {
+            window: amplitude_folds && room < source + window + display,
+            amplitude: amplitude_folds,
+        }
+    }
+}
+
+fn display_width_id(ui: &Ui) -> egui::Id {
+    ui.id().with("rspice.fft.display-width")
+}
+
+/// The window select, and the Kaiser window's β beside it.
+fn window_controls(ui: &mut Ui, settings: &mut SpectrumSettings) {
     let windows = SpectrumWindow::ALL
         .iter()
         .map(|window| window.label().to_owned())
@@ -98,7 +165,7 @@ pub fn domain_bar(
         ui.add_space(4.0);
         bar_label(ui, "β");
         ui.add_sized(
-            [NUMBER_WIDTH * 0.66, control],
+            [NUMBER_WIDTH * 0.66, ui.spacing().interact_size.y],
             egui::DragValue::new(&mut settings.kaiser_beta)
                 .range(0.0..=KaiserBeta::MAX)
                 .speed(0.25)
@@ -109,9 +176,10 @@ pub fn domain_bar(
             KaiserBeta::DEFAULT.get()
         ));
     }
+}
 
-    ui.add_space(8.0);
-    bar_label(ui, "Normalization");
+/// Whether a line's level reads its peak or its rms amplitude.
+fn amplitude_select(ui: &mut Ui, settings: &mut SpectrumSettings) {
     let amplitudes = [
         crate::fft::data::SpectrumNormalization::Peak,
         crate::fft::data::SpectrumNormalization::Rms,
@@ -134,11 +202,6 @@ pub fn domain_bar(
     if let Some(picked) = amplitude.picked {
         settings.amplitude = SpectrumAmplitude::ALL[picked];
     }
-
-    ui.add_space(8.0);
-    let held = fft.source_cache.as_ref().map(|source| source.record);
-    display_menu(ui, &mut settings, cursors, held);
-    (settings != before && settings.validate().is_ok()).then_some(settings)
 }
 
 /// The record, its samples and what the figures are measured over: the
@@ -148,11 +211,14 @@ fn display_menu(
     settings: &mut SpectrumSettings,
     cursors: RecordCursors,
     held: Option<(f64, f64)>,
+    fold: Fold,
 ) {
     let display = Button::new("Display")
         .menu()
         .accessible_label("Spectrum display options")
         .show(ui);
+    let width = display.rect.width();
+    ui.data_mut(|data| data.insert_temp(display_width_id(ui), width));
     egui::Popup::menu(&display)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
@@ -160,6 +226,16 @@ fn display_menu(
                 .num_columns(2)
                 .spacing([12.0, 6.0])
                 .show(ui, |ui| {
+                    if fold.window {
+                        bar_label(ui, "Window");
+                        ui.horizontal(|ui| window_controls(ui, settings));
+                        ui.end_row();
+                    }
+                    if fold.amplitude {
+                        bar_label(ui, "Normalization");
+                        amplitude_select(ui, settings);
+                        ui.end_row();
+                    }
                     record_rows(ui, settings, cursors, held);
                     sampling_rows(ui, settings);
                     measurement_rows(ui, settings);

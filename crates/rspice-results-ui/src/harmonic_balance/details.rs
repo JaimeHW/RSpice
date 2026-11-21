@@ -1,8 +1,9 @@
-//! What the details pane reads off a coefficient spectrum: every line of
-//! every signal in one table, the THD of each one-tone signal, and the
-//! intermodulation and intercept of each two-tone one.
+//! What the details pane reads off a coefficient spectrum: the THD of each
+//! one-tone signal, the intermodulation and intercept of each two-tone one,
+//! and every line of each signal in a table of its own.
 
-use super::HarmonicBalanceModel;
+use super::{HarmonicBalanceModel, HarmonicTrace};
+use crate::fft::view::{KEY_COLUMN_WIDTH, level_column, number_column};
 use crate::presentation::{frequency_readout, with_table_state};
 use egui::Ui;
 use rspice_results::harmonic_spectrum::lines::{
@@ -15,7 +16,7 @@ use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
-/// One row of the line table.
+/// One row of a signal's line table.
 struct Row<'a> {
     signal: &'a str,
     line: String,
@@ -43,15 +44,16 @@ fn line_name(line: &CoefficientLine, fundamental: Option<f64>) -> (String, f64) 
     }
 }
 
-fn rows<'a>(model: &'a HarmonicBalanceModel, settings: &CoefficientSettings) -> Vec<Row<'a>> {
-    let mut rows = Vec::new();
-    for trace in &model.traces {
-        let quantity = trace.quantity();
-        let fundamental = single_tone_fundamental(&trace.lines);
-        let carrier = carrier(&trace.lines);
-        for line in trace.lines.iter() {
+fn rows<'a>(trace: &'a HarmonicTrace, settings: &CoefficientSettings) -> Vec<Row<'a>> {
+    let quantity = trace.quantity();
+    let fundamental = single_tone_fundamental(&trace.lines);
+    let carrier = carrier(&trace.lines);
+    trace
+        .lines
+        .iter()
+        .map(|line| {
             let (name, order) = line_name(line, fundamental);
-            rows.push(Row {
+            Row {
                 signal: &trace.name,
                 line: name,
                 order,
@@ -62,10 +64,9 @@ fn rows<'a>(model: &'a HarmonicBalanceModel, settings: &CoefficientSettings) -> 
                     .then(|| carrier.map(|carrier| 20.0 * (line.magnitude() / carrier).log10()))
                     .flatten(),
                 phase: line.phase_degrees(),
-            });
-        }
-    }
-    rows
+            }
+        })
+        .collect()
 }
 
 /// Every line as tab-separated text, its head first, for a spreadsheet.
@@ -97,57 +98,89 @@ pub(super) fn show(
     quantity_policy: &QuantityPresentationPolicy,
     digits: usize,
 ) {
-    distortion(ui, model, digits);
+    distortion(ui, model, quantity_policy, digits);
     intermodulation(ui, model, settings, quantity_policy, digits);
+    for (index, trace) in model.traces.iter().enumerate() {
+        #[allow(clippy::cast_precision_loss)]
+        let share = (model.traces.len() - index) as f32;
+        lines(ui, trace, settings, quantity_policy, digits, share);
+    }
+}
 
-    let rows = rows(model, settings);
-    if section_header_action(ui, "Lines", "Copy", !rows.is_empty())
-        .on_hover_text("Copy every line as tab-separated text")
-        .clicked()
+/// One signal's lines, one signal to a table so each column fits the pane:
+/// on one tone's grid each harmonic by its order, the fundamental standing
+/// under Distortion; on several tones' grid each line by its frequency;
+/// then its level in the bar's scale and its phase. Copy takes every
+/// column, the frequency and the level under the carrier too. `share` is
+/// how many tables still stand in the height left, this one among them.
+fn lines(
+    ui: &mut Ui,
+    trace: &HarmonicTrace,
+    settings: &CoefficientSettings,
+    quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
+    share: f32,
+) {
+    let rows = rows(trace, settings);
+    if section_header_action(
+        ui,
+        &format!("Lines · {}", trace.name),
+        "Copy",
+        !rows.is_empty(),
+    )
+    .on_hover_text(format!(
+        "Copy every line of {} as tab-separated text",
+        trace.name
+    ))
+    .clicked()
     {
         ui.ctx().copy_text(table_text(&rows, digits));
     }
-    let width = (ui.available_width() / 6.0).floor();
+    let one_tone = single_tone_fundamental(&trace.lines).is_some();
+    let (level, level_unit) = level_column(settings.unit(trace.quantity()));
     let columns = [
-        Column::name("Signal", width),
-        Column::words("Line", width),
-        Column::number("Frequency", width),
-        Column::number("Level", width),
-        Column::number("dBc", width),
-        Column::number("Phase", width),
+        if one_tone {
+            Column::words("Line", KEY_COLUMN_WIDTH)
+        } else {
+            number_column("Frequency")
+        },
+        level,
+        number_column("Phase (°)"),
     ];
-    let height = ui.available_height().max(120.0);
-    with_table_state(ui, "harmonic-balance.lines", |ui, state| {
-        DataTable::new(
-            "rspice.results.harmonic-balance.lines",
-            &columns,
-            rows.len(),
-        )
-        .state(state)
-        .max_height(height)
-        .show(ui, |index| {
-            let row = &rows[index];
-            vec![
-                Cell::text(row.signal),
-                Cell::text(row.line.clone()).sort_by(SortKey::Number(row.order)),
-                Cell::number(frequency_readout(quantity_policy, row.frequency, digits))
-                    .sort_by(SortKey::Number(row.frequency)),
-                Cell::number(fmt_si_significant(row.level, row.unit, digits))
-                    .sort_by(SortKey::Number(row.level)),
-                row.dbc.map_or_else(Cell::absent, |dbc| {
-                    Cell::number(fmt_si_significant(dbc, "dBc", digits))
-                        .sort_by(SortKey::Number(dbc))
-                }),
-                Cell::number(fmt_si_significant(row.phase, "°", digits))
-                    .sort_by(SortKey::Number(row.phase)),
-            ]
-        });
+    let height = (ui.available_height() / share).max(120.0);
+    let id = format!("rspice.results.harmonic-balance.lines.{}", trace.name);
+    with_table_state(ui, &id, |ui, state| {
+        DataTable::new(&id, &columns, rows.len())
+            .state(state)
+            .max_height(height)
+            .show(ui, |index| {
+                let row = &rows[index];
+                vec![
+                    if one_tone {
+                        Cell::text(row.line.clone()).sort_by(SortKey::Number(row.order))
+                    } else {
+                        Cell::number(frequency_readout(quantity_policy, row.frequency, digits))
+                            .sort_by(SortKey::Number(row.frequency))
+                    },
+                    Cell::number(fmt_si_significant(row.level, level_unit, digits))
+                        .sort_by(SortKey::Number(row.level)),
+                    Cell::number(fmt_si_significant(row.phase, "", digits))
+                        .sort_by(SortKey::Number(row.phase)),
+                ]
+            });
     });
 }
 
-/// Each signal's THD, in percent and in dB; a THD that cannot be read says
-/// why in its row in a few words, and in full on hover.
-fn distortion(ui: &mut Ui, model: &HarmonicBalanceModel, digits: usize) {
+/// Each one-tone signal's fundamental and THD under its name, the THD in
+/// percent and in dB on a row each as the spectrum sheet reads it; a THD
+/// that cannot be read says why in its row in a few words, and in full on
+/// hover.
+fn distortion(
+    ui: &mut Ui,
+    model: &HarmonicBalanceModel,
+    quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
+) {
     let mut shown = false;
     for trace in &model.traces {
         let thd = total_harmonic_distortion(&trace.lines);
@@ -161,29 +194,33 @@ fn distortion(ui: &mut Ui, model: &HarmonicBalanceModel, digits: usize) {
             section_header(ui, "Distortion", None);
             shown = true;
         }
+        let mut head = vec![(trace.name.as_str(), String::new(), true)];
+        if let Some(fundamental) = single_tone_fundamental(&trace.lines) {
+            head.push((
+                "Fundamental",
+                frequency_readout(quantity_policy, fundamental, digits),
+                false,
+            ));
+        }
+        crate::presentation::stat_table(ui, &head);
         match thd {
             Ok(ratio) => crate::presentation::stat_table(
                 ui,
-                &[(
-                    trace.name.as_str(),
-                    format!(
-                        "THD {} · {}",
-                        fmt_si_significant(100.0 * ratio, "%", digits),
-                        fmt_si_significant(20.0 * ratio.log10(), "dB", digits)
+                &[
+                    ("THD", fmt_si_significant(100.0 * ratio, "%", digits), false),
+                    (
+                        "THD",
+                        fmt_si_significant(20.0 * ratio.log10(), "dB", digits),
+                        false,
                     ),
-                    true,
-                )],
+                ],
             ),
             Err(absence) => {
                 let row = ui
                     .scope(|ui| {
                         crate::presentation::stat_table(
                             ui,
-                            &[(
-                                trace.name.as_str(),
-                                format!("THD {}", absence.short()),
-                                true,
-                            )],
+                            &[("THD", absence.short().to_owned(), false)],
                         );
                     })
                     .response;

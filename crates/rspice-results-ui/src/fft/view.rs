@@ -14,7 +14,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey};
+use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable, SortKey};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use crate::presentation::well_hint;
@@ -22,6 +22,38 @@ use crate::strip::{self, LegendChip};
 
 mod bar;
 pub use bar::{RecordCursors, domain_bar};
+
+/// A phase strip's axis: a whole turn reads in quarter turns, as a phase is
+/// read; a zoomed span takes the plot's own ticks.
+pub(crate) fn phase_axis(lo: f64, hi: f64) -> Axis {
+    if (lo, hi) == (-180.0, 180.0) {
+        Axis::with_ticks(lo, hi, "°", &[-180.0, -90.0, 0.0, 90.0, 180.0])
+    } else {
+        Axis::linear_with(lo, hi, "°", 5)
+    }
+}
+
+/// Width of a table's leading key column: a harmonic's order, a line's name,
+/// and the least a column of numbers narrows to.
+pub(crate) const KEY_COLUMN_WIDTH: f32 = 48.0;
+
+/// A column of numbers sharing what the key column and the scroll bar leave
+/// with its siblings, so the table fills the details pane at any width.
+pub(crate) fn number_column(head: impl Into<String>) -> Column {
+    Column::name(head, KEY_COLUMN_WIDTH).align(Align::Right)
+}
+
+/// A column of levels in `unit`: a unit that takes a prefix stays on each
+/// value, so `625 µV` reads as itself; a decibel states its unit once in the
+/// head and each value is the bare number, so the column fits the details
+/// pane at the reader's digits.
+pub(crate) fn level_column(unit: &str) -> (Column, &str) {
+    if rspice_results::number_format::unit_takes_prefix(unit) {
+        (number_column("Level"), unit)
+    } else {
+        (number_column(unit).tooltip(format!("Level, in {unit}")), "")
+    }
+}
 
 /// The arrays the active FFT draws, keyed on the FFT state's spectrum
 /// revision and the scale they are drawn in — the FFT can be recomputed
@@ -432,9 +464,8 @@ pub fn show(
             })
             .inner;
         crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
-        let mut phase_spec =
-            PlotSpec::new(x_axis, x_scale, Axis::linear_with(-180.0, 180.0, "°", 5))
-                .accessible_name("FFT phase plot");
+        let mut phase_spec = PlotSpec::new(x_axis, x_scale, phase_axis(-180.0, 180.0))
+            .accessible_name("FFT phase plot");
         phase_spec.traces.push(
             Trace::new(&model.frequency, &model.phase, c.traces[1])
                 .thin()
@@ -600,7 +631,7 @@ pub fn right_panel(
 
     if analysis.fundamental_frequency.is_some() && !analysis.harmonics.is_empty() {
         section_header(ui, "Harmonics", None);
-        harmonic_table(ui, analysis, quantity_policy, level_unit, digits);
+        harmonic_table(ui, analysis, quantity_policy, digits);
     }
     let peaks = spectral_peaks(fft);
     if !peaks.is_empty() {
@@ -616,21 +647,20 @@ pub fn right_panel(
     }
 }
 
-/// Every measured harmonic: its order, frequency, level and level under the
-/// carrier. The table scrolls; nothing is left off.
+/// Every measured harmonic: its order, frequency and level under the
+/// fundamental, as an analyser's harmonic table reads them; the
+/// fundamental's own level is the Signal row above. The table scrolls;
+/// nothing is left off.
 fn harmonic_table(
     ui: &mut Ui,
     analysis: &crate::fft::data::SpectrumAnalysis,
     quantity_policy: &QuantityPresentationPolicy,
-    level_unit: &str,
     digits: usize,
 ) {
-    let width = (ui.available_width() / 4.0).floor();
     let columns = [
-        Column::number("HD", width),
-        Column::number("Frequency", width),
-        Column::number("Level", width),
-        Column::number("dBc", width),
+        Column::number("HD", KEY_COLUMN_WIDTH),
+        number_column("Frequency"),
+        number_column("dBc").tooltip("Level under the fundamental, in dBc"),
     ];
     let db0 = analysis.fundamental_db.unwrap_or(0.0);
     let rows = analysis.harmonics.len();
@@ -650,9 +680,7 @@ fn harmonic_table(
                         digits,
                     ))
                     .sort_by(SortKey::Number(harmonic.frequency)),
-                    Cell::number(fmt_si_significant(harmonic.level_db, level_unit, digits))
-                        .sort_by(SortKey::Number(harmonic.level_db)),
-                    Cell::number(fmt_si_significant(harmonic.level_db - db0, "dBc", digits))
+                    Cell::number(fmt_si_significant(harmonic.level_db - db0, "", digits))
                         .sort_by(SortKey::Number(harmonic.level_db - db0)),
                 ]
             });
@@ -668,11 +696,11 @@ fn peak_table(
     level_unit: &str,
     digits: usize,
 ) {
-    let width = (ui.available_width() / 3.0).floor();
+    let (level, level_unit) = level_column(level_unit);
     let columns = [
-        Column::number("Frequency", width),
-        Column::number("Level", width),
-        Column::number("dBc", width),
+        number_column("Frequency"),
+        level,
+        number_column("dBc").tooltip("Level under the fundamental, in dBc"),
     ];
     let height = ui.available_height().max(96.0);
     with_table_state(ui, "fft.peaks", |ui, state| {
@@ -687,7 +715,7 @@ fn peak_table(
                     Cell::number(fmt_si_significant(level, level_unit, digits))
                         .sort_by(SortKey::Number(level)),
                     carrier_db.map_or_else(Cell::absent, |carrier| {
-                        Cell::number(fmt_si_significant(level - carrier, "dBc", digits))
+                        Cell::number(fmt_si_significant(level - carrier, "", digits))
                             .sort_by(SortKey::Number(level - carrier))
                     }),
                 ]

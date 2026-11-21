@@ -238,7 +238,10 @@ fn show_strip(
         SignalForm::Value => "WAVEFORM",
         _ => "SPECTRUM",
     };
-    let header = strip::StripHeader::new(kind, &model.label, &legend)
+    // The legend names the signals and the bar the level, so the strip
+    // states nothing more.
+    let header = strip::StripHeader::new(kind, "", &legend)
+        .id_salt(("rspice.results.harmonic-balance.strip", &strip.key))
         .zoomed(view.is_zoomed())
         .maximizable(false)
         .show(ui);
@@ -274,12 +277,16 @@ fn show_strip(
         let (scale, offset, frequency_unit) = quantity_policy.frequency_axis_transform();
         Axis::linear(x0, x1, "Hz").with_display_transform(scale, offset, frequency_unit)
     };
-    let mut spec = PlotSpec::new(x_axis, XScale::Linear, Axis::linear_with(y0, y1, unit, 7))
-        .accessible_name(match form {
-            SignalForm::Phase => "Coefficient spectrum phase",
-            SignalForm::Value => "Waveform rebuilt from the coefficient spectrum",
-            _ => "Coefficient spectrum levels",
-        });
+    let y_axis = if form == SignalForm::Phase {
+        crate::fft::view::phase_axis(y0, y1)
+    } else {
+        Axis::linear_with(y0, y1, unit, 7)
+    };
+    let mut spec = PlotSpec::new(x_axis, XScale::Linear, y_axis).accessible_name(match form {
+        SignalForm::Phase => "Coefficient spectrum phase",
+        SignalForm::Value => "Waveform rebuilt from the coefficient spectrum",
+        _ => "Coefficient spectrum levels",
+    });
     spec.left_margin = 64.0;
     if form != SignalForm::Value {
         // The lines are discrete: a stem from the strip's floor (zero for a

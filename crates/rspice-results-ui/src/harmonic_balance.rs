@@ -500,8 +500,9 @@ mod tests {
         .collect()
     }
 
-    /// Every one of forty harmonics is a row of the line table, and the
-    /// third reads its level under the fundamental in dBc.
+    /// Every one of forty harmonics of each signal is a row of that
+    /// signal's line table, the third reads its level under the fundamental
+    /// in dBc, and each signal's THD reads in percent and in dB.
     #[test]
     fn an_hb_spectrum_lists_every_harmonic_and_reads_the_third_in_dbc() {
         let model = forty_harmonics();
@@ -510,20 +511,17 @@ mod tests {
             ..CoefficientSettings::default()
         };
         let rows = details(&model, &settings);
-        let harmonics = rows
-            .iter()
-            .filter(|row| row.starts_with("Signal: V(out), Line: H"))
-            .count();
-        assert_eq!(harmonics, 40, "{rows:?}");
+        let harmonics = rows.iter().filter(|row| row.starts_with("Line: H")).count();
+        assert_eq!(harmonics, 2 * 40, "{rows:?}");
         let third = rows
             .iter()
-            .find(|row| row.starts_with("Signal: V(out), Line: H3,"))
+            .find(|row| row.starts_with("Line: H3,"))
             .expect("H3 listed");
-        assert!(third.contains("Level: −19.08 dBc"), "{third}");
-        assert!(
-            rows.iter().any(|row| row.starts_with("THD ")),
-            "no THD read: {rows:?}"
-        );
+        assert!(third.contains("dBc: −19.08,"), "{third}");
+        // The THD of lines at 1/k² of the fundamental: √(ζ(4) − 1).
+        for value in ["28.69 %", "−10.85 dB"] {
+            assert!(rows.iter().any(|row| row == value), "no {value}: {rows:?}");
+        }
     }
 
     /// Voltages and currents stand on strips of their own, as do the phase
