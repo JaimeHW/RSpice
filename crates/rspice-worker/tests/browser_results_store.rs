@@ -482,3 +482,168 @@ async fn a_store_another_holder_has_is_refused() {
         "a write began without the store: {begun:?}"
     );
 }
+
+/// The names of the results stores this browser keeps.
+async fn store_names() -> Vec<String> {
+    let list = js_sys::Function::new_no_args(
+        "return navigator.storage.getDirectory()
+            .then(root => root.getDirectoryHandle('rspice-results', {create: true}))
+            .then(async stores => { const names = []; for await (const name of stores.keys())
+                names.push(name); return names; });",
+    );
+    let promise = list
+        .call0(&JsValue::NULL)
+        .unwrap()
+        .dyn_into::<js_sys::Promise>()
+        .unwrap();
+    let names = JsFuture::from(promise).await.unwrap();
+    Array::from(&names)
+        .iter()
+        .filter_map(|name| name.as_string())
+        .collect()
+}
+
+/// Hold the lock of the store `store` as another tab holds it, for as long as the test runs.
+async fn hold_elsewhere(store: &str) {
+    let hold = js_sys::Function::new_with_args(
+        "name",
+        "return new Promise(granted => navigator.locks.request(name, {mode: 'exclusive'},
+            () => { granted(); return new Promise(() => {}); }));",
+    );
+    let held = hold
+        .call1(
+            &JsValue::NULL,
+            &JsValue::from_str(&format!("rspice-results-store-{store}")),
+        )
+        .unwrap()
+        .dyn_into::<js_sys::Promise>()
+        .unwrap();
+    JsFuture::from(held).await.unwrap();
+}
+
+/// A project copied under a new identity reads the segments of the one it was copied from: its
+/// store copies them in from the other project's store, checked against their names, keeps them
+/// once it is opened again, and reads every sample of them.
+#[wasm_bindgen_test]
+async fn a_copied_project_keeps_the_segments_of_the_one_it_was_copied_from() {
+    let (source, copy) = ("adopt-source", "adopt-copy");
+    let (seed, signals, count) = (5, 2, 30_000);
+    let digest = keep_run(source, seed, signals, count).await;
+    let open = ResultsStoreRequest::Open {
+        store: copy.to_owned(),
+    };
+    assert!(matches!(
+        ask(&open, Array::new()).await.0,
+        ResultsStoreResponse::Opened {
+            standing: ResultsStoreStanding::Held,
+            ..
+        }
+    ));
+    let adopt = ResultsStoreRequest::Adopt {
+        digests: vec![digest.clone()],
+    };
+    match ask(&adopt, Array::new()).await.0 {
+        ResultsStoreResponse::Adopted { segments } => {
+            assert_eq!(segments.len(), 1, "{segments:?}");
+            assert_eq!(segments[0].digest, digest);
+            assert_eq!(segments[0].rows, count);
+        }
+        other => panic!("the segment was not copied: {other:?}"),
+    }
+    // Asked again, the store keeps it already and copies nothing.
+    match ask(&adopt, Array::new()).await.0 {
+        ResultsStoreResponse::Adopted { segments } => assert!(segments.is_empty(), "{segments:?}"),
+        other => panic!("the second copy was refused: {other:?}"),
+    }
+    assert!(matches!(
+        ask(&ResultsStoreRequest::Close, Array::new()).await.0,
+        ResultsStoreResponse::Closed
+    ));
+    match ask(&open, Array::new()).await.0 {
+        ResultsStoreResponse::Opened { segments, .. } => assert!(
+            segments.iter().any(|record| record.digest == digest),
+            "the copy's store keeps {segments:?}"
+        ),
+        other => panic!("the copy's store did not open again: {other:?}"),
+    }
+    let check = ResultsStoreRequest::Check {
+        digest: digest.clone(),
+    };
+    assert!(matches!(
+        ask(&check, Array::new()).await.0,
+        ResultsStoreResponse::Checked { len } if len > 0
+    ));
+    let (x, values) = rows(seed, signals, 0, count as usize);
+    assert_eq!(range(&digest, count, 0, 0, count).await, x);
+    let expected: Vec<f64> = values.iter().skip(1).step_by(signals).copied().collect();
+    let column = range(&digest, count, 2, 0, count).await;
+    assert!(
+        column
+            .iter()
+            .zip(&expected)
+            .all(|(read, wrote)| read.to_bits() == wrote.to_bits())
+            && column.len() == expected.len()
+    );
+    remove_store(copy).await;
+    remove_store(source).await;
+}
+
+/// A sweep deletes the stores of the projects this browser keeps nothing else of, and keeps the
+/// live projects' stores, the one this tab holds and one another tab holds.
+#[wasm_bindgen_test]
+async fn a_sweep_deletes_only_the_stores_no_project_keeps() {
+    let (dead, live, elsewhere, here) =
+        ("sweep-dead", "sweep-live", "sweep-elsewhere", "sweep-here");
+    for (seed, store) in [dead, live, elsewhere, here].into_iter().enumerate() {
+        keep_run(store, seed as u64, 1, 1_000).await;
+    }
+    hold_elsewhere(elsewhere).await;
+    let open = ResultsStoreRequest::Open {
+        store: here.to_owned(),
+    };
+    assert!(matches!(
+        ask(&open, Array::new()).await.0,
+        ResultsStoreResponse::Opened {
+            standing: ResultsStoreStanding::Held,
+            ..
+        }
+    ));
+    let sweep = ResultsStoreRequest::Sweep {
+        live: vec![live.to_owned()],
+    };
+    match ask(&sweep, Array::new()).await.0 {
+        ResultsStoreResponse::Swept { removed } => {
+            assert!(removed.iter().any(|store| store == dead), "{removed:?}");
+            assert!(
+                [live, elsewhere, here]
+                    .iter()
+                    .all(|kept| !removed.iter().any(|store| store == kept)),
+                "{removed:?}"
+            );
+        }
+        other => panic!("the stores were not swept: {other:?}"),
+    }
+    let names = store_names().await;
+    assert!(!names.iter().any(|name| name == dead), "{names:?}");
+    assert!(
+        [live, elsewhere, here]
+            .iter()
+            .all(|kept| names.iter().any(|name| name == kept)),
+        "{names:?}"
+    );
+    remove_store(here).await;
+    for store in [live, elsewhere] {
+        let remove = js_sys::Function::new_with_args(
+            "name",
+            "return navigator.storage.getDirectory()
+                .then(root => root.getDirectoryHandle('rspice-results'))
+                .then(stores => stores.removeEntry(name, {recursive: true}));",
+        );
+        let promise = remove
+            .call1(&JsValue::NULL, &JsValue::from_str(store))
+            .unwrap()
+            .dyn_into::<js_sys::Promise>()
+            .unwrap();
+        JsFuture::from(promise).await.unwrap();
+    }
+}

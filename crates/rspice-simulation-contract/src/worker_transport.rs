@@ -137,6 +137,12 @@ pub enum ResultsStoreRequest {
     },
     /// Delete every kept segment but `digests`, and every file no write finished.
     Keep { digests: Vec<String> },
+    /// Copy into the held store the segments `digests` that another project's store keeps, as a
+    /// project copied under a new identity reads them: each copy is checked against its name.
+    Adopt { digests: Vec<String> },
+    /// Delete every project's store but the `live` projects', the one this tab holds and any
+    /// another tab holds: what a project never saved, or since deleted, left behind.
+    Sweep { live: Vec<String> },
     /// `read` of the window `values` of the kept segment `digest`, a series whose run's axis is
     /// the window `x` of the same segment: what a view draws, read here so the page never reads
     /// the segment.
@@ -260,6 +266,14 @@ pub enum ResultsStoreResponse {
     Bytes,
     Kept {
         removed: u32,
+    },
+    /// The segments copied in, which the held store keeps now.
+    Adopted {
+        segments: Vec<KeptSegmentRecord>,
+    },
+    /// The stores deleted, by project.
+    Swept {
+        removed: Vec<String>,
     },
     Series {
         value: WorkerReadValue,

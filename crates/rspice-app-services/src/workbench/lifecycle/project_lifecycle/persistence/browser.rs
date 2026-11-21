@@ -1061,6 +1061,45 @@ pub(crate) fn start_browser_checkpoint_read(
     });
 }
 
+/// Delete the results stores of the projects this browser keeps nothing else of: no file
+/// binding, no checkpoint, and not `open` here. A store is deleted only once every record was
+/// read: when they cannot be, every store stays.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_browser_results_sweep(open: Option<String>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        match browser_live_projects().await {
+            Ok(live) => {
+                rspice_app_state::state::run_store::browser::sweep(live.into_iter().chain(open))
+                    .await;
+            }
+            Err(reason) => log::warn!("the results stores were not swept: {reason}"),
+        }
+    });
+}
+
+/// Every project this browser keeps a file binding or a checkpoint of, by id.
+#[cfg(target_arch = "wasm32")]
+async fn browser_live_projects() -> Result<std::collections::HashSet<String>, String> {
+    use crate::workbench::lifecycle::project_checkpoint::browser_record_project;
+    let database = browser_store::open(&PROJECT_BINDINGS).await?;
+    let keys = database.read()?.keys().await?;
+    let mut live = std::collections::HashSet::new();
+    for key in keys {
+        if let Some(project) = browser_record_project(&key) {
+            live.insert(project.to_owned());
+            continue;
+        }
+        // Any other record is a file binding, which names the project it binds.
+        let Some(record) = indexed_db_get(&key).await? else {
+            continue;
+        };
+        if let Ok(project) = js_string_field(&record, "projectId") {
+            live.insert(project);
+        }
+    }
+    Ok(live)
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn indexed_db_add_unique(
     key: &str,

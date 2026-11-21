@@ -98,6 +98,9 @@ struct Client {
     loading: HashSet<[u8; 32]>,
     /// Kept segments that could not be loaded, and why.
     unloadable: HashMap<[u8; 32], String>,
+    /// Segments the project's runs read that its store does not keep, asked of the other
+    /// projects' stores ([`adopt_now`]) once while this store is open.
+    sought: HashSet<[u8; 32]>,
     /// Segments loaded and not yet read again by the runs that name them.
     loaded: Vec<Arc<Segment>>,
     /// The kept segments whose reads are made in the worker, by digest.
@@ -202,6 +205,7 @@ pub fn follow(
             client.queued.clear();
             client.loading.clear();
             client.unloadable.clear();
+            client.sought.clear();
             client.scanned = None;
             client.named = named;
         });
@@ -244,9 +248,16 @@ pub async fn preload(bytes: &[u8]) {
     while with(|client| client.writing) {
         sleep(20).await;
     }
-    let (standing, kept) = open_now(Some(&store)).await;
+    let (standing, mut kept) = open_now(Some(&store)).await;
     let mut held = Vec::new();
     if standing == Standing::Held {
+        // A copy of a project names the segments of the project it was copied from.
+        let missing: Vec<[u8; 32]> = named
+            .iter()
+            .filter(|digest| !kept.contains_key(*digest))
+            .copied()
+            .collect();
+        kept.extend(adopt_now(&missing).await);
         for digest in named.iter().filter(|digest| kept.contains_key(*digest)) {
             if rspice_results::store_reader::kept_segment(SegmentDigest(*digest)).is_some() {
                 continue;
@@ -267,6 +278,9 @@ pub async fn preload(bytes: &[u8]) {
                 client.kept = kept;
             }
         });
+    } else {
+        // The open project's own store: what it copied in, it keeps now.
+        with(|client| client.kept.extend(kept));
     }
     with(|client| {
         client.preloaded = Some((store, held));
@@ -274,6 +288,64 @@ pub async fn preload(bytes: &[u8]) {
     });
     write_queued();
     repaint();
+}
+
+/// Copy into the store this tab holds the segments `digests` that another project's store
+/// keeps, and say the bytes of each it keeps now: a copy of a project under a new identity reads
+/// the segments of the one it was copied from.
+async fn adopt_now(digests: &[[u8; 32]]) -> HashMap<[u8; 32], u64> {
+    if digests.is_empty() {
+        return HashMap::new();
+    }
+    let request = ResultsStoreRequest::Adopt {
+        digests: digests
+            .iter()
+            .map(|digest| SegmentDigest(*digest).to_string())
+            .collect(),
+    };
+    match call(&request, Array::new()).await {
+        Ok((ResultsStoreResponse::Adopted { segments }, _)) => segments
+            .iter()
+            .filter_map(|record| {
+                let digest = rspice_results::store_reader::parse_digest(&record.digest).ok()?;
+                Some((digest.0, record.bytes))
+            })
+            .collect(),
+        Ok((other, _)) => {
+            log::warn!("the results stores were not searched: {}", refusal(other));
+            HashMap::new()
+        }
+        Err(reason) => {
+            log::warn!("the results stores were not searched: {reason}");
+            HashMap::new()
+        }
+    }
+}
+
+/// Delete the results stores of every project but the `live` ones, the one open here and any
+/// another tab holds: what projects never saved, or since deleted, left in this browser.
+pub async fn sweep(live: impl IntoIterator<Item = String>) {
+    let mut live: Vec<String> = live.into_iter().collect();
+    live.extend(with(|client| {
+        client
+            .store
+            .iter()
+            .cloned()
+            .chain(client.preloaded.iter().map(|(store, _)| store.clone()))
+            .collect::<Vec<_>>()
+    }));
+    match call(&ResultsStoreRequest::Sweep { live }, Array::new()).await {
+        Ok((ResultsStoreResponse::Swept { removed }, _)) => {
+            if !removed.is_empty() {
+                log::info!(
+                    "deleted the results stores of {} projects this browser keeps nothing else of",
+                    removed.len()
+                );
+            }
+        }
+        Ok((other, _)) => log::warn!("the results stores were not swept: {}", refusal(other)),
+        Err(reason) => log::warn!("the results stores were not swept: {reason}"),
+    }
 }
 
 /// Open `store` in the worker (`None`: close the one it holds), and say what this tab has of it
@@ -324,13 +396,27 @@ fn open_store(project: Option<String>) {
             return;
         }
         let held = standing == Standing::Held;
+        let mut kept = kept;
         // Every segment the page holds now goes into the store it opened: a project saved for
-        // the first time, or opened with results this page made before.
-        let open = if held {
-            rspice_results::store_reader::open_segments()
-        } else {
-            Vec::new()
-        };
+        // the first time, or opened with results this page made before. The ones the page reads
+        // through the worker are another project's store's, and are copied from it; the rest
+        // are in the page's memory, and are written from their rows.
+        let mut open = Vec::new();
+        if held {
+            let stubs = with(|client| client.stubs.clone());
+            let mut adopt = Vec::new();
+            for segment in rspice_results::store_reader::open_segments() {
+                match segment.reader().digest().map(|digest| digest.0) {
+                    Some(digest) if stubs.contains(&digest) => {
+                        if !kept.contains_key(&digest) {
+                            adopt.push(digest);
+                        }
+                    }
+                    _ => open.push(segment),
+                }
+            }
+            kept.extend(adopt_now(&adopt).await);
+        }
         with(|client| {
             client.kept = kept;
             client.queued.clear();
@@ -666,6 +752,30 @@ fn load_unread(simulation: &mut SimulationState) {
         return;
     }
     let wanted = segments_read(simulation, true);
+    let seek: Vec<[u8; 32]> = with(|client| {
+        let seek: Vec<[u8; 32]> = wanted
+            .iter()
+            .filter(|digest| !client.kept.contains_key(*digest) && !client.sought.contains(*digest))
+            .copied()
+            .collect();
+        client.sought.extend(seek.iter().copied());
+        seek
+    });
+    if !seek.is_empty() {
+        let store = with(|client| client.store.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            let adopted = adopt_now(&seek).await;
+            if adopted.is_empty() {
+                return;
+            }
+            with(|client| {
+                if client.store == store {
+                    client.kept.extend(adopted);
+                }
+            });
+            repaint();
+        });
+    }
     let start: Vec<[u8; 32]> = with(|client| {
         let start: Vec<[u8; 32]> = wanted
             .into_iter()

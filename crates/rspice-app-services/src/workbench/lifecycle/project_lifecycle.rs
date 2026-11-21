@@ -643,6 +643,18 @@ pub fn bind_restored_project(state: &mut dyn LifecycleSourceMut) {
     let _ = refresh_registry(state);
 }
 
+/// Delete, once a page, the results stores of the projects this browser keeps nothing else of:
+/// no file binding, no checkpoint, and not `open` here.
+#[cfg(target_arch = "wasm32")]
+pub fn sweep_browser_results_stores(open: Option<String>) {
+    thread_local! {
+        static SWEPT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if !SWEPT.with(|swept| swept.replace(true)) {
+        persistence::start_browser_results_sweep(open);
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn poll_browser_binding_restore(state: &mut dyn LifecycleSourceMut) {
     let state = &mut state.lifecycle_parts();

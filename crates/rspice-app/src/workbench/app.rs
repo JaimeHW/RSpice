@@ -1217,6 +1217,9 @@ fn follow_browser_results_store(state: &mut AppState, ctx: &Context) {
         .project_lifecycle
         .is_open()
         .then(|| state.model.workspace.content.project.id().to_string());
+    rspice_app_services::workbench::lifecycle::project_lifecycle::sweep_browser_results_stores(
+        project.clone(),
+    );
     for (run_sequence, stop) in browser::follow(&mut state.model.simulation, project, ctx) {
         let line = format!("{}: {}", stop.analysis, storage_stop_message(&stop));
         state.record(LogSeverity::Error, LogSource::Run, line);

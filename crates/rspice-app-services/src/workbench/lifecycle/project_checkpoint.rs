@@ -1779,6 +1779,14 @@ fn browser_project_prefix(project_id: &str) -> String {
     format!("{BROWSER_KEY_PREFIX}.{project_id}")
 }
 
+/// The project a checkpoint record of the browser's records belongs to, by its key; `None` for a
+/// key that names no checkpoint record.
+pub fn browser_record_project(key: &str) -> Option<&str> {
+    let rest = key.strip_prefix(BROWSER_KEY_PREFIX)?.strip_prefix('.')?;
+    let (project, record) = rest.split_once('.')?;
+    (!project.is_empty() && !record.is_empty()).then_some(project)
+}
+
 /// A checkpoint of the open project read off the model, for the browser's
 /// records. Encoding and writing it is work for a browser task: nothing here
 /// encodes the project.
@@ -2447,6 +2455,45 @@ mod tests {
             saved_generation: None,
         };
         assert!(validate_manifest(&manifest).is_err());
+    }
+
+    /// The browser's records name the project each checkpoint record belongs to, so a sweep of
+    /// the results stores keeps the stores of projects that have checkpoints.
+    #[test]
+    fn a_browser_checkpoint_record_names_its_project() {
+        let project = Uuid::new_v4().to_string();
+        let manifest = ProjectCheckpointManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            checkpoint_id: Uuid::new_v4(),
+            project_id: project.clone(),
+            project_name: "Precision reference".to_owned(),
+            project_revision: 7,
+            reason: ProjectCheckpointReason::Autosave,
+            created_unix_ms: 42,
+            note: None,
+            pinned: false,
+            snapshot_digest: ContentDigest::from_bytes([0x51; 32]),
+            snapshot_byte_len: 128,
+            snapshot_name: "wrong.rspiceproj".to_owned(),
+            saved_generation: None,
+        };
+        let (manifest_key, snapshot_key) = browser_keys(&manifest);
+        assert_eq!(
+            browser_record_project(&manifest_key),
+            Some(project.as_str())
+        );
+        assert_eq!(
+            browser_record_project(&snapshot_key),
+            Some(project.as_str())
+        );
+        for other in [
+            Uuid::new_v4().to_string(),
+            BROWSER_KEY_PREFIX.to_owned(),
+            format!("{BROWSER_KEY_PREFIX}.{project}"),
+            format!("{BROWSER_KEY_PREFIX}x.{project}.1.manifest"),
+        ] {
+            assert_eq!(browser_record_project(&other), None, "{other}");
+        }
     }
 
     #[test]

@@ -34,6 +34,9 @@ use web_sys::{FileSystemDirectoryHandle, FileSystemSyncAccessHandle};
 /// The folder of the origin-private file system that holds every project's store.
 const STORES: &str = "rspice-results";
 
+/// The bytes of a segment one step of a copy moves.
+const COPY_PIECE: u64 = 8 << 20;
+
 type Handle = OpfsIo<FileSystemSyncAccessHandle>;
 
 /// A segment being written from the rows a page sends.
@@ -188,6 +191,8 @@ async fn answer(
             return Ok((ResultsStoreResponse::Bytes, out));
         }
         ResultsStoreRequest::Keep { digests } => keep(held(store)?, &digests).await?,
+        ResultsStoreRequest::Adopt { digests } => adopt(held(store)?, &digests).await?,
+        ResultsStoreRequest::Sweep { live } => sweep(store.as_ref(), &live).await?,
         ResultsStoreRequest::Series {
             digest,
             x,
@@ -734,6 +739,188 @@ async fn keep(store: &mut Store, digests: &[String]) -> Result<ResultsStoreRespo
     }
     store.checked.retain(|digest| kept.contains(digest));
     Ok(ResultsStoreResponse::Kept { removed })
+}
+
+/// Copy into `store` each segment of `digests` it does not keep that another project's store
+/// does, checked against its name once copied. A store another tab holds is that tab's, and is
+/// not read.
+async fn adopt(store: &mut Store, digests: &[String]) -> Result<ResultsStoreResponse, String> {
+    let mut wanted: Vec<Digest> = digests
+        .iter()
+        .map(|digest| digest_of(digest))
+        .collect::<Result<_, _>>()?;
+    wanted.retain(|digest| member_of(store, digest).is_err());
+    let mut segments = Vec::new();
+    if wanted.is_empty() {
+        return Ok(ResultsStoreResponse::Adopted { segments });
+    }
+    let root = storage_root().await?;
+    let stores = directory(&root, STORES).await?;
+    for name in folder_names(&stores).await? {
+        if wanted.is_empty() {
+            break;
+        }
+        if name == store.name || !valid_name(&name) {
+            continue;
+        }
+        let Some(_lock) = try_lock(&format!("rspice-results-store-{name}")).await? else {
+            continue;
+        };
+        let Ok(source) = OpfsStoreDir::open(&stores, &name, false).await else {
+            continue;
+        };
+        let Ok(Some(manifest)) = source.load_manifest().await else {
+            continue;
+        };
+        for member in manifest.members() {
+            let Some(digest) = member.digest.filter(|digest| wanted.contains(digest)) else {
+                continue;
+            };
+            if member.status.is_none() {
+                continue;
+            }
+            // A segment that cannot be copied is left out of the answer, and reads as unread
+            // where the page reads it.
+            if let Ok(record) = copy_member(store, &source, member, &digest).await {
+                wanted.retain(|wanted| *wanted != digest);
+                segments.push(record);
+            }
+        }
+    }
+    Ok(ResultsStoreResponse::Adopted { segments })
+}
+
+/// Copy `member` of the store `source` into `store` as a member of its own, checked against
+/// `digest` before the manifest names it.
+async fn copy_member(
+    store: &mut Store,
+    source: &OpfsStoreDir,
+    member: &Member,
+    digest: &Digest,
+) -> Result<KeptSegmentRecord, String> {
+    let from = source
+        .segment(member.index, false)
+        .await
+        .map_err(|error| format!("it could not be opened: {error}"))?;
+    let index = store
+        .manifest
+        .members()
+        .iter()
+        .map(|member| member.index)
+        .chain(store.writes.iter().map(|(_, write)| write.index))
+        .max()
+        .map_or(0, |index| index + 1);
+    let before = store.manifest.clone();
+    let copied = async {
+        let mut to = store
+            .dir
+            .segment(index, true)
+            .await
+            .map_err(|error| format!("a segment could not be made for it: {error}"))?;
+        let len = from.size().map_err(|error| error.to_string())?;
+        let mut piece = Vec::new();
+        let mut offset = 0;
+        while offset < len {
+            let take = usize::try_from(COPY_PIECE.min(len - offset))
+                .map_err(|_| "a piece is longer than this memory".to_owned())?;
+            piece.resize(take, 0);
+            from.read_at(offset, &mut piece)
+                .map_err(|error| error.to_string())?;
+            to.write_at(offset, &piece)
+                .map_err(|error| error.to_string())?;
+            offset += take as u64;
+        }
+        to.flush().map_err(|error| error.to_string())?;
+        drop(to);
+        let mut manifest = store.manifest.clone();
+        manifest.upsert(Member {
+            index,
+            segment: OpfsStoreDir::segment_name(index),
+            ..member.clone()
+        });
+        store.manifest = manifest;
+        let (key, segment) = opened_segment(store, digest).await?;
+        let len = with_file(*key, SegmentIo::size).map_err(|error| error.to_string())?;
+        let rows = segment.reader().rows();
+        store
+            .dir
+            .save_manifest(&store.manifest)
+            .await
+            .map_err(|error| format!("the results store's manifest could not be saved: {error}"))?;
+        Ok(KeptSegmentRecord {
+            digest: hex(digest),
+            bytes: len,
+            rows,
+        })
+    }
+    .await;
+    if copied.is_err() {
+        store.open.remove(&digest.0);
+        store.checked.remove(&digest.0);
+        store.manifest = before;
+        let _ = store.dir.remove_segment(index).await;
+    }
+    copied
+}
+
+/// Delete every project's store but the `live` projects' and the one this worker holds. A store
+/// another tab holds is in use there, and stays.
+async fn sweep(store: Option<&Store>, live: &[String]) -> Result<ResultsStoreResponse, String> {
+    let root = storage_root().await?;
+    let stores = directory(&root, STORES).await?;
+    let mut removed = Vec::new();
+    for name in folder_names(&stores).await? {
+        if !valid_name(&name)
+            || live.contains(&name)
+            || store.is_some_and(|store| store.name == name)
+        {
+            continue;
+        }
+        let Some(_lock) = try_lock(&format!("rspice-results-store-{name}")).await? else {
+            continue;
+        };
+        let options = js_sys::Object::new();
+        Reflect::set(&options, &"recursive".into(), &JsValue::TRUE)
+            .map_err(|error| js_message(&error))?;
+        let remove = Reflect::get(&stores, &"removeEntry".into())
+            .ok()
+            .and_then(|remove| remove.dyn_into::<js_sys::Function>().ok())
+            .ok_or("this browser cannot delete a folder")?;
+        let promise = remove
+            .call2(&stores, &JsValue::from_str(&name), &options)
+            .map_err(|error| js_message(&error))?;
+        if awaited(promise, "the store's folder").await.is_ok() {
+            removed.push(name);
+        }
+    }
+    Ok(ResultsStoreResponse::Swept { removed })
+}
+
+/// The names of the entries of `folder`.
+async fn folder_names(folder: &FileSystemDirectoryHandle) -> Result<Vec<String>, String> {
+    let keys = Reflect::get(folder, &"keys".into())
+        .ok()
+        .and_then(|keys| keys.dyn_into::<js_sys::Function>().ok())
+        .ok_or("this browser cannot list a folder")?;
+    let names = keys.call0(folder).map_err(|error| js_message(&error))?;
+    let next = Reflect::get(&names, &"next".into())
+        .ok()
+        .and_then(|next| next.dyn_into::<js_sys::Function>().ok())
+        .ok_or("this browser cannot list a folder")?;
+    let mut found = Vec::new();
+    loop {
+        let step = next.call0(&names).map_err(|error| js_message(&error))?;
+        let step = awaited(step, "a folder's listing").await?;
+        if Reflect::get(&step, &"done".into()).is_ok_and(|done| done.is_truthy()) {
+            return Ok(found);
+        }
+        if let Some(name) = Reflect::get(&step, &"value".into())
+            .ok()
+            .and_then(|name| name.as_string())
+        {
+            found.push(name);
+        }
+    }
 }
 
 fn navigator() -> Result<JsValue, String> {
