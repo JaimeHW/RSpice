@@ -1,5 +1,6 @@
 //! Network-matrix controls, exact cell display and sampled diagnostic presentation.
 
+use crate::presentation::with_table_state;
 use egui::Ui;
 use rspice_results::engine_evidence::{
     MAX_NETWORK_DIAGNOSTIC_PORTS, NoAbort, network_quality_with_abort,
@@ -11,6 +12,7 @@ use rspice_results::{
     network_matrix::{NetworkLayout, channel_label, channel_reference},
 };
 use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
 use rspice_vocabulary::quantity::AngleDisplay;
 
 /// Disposable local controls for one source-qualified matrix session.
@@ -277,41 +279,88 @@ pub fn show(
         ui.label("This is a periodic conversion block. Passivity and reciprocity require the complete lifted network and its wave-frequency convention.");
     }
     let ports = matrix.references().len();
-    let row_height = ui.spacing().interact_size.y.max(32.0);
-    egui::ScrollArea::horizontal().id_salt("network-matrix-scroll").auto_shrink([false, false]).show(ui, |ui| {
-        egui_extras::TableBuilder::new(ui).id_salt("network-matrix-cells").striped(true)
-            .columns(egui_extras::Column::exact(240.0), ports + 1)
-            .header(row_height, |mut header| {
-                header.col(|ui| { ui.strong("Wave channel / reference"); });
-                for column in 0..ports {
-                    header.col(|ui| { ui.strong(format!("{} · {}", channel_label(column, ports, block.is_mixed()), fmt_si_significant(channel_reference(column, matrix.references(), block.is_mixed()), "Ω", significant_digits))); });
-                }
-            }).body(|body| body.rows(row_height, ports, |mut table_row| {
-                let row = table_row.index();
-                table_row.col(|ui| { ui.strong(format!("{} · {}", channel_label(row, ports, block.is_mixed()), fmt_si_significant(channel_reference(row, matrix.references(), block.is_mixed()), "Ω", significant_digits))); });
-                for column in 0..ports {
-                    table_row.col(|ui| {
-                    let (out, input) = if controls.transpose { (column, row) } else { (row, column) };
-                    let waveform = &analysis.waveforms[block.cells()[out * ports + input]];
-                    let complex = waveform.complex.as_ref().expect("resolved complex coefficient");
-                    let real = coefficient(&complex.real, controls.sample);
-                    let imaginary = coefficient(&complex.imag, controls.sample);
-                    let label = formatted(real, imaginary, controls.representation, angle_display, significant_digits);
+    let mixed = block.is_mixed();
+    let channel = |index: usize| {
+        format!(
+            "{} · {}",
+            channel_label(index, ports, mixed),
+            fmt_si_significant(
+                channel_reference(index, matrix.references(), mixed),
+                "Ω",
+                significant_digits
+            )
+        )
+    };
+    // A matrix has no order to sort: its rows and columns are its ports.
+    let mut columns = vec![Column::name("Wave channel / reference", 200.0).unsortable()];
+    columns.extend((0..ports).map(|column| Column::number(channel(column), 200.0).unsortable()));
+    let entry = |row: usize, column: usize| {
+        let (out, input) = if controls.transpose {
+            (column, row)
+        } else {
+            (row, column)
+        };
+        let waveform = &analysis.waveforms[block.cells()[out * ports + input]];
+        let complex = waveform
+            .complex
+            .as_ref()
+            .expect("resolved complex coefficient");
+        (
+            waveform,
+            complex,
+            coefficient(&complex.real, controls.sample),
+            coefficient(&complex.imag, controls.sample),
+        )
+    };
+    let frequency = grid[controls.sample];
+    let (response, chosen) = with_table_state(ui, "network-matrix", |ui, state| {
+        let response = DataTable::new("rspice.results.network-matrix", &columns, ports)
+            .state(state)
+            .freeze(1)
+            .cell_selection()
+            .max_height(ui.available_height())
+            .show(ui, |row| {
+                let mut cells = vec![Cell::text(channel(row))];
+                cells.extend((0..ports).map(|column| {
+                    let (_, complex, real, imaginary) = entry(row, column);
+                    let mut cell = Cell::number(formatted(
+                        real,
+                        imaginary,
+                        controls.representation,
+                        angle_display,
+                        significant_digits,
+                    ))
+                    .hint(format!(
+                        "{}\nReal: {real:.17e}\nImaginary: {imaginary:.17e}\nFrequency: {frequency:.17e} Hz\nDouble-click or press Enter to open this coefficient in Polar",
+                        complex.source_name
+                    ));
                     if controls.heatmap {
-                        let color = heat_color(magnitude_db(real, imaginary), controls.floor_db, &tokens.color);
-                        let rect = ui.max_rect().shrink(2.0);
-                        ui.painter().rect_filled(rect, tokens.radius, color.gamma_multiply(0.22));
-                        ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())), 0.0, color);
+                        let color = heat_color(
+                            magnitude_db(real, imaginary),
+                            controls.floor_db,
+                            &tokens.color,
+                        );
+                        cell = cell.wash(color.gamma_multiply(0.22));
                     }
-                    if ui.selectable_label(false, egui::RichText::new(label).monospace().color(tokens.color.text)).on_hover_text(format!("{}\nReal: {real:.17e}\nImaginary: {imaginary:.17e}\nFrequency: {:.17e} Hz\nOpen this coefficient in Polar", complex.source_name, grid[controls.sample])).clicked() {
-                        open_coefficient = Some(OpenCoefficient {
-                            waveform_name: waveform.name.clone(),
-                            frequency: grid[controls.sample],
-                        });
-                    }
-                    });
-                }
-            }));
+                    cell
+                }));
+                cells
+            });
+        (response, state.selected_column())
     });
+    // A click selects a coefficient to copy; a double-click, or Enter on
+    // the selected one, opens it.
+    let opened = response
+        .double_clicked
+        .and_then(|cell| Some((cell.row, cell.column?)))
+        .or_else(|| Some((response.activate?, chosen?)))
+        .filter(|(_, column)| *column > 0);
+    if let Some((row, column)) = opened {
+        let (waveform, ..) = entry(row, column - 1);
+        open_coefficient = Some(OpenCoefficient {
+            waveform_name: waveform.name.clone(),
+            frequency,
+        });
+    }
     open_coefficient
 }

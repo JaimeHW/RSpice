@@ -374,10 +374,7 @@ mod tests {
             .expect("the optimization sheet publishes an accessibility tree")
             .nodes
             .iter()
-            .filter(|(_, node)| {
-                // A Label-role node carries its text in `value`, not `label`.
-                node.value() == Some("evaluated") || node.label() == Some("evaluated")
-            })
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Row)
             .count();
         assert!(drawn > 0, "the sheet drew no candidates at all");
         assert!(

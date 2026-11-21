@@ -1,9 +1,8 @@
 //! Optimization convergence plots and exact retained candidate presentation.
 
-use crate::presentation::{PlotView, fit_controls_to_rows, stat_table, table_row_height};
+use crate::presentation::{PlotView, stat_table, with_table_state};
 use crate::strip::StripHeader;
 use egui::{RichText, Ui};
-use egui_extras::{Column, TableBuilder};
 use rspice_results::optimization::OptimizationObjectiveGoal;
 use rspice_results::waveform::RetainedTrace;
 use rspice_results::{analysis_result::AnalysisResult, optimization::history::OptimizationView};
@@ -11,6 +10,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey, Tone};
 use std::collections::BTreeMap;
 
 /// History and display inputs qualified for the host's active analysis.
@@ -302,93 +302,74 @@ pub fn show(
         requested = Some(index);
     }
 
-    // The table owns horizontal scrolling, so every retained design variable
-    // remains addressable. Truncating the list here made the exact structured
-    // alternative disagree with the immutable candidate vector.
+    // Every retained design variable is a column: the table scrolls
+    // sideways under the frozen iteration, so the structured alternative
+    // agrees with the immutable candidate vector.
     let visible_variables = view
         .variables
         .iter()
         .map(|(name, waveform)| (*name, held(&waveform.y)))
         .collect::<Vec<_>>();
-    let width = ui
-        .available_width()
-        .max(530.0 + visible_variables.len() as f32 * 150.0);
-    egui::ScrollArea::horizontal()
-        .id_salt("rspice.results.optimization-horizontal")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.set_min_width(width);
-            let row_height = table_row_height(ui);
-            fit_controls_to_rows(ui, row_height);
-            let mut table = TableBuilder::new(ui)
-                .id_salt("rspice.results.optimization")
-                .striped(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::initial(105.0))
-                .column(Column::initial(160.0))
-                .column(Column::initial(160.0));
-            for _ in &visible_variables {
-                table = table.column(Column::initial(150.0));
+    let mut columns = vec![
+        Column::number("Iteration", 105.0),
+        Column::number("Cost", 160.0),
+        Column::number("\u{0394} from best", 160.0),
+    ];
+    columns.extend(
+        visible_variables
+            .iter()
+            .map(|(name, _)| Column::number(*name, 150.0)),
+    );
+    columns.push(Column::name("Disposition", 110.0));
+    let candidates = view.iterations.len();
+    let revision = egui::Id::new(("optimization", analysis_id, candidates, digits)).value();
+    with_table_state(ui, "optimization", |ui, state| {
+        if state.selected_row() != selected {
+            match selected {
+                Some(index) => state.select(index, None),
+                None => state.selection = None,
             }
-            table
-                .column(Column::remainder().at_least(110.0))
-                .header(row_height, |mut header| {
-                    header.col(|ui| table_header(ui, "Iteration"));
-                    header.col(|ui| table_header(ui, "Cost"));
-                    header.col(|ui| table_header(ui, "Δ from best"));
-                    for (name, _) in &visible_variables {
-                        header.col(|ui| table_header(ui, name));
-                    }
-                    header.col(|ui| table_header(ui, "Disposition"));
-                })
-                // Only the candidates the viewport can show. An optimizer run
-                // is thousands of iterations long, and every row here formats
-                // three quantities plus one per design variable.
-                .body(|body| {
-                    body.rows(row_height, view.iterations.len(), |mut row| {
-                        let index = row.index();
-                        let iteration = view.iterations[index];
-                        let is_selected = selected == Some(index);
-                        row.set_selected(is_selected);
-                        row.col(|ui| {
-                            if ui
-                                .selectable_label(
-                                    is_selected,
-                                    RichText::new(iteration_text(iteration, digits)).monospace(),
-                                )
-                                .clicked()
-                            {
-                                requested = Some(index);
-                            }
-                        });
-                        row.col(|ui| mono(ui, &value_text(cost_at(index), "", digits)));
-                        row.col(|ui| {
-                            mono(ui, &signed_readout(cost_at(index) - view.best_cost, digits))
-                        });
-                        for (_, values) in &visible_variables {
-                            let value = values.get(index).copied().unwrap_or(f64::NAN);
-                            row.col(|ui| mono(ui, &value_text(value, "", digits)));
-                        }
-                        row.col(|ui| {
-                            if best_index == index {
-                                outcome_badge(
-                                    ui,
-                                    if index + 1 == view.iterations.len() && view.converged {
-                                        "best · converged"
-                                    } else {
-                                        "best"
-                                    },
-                                    true,
-                                );
-                            } else if index + 1 == view.iterations.len() {
-                                outcome_badge(ui, outcome, view.converged);
-                            } else {
-                                ui.label("evaluated");
-                            }
-                        });
-                    });
+        }
+        let response = DataTable::new("rspice.results.optimization", &columns, candidates)
+            .state(state)
+            .freeze(1)
+            .revision(revision)
+            .max_height(ui.available_height())
+            .show(ui, |index| {
+                let iteration = view.iterations[index];
+                let cost = cost_at(index);
+                let mut cells = vec![
+                    Cell::number(iteration_text(iteration, digits))
+                        .sort_by(SortKey::Number(iteration)),
+                    Cell::number(value_text(cost, "", digits)).sort_by(SortKey::Number(cost)),
+                    Cell::number(signed_readout(cost - view.best_cost, digits))
+                        .sort_by(SortKey::Number(cost - view.best_cost)),
+                ];
+                cells.extend(visible_variables.iter().map(|(_, values)| {
+                    let value = values.get(index).copied().unwrap_or(f64::NAN);
+                    Cell::number(value_text(value, "", digits)).sort_by(SortKey::Number(value))
+                }));
+                let last = index + 1 == candidates;
+                cells.push(if best_index == index {
+                    disposition(
+                        if last && view.converged {
+                            "best · converged"
+                        } else {
+                            "best"
+                        },
+                        true,
+                    )
+                } else if last {
+                    disposition(outcome, view.converged)
+                } else {
+                    Cell::text("evaluated")
                 });
-        });
+                cells
+            });
+        if response.clicked.is_some() || response.selection_changed {
+            requested = state.selected_row().or(requested);
+        }
+    });
     OptimizationResponse {
         fit: header.fit_clicked,
         view: response.view,
@@ -498,15 +479,6 @@ fn candidate_matches_best(
         })
 }
 
-pub(crate) fn table_header(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(text)
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_faint),
-    );
-}
-
 pub(crate) fn mono(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Regular)));
 }
@@ -514,24 +486,16 @@ pub(crate) fn mono(ui: &mut Ui, text: &str) {
 /// The outcome cell, in sentence case. A run that stopped short of
 /// convergence is the one verdict here and keeps the warning tone; the best
 /// candidate and a converged run are facts and read as plain text.
-fn outcome_badge(ui: &mut Ui, label: &str, converged: bool) {
+fn disposition(label: &str, converged: bool) -> Cell {
     let mut chars = label.chars();
     let text = chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().chain(chars).collect::<String>()
     });
-    ui.label(
-        RichText::new(text)
-            .strong()
-            .color(outcome_color(converged, &Tokens::get(ui.ctx()).color)),
-    );
-}
-
-fn outcome_color(converged: bool, palette: &rspice_ui_kit::palette::Palette) -> egui::Color32 {
-    if converged {
-        palette.text
+    Cell::text(text).toned(if converged {
+        Tone::Neutral
     } else {
-        palette.warn
-    }
+        Tone::Caution
+    })
 }
 
 #[cfg(test)]

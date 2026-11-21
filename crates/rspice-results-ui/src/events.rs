@@ -1,12 +1,10 @@
 //! Retained event tables, bus controls and source-aware selection readouts.
 
 use crate::{
-    optimization::table_header,
-    presentation::{fit_controls_to_rows, panel_note, stat_table, table_row_height, well_hint},
+    presentation::{panel_note, stat_table, table_row_menu, well_hint, with_table_state},
     strip::StripHeader,
 };
 use egui::{RichText, Ui};
-use egui_extras::{Column, TableBuilder};
 use rspice_results::{
     analysis_payload::AnalysisResultPayload,
     analysis_result::AnalysisResult,
@@ -22,7 +20,10 @@ use rspice_ui_kit::{
     plot::fmt_si_significant,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{SegmentedWidth, chip, segmented},
+    widgets::{
+        SegmentedWidth, segmented,
+        table::{Cell, Column, DataTable, SortKey},
+    },
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::collections::BTreeSet;
@@ -282,14 +283,7 @@ fn show_current_impulses(
             "This preview did not retain the complete impulse history.",
         );
     }
-    let min_width = ui.available_width().max(720.0);
-    egui::ScrollArea::horizontal()
-        .id_salt("rspice.results.current-impulses-horizontal")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.set_min_width(min_width);
-            show_current_impulse_tables(ui, history, order, numbers);
-        });
+    show_current_impulse_tables(ui, history, order, numbers);
 }
 fn show_current_impulse_tables(
     ui: &mut Ui,
@@ -297,39 +291,34 @@ fn show_current_impulse_tables(
     order: &EventOrder,
     numbers: EventNumbers,
 ) {
-    let row_height = table_row_height(ui);
     ui.collapsing("Current coverage", |ui| {
-        TableBuilder::new(ui)
-            .id_salt("rspice.results.current-coverage")
-            .striped(true)
-            .max_scroll_height(180.0)
-            .column(Column::remainder().clip(true))
-            .column(Column::initial(100.0).clip(true))
-            .column(Column::initial(120.0).clip(true))
-            .header(row_height, |mut header| {
-                for label in ["Current", "Events", "Coverage"] {
-                    header.col(|ui| table_header(ui, label));
-                }
+        let columns = [
+            Column::name("Current", 180.0),
+            Column::number("Events", 100.0),
+            Column::words("Coverage", 120.0),
+        ];
+        with_table_state(ui, "current-coverage", |ui, state| {
+            DataTable::new(
+                "rspice.results.current-coverage",
+                &columns,
+                history.traces.len(),
+            )
+            .state(state)
+            .max_height(180.0)
+            .show(ui, |index| {
+                let trace = &history.traces[index];
+                let count = trace.points.len();
+                vec![
+                    Cell::text(&order.current_names()[index]),
+                    Cell::number(count.to_string()).sort_by(SortKey::Number(count as f64)),
+                    Cell::text(if trace.complete && history.delivery_complete {
+                        "Complete"
+                    } else {
+                        "Incomplete"
+                    }),
+                ]
             })
-            .body(|body| {
-                body.rows(row_height, history.traces.len(), |mut row| {
-                    let index = row.index();
-                    let trace = &history.traces[index];
-                    row.col(|ui| {
-                        mono(ui, &order.current_names()[index]);
-                    });
-                    row.col(|ui| {
-                        mono(ui, &trace.points.len().to_string());
-                    });
-                    row.col(|ui| {
-                        ui.label(if trace.complete && history.delivery_complete {
-                            "Complete"
-                        } else {
-                            "Incomplete"
-                        });
-                    });
-                })
-            });
+        });
     });
     if order.current_rows().is_empty() {
         panel_note(
@@ -343,43 +332,53 @@ fn show_current_impulse_tables(
         return;
     }
     let height = (ui.available_height() * 0.45).max(120.0);
-    TableBuilder::new(ui)
-        .id_salt("rspice.results.current-impulses")
-        .striped(true)
-        .sense(egui::Sense::click())
-        .max_scroll_height(height)
-        .column(Column::initial(180.0).clip(true))
-        .column(Column::remainder().at_least(100.0).clip(true))
-        .column(Column::initial(210.0).clip(true))
-        .header(row_height, |mut header| {
-            for label in ["Time", "Current", "Signed charge"] {
-                header.col(|ui| table_header(ui, label));
-            }
+    let columns = [
+        Column::number("Time", 180.0),
+        Column::name("Current", 100.0),
+        Column::number("Signed charge", 210.0),
+    ];
+    let point = |row: usize| {
+        let (trace_index, point_index) = order.current_rows()[row];
+        (
+            &history.traces[trace_index].points[point_index],
+            &order.current_names()[trace_index],
+        )
+    };
+    let response = with_table_state(ui, "current-impulses", |ui, state| {
+        DataTable::new(
+            "rspice.results.current-impulses",
+            &columns,
+            order.current_rows().len(),
+        )
+        .state(state)
+        .multi_select()
+        .freeze(1)
+        .max_height(height)
+        .revision(egui::Id::new(("current-impulses", order.current_rows().len())).value())
+        .show(ui, |row| {
+            let (point, name) = point(row);
+            vec![
+                Cell::number(numbers.shown(point.time, "s"))
+                    .hint(numbers.exact(point.time, "s"))
+                    .sort_by(SortKey::Number(point.time)),
+                Cell::text(name),
+                Cell::number(numbers.shown(point.charge_coulombs, "C"))
+                    .hint(numbers.exact(point.charge_coulombs, "C"))
+                    .sort_by(SortKey::Number(point.charge_coulombs)),
+            ]
         })
-        .body(|body| {
-            body.rows(row_height, order.current_rows().len(), |mut row| {
-                let (trace_index, point_index) = order.current_rows()[row.index()];
-                let point = &history.traces[trace_index].points[point_index];
-                let name = &order.current_names()[trace_index];
-                let time = numbers.exact(point.time, "s");
-                let charge = numbers.exact(point.charge_coulombs, "C");
-                row.col(|ui| {
-                    mono(ui, &numbers.shown(point.time, "s")).on_hover_text(&time);
-                });
-                row.col(|ui| {
-                    mono(ui, name);
-                });
-                row.col(|ui| {
-                    mono(ui, &numbers.shown(point.charge_coulombs, "C")).on_hover_text(&charge);
-                });
-                row.response().context_menu(|ui| {
-                    if ui.button("Copy exact row").clicked() {
-                        ui.ctx().copy_text(format!("{time}\t{name}\t{charge}"));
-                        ui.close();
-                    }
-                });
-            })
-        });
+    });
+    table_row_menu(ui, "current-impulses", response.context_menu, |ui, row| {
+        if ui.button("Copy exact row").clicked() {
+            let (point, name) = point(row);
+            ui.ctx().copy_text(format!(
+                "{}\t{name}\t{}",
+                numbers.exact(point.time, "s"),
+                numbers.exact(point.charge_coulombs, "C")
+            ));
+            ui.close();
+        }
+    });
 }
 /// A number or name in the sheet's mono face. It is not selectable text: a
 /// drag would copy the digits the cell shows, and the exact value is what
@@ -442,156 +441,161 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
 
     let mut requested = None;
     let mut toggled_bus = None;
-    let min_width = 908.0_f32.max(ui.available_width());
-    egui::ScrollArea::horizontal()
-        .id_salt("rspice.results.events-horizontal")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.set_min_width(min_width);
-            let row_height = table_row_height(ui);
-            fit_controls_to_rows(ui, row_height);
-            TableBuilder::new(ui)
-                .id_salt("rspice.results.events")
-                .striped(true)
-                .sense(egui::Sense::click())
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                // Every column clips. `egui_extras` grows a cell that does not
-                // fit and pushes the rest of its row along with it, so one
-                // long value used to shift four columns on that row alone and
-                // the table stopped being a table wherever the numbers were
-                // widest. The time column is sized so its own widest content
-                // — a time at seventeen significant digits past the prefix
-                // ladder, with a three-digit exponent — never reaches the
-                // clip.
-                .column(Column::initial(84.0).clip(true))
-                .column(Column::initial(176.0).clip(true))
-                .column(Column::remainder().at_least(190.0).clip(true))
-                .column(Column::initial(152.0).clip(true))
-                .column(Column::initial(128.0).clip(true))
-                .column(Column::initial(112.0).clip(true))
-                .header(row_height, |mut header| {
-                    for label in [
-                        "Event",
-                        "Physical time",
-                        "Signal",
-                        "Value",
-                        "Domain",
-                        "Kind",
-                    ] {
-                        header.col(|ui| table_header(ui, label));
-                    }
+    let row_at = |index: usize| {
+        cache.rows().get(index).copied().and_then(|entry| {
+            event_row_from_entry(analysis, cache.buses(), radix, entry, index + 1)
+        })
+    };
+    let columns = [
+        Column::number("Event", 84.0),
+        Column::number("Physical time", 176.0),
+        Column::name("Signal", 190.0),
+        Column::number("Value", 152.0),
+        Column::words("Domain", 128.0),
+        Column::words("Kind", 112.0),
+    ];
+    // The rows' words change with the dataset, the radix a bus word is
+    // spelled in and which buses list their members.
+    let revision = egui::Id::new((
+        "events",
+        analysis_key,
+        cache.rows().len(),
+        bus_radix_index(radix),
+        expanded,
+    ))
+    .value();
+    let response = with_table_state(ui, "events", |ui, state| {
+        follow_page_selection(
+            ui,
+            state,
+            selected,
+            analysis_key,
+            cache.rows().len(),
+            |row| {
+                row_at(row).is_some_and(|row| {
+                    selected.is_some_and(|selection| selection.matches(&row, cache.buses()))
                 })
-                .body(|body| {
-                    body.rows(row_height, cache.rows().len(), |mut row| {
-                        let row_index = row.index();
-                        let Some(row_data) =
-                            cache.rows().get(row_index).copied().and_then(|entry| {
-                                event_row_from_entry(
-                                    analysis,
-                                    cache.buses(),
-                                    radix,
-                                    entry,
-                                    row_index + 1,
-                                )
-                            })
-                        else {
-                            return;
-                        };
-                        let is_selected = selected.as_ref().is_some_and(|selection| {
-                            selection.analysis == analysis_key
-                                && selection.matches(&row_data, cache.buses())
-                        });
-                        row.set_selected(is_selected);
-                        row.col(|ui| {
-                            if ui
-                                .selectable_label(
-                                    is_selected,
-                                    format!("#{:04}", row_data.event_ordinal()),
-                                )
-                                .clicked()
-                            {
-                                requested = row_data.selection(analysis_key, cache.buses());
-                            }
-                        });
-                        let time = numbers.exact(row_data.time_s(), "s");
-                        row.col(|ui| {
-                            mono(ui, &numbers.shown(row_data.time_s(), "s")).on_hover_text(&time);
-                        });
-                        row.col(|ui| {
-                            mono(ui, row_data.signal_name());
-                            // The disclosure rides the bus row rather than a
-                            // seventh column: it belongs to the one row it
-                            // acts on, and a column that is blank on every
-                            // scalar row would cost the table width to say
-                            // nothing about them.
-                            if row_data.source() == EventSelectionSource::Bus {
-                                let open = expanded.contains(row_data.trace_name());
-                                let response = chip(ui, "BITS", open);
-                                // The chip reads `BITS` on every bus row, so
-                                // its published name says which bus it opens
-                                // — two declarations on screen are otherwise
-                                // the same word to anything not looking at
-                                // the column beside it.
-                                let name = format!("Bits of {}", row_data.signal_name());
-                                response.widget_info(|| {
-                                    egui::WidgetInfo::selected(
-                                        egui::WidgetType::SelectableLabel,
-                                        ui.is_enabled(),
-                                        open,
-                                        &name,
-                                    )
-                                });
-                                let response = response.on_hover_text(if open {
-                                    "Hide the member rows this word is reassembled from"
-                                } else {
-                                    "Show the member rows this word is reassembled from"
-                                });
-                                if response.clicked() {
-                                    toggled_bus = Some(row_data.trace_name().to_owned());
-                                }
-                            }
-                        });
-                        let value = numbers.exact_value(row_data.value());
-                        row.col(|ui| {
-                            let response = mono(ui, &numbers.value(row_data.value()));
-                            // A word is as wide as the bus is: the column
-                            // clips rather than shoving the table along, so
-                            // the whole word has to be reachable without
-                            // selecting the row. A real value is stated at
-                            // the reader's digits and keeps the rest here.
-                            if matches!(row_data.value(), EventValue::Bus(_) | EventValue::Real(_))
-                            {
-                                response.on_hover_text(&value);
-                            }
-                        });
-                        let kind = if row_data.initial() {
-                            "initial"
-                        } else {
-                            "change"
-                        };
-                        row.col(|ui| {
-                            ui.add(egui::Label::new(row_data.value().domain()).selectable(false));
-                        });
-                        row.col(|ui| {
-                            ui.add(egui::Label::new(kind).selectable(false));
-                        });
-                        let ordinal = row_data.event_ordinal();
-                        let signal = row_data.signal_name();
-                        let domain = row_data.value().domain();
-                        row.response().context_menu(|ui| {
-                            if ui.button("Copy exact row").clicked() {
-                                ui.ctx().copy_text(format!(
-                                    "#{ordinal:04}\t{time}\t{signal}\t{value}\t{domain}\t{kind}"
-                                ));
-                                ui.close();
-                            }
-                        });
-                    });
-                });
-        });
+            },
+        );
+        let response = DataTable::new("rspice.results.events", &columns, cache.rows().len())
+            .state(state)
+            .freeze(1)
+            .revision(revision)
+            .max_height(ui.available_height())
+            .show(ui, |index| {
+                let Some(row) = row_at(index) else {
+                    return vec![Cell::absent(); 6];
+                };
+                let mut signal = Cell::text(row.signal_name());
+                if row.source() == EventSelectionSource::Bus {
+                    signal = signal
+                        .twist(expanded.contains(row.trace_name()))
+                        .hint("Show or hide the member rows this word is reassembled from");
+                }
+                let mut value = Cell::number(numbers.value(row.value()));
+                match row.value() {
+                    // A word is as wide as the bus: the whole word, and a real
+                    // value's every digit, are one hover away.
+                    EventValue::Bus(_) => value = value.hint(numbers.exact_value(row.value())),
+                    EventValue::Real(real) => {
+                        value = value
+                            .hint(numbers.exact_value(row.value()))
+                            .sort_by(SortKey::Number(*real));
+                    }
+                    _ => {}
+                }
+                vec![
+                    Cell::number(format!("#{:04}", row.event_ordinal()))
+                        .sort_by(SortKey::Number(row.event_ordinal() as f64)),
+                    Cell::number(numbers.shown(row.time_s(), "s"))
+                        .hint(numbers.exact(row.time_s(), "s"))
+                        .sort_by(SortKey::Number(row.time_s())),
+                    signal,
+                    value,
+                    Cell::text(row.value().domain()),
+                    Cell::text(if row.initial() { "initial" } else { "change" }),
+                ]
+            });
+        if response.clicked.is_some() || response.selection_changed {
+            requested = state
+                .selected_row()
+                .and_then(row_at)
+                .and_then(|row| row.selection(analysis_key, cache.buses()));
+            remember_page_selection(ui, requested.as_ref());
+        }
+        response
+    });
+    if let Some((index, _)) = response.expand
+        && let Some(row) = row_at(index)
+    {
+        toggled_bus = Some(row.trace_name().to_owned());
+    }
+    table_row_menu(ui, "events", response.context_menu, |ui, index| {
+        if ui.button("Copy exact row").clicked() {
+            if let Some(row) = row_at(index) {
+                ui.ctx().copy_text(format!(
+                    "#{:04}\t{}\t{}\t{}\t{}\t{}",
+                    row.event_ordinal(),
+                    numbers.exact(row.time_s(), "s"),
+                    row.signal_name(),
+                    numbers.exact_value(row.value()),
+                    row.value().domain(),
+                    if row.initial() { "initial" } else { "change" },
+                ));
+            }
+            ui.close();
+        }
+    });
     EventResponse {
         requested,
         toggled_bus,
+    }
+}
+
+fn page_selection_id(ui: &Ui) -> egui::Id {
+    ui.id().with("rspice.results.events-page-selection")
+}
+
+/// Note the event the table last handed the page, so the table does not
+/// look for it again.
+fn remember_page_selection(ui: &Ui, selection: Option<&DigitalEventSelection>) {
+    let id = page_selection_id(ui);
+    let selection = selection.cloned();
+    ui.data_mut(|data| data.insert_temp(id, selection));
+}
+
+/// Put the table's selection on the event the page has selected, when the
+/// page chose it elsewhere (on a plot, in the inspector) or the rows
+/// changed under it. The rows are searched once per change, never on a
+/// frame where the table and the page already agree.
+fn follow_page_selection(
+    ui: &Ui,
+    state: &mut rspice_ui_kit::widgets::table::TableState,
+    selected: Option<&DigitalEventSelection>,
+    analysis: AnalysisPresentationKey,
+    rows: usize,
+    matches: impl Fn(usize) -> bool,
+) {
+    let id = page_selection_id(ui);
+    let seen = ui.data(|data| data.get_temp::<Option<DigitalEventSelection>>(id));
+    let selected = selected.filter(|selection| selection.analysis == analysis);
+    if seen.as_ref().map(Option::as_ref) == Some(selected)
+        && state.selected_row().is_none_or(|row| row < rows)
+    {
+        return;
+    }
+    remember_page_selection(ui, selected);
+    match selected {
+        None => state.selection = None,
+        Some(_) => {
+            if state.selected_row().is_some_and(&matches) {
+                return;
+            }
+            match (0..rows).find(|row| matches(*row)) {
+                Some(row) => state.select(row, None),
+                None => state.selection = None,
+            }
+        }
     }
 }
 const BUS_RADIX_OPTIONS: [&str; 6] = [
@@ -849,6 +853,132 @@ mod tests {
     fn collapsed() -> std::collections::BTreeSet<String> {
         std::collections::BTreeSet::new()
     }
+
+    /// One frame of the event sheet over `events`, and where it drew.
+    fn event_sheet_frame(
+        ctx: &egui::Context,
+        analysis_key: AnalysisPresentationKey,
+        analysis: &AnalysisResult,
+        order: &EventOrder,
+        selected: Option<&DigitalEventSelection>,
+        events: Vec<egui::Event>,
+    ) -> (
+        egui::FullOutput,
+        rspice_ui_kit::probe::Geometry,
+        Option<DigitalEventSelection>,
+    ) {
+        let expanded = collapsed();
+        let mut requested = None;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 700.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let (output, geometry) = rspice_ui_kit::probe::pass(ctx, input, |ui| {
+            requested = show(
+                ui,
+                &EventView {
+                    analysis_key,
+                    analysis,
+                    order,
+                    origin: EventOrigin::Native,
+                    radix: BusRadix::Binary,
+                    expanded: &expanded,
+                    selected,
+                    numbers: EventNumbers {
+                        significant_digits: 4,
+                        quantity_policy: QuantityPresentationPolicy::default(),
+                    },
+                },
+            )
+            .requested;
+        });
+        (output, geometry, requested)
+    }
+
+    /// The event sheet draws through the shared table: each head stands over
+    /// its own cells (the heads used to sit 12 px left of them), and Ctrl+C
+    /// on a selected row copies it as tab-separated text under the heads.
+    #[test]
+    fn the_event_table_aligns_heads_with_cells_and_copies_rows_as_tab_separated_text() {
+        let analysis = two_bit_counter();
+        let order =
+            rspice_results::events::projection::build_event_order(&analysis, &collapsed(), || {});
+        assert!(order.rows().len() >= 2, "the fixture has events to list");
+        let key =
+            AnalysisPresentationKey::new(rspice_vocabulary::product::DatasetId::new(), &analysis);
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let (_, geometry, _) = event_sheet_frame(&ctx, key, &analysis, &order, None, Vec::new());
+        for column in 0..6 {
+            let head = geometry
+                .one(&format!("table.head.{column}"))
+                .unwrap_or_else(|| panic!("column {column}'s head is drawn"));
+            let cell = geometry
+                .one(&format!("table.cell.{column}"))
+                .unwrap_or_else(|| panic!("column {column} has cells"));
+            assert!(
+                (head.left() - cell.left()).abs() < 0.5
+                    && (head.right() - cell.right()).abs() < 0.5,
+                "column {column}: head {head:?} over cells {cell:?}"
+            );
+        }
+        let first = geometry
+            .all("table.cell.0")
+            .into_iter()
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .expect("a first row");
+        let click = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let (_, _, requested) =
+            event_sheet_frame(&ctx, key, &analysis, &order, None, click(first.center()));
+        let requested = requested.expect("a click on a row selects its event");
+        let _ = event_sheet_frame(&ctx, key, &analysis, &order, Some(&requested), Vec::new());
+        let (output, _, _) = event_sheet_frame(
+            &ctx,
+            key,
+            &analysis,
+            &order,
+            Some(&requested),
+            vec![egui::Event::Copy],
+        );
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .expect("Ctrl+C copies the selected row");
+        let mut lines = copied.lines();
+        assert_eq!(
+            lines.next(),
+            Some("Event\tPhysical time\tSignal\tValue\tDomain\tKind")
+        );
+        let row = lines.next().expect("the selected row");
+        assert!(row.starts_with("#0001\t"), "{row}");
+        assert_eq!(row.split('\t').count(), 6, "{row}");
+    }
+
     #[test]
     fn event_rows_keep_initial_value_and_only_projected_changes() {
         let waveform = RetainedTrace::new(

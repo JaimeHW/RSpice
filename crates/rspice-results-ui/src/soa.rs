@@ -1,14 +1,11 @@
 //! Retained SOA rule projections, table, inspector and stress-history presentation.
 
 use crate::{
-    optimization::{mono, table_header},
-    presentation::{
-        PlotView, fit_controls_to_rows, panel_note, stat_table, table_row_height, well_hint,
-    },
+    optimization::mono,
+    presentation::{PlotView, panel_note, stat_table, table_row_menu, well_hint, with_table_state},
     strip::StripHeader,
 };
 use egui::{RichText, Ui};
-use egui_extras::{Column, TableBuilder};
 use rspice_results::{
     analysis_payload::AnalysisResultPayload,
     family_metadata::AnalysisResultFamilyMetadata,
@@ -17,8 +14,9 @@ use rspice_results::{
     soa_evidence::{SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence},
     waveform::RetainedTrace,
 };
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey, Tone};
 use rspice_ui_kit::{
-    panels::{elide_middle, section_header},
+    panels::section_header,
     plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_significant},
     tokens::Tokens,
 };
@@ -465,151 +463,150 @@ pub fn show(
 
     let visible_rules = plan.visible(filter);
 
-    // The table fills the sheet and scrolls sideways only once the sheet is
-    // narrower than every column's floor. The numbers, the interval, the
-    // verdict and the row's buttons keep their width; the device and the rule
-    // share what is left and give it up first, eliding in the middle with the
-    // whole name on hover, so a narrow sheet never clips a control.
-    let width = ui.available_width();
-    egui::ScrollArea::horizontal()
-        .id_salt("rspice.results.soa-horizontal")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ui.set_min_width(width);
-            let row_height = table_row_height(ui);
-            fit_controls_to_rows(ui, row_height);
-            TableBuilder::new(ui)
-                .id_salt("rspice.results.soa")
-                .striped(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::remainder().at_least(96.0).clip(true))
-                .column(Column::remainder().at_least(150.0).clip(true))
-                .column(Column::initial(104.0))
-                .column(Column::initial(104.0))
-                .column(Column::initial(104.0))
-                .column(Column::initial(176.0))
-                .column(Column::initial(76.0))
-                .column(Column::auto())
-                .header(row_height, |mut header| {
-                    for label in [
-                        "Device",
-                        "Rule",
-                        "Observed",
-                        "Limit",
-                        "Margin",
-                        "Worst interval",
-                        "Status",
-                        "Open",
-                    ] {
-                        header.col(|ui| table_header(ui, label));
+    // The device and the rule share what the numbers leave and elide first,
+    // their whole words on hover; the table scrolls sideways only once the
+    // sheet is narrower than every column's floor. A row's actions are its
+    // menu: Enter or a double-click opens its stress trace.
+    let columns = [
+        Column::name("Device", 96.0),
+        Column::name("Rule", 150.0),
+        Column::number("Observed", 104.0),
+        Column::number("Limit", 104.0),
+        Column::number("Margin", 104.0),
+        Column::number("Worst interval", 176.0),
+        Column::words("Status", 76.0),
+    ];
+    let rule_at = |row: usize| {
+        let rule = *visible_rules.get(row)?;
+        Some((evaluations.get(rule)?, plan.facts(rule)?))
+    };
+    let selection_of = |evaluation: &SoaEvaluationEvidence| SoaRuleSelection {
+        analysis: analysis_key,
+        device_id: evaluation.device_id.clone(),
+        parameter: evaluation.parameter,
+    };
+    let is_selected = |evaluation: &SoaEvaluationEvidence| {
+        selected.as_ref().is_some_and(|selection| {
+            selection.analysis == analysis_key
+                && selection.device_id == evaluation.device_id
+                && selection.parameter == evaluation.parameter
+        })
+    };
+    let revision =
+        egui::Id::new(("soa", analysis_key, filter.label(), visible_rules.len())).value();
+    let response = with_table_state(ui, "soa", |ui, state| {
+        // The page's selected rule is the table's: one row, looked for once
+        // per change of the rule or the rows shown.
+        match selected.filter(|selection| selection.analysis == analysis_key) {
+            None => state.selection = None,
+            Some(selection) => {
+                let lead = state.selected_row().and_then(rule_at);
+                let sought = egui::Id::new((
+                    selection.device_id.as_str(),
+                    parameter_label(selection.parameter),
+                    revision,
+                ))
+                .value();
+                let sought_id = ui.id().with("rspice.results.soa-sought");
+                if lead.is_none_or(|(evaluation, _)| !is_selected(evaluation))
+                    && ui.data(|data| data.get_temp::<u64>(sought_id)) != Some(sought)
+                {
+                    ui.data_mut(|data| data.insert_temp(sought_id, sought));
+                    match (0..visible_rules.len()).find(|row| {
+                        rule_at(*row).is_some_and(|(evaluation, _)| is_selected(evaluation))
+                    }) {
+                        Some(row) => state.select(row, None),
+                        None => state.selection = None,
                     }
-                })
-                // Only the rows the viewport can show. A real block SOAs
-                // thousands of rules, and every row here costs a schematic
-                // lookup for its cross-probe button.
-                .body(|body| {
-                    body.rows(row_height, visible_rules.len(), |mut row| {
-                        let rule = visible_rules[row.index()];
-                        // `rule` is an ordinal from the memoized plan and
-                        // `evaluations` is the live retained evidence. They
-                        // agree for every generation the plan was built
-                        // against, and a panic is not how a Results sheet
-                        // should report that they stopped agreeing: a row it
-                        // cannot vouch for is a row it does not draw.
-                        let (Some(evaluation), Some(facts)) =
-                            (evaluations.get(rule), plan.facts(rule))
-                        else {
-                            return;
-                        };
-                        let is_selected = selected.as_ref().is_some_and(|selection| {
-                            selection.analysis == analysis_key
-                                && selection.device_id == evaluation.device_id
-                                && selection.parameter == evaluation.parameter
-                        });
-                        row.set_selected(is_selected);
-                        row.col(|ui| {
-                            let font = egui::TextStyle::Monospace.resolve(ui.style());
-                            let budget =
-                                ui.available_width() - 2.0 * ui.spacing().button_padding.x;
-                            let shown = elide_middle(ui, &evaluation.device_id, &font, budget);
-                            let mut response = ui
-                                .selectable_label(is_selected, RichText::new(&shown).monospace());
-                            if shown != evaluation.device_id {
-                                response = response.on_hover_text(&evaluation.device_id);
-                            }
-                            if response.clicked() {
-                                requested = Some(SoaRuleSelection {
-                                    analysis: analysis_key,
-                                    device_id: evaluation.device_id.clone(),
-                                    parameter: evaluation.parameter,
-                                });
-                            }
-                        });
-                        row.col(|ui| {
-                            let label = parameter_label(evaluation.parameter);
-                            let font = egui::TextStyle::Body.resolve(ui.style());
-                            let shown = elide_middle(ui, label, &font, ui.available_width());
-                            let response = ui.label(&shown);
-                            if shown != label {
-                                response.on_hover_text(label);
-                            }
-                        });
-                        let unit = &evaluation.unit;
-                        row.col(|ui| {
-                            mono(ui, &numbers.value(evaluation.worst_actual_value, unit));
-                        });
-                        row.col(|ui| mono(ui, &numbers.value(evaluation.limit_value, unit)));
-                        row.col(|ui| {
-                            mono(
-                                ui,
-                                &numbers.difference(
-                                    evaluation.limit_value - evaluation.worst_actual_value,
-                                    unit,
-                                ),
-                            );
-                        });
-                        row.col(|ui| mono(ui, &facts.worst_interval.compact(numbers)));
-                        row.col(|ui| verdict(ui, evaluation.verdict));
-                        row.col(|ui| {
-                            ui.horizontal(|ui| {
-                                let response = ui
-                                    .add_enabled(
-                                        facts.stress_waveform.is_some(),
-                                        egui::Button::new("Stress trace"),
-                                    )
-                                    .on_disabled_hover_text(
-                                        "This dataset predates exact SOA stress-history retention; run the analysis again.",
-                                    );
-                                if response.clicked() {
-                                    requested = Some(SoaRuleSelection {
-                                        analysis: analysis_key,
-                                        device_id: evaluation.device_id.clone(),
-                                        parameter: evaluation.parameter,
-                                    });
-                                    trace_open = true;
-                                }
-
-                                let schematic_available =
-                                    schematic_available(analysis_key, &evaluation.device_id);
-                                let response = ui
-                                    .add_enabled(schematic_available, egui::Button::new("Schematic"))
-                                    .on_disabled_hover_text(
-                                        "The result is stale or the retained device has no exact identity in the active schematic.",
-                                    );
-                                if response.clicked() {
-                                    let selection = SoaRuleSelection {
-                                        analysis: analysis_key,
-                                        device_id: evaluation.device_id.clone(),
-                                        parameter: evaluation.parameter,
-                                    };
-                                    requested = Some(selection.clone());
-                                    cross_probe = Some(selection);
-                                }
-                            });
-                        });
-                    });
-                });
-        });
+                }
+            }
+        }
+        let response = DataTable::new("rspice.results.soa", &columns, visible_rules.len())
+            .state(state)
+            .freeze(1)
+            .revision(revision)
+            .max_height(ui.available_height())
+            .show(ui, |row| {
+                // `rule` is an ordinal from the memoized plan and
+                // `evaluations` is the live retained evidence. A row the
+                // sheet cannot vouch for is a row of dashes, not a panic.
+                let Some((evaluation, facts)) = rule_at(row) else {
+                    return vec![Cell::absent(); 7];
+                };
+                let unit = &evaluation.unit;
+                let margin = evaluation.limit_value - evaluation.worst_actual_value;
+                vec![
+                    Cell::text(&evaluation.device_id),
+                    Cell::text(parameter_label(evaluation.parameter)),
+                    Cell::number(numbers.value(evaluation.worst_actual_value, unit))
+                        .sort_by(SortKey::Number(evaluation.worst_actual_value)),
+                    Cell::number(numbers.value(evaluation.limit_value, unit))
+                        .sort_by(SortKey::Number(evaluation.limit_value)),
+                    Cell::number(numbers.difference(margin, unit)).sort_by(SortKey::Number(margin)),
+                    Cell::number(facts.worst_interval.compact(numbers)),
+                    Cell::text(evaluation.verdict.label()).toned(verdict_tone(evaluation.verdict)),
+                ]
+            });
+        if (response.clicked.is_some() || response.selection_changed)
+            && let Some((evaluation, _)) = state.selected_row().and_then(rule_at)
+        {
+            requested = Some(selection_of(evaluation));
+        }
+        if let Some((evaluation, facts)) = response.activate.and_then(rule_at)
+            && facts.stress_waveform.is_some()
+        {
+            requested = Some(selection_of(evaluation));
+            trace_open = true;
+        }
+        response
+    });
+    table_row_menu(ui, "soa", response.context_menu, |ui, row| {
+        let Some((evaluation, facts)) = rule_at(row) else {
+            ui.close();
+            return;
+        };
+        let stress = ui
+            .add_enabled(
+                facts.stress_waveform.is_some(),
+                egui::Button::new("Open stress trace"),
+            )
+            .on_disabled_hover_text(
+                "This dataset predates exact SOA stress-history retention; run the analysis again.",
+            );
+        if stress.clicked() {
+            requested = Some(selection_of(evaluation));
+            trace_open = true;
+            ui.close();
+        }
+        let schematic = ui
+            .add_enabled(
+                schematic_available(analysis_key, &evaluation.device_id),
+                egui::Button::new("Locate in schematic"),
+            )
+            .on_disabled_hover_text(
+                "The result is stale or the retained device has no exact identity in the active schematic.",
+            );
+        if schematic.clicked() {
+            let selection = selection_of(evaluation);
+            requested = Some(selection.clone());
+            cross_probe = Some(selection);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Copy exact row").clicked() {
+            ui.ctx().copy_text(format!(
+                "{}\t{}\t{:.17e}\t{:.17e}\t{:.17e}\t{}\t{}",
+                evaluation.device_id,
+                parameter_label(evaluation.parameter),
+                evaluation.worst_actual_value,
+                evaluation.limit_value,
+                evaluation.limit_value - evaluation.worst_actual_value,
+                facts.worst_interval.full(numbers),
+                evaluation.verdict.label(),
+            ));
+            ui.close();
+        }
+    });
     if visible_rules.is_empty() {
         well_hint(ui, "No retained SOA rules match the selected filter");
     }
@@ -1279,22 +1276,14 @@ fn parameter_label(parameter: SoaParameterEvidence) -> &'static str {
     }
 }
 
-fn verdict(ui: &mut Ui, value: SoaRuleVerdictEvidence) {
-    let color = verdict_color(value, &Tokens::get(ui.ctx()).color);
-    ui.label(RichText::new(value.label()).strong().color(color));
-}
-
-/// The ink of a rule's verdict cell: a violation in the error tone, a rule
-/// near its limit in the warning tone, and a pass in plain text, because a
+/// A verdict cell's tone in the rule table: a violation in the error tone,
+/// a rule near its limit in the warning tone, and a pass neutral, because a
 /// rule that holds has nothing to say.
-fn verdict_color(
-    value: SoaRuleVerdictEvidence,
-    palette: &rspice_ui_kit::palette::Palette,
-) -> egui::Color32 {
+fn verdict_tone(value: SoaRuleVerdictEvidence) -> Tone {
     match value {
-        SoaRuleVerdictEvidence::Pass => palette.text,
-        SoaRuleVerdictEvidence::Warning => palette.warn,
-        SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => palette.err,
+        SoaRuleVerdictEvidence::Pass => Tone::Neutral,
+        SoaRuleVerdictEvidence::Warning => Tone::Caution,
+        SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => Tone::Error,
     }
 }
 

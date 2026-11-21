@@ -338,7 +338,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn clicking_a_matrix_cell_opens_its_retained_coefficient_plot() {
+    fn double_clicking_a_matrix_cell_opens_its_retained_coefficient_plot() {
         for width in [1280.0, 768.0] {
             let mut app =
                 crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
@@ -379,7 +379,8 @@ pub(crate) mod tests {
                 .find_map(|shape| cell_text_rect(&shape.shape))
                 .expect("visible matrix coefficient")
                 .center();
-            for pressed in [true, false] {
+            // A click selects the coefficient; the second click opens it.
+            for pressed in [true, false, true, false] {
                 let _ = frame(vec![
                     egui::Event::PointerMoved(position),
                     egui::Event::PointerButton {

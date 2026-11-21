@@ -312,7 +312,7 @@ fn every_sheet_paints_an_empty_dataset() {
 /// without scrolling a document well that does not scroll.
 ///
 /// The Events sheet joined the list when it gained a bar of its own: its bus
-/// radix, and the per-row disclosure that opens a word to its member rows,
+/// radix, and the twist on a bus row that opens the word to its member rows,
 /// are controls that a reader has to be able to reach.
 #[test]
 fn the_catalog_sheets_fit_their_window_at_both_gates() {
@@ -350,9 +350,12 @@ fn the_catalog_sheets_fit_their_window_at_both_gates() {
                     continue;
                 };
                 measured += 1;
-                if node
-                    .label()
-                    .is_some_and(|label| label.starts_with("Bits of "))
+                // The table names a row's disclosure for the word it opens.
+                if viewer == ResultViewer::Events
+                    && node.role() == egui::accesskit::Role::Button
+                    && node.label().is_some_and(|label| {
+                        label.starts_with("Open ") || label.starts_with("Close ")
+                    })
                 {
                     buses_measured += 1;
                 }

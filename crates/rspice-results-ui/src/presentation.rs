@@ -196,22 +196,57 @@ pub(crate) fn table_row_height(ui: &Ui) -> f32 {
     }
 }
 
-/// Fit the controls a dense table's rows hold to the row: a selectable
-/// ordinal or a row button keeps its width but not the control height, so
-/// it cannot spill into the rows beside it. Call it on the table's own
-/// child `Ui`.
-pub(crate) fn fit_controls_to_rows(ui: &mut Ui, row_height: f32) {
-    let text_height = ui.text_style_height(&egui::TextStyle::Button);
-    let spacing = ui.spacing_mut();
-    spacing.interact_size.y = spacing.interact_size.y.min(row_height - 2.0);
-    spacing.button_padding.y = spacing
-        .button_padding
-        .y
-        .min(((row_height - 2.0 - text_height) * 0.5).max(0.0));
+/// A sheet table's memory between frames (its selection, sort, sideways
+/// scroll and the widths the reader dragged), kept with the window under
+/// `salt` and lent to `show`.
+pub(crate) fn with_table_state<R>(
+    ui: &mut Ui,
+    salt: &str,
+    show: impl FnOnce(&mut Ui, &mut rspice_ui_kit::widgets::table::TableState) -> R,
+) -> R {
+    let id = ui.id().with(("rspice.results.table-state", salt));
+    let mut state = ui
+        .data_mut(|data| data.get_temp::<rspice_ui_kit::widgets::table::TableState>(id))
+        .unwrap_or_default();
+    let shown = show(ui, &mut state);
+    ui.data_mut(|data| data.insert_temp(id, state));
+    shown
 }
 
-/// Dimmed names and mono values. A key row is set in primary text with a
-/// semibold value: weight, not colour, since accent means selection.
+/// A sheet table's row menu: opened where the reader asked for it, on the
+/// row they asked on, and drawn by `items` until it closes.
+pub(crate) fn table_row_menu(
+    ui: &Ui,
+    salt: &str,
+    asked: Option<rspice_ui_kit::widgets::table::ContextRequest>,
+    items: impl FnOnce(&mut Ui, usize),
+) {
+    let id = ui.id().with(("rspice.results.table-menu", salt));
+    let ctx = ui.ctx().clone();
+    if let Some(asked) = asked {
+        ctx.data_mut(|data| data.insert_temp(id, (asked.cell.row, asked.position)));
+        egui::Popup::open_id(&ctx, id);
+    }
+    if !egui::Popup::is_id_open(&ctx, id) {
+        return;
+    }
+    let Some((row, position)) = ctx.data(|data| data.get_temp::<(usize, egui::Pos2)>(id)) else {
+        return;
+    };
+    egui::Popup::new(
+        id,
+        ctx,
+        egui::PopupAnchor::Position(position),
+        egui::LayerId::new(egui::Order::Foreground, id),
+    )
+    .kind(egui::PopupKind::Menu)
+    .open_memory(None)
+    .show(|ui| items(ui, row));
+}
+
+/// Dimmed names and mono values, the values selectable for copying. A key
+/// row is set in primary text with a semibold value: weight, not colour,
+/// since accent means selection.
 pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -243,7 +278,7 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
         if !ui.is_rect_visible(rect) {
             continue;
         }
-        let painter = ui.painter();
+        let painter = ui.painter().clone();
         let name_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left() + inset, rect.top() + 4.0),
             egui::vec2(name_width, row_height - 8.0),
@@ -255,11 +290,19 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
         painter
             .with_clip_rect(name_rect)
             .galley(name_rect.min, name_galley, c.text_dim);
-        painter.with_clip_rect(value_rect).galley(
+        // The value is text the reader can select and copy, as a readout
+        // is read off to be used elsewhere; the name beside it is painted.
+        let value_at = egui::Rect::from_min_size(
             egui::pos2(value_rect.right() - value_galley.size().x, value_rect.top()),
-            value_galley,
-            c.text,
-        );
+            value_galley.size(),
+        )
+        .intersect(value_rect);
+        ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(value_at)
+                .layout(egui::Layout::right_to_left(egui::Align::Min)),
+        )
+        .add(egui::Label::new(value_galley).selectable(true));
         if i + 1 < rows.len() {
             painter.hline(
                 rect.x_range(),

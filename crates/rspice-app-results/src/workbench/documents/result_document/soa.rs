@@ -503,67 +503,47 @@ mod tests {
         assert_eq!(served.analysis, active);
     }
 
-    /// At 1200 px the rule table fits the sheet: every row's Stress trace and
-    /// Schematic buttons sit whole inside the frame, beside the verdict they
-    /// act on, with nothing scrolled sideways out of view.
+    /// At 1200 px the rule table fits the sheet: every column, the verdict
+    /// last, sits whole inside the frame with nothing scrolled sideways out
+    /// of view.
     #[test]
-    fn the_rule_table_fits_a_1200_px_sheet_with_every_control_inside() {
+    fn the_rule_table_fits_a_1200_px_sheet_with_every_column_inside() {
         let mut state = soa_state(12, 8, 3.0);
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
         let width = 1_200.0;
-        let mut output = None;
+        let mut geometry = None;
         for _ in 0..3 {
-            output = Some(ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(width, 760.0),
-                    )),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default()
-                        .show(ctx, |ui| show(ui, &mut state.results_parts()));
-                },
-            ));
-        }
-        let tree = output
-            .expect("three frames ran")
-            .platform_output
-            .accesskit_update
-            .expect("the SOA sheet publishes an accessibility tree");
-        let bounds = |label: &str| -> Vec<egui::accesskit::Rect> {
-            tree.nodes
-                .iter()
-                // A Label-role node carries its text in `value`, a button in
-                // `label`.
-                .filter(|(_, node)| node.label().or(node.value()) == Some(label))
-                .filter_map(|(_, node)| node.bounds())
-                .collect()
-        };
-        let stress = bounds("Stress trace");
-        let schematic = bounds("Schematic");
-        assert!(stress.len() >= 6, "the sheet drew {} rules", stress.len());
-        assert_eq!(stress.len(), schematic.len());
-        // The Status header is the one heading the rows, just above the first.
-        let first_row = stress.iter().map(|rect| rect.y0).fold(f64::MAX, f64::min);
-        let status = bounds("Status")
-            .into_iter()
-            .filter(|rect| rect.y1 <= first_row)
-            .max_by(|a, b| a.y0.total_cmp(&b.y0))
-            .expect("the table names its Status column");
-        for button in stress.iter().chain(&schematic) {
-            assert!(
-                button.x0 >= 0.0 && button.x1 <= f64::from(width),
-                "a row button spans {:.1}..{:.1} px of a {width} px frame",
-                button.x0,
-                button.x1
+            geometry = Some(
+                rspice_ui_kit::probe::pass(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 760.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| show(ui, &mut state.results_parts()),
+                )
+                .1,
             );
+        }
+        let geometry = geometry.expect("three frames ran");
+        assert!(
+            geometry.all("table.row").len() >= 6,
+            "the sheet drew {} rules",
+            geometry.all("table.row").len()
+        );
+        for column in 0..7 {
+            let head = geometry
+                .one(&format!("table.head.{column}"))
+                .unwrap_or_else(|| panic!("column {column} is in view"));
             assert!(
-                button.x0 >= status.x1,
-                "a row button sits over the Status column"
+                head.left() >= 0.0 && head.right() <= width,
+                "column {column} spans {:.1}..{:.1} px of a {width} px frame",
+                head.left(),
+                head.right()
             );
         }
     }
@@ -592,7 +572,7 @@ mod tests {
             .expect("the SOA sheet publishes an accessibility tree")
             .nodes
             .iter()
-            .filter(|(_, node)| node.label() == Some("Stress trace"))
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Row)
             .count();
         assert!(drawn > 0, "the sheet drew no rules at all");
         assert!(
