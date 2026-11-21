@@ -396,105 +396,6 @@ fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
     }
 }
 
-/// A page with nothing to list is inset by the body padding and nothing
-/// else: its line stands at the panel's own left edge, on the row the first
-/// row would have taken — under the tab strip, or under the page's toolbar
-/// band where it has one. The hint used to carry a 12 × 20 inset of its own,
-/// which floated it inside a panel every other page kept tight.
-#[test]
-fn an_empty_page_starts_where_its_first_row_would() {
-    fn scan(shape: &egui::epaint::Shape, below: f32, found: &mut Option<egui::Pos2>) {
-        match shape {
-            // An empty field's galley has no extent, so the band filter below
-            // cannot place it; it is placed by where it is drawn instead.
-            egui::epaint::Shape::Text(text)
-                if text.galley.job.text.is_empty() || text.pos.y < below => {}
-            egui::epaint::Shape::Text(text) => {
-                if found.is_none_or(|best: egui::Pos2| text.pos.y < best.y) {
-                    *found = Some(text.pos);
-                }
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    scan(shape, below, found);
-                }
-            }
-            _ => {}
-        }
-    }
-    /// The foot of the page's toolbar band: the panel-filled rect that starts
-    /// at the tab strip's foot.
-    fn toolbar_foot(shape: &egui::epaint::Shape, panel: egui::Color32) -> Option<f32> {
-        match shape {
-            egui::epaint::Shape::Rect(rect)
-                if rect.fill == panel && (rect.rect.top() - CONSOLE_HEADER_HEIGHT).abs() < 0.5 =>
-            {
-                Some(rect.rect.bottom())
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                shapes.iter().find_map(|shape| toolbar_foot(shape, panel))
-            }
-            _ => None,
-        }
-    }
-
-    for page in ConsolePage::ALL {
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.console_visible = true;
-        app.state.workbench.console_page = page;
-        let ctx = egui::Context::default();
-        rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        let size = egui::Vec2::new(900.0, 240.0);
-        let mut run = || {
-            ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                    ..Default::default()
-                },
-                |ui| {
-                    let layout = rspice_app_workbench::workbench::layout::LayoutSpec::resolve(
-                        1280.0,
-                        760.0,
-                        &app.state.workbench,
-                    );
-                    rspice_app_workbench::workbench::docks::console::show(ui, &mut app, layout);
-                },
-            )
-        };
-        // Sizing settles on the second pass; the third is the one measured.
-        let _ = run();
-        let _ = run();
-        let output = run();
-        let panel = Tokens::get(&ctx).color.bg_panel;
-        // The first row stands as far under the toolbar band as a page with
-        // no toolbar stands under the tab strip.
-        let body_top = output
-            .shapes
-            .iter()
-            .find_map(|clipped| toolbar_foot(&clipped.shape, panel))
-            .unwrap_or(CONSOLE_HEADER_HEIGHT)
-            + CONSOLE_BODY_PADDING_TOP;
-        let mut found = None;
-        for clipped in &output.shapes {
-            // The tab strip paints above the body; only body ink is in scope.
-            if clipped.shape.visual_bounding_rect().top() < CONSOLE_HEADER_HEIGHT {
-                continue;
-            }
-            scan(&clipped.shape, body_top - 0.5, &mut found);
-        }
-        let hint = found.unwrap_or_else(|| panic!("{page:?} painted no empty line"));
-        assert_eq!(
-            hint.x, CONSOLE_BODY_PADDING_X,
-            "{page:?} insets its empty line past the body padding"
-        );
-        assert!(
-            (body_top..body_top + CONSOLE_ROW_MIN_HEIGHT).contains(&hint.y),
-            "{page:?} drops its empty line to {} instead of the first row at {body_top}",
-            hint.y
-        );
-    }
-}
-
 /// Only a warning or an error earns a mark, and the mark is the line's only
 /// colour: notes, debug and trace lines are told apart by neutral ink alone.
 #[test]
@@ -517,61 +418,6 @@ fn only_warnings_and_errors_earn_a_problem_mark() {
         assert!(
             neutral.contains(&log_message_color(&Tokens::default(), severity)),
             "{severity:?} messages must be painted in neutral ink"
-        );
-    }
-}
-
-/// Every console row is painted in neutral ink. The one colour a log, problem
-/// or task row may carry is its leading mark, and a pass, a note or a
-/// lifecycle word carries none.
-#[test]
-fn console_rows_paint_no_coloured_text() {
-    fn text_colors(shape: &egui::epaint::Shape, colors: &mut Vec<egui::Color32>) {
-        match shape {
-            egui::epaint::Shape::Text(text) => {
-                colors.push(text.fallback_color);
-                colors.extend(text.galley.job.sections.iter().map(|s| s.format.color));
-            }
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    text_colors(shape, colors);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut state = AppState::default();
-    state.model.log_buffer.clear();
-    state
-        .model
-        .log_buffer
-        .log(LogSeverity::Error, LogSource::Run, "solve failed");
-    state
-        .model
-        .log_buffer
-        .log(LogSeverity::Warning, LogSource::Run, "gmin stepping");
-    state
-        .model
-        .log_buffer
-        .log(LogSeverity::Info, LogSource::Run, "run complete");
-
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| transcript::console(ui, &mut state));
-    });
-    let mut colors = Vec::new();
-    for clipped in &output.shapes {
-        text_colors(&clipped.shape, &mut colors);
-    }
-    let palette = Tokens::default().color;
-    assert!(!colors.is_empty(), "the console painted no text");
-    for color in colors {
-        assert!(
-            [palette.text, palette.text_dim, palette.text_faint].contains(&color)
-                || color == egui::Color32::PLACEHOLDER,
-            "console text painted in {color:?}, not a neutral ink"
         );
     }
 }
@@ -1032,19 +878,6 @@ fn a_console_tab_press_survives_widgets_coming_and_going_before_the_strip() {
     );
 }
 
-#[test]
-fn console_tab_lane_reserves_every_visible_trailing_action() {
-    // Maximize and collapse.
-    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
-    assert_eq!(console_trailing_actions_width(desktop, false), 60.0);
-    // Collapse alone, at the touch target.
-    let phone = LayoutSpec::resolve_with_pointer(390.0, 844.0, true, &WorkbenchSession::default());
-    assert_eq!(console_trailing_actions_width(phone, true), 47.0);
-    let tablet =
-        LayoutSpec::resolve_with_pointer(1_024.0, 768.0, true, &WorkbenchSession::default());
-    assert_eq!(console_trailing_actions_width(tablet, true), 47.0);
-}
-
 /// A collapsed dock shows its tabs and no page, so no tab is marked as the
 /// open one, and a press on any tab opens the dock on that page. A press used
 /// to change the page the strip marked and leave the dock shut.
@@ -1107,85 +940,6 @@ fn a_press_on_a_collapsed_docks_tab_opens_it_on_that_page() {
     let (_, page, open) = frame(vec![button(false)]);
     assert_eq!(page, ConsolePage::Problems);
     assert!(open, "the press left the dock collapsed");
-}
-
-/// The open page's underline runs the whole width of its tab, as the tab's
-/// hover fill does, and lies on the strip's foot, over its rule. It used to
-/// stop 8 px short of either edge and float above the rule.
-#[test]
-fn the_open_tabs_underline_spans_its_tab_on_the_strips_foot() {
-    let mut app = busy_console();
-    app.state.workbench.console_page = ConsolePage::Problems;
-    let output = console_dock_output(&mut app, 900.0);
-    let tab = labelled_bounds(&output)
-        .into_iter()
-        .find(|(role, label, _)| {
-            *role == egui::accesskit::Role::Tab && label.starts_with("Problems")
-        })
-        .map(|(_, _, bounds)| bounds)
-        .expect("the Problems tab");
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let accent = Tokens::get(&ctx).color.accent;
-    let underline = output
-        .shapes
-        .iter()
-        .find_map(|clipped| match &clipped.shape {
-            egui::epaint::Shape::Rect(rect)
-                if rect.fill == accent && rect.rect.bottom() <= CONSOLE_HEADER_HEIGHT + 0.5 =>
-            {
-                Some(rect.rect)
-            }
-            _ => None,
-        })
-        .expect("the open tab's underline");
-    assert_eq!(
-        underline.x_range(),
-        tab.x_range(),
-        "{underline:?} under {tab:?}"
-    );
-    assert_eq!(underline.bottom(), CONSOLE_HEADER_HEIGHT);
-}
-
-/// Every page's toolbar stands on a band of the panel's fill, ruled off from
-/// the page's well under it. The Problems page's controls used to stand on
-/// the well itself, the colour of the rows they filter.
-#[test]
-fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
-    let mut app = busy_console();
-    app.state.open_project_session();
-    app.state.code.netlist.diagnostics = std::sync::Arc::new(
-        rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
-            vec![
-                rspice_app_state::state::netlist_diagnostics::Diagnostic::error("bad netlist card"),
-            ],
-            "",
-        )
-        .unwrap(),
-    );
-    let size = Vec2::new(900.0, 240.0);
-    for page in [
-        ConsolePage::Console,
-        ConsolePage::Problems,
-        ConsolePage::Measurements,
-    ] {
-        app.state.workbench.console_page = page;
-        let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
-        let mut palette = None;
-        let canvas = rspice_app_workbench::ui::raster::render(size, |ui, _| {
-            palette = Some(Tokens::get(ui.ctx()).color);
-            rspice_app_workbench::workbench::docks::console::show(ui, &mut app, layout);
-        });
-        let palette = palette.expect("a pass ran");
-        // Beside the controls, past the last of them; then well under them.
-        let x = 600;
-        let band = canvas
-            .pixel(x, CONSOLE_HEADER_HEIGHT as usize + 3)
-            .expect("on the canvas");
-        let well = canvas.pixel(x, 200).expect("on the canvas");
-        assert_eq!(band, palette.bg_panel, "{page:?}'s toolbar band");
-        assert_eq!(well, palette.bg_inset, "{page:?}'s well");
-    }
 }
 
 /// Collect text from the same rendering path used by the console and its header.

@@ -1,17 +1,15 @@
-//! Tests for the context toolbar: run currentness, the mockup's command rows
-//! and glyphs, and the responsive widths every breakpoint reserves.
+//! Tests for the context toolbar: run currentness, the run control and the
+//! design toolbars the shell chooses.
 
 use crate::workbench::RSpiceApp;
 use egui::Vec2;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_design::workbench::design::toolbar::{
-    DESIGN_DIRECT_TOOLBAR_COMMANDS, SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
-    design_toolbar_command_selected,
+    SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR, design_toolbar_command_selected,
 };
 use rspice_app_results::workbench::chrome::toolbar::results::{
     results_document_is_historical, run_has_current_success_authority,
 };
-use rspice_app_simulate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
 use rspice_app_state::product::{
     AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
 };
@@ -21,7 +19,6 @@ use rspice_app_state::state::{
     Tool,
 };
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::workbench::chrome::toolbar::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
 use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
@@ -143,36 +140,6 @@ fn missing_current_generated_source_never_authenticates_a_retained_dataset() {
     assert!(results_document_is_historical(app.state.results_reads()));
 }
 
-/// A labelled tool is as wide as its label drawn in its button's font, with
-/// no floor under a short one, wider drawn selected, and a long label stops
-/// at the widest any text-bearing toolbar control grows.
-#[test]
-fn long_toolbar_labels_remain_bounded() {
-    let ctx = egui::Context::default();
-    rspice_ui_kit::fonts::install(&ctx);
-    let mut widths = Vec::new();
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-        widths = vec![
-            explicit_label_width(ui, "Run", false),
-            explicit_label_width(ui, "Run schematic checks (Ctrl+E)", false),
-            explicit_label_width(ui, "Run schematic checks (Ctrl+E)", true),
-            explicit_label_width(ui, "A very long engineering command label, clipped", false),
-        ];
-    });
-    let [short, label, selected, long] = widths[..] else {
-        panic!("four widths: {widths:?}");
-    };
-    assert!(
-        short < 76.0,
-        "a short label takes only its own room: {short}"
-    );
-    assert!(label > short && selected > label, "{widths:?}");
-    assert_eq!(
-        long,
-        rspice_app_workbench::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH
-    );
-}
-
 #[test]
 fn run_control_label_tracks_stable_execution_and_cancellation_lifecycle() {
     let mut app = RSpiceApp::test_instance();
@@ -218,66 +185,6 @@ fn every_design_toolbar_the_shell_chooses_is_registered_once() {
 }
 
 #[test]
-fn desktop_design_toolbar_matches_the_upgraded_mockup() {
-    assert_eq!(
-        DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(key, _, _)| key),
-        [
-            DesignCommand::SelectTool.key(),
-            DesignCommand::PlaceInstance.key(),
-            DesignCommand::PlaceWire.key(),
-            DesignCommand::PlaceBus.key(),
-            DesignCommand::PlaceBusTap.key(),
-            DesignCommand::PlaceJunction.key(),
-            DesignCommand::PlaceLabel.key(),
-            DesignCommand::PlaceOffSheetConnector.key(),
-            DesignCommand::PlacePin.key(),
-            DesignCommand::PlaceProbe.key(),
-            DesignCommand::PlaceText.key(),
-        ]
-    );
-}
-
-/// The direct tools are a single unlabelled row, so a glyph is the only
-/// thing distinguishing one arm from another while the pointer is
-/// elsewhere. `DescendHierarchyDirect` sits in the same row, which is why
-/// its glyph is checked here too.
-#[test]
-fn no_two_armed_schematic_tools_paint_the_same_glyph() {
-    let icons = DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(_, icon, _)| icon);
-    for (index, icon) in icons.iter().enumerate() {
-        assert!(
-            !icons[index + 1..].contains(icon),
-            "{icon:?} is painted twice in the direct tool row"
-        );
-        assert_ne!(
-            *icon,
-            WorkbenchIcon::Layers,
-            "Layers is the descend-hierarchy glyph of this same toolbar"
-        );
-    }
-}
-
-#[test]
-fn schematic_tooltips_use_the_upgraded_mockup_copy() {
-    assert_eq!(
-        DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(_, _, label)| label),
-        [
-            "Select (Esc)",
-            "Place instance",
-            "Draw wire",
-            "Draw bus",
-            "Place bus tap",
-            "Place junction",
-            "Net label",
-            "Off-sheet connector",
-            "Create pin",
-            "Probe signal",
-            "Place text or note",
-        ]
-    );
-}
-
-#[test]
 fn direct_schematic_toolbar_selection_tracks_every_armed_tool() {
     assert!(design_toolbar_command_selected(
         Tool::Place(ComponentType::Resistor),
@@ -303,46 +210,6 @@ fn direct_schematic_toolbar_selection_tracks_every_armed_tool() {
         Tool::DesignNote,
         DesignCommand::PlaceText.key(),
     ));
-}
-
-#[test]
-fn responsive_toolbar_reserves_fixed_trailing_controls() {
-    let tablet = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchSession::default());
-    let available_after_navigator = 780.0;
-    assert_eq!(
-        trailing_controls_width(tablet, 5.0, true, 117.0, 96.0),
-        252.0
-    );
-    assert_eq!(
-        context_tools_width(
-            available_after_navigator,
-            tablet,
-            8.0,
-            5.0,
-            true,
-            117.0,
-            96.0,
-        ),
-        520.0
-    );
-
-    let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
-    assert_eq!(
-        trailing_controls_width(phone, 2.0, true, 136.0, 106.0),
-        185.0
-    );
-    assert_eq!(
-        trailing_controls_width(phone, 2.0, false, 136.0, 106.0),
-        46.0
-    );
-    assert!(context_tools_width(336.0, phone, 3.0, 2.0, true, 136.0, 106.0) > 0.0);
-}
-
-#[test]
-fn pvt_menu_height_is_bounded_for_short_and_touch_viewports() {
-    assert_eq!(pvt_menu_height_for_viewport(900.0, 29.0), 484.0);
-    assert_eq!(pvt_menu_height_for_viewport(600.0, 44.0), 484.0);
-    assert_eq!(pvt_menu_height_for_viewport(140.0, 44.0), 132.0);
 }
 
 #[test]

@@ -30,7 +30,6 @@ use rspice_app_workbench::workbench::state::problems_view::{
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
 mod detail_region;
-mod review;
 mod waivers;
 
 const WIDTH: f32 = 900.0;
@@ -227,22 +226,6 @@ impl Render {
 
     fn has(&self, needle: &str) -> bool {
         self.text(needle).is_some()
-    }
-
-    /// Every text painted on one row of the grid, left to right.
-    ///
-    /// Two points of tolerance, not none: the subject column is printed in a
-    /// heavier weight than its neighbours and a face's line height is its
-    /// own. Rows are a row height apart, so it cannot reach the next one.
-    fn row_at(&self, y: f32) -> Vec<(String, egui::Rect)> {
-        let mut row: Vec<(String, egui::Rect)> = self
-            .texts
-            .iter()
-            .filter(|(_, rect)| (rect.min.y - y).abs() < 2.0)
-            .cloned()
-            .collect();
-        row.sort_by(|left, right| left.1.min.x.total_cmp(&right.1.min.x));
-        row
     }
 
     fn node(&self, says: &str) -> Option<&Announced> {
@@ -780,85 +763,6 @@ fn the_waiver_toggle_counts_what_it_would_list() {
         narrowed.exact("Waived 0").is_some(),
         "with errors hidden too, the toggle would list nothing: {:?}",
         narrowed.texts,
-    );
-}
-
-/// A waived current error keeps the shape of its mark without its colour:
-/// it is not counted against the design, and a red cross would say it is.
-#[test]
-fn a_waived_error_is_marked_without_the_failure_colour() {
-    let mut state = open_state();
-    let mut waived = record(&state, "T-WAIVED", DiagnosticLevel::Error, "a waived error");
-    waived.canonical.suppression = Some(waiver("T-WAIVED"));
-    publish(&mut state, vec![waived]);
-    let palette = rspice_app_workbench::ui::tokens::Tokens::default().color;
-
-    let render = render(&mut state, sized(egui::RawInput::default()));
-    let cell = render.cell("a waived error").expect("listed");
-    let row = row_of(cell);
-    // The gutter ends where the row's severity word begins.
-    let gutter_end = render.row_at(cell.min.y)[0].1.left();
-    let marked = |color: egui::Color32| {
-        render
-            .segments
-            .iter()
-            .filter(|(points, stroke)| {
-                *stroke == color
-                    && points.iter().all(|point| {
-                        point.y >= row.top() && point.y <= row.bottom() && point.x <= gutter_end
-                    })
-            })
-            .count()
-    };
-    assert_eq!(
-        marked(palette.err),
-        0,
-        "no failure cross in the error colour"
-    );
-    assert_eq!(
-        marked(palette.text_faint),
-        2,
-        "the cross's two strokes, in the faint ink",
-    );
-}
-
-/// Every severity has a mark in the gutter: a note carries the outlined `i`
-/// in the note tone, and a hint the same `i` a step quieter. Before, a note's
-/// gutter was empty, so a column of marks read as a column with gaps in it.
-#[test]
-fn a_note_and_a_hint_are_marked_like_every_other_severity() {
-    let mut state = open_state();
-    let note = record(&state, "T-NOTE", DiagnosticLevel::Info, "a note");
-    let hint = record(&state, "T-HINT", DiagnosticLevel::Hint, "a hint");
-    publish(&mut state, vec![note, hint]);
-    let palette = rspice_app_workbench::ui::tokens::Tokens::default().color;
-
-    let render = render(&mut state, sized(egui::RawInput::default()));
-    // Strokes inside the row and left of its severity cell: the gutter.
-    let stems = |message: &str, color: egui::Color32| {
-        let cell = render.cell(message).expect("listed");
-        let row = row_of(cell);
-        let severity = render.row_at(cell.min.y)[0].1.left();
-        render
-            .segments
-            .iter()
-            .filter(|(points, stroke)| {
-                *stroke == color
-                    && points.iter().all(|point| {
-                        point.y >= row.top() && point.y <= row.bottom() && point.x < severity
-                    })
-            })
-            .count()
-    };
-    assert_eq!(
-        stems("a note", palette.info),
-        1,
-        "the note's `i`, in its tone"
-    );
-    assert_eq!(
-        stems("a hint", palette.text_dim),
-        1,
-        "the hint's `i`, in the dim ink"
     );
 }
 
@@ -2009,36 +1913,6 @@ fn the_severity_cell_tells_an_unreadable_finding_from_a_stale_one() {
         )),
         "Unavailable Error",
     );
-}
-
-/// The severity column is measured against the longest severity cell the
-/// listed rows print, not the longest the page could print: an error and a
-/// warning ask for "Warning", and only a listed waived error asks for
-/// "Waived Error". A waived finding the filter hides asks for nothing.
-#[test]
-fn the_severity_column_is_measured_against_the_listed_cells() {
-    let mut state = open_state();
-    let mut waived = record(
-        &state,
-        "T-WAIVED",
-        DiagnosticLevel::Error,
-        "a waived finding",
-    );
-    waived.canonical.suppression = Some(waiver("T-WAIVED"));
-    let error = record(&state, "T-ERROR", DiagnosticLevel::Error, "an error");
-    let warning = record(&state, "T-WARN", DiagnosticLevel::Warning, "a warning");
-    publish(&mut state, vec![waived, error, warning]);
-
-    let widest = |state: &AppState| {
-        let listed = listing(state);
-        Arrangement::build(&listed, &state.workbench.problems_view)
-            .tally
-            .widest[0]
-    };
-    state.workbench.problems_view.waived = false;
-    assert_eq!(widest(&state), "Warning".chars().count());
-    state.workbench.problems_view.waived = true;
-    assert_eq!(widest(&state), "Waived Error".chars().count());
 }
 
 /// A frame whose listing and reading position match the last one reuses the

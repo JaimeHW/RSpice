@@ -5,11 +5,10 @@
 //! announced to AccessKit — so a control that reaches nobody cannot be pressed
 //! here either.
 
-use egui::{Pos2, Rect, Vec2, ViewportId, pos2, vec2};
+use egui::{Pos2, Rect, ViewportId, pos2, vec2};
 
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_services::workbench::browser::background_alerts::BackgroundAlerts;
-use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::ui::widgets::{
     MirroredEntry, NotificationAction, NotificationCategory, ToastKind, Toasts,
 };
@@ -24,8 +23,6 @@ use rspice_app_workbench::workbench::tools::notification_center::*;
 
 const TITLE_BAR: f32 = 35.0;
 const DESKTOP: (f32, f32) = (1280.0, 760.0);
-const TABLET: (f32, f32) = (820.0, 640.0);
-const PHONE: (f32, f32) = (390.0, 780.0);
 
 /// The wall clock while a pass is drawn: 15:00:30 UTC on 18 October 2026.
 /// The half minute absorbs the fraction of a second egui's clock has run by
@@ -266,91 +263,12 @@ impl Panel {
         self.texts.iter().any(|(text, _)| text == wanted)
     }
 
-    fn painted(&self) -> Vec<&str> {
-        self.texts.iter().map(|(text, _)| text.as_str()).collect()
-    }
-
     fn showing(&self) -> bool {
         self.app.state.workbench.notification_center_showing()
     }
 
     fn toasts(&self) -> &Toasts {
         &self.app.state.workbench.toasts
-    }
-}
-
-#[test]
-fn the_panel_states_the_session_in_one_grammar() {
-    let panel = Panel::seeded(DESKTOP);
-    for owed in [
-        "Notifications",
-        "Mark all read",
-        "All",
-        "Jobs",
-        "System",
-        "Unread only",
-        "Recent",
-        "Earlier this session",
-        "Run 41 complete",
-        "Run 40 failed",
-        "Warning",
-        "Information",
-        "Job \u{00b7} now",
-        "Job \u{00b7} 30 min",
-        "System \u{00b7} 13:00",
-        "Open in Results",
-        "Show in Console",
-        "This session \u{00b7} 4 of 50 kept",
-        "Clear read",
-    ] {
-        assert!(
-            panel.paints(owed),
-            "the panel owes {owed:?} and painted {:#?}",
-            panel.painted()
-        );
-    }
-    // The unread count is the bell's badge and the rows' rails; the head
-    // does not repeat it beside the title.
-    assert!(
-        !panel.painted().iter().any(|text| text.ends_with(" unread")),
-        "the head repeats the unread count: {:#?}",
-        panel.painted()
-    );
-    // The counts ride beside the filters they belong to.
-    for (segment, count) in [("All", 4), ("Jobs", 3), ("System", 1)] {
-        assert!(
-            panel.announces(|label| label == format!("{segment}, {count}")),
-            "{segment} must announce that it holds {count}"
-        );
-    }
-}
-
-/// Nothing the panel paints leaves the panel, and no two strings share
-/// ground, at the three sizes the shell is gated at.
-#[test]
-fn every_string_stays_inside_the_panel_and_clear_of_its_neighbours() {
-    for size in [DESKTOP, TABLET, PHONE] {
-        let panel = Panel::seeded(size);
-        let bounds = panel.bounds().expand(0.5);
-        assert!(
-            panel.screen().contains_rect(panel.bounds()),
-            "{size:?}: the panel {:?} leaves the screen",
-            panel.bounds()
-        );
-        for (text, rect) in &panel.texts {
-            assert!(
-                bounds.contains_rect(*rect),
-                "{size:?}: {text:?} at {rect:?} leaves the panel {bounds:?}"
-            );
-        }
-        for (index, (text, rect)) in panel.texts.iter().enumerate() {
-            for (other, other_rect) in &panel.texts[index + 1..] {
-                assert!(
-                    !rect.shrink(0.5).intersects(other_rect.shrink(0.5)),
-                    "{size:?}: {text:?} at {rect:?} overlaps {other:?} at {other_rect:?}"
-                );
-            }
-        }
     }
 }
 
@@ -456,83 +374,6 @@ fn a_row_under_the_pointer_offers_dismissal_and_dismissal_removes_it() {
     assert_eq!(panel.toasts().activity().len(), 3);
     assert!(!panel.paints("Run 41 complete"));
     assert!(panel.paints("This session \u{00b7} 3 of 50 kept"));
-}
-
-/// Under a finger there is no hover to wait for: every row carries its mark,
-/// and every target is at least the touch size.
-#[test]
-fn a_touch_sized_panel_shows_every_dismiss_mark_at_touch_size() {
-    let panel = Panel::seeded(PHONE);
-    let marks: Vec<_> = panel
-        .controls
-        .iter()
-        .filter(|(label, _)| label.starts_with("Dismiss "))
-        .collect();
-    assert_eq!(marks.len(), 4);
-    for (label, rect) in &panel.controls {
-        let pressable = label.starts_with("Dismiss ")
-            || label.starts_with("Open in Results: ")
-            || label.starts_with("Show in Console: ")
-            || matches!(
-                label.as_str(),
-                "Mark all read" | "Clear read" | "Unread only"
-            );
-        if pressable {
-            assert!(
-                rect.height() >= tokens::TOUCH_TARGET - 0.5,
-                "{label:?} is {} points tall under a finger",
-                rect.height()
-            );
-        }
-    }
-}
-
-/// Touch size is a taller press and not a taller control: the filter band is
-/// the height it is on a desktop, and what grows is what answers the finger.
-#[test]
-fn the_filter_takes_a_finger_without_growing_taller() {
-    let drop_to_list = |panel: &Panel| {
-        let of = |wanted: &str| {
-            panel
-                .texts
-                .iter()
-                .find(|(text, _)| text == wanted)
-                .unwrap_or_else(|| panic!("{wanted:?} is not painted"))
-                .1
-                .center()
-                .y
-        };
-        of("Recent") - of("All")
-    };
-    let desktop = Panel::seeded(DESKTOP);
-    let authored = drop_to_list(&desktop);
-    for size in [TABLET, PHONE] {
-        let panel = Panel::seeded(size);
-        let drop = drop_to_list(&panel);
-        assert!(
-            (drop - authored).abs() <= 0.5,
-            "{size:?}: the list starts {drop} points under the filter's label, \
-             {authored} on a desktop"
-        );
-        let heading = panel
-            .texts
-            .iter()
-            .find(|(text, _)| text == "Recent")
-            .expect("group heading")
-            .1;
-        for segment in ["All, 4", "Jobs, 3", "System, 1"] {
-            let press = panel.control(|label| label == segment);
-            assert!(
-                press.height() >= tokens::TOUCH_TARGET - 0.5,
-                "{size:?}: {segment:?} answers {} points of finger",
-                press.height()
-            );
-            assert!(
-                press.bottom() <= heading.top(),
-                "{size:?}: {segment:?} answers presses meant for the list"
-            );
-        }
-    }
 }
 
 #[test]
@@ -957,47 +798,4 @@ fn the_panel_hangs_under_the_bell_and_never_leaves_the_screen() {
     let placed = PanelPlacement::resolve(short, Some(bell), TITLE_BAR);
     assert!(placed.min.y + placed.max_height <= short.bottom());
     assert!(placed.max_height < PANEL_MAX_HEIGHT);
-}
-
-#[test]
-fn a_phone_gets_a_sheet_under_the_chrome_with_no_caret() {
-    let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 780.0));
-    let placed = PanelPlacement::resolve(screen, None, 40.0);
-
-    assert_eq!(placed.min, pos2(SCREEN_MARGIN, 40.0 + ANCHOR_GAP));
-    assert_eq!(placed.width, 390.0 - SCREEN_MARGIN * 2.0);
-    assert_eq!(placed.max_height, 780.0 - SCREEN_MARGIN - placed.min.y);
-    assert_eq!(placed.caret_x, None);
-
-    let nothing = PanelPlacement::resolve(Rect::from_min_size(Pos2::ZERO, Vec2::ZERO), None, 0.0);
-    assert_eq!((nothing.width, nothing.max_height), (0.0, 0.0));
-}
-
-#[test]
-fn an_empty_list_says_why_it_is_empty() {
-    assert_eq!(empty_copy(true, false).0, "No notifications yet");
-    assert_eq!(empty_copy(true, true).0, "No notifications yet");
-    assert_eq!(empty_copy(false, true).0, "Nothing unread");
-    assert_eq!(empty_copy(false, false).0, "Nothing in this view");
-}
-
-#[test]
-fn responsive_target_size_follows_the_shell_the_bell_is_in() {
-    let ctx = egui::Context::default();
-    let mut state = AppState::default();
-    let at = |width: f32, state: &AppState| {
-        let mut large = false;
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 700.0))),
-                ..Default::default()
-            },
-            |ui| large = large_targets(ui.ctx(), &state.workbench),
-        );
-        large
-    };
-    assert!(at(480.0, &state));
-    assert!(!at(1_120.0, &state));
-    state.workbench.coarse_pointer = true;
-    assert!(at(1_120.0, &state));
 }

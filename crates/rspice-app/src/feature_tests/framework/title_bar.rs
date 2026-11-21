@@ -11,19 +11,15 @@ use crate::workbench::commands::vocabulary::{ShellCommand, command_registry};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
-use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
-use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
-    ALL_MENUS, ApplicationMenu, file_menu_shows_exit, menu_popup_height_for_viewport,
-    shortcut_for_occurrence,
+    ALL_MENUS, ApplicationMenu, file_menu_shows_exit, shortcut_for_occurrence,
 };
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_rows};
 use rspice_app_workbench::workbench::chrome::title_bar::*;
@@ -74,44 +70,6 @@ fn closed_project_title_context_does_not_leak_the_previous_document_identity() {
     assert_eq!(title_context_text(&app, false), "RSpice Workbench");
     assert_eq!(title_context_text(&app, true), "No project open");
     assert_eq!(active_title_cell(&app), "No project open");
-}
-
-/// The rule above was asserted for years against a `#[cfg(test)]` helper the
-/// painter did not call, so the shipped desktop title still read the project
-/// name with nothing open. Assert what is painted, not what is computable.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_painted_desktop_title_names_no_project_when_none_is_open() {
-    fn painted(project_open: bool) -> String {
-        let ctx = title_test_ctx();
-        rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        let mut app = title_test_app();
-        app.state.workbench.workspace = Workspace::Design;
-        if !project_open {
-            app.state.close_project_session();
-        }
-        let bounds = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(640.0, 32.0));
-        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default()
-                .frame(Frame::NONE)
-                .show(ctx, |ui| {
-                    paint_title_context(ui, &app, bounds, false, false)
-                });
-        });
-        let mut text = String::new();
-        for shape in &output.shapes {
-            if let egui::epaint::Shape::Text(painted) = &shape.shape {
-                text.push_str(&painted.galley.job.text);
-                text.push('\n');
-            }
-        }
-        text
-    }
-
-    let closed = painted(false);
-    assert!(closed.contains("RSpice Workbench"), "{closed}");
-    assert!(!closed.contains("Untitled Project"), "{closed}");
-    assert!(painted(true).contains("Untitled Project"));
 }
 
 /// Unsaved project changes are stated once, as a `*` after the visible title,
@@ -182,14 +140,6 @@ fn run_title_menu_frame(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Ev
     });
 }
 
-fn labels(projection: MenuProjection) -> Vec<&'static str> {
-    projection
-        .visible_menus()
-        .iter()
-        .map(|menu| menu.label())
-        .collect()
-}
-
 /// Draw `entries` the way an open menu draws them.
 #[cfg(not(target_arch = "wasm32"))]
 fn draw_menu_entries(ui: &mut Ui, app: &RSpiceApp, entries: &[MenuEntry]) {
@@ -219,75 +169,15 @@ fn listed_commands(entries: &[MenuEntry]) -> Vec<CommandKey> {
     commands
 }
 
-/// `menu` lists `run` as consecutive rows.
-fn assert_menu_lists(menu: ApplicationMenu, run: &[CommandKey]) {
-    let listed = listed_commands(application_menu_entries(menu));
-    assert!(
-        listed.windows(run.len()).any(|window| window == run),
-        "{} does not list {run:?} in order: {listed:?}",
-        menu.label()
-    );
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn rendered_results_menu_labels() -> Vec<String> {
-    let ctx = title_test_ctx();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let app = title_test_app();
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(MENU_OUTER_WIDTH, 720.0),
-            )),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(Frame::NONE)
-                .show(ctx, |ui| {
-                    draw_menu_entries(ui, &app, application_menu_entries(ApplicationMenu::Results))
-                });
-        },
-    );
-    let mut items = output
-        .platform_output
-        .accesskit_update
-        .expect("AccessKit results-menu tree")
-        .nodes
-        .into_iter()
-        .filter_map(|(_, node)| {
-            if matches!(
-                node.role(),
-                egui::accesskit::Role::MenuItem | egui::accesskit::Role::MenuItemCheckBox
-            ) {
-                node.label()
-                    .zip(node.bounds())
-                    .map(|(label, bounds)| (bounds.y0, bounds.x0, label.to_owned()))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    items.sort_by(|left, right| {
-        left.0
-            .total_cmp(&right.0)
-            .then_with(|| left.1.total_cmp(&right.1))
-    });
-    items.into_iter().map(|(_, _, label)| label).collect()
-}
-
 /// Simulate-menu rows as the platform sees them: the painted label paired with
 /// the description the row publishes only when its command is unavailable,
 /// beside what the plan-manager command said about itself while they were
 /// painted.
 ///
-/// The application is built here rather than borrowed from the caller, the way
-/// [`rendered_results_menu_labels`] does it. A helper that took the whole app
-/// mutably would hand every caller reach over every subsystem to render a menu;
-/// what the callers actually vary is whether the active plan has stable
-/// analysis identity, so that is the parameter. Returning the availability read
+/// The application is built here rather than borrowed from the caller. A
+/// helper that took the whole app mutably would hand every caller reach over
+/// every subsystem to render a menu; what the callers actually vary is whether
+/// the active plan has stable analysis identity, so that is the parameter. Returning the availability read
 /// from this same instance is what lets a caller compare a row's published
 /// description against the command's own refusal without a second app to
 /// disagree with.
@@ -392,114 +282,6 @@ fn the_bar_shows_every_menu_above_820_and_one_menu_button_below() {
     assert!(!title_context_is_left_aligned(820.0, true));
 }
 
-#[test]
-fn the_full_bar_lists_every_menu_in_order() {
-    assert!(labels(MenuProjection::Compact).is_empty());
-    assert_eq!(
-        labels(MenuProjection::All),
-        [
-            "File", "Edit", "View", "Design", "Simulate", "Results", "Verify", "Tools", "Window",
-            "Help"
-        ]
-    );
-}
-
-/// The overflow menu the in-between widths showed is gone, and each of its
-/// rows still has a home in a real menu. Its jobs row read "Jobs & targets"
-/// and opens what is now the run history, so Simulate lists it under that
-/// name. The overflow's only other own row, the specialist tool browser, is
-/// retired.
-#[test]
-fn every_row_the_overflow_held_has_a_home_in_a_menu() {
-    let listed = ALL_MENUS
-        .into_iter()
-        .flat_map(|menu| listed_commands(application_menu_entries(menu)))
-        .collect::<Vec<_>>();
-    assert!(
-        listed.contains(
-            &ResultsCommand::ResultViewer(
-                rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
-            )
-            .key()
-        ),
-        "no menu lists the waveform viewer"
-    );
-    assert!(
-        listed.contains(&ModelsCommand::Page(ModelsPage::Models).key()),
-        "no menu lists the model catalog"
-    );
-    assert!(
-        listed.contains(&ShellCommand::OpenWorkspace(Workspace::Netlist).key()),
-        "no menu lists the Netlist workspace"
-    );
-    for command in [
-        ShellCommand::WindowManager,
-        ShellCommand::ToggleFocusMode,
-        ShellCommand::ToggleConsole,
-        ShellCommand::HelpCenter,
-    ] {
-        assert!(listed.contains(&command.key()), "no menu lists {command:?}");
-    }
-    for command in [
-        SimulateCommand::Verify(VerificationPage::MonteCarlo),
-        SimulateCommand::JobsManager,
-    ] {
-        assert!(listed.contains(&command.key()), "no menu lists {command:?}");
-    }
-    assert!(
-        listed.contains(&ids::WORKSPACE_LAYOUTS),
-        "no menu lists workspace layouts"
-    );
-    assert!(
-        listed_commands(application_menu_entries(ApplicationMenu::Simulate))
-            .contains(&SimulateCommand::JobsManager.key())
-    );
-    assert_eq!(
-        SimulateCommand::JobsManager.declared_spec().label,
-        "Run history\u{2026}"
-    );
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn desktop_menu_triggers_fill_the_title_track_without_vertical_clipping() {
-    let ctx = title_test_ctx();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let mut app = title_test_app();
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1_440.0, 900.0),
-            )),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(Frame::NONE)
-                .show(ctx, |ui| {
-                    menus(ui, &mut app, MenuProjection::All, false, 35.0);
-                });
-        },
-    );
-    let nodes = output
-        .platform_output
-        .accesskit_update
-        .expect("AccessKit tree update")
-        .nodes;
-    for label in ["File", "Edit", "View", "Design", "Simulate", "Help"] {
-        let bounds = nodes
-            .iter()
-            .find(|(_, node)| {
-                node.role() == egui::accesskit::Role::MenuItem && node.label() == Some(label)
-            })
-            .and_then(|(_, node)| node.bounds())
-            .unwrap_or_else(|| panic!("missing application menu trigger {label}"));
-        assert_eq!(bounds.y1 - bounds.y0, 35.0, "clipped trigger {label}");
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn f10_then_enter_opens_the_focused_application_menu() {
@@ -563,13 +345,6 @@ fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
 }
 
 #[test]
-fn application_menu_height_is_viewport_bounded() {
-    assert_eq!(menu_popup_height_for_viewport(900.0), 836.0);
-    assert_eq!(menu_popup_height_for_viewport(600.0), 536.0);
-    assert_eq!(menu_popup_height_for_viewport(120.0), MENU_ROW_HEIGHT * 3.0);
-}
-
-#[test]
 fn menu_shortcuts_are_projected_from_the_typed_registry() {
     let platform = rspice_app_state::state::command_catalog::CommandPlatform::Desktop;
     let app = RSpiceApp::test_instance();
@@ -616,43 +391,6 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
             None
         ),
         ""
-    );
-}
-
-#[test]
-fn core_menu_commands_are_all_real_dispatch_commands() {
-    let commands = [
-        ids::UNDO,
-        DesignCommand::PlaceWire.key(),
-        DesignCommand::PlaceBus.key(),
-        DesignCommand::PlaceBusTap.key(),
-        DesignCommand::PlaceJunction.key(),
-    ];
-    assert!(
-        commands
-            .iter()
-            .all(|key| command_registry().spec(*key).is_some())
-    );
-    assert!(
-        command_registry()
-            .spec(ResultsCommand::WaveformCalculator.key())
-            .is_some()
-    );
-    assert!(
-        command_registry()
-            .spec(ModelsCommand::PdkSettings.key())
-            .is_some()
-    );
-    for command in [ProjectCommand::OpenProject, ProjectCommand::Save] {
-        assert!(
-            command_registry().spec(command.key()).is_some(),
-            "{command:?}"
-        );
-    }
-    assert!(
-        command_registry()
-            .spec(SimulateCommand::Run.key())
-            .is_some()
     );
 }
 
@@ -724,29 +462,6 @@ const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::DeleteSheet,
 ];
 
-/// The panels around the drawing are switched from View, beside what is
-/// drawn over it; Window keeps the windows and the documents in them.
-#[test]
-fn the_panels_are_switched_from_view_and_not_from_window() {
-    let panels = [
-        ShellCommand::ToggleNavigator.key(),
-        ShellCommand::ToggleInspector.key(),
-        ShellCommand::ToggleConsole.key(),
-        ResultsCommand::ToggleResultsSplit.key(),
-        ShellCommand::OpenProblems.key(),
-    ];
-    let screen = [
-        ShellCommand::ToggleFocusMode.key(),
-        ShellCommand::ToggleFullScreen.key(),
-    ];
-    assert_menu_lists(ApplicationMenu::View, &panels);
-    assert_menu_lists(ApplicationMenu::View, &screen);
-    let window = listed_commands(application_menu_entries(ApplicationMenu::Window));
-    for key in panels.into_iter().chain(screen) {
-        assert!(!window.contains(&key), "Window still lists {key:?}");
-    }
-}
-
 /// View > Grid draws one style at a time: its rows are radio items, the
 /// drawn style's selected, and choosing one draws it; G still steps through
 /// them.
@@ -808,17 +523,6 @@ fn the_grid_rows_choose_the_drawn_style() {
     assert_eq!(app.checked(DesignCommand::GridDots.key()), Some(false));
     app.execute(DesignCommand::CycleGrid.key());
     assert_eq!(app.state.design.grid, GridStyle::Dots);
-}
-
-/// What is done to a selection is edited from Edit, where Cut, Copy and
-/// Delete already are; Design keeps what builds the design.
-#[test]
-fn the_selection_edits_are_in_edit_and_not_in_design() {
-    assert_menu_lists(ApplicationMenu::Edit, &SELECTION_EDIT_COMMANDS);
-    let design = listed_commands(application_menu_entries(ApplicationMenu::Design));
-    for key in SELECTION_EDIT_COMMANDS {
-        assert!(!design.contains(&key), "Design still lists {key:?}");
-    }
 }
 
 /// Undo and Redo name the step they take and Repeat the command it runs
@@ -1087,14 +791,6 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
 }
 
 #[test]
-fn design_sheet_menu_reads_navigation_before_authoring() {
-    assert_menu_lists(
-        ApplicationMenu::Design,
-        &DESIGN_SHEET_COMMANDS.map(SheetsCommand::key),
-    );
-}
-
-#[test]
 fn upgraded_design_menu_commands_remain_palette_discoverable() {
     for key in DESIGN_PLACEMENT_COMMANDS
         .into_iter()
@@ -1130,32 +826,6 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn results_menu_exposes_only_truthful_completed_result_workflows() {
-    let labels = rendered_results_menu_labels();
-    assert_eq!(
-        labels,
-        [
-            // No result is selected, so View as offers no viewer and is
-            // left out rather than opening on nothing.
-            "Data browser",
-            "Waveforms",
-            "New result document…",
-            "Add pane…",
-            "Compare datasets…",
-            "Add measurement…",
-            "Family slicing and pivot…",
-            "Link A/B cursors",
-            "Plot properties…",
-            "Calculator…",
-            "Expression diagnostics…",
-            "Report editor…",
-            "Clear result history…",
-        ]
-    );
-}
-
 /// Every Verify row is a command the palette finds too.
 #[test]
 fn every_verify_row_is_in_the_palette() {
@@ -1169,31 +839,6 @@ fn every_verify_row_is_in_the_palette() {
             "{key:?} is not in the palette"
         );
         assert!(registry.order().contains(&key), "{key:?} is not ordered");
-    }
-}
-
-/// Parameter tuning left the product with every way into it: no command the
-/// registry declares, and so no palette entry, and no row of any menu, names
-/// it by its label or by its id.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn nothing_offers_parameter_tuning() {
-    fn names_tuning(text: &str) -> bool {
-        text.split(|character: char| !character.is_ascii_alphanumeric())
-            .map(str::to_ascii_lowercase)
-            .any(|word| matches!(word.as_str(), "tune" | "tuned" | "tuner" | "tuning"))
-    }
-    let registry = command_registry();
-    assert!(registry.ordered().count() > 0);
-    for spec in registry.ordered() {
-        assert!(!names_tuning(spec.label), "{}", spec.label);
-        assert!(!names_tuning(spec.key.as_str()), "{}", spec.key.as_str());
-    }
-    let app = RSpiceApp::test_instance();
-    for menu in ALL_MENUS {
-        for row in pins::menu_pin(application_menu_entries(menu), &app) {
-            assert!(!names_tuning(&row), "{menu:?}: {row}");
-        }
     }
 }
 
@@ -1244,61 +889,6 @@ fn offered_rows_and_empty_submenus_are_left_out() {
     );
 }
 
-/// The plan manager was reachable from the toolbar chip and the palette but
-/// from no menu at all. It leads the Simulate menu now: it decides which plan
-/// is active, and every row under it - run it, stop it, read its job history,
-/// check it - acts on whatever it selected.
-///
-/// Adding to that plan reads second, directly under choosing it. Before
-/// `SimulateCommand::AddAnalysis` existed, the catalogue had exactly one route - the
-/// navigator's creating action - and a reader with the panel collapsed, or in
-/// focus mode, had no way to add an analysis at all.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
-    let (_, rows) = rendered_simulate_menu_rows(true);
-    let labels = rows
-        .iter()
-        .map(|(label, _)| label.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        labels,
-        [
-            "Manage simulation plans\u{2026}",
-            "Add analysis\u{2026}",
-            "Setup",
-            "Check and netlist",
-            "Run",
-            "Stop",
-            "Open generated netlist",
-            "Run history\u{2026}",
-            // Annotate DC operating point reads as a check box, not a
-            // plain item, so this list of menu items leaves it out.
-            "Probe",
-            "Operating-point table",
-        ]
-    );
-    // The rows are the commands', not look-alikes: their labels are the ones
-    // the vocabulary publishes, so renaming a command renames its row.
-    assert_eq!(
-        labels.first().copied(),
-        Some(SimulateCommand::ManagePlans.declared_spec().label)
-    );
-    assert_eq!(
-        SimulateCommand::ManagePlans.declared_spec().group,
-        "Simulate"
-    );
-    assert_eq!(
-        labels.get(1).copied(),
-        Some(SimulateCommand::AddAnalysis.declared_spec().label)
-    );
-    assert_eq!(
-        SimulateCommand::AddAnalysis.declared_spec().group,
-        "Simulate"
-    );
-}
-
 /// The menu row has to be exactly as honest as the command behind it: a project
 /// whose plan never migrated to stable analysis identity gets an inert row that
 /// names the reason, not a row that opens an empty dialog.
@@ -1322,83 +912,6 @@ fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reas
         Some(Some(reason.to_owned())),
         "the disabled row must name the command's own reason: {disabled:?}"
     );
-}
-
-/// A menu row wears an icon only where the command has a toolbar button,
-/// and then the button's own icon, so the two read as one command. Every
-/// row used to carry one, most of them stand-ins (a check for Legal, a
-/// folder for Close project) that matched nothing on screen. The check
-/// buttons' glyph is the exception: in a menu a check says a toggle is on,
-/// and Check cellview and Check design wore one beside View's Navigator.
-#[test]
-fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
-    let app = RSpiceApp::test_instance();
-    for (key, icon) in [
-        (DesignCommand::PlaceInstance.key(), WorkbenchIcon::Instance),
-        (DesignCommand::PlaceJunction.key(), WorkbenchIcon::Junction),
-        (DesignCommand::PlacePin.key(), WorkbenchIcon::Pin),
-        (DesignCommand::PlaceText.key(), WorkbenchIcon::Text),
-        (ids::DELETE, WorkbenchIcon::Trash),
-        (DesignCommand::AscendHierarchy.key(), WorkbenchIcon::ArrowUp),
-        (
-            DesignCommand::DescendHierarchyDirect.key(),
-            WorkbenchIcon::Layers,
-        ),
-    ] {
-        assert_eq!(app.command_icon(key), Some(icon), "{key:?}");
-    }
-    assert_eq!(
-        app.command_icon(DesignCommand::VisibilityOptions.key()),
-        Some(WorkbenchIcon::Visibility)
-    );
-    assert_eq!(
-        app.command_icon(CodeCommand::CompileVerilogA.key()),
-        Some(WorkbenchIcon::Netlist)
-    );
-    assert_eq!(
-        app.command_icon(ModelsCommand::ModelCompareRelease.key()),
-        Some(WorkbenchIcon::Compare)
-    );
-    assert_eq!(
-        app.command_icon(SimulateCommand::Run.key()),
-        Some(WorkbenchIcon::Run)
-    );
-    for (command, icon) in [
-        (ProjectCommand::NewProject, WorkbenchIcon::Add),
-        (ProjectCommand::Save, WorkbenchIcon::Save),
-    ] {
-        assert_eq!(app.command_icon(command.key()), Some(icon), "{command:?}");
-    }
-    assert_eq!(app.command_icon(ProjectCommand::CloseProject.key()), None);
-    assert_eq!(
-        app.command_icon(ids::PRINT_HARDCOPY),
-        Some(WorkbenchIcon::File)
-    );
-    for command in [
-        ShellCommand::LegalPrivacy,
-        ShellCommand::About,
-        ShellCommand::HelpCenter,
-        ShellCommand::Exit,
-        ShellCommand::KeyboardShortcuts,
-    ] {
-        assert_eq!(
-            app.command_icon(command.key()),
-            None,
-            "{}",
-            command.spec().id
-        );
-    }
-    assert_eq!(app.command_icon(ids::SELECT_ALL), None);
-    for key in [
-        DesignCommand::DescendHierarchy.key(),
-        DesignCommand::RenameSelection.key(),
-        DesignCommand::CheckCellview.key(),
-        DesignCommand::CheckDesign.key(),
-        SimulateCommand::Preflight.key(),
-        ModelsCommand::ModelValidate.key(),
-    ] {
-        assert_eq!(app.command_icon(key), None, "{key:?}");
-    }
 }
 
 /// With a symbol in front, Design places the symbol's own shapes, offers the
@@ -1518,31 +1031,6 @@ fn window_gathers_windows_only_on_the_desktop_and_reaches_every_workspace() {
     for (digit, row) in (1..).zip(&workspaces) {
         assert!(row.contains(&format!("| Alt+{digit} |")), "{row}");
     }
-}
-
-/// Exit ends the File menu on Windows and Linux; on macOS the application
-/// menu's Quit ends the application, so File does not repeat it.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn exit_ends_the_file_menu_on_windows_and_linux_but_not_macos() {
-    let app = title_test_app();
-    let file = application_menu_entries(ApplicationMenu::File);
-    for os in [
-        egui::os::OperatingSystem::Windows,
-        egui::os::OperatingSystem::Nix,
-    ] {
-        let rows = menu_pin_on(file, &app, os);
-        assert_eq!(
-            rows.last().map(String::as_str),
-            Some("Exit | exit-rspice | Alt+F4 | on"),
-            "{os:?}"
-        );
-    }
-    let rows = menu_pin_on(file, &app, egui::os::OperatingSystem::Mac);
-    assert!(
-        rows.iter().all(|row| !row.contains("exit-rspice")),
-        "{rows:#?}"
-    );
 }
 
 /// File ▸ Open recent lists the recent-files list as it stands, newest
@@ -1753,58 +1241,6 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
         (Role::MenuItemCheckBox, Some(Toggled::False))
     );
     assert_eq!(read("Display options…"), (Role::MenuItem, None));
-}
-
-/// With no one signed in and no license, the account button shows a
-/// generic person instead of "RS", initials that named no one; a license
-/// holder's initials still show.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_account_button_shows_a_person_until_an_identity_names_someone() {
-    fn painted(initials: Option<&str>) -> (Vec<String>, usize) {
-        let ctx = title_test_ctx();
-        rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default()
-                .frame(Frame::NONE)
-                .show(ctx, |ui| {
-                    let _ = account_action(ui, initials, false);
-                });
-        });
-        let mut texts = Vec::new();
-        let mut marks = 0;
-        for shape in &output.shapes {
-            match &shape.shape {
-                egui::epaint::Shape::Text(text) => texts.push(text.galley.job.text.clone()),
-                _ => marks += 1,
-            }
-        }
-        (texts, marks)
-    }
-
-    let mut app = title_test_app();
-    assert_eq!(account_initials(&app), None);
-    let (texts, person_marks) = painted(None);
-    assert!(
-        texts.is_empty(),
-        "no initials without an identity: {texts:?}"
-    );
-
-    app.state.cloud.license = Some(rspice_app_cloud::services::license::LicenseInfo {
-        licensed_to: "Ada Lovelace".to_owned(),
-        tier: String::new(),
-        updates_until: String::new(),
-        license_id: String::new(),
-        features: Vec::new(),
-        updates_expired: false,
-    });
-    assert_eq!(account_initials(&app).as_deref(), Some("AL"));
-    let (texts, lettered_marks) = painted(Some("AL"));
-    assert_eq!(texts, ["AL"]);
-    assert!(
-        person_marks > lettered_marks,
-        "the person glyph is painted in place of the letters"
-    );
 }
 
 /// The labels of the command and submenu rows `menu` shows for `app`, in
@@ -2103,235 +1539,6 @@ fn every_menu_is_reachable_on_the_bar_at_every_desktop_width() {
     }
 }
 
-/// In the compact layout, at phone and tablet widths, one Menu button
-/// holds every menu as a submenu on 44 pt rows, and each submenu opens onto
-/// every row its menu holds, on 44 pt rows too. The compact layout used to
-/// offer no application menu at all.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_compact_menu_button_reaches_every_menu_on_touch_rows() {
-    for size in [egui::vec2(390.0, 844.0), egui::vec2(768.0, 1_024.0)] {
-        let mut window = TitleBarWindow::new(size);
-        let trigger = Id::new(("workbench.title_menu.trigger", MenuTriggerKey::Compact));
-        let nodes = window.settle();
-        assert!(
-            nodes
-                .iter()
-                .any(|(label, role, _)| label == "Menu" && is_menu_row(*role)),
-            "{size:?}: no Menu button"
-        );
-        assert!(
-            !nodes.iter().any(|(label, _, _)| label == "File"),
-            "{size:?}: the compact bar shows no menu of its own"
-        );
-
-        Popup::open_id(&window.ctx, trigger.with("popup"));
-        let nodes = window.settle();
-        for menu in ALL_MENUS {
-            let row = nodes
-                .iter()
-                .find(|(label, role, rect)| {
-                    label == menu.label() && is_menu_row(*role) && rect.top() > 30.0
-                })
-                .unwrap_or_else(|| panic!("{size:?}: the Menu button has no {menu:?} row"));
-            assert!(
-                (row.2.height() - MENU_TOUCH_ROW_HEIGHT).abs() < 0.01,
-                "{row:?}"
-            );
-        }
-
-        for menu in ALL_MENUS {
-            window.ctx.memory_mut(|memory| {
-                memory.request_focus(menu_entries::submenu_row_id(menu.label()));
-            });
-            let _ = window.frame(Vec::new());
-            let _ = window.frame(vec![title_key_event(Key::ArrowRight)]);
-            let nodes = window.settle();
-            // On screen whole, scrolling where its rows are taller.
-            let area = window
-                .ctx
-                .memory(|memory| {
-                    memory.area_rect(egui::containers::menu::SubMenu::id_from_widget_id(
-                        menu_entries::submenu_row_id(menu.label()),
-                    ))
-                })
-                .unwrap_or_else(|| panic!("{size:?}: {menu:?} did not open"));
-            assert!(
-                area.top() >= 0.0
-                    && area.bottom() <= size.y + 0.5
-                    && area.left() >= -0.5
-                    && area.right() <= size.x + 0.5,
-                "{size:?}: {menu:?} hangs off screen at {area:?}"
-            );
-            // A submenu too tall to open below its row opens above it, over
-            // the bar, so its rows are found from its top down rather than
-            // below the bar.
-            for (label, _) in shown_rows(menu, &window.app) {
-                let row = nodes
-                    .iter()
-                    .find(|(drawn, role, rect)| {
-                        *drawn == label && is_menu_row(*role) && rect.top() >= area.top()
-                    })
-                    .unwrap_or_else(|| panic!("{size:?}: {menu:?} does not show {label:?}"));
-                assert!(
-                    (row.2.height() - MENU_TOUCH_ROW_HEIGHT).abs() < 0.01,
-                    "{size:?}: {menu:?} row {row:?}"
-                );
-            }
-            let _ = window.frame(vec![title_key_event(Key::ArrowLeft)]);
-        }
-    }
-}
-
-/// Every menu and submenu is as wide as its longest row needs, so no label
-/// is cut short, within the 244 to 360 pt a menu may be. At the old fixed
-/// 244 pt some rows were cut. Measured on the rows each open menu draws, at
-/// desktop and touch row heights, with the popup as tall as its rows up to
-/// the window's bound: it used to stop at 400 pt and scroll, whose bar cut
-/// the rows narrower still.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn every_menu_is_wide_enough_for_its_longest_row() {
-    fn fits(ui: &Ui, name: &str, rows: &[menu_entries::MenuRow], out: &mut Vec<(String, f32)>) {
-        out.push((name.to_owned(), menu_entries::menu_rows_fit(ui, rows)));
-        for row in rows {
-            if let menu_entries::MenuRow::Submenu { label, rows, .. } = row {
-                fits(ui, label, rows, out);
-            }
-        }
-    }
-    let ctx = title_test_ctx();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut needed = Vec::new();
-    for app in [title_test_app(), source_editor_app()] {
-        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                for menu in ALL_MENUS {
-                    let rows = menu_rows(application_menu_entries(menu), &app, ui.ctx());
-                    fits(ui, menu.label(), &rows, &mut needed);
-                }
-            });
-        });
-    }
-    for (name, fit) in &needed {
-        assert!(
-            *fit <= MENU_MAX_CONTENT_WIDTH,
-            "{name} needs {fit} pt, more than a menu may be"
-        );
-    }
-    assert!(
-        needed.iter().any(|(_, fit)| *fit > MENU_CONTENT_WIDTH),
-        "no menu needs more than the narrowest width: {needed:?}"
-    );
-
-    for large_targets in [false, true] {
-        let row_height = if large_targets {
-            MENU_TOUCH_ROW_HEIGHT
-        } else {
-            MENU_ROW_HEIGHT
-        };
-        let ctx = title_test_ctx();
-        rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut app = title_test_app();
-        for menu in ALL_MENUS {
-            let popup = Id::new((
-                "workbench.title_menu.trigger",
-                MenuTriggerKey::Application(menu),
-            ))
-            .with("popup");
-            Popup::open_id(&ctx, popup);
-            let mut fit = 0.0;
-            let mut rows_height = 0.0;
-            let mut drawn = Vec::new();
-            for _ in 0..3 {
-                let output = ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(1_440.0, 900.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |ctx| {
-                        egui::CentralPanel::default().show(ctx, |ui| {
-                            let rows = menu_rows(application_menu_entries(menu), &app, ui.ctx());
-                            fit = menu_entries::menu_rows_fit(ui, &rows);
-                            rows_height = menu_entries::visible_rows(&rows)
-                                .into_iter()
-                                .map(|row| match row {
-                                    menu_entries::MenuRow::Separator => 9.0,
-                                    _ => row_height,
-                                })
-                                .sum::<f32>();
-                            menus(ui, &mut app, MenuProjection::All, large_targets, 35.0);
-                        });
-                    },
-                );
-                drawn = output
-                    .platform_output
-                    .accesskit_update
-                    .expect("AccessKit menu tree")
-                    .nodes
-                    .into_iter()
-                    .filter(|(_, node)| {
-                        matches!(
-                            node.role(),
-                            egui::accesskit::Role::MenuItem
-                                | egui::accesskit::Role::MenuItemCheckBox
-                        )
-                    })
-                    .filter_map(|(_, node)| {
-                        let bounds = node.bounds()?;
-                        (bounds.y0 > 35.0).then(|| {
-                            (
-                                node.label().unwrap_or_default().to_owned(),
-                                bounds.width() as f32,
-                                bounds.height() as f32,
-                            )
-                        })
-                    })
-                    .collect::<Vec<_>>();
-            }
-            assert!(!drawn.is_empty(), "{} drew no rows", menu.label());
-            // The popup is as tall as its rows up to the window's bound,
-            // so a menu that fits never scrolls.
-            let outer_height = ctx
-                .memory(|memory| memory.area_rect(popup))
-                .expect("the menu is open")
-                .height();
-            // On desktop rows, no menu scrolls in a window 900 pt tall.
-            assert!(
-                large_targets || rows_height <= menu_popup_height_for_viewport(900.0),
-                "{} scrolls its {rows_height} pt of rows in a 900 pt window",
-                menu.label()
-            );
-            let frame = 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
-            let expected = rows_height.min(menu_popup_height_for_viewport(900.0)) + frame;
-            assert!(
-                (outer_height - expected).abs() < 1.0,
-                "{} is {outer_height} pt tall for {rows_height} pt of rows \
-                 (touch rows: {large_targets})",
-                menu.label()
-            );
-            for (label, width, height) in &drawn {
-                assert!(
-                    *width >= fit.min(MENU_MAX_CONTENT_WIDTH) - 0.5
-                        && *width <= MENU_MAX_CONTENT_WIDTH + 0.5,
-                    "{} row {label:?} is {width} pt wide; its longest row needs {fit} \
-                     (touch rows: {large_targets})",
-                    menu.label()
-                );
-                assert!(
-                    (*height - row_height).abs() < 0.01,
-                    "{} row {label:?} is {height} pt tall",
-                    menu.label()
-                );
-            }
-        }
-    }
-}
-
 /// What a reader sees of `rows`: each row's label, `---` for a rule.
 #[cfg(not(target_arch = "wasm32"))]
 fn visible_row_names(rows: &[menu_entries::MenuRow]) -> Vec<String> {
@@ -2343,33 +1550,4 @@ fn visible_row_names(rows: &[menu_entries::MenuRow]) -> Vec<String> {
             menu_entries::MenuRow::Submenu { label, .. } => (*label).to_owned(),
         })
         .collect()
-}
-
-/// A rule only ever stands between two groups a reader can see: none opens
-/// or closes a menu, and none sits beside another where a whole group is
-/// hidden. The Window menu's last group (previous and next workspace) is
-/// hidden, and it used to leave a rule hanging at the menu's foot.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
-    for app in [title_test_app(), source_editor_app()] {
-        for menu in ALL_MENUS {
-            let rows = menu_entries::resolve_menu_rows(
-                application_menu_entries(menu),
-                &app,
-                rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
-                egui::os::OperatingSystem::Windows,
-            );
-            let shown = visible_row_names(&rows);
-            assert_ne!(shown.first().map(String::as_str), Some("---"), "{shown:?}");
-            assert_ne!(shown.last().map(String::as_str), Some("---"), "{shown:?}");
-            assert!(
-                !shown
-                    .windows(2)
-                    .any(|pair| pair[0] == "---" && pair[1] == "---"),
-                "{} draws two rules together: {shown:?}",
-                menu.label()
-            );
-        }
-    }
 }

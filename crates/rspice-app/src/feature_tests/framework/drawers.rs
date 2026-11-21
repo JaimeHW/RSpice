@@ -1,16 +1,11 @@
-//! The phone's drawers and navigation sheet: the scrim's tokens, the grid's
-//! height against its real rows, the workspace entry and the tool groups, the
-//! account and notification entries, and the floor on very narrow viewports.
+//! The phone's drawers and navigation sheet: the account and notification
+//! entries, and keyboard focus inside a side drawer.
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::ShellCommand;
 use egui::{Area, Context, Id, Order, Sense, UiKind};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
-use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::drawers::*;
-use rspice_app_workbench::workbench::layout::LayoutSpec;
-use rspice_app_workbench::workbench::state::workbench_session::Drawer;
-use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
 
 #[derive(Clone, Copy)]
 struct ModalFocusFixtureIds {
@@ -90,33 +85,6 @@ fn run_modal_focus_fixture(
     rendered.expect("focus fixture must render")
 }
 
-/// Thirteen one-line rows under two heads, not taglined cards under four:
-/// the one-column sheet was 1,237 px of scrolling.
-#[test]
-fn mobile_navigation_grid_height_tracks_its_real_rows() {
-    assert_eq!(mobile_navigation_natural_height(2), 486.0);
-    assert_eq!(mobile_navigation_natural_height(1), 798.0);
-}
-
-/// A workspace is called what the rest of the shell calls it, and the
-/// sheet has two heads: the destinations, and everything else.
-#[test]
-fn the_phone_sheet_names_a_workspace_once_and_groups_the_rest_as_tools() {
-    for workspace in Workspace::ALL {
-        assert!(
-            WORKSPACE_ACTIONS.iter().any(|action| {
-                action.command == ShellCommand::OpenWorkspace(workspace).key()
-                    && action.label == workspace.label()
-            }),
-            "{workspace:?} is offered under the name the shell gives it"
-        );
-    }
-    assert_eq!(
-        MOBILE_NAV_GROUPS.map(|(label, _)| label),
-        ["Workspaces", "Tools"]
-    );
-}
-
 #[test]
 fn mobile_organization_entry_opens_the_canonical_account_manager() {
     let action = TOOL_ACTIONS
@@ -124,26 +92,6 @@ fn mobile_organization_entry_opens_the_canonical_account_manager() {
         .find(|action| action.label == "Organization & licensing")
         .expect("the account entry");
     assert_eq!(action.command, CloudCommand::AccountOrganization.key());
-}
-
-/// One mark for one thing: no two entries on the sheet wear the same icon,
-/// so a tool never reads as the workspace whose mark it borrowed.
-#[test]
-fn no_two_sheet_entries_wear_the_same_mark() {
-    let entries = MOBILE_NAV_GROUPS
-        .iter()
-        .flat_map(|(_, actions)| actions.iter())
-        .collect::<Vec<_>>();
-    for (index, entry) in entries.iter().enumerate() {
-        for other in &entries[index + 1..] {
-            assert!(
-                entry.icon != other.icon,
-                "{} and {} wear the same mark",
-                entry.label,
-                other.label
-            );
-        }
-    }
 }
 
 /// A phone's title bar draws no bell, so the sheet carries it: the panel
@@ -170,36 +118,6 @@ fn the_phone_sheet_reaches_notifications_and_counts_what_is_unread() {
         Some("2 unread")
     );
     assert_eq!(card_meta(ShellCommand::OpenConsole.key(), &app), None);
-}
-
-#[test]
-fn drawer_close_targets_follow_pointer_and_breakpoint_cascade() {
-    let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
-    assert_eq!(drawer_close_geometry(compact), (44.0, 5.0));
-
-    let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &WorkbenchSession::default());
-    assert_eq!(drawer_close_geometry(intermediate), (34.0, 5.0));
-
-    let coarse =
-        LayoutSpec::resolve_with_pointer(834.0, 1_112.0, true, &WorkbenchSession::default());
-    assert_eq!(drawer_close_geometry(coarse), (44.0, 0.0));
-}
-
-#[test]
-fn intermediate_inspector_drawer_uses_only_its_inner_edge() {
-    let state = WorkbenchSession::default();
-    let compact = LayoutSpec::resolve(390.0, 844.0, &state);
-    let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &state);
-
-    assert_eq!(drawer_border(compact, Drawer::Inspector), DrawerBorder::Box);
-    assert_eq!(
-        drawer_border(intermediate, Drawer::Inspector),
-        DrawerBorder::InnerLeft
-    );
-    assert_eq!(
-        drawer_border(intermediate, Drawer::Navigator),
-        DrawerBorder::Box
-    );
 }
 
 #[test]

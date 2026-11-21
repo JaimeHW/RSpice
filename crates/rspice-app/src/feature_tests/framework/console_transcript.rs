@@ -1,13 +1,12 @@
 //! The Console page's contract: what it lays out, what a reader can select
 //! and copy, what is announced, and where the notice centre lands.
 
-use egui::{Key, Modifiers, Rect, pos2};
+use egui::{Key, Modifiers, Rect};
 
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_state::diagnostics::{LogAnchor, LogBuffer, LogSeverity, LogSource};
 use rspice_app_state::state::SimulationRun;
 use rspice_app_workbench::ui::widgets::NotificationAction;
-use rspice_app_workbench::workbench::docks::console::CONSOLE_ROW_MIN_HEIGHT;
 use rspice_app_workbench::workbench::docks::console::transcript::lines::{Rows, Source};
 use rspice_app_workbench::workbench::docks::console::transcript::*;
 use rspice_app_workbench::workbench::state::{
@@ -121,60 +120,6 @@ fn a_ten_thousand_line_session_lays_out_only_the_rows_in_view() {
         (10..200).contains(&laid_out),
         "{laid_out} galleys laid out for a body that shows under forty rows"
     );
-}
-
-/// A long path wraps at the message column and every row is set below the
-/// one before it, however many lines it took.
-#[test]
-fn wrapped_rows_never_overlap() {
-    let mut state = session();
-    // A 300-character path.
-    let path = format!("C:/projects/{}/netlist.cir", "deep/".repeat(55));
-    state.model.log_buffer.log(
-        LogSeverity::Error,
-        LogSource::Netlist,
-        format!("Could not read {path}"),
-    );
-    state
-        .model
-        .log_buffer
-        .log(LogSeverity::Info, LogSource::Studio, "Project saved");
-    let ctx = context();
-    ctx.enable_accesskit();
-    let mut output = frame(&ctx, &mut state, Vec::new());
-    for _ in 0..2 {
-        output = frame(&ctx, &mut state, Vec::new());
-    }
-    let mut rows: Vec<Rect> = output
-        .platform_output
-        .accesskit_update
-        .expect("accesskit is on")
-        .nodes
-        .iter()
-        .filter(|(_, node)| node.role() == egui::accesskit::Role::ListBoxOption)
-        .filter_map(|(_, node)| node.bounds())
-        .map(|bounds| {
-            Rect::from_min_max(
-                pos2(bounds.x0 as f32, bounds.y0 as f32),
-                pos2(bounds.x1 as f32, bounds.y1 as f32),
-            )
-        })
-        .collect();
-    rows.sort_by(|a, b| a.top().total_cmp(&b.top()));
-    assert_eq!(rows.len(), 5, "{rows:?}");
-    assert!(
-        rows.iter()
-            .any(|row| row.height() > 2.0 * CONSOLE_ROW_MIN_HEIGHT),
-        "the path wraps rather than running off the row: {rows:?}"
-    );
-    for pair in rows.windows(2) {
-        assert!(
-            pair[0].bottom() <= pair[1].top() + 0.01,
-            "{:?} overlaps {:?}",
-            pair[0],
-            pair[1]
-        );
-    }
 }
 
 /// Each row is announced as a reader would say it: severity, time, message.

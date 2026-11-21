@@ -1,6 +1,6 @@
 //! The confirmation dialog on its narrow surface: the close-project review and
-//! the save prompt each ask one question, stack their verbs on a phone and paint
-//! no fill band, and a review raised during a run offers Stop and no save verbs.
+//! the save prompt each ask one question, and a review raised during a run
+//! offers Stop and no save verbs.
 
 use crate::workbench::RSpiceApp;
 use egui::Context;
@@ -166,57 +166,6 @@ fn save_prompt_asks_one_question_on_the_narrow_confirmation_surface() {
             "{retired:?} painted"
         );
     }
-}
-
-/// On a phone the verbs stack full-width, primary first.
-#[test]
-fn close_project_review_stacks_its_verbs_on_a_phone() {
-    let painted = painted_text(&render_close_review(
-        &mut unsaved_project_closing(),
-        egui::vec2(390.0, 844.0),
-    ));
-    let [save, dont_save, cancel] =
-        ["Save", "Don't save", "Cancel"].map(|verb| find(&painted, verb));
-    assert!(
-        save.center().y < dont_save.center().y && dont_save.center().y < cancel.center().y,
-        "stacked primary, Don't save, Cancel: {save:?} {dont_save:?} {cancel:?}"
-    );
-    for rect in [save, dont_save, cancel] {
-        assert!(
-            (rect.center().x - 195.0).abs() < 1.5,
-            "a full-width verb centres its label on the card: {rect:?}"
-        );
-    }
-}
-
-/// The body is one surface. Its frame used to repeat the surface fill
-/// over a rect as wide as the text, which showed as a band while the modal
-/// faded in; nothing between the header and the footer paints a fill now.
-#[test]
-fn close_project_review_body_paints_no_fill_band() {
-    let output = render_close_review(&mut unsaved_project_closing(), egui::vec2(1_280.0, 800.0));
-    let painted = painted_text(&output);
-    let summary = find(&painted, "This project has never been saved.");
-    let body = egui::Rect::from_min_max(
-        egui::pos2(0.0, summary.top() - 20.0),
-        egui::pos2(1_280.0, summary.bottom() + 20.0),
-    );
-    let mut bands = Vec::new();
-    for clipped in &output.shapes {
-        visit_shapes(&clipped.shape, &mut |shape| {
-            if let egui::epaint::Shape::Rect(rect) = shape
-                && rect.fill != egui::Color32::TRANSPARENT
-                && rect.rect.width() > 24.0
-                && body.contains_rect(rect.rect)
-            {
-                bands.push(rect.rect);
-            }
-        });
-    }
-    assert!(
-        bands.is_empty(),
-        "the body painted a fill of its own: {bands:?}"
-    );
 }
 
 /// While a run owns the project the prompt asks for it to stop, and

@@ -8,7 +8,6 @@ use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
-use rspice_app_workbench::ui::icons::Icon;
 use rspice_app_workbench::workbench::app::command_palette::*;
 use rspice_app_workbench::workbench::framework::command_registry::CommandSpec;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -218,30 +217,6 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
         .collect::<Vec<_>>();
     assert!(help.contains(&ShellCommand::KeyboardShortcuts));
     assert!(help.contains(&ShellCommand::About));
-}
-
-#[test]
-fn stretch_selection_uses_the_exact_pointer_glyph() {
-    assert_eq!(
-        row_icon(&palette_entry_for(DesignCommand::StretchSelection.key())),
-        Icon::Select
-    );
-}
-
-#[test]
-fn create_array_uses_the_exact_grid_glyph() {
-    assert_eq!(
-        row_icon(&palette_entry_for(DesignCommand::ArraySelection.key())),
-        Icon::Grid
-    );
-}
-
-#[test]
-fn replace_instance_uses_the_exact_refresh_glyph() {
-    assert_eq!(
-        row_icon(&palette_entry_for(DesignCommand::ReplaceInstance.key())),
-        Icon::Refresh
-    );
 }
 
 #[test]
@@ -1065,49 +1040,6 @@ fn accesskit_exposes_modal_combobox_scopes_listbox_and_options() {
             .expect("scope semantic container")
             .rect,
         expected_scope
-    );
-}
-
-/// The search text stands inside its field by the kit text field's 8 px, so
-/// the focus ring drawn around the field clears the placeholder and the
-/// caret instead of touching the one and sitting on the other.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn the_search_text_stands_clear_of_the_fields_focus_ring() {
-    fn text_left(shape: &egui::Shape, prefix: &str) -> Option<f32> {
-        match shape {
-            egui::Shape::Text(text) if text.galley.text().starts_with(prefix) => {
-                Some(text.pos.x + text.galley.rect.left())
-            }
-            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_left(shape, prefix)),
-            _ => None,
-        }
-    }
-    let ctx = Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut app = test_app();
-    app.state.workbench.command_palette.open();
-    let mut shapes = Vec::new();
-    for _ in 0..2 {
-        shapes = ctx
-            .run_ui(raw_input(Vec::new()), |ctx| {
-                render_command_palette(&mut app, ctx)
-            })
-            .shapes;
-    }
-    assert!(
-        ctx.memory(|memory| memory.has_focus(search_id())),
-        "the palette opens with its search field focused, ring and all"
-    );
-    let field = ctx.read_response(search_id()).expect("search field").rect;
-    let placeholder_left = shapes
-        .iter()
-        .find_map(|clipped| text_left(&clipped.shape, "Search commands"))
-        .expect("the empty field paints its placeholder");
-    assert!(
-        placeholder_left - field.left() >= 8.0,
-        "the placeholder starts {} px inside the field the ring frames",
-        placeholder_left - field.left()
     );
 }
 

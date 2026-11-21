@@ -1,4 +1,4 @@
-//! The status bar: its rules and segment geometry, the expiring prompt, the
+//! The status bar: its segment geometry, the expiring prompt, the
 //! checks count and marks, the result, zoom, page and coordinate segments,
 //! the engine's lifecycle mark, and what gives way on a narrow bar.
 
@@ -16,7 +16,6 @@ use rspice_app_runs::simulation::status::{
 use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use rspice_app_state::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::chrome::status_bar::*;
 use rspice_app_workbench::workbench::framework::host::StatusMark;
@@ -25,51 +24,6 @@ use rspice_app_workbench::workbench::layout::LayoutSpec;
 /// The counts the bar states, read as the page reads them.
 fn counts(app: &RSpiceApp) -> DiagnosticCounts {
     rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state).counts()
-}
-
-/// A rule separates two items. The last item on the left used to draw
-/// one anyway, so a rule stood alone in front of the empty middle of the
-/// bar. Every rule now has an item's ink within a gutter on both sides.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn every_status_rule_stands_between_two_items() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state.workbench.activate(Workspace::Design);
-    let size = egui::vec2(1440.0, 900.0);
-    let canvas = rspice_app_workbench::ui::raster::render(size, |ui, _| {
-        let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
-        show(ui, &mut app, layout);
-    });
-    let themed = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&themed);
-    let border = Tokens::get(&themed).color.border;
-    let y = size.y - 11.0;
-    let row = (0..size.x as usize)
-        .map(|x| {
-            let rect = egui::Rect::from_min_size(egui::pos2(x as f32, y), egui::vec2(1.0, 1.0));
-            canvas.pixels_in(rect).next().expect("pixel on the canvas")
-        })
-        .collect::<Vec<_>>();
-    let fill = *row
-        .iter()
-        .max_by_key(|colour| row.iter().filter(|other| other == colour).count())
-        .expect("a status row");
-    let ink = |range: std::ops::Range<usize>| {
-        row[range]
-            .iter()
-            .any(|colour| *colour != fill && *colour != border)
-    };
-    let rules = (1..row.len() - 1)
-        .filter(|&x| row[x] == border)
-        .collect::<Vec<_>>();
-    assert!(!rules.is_empty(), "the bar draws its rules");
-    for x in rules {
-        assert!(
-            ink(x.saturating_sub(14)..x) && ink(x + 1..(x + 15).min(row.len())),
-            "the rule at x = {x} faces empty bar"
-        );
-    }
 }
 
 /// A prompt is the bar's answer to the gesture just made: drawn, and

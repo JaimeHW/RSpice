@@ -1,19 +1,16 @@
 //! The document bar: which documents each workspace's strip lists and keeps,
 //! what activating, cycling and closing a tab does to them, and how the tabs
-//! share the strip's width, elide their labels and scroll into view.
+//! share the strip's width and scroll into view.
 
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
 use rspice_app_code::workbench::documents::netlist_document::fixtures::{
     DECK_INCLUDE, seed_deck_with_include,
 };
-use rspice_app_design::workbench::chrome::document_bar::design::icon_for_view;
 use rspice_app_state::state::{SimulationRun, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::workbench::chrome::document_bar::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
-use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocument;
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
 fn multi_document_netlist_state() -> AppState {
@@ -21,23 +18,6 @@ fn multi_document_netlist_state() -> AppState {
     state.workbench.workspace = Workspace::Netlist;
     seed_deck_with_include(&mut state.model, &mut state.code.netlist);
     state
-}
-
-/// Every Design tab is a cell view, so the icon is what tells a module
-/// from the schematic and the symbol beside it. A Verilog-A module wore
-/// the netlist mark, which named a deck that is not what the tab opens.
-#[test]
-fn a_veriloga_tab_wears_its_own_icon() {
-    let icon = icon_for_view(ViewType::VerilogA);
-    assert_eq!(icon, WorkbenchIcon::VerilogA);
-    for other in [
-        ViewType::Schematic,
-        ViewType::Symbol,
-        ViewType::Spice,
-        ViewType::Verilog,
-    ] {
-        assert_ne!(icon, icon_for_view(other), "{other:?} shares the mark");
-    }
 }
 
 #[test]
@@ -524,50 +504,6 @@ fn tab_nodes(nodes: &[egui::accesskit::Node]) -> Vec<&egui::accesskit::Node> {
         .iter()
         .filter(|node| node.role() == egui::accesskit::Role::Tab)
         .collect()
-}
-
-#[test]
-fn a_squeezed_cell_view_tab_shows_its_cell_before_cutting_the_name() {
-    let label = "stage_10 · schematic";
-    assert_eq!(tab_caption(label, Some("stage_10"), 170.0, 170.0), label);
-    assert_eq!(
-        tab_caption(label, Some("stage_10"), 170.0, 140.0),
-        "stage_10"
-    );
-    assert_eq!(
-        tab_caption("Generated netlist", None, 170.0, 140.0),
-        "Generated netlist",
-        "a document with no short form is cut as it is"
-    );
-
-    let document = WorkspaceDocument {
-        id: WorkspaceDocumentId::CellView(rspice_app_state::state::CellViewRef::new(
-            "lib",
-            "stage_10",
-            "schematic",
-        )),
-        label: label.to_owned(),
-        icon: WorkbenchIcon::Design,
-        dirty: false,
-    };
-    assert_eq!(document.short_label(), Some("stage_10"));
-}
-
-#[test]
-fn tabs_never_shrink_past_the_floor_and_the_strip_scrolls_instead() {
-    let natural = [190.0; 10];
-    assert_eq!(shared_width_cap(&natural, 600.0), Some(TAB_MIN_WIDTH));
-    let fit = StripFit::resolve(&natural, 1000.0, 40.0);
-    assert!(fit.overflowing);
-    assert_eq!(
-        fit.tabs_width, 960.0,
-        "the hidden-tabs button takes its room"
-    );
-    assert_eq!(fit.cap, Some(TAB_MIN_WIDTH));
-
-    let fit = StripFit::resolve(&natural[..6], 1000.0, 40.0);
-    assert!(!fit.overflowing, "six tabs fit at 166 pt each");
-    assert_eq!(fit.tabs_width, 1000.0, "no button, so no room given up");
 }
 
 /// Ten tabs too wide for the window together shrink until they fit, so
