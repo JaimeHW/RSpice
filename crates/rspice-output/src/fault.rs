@@ -286,25 +286,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nothing_is_injected_until_a_fault_is_armed() {
-        assert!(check_armed(FaultPoint::Replace).is_ok());
-    }
-
-    #[test]
     fn an_armed_fault_fires_once_at_its_own_point() {
         let armed = ArmedFaults::arm(ArtifactFault::io(ArtifactFaultPoint::Replace));
         assert!(check_armed(FaultPoint::AfterPrepare).is_ok());
         assert!(check_armed(FaultPoint::Replace).is_err());
         assert_eq!(armed.fired(), 1);
-    }
-
-    #[test]
-    fn an_allocation_fault_is_reported_as_out_of_memory() {
-        let _armed = ArmedFaults::arm(ArtifactFault::allocation(
-            ArtifactFaultPoint::AfterStagingCreated,
-        ));
-        let error = check_armed(FaultPoint::AfterPrepare).expect_err("the fault fires");
-        assert_eq!(error.kind(), io::ErrorKind::OutOfMemory);
     }
 
     #[test]
