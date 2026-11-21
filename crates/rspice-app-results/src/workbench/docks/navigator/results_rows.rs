@@ -1222,11 +1222,29 @@ pub(super) fn show_virtualized_result_signals(
         });
 
     paint_browser_drag(ui.ctx());
+    // A running run lists what its live plot draws; the rest of its signals are written as it
+    // goes and listed once it ends.
+    let running = state.model.simulation.active_run().is_some_and(|run| {
+        matches!(
+            run.lifecycle,
+            crate::state::SimulationRunLifecycle::Preparing
+                | crate::state::SimulationRunLifecycle::Running
+                | crate::state::SimulationRunLifecycle::Cancelling
+        )
+    });
+    if running && signal_rows > 0 {
+        muted(
+            ui,
+            "The rest of this run's signals are listed when it ends.",
+        );
+    }
     if signal_rows == 0 {
         muted(
             ui,
             if state.model.simulation.retained.runs.is_empty() {
                 "No results yet — run a simulation"
+            } else if running {
+                "This run's signals are listed when it ends."
             } else {
                 match scope {
                     ResultsBrowserScope::Recent => "Signals you select or show collect here.",

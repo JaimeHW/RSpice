@@ -308,6 +308,20 @@ const fn currentness_rank(currentness: ResultCurrentness) -> u8 {
 /// operation failed", which is true of every failure and identifies none
 /// of them. This banner sits directly above the control that acts on the
 /// failure, so the sentence over that control has to say what failed.
+/// What a running analysis that is not drawn yet says: whether it is drawn as it runs, and how
+/// far it has got when the engine reports that.
+fn running_words(drawn_live: bool, progress: Option<f64>) -> String {
+    let mut words = if drawn_live {
+        "The plot starts as soon as the run writes its first results.".to_owned()
+    } else {
+        "This analysis is not drawn while it runs; its results appear when it ends.".to_owned()
+    };
+    if let Some(progress) = progress {
+        words.push_str(&format!(" {:.0}% done.", progress * 100.0));
+    }
+    words
+}
+
 fn failed_status(run: &SimulationRun, blocks_visuals: bool) -> ResultOperationalStatus {
     ResultOperationalStatus {
         state: ResultOperationalState::Failed,
@@ -405,18 +419,25 @@ pub(crate) fn classify_viewer(
             };
         }
         SimulationRunLifecycle::Running => {
+            let execution = &state.model.simulation.execution;
             if run
                 .analyses
                 .iter()
                 .any(|analysis| analysis.is_live_partial())
             {
-                return ResultOperationalStatus::canonical(
-                    ResultOperationalState::Streaming,
-                    !run_has_data,
-                );
+                return ResultOperationalStatus {
+                    detail: execution.live_preview_note.clone(),
+                    ..ResultOperationalStatus::canonical(
+                        ResultOperationalState::Streaming,
+                        !run_has_data,
+                    )
+                };
             }
             return ResultOperationalStatus {
-                detail: Some("The simulation is running.".to_owned()),
+                detail: Some(running_words(
+                    execution.live_window.is_some(),
+                    execution.reported_progress,
+                )),
                 ..ResultOperationalStatus::canonical(ResultOperationalState::Loading, !run_has_data)
             };
         }

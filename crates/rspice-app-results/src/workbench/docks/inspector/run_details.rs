@@ -151,7 +151,11 @@ pub fn show(
         .show(ctx, |ui| {
             property_card(ui, "Run", |ui| {
                 property_row(ui, "Run", &manifest.run_label);
-                property_row(ui, "Duration", &manifest.elapsed_time);
+                property_row(
+                    ui,
+                    "Duration",
+                    &super::result_authority::run_duration(ui, run, manifest),
+                );
                 property_row(ui, "State", &manifest.lifecycle);
                 // Stated only for a run whose checks reported something: a
                 // run that checked nothing has not passed anything.

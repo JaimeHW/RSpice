@@ -15,6 +15,44 @@ use rspice_results::saved_output::{SavedOutputMaterializationStatus, SavedOutput
 use rspice_ui_kit::panels::Problem;
 use rspice_ui_kit::panels::section_block_gap;
 
+/// How long the run took; while it runs, how long it has run so far, counted on as the frame is
+/// drawn again.
+pub(super) fn run_duration(
+    ui: &Ui,
+    run: &crate::state::SimulationRun,
+    manifest: &rspice_results::manifest::ManifestViewModel,
+) -> String {
+    let duration = duration_words(run, manifest);
+    if run_is_going(run) {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    duration
+}
+
+fn run_is_going(run: &crate::state::SimulationRun) -> bool {
+    use crate::state::SimulationRunLifecycle;
+    matches!(
+        run.lifecycle,
+        SimulationRunLifecycle::Preparing
+            | SimulationRunLifecycle::Running
+            | SimulationRunLifecycle::Cancelling
+    )
+}
+
+fn duration_words(
+    run: &crate::state::SimulationRun,
+    manifest: &rspice_results::manifest::ManifestViewModel,
+) -> String {
+    if run_is_going(run)
+        && let Ok(now) = rspice_app_state::time_compat::checked_unix_epoch()
+    {
+        let elapsed = (now.as_secs_f64() - run.timestamp).max(0.0);
+        return format!("{elapsed:.1} s so far");
+    }
+    manifest.elapsed_time.clone()
+}
+
 /// The Run section: the run's name and duration, its state when it did not
 /// complete, and the route to its details. Returns the run whose details
 /// the reader asked for.
@@ -44,7 +82,7 @@ pub(super) fn result_run(
             (standing != RecordedConfigurationStanding::AsRun).then_some(Problem::Warning),
         );
     }
-    property_row(ui, "Duration", &manifest.elapsed_time);
+    property_row(ui, "Duration", &run_duration(ui, run, manifest));
     let problem = match run.lifecycle {
         SimulationRunLifecycle::Completed => None,
         SimulationRunLifecycle::Failed => Some(Some(Problem::Failure)),
@@ -212,4 +250,39 @@ pub(super) fn forced_lte_acceptances(
         + quality.initialization.as_ref().map_or(0, |initialization| {
             initialization.report.force_accepted_points
         })
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::*;
+    use crate::state::{SimulationRun, SimulationRunLifecycle};
+    use rspice_app_state::time_compat::with_unix_epoch;
+    use rspice_results::manifest::ManifestViewModel;
+    use std::time::Duration;
+
+    #[test]
+    fn a_running_runs_duration_counts_on_until_it_ends() {
+        let mut run = SimulationRun::new(1);
+        run.timestamp = 1_000.0;
+        run.lifecycle = SimulationRunLifecycle::Running;
+        let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
+        let at = |seconds: f64| {
+            with_unix_epoch(Ok(Duration::from_secs_f64(seconds)), || {
+                duration_words(&run, &manifest)
+            })
+        };
+        assert_eq!(at(1_002.5), "2.5 s so far");
+        assert_eq!(at(1_007.0), "7.0 s so far");
+
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.elapsed_time = 7.25;
+        let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
+        assert_eq!(
+            with_unix_epoch(Ok(Duration::from_secs(2_000)), || duration_words(
+                &run, &manifest
+            )),
+            "7.250 s",
+            "a finished run states the time it took"
+        );
+    }
 }
