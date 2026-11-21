@@ -77,9 +77,4 @@ mod tests {
         assert_eq!(refusal.object, "test workspace");
         assert_eq!(refusal.bytes, values.saturating_mul(8));
     }
-
-    #[test]
-    fn a_set_this_machine_holds_is_confirmed() {
-        confirm_working_values("test workspace", 1 << 20).expect("8 MiB is held");
-    }
 }

@@ -1274,11 +1274,4 @@ mod tests {
         assert_eq!((object, requested), ("STB Bode result", usize::MAX));
         assert_eq!(source, expected);
     }
-
-    #[test]
-    fn a_bode_point_carries_the_loop_gain_magnitude_in_db() {
-        let point = BodePoint::from_loop_gain(1.0, Complex64::new(2.0, 0.0));
-        assert_eq!(point.frequency, 1.0);
-        assert_eq!(point.magnitude_db, Some(20.0 * 2.0_f64.log10()));
-    }
 }

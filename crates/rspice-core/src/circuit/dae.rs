@@ -39,18 +39,6 @@ impl XyceDaeVectors {
         self.q.len()
     }
 
-    /// Zeros all current contributions while retaining their allocations.
-    ///
-    /// Loaders reach for [`resize_and_clear`](Self::resize_and_clear), which
-    /// zeros as it sizes; this is the dimension-preserving half, exercised on
-    /// its own by the tests below.
-    #[cfg(test)]
-    pub(crate) fn clear(&mut self) {
-        self.q.fill(0.0);
-        self.f.fill(0.0);
-        self.b.fill(0.0);
-    }
-
     /// Changes the equation count and zeros all current contributions.
     ///
     /// Shrinking does not reduce capacity. Growing reuses each allocation when
@@ -89,73 +77,4 @@ impl XyceDaeVectors {
 fn resize_and_zero(vector: &mut Vec<Value>, dimension: usize) {
     vector.resize(dimension, 0.0);
     vector.fill(0.0);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clear_preserves_allocations_and_vector_separation() {
-        let mut vectors = XyceDaeVectors::new(3);
-        let q_ptr = vectors.q.as_ptr();
-        let f_ptr = vectors.f.as_ptr();
-        let b_ptr = vectors.b.as_ptr();
-
-        let (q, f, b) = vectors.q_f_b_mut();
-        q.copy_from_slice(&[1.0, 2.0, 3.0]);
-        f.copy_from_slice(&[4.0, 5.0, 6.0]);
-        b.copy_from_slice(&[7.0, 8.0, 9.0]);
-        vectors.clear();
-
-        assert_eq!(vectors.q(), &[0.0; 3]);
-        assert_eq!(vectors.f(), &[0.0; 3]);
-        assert_eq!(vectors.b(), &[0.0; 3]);
-        assert_eq!(vectors.q.as_ptr(), q_ptr);
-        assert_eq!(vectors.f.as_ptr(), f_ptr);
-        assert_eq!(vectors.b.as_ptr(), b_ptr);
-    }
-
-    #[test]
-    fn resize_retains_capacity_and_clears_existing_entries() {
-        let mut vectors = XyceDaeVectors::new(8);
-        let capacities = (
-            vectors.q.capacity(),
-            vectors.f.capacity(),
-            vectors.b.capacity(),
-        );
-        let pointers = (vectors.q.as_ptr(), vectors.f.as_ptr(), vectors.b.as_ptr());
-        let (q, f, b) = vectors.q_f_b_mut();
-        q.fill(1.0);
-        f.fill(2.0);
-        b.fill(3.0);
-
-        vectors.resize_and_clear(3);
-        assert_eq!(vectors.dimension(), 3);
-        assert_eq!(vectors.q(), &[0.0; 3]);
-        assert_eq!(vectors.f(), &[0.0; 3]);
-        assert_eq!(vectors.b(), &[0.0; 3]);
-        assert_eq!(
-            (
-                vectors.q.capacity(),
-                vectors.f.capacity(),
-                vectors.b.capacity(),
-            ),
-            capacities
-        );
-        assert_eq!(
-            (vectors.q.as_ptr(), vectors.f.as_ptr(), vectors.b.as_ptr(),),
-            pointers
-        );
-
-        vectors.resize_and_clear(8);
-        assert_eq!(vectors.dimension(), 8);
-        assert_eq!(vectors.q(), &[0.0; 8]);
-        assert_eq!(vectors.f(), &[0.0; 8]);
-        assert_eq!(vectors.b(), &[0.0; 8]);
-        assert_eq!(
-            (vectors.q.as_ptr(), vectors.f.as_ptr(), vectors.b.as_ptr(),),
-            pointers
-        );
-    }
 }

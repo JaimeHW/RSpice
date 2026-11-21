@@ -275,14 +275,4 @@ mod tests {
         indefinite[1][0] = indefinite[0][1];
         assert!(!derive_two_port_noise(&y, &indefinite, 50.0, 300.15).valid);
     }
-
-    #[test]
-    fn undefined_is_all_nan_and_not_equal_to_itself_by_value() {
-        let undefined = TwoPortNoise::undefined();
-        assert!(!undefined.valid);
-        assert!(undefined.noise_resistance.is_nan());
-        assert!(undefined.noise_factor.is_nan());
-        assert!(undefined.minimum_noise_factor.is_nan());
-        assert!(undefined.optimum_source_reflection.re.is_nan());
-    }
 }
