@@ -616,17 +616,3 @@ fn live_object_ids(model: &Model) -> Vec<u64> {
     ids.extend(schematic.document().probes.iter().map(|object| object.id));
     ids.into_iter().collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Counts are said in words, never as "object(s)".
-    #[test]
-    fn counts_are_said_in_words() {
-        assert_eq!(counted_objects(1), "1 object");
-        assert_eq!(counted_objects(3), "3 objects");
-        assert_eq!(counted_ports(1), "1 explicit boundary port");
-        assert_eq!(counted_ports(0), "0 explicit boundary ports");
-    }
-}

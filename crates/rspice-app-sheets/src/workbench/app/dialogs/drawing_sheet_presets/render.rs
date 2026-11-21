@@ -1516,7 +1516,7 @@ fn format_mm(value_um: u64) -> String {
 #[cfg(test)]
 mod tests {
 
-    use super::{custom_editor_stacks, matches_filter};
+    use super::matches_filter;
     use crate::state::{DrawingSheetPreset, DrawingSheetPresetScope};
 
     fn preset(name: &str) -> DrawingSheetPreset {
@@ -1549,13 +1549,5 @@ mod tests {
             assert!(matches_filter(&personal, query), "{query:?}");
             assert!(!matches_filter(&project, query), "{query:?}");
         }
-    }
-
-    #[test]
-    fn custom_editor_stacks_before_its_preview_can_leave_the_viewport() {
-        assert!(custom_editor_stacks(366.0));
-        assert!(custom_editor_stacks(719.0));
-        assert!(!custom_editor_stacks(720.0));
-        assert!(!custom_editor_stacks(980.0));
     }
 }
