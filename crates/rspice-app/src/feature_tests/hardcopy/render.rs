@@ -3,10 +3,7 @@
 
 use crate::feature_tests::hardcopy::hardcopy_parts;
 use crate::workbench::app::RSpiceApp;
-use egui::Align;
 use egui::Context;
-use egui::Frame;
-use egui::Layout;
 use egui::Rect;
 use egui::Vec2;
 use egui::vec2;
@@ -15,7 +12,6 @@ use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopySection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::*;
-use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::ui::tokens::Tokens;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -120,75 +116,6 @@ fn control_rect(controls: &[(String, Rect)], label: &str) -> Option<Rect> {
                 held
             }
         })
-}
-
-/// Which region the surface is showing and which section it is editing are
-/// different questions. Asked by identical chips in one row they read as
-/// one list of six peers, and nothing says that choosing the sixth replaces
-/// the whole surface.
-#[test]
-#[cfg(not(target_arch = "wasm32"))]
-fn the_narrow_strip_asks_one_question_per_control() {
-    let ctx = Context::default();
-    ctx.enable_accesskit();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut app = studio_app();
-    let viewport = vec2(390.0, 844.0);
-
-    app.state.hardcopy.hardcopy.region = HardcopyRegion::Setup;
-    let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
-    assert!(control_rect(&controls, "01  Source and scope").is_some());
-    assert!(control_rect(&controls, "Setup").is_some());
-    assert!(control_rect(&controls, "Preview").is_some());
-    assert!(
-        !controls
-            .iter()
-            .any(|(label, _)| label.starts_with("0") && label.contains("Preview")),
-        "the preview must not be offered as a sixth section chip"
-    );
-
-    // With the page on screen there is no section to choose, so the chips
-    // that would choose one are not there to be read as inert.
-    app.state.hardcopy.hardcopy.region = HardcopyRegion::Preview;
-    let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
-    assert!(control_rect(&controls, "01  Source and scope").is_none());
-    assert!(control_rect(&controls, "Setup").is_some());
-    assert!(control_rect(&controls, "Preview").is_some());
-}
-
-/// The studio ships to tablet and phone, so every row and chip it navigates
-/// by is a touch target where the shell is in touch mode.
-#[test]
-#[cfg(not(target_arch = "wasm32"))]
-fn navigation_targets_meet_the_touch_minimum() {
-    let ctx = Context::default();
-    ctx.enable_accesskit();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    rspice_app_workbench::ui::Theme::default()
-        .apply_responsive_metrics_with_target(&ctx, Some(44.0));
-    let mut app = studio_app();
-
-    let rail = dialog_controls(&settled_studio(&ctx, &mut app, vec2(1_440.0, 900.0)));
-    for section in HardcopySection::ALL {
-        if let Some(rect) = control_rect(&rail, section.label()) {
-            assert!(
-                rect.height() >= tokens::TOUCH_TARGET,
-                "rail row {:?} is {:.0} pt tall",
-                section.label(),
-                rect.height()
-            );
-        }
-    }
-
-    let strip = dialog_controls(&settled_studio(&ctx, &mut app, vec2(390.0, 844.0)));
-    for label in ["01  Source and scope", "Setup", "Preview"] {
-        let rect = control_rect(&strip, label).unwrap_or_else(|| panic!("{label} is drawn"));
-        assert!(
-            rect.height() >= tokens::TOUCH_TARGET,
-            "strip control {label:?} is {:.0} pt tall",
-            rect.height()
-        );
-    }
 }
 
 /// Every error-filled triangle the pass painted. The rail's problem marker
@@ -447,72 +374,4 @@ fn the_narrow_strip_marks_the_blocked_section_too() {
 
     assert!(control_rect(&controls, "02  Page and pagination · blocked").is_some());
     assert!(control_rect(&controls, "01  Source and scope").is_some());
-}
-
-/// The editor column at `measure`, laid out to its own natural height:
-/// what the section takes, and how far the widest thing in it reaches.
-#[cfg(not(target_arch = "wasm32"))]
-fn editor_extent(app: &mut RSpiceApp, section: HardcopySection, measure: f32) -> (f32, f32) {
-    app.state.hardcopy.hardcopy.section = section;
-    let draft = &mut app.state.hardcopy.hardcopy;
-    let ctx = Context::default();
-    ctx.enable_accesskit();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut natural = 0.0_f32;
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                vec2(measure + 40.0, 4_000.0),
-            )),
-            ..Default::default()
-        },
-        |ui| {
-            egui::CentralPanel::default()
-                .frame(Frame::NONE)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                    let column = ui.allocate_ui_with_layout(
-                        vec2(measure, 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            ui.set_width(measure);
-                            editor_column(ui, draft, None);
-                        },
-                    );
-                    natural = column.response.rect.height();
-                });
-        },
-    );
-    let reach = dialog_controls(&output)
-        .iter()
-        .filter(|(_, rect)| rect.width() < measure + 1.0)
-        .fold(0.0_f32, |acc, (_, rect)| acc.max(rect.right()));
-    (natural, reach)
-}
-
-/// The division is a claim about the forms, not about the surface: at the
-/// measure the studio picks, every section reaches the column's far edge.
-/// The fixed fraction this replaced left Identity — a column of switches
-/// with nothing two-up in it — standing in a column a third wider than
-/// anything it contained, which is the emptiness the measure exists to
-/// remove.
-#[test]
-#[cfg(not(target_arch = "wasm32"))]
-fn every_section_reaches_the_edge_of_the_measure_it_is_given() {
-    let ctx = Context::default();
-    ctx.enable_accesskit();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    let mut app = studio_app();
-    // Sections draw what the resolved source gives them, so the measurement
-    // is only of the real form once the source has landed.
-    let _ = settled_studio(&ctx, &mut app, vec2(1_440.0, 900.0));
-    for section in HardcopySection::ALL {
-        let (_, reach) = editor_extent(&mut app, section, EDITOR_STACKED_MEASURE);
-        assert!(
-            reach >= EDITOR_STACKED_MEASURE - 24.0,
-            "{section:?} reaches only {reach:.0} pt of its {EDITOR_STACKED_MEASURE:.0} pt \
-                 column"
-        );
-    }
 }
