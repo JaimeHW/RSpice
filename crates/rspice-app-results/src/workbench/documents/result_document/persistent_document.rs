@@ -993,6 +993,12 @@ pub fn project_pane_presentation(
             ))
         }),
     );
+    state.results.project_waveform_looks(
+        analysis_key,
+        pane.traces
+            .iter()
+            .map(|trace| super::trace_style::look_of(trace)),
+    );
     // The expressions this pane keeps are the ones its strip draws.
     if let Some(document) = state
         .model

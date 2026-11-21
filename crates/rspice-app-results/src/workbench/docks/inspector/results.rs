@@ -266,6 +266,7 @@ fn selected_result_trace(
             state.prompt(error);
         }
     }
+    trace_style_rows(ui, state, selected, &waveform_name);
 
     section_block_gap(ui);
     ui.horizontal_wrapped(|ui| {
@@ -442,6 +443,172 @@ fn axis_limit_row(
 /// The trace's colour as one more property row: its name in the label column,
 /// and in the value column the swatch that opens the picker beside the hex
 /// value it holds. Returns whether the reader picked a different colour.
+/// The selected trace's name and style rows. The style is the view's, and
+/// one edit styles every trace Ctrl-clicked beside the selected one with
+/// it; the name is the selected trace's own.
+fn trace_style_rows(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    selected: &rspice_results_ui::selection::SelectedResultTrace,
+    signal: &str,
+) {
+    use super::super::super::design_system::{property_row_combo, property_row_input_with_hint};
+    use crate::results::visualization_document::{
+        TraceDash, TraceDraw, TraceStyle, TraceSymbol, TraceWidth,
+    };
+    let analysis = selected.analysis_key();
+    let together: Vec<String> = std::iter::once(signal.to_owned())
+        .chain(
+            state
+                .results
+                .session
+                .also_selected_traces
+                .iter()
+                .filter(|held| held.analysis_key() == analysis && held.source_name() != signal)
+                .map(|held| held.source_name().to_owned()),
+        )
+        .collect();
+    let key = rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+        analysis,
+        signal.to_owned(),
+    );
+    let look = state
+        .results
+        .session
+        .waveform_looks
+        .get(&key)
+        .cloned()
+        .unwrap_or_default();
+
+    // The name is typed into a draft the field keeps until Enter or a click
+    // away, so the view is renamed once, not on every key.
+    let draft_id = egui::Id::new(("rspice.inspector.trace-name", analysis, signal));
+    let mut draft = ui
+        .data(|data| data.get_temp::<String>(draft_id))
+        .unwrap_or_else(|| look.name.clone().unwrap_or_default());
+    let field = property_row_input_with_hint(ui, "Shown as", &mut draft, signal, false);
+    if field.lost_focus() {
+        ui.data_mut(|data| data.remove::<String>(draft_id));
+        if draft.trim() != look.name.as_deref().unwrap_or_default() {
+            if let Err(error) = crate::workbench::documents::result_document::rename_trace(
+                state, analysis, signal, &draft,
+            ) {
+                state.prompt(error);
+            }
+        }
+    } else if field.has_focus() {
+        ui.data_mut(|data| data.insert_temp(draft_id, draft));
+    }
+
+    if together.len() > 1 {
+        property_row(ui, "Styled together", &format!("{} traces", together.len()));
+    }
+    let automatic = ("automatic".to_owned(), "Automatic".to_owned());
+    let options = |labels: &[&'static str]| -> Vec<(String, String)> {
+        std::iter::once(automatic.clone())
+            .chain(
+                labels
+                    .iter()
+                    .map(|label| ((*label).to_owned(), (*label).to_owned())),
+            )
+            .collect()
+    };
+    let pick = |selected: &str, labels: &[&'static str]| {
+        labels.iter().position(|label| *label == selected)
+    };
+    let mut style = look.style;
+    let mut changed = false;
+
+    let widths = TraceWidth::ALL.map(TraceWidth::label);
+    let mut width = style
+        .width
+        .map_or("automatic", TraceWidth::label)
+        .to_owned();
+    if property_row_combo(
+        ui,
+        "Width",
+        ("trace-width", signal),
+        &mut width,
+        &options(&widths),
+        true,
+    ) {
+        style.width = pick(&width, &widths).map(|at| TraceWidth::ALL[at]);
+        changed = true;
+    }
+    let dashes = TraceDash::ALL.map(TraceDash::label);
+    let mut dash = style.dash.map_or("automatic", TraceDash::label).to_owned();
+    if property_row_combo(
+        ui,
+        "Dash",
+        ("trace-dash", signal),
+        &mut dash,
+        &options(&dashes),
+        true,
+    ) {
+        style.dash = pick(&dash, &dashes).map(|at| TraceDash::ALL[at]);
+        changed = true;
+    }
+    let symbols = TraceSymbol::ALL.map(TraceSymbol::label);
+    let mut symbol = style
+        .symbol
+        .map_or("automatic", TraceSymbol::label)
+        .to_owned();
+    if property_row_combo(
+        ui,
+        "Symbols",
+        ("trace-symbol", signal),
+        &mut symbol,
+        &options(&symbols),
+        true,
+    ) {
+        style.symbol = pick(&symbol, &symbols).map(|at| TraceSymbol::ALL[at]);
+        changed = true;
+    }
+    let draws = TraceDraw::ALL.map(TraceDraw::label);
+    let mut draw = style.draw.label().to_owned();
+    let draw_options: Vec<(String, String)> = draws
+        .iter()
+        .map(|label| ((*label).to_owned(), (*label).to_owned()))
+        .collect();
+    if property_row_combo(
+        ui,
+        "Draw as",
+        ("trace-draw", signal),
+        &mut draw,
+        &draw_options,
+        true,
+    ) {
+        style.draw = pick(&draw, &draws).map_or(TraceDraw::Line, |at| TraceDraw::ALL[at]);
+        changed = true;
+    }
+    if changed && style != look.style {
+        // Each trace styled together takes the part changed, and keeps the
+        // parts it has of its own.
+        for signal in &together {
+            let own: TraceStyle = state
+                .results
+                .session
+                .waveform_looks
+                .get(
+                    &rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+                        analysis,
+                        signal.clone(),
+                    ),
+                )
+                .map(|look| look.style)
+                .unwrap_or_default();
+            if let Err(error) = crate::workbench::documents::result_document::set_trace_style(
+                state,
+                analysis,
+                signal,
+                own.with_changes(look.style, style),
+            ) {
+                state.prompt(error);
+            }
+        }
+    }
+}
+
 fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
     use super::super::super::design_system::{property_row_control_columns, property_row_height};
     let t = Tokens::get(ui.ctx());

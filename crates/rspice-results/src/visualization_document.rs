@@ -11,6 +11,7 @@ mod family;
 mod query;
 mod run_source;
 mod strips;
+mod trace_style;
 mod working_view;
 
 pub use comparison::*;
@@ -19,6 +20,7 @@ pub use family::*;
 pub use query::*;
 pub use run_source::*;
 pub use strips::*;
+pub use trace_style::*;
 pub use working_view::*;
 
 use std::cell::RefCell;
@@ -1505,6 +1507,10 @@ pub struct Trace {
     /// value trace.
     #[serde(default, skip_serializing_if = "TraceLane::is_value")]
     pub lane: TraceLane,
+    /// The width, dash, symbol and joining the reader gave this trace.
+    /// Absent, it draws as its place in the palette draws it.
+    #[serde(default, skip_serializing_if = "TraceStyle::is_default")]
+    pub style: TraceStyle,
     /// The run the trace reads has no signal by its name. The trace keeps
     /// its place and draws nothing, and reads the signal again from the
     /// first later run that has it.

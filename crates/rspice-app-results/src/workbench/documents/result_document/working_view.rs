@@ -684,6 +684,12 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
                 .iter()
                 .filter_map(|trace| Some((trace_signal(trace).to_owned(), trace.color?))),
         );
+        state.results.project_waveform_looks(
+            key,
+            traces
+                .iter()
+                .map(|trace| super::trace_style::look_of(trace)),
+        );
 
         let held: Vec<_> = document
             .expression_traces()

@@ -499,6 +499,15 @@ impl ResultViewerState {
     }
 }
 
+/// What a view gives one signal's trace beyond its colour: the style the
+/// reader chose and the name they gave it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct WaveformLook {
+    pub style: rspice_results::visualization_document::TraceStyle,
+    /// The name the reader gave the trace; `None` keeps its signal's.
+    pub name: Option<String>,
+}
+
 /// Device-local result viewer state over explicit retained identities.
 #[derive(Debug, Clone, Default)]
 pub struct ResultViewerState {
@@ -569,6 +578,9 @@ pub struct ResultViewerState {
     /// identity into the canonical result dataset; it never copies samples or
     /// creates a second result owner.
     pub selected_trace: Option<SelectedResultTrace>,
+    /// The traces Ctrl-clicked beside the selected one, of its strip: the
+    /// inspector and the Style menu style them together with it.
+    pub also_selected_traces: Vec<SelectedResultTrace>,
     /// Exact non-waveform Data Browser row selected for inspection. Like
     /// `selected_trace`, this is only an immutable source identity.
     pub selected_result_artifact: Option<ResultArtifactPresentationKey>,
@@ -737,6 +749,9 @@ pub struct ResultViewerState {
     /// The strips that draw a unit pane against a signal or an expression,
     /// each after its analysis' strip. Boxed, as the X scales are.
     pub xy_strips: Box<XyStrips>,
+    /// The style and name the view being drawn gives each signal's trace
+    /// beyond its colour.
+    pub waveform_looks: HashMap<SourceWaveformPresentationKey, WaveformLook>,
     /// The strips the reader arranged each analysis' waveform stack into, as
     /// the view being drawn keeps them; an analysis it has none for gives
     /// each unit a strip of its own.
@@ -1525,6 +1540,7 @@ impl ResultViewerState {
         self.waveform_visibility
             .retain(|key, _| live(key.analysis()));
         self.waveform_colors.retain(|key, _| live(key.analysis()));
+        self.waveform_looks.retain(|key, _| live(key.analysis()));
         self.hidden_family_traces.retain(|key| live(key.analysis()));
         self.eye_timebase.retain(|key, _| match key {
             crate::eye_diagram::EyeTimebaseKey::Prepared(_) => true,

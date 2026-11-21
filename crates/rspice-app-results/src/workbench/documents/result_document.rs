@@ -42,6 +42,7 @@ pub mod smith;
 mod soa;
 mod table;
 pub(crate) mod trace_statistics;
+mod trace_style;
 mod transfer_function;
 pub mod view_context;
 pub(crate) mod view_edits;
@@ -65,6 +66,7 @@ pub(crate) use network_matrix::exact_values as network_matrix_exact_values;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub(crate) use optimization::export_csv as export_optimization_csv;
+pub use trace_style::{rename_trace, set_trace_style};
 pub(crate) use view_history::{
     zoom_next, zoom_next_available, zoom_previous, zoom_previous_available,
 };

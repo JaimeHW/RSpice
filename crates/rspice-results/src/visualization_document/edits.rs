@@ -271,6 +271,12 @@ pub enum DocumentEdit {
         trace_id: TraceId,
         color: Option<TraceColor>,
     },
+    /// Draw one trace in the width, dash, symbol and joining the reader
+    /// chose; the default style draws it as its palette place does again.
+    SetTraceStyle {
+        trace_id: TraceId,
+        style: TraceStyle,
+    },
     /// Set how the waveform stack draws one trace: its lane kind, a bus's
     /// radix, and whether a bus shows its member lanes.
     SetTraceLane {

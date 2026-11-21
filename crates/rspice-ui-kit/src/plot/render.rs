@@ -261,7 +261,10 @@ impl Trace<'_> {
             .marker_style
             .map(|ordinal| color_safe_trace_style(ordinal, false).marker)
             .or_else(|| redundancy.map(|style| style.marker));
-        TraceLook { dash, marker }
+        TraceLook {
+            dash: self.chosen_dash.unwrap_or(dash),
+            marker: self.chosen_marker.unwrap_or(marker),
+        }
     }
 }
 

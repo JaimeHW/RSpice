@@ -9,6 +9,7 @@ use super::{
 use egui::Ui;
 use rspice_results::family_projection::FamilyTraceStyle;
 use rspice_results::result_presentation::{MarkerKind, WaveformPresentationKey};
+use rspice_results::visualization_document::TraceStyle;
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::palette::TRACE_HUES;
 use rspice_ui_kit::plot::sample::{
@@ -84,6 +85,8 @@ pub struct SwatchStyle {
     pub palette_slot: Option<usize>,
     pub family_style: Option<FamilyTraceStyle>,
     pub ordinal: usize,
+    /// The style the view gives the curve.
+    pub style: TraceStyle,
 }
 
 impl SwatchStyle {
@@ -92,20 +95,51 @@ impl SwatchStyle {
             palette_slot: trace.palette_slot,
             family_style: trace.family_style,
             ordinal: trace.waveform_index,
+            style: trace.style,
         }
     }
 
     /// The curve's dash and marker, exactly as its pane resolves them, so a
     /// legend or readout swatch is the curve.
     pub fn look(&self, color_safe: bool) -> TraceLook {
-        strip_trace_cues(
-            Trace::new(&[], &[], egui::Color32::PLACEHOLDER),
-            self.palette_slot,
-            self.family_style,
-            self.ordinal,
+        styled(
+            strip_trace_cues(
+                Trace::new(&[], &[], egui::Color32::PLACEHOLDER),
+                self.palette_slot,
+                self.family_style,
+                self.ordinal,
+            ),
+            self.style,
         )
         .look(self.ordinal, color_safe)
     }
+}
+
+/// `plot` as the reader styled it: their width, dash, symbol and joining
+/// where they chose one, its cues elsewhere.
+pub(crate) fn styled(plot: Trace<'_>, style: TraceStyle) -> Trace<'_> {
+    use rspice_results::visualization_document::{TraceDraw, TraceSymbol};
+    use rspice_ui_kit::plot::{DrawMode, TraceMarkerShape};
+    let plot = match style.width {
+        Some(width) => plot.width(width.points()),
+        None => plot,
+    };
+    let marker = style.symbol.map(|symbol| match symbol {
+        TraceSymbol::None => None,
+        TraceSymbol::Circle => Some(TraceMarkerShape::Circle),
+        TraceSymbol::Square => Some(TraceMarkerShape::Square),
+        TraceSymbol::Diamond => Some(TraceMarkerShape::Diamond),
+        TraceSymbol::Triangle => Some(TraceMarkerShape::Triangle),
+        TraceSymbol::Cross => Some(TraceMarkerShape::Cross),
+        TraceSymbol::Plus => Some(TraceMarkerShape::Plus),
+    });
+    plot.chosen_look(style.dash.map(|dash| dash.pattern()), marker)
+        .draw(match style.draw {
+            TraceDraw::Line => DrawMode::Line,
+            TraceDraw::Points => DrawMode::Points,
+            TraceDraw::Steps => DrawMode::Steps,
+            TraceDraw::Stems => DrawMode::Stems,
+        })
 }
 
 /// A strip trace's plot curve with the cues its swatch reads: its family
@@ -1055,11 +1089,16 @@ pub fn show_plot<'a>(
             trace.family_style,
             trace.waveform_index,
         );
+        let width = trace
+            .style
+            .width
+            .map_or(input.trace_width, |width| width.points());
+        plot_trace = styled(plot_trace, trace.style);
         if trace.overlay {
-            plot_trace = plot_trace.width(input.trace_width * SECONDARY_TRACE_RATIO);
+            plot_trace = plot_trace.width(width * SECONDARY_TRACE_RATIO);
         }
         if lifted {
-            plot_trace = plot_trace.width(input.trace_width);
+            plot_trace = plot_trace.width(width);
         }
         spec.traces.push(plot_trace);
     }
@@ -1105,21 +1144,28 @@ pub fn show_plot<'a>(
             } else {
                 continue;
             };
+            let width = trace
+                .style
+                .width
+                .map_or(input.trace_width, |width| width.points());
             let width = if trace.overlay {
-                input.trace_width * SECONDARY_TRACE_RATIO
+                width * SECONDARY_TRACE_RATIO
             } else {
-                input.trace_width
+                width
             };
             spec.traces.push(
-                strip_trace_cues(
-                    samples
-                        .width(width)
-                        .cache_key(trace_key(model, trace))
-                        .shape(&trace.shape),
-                    trace.palette_slot,
-                    trace.family_style,
-                    trace.waveform_index,
+                styled(
+                    strip_trace_cues(
+                        samples
+                            .cache_key(trace_key(model, trace))
+                            .shape(&trace.shape),
+                        trace.palette_slot,
+                        trace.family_style,
+                        trace.waveform_index,
+                    ),
+                    trace.style,
                 )
+                .width(width)
                 .on_axis(on),
             );
         }
@@ -1314,6 +1360,7 @@ mod tests {
                 palette_slot: None,
                 family_style: Some(style),
                 ordinal: waveform_index,
+                style: TraceStyle::default(),
             };
             for draw_index in 0..12 {
                 let curve = strip_trace_cues(

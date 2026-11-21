@@ -24,6 +24,8 @@ pub struct ModelCacheInput<'a> {
     pub waveform_visibility: &'a HashMap<SourceWaveformPresentationKey, bool>,
     /// The colours the view gives its traces, by signal.
     pub waveform_colors: &'a HashMap<SourceWaveformPresentationKey, TraceColor>,
+    /// The styles and names the view gives its traces, by signal.
+    pub waveform_looks: &'a HashMap<SourceWaveformPresentationKey, crate::session::WaveformLook>,
     /// A digest of what routes the reader's expressions to panes: their
     /// text, visibility and declared units, and which failed to evaluate.
     pub expressions: u64,
@@ -140,6 +142,13 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
         .collect::<Vec<_>>();
     colors.sort_unstable();
     colors.hash(&mut h);
+    let mut looks = input
+        .waveform_looks
+        .iter()
+        .map(|(key, look)| (stable_hash(key), stable_hash(look)))
+        .collect::<Vec<_>>();
+    looks.sort_unstable();
+    looks.hash(&mut h);
     for color in &t.color.traces {
         color.to_array().hash(&mut h);
     }
@@ -266,6 +275,34 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
             lane.visible = overrides.get(&key).copied().unwrap_or(dataset_default);
         }
         rank_lane_hues(model, analysis, first_lane_slot, colors, palette);
+    }
+}
+
+/// Give each curve of `models` the style and name the view gives its
+/// signal in `looks`. A family member keeps its member's tag after the name.
+pub fn apply_waveform_looks(
+    models: &mut [StripModel],
+    looks: &HashMap<SourceWaveformPresentationKey, crate::session::WaveformLook>,
+) {
+    if looks.is_empty() {
+        return;
+    }
+    for model in models {
+        for trace in &mut model.traces {
+            let Some(look) = looks.get(&SourceWaveformPresentationKey::new(
+                model.analysis_key,
+                trace.source_waveform_name.clone(),
+            )) else {
+                continue;
+            };
+            trace.style = look.style;
+            if let Some(name) = look.name.as_deref() {
+                trace.name = match trace.name.strip_prefix(trace.base_name.as_str()) {
+                    Some(tag) if !tag.is_empty() => format!("{name}{tag}"),
+                    _ => name.to_owned(),
+                };
+            }
+        }
     }
 }
 

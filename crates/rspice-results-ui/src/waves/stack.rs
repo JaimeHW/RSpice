@@ -1285,6 +1285,7 @@ fn pane_expressions(
         palette_slot: Some(expression_hue_slot(model, slot)),
         family_style,
         ordinal: 0,
+        style: Default::default(),
     };
     let mut slots: Vec<usize> = Vec::new();
     for expr in exprs {

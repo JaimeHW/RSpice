@@ -1081,6 +1081,62 @@ fn a_chosen_trace_colour_is_the_views_and_the_run_keeps_its_own() {
     );
 }
 
+/// A style and a name the reader gives a trace are drawn from the frame
+/// they are given, kept by the view, drawn from it again on the next frame,
+/// and stepped back by undo.
+#[test]
+fn a_trace_style_and_name_are_the_views_and_undo_takes_them_back() {
+    use crate::results::visualization_document::{TraceDraw, TraceStyle, TraceWidth};
+    let mut state = transient_state();
+    state.quick_frame();
+    let analysis = active_analysis_key(&state);
+    let drawn = |state: &mut ResultsTestHost| {
+        let presentation = state.model.preferences.result_presentation_policy();
+        let models = waves::cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+        models[0]
+            .traces
+            .iter()
+            .find(|trace| trace.source_waveform_name == "V(out)" && !trace.overlay)
+            .map(|trace| (trace.name.clone(), trace.style))
+            .expect("V(out) is drawn")
+    };
+    let thick_steps = TraceStyle {
+        width: Some(TraceWidth::Thick),
+        draw: TraceDraw::Steps,
+        ..TraceStyle::default()
+    };
+    set_trace_style(&mut state.results_parts(), analysis, "V(out)", thick_steps)
+        .expect("the working view keeps the trace");
+    rename_trace(&mut state.results_parts(), analysis, "V(out)", "Output")
+        .expect("the trace is renamed");
+    assert_eq!(drawn(&mut state), ("Output".to_owned(), thick_steps));
+    state.results.results.session.waveform_looks.clear();
+    state.quick_frame();
+    assert_eq!(
+        drawn(&mut state),
+        ("Output".to_owned(), thick_steps),
+        "the next frame draws the view's style and name"
+    );
+
+    let view = state.working_view().expect("the run's view").id();
+    view_edits::step(&mut state.results_parts(), view, view_edits::Step::Undo)
+        .expect("the rename is undone");
+    state.quick_frame();
+    assert_eq!(drawn(&mut state), ("V(out)".to_owned(), thick_steps));
+    view_edits::step(&mut state.results_parts(), view, view_edits::Step::Undo)
+        .expect("the style is undone");
+    state.quick_frame();
+    assert_eq!(
+        drawn(&mut state),
+        ("V(out)".to_owned(), TraceStyle::default())
+    );
+}
+
 /// The signals the run's view plots, and whether each is drawn.
 fn view_plots(state: &ResultsTestHost) -> Vec<(String, bool)> {
     let mut plots: Vec<_> = state

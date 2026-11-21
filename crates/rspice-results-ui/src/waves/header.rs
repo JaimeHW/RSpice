@@ -31,10 +31,15 @@ pub trait PaneHeaderHost {
     fn trace_selected(&self, trace: &StripTrace) -> bool;
     fn toggle_trace_visibility(&mut self, trace: &StripTrace);
     fn select_trace(&mut self, trace: &StripTrace);
+    /// Add `trace` to the traces selected, or take it out, as a Ctrl-click
+    /// on its legend entry asks: the selected traces are styled together.
+    fn extend_selection(&mut self, trace: &StripTrace) {
+        self.select_trace(trace);
+    }
     fn activate_pane(&mut self);
     /// Add an expression to the strip, as a trace's menu asks.
     fn add_expression(&mut self, _text: String) {}
-    /// Whether the host runs a trace's menu's measure, spectrum and
+    /// Whether the host runs a trace's menu's style, measure, spectrum and
     /// calculator entries, which the menu then offers.
     fn offers_trace_commands(&self) -> bool {
         false
@@ -46,6 +51,8 @@ pub trait PaneHeaderHost {
 /// What a trace's menu hands the host to do with the trace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TraceCommand {
+    /// Draw the trace, and the traces selected with it, in this style.
+    Style(rspice_results::visualization_document::TraceStyle),
     /// Measure the trace.
     Measure,
     /// Take the trace's spectrum.
@@ -924,7 +931,11 @@ fn legend_chip(
         .on_hover_text(&*shown);
     let label = drag_curve(label, curve);
     if label.clicked() {
-        host.select_trace(trace);
+        if ui.input(|input| input.modifiers.command) {
+            host.extend_selection(trace);
+        } else {
+            host.select_trace(trace);
+        }
     }
     crate::context_menu::context_menu(&label, |ui| {
         trace_menu(ui, trace, curve, host, output);
@@ -944,6 +955,15 @@ fn trace_menu(
     if ui.button("Hide").clicked() {
         host.toggle_trace_visibility(trace);
         ui.close();
+    }
+    if host.offers_trace_commands() {
+        let mut style = None;
+        rspice_ui_kit::widgets::menu_button(ui, "Style", |ui| {
+            style = super::style_menu::style_menu(ui, trace.style);
+        });
+        if let Some(style) = style {
+            host.trace_command(trace, TraceCommand::Style(style));
+        }
     }
     if let Some((model, curve)) = curve {
         output.arrange = output

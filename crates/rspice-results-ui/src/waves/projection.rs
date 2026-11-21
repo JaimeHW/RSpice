@@ -360,6 +360,7 @@ fn append_projected_traces(
             family_group_ordinal: projection.group.map(|group| group.ordinal),
             family_style,
             family_visibility_key,
+            style: Default::default(),
         });
     }
 }
@@ -851,6 +852,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     family_group_ordinal: *family_group_ordinal,
                     family_style: *family_style,
                     family_visibility_key: None,
+                    style: Default::default(),
                 });
                 contributed = true;
             }

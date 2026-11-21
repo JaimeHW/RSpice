@@ -1011,6 +1011,10 @@ impl VisualizationDocument {
                 self.trace_mut(trace_id)?.color = color;
                 Ok(())
             }
+            DocumentEdit::SetTraceStyle { trace_id, style } => {
+                self.trace_mut(trace_id)?.style = style;
+                Ok(())
+            }
             DocumentEdit::SetTraceLane { trace_id, lane } => {
                 self.trace_mut(trace_id)?.lane = lane;
                 Ok(())
@@ -1646,6 +1650,7 @@ impl VisualizationDocument {
             visible: true,
             color: None,
             lane: TraceLane::default(),
+            style: TraceStyle::default(),
             missing: false,
         });
         created.push(EntityRef::Trace(id));

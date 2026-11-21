@@ -696,6 +696,66 @@ fn a_trace_colour_is_kept_by_the_view_through_a_save_and_a_rerun() {
     );
 }
 
+/// A trace's style is kept by its view through a save and the next run, in
+/// readable words, and the default style leaves nothing written.
+#[test]
+fn a_trace_style_is_kept_by_the_view_through_a_save_and_a_rerun() {
+    let (mut document, source, analysis_id) = provisioned_trace_document("V(out)");
+    let trace_id = document.traces()[0].id;
+    let style = TraceStyle {
+        width: Some(TraceWidth::Thick),
+        dash: Some(TraceDash::DashDot),
+        symbol: Some(TraceSymbol::None),
+        draw: TraceDraw::Steps,
+    };
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTraceStyle { trace_id, style }],
+        )
+        .unwrap();
+    let saved = serde_json::to_string(&document).unwrap();
+    for word in [
+        "\"width\":\"thick\"",
+        "\"dash\":\"dash-dot\"",
+        "\"symbol\":\"none\"",
+        "\"draw\":\"steps\"",
+    ] {
+        assert!(saved.contains(word), "{word} in {saved}");
+    }
+    let mut document: VisualizationDocument = serde_json::from_str(&saved).unwrap();
+    assert_eq!(document.traces()[0].style, style, "a saved view keeps it");
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous: source,
+                next: long_form_analysis_dataset(binding(46), analysis_id, "V(out)", 2.0),
+                analysis_id,
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        document.traces()[0].style,
+        style,
+        "the next run's trace keeps it"
+    );
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTraceStyle {
+                trace_id,
+                style: TraceStyle::default(),
+            }],
+        )
+        .unwrap();
+    assert!(
+        !serde_json::to_string(&document)
+            .unwrap()
+            .contains("\"style\"")
+    );
+}
+
 /// Provisioning labels a trace with the vector's own name, and the vector it
 /// came from stays recorded beside it. A display surface may re-spell a label
 /// it can prove derivation wrote — the two are still equal — and must leave one

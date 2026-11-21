@@ -70,6 +70,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             },
             waveform_visibility: &session.waveform_visibility,
             waveform_colors: &session.waveform_colors,
+            waveform_looks: &session.waveform_looks,
             expressions,
             x_scales: &session.x_scales,
             strips: &session.strip_layouts,
@@ -107,6 +108,10 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 &session.waveform_colors,
                 projection.hidden_family_traces,
                 &t.color.traces,
+            );
+            rspice_results_ui::waves::cache::apply_waveform_looks(
+                &mut built,
+                &session.waveform_looks,
             );
             add_logic_lanes(
                 &mut built,

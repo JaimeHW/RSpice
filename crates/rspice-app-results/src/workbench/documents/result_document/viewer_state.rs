@@ -251,6 +251,53 @@ impl ResultsState {
         self.models.invalidate();
     }
 
+    /// Draw `analysis`' traces in the styles and names the view being drawn
+    /// gives them, by signal, and every other as its palette place draws
+    /// it. Idempotent, like [`Self::project_waveform_colors`].
+    pub(crate) fn project_waveform_looks(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        looks: impl IntoIterator<Item = (String, rspice_results_ui::session::WaveformLook)>,
+    ) {
+        let desired = looks
+            .into_iter()
+            .filter(|(_, look)| *look != rspice_results_ui::session::WaveformLook::default())
+            .map(|(signal, look)| (SourceWaveformPresentationKey::new(analysis, signal), look))
+            .collect::<HashMap<_, _>>();
+        let looks = &mut self.session.waveform_looks;
+        let unchanged = looks
+            .iter()
+            .filter(|(key, _)| key.analysis() == analysis)
+            .count()
+            == desired.len()
+            && desired
+                .iter()
+                .all(|(key, look)| looks.get(key) == Some(look));
+        if unchanged {
+            return;
+        }
+        looks.retain(|key, _| key.analysis() != analysis);
+        looks.extend(desired);
+        self.models.invalidate();
+    }
+
+    /// Draw `key`'s signal with `look` from this frame on: the view that
+    /// keeps it was just given the style or the name.
+    pub(super) fn draw_waveform_look(
+        &mut self,
+        key: SourceWaveformPresentationKey,
+        look: rspice_results_ui::session::WaveformLook,
+    ) {
+        let changed = if look == rspice_results_ui::session::WaveformLook::default() {
+            self.session.waveform_looks.remove(&key).is_some()
+        } else {
+            self.session.waveform_looks.insert(key, look.clone()) != Some(look)
+        };
+        if changed {
+            self.models.invalidate();
+        }
+    }
+
     /// Draw `key`'s signal in `color` from this frame on, or with `None` in
     /// its own colour: the view that keeps it was just given the colour.
     pub(super) fn draw_waveform_color(

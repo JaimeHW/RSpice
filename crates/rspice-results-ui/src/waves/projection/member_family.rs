@@ -216,6 +216,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 family_group_ordinal: Some(ordinal),
                 family_style: Some(style),
                 family_visibility_key: Some(visibility_key),
+                style: trace.style,
             });
         }
     }

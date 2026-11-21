@@ -33,6 +33,7 @@ pub mod readout;
 pub mod stack;
 mod strip_drag;
 pub mod strip_layout;
+pub mod style_menu;
 pub mod xy;
 pub use policy::{ReadoutPolicy, cursor_interpolation};
 mod units;
@@ -153,6 +154,8 @@ pub struct StripTrace {
     pub family_group_ordinal: Option<usize>,
     pub family_style: Option<FamilyTraceStyle>,
     pub family_visibility_key: Option<FamilyTraceVisibilityKey>,
+    /// The width, dash, symbol and joining the view gives the trace.
+    pub style: rspice_results::visualization_document::TraceStyle,
 }
 
 impl StripTrace {

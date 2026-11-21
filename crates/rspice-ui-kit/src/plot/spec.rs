@@ -240,6 +240,12 @@ pub struct Trace<'a> {
     pub y_axis: Option<TraceAxis>,
     /// How the samples are drawn: joined, as points, as steps or as stems.
     pub draw: DrawMode,
+    /// The dash the reader chose, `Some(None)` for a solid line: every cue
+    /// gives way to it.
+    pub chosen_dash: Option<Option<(f32, f32)>>,
+    /// The symbol the reader chose, `Some(None)` for none: every cue gives
+    /// way to it.
+    pub chosen_marker: Option<Option<super::render::TraceMarkerShape>>,
 }
 
 /// A Y axis a trace reads against beside the plot's own: its range and
@@ -293,6 +299,8 @@ impl<'a> Trace<'a> {
             stored: None,
             y_axis: None,
             draw: DrawMode::Line,
+            chosen_dash: None,
+            chosen_marker: None,
         }
     }
 
@@ -370,6 +378,18 @@ impl<'a> Trace<'a> {
     /// Draw the samples as `mode` draws them.
     pub fn draw(mut self, mode: DrawMode) -> Self {
         self.draw = mode;
+        self
+    }
+
+    /// Draw in the dash and symbol the reader chose, where they chose one,
+    /// whatever the trace's cues would give it.
+    pub fn chosen_look(
+        mut self,
+        dash: Option<Option<(f32, f32)>>,
+        marker: Option<Option<super::render::TraceMarkerShape>>,
+    ) -> Self {
+        self.chosen_dash = dash;
+        self.chosen_marker = marker;
         self
     }
 

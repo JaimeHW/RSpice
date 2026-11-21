@@ -160,12 +160,22 @@ fn show_unit_pane_header(
     }
     impl pane_header::PaneHeaderHost for HeaderHost<'_, '_> {
         fn trace_selected(&self, trace: &StripTrace) -> bool {
+            let is = |selected: &SelectedResultTrace| {
+                selected.analysis_key() == self.model.analysis_key
+                    && selected.source_name() == trace.source_waveform_name
+            };
             self.state
                 .results
                 .valid_selected_trace(&self.state.model.simulation)
                 .is_some_and(|selected| {
-                    selected.analysis_key() == self.model.analysis_key
-                        && selected.source_name() == trace.source_waveform_name
+                    is(selected)
+                        || self
+                            .state
+                            .results
+                            .session
+                            .also_selected_traces
+                            .iter()
+                            .any(is)
                 })
         }
 
@@ -185,7 +195,31 @@ fn show_unit_pane_header(
                 self.model.analysis_key,
                 trace.source_waveform_name.clone(),
             ));
+            self.state.results.session.also_selected_traces.clear();
             self.activate_pane();
+        }
+
+        fn extend_selection(&mut self, trace: &StripTrace) {
+            let picked = SelectedResultTrace::from_identity(
+                self.model.analysis_key,
+                trace.source_waveform_name.clone(),
+            );
+            let session = &mut self.state.results.session;
+            // The traces styled together are of one strip.
+            match session.selected_trace.as_ref() {
+                Some(selected) if selected.analysis_key() == self.model.analysis_key => {
+                    if *selected != picked {
+                        let also = &mut session.also_selected_traces;
+                        if let Some(at) = also.iter().position(|held| *held == picked) {
+                            also.remove(at);
+                        } else {
+                            also.push(picked);
+                        }
+                    }
+                    self.activate_pane();
+                }
+                _ => self.select_trace(trace),
+            }
         }
 
         fn activate_pane(&mut self) {
@@ -202,12 +236,53 @@ fn show_unit_pane_header(
 
         fn trace_command(&mut self, trace: &StripTrace, command: pane_header::TraceCommand) {
             use crate::workbench::results::commands::ResultsCommand;
+            if let pane_header::TraceCommand::Style(style) = command {
+                // A trace among the selected ones styles them all.
+                let mut signals = vec![trace.source_waveform_name.clone()];
+                if self.trace_selected(trace) {
+                    let session = &self.state.results.session;
+                    signals.extend(
+                        session
+                            .selected_trace
+                            .iter()
+                            .chain(&session.also_selected_traces)
+                            .filter(|selected| selected.analysis_key() == self.model.analysis_key)
+                            .map(|selected| selected.source_name().to_owned()),
+                    );
+                    signals.sort();
+                    signals.dedup();
+                }
+                // Each takes the part the menu changed and keeps its own.
+                for signal in signals {
+                    let own = self
+                        .state
+                        .results
+                        .session
+                        .waveform_looks
+                        .get(&SourceWaveformPresentationKey::new(
+                            self.model.analysis_key,
+                            signal.clone(),
+                        ))
+                        .map(|look| look.style)
+                        .unwrap_or_default();
+                    if let Err(error) = super::super::set_trace_style(
+                        self.state,
+                        self.model.analysis_key,
+                        &signal,
+                        own.with_changes(trace.style, style),
+                    ) {
+                        self.state.prompt(error);
+                    }
+                }
+                return;
+            }
             let command = match command {
                 pane_header::TraceCommand::Measure => ResultsCommand::MeasurementLibrary,
                 pane_header::TraceCommand::Spectrum => ResultsCommand::TraceSpectrum,
                 pane_header::TraceCommand::SendToCalculator => {
                     ResultsCommand::SendTraceToCalculator
                 }
+                pane_header::TraceCommand::Style(_) => return,
             };
             run_on_trace(self.state, self.model, trace, command);
         }
