@@ -132,7 +132,7 @@ pub(super) fn keep(segment: &Arc<Segment>) {
     }
 }
 
-//// Follow the open project, once a frame: hold its store, cut the runs a full store stopped and
+/// Follow the open project, once a frame: hold its store, cut the runs a full store stopped and
 /// say so, and load and read again the runs whose segments the store keeps and the page does not
 /// hold. Returns each run the store stopped, by its sequence, with the stop it keeps.
 pub fn follow(
@@ -818,7 +818,7 @@ fn read_again(simulation: &mut SimulationState) {
     }
 }
 
-//// After the open project was saved reading the segments `read`: the store lets go of every
+/// After the open project was saved reading the segments `read`: the store lets go of every
 /// segment neither that file, nor the version it replaced, nor this page reads, as a desktop
 /// project's folder does after a save.
 pub fn saved(read: impl IntoIterator<Item = SegmentDigest>) {
