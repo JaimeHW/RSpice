@@ -45,8 +45,8 @@ struct Write {
     index: u32,
     analysis: String,
     /// The logical digest of the segment the page holds, which a write that ran to its end
-    /// must have.
-    digest: Digest,
+    /// must have; none for rows the page relays from the import worker.
+    digest: Option<Digest>,
     writer: SegmentWriter<WatchedIo<Handle>>,
     /// The store filled: the write takes no more rows.
     full: bool,
@@ -165,7 +165,7 @@ async fn answer(
             ResultsStoreResponse::Closed
         }
         ResultsStoreRequest::Begin { schema, digest } => {
-            begin(held(store)?, &schema, &digest, Arc::new(|| None)).await?
+            begin(held(store)?, &schema, digest.as_deref(), Arc::new(|| None)).await?
         }
         ResultsStoreRequest::Rows { write } => {
             let x = f64_buffer(buffers, 0)?;
@@ -333,20 +333,20 @@ async fn opened(store: &Store) -> ResultsStoreResponse {
     }
 }
 
-/// Start writing a segment of `schema`, held by the page as `digest`; `free` says what room the
-/// store has, `None` where the browser cannot say, so the write holds room for closing ahead.
+/// Start writing a segment of `schema`, held by the page as `digest` (none for rows the page
+/// relays and does not hold); `free` says what room the store has, `None` where the browser
+/// cannot say, so the write holds room for closing ahead.
 async fn begin(
     store: &mut Store,
     schema: &WorkerResultsSchema,
-    digest: &str,
+    digest: Option<&str>,
     free: FreeSpace,
 ) -> Result<ResultsStoreResponse, String> {
-    let digest = digest_of(digest)?;
-    if store
-        .manifest
-        .members()
-        .iter()
-        .any(|member| member.digest == Some(digest) && member.status == Some(RunStatus::Completed))
+    let digest = digest.map(digest_of).transpose()?;
+    if let Some(digest) = digest
+        && store.manifest.members().iter().any(|member| {
+            member.digest == Some(digest) && member.status == Some(RunStatus::Completed)
+        })
     {
         return Ok(ResultsStoreResponse::Finished {
             record: KeptSegmentRecord {
@@ -471,13 +471,34 @@ async fn finish(store: &mut Store, write: u32) -> Result<ResultsStoreResponse, S
             return Err(error.to_string());
         }
     };
-    if !full && receipt.digest != digest {
+    if let Some(digest) = digest
+        && !full
+        && receipt.digest != digest
+    {
         let _ = store.dir.remove_segment(index).await;
         return Err(format!(
             "the segment written holds {}, not the {} the page holds",
             hex(&receipt.digest),
             hex(&digest)
         ));
+    }
+    // Relayed rows whose segment the store keeps already are dropped for it: the store keeps a
+    // run's samples once.
+    if digest.is_none()
+        && !full
+        && store.manifest.members().iter().any(|member| {
+            member.digest == Some(receipt.digest) && member.status == Some(RunStatus::Completed)
+        })
+    {
+        let _ = store.dir.remove_segment(index).await;
+        return Ok(ResultsStoreResponse::Finished {
+            record: KeptSegmentRecord {
+                digest: hex(&receipt.digest),
+                bytes: receipt.bytes,
+                rows: receipt.rows,
+            },
+            full,
+        });
     }
     let mut manifest = store.manifest.clone();
     manifest.upsert(Member {

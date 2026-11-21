@@ -11,8 +11,8 @@ use rspice_results_store::{
     Axis, Digest, RunMeta, RunStatus, Schema, SegmentWriter, Signal, SignalKind,
 };
 use rspice_simulation_contract::worker_transport::{
-    ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerLead, WorkerRead,
-    WorkerReadValue, WorkerResultsSchema, WorkerWindow,
+    KeptSegmentRecord, ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerLead,
+    WorkerRead, WorkerReadValue, WorkerResultsSchema, WorkerWindow,
 };
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -104,7 +104,7 @@ fn schema(signals: usize) -> Schema {
             unit: "s".to_owned(),
         },
         signals: (0..signals)
-            .map(|signal| Signal::new(&format!("v(n{signal})"), "V", SignalKind::Real))
+            .map(|signal| Signal::new(format!("v(n{signal})"), "V", SignalKind::Real))
             .collect(),
     }
 }
@@ -218,11 +218,28 @@ async fn keep_run(store: &str, seed: u64, signals: usize, count: u64) -> String 
         } => assert!(segments.is_empty(), "a fresh store keeps {segments:?}"),
         other => panic!("the store did not open: {other:?}"),
     }
+    let record = write_rows(Some(digest.clone()), seed, signals, count).await;
+    assert_eq!(record.digest, digest);
+    assert!(matches!(
+        ask(&ResultsStoreRequest::Close, Array::new()).await.0,
+        ResultsStoreResponse::Closed
+    ));
+    digest
+}
+
+/// Write the seeded run to the store held now from its rows, begun under `digest` as the page
+/// begins a run it holds, or under none as it relays an import's rows: what the store kept.
+async fn write_rows(
+    digest: Option<String>,
+    seed: u64,
+    signals: usize,
+    count: u64,
+) -> KeptSegmentRecord {
     let sent = WorkerResultsSchema::of(&schema(signals), &meta()).unwrap();
     let write = match ask(
         &ResultsStoreRequest::Begin {
             schema: sent,
-            digest: digest.clone(),
+            digest,
         },
         Array::new(),
     )
@@ -253,16 +270,11 @@ async fn keep_run(store: &str, seed: u64, signals: usize, count: u64) -> String 
     {
         ResultsStoreResponse::Finished { record, full } => {
             assert!(!full);
-            assert_eq!(record.digest, digest);
             assert_eq!(record.rows, count);
+            record
         }
         other => panic!("the write did not finish: {other:?}"),
     }
-    assert!(matches!(
-        ask(&ResultsStoreRequest::Close, Array::new()).await.0,
-        ResultsStoreResponse::Closed
-    ));
-    digest
 }
 
 /// Write the seeded run of `count` rows to the store `store` from its rows, close the store and
@@ -414,6 +426,43 @@ async fn remove_store(store: &str) {
     JsFuture::from(promise).await.unwrap();
 }
 
+/// Rows an import relays, whose digest no one knows before the last of them, are kept under the
+/// digest of what they hold; relayed again, they are kept once, as a run's samples always are.
+#[wasm_bindgen_test]
+async fn rows_relayed_without_a_digest_are_kept_once_under_their_own() {
+    let store = "relayed-rows";
+    let open = ResultsStoreRequest::Open {
+        store: store.to_owned(),
+    };
+    assert!(matches!(
+        ask(&open, Array::new()).await.0,
+        ResultsStoreResponse::Opened {
+            standing: ResultsStoreStanding::Held,
+            ..
+        }
+    ));
+    let digest = page_digest(11, 2, 5_000).to_string();
+    let first = write_rows(None, 11, 2, 5_000).await;
+    assert_eq!(first.digest, digest);
+    let again = write_rows(None, 11, 2, 5_000).await;
+    assert_eq!(again.digest, digest);
+    assert!(matches!(
+        ask(&ResultsStoreRequest::Close, Array::new()).await.0,
+        ResultsStoreResponse::Closed
+    ));
+    match ask(&open, Array::new()).await.0 {
+        ResultsStoreResponse::Opened { segments, .. } => {
+            let kept: Vec<_> = segments
+                .iter()
+                .map(|record| record.digest.as_str())
+                .collect();
+            assert_eq!(kept, [digest.as_str()], "the store keeps {segments:?}");
+        }
+        other => panic!("the store did not open again: {other:?}"),
+    }
+    remove_store(store).await;
+}
+
 /// A run of a few mebibytes written to origin-private storage reads back with every sample after
 /// its store is closed and opened again.
 #[wasm_bindgen_test]
@@ -471,7 +520,7 @@ async fn a_store_another_holder_has_is_refused() {
     let begun = ask(
         &ResultsStoreRequest::Begin {
             schema: sent,
-            digest: page_digest(3, 1, 10).to_string(),
+            digest: Some(page_digest(3, 1, 10).to_string()),
         },
         Array::new(),
     )

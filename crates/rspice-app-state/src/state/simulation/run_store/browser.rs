@@ -524,7 +524,7 @@ async fn write(segment: &Arc<Segment>) -> Result<(), String> {
     let begun = call(
         &ResultsStoreRequest::Begin {
             schema: sent,
-            digest: digest.to_string(),
+            digest: Some(digest.to_string()),
         },
         Array::new(),
     )

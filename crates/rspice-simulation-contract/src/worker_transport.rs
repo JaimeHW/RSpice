@@ -116,10 +116,13 @@ pub enum ResultsStoreRequest {
     Open { store: String },
     /// Let go of the store this tab holds.
     Close,
-    /// Start writing a segment of `schema`, which the page holds under the logical `digest`.
+    /// Start writing a segment of `schema`, which the page holds under the logical `digest`. A
+    /// segment the page does not hold (rows the import worker reads) names none, and is kept
+    /// under the digest its rows give.
     Begin {
         schema: WorkerResultsSchema,
-        digest: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        digest: Option<String>,
     },
     /// Rows for writing `write`.
     Rows { write: u32 },
@@ -523,7 +526,7 @@ mod tests {
         let sent = WorkerResultsSchema::of(&schema, &meta).expect("analog signals cross");
         let request = ResultsStoreRequest::Begin {
             schema: sent,
-            digest: "ab".repeat(32),
+            digest: Some("ab".repeat(32)),
         };
         let wire = serde_json::to_string(&request).expect("written");
         let ResultsStoreRequest::Begin { schema: read, .. } =
