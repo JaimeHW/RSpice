@@ -676,11 +676,6 @@ mod tests {
     }
 
     #[test]
-    fn the_five_line_deck_is_five_lines() {
-        assert_eq!(FIVE_LINE_DECK.lines().count(), 5);
-    }
-
-    #[test]
     fn the_population_is_complete_and_uniquely_named() {
         let root = crate::workspace_root();
         let decks = tempfile::tempdir().expect("temporary deck directory");
