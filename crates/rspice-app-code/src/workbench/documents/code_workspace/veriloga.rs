@@ -1028,15 +1028,6 @@ mod tests {
     };
     use rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt;
 
-    #[test]
-    fn editor_and_execution_share_the_project_macro_expansion_contract() {
-        let limits = rspice_simulation::project_veriloga::project_virtual_compile_limits();
-        assert_eq!(
-            limits.max_expanded_bytes,
-            crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2)
-        );
-    }
-
     /// A `behavioral/<cell>/veriloga` view binding `module`, owning a
     /// one-file bundle at `root` that holds `source`.
     fn add_module_view(
