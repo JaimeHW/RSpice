@@ -30,6 +30,20 @@ pub(super) fn hierarchical_run() -> ResultsTestHost {
     host
 }
 
+/// [`hierarchical_run`] once the run has ended, with none of its signals
+/// on the plot: what a reader ticks from.
+pub(super) fn finished_hierarchical_run() -> ResultsTestHost {
+    let mut host = hierarchical_run();
+    let run = host.model.simulation.active_run_mut().expect("a run");
+    run.mark_running().expect("the run starts");
+    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+        .expect("the run finishes");
+    for waveform in &mut run.analyses[0].waveforms {
+        waveform.visible = false;
+    }
+    host
+}
+
 /// The browser in a 300 px dock, frame by frame.
 pub(super) struct Browser {
     pub(super) host: ResultsTestHost,
@@ -516,4 +530,90 @@ fn a_measurement_of_a_run_without_curves_is_not_offered_the_table() {
         viewer_refusal(&parts, &measurement, ResultViewer::Table),
         Some("Requires an analysis with retained samples")
     );
+}
+
+/// Ticking the first signal brings the band of batch actions in under the
+/// rows: no row moves under the pointer, so a second click where the first
+/// landed does not untick what it ticked.
+#[test]
+fn the_first_tick_moves_no_row() {
+    let mut browser = Browser::new(finished_hierarchical_run());
+    browser.frame(Vec::new());
+    let before = browser.frame(Vec::new());
+    let tick_of = |nodes: &[Node], name: &str| {
+        nodes
+            .iter()
+            .find(|node| node.label == format!("Plot {name}"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no tick box for {name}: {:?}", labels(nodes)))
+    };
+    let (input, output) = (tick_of(&before, "V(in)"), tick_of(&before, "V(out)"));
+    assert!(!input.ticked && find(&before, "1 ticked").is_none());
+
+    let after = browser.click(input.rect.center());
+    let ticked = tick_of(&after, "V(in)");
+    assert!(ticked.ticked, "the click ticks V(in)");
+    assert_eq!(ticked.rect, input.rect, "V(in) stays under the pointer");
+    assert_eq!(tick_of(&after, "V(out)").rect, output.rect);
+    let band = find(&after, "1 ticked").expect("the band counts the tick");
+    assert!(
+        band.rect.top() >= ticked.rect.bottom(),
+        "the band stands under the rows: {:?} against {:?}",
+        band.rect,
+        ticked.rect
+    );
+}
+
+/// The flat list in the order the Sort menu names: the order the run wrote
+/// its signals in, or by unit and then by name.
+#[test]
+fn the_flat_list_sorts_in_run_order_and_by_unit() {
+    let mut browser = Browser::new(finished_hierarchical_run());
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    let at = |nodes: &[Node], label: &str| {
+        find(nodes, label)
+            .unwrap_or_else(|| panic!("no {label}: {:?}", labels(nodes)))
+            .rect
+            .center()
+    };
+    let rows = |nodes: &[Node]| {
+        let mut ticks: Vec<&Node> = nodes
+            .iter()
+            .filter(|node| node.label.starts_with("Plot "))
+            .collect();
+        ticks.sort_by(|above, below| above.rect.top().total_cmp(&below.rect.top()));
+        ticks
+            .iter()
+            .map(|node| node.label["Plot ".len()..].to_owned())
+            .collect::<Vec<_>>()
+    };
+    let nodes = browser.click(at(&nodes, "Flat"));
+    let nodes = browser.click(at(&nodes, "Sort"));
+    let nodes = browser.click(at(&nodes, "Run order"));
+    assert_eq!(
+        rows(&nodes),
+        [
+            "V(out)",
+            "V(x1.a)",
+            "I(X1.V1)",
+            "V(x1.x2.b)",
+            "D(xsar.q)",
+            "V(in)"
+        ],
+        "as the run wrote them"
+    );
+
+    let nodes = browser.click(at(&nodes, "Sort"));
+    let nodes = browser.click(at(&nodes, "Unit"));
+    let by_unit = rows(&nodes);
+    let volts: Vec<&str> = by_unit
+        .iter()
+        .map(String::as_str)
+        .filter(|name| name.starts_with("V("))
+        .collect();
+    assert_eq!(volts, ["V(in)", "V(out)", "V(x1.a)", "V(x1.x2.b)"]);
+    let amps = by_unit.iter().position(|name| name == "I(X1.V1)").unwrap();
+    let first_volt = by_unit.iter().position(|name| name == "V(in)").unwrap();
+    assert!(amps < first_volt, "A before V: {by_unit:?}");
 }

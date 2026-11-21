@@ -59,6 +59,8 @@ const RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT: usize = 8_000_000;
 /// scope control a band rather than a bare row. Without it the segments are
 /// exactly the band, so they sit hard against the toolbar rule above them.
 const RESULT_BROWSER_BAND_PAD_Y: f32 = 3.0;
+/// The band of batch actions over the ticked quantities, under the rows.
+const TICKED_BAND_HEIGHT: f32 = 29.0;
 
 pub fn result_browser_facets_stack(available_width: f32) -> bool {
     available_width < RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
@@ -99,6 +101,10 @@ pub(in crate::workbench) fn results(
         .ctx()
         .data(|data| data.get_temp::<ResultsBrowserScope>(results_browser_scope_id()))
         .unwrap_or_default();
+    let stored_order = ui
+        .ctx()
+        .data(|data| data.get_temp::<ResultsBrowserOrder>(results_browser_order_id()))
+        .unwrap_or_default();
     // Internal nodes stay behind the kind list's switch whatever tab is open:
     // they are hidden from the browser, not filtered out of one listing.
     let show_internal = results_browser_shows_internal(ui.ctx());
@@ -117,6 +123,11 @@ pub(in crate::workbench) fn results(
         stored_scope
     } else {
         ResultsBrowserScope::All
+    };
+    let order = if active_browser_tab == ResultsBrowserTab::Signals {
+        stored_order
+    } else {
+        ResultsBrowserOrder::Name
     };
     let producer_facet = if active_browser_tab == ResultsBrowserTab::Signals {
         stored_producer_facet
@@ -199,7 +210,7 @@ pub(in crate::workbench) fn results(
     let fingerprint = browser_rows_fingerprint(
         &*state,
         &analysis_integrity,
-        (kind, layout, scope, producer_facet, show_internal),
+        (kind, layout, order, scope, producer_facet, show_internal),
         &ticked,
         (active_run, expression_query_match),
     );
@@ -305,6 +316,8 @@ pub(in crate::workbench) fn results(
                                 )),
                                 identity,
                                 name: waveform.name.clone(),
+                                unit: unit.to_owned(),
+                                samples,
                                 color: waveform.color.clone(),
                                 // Nothing: every row of a waveform list is a
                                 // vector, the unit rides the value, and the
@@ -363,8 +376,8 @@ pub(in crate::workbench) fn results(
                                 .unwrap_or(usize::MAX)
                         });
                     } else if layout == ResultsBrowserLayout::Flat {
-                        signals.sort_by(|left, right| natural_cmp(&left.name, &right.name));
-                        artifacts.sort_by(|left, right| natural_cmp(&left.name, &right.name));
+                        order.sort_signals(&mut signals);
+                        order.sort_artifacts(&mut artifacts);
                     }
                     let matches_analysis =
                         analysis_query_matches || !signals.is_empty() || !artifacts.is_empty();
@@ -394,17 +407,22 @@ pub(in crate::workbench) fn results(
                                     )
                                 })),
                         );
-                        // Recent keeps recency order; otherwise each level
-                        // reads by kind and name, as a hierarchy browser's do.
-                        if scope != ResultsBrowserScope::Recent {
+                        // Recent keeps recency order and run order the
+                        // order the run wrote them in; otherwise each level
+                        // reads by the order's group and then by name: by
+                        // kind, as a hierarchy browser's do, by unit, or by
+                        // sample count.
+                        if scope != ResultsBrowserScope::Recent
+                            && order != ResultsBrowserOrder::RunOrder
+                        {
+                            let group = order.groups(&signals, &artifacts);
                             tree.sort(&|item| match item {
                                 TreeItem::Signal(index) => (
-                                    signals[index].kind.rank(),
+                                    group.of_signal(&signals[index]),
                                     split_hierarchy(&signals[index].name).leaf,
                                 ),
                                 TreeItem::Artifact(index) => (
-                                    artifact_signal_kind(&artifacts[index])
-                                        .map_or(u8::MAX, SignalKind::rank),
+                                    group.of_artifact(&artifacts[index]),
                                     split_hierarchy(artifact_hierarchical_name(&artifacts[index]))
                                         .leaf,
                                 ),
@@ -607,6 +625,8 @@ pub(in crate::workbench) fn results(
                         }
                         ui.add_space(6.0);
                         signal_sets_menu(ui, state, &ticked_ordered);
+                        ui.add_space(6.0);
+                        results_browser_order_menu(ui, order, scope);
                     }
                     // The count is the band's last register: how many of the
                     // tab's rows the filter in force is letting through.
@@ -634,9 +654,38 @@ pub(in crate::workbench) fn results(
             );
         }
     }
+    if tab == ResultsBrowserTab::Signals {
+        // The rows leave the band its height under them while anything is
+        // ticked.
+        let band = if ticked.is_empty() {
+            0.0
+        } else {
+            TICKED_BAND_HEIGHT
+        };
+        let rows_height = (ui.available_height() - band).max(0.0);
+        ui.allocate_ui(egui::vec2(ui.available_width(), rows_height), |ui| {
+            show_virtualized_result_signals(
+                ui,
+                state,
+                &runs,
+                &signal_list,
+                active_run,
+                active_analysis,
+                selected_trace.as_ref(),
+                selected_artifact.as_ref(),
+                &visible_result_keys,
+                &ticked_ordered,
+                !query.is_empty(),
+                kind,
+                scope,
+            );
+        });
+    }
     // What a batch action acts on: the ticked quantities, which for a
     // waveform are the curves on the plot. The band belongs to the ticks, and
-    // the row ticks under it are how a set starts.
+    // the row ticks above it are how a set starts. It stands under the rows:
+    // over them, the first tick brought it in and moved every row down under
+    // the pointer, so the next click there unticked what had just been ticked.
     if tab == ResultsBrowserTab::Signals && !ticked.is_empty() {
         let t = Tokens::get(ui.ctx());
         let checked = ticked;
@@ -682,8 +731,15 @@ pub(in crate::workbench) fn results(
                 .collect::<std::collections::HashSet<_>>()
                 .len()
                 == 1;
+        // `.result-browser-selection` opens on a rule, so the rows above it
+        // and the band do not run together.
+        ui.painter().hline(
+            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
+            ui.cursor().top() + 0.5,
+            egui::Stroke::new(1.0, t.color.border),
+        );
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 29.0),
+            egui::vec2(ui.available_width(), TICKED_BAND_HEIGHT),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.painter()
@@ -808,30 +864,8 @@ pub(in crate::workbench) fn results(
                 });
             },
         );
-        // `.result-browser-selection` closes on a rule too, so the selection
-        // band and the list under it do not run together.
-        ui.painter().hline(
-            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
-            ui.cursor().top() - 0.5,
-            egui::Stroke::new(1.0, t.color.border),
-        );
     }
     if tab == ResultsBrowserTab::Signals {
-        show_virtualized_result_signals(
-            ui,
-            state,
-            &runs,
-            &signal_list,
-            active_run,
-            active_analysis,
-            selected_trace.as_ref(),
-            selected_artifact.as_ref(),
-            &visible_result_keys,
-            &ticked_ordered,
-            !query.is_empty(),
-            kind,
-            scope,
-        );
         return;
     }
     ScrollArea::vertical()
@@ -1135,9 +1169,10 @@ fn browser_rows(
 fn browser_rows_fingerprint(
     state: &ResultsParts<'_>,
     integrity: &std::collections::HashMap<AnalysisPresentationKey, bool>,
-    (kind, layout, scope, producer, show_internal): (
+    (kind, layout, order, scope, producer, show_internal): (
         ResultsBrowserKind,
         ResultsBrowserLayout,
+        ResultsBrowserOrder,
         ResultsBrowserScope,
         Option<AnalysisPresentationKey>,
         bool,
@@ -1150,7 +1185,7 @@ fn browser_rows_fingerprint(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     state.model.simulation.view.data_version.hash(&mut hasher);
     state.workbench.navigator_filter().hash(&mut hasher);
-    (kind as u8, layout as u8, scope as u8).hash(&mut hasher);
+    (kind as u8, layout as u8, order as u8, scope as u8).hash(&mut hasher);
     (producer, show_internal, active_run, expression_query_match).hash(&mut hasher);
     // A set's order is its hasher's: combine its members in any order.
     ticked
@@ -1292,10 +1327,11 @@ impl ResultsBrowserKind {
 }
 
 /// How the signals tab lays its quantities out: as the design's instance
-/// tree, each level by kind and then by name, or as one flat list of full
-/// names in name order — EZwave's "hierarchical (tree) or flat (list)
-/// format". Both count numbers in names (`L2` before `L10`). Recency is the Recent scope on the band below: one owner for
-/// it, not a third order that silently competes with it.
+/// tree, or as one flat list of full names — EZwave's "hierarchical (tree)
+/// or flat (list) format" — each in the [`ResultsBrowserOrder`] in force.
+/// Both count numbers in names (`L2` before `L10`). Recency is the Recent
+/// scope on the band below: one owner for it, not a further order that
+/// silently competes with it.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum ResultsBrowserLayout {
     #[default]
@@ -1728,6 +1764,38 @@ fn results_browser_scope_id() -> egui::Id {
 
 fn results_browser_producer_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-producer-facet")
+}
+
+fn results_browser_order_id() -> egui::Id {
+    egui::Id::new("workbench.results.browser-order")
+}
+
+/// The order of the signals tab on a menu beside its sets: one order is on.
+/// Recent lists what was used most recently first, so the menu waits while
+/// it is in force.
+fn results_browser_order_menu(ui: &mut Ui, order: ResultsBrowserOrder, scope: ResultsBrowserScope) {
+    let recent = scope == ResultsBrowserScope::Recent;
+    let response = ui
+        .add_enabled_ui(!recent, |ui| {
+            egui::containers::menu::MenuButton::new("Sort")
+                .ui(ui, |ui| {
+                    for candidate in ResultsBrowserOrder::ALL {
+                        if ui.radio(candidate == order, candidate.label()).clicked() {
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_order_id(), candidate);
+                            });
+                            ui.close();
+                        }
+                    }
+                })
+                .0
+        })
+        .inner;
+    if recent {
+        response.on_disabled_hover_text("Recent lists what was used most recently first.");
+    } else {
+        response.on_hover_text(order.stated());
+    }
 }
 
 fn results_browser_active_tab(ctx: &egui::Context) -> ResultsBrowserTab {
@@ -2165,6 +2233,10 @@ pub(super) struct ResultSignal {
     pub(super) waveform_index: usize,
     pub(super) identity: SourceWaveformPresentationKey,
     pub(super) name: String,
+    /// The unit the signal reads in, which the unit order sorts by.
+    pub(super) unit: String,
+    /// The samples it holds, which the sample order sorts by.
+    pub(super) samples: usize,
     pub(super) color: String,
     pub(super) visible: bool,
     pub(super) value: Option<String>,
@@ -2251,4 +2323,149 @@ pub(super) enum ResultSignalVirtualRow {
         artifact: usize,
         depth: usize,
     },
+}
+
+/// The order the signals tab lists each level's quantities in: by name, by
+/// unit, in the order the run wrote them, or by sample count, as ViVA's and
+/// EZwave's browsers sort. Numbers in names count (`L2` before `L10`), and
+/// a tie reads by name.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub(super) enum ResultsBrowserOrder {
+    #[default]
+    Name,
+    Unit,
+    RunOrder,
+    Samples,
+}
+
+impl ResultsBrowserOrder {
+    pub(super) const ALL: [Self; 4] = [Self::Name, Self::Unit, Self::RunOrder, Self::Samples];
+
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Unit => "Unit",
+            Self::RunOrder => "Run order",
+            Self::Samples => "Samples",
+        }
+    }
+
+    /// The order said in full, for the menu's tooltip.
+    const fn stated(self) -> &'static str {
+        match self {
+            Self::Name => "Sorted by name",
+            Self::Unit => "Sorted by unit, then by name",
+            Self::RunOrder => "In the order the run wrote them",
+            Self::Samples => "Most samples first, then by name",
+        }
+    }
+
+    /// Put a flat list's signals in this order.
+    pub(super) fn sort_signals(self, signals: &mut [ResultSignal]) {
+        let by_name =
+            |left: &ResultSignal, right: &ResultSignal| natural_cmp(&left.name, &right.name);
+        match self {
+            Self::Name => signals.sort_by(by_name),
+            Self::Unit => signals.sort_by(|left, right| {
+                natural_cmp(&left.unit, &right.unit).then_with(|| by_name(left, right))
+            }),
+            Self::Samples => signals.sort_by(|left, right| {
+                right
+                    .samples
+                    .cmp(&left.samples)
+                    .then_with(|| by_name(left, right))
+            }),
+            Self::RunOrder => {}
+        }
+    }
+
+    /// Put a flat list's other results in this order. They hold no samples
+    /// to count, so the sample order reads them by name.
+    pub(super) fn sort_artifacts(self, artifacts: &mut [ResultArtifact]) {
+        let by_name =
+            |left: &ResultArtifact, right: &ResultArtifact| natural_cmp(&left.name, &right.name);
+        match self {
+            Self::Name | Self::Samples => artifacts.sort_by(by_name),
+            Self::Unit => artifacts.sort_by(|left, right| {
+                natural_cmp(&left.unit, &right.unit).then_with(|| by_name(left, right))
+            }),
+            Self::RunOrder => {}
+        }
+    }
+
+    /// The groups a tree level reads in under this order, before names:
+    /// kinds, units, or sample counts.
+    pub(super) fn groups(
+        self,
+        signals: &[ResultSignal],
+        artifacts: &[ResultArtifact],
+    ) -> OrderGroups {
+        let mut units: Vec<String> = Vec::new();
+        let mut counts: Vec<usize> = Vec::new();
+        match self {
+            Self::Unit => {
+                units = signals
+                    .iter()
+                    .map(|signal| signal.unit.clone())
+                    .chain(artifacts.iter().map(|artifact| artifact.unit.clone()))
+                    .collect();
+                units.sort_by(|left, right| natural_cmp(left, right));
+                units.dedup();
+            }
+            Self::Samples => {
+                counts = signals.iter().map(|signal| signal.samples).collect();
+                counts.sort_unstable_by(|left, right| right.cmp(left));
+                counts.dedup();
+            }
+            Self::Name | Self::RunOrder => {}
+        }
+        OrderGroups {
+            order: self,
+            units,
+            counts,
+        }
+    }
+}
+
+/// Where each quantity of a tree level falls under a [`ResultsBrowserOrder`]:
+/// the rank its group reads at.
+pub(super) struct OrderGroups {
+    order: ResultsBrowserOrder,
+    units: Vec<String>,
+    counts: Vec<usize>,
+}
+
+impl OrderGroups {
+    fn rank(position: Option<usize>) -> u8 {
+        position.map_or(u8::MAX, |position| {
+            u8::try_from(position).unwrap_or(u8::MAX - 1)
+        })
+    }
+
+    pub(super) fn of_signal(&self, signal: &ResultSignal) -> u8 {
+        match self.order {
+            ResultsBrowserOrder::Unit => {
+                Self::rank(self.units.iter().position(|unit| *unit == signal.unit))
+            }
+            ResultsBrowserOrder::Samples => Self::rank(
+                self.counts
+                    .iter()
+                    .position(|count| *count == signal.samples),
+            ),
+            ResultsBrowserOrder::Name | ResultsBrowserOrder::RunOrder => signal.kind.rank(),
+        }
+    }
+
+    pub(super) fn of_artifact(&self, artifact: &ResultArtifact) -> u8 {
+        match self.order {
+            ResultsBrowserOrder::Unit => {
+                Self::rank(self.units.iter().position(|unit| *unit == artifact.unit))
+            }
+            // No samples to count: after the signals, by name.
+            ResultsBrowserOrder::Samples => u8::MAX,
+            ResultsBrowserOrder::Name | ResultsBrowserOrder::RunOrder => {
+                artifact_signal_kind(artifact).map_or(u8::MAX, SignalKind::rank)
+            }
+        }
+    }
 }
