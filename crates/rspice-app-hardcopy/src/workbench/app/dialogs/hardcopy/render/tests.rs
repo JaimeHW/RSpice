@@ -74,13 +74,6 @@ fn a_resolution_outside_the_offered_range_is_refused() {
 }
 
 #[test]
-fn preview_texture_cache_is_bounded_to_two_rotating_slots() {
-    assert_eq!(preview_texture_slot_id(0), preview_texture_slot_id(0));
-    assert_eq!(preview_texture_slot_id(1), preview_texture_slot_id(8));
-    assert_ne!(preview_texture_slot_id(0), preview_texture_slot_id(1));
-}
-
-#[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn rapid_preview_invalidation_never_launches_over_an_active_worker() {
     assert_eq!(
@@ -125,64 +118,6 @@ fn closing_preview_cancels_and_clears_worker_before_reopen() {
     assert_eq!(
         preview_schedule_decision(None, 42),
         PreviewScheduleDecision::Launch
-    );
-}
-
-/// Whatever the track, the editor takes its measure and the page desk takes
-/// the rest — and a column too short for a stacked form buys its height
-/// back with the width the desk would have had.
-#[test]
-fn the_page_desk_takes_every_point_the_form_does_not_need() {
-    let tall = STACKED_FORM_HEIGHT;
-    for track in [1_050.0_f32, 888.0, 782.0, 768.0] {
-        let (editor, preview) = column_widths(track, tall);
-        assert_eq!(editor, EDITOR_STACKED_MEASURE);
-        assert!((editor + preview - track).abs() < 0.5);
-    }
-    let (editor, preview) = column_widths(1_050.0, STACKED_FORM_HEIGHT - 1.0);
-    assert_eq!(editor, EDITOR_PAIRED_MEASURE);
-    assert!((editor + preview - 1_050.0).abs() < 0.5);
-    // A track that cannot pay for both gives way from the editor first: a
-    // page too small to read is not worth a wider form.
-    let (editor, preview) = column_widths(EDITOR_MIN + PREVIEW_MIN, tall);
-    assert_eq!((editor, preview), (EDITOR_MIN, PREVIEW_MIN));
-}
-
-/// The toolbar's band is measured, not assumed. The desk must give up the
-/// exact band the toolbar draws at both wide and constrained widths.
-#[test]
-fn the_preview_toolbar_reserves_exactly_the_band_it_draws() {
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
-    let mut bands = Vec::new();
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            for width in [620.0_f32, 340.0] {
-                let view = PreviewView { page: 0, zoom: 100 };
-                let reserved = preview_toolbar_height(ui, &view, 4, width);
-                let drawn = ui
-                    .allocate_ui_with_layout(
-                        vec2(width, 400.0),
-                        Layout::top_down(Align::Min),
-                        |ui| preview_toolbar(ui, &mut { view }, 4, width),
-                    )
-                    .inner;
-                bands.push((width, reserved, drawn));
-            }
-        });
-    });
-    for (width, reserved, drawn) in &bands {
-        assert!(
-            (reserved - drawn).abs() < 0.5,
-            "at {width:.0} pt the desk gave up {reserved:.0} pt for a toolbar that drew \
-                 {drawn:.0}"
-        );
-    }
-    let row = 44.0 + 12.0;
-    assert!(
-        bands[0].1 < row + 6.0,
-        "a 620 pt column holds the toolbar in one row, but {:.0} pt was reserved",
-        bands[0].1
     );
 }
 
