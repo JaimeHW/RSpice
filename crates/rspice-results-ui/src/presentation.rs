@@ -246,14 +246,16 @@ pub(crate) fn table_row_menu(
 
 /// Dimmed names and mono values, the values selectable for copying. A key
 /// row is set in primary text with a semibold value: weight, not colour,
-/// since accent means selection.
+/// since accent means selection. No rule between rows: the row rhythm and the
+/// aligned values carry the reading, as the property rows above them do, and
+/// a section's own rule is the only line that marks a group.
 pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
     let inset = panel_inset(ui);
     let (name_width, value_width) = stat_column_widths(width, inset);
-    for (i, (name, value, highlight)) in rows.iter().enumerate() {
+    for (name, value, highlight) in rows {
         let value_font = theme::mono(
             tokens::FS_1,
             if *highlight {
@@ -311,13 +313,6 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
                 .layout(egui::Layout::right_to_left(egui::Align::Min)),
         )
         .add(egui::Label::new(value_galley).selectable(true));
-        if i + 1 < rows.len() {
-            painter.hline(
-                rect.x_range(),
-                rect.bottom() - 0.5,
-                egui::Stroke::new(1.0, c.border),
-            );
-        }
     }
 }
 
