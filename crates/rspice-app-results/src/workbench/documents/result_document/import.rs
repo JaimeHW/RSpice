@@ -118,16 +118,23 @@ impl ResultImportSampleFacts {
                 .map(|waveform| {
                     let x = &waveform.x;
                     !x.is_empty()
-                        && x.iter()
-                            .all(|frequency| frequency.is_finite() && *frequency > 0.0)
-                        && x.windows(2).all(|pair| pair[0] < pair[1])
+                        && x.samples(..)
+                            .all(|frequency| frequency.is_finite() && frequency > 0.0)
+                        && x.samples(..)
+                            .zip(x.samples(1..))
+                            .all(|(left, right)| left < right)
                 })
                 .collect(),
             first_rows: waveforms
                 .iter()
                 .map(|waveform| {
                     (0..waveform.x.len().min(RESULT_IMPORT_PREVIEW_ROWS))
-                        .map(|row| (waveform.x[row], waveform.sample(row)))
+                        .map(|row| {
+                            (
+                                waveform.x.sample(row).unwrap_or(f64::NAN),
+                                waveform.sample(row),
+                            )
+                        })
                         .collect()
                 })
                 .collect(),

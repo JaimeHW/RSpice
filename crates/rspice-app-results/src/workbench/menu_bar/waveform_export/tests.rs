@@ -1384,13 +1384,19 @@ fn a_complex_ac_run_round_trips_through_csv_as_complex() {
         let current = &parsed.waveforms[1];
         let parts = current.complex.as_ref().expect("the current is complex");
         assert_eq!(parts.source_name, "I(V1)[sb=+0]");
-        assert_eq!(parts.real[1].to_bits(), current_real.to_bits());
-        assert_eq!(parts.imag[1].to_bits(), current_imag.to_bits());
+        assert_eq!(
+            parts.real.sample(1).map(f64::to_bits),
+            Some(current_real.to_bits())
+        );
+        assert_eq!(
+            parts.imag.sample(1).map(f64::to_bits),
+            Some(current_imag.to_bits())
+        );
         assert_eq!(current.unit.as_deref(), Some("A"));
         let voltage = parsed.waveforms[0].complex.as_ref().expect("complex");
-        assert_eq!(voltage.real.as_slice(), &[0.8, 1.6]);
-        assert_eq!(voltage.imag.as_slice(), &[0.6, 1.2]);
-        assert_eq!(parsed.waveforms[0].y.as_slice(), &[1.0, 2.0]);
+        assert_eq!(voltage.real.in_memory(), Some(&[0.8, 1.6][..]));
+        assert_eq!(voltage.imag.in_memory(), Some(&[0.6, 1.2][..]));
+        assert_eq!(parsed.waveforms[0].y.in_memory(), Some(&[1.0, 2.0][..]));
     }
 }
 
