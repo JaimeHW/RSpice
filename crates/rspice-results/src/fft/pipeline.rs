@@ -755,7 +755,7 @@ fn select_time_window_columns(
     let last = time.sample(time.len() - 1).unwrap_or(f64::NAN);
     let (start, stop) = record_bounds(first, last, time_window)?;
     let (range, in_window) = window_rows(time.len(), start, stop, |before| {
-        time.partition_point(|t| before(t))
+        time.partition_point(before)
     });
     validate_window_rows(in_window, Some(FftTimeWindow::new(start, stop)), || {
         FftTimeWindow::new(start, stop)
