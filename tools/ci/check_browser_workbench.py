@@ -712,6 +712,7 @@ SAVE_PAGE = "Save, streaming & retention policy"
 KEPT = "kept in this browser's storage"
 HELD_ELSEWHERE = "another tab holds this project's results store"
 UNREAD = "cannot be read"
+BROWSER_FILE_OPERATION = "Browser file operation"
 
 
 def results_storage(rendered):
@@ -810,7 +811,7 @@ def results_survive_reload(browser):
     browser.call("POST", "/refresh", {})
     wait_until_ready(browser)
     browser.click("Schematic canvas", "canvas")
-    palette_stays_open(browser, "as the saved project reopens")
+    palette_stays_open(browser, "once the saved project is read back")
     after = stated_storage(browser, KEPT, "the reopened run's results read from this browser's storage")
     if after.split(" · ")[-1] != before.split(" · ")[-1]:
         raise AssertionError(f"The reopened store states other results than it kept: {before!r}, then {after!r}")
@@ -835,8 +836,8 @@ def held(statement):
 
 
 def palette_stays_open(browser, when):
-    """The command palette opened as the page's project opens stays open: the project opening does
-    not close what the reader opened."""
+    """The command palette opened once the page's project is read back stays open while its
+    results store opens: nothing the store's opening brings closes what the reader opened."""
     browser.keys("k", modifiers=("\ue009",))
 
     def search():
@@ -1249,6 +1250,11 @@ def wait_until_ready(browser):
         return not status["loading"] and status["worker"] == "qualified"
 
     wait_for(ready, "the real workbench and simulation worker", 120)
+    # A page that reopens its project holds the keyboard behind a modal until the project's file
+    # and the results it names are read back: a key pressed meanwhile reaches no command.
+    wait_for(lambda: not any(control["label"] == BROWSER_FILE_OPERATION
+                             for control in controls(browser.snapshot())),
+             "the reopened project's file read back", 120)
 
 
 def run(browser):
