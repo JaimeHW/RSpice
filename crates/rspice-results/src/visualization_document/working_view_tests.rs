@@ -232,6 +232,77 @@ fn following_a_run_moves_each_pane_onto_its_own_analysis() {
     assert_eq!(document.datasets().len(), 1, "the earlier run is let go");
 }
 
+/// The run a view reads, grown since (it was shown while still running and
+/// has more signals now, and a digest of its finished samples): the view
+/// reads it again in place, its traces kept, and plots the new signals.
+#[test]
+fn a_run_read_while_running_is_read_again_once_it_grows() {
+    let TwoAnalyses {
+        mut document,
+        tran,
+        ac,
+    } = two_analyses();
+    let first = document.datasets()[0].binding();
+    let tran_pane = document.pane_of_analysis(tran).unwrap().id;
+    let hidden = document
+        .traces()
+        .iter()
+        .find(|trace| trace.pane_id == tran_pane)
+        .unwrap()
+        .id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetTraceVisibility {
+                trace_id: hidden,
+                visible: false,
+            }],
+        )
+        .unwrap();
+    let grown = DatasetBinding::new(first.dataset_id, ContentDigest::from_bytes([9; 32]));
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::FollowRun {
+                    next: run(
+                        grown,
+                        &[
+                            (
+                                tran,
+                                AnalysisType::Transient,
+                                &["V(in)", "V(out)", "I(R1)", "V(late)"],
+                            ),
+                            (ac, AnalysisType::Ac, &["V(out)", "V(mid)"]),
+                        ],
+                    ),
+                },
+                DocumentEdit::PlotSignal {
+                    pane_id: tran_pane,
+                    signal: "V(late)".to_owned(),
+                },
+            ],
+        )
+        .expect("the view reads the grown run and plots its new signal");
+    assert_eq!(document.datasets().len(), 1);
+    assert_eq!(document.datasets()[0].binding(), grown);
+    assert!(
+        document
+            .panes()
+            .iter()
+            .all(|pane| pane.binding.is_none_or(|binding| binding.dataset == grown))
+    );
+    assert!(document.traces().iter().all(|trace| trace.binding == grown));
+    assert_eq!(
+        plotted(&document, tran_pane),
+        [
+            ("V(out)".to_owned(), false, false),
+            ("V(late)".to_owned(), true, false)
+        ],
+        "the reader's hide stays, and the new signal is plotted"
+    );
+}
+
 #[test]
 fn a_pane_whose_analysis_the_new_run_lacks_stays_on_its_run() {
     let TwoAnalyses {

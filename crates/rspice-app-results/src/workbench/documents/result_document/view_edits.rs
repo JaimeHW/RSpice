@@ -116,6 +116,21 @@ pub(crate) fn apply(
     Ok(receipt)
 }
 
+/// Apply `edits` the view makes of itself, following its run (taking in
+/// the signals a run plots, say): no step of the reader's to undo.
+pub(crate) fn apply_following(
+    state: &mut ResultsParts<'_>,
+    document_id: ResultDocumentId,
+    revision: ObjectRevision,
+    edits: Vec<DocumentEdit>,
+) -> Result<VisualizationTransactionReceipt, VisualizationDocumentPersistenceError> {
+    state
+        .model
+        .workspace
+        .content
+        .transact_visualization_document(document_id, revision, edits)
+}
+
 /// Whether the view `document_id` has a step to take in `direction`.
 pub(crate) fn can_step(
     state: ResultsReads<'_>,

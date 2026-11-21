@@ -1006,6 +1006,71 @@ fn a_chosen_trace_colour_is_the_views_and_the_run_keeps_its_own() {
     );
 }
 
+/// The signals the run's view plots, and whether each is drawn.
+fn view_plots(state: &ResultsTestHost) -> Vec<(String, bool)> {
+    let mut plots: Vec<_> = state
+        .working_view()
+        .expect("the run's view")
+        .traces()
+        .iter()
+        .map(|trace| (trace.label.clone(), trace.visible))
+        .collect();
+    plots.sort();
+    plots
+}
+
+/// A run plots the outputs its plan marks Plot and leaves the others in the
+/// browser: on the first run, on a re-run that adds one, and for the outputs
+/// a run had not yet when it was first shown while running. An output the
+/// reader took off stays off.
+#[test]
+fn a_run_plots_the_outputs_its_plan_marks_and_a_rerun_adds_new_ones() {
+    let output = |name: &str, plot: bool| {
+        let mut waveform = RetainedTrace::new(name, vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e");
+        waveform.visible = plot;
+        waveform
+    };
+    let mut state = state_with_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![output("V(out)", true), output("V(dbg)", false)]),
+    );
+    state.model.simulation.retained.runs[0].lifecycle =
+        crate::state::SimulationRunLifecycle::Running;
+    state.quick_frame();
+    assert_eq!(view_plots(&state), [("V(out)".to_owned(), true)]);
+
+    // The rest of the run arrives, and it finishes.
+    let run = state.model.simulation.active_run_mut().expect("the run");
+    run.analyses[0].waveforms.push(output("V(late)", true));
+    run.lifecycle = crate::state::SimulationRunLifecycle::Completed;
+    state.quick_frame();
+    assert_eq!(
+        view_plots(&state),
+        [("V(late)".to_owned(), true), ("V(out)".to_owned(), true)],
+        "an output that arrived later is plotted too"
+    );
+    let run = state.model.simulation.active_run().expect("the run");
+    let digest = retained_dataset_digest(state.results_reads(), run);
+    assert_eq!(
+        state.working_view().unwrap().datasets()[0]
+            .binding()
+            .content_digest,
+        digest,
+        "the view reads the finished run"
+    );
+
+    let analysis = active_analysis_key(&state);
+    state.results.results.session.waveform_visibility.insert(
+        SourceWaveformPresentationKey::new(analysis, "V(late)"),
+        false,
+    );
+    state.quick_frame();
+    assert_eq!(
+        view_plots(&state),
+        [("V(late)".to_owned(), false), ("V(out)".to_owned(), true)]
+    );
+}
+
 fn active_analysis_key(state: &ResultsTestHost) -> AnalysisPresentationKey {
     let run = state
         .model

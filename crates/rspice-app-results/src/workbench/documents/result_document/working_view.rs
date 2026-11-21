@@ -112,6 +112,8 @@ pub fn sync(state: &mut ResultsParts<'_>) {
         return;
     };
     follow(state, view, &run);
+    reread_grown(state, view, &run);
+    plot_marked_outputs(state, view, &run);
     project(state, view, &run);
 }
 
@@ -224,6 +226,56 @@ fn ensure(state: &mut ResultsParts<'_>, run: &SimulationRun) -> Option<ResultDoc
     }
 }
 
+/// Plot on `view` the signals `run` plots (a plan's outputs marked Plot)
+/// that the view has never drawn: an output a re-run adds, the outputs of
+/// an analysis it adds, and the rest of a run whose first signals were shown
+/// while it was still running. A signal the reader took off keeps its
+/// hidden trace and stays off. The view does this of itself: no step of the
+/// reader's to undo.
+fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
+    let Some(document) = state.model.workspace.content.visualization_document(view) else {
+        return;
+    };
+    let mut edits = Vec::new();
+    for (index, _, pane_id) in bound_panes(document, run) {
+        let reads_run = document.panes().iter().any(|pane| {
+            pane.id == pane_id
+                && pane
+                    .binding
+                    .is_some_and(|binding| binding.dataset.dataset_id == run.dataset_id)
+        });
+        if !reads_run {
+            continue;
+        }
+        for waveform in run.analyses[index]
+            .waveforms
+            .iter()
+            .filter(|waveform| waveform.visible)
+        {
+            let drawn = document
+                .traces()
+                .iter()
+                .any(|trace| trace.pane_id == pane_id && trace_signal(trace) == waveform.name);
+            if !drawn {
+                edits.push(DocumentEdit::PlotSignal {
+                    pane_id,
+                    signal: waveform.name.clone(),
+                });
+            }
+        }
+    }
+    if edits.is_empty() {
+        return;
+    }
+    let revision = document.revision();
+    if let Err(error) = view_edits::apply_following(state, view, revision, edits) {
+        state.prompt(format!(
+            "The view could not plot what {} plots: {error}",
+            run.label
+        ));
+    }
+}
+
 /// The signals a plan's first run plots: the outputs it marks for plotting,
 /// and any the reader plotted or took off before the run was first shown
 /// (from a deck's Plot command, say).
@@ -293,6 +345,27 @@ fn follow(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: &Simulati
     show_run(state, view, &newest);
 }
 
+/// Read `run` again through `view` when the view reads it and it grew since
+/// (it was shown while still running), whether the view follows its plan or
+/// stays on this run.
+fn reread_grown(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
+    let reads_run = state
+        .model
+        .workspace
+        .content
+        .visualization_document(view)
+        .is_some_and(|document| {
+            document
+                .panes()
+                .iter()
+                .filter_map(|pane| pane.binding)
+                .any(|binding| binding.dataset.dataset_id == run.dataset_id)
+        });
+    if reads_run {
+        show_run(state, view, run);
+    }
+}
+
 /// Read `run` through `view`: each pane onto the same analysis of `run`, and
 /// a pane for each analysis of `run` the view does not draw yet.
 fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
@@ -304,6 +377,35 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
         .iter()
         .filter_map(|pane| pane.binding)
         .any(|binding| binding.dataset.dataset_id == run.dataset_id);
+    // The run the view reads grew since the view last read it: it was shown
+    // while still running, and has signals now that it had not then, or it
+    // finished.
+    let grown = reads_run
+        && document
+            .datasets()
+            .iter()
+            .find(|dataset| dataset.binding().dataset_id == run.dataset_id)
+            .is_some_and(|held| {
+                let signals_changed = held.run_source().is_none_or(|source| {
+                    run.analyses.iter().any(|analysis| {
+                        source
+                            .analysis(super::create_document::source_analysis_identity(
+                                run, analysis,
+                            ))
+                            .is_some_and(|read| {
+                                !read
+                                    .signals()
+                                    .iter()
+                                    .map(|signal| signal.name())
+                                    .eq(analysis.waveforms.iter().map(|w| w.name.as_str()))
+                            })
+                    })
+                });
+                signals_changed
+                    || (run.lifecycle.is_terminal()
+                        && held.binding().content_digest
+                            != super::retained_dataset_digest(state.results_reads(), run))
+            });
     let missing: Vec<_> = run
         .analyses
         .iter()
@@ -315,7 +417,7 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
                 .is_none()
         })
         .collect();
-    if reads_run && missing.is_empty() {
+    if reads_run && missing.is_empty() && !grown {
         return;
     }
     let revision = document.revision();

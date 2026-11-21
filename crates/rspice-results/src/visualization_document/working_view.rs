@@ -232,9 +232,31 @@ impl VisualizationDocument {
     /// analysis of another: each pane onto that analysis of `next` and each
     /// trace onto its signal of the same name, a trace whose signal `next`
     /// lacks kept and marked missing. A pane whose analysis `next` does not
-    /// solve stays on the run it reads.
+    /// solve stays on the run it reads. `next` may be the run the document
+    /// reads already, grown since (it kept running, or finished): it is read
+    /// again in place, with the signals it has now.
     pub(super) fn follow_run(&mut self, next: SourceDataset) -> Result<(), VisualizationError> {
         let next_binding = next.binding();
+        if let Some(held) = self.datasets.iter().position(|dataset| {
+            dataset.binding.dataset_id == next_binding.dataset_id && dataset.binding != next_binding
+        }) {
+            next.validate()?;
+            if self.datasets[held].run.is_none() || next.run.is_none() {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.datasets",
+                    message: "a view follows a run reference".to_owned(),
+                });
+            }
+            let grown_from = self.datasets[held].binding;
+            self.datasets[held] = next;
+            return self.rebind_consumers(
+                grown_from,
+                next_binding,
+                |analysis| analysis,
+                "grown",
+                apply::RebindMode::Follow,
+            );
+        }
         let solved: HashSet<AnalysisInstanceId> = next
             .run
             .as_ref()

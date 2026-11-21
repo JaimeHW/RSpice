@@ -25,6 +25,18 @@ const ORANGE: TraceColor = TraceColor::from_rgb(0xff, 0x88, 0x00);
 /// Run the session's plan once, its transient answering `out`, and finish
 /// the run.
 fn run_plan(state: &mut AppState, out: [f64; 5]) {
+    run_plan_with(
+        state,
+        vec![
+            RetainedTrace::new("V(in)", TIME.to_vec(), vec![1.0; 5], "#ffffff"),
+            RetainedTrace::new("V(out)", TIME.to_vec(), out.to_vec(), "#ffffff"),
+        ],
+    );
+}
+
+/// Run the session's plan once, its transient answering `waveforms`, and
+/// finish the run.
+fn run_plan_with(state: &mut AppState, waveforms: Vec<RetainedTrace>) {
     let mut controller = SimulationController::new();
     controller
         .preflight_run_set(state)
@@ -43,10 +55,7 @@ fn run_plan(state: &mut AppState, out: [f64; 5]) {
         .add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
                 .with_provenance(provenance)
-                .with_waveforms(vec![
-                    RetainedTrace::new("V(in)", TIME.to_vec(), vec![1.0; 5], "#ffffff"),
-                    RetainedTrace::new("V(out)", TIME.to_vec(), out.to_vec(), "#ffffff"),
-                ]),
+                .with_waveforms(waveforms),
         );
     controller.abort();
     state
@@ -307,4 +316,82 @@ fn an_older_run_is_shown_through_the_same_view_and_back_to_latest() {
         ResultDocumentTrackingMode::Latest
     );
     assert_eq!(input_shown(&state, rerun), Some(false));
+}
+
+/// The signals the plan's view plots, and whether each is drawn.
+fn view_plots(state: &AppState) -> Vec<(String, bool)> {
+    let view = plan_view(state);
+    let mut plots: Vec<_> = state
+        .model
+        .workspace
+        .content
+        .visualization_document(view)
+        .expect("the plan's view")
+        .traces()
+        .iter()
+        .map(|trace| (trace.label.clone(), trace.visible))
+        .collect();
+    plots.sort();
+    plots
+}
+
+/// The first run plots the outputs the plan marks Plot and leaves the rest
+/// in the browser; a re-run that adds an output marked Plot plots it too,
+/// while an output the reader took off stays off.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_run_plots_the_outputs_its_plan_marks_and_a_rerun_plots_a_new_one() {
+    let output = |name: &str, plot: bool| {
+        let mut waveform = RetainedTrace::new(name, TIME.to_vec(), FIRST_OUT.to_vec(), "#ffffff");
+        waveform.visible = plot;
+        waveform
+    };
+    let host = state_with_current_clean_drc();
+    let mut state = AppState::default();
+    state.model = host.model;
+    state.runs = host.runs;
+    state.workbench.activate(Workspace::Results);
+    run_plan_with(
+        &mut state,
+        vec![
+            output("V(in)", true),
+            output("V(out)", true),
+            output("I(R1)", false),
+        ],
+    );
+    let first = show_newest(&mut state);
+    quick_frame(&mut state);
+    assert_eq!(
+        view_plots(&state),
+        [("V(in)".to_owned(), true), ("V(out)".to_owned(), true)],
+        "the first run plots what the plan marks, and only that"
+    );
+    state
+        .results
+        .results
+        .session
+        .waveform_visibility
+        .insert(SourceWaveformPresentationKey::new(first, "V(in)"), false);
+    quick_frame(&mut state);
+
+    run_plan_with(
+        &mut state,
+        vec![
+            output("V(in)", true),
+            output("V(out)", true),
+            output("I(R1)", false),
+            output("V(mid)", true),
+        ],
+    );
+    show_newest(&mut state);
+    quick_frame(&mut state);
+    assert_eq!(
+        view_plots(&state),
+        [
+            ("V(in)".to_owned(), false),
+            ("V(mid)".to_owned(), true),
+            ("V(out)".to_owned(), true)
+        ],
+        "the new output is plotted and the one taken off stays off"
+    );
 }
