@@ -368,7 +368,7 @@ fn axis_limit_row(
     label: &str,
 ) {
     use crate::workbench::documents::result_document::axis_range::{
-        format_axis_range, parse_axis_range,
+        format_axis_range, parse_axis_range, shorter_axis_ranges,
     };
     use crate::workbench::documents::result_document::{
         active_axis_is_pinned, active_axis_range, set_active_axis_range,
@@ -400,6 +400,12 @@ fn axis_limit_row(
 
     let parsed = parse_axis_range(&text, unit);
     let invalid = !text.trim().is_empty() && parsed.is_none();
+    // A field too narrow for the interval shows it to fewer digits at rest,
+    // never cut through its own ellipsis; a draft shows as typed.
+    let shorter = current
+        .filter(|_| text == committed)
+        .map(|range| shorter_axis_ranges(range, unit))
+        .unwrap_or_default();
     let (edit, reset) = property_row_input_action(
         ui,
         label,
@@ -411,6 +417,7 @@ fn axis_limit_row(
             enabled: pinned,
             disabled_reason: Some("This axis is already fitting its data."),
         },
+        &shorter,
     );
 
     if edit.changed() {

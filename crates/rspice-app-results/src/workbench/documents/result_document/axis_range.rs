@@ -26,6 +26,10 @@ use rspice_results_ui::waves::unit_carries_its_decade;
 /// width.
 const SIGNIFICANT_DIGITS: i32 = 4;
 
+/// The fewest significant digits a shorter spelling of an interval is
+/// written to: one digit of the width could misstate it by half.
+const MIN_SHORTER_DIGITS: i32 = 2;
+
 /// How many times the larger end's magnitude the smaller may fall short of
 /// and still be written on the larger's decade: `0.01` reads, `0.0001`
 /// would bury the end's digits behind zeros.
@@ -44,13 +48,37 @@ const MAX_DECIMALS: i32 = 17;
 /// own keeps its prefix and the unit with it, `500 µs … 2 ms`, and so does a
 /// unity minimum under a prefixed maximum, `2 V … 1.5 kV`, which would
 /// otherwise read as kilovolts too.
-pub(crate) fn format_axis_range((minimum, maximum): (f64, f64), unit: &str) -> String {
+pub(crate) fn format_axis_range(range: (f64, f64), unit: &str) -> String {
+    written(range, unit, SIGNIFICANT_DIGITS)
+}
+
+/// `(minimum, maximum)` to fewer digits of the interval's width, finest
+/// first, each one shorter than the last: what a field too narrow for
+/// [`format_axis_range`]'s spelling shows at rest, `−1.76 … 1.76Meg` for
+/// `−1.763 … 1.763Meg`, rather than cutting the interval through its own
+/// ellipsis. The field still edits, and reads on hover, the full spelling.
+pub(crate) fn shorter_axis_ranges(range: (f64, f64), unit: &str) -> Vec<String> {
+    let mut shorter: Vec<String> = Vec::new();
+    let mut last = format_axis_range(range, unit);
+    for digits in (MIN_SHORTER_DIGITS..SIGNIFICANT_DIGITS).rev() {
+        let text = written(range, unit, digits);
+        if text.chars().count() < last.chars().count() {
+            last.clone_from(&text);
+            shorter.push(text);
+        }
+    }
+    shorter
+}
+
+/// `(minimum, maximum)` to `digits` significant digits of the interval's
+/// width.
+fn written((minimum, maximum): (f64, f64), unit: &str, digits: i32) -> String {
     let width = (maximum - minimum).abs();
-    if let Some(shared) = shared_decade_range((minimum, maximum), width, unit) {
+    if let Some(shared) = shared_decade_range((minimum, maximum), width, unit, digits) {
         return shared;
     }
-    let low = AxisValue::of(minimum, width, unit);
-    let high = AxisValue::of(maximum, width, unit);
+    let low = AxisValue::of(minimum, width, unit, digits);
+    let high = AxisValue::of(maximum, width, unit, digits);
     let low_text = if low.is_zero || (low.prefix.is_empty() && high.prefix.is_empty()) {
         low.mantissa.clone()
     } else {
@@ -63,7 +91,12 @@ pub(crate) fn format_axis_range((minimum, maximum): (f64, f64), unit: &str) -> S
 /// resolution: `−0.105 … 1.415 V`. `None` when the smaller end is too small
 /// beside the larger to be written on its decade, or the interval has no
 /// finite width.
-fn shared_decade_range((minimum, maximum): (f64, f64), width: f64, unit: &str) -> Option<String> {
+fn shared_decade_range(
+    (minimum, maximum): (f64, f64),
+    width: f64,
+    unit: &str,
+    digits: i32,
+) -> Option<String> {
     if !(width.is_finite() && width > 0.0 && minimum.is_finite() && maximum.is_finite()) {
         return None;
     }
@@ -75,7 +108,7 @@ fn shared_decade_range((minimum, maximum): (f64, f64), width: f64, unit: &str) -
         return None;
     }
     // A decade is between -324 and 308, so each cast is exact.
-    let step = width.log10().floor() as i32 - (SIGNIFICANT_DIGITS - 1);
+    let step = width.log10().floor() as i32 - (digits - 1);
     let large_decade = large.log10().floor() as i32;
     // Past a prefix, or positional digits, the ends keep their exponents.
     let (decade, prefix) = if unit_carries_its_decade(unit) {
@@ -232,8 +265,8 @@ struct AxisValue {
 }
 
 impl AxisValue {
-    fn of(value: f64, width: f64, unit: &str) -> Self {
-        let step = step_exponent(value, width);
+    fn of(value: f64, width: f64, unit: &str, digits: i32) -> Self {
+        let step = step_exponent(value, width, digits);
         let rounded = (value / 10f64.powi(step)).round() * 10f64.powi(step);
         // A signed zero, or an end that rounds to zero, is written as zero.
         let value = if rounded == 0.0 || !rounded.is_finite() {
@@ -307,19 +340,17 @@ fn plain_text(value: f64, step: i32) -> String {
     }
 }
 
-/// The power of ten an end is rounded to: [`SIGNIFICANT_DIGITS`] of the
+/// The power of ten an end is rounded to: `digits` significant digits of the
 /// smaller of its magnitude and the interval's width. The width alone would
 /// round a log axis's `1 kHz` end to zero under a `1 GHz` one; the magnitude
 /// alone would write a narrow zoom's two ends identically.
-fn step_exponent(value: f64, width: f64) -> i32 {
+fn step_exponent(value: f64, width: f64, digits: i32) -> i32 {
     let scale = [value.abs(), width]
         .into_iter()
         .filter(|magnitude| magnitude.is_finite() && *magnitude > 0.0)
         .reduce(f64::min);
     // An `f64` decade lies between -324 and 308, so each cast is exact.
-    scale.map_or(0, |scale| {
-        scale.log10().floor() as i32 - (SIGNIFICANT_DIGITS - 1)
-    })
+    scale.map_or(0, |scale| scale.log10().floor() as i32 - (digits - 1))
 }
 
 /// The decade the engineering formatter writes `value`'s mantissa on: `k` is
@@ -335,7 +366,30 @@ fn decade_of(value: f64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_axis_range, parse_axis_range};
+    use super::{format_axis_range, parse_axis_range, shorter_axis_ranges};
+
+    /// A pole-zero plane's range read `−1.763 ……763Meg` in a field a few
+    /// pixels too narrow: the field cut the interval through its own
+    /// ellipsis. The interval offers shorter spellings instead, to fewer
+    /// digits, each shorter than the last and each read back as nearly the
+    /// same interval.
+    #[test]
+    fn a_range_too_wide_for_its_field_offers_shorter_spellings() {
+        let range = (-1.763e6, 1.763e6);
+        assert_eq!(format_axis_range(range, ""), "−1.763 … 1.763Meg");
+        assert_eq!(
+            shorter_axis_ranges(range, ""),
+            ["−1.76 … 1.76Meg", "−1.8 … 1.8Meg"]
+        );
+        // Nothing is shorter than what already reads whole.
+        assert!(shorter_axis_ranges((4.0, 6.0), "V").is_empty());
+        let shorter = shorter_axis_ranges((0.0, 1.234_5e-3), "s");
+        assert_eq!(shorter.len(), 2);
+        for text in shorter {
+            let (low, high) = parse_axis_range(&text, "s").expect("reads back");
+            assert!(low == 0.0 && (high - 1.234_5e-3).abs() < 0.05e-3, "{text}");
+        }
+    }
 
     /// What James saw was `0 … 0.0010000` and `4.0000000 … 6.000`: seven
     /// padding zeros that say nothing and cost the field its width. The range

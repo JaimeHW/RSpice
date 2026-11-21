@@ -192,6 +192,7 @@ fn property_controls_and_section_headers_expose_their_full_accessible_names() {
                         enabled: true,
                         disabled_reason: None,
                     },
+                    &[],
                 );
                 property_row_combo(
                     ui,

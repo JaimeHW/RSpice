@@ -1621,12 +1621,18 @@ pub struct PropertyRowAction<'a> {
 /// Editable property row with one compact trailing action. The action owns
 /// fixed width so focusing or editing the text field never shifts adjacent
 /// rows.
+///
+/// `shorter` are shorter spellings of `value`, most precise first. At rest a
+/// value too wide for its field shows the first of them that fits, and only
+/// past the last is it cut from the middle; hovering shows `value` whole and
+/// editing gets it back.
 pub fn property_row_input_action(
     ui: &mut Ui,
     label: &str,
     value: &mut String,
     invalid: bool,
     action: PropertyRowAction<'_>,
+    shorter: &[String],
 ) -> (Response, Response) {
     let PropertyRowAction {
         icon: action_icon,
@@ -1683,7 +1689,7 @@ pub fn property_row_input_action(
                 let font = theme::field_mono();
                 let full = output.galley.text();
                 let width = output.text_clip_rect.width();
-                let shown = crate::widgets::middle_elided(ui, full, &font, text_color, width);
+                let shown = at_rest_text(ui, full, shorter, &font, text_color, width);
                 let elided = (shown != full).then(|| full.to_owned());
                 ui.painter().with_clip_rect(output.text_clip_rect).text(
                     output.galley_pos,
@@ -1775,6 +1781,34 @@ pub fn property_row_input_action(
         action_response.on_hover_text(action_label)
     };
     (edit_response, action_response)
+}
+
+/// What a field shows at rest: its text when that fits, else the first of
+/// the shorter spellings that fits, else the shortest cut from the middle.
+fn at_rest_text(
+    ui: &Ui,
+    full: &str,
+    shorter: &[String],
+    font: &egui::FontId,
+    color: Color32,
+    width: f32,
+) -> String {
+    let fits = |text: &str| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_owned(), font.clone(), color)
+                .size()
+                .x
+        }) <= width
+    };
+    if fits(full) {
+        return full.to_owned();
+    }
+    if let Some(text) = shorter.iter().find(|text| fits(text)) {
+        return text.clone();
+    }
+    let last = shorter.last().map_or(full, String::as_str);
+    crate::widgets::middle_elided(ui, last, font, color, width)
 }
 
 /// What a [`property_row_pair_input`] row answered: its two fields and its
