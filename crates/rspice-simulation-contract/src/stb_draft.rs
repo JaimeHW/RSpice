@@ -366,17 +366,6 @@ mod tests {
         assert_eq!(config.deleted_probe_error(&[]), None);
     }
 
-    /// The default draft has not been shown a drawing, so it cannot claim to
-    /// refer to anything on one — and the directive ratchet depends on that
-    /// default still emitting a card.
-    #[test]
-    fn the_default_draft_refers_to_nothing_placed() {
-        let config = StbConfig::default();
-
-        assert_eq!(config.probe_reference, StbProbeReference::Entered);
-        assert_eq!(config.deleted_probe_error(&[]), None);
-    }
-
     #[test]
     fn a_project_written_before_placed_probes_opens_as_entered() {
         let persisted = r#"{

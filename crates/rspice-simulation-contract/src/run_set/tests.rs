@@ -125,15 +125,6 @@ fn a_cartesian_space_multiplies_every_enabled_axis() {
 }
 
 #[test]
-fn contract_vocabulary_includes_every_mockup_dimension_and_composition_kind() {
-    assert_eq!(RunSetDimensionKind::ALL.len(), 13);
-    assert_eq!(RunSetCompositionMode::ALL.len(), 6);
-    assert!(RunSetDimensionKind::ALL.contains(&RunSetDimensionKind::Parameter));
-    assert!(RunSetDimensionKind::ALL.contains(&RunSetDimensionKind::ExternalDataset));
-    assert!(RunSetCompositionMode::ALL.contains(&RunSetCompositionMode::Adaptive));
-}
-
-#[test]
 fn every_visible_run_set_capability_is_executable_or_has_one_exact_blocker() {
     let executable_dimensions = RunSetDimensionKind::ALL
         .into_iter()

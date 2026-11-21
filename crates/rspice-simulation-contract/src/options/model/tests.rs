@@ -3,34 +3,23 @@
 use super::*;
 
 #[test]
-fn a_project_saved_with_the_retired_gear_only_method_still_opens() {
-    let mut persisted = serde_json::to_value(SimulationOptions::default()).expect("options encode");
-    persisted
-        .as_object_mut()
-        .expect("options are an object")
-        .insert("method".to_owned(), serde_json::json!("Gear2Only"));
+fn a_project_saved_with_a_retired_gear_method_still_opens() {
+    // `Gear2Only`, `Gear` and `Gear2` all resolved to the engine's one
+    // second-order Gear integrator, so a project that chose any of them was
+    // always running the survivor.
+    for retired in ["Gear2Only", "Gear"] {
+        let mut persisted =
+            serde_json::to_value(SimulationOptions::default()).expect("options encode");
+        persisted
+            .as_object_mut()
+            .expect("options are an object")
+            .insert("method".to_owned(), serde_json::json!(retired));
 
-    let restored: SimulationOptions =
-        serde_json::from_value(persisted).expect("a project naming the retired method decodes");
+        let restored: SimulationOptions =
+            serde_json::from_value(persisted).expect("a project naming the retired method decodes");
 
-    assert_eq!(restored.method, IntegrationMethod::Gear2);
-}
-
-#[test]
-fn a_project_saved_with_the_retired_plain_gear_method_still_opens() {
-    // `Gear` and `Gear2` both resolved to the engine's one second-order
-    // Gear integrator, so a project that chose either was always running
-    // the survivor.
-    let mut persisted = serde_json::to_value(SimulationOptions::default()).expect("options encode");
-    persisted
-        .as_object_mut()
-        .expect("options are an object")
-        .insert("method".to_owned(), serde_json::json!("Gear"));
-
-    let restored: SimulationOptions =
-        serde_json::from_value(persisted).expect("a project naming the retired method decodes");
-
-    assert_eq!(restored.method, IntegrationMethod::Gear2);
+        assert_eq!(restored.method, IntegrationMethod::Gear2, "{retired}");
+    }
 }
 
 #[test]

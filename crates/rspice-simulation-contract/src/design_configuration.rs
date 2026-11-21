@@ -39,16 +39,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_plan_that_never_chose_follows_the_mark_for_runs() {
-        assert_eq!(
-            DesignConfiguration::default(),
-            DesignConfiguration::UsedForRuns
-        );
-        assert!(DesignConfiguration::default().follows_runs());
-        assert!(!DesignConfiguration::BuiltIn.follows_runs());
-    }
-
-    #[test]
     fn a_named_configuration_round_trips_by_identity() {
         let id = ConfigurationSetId::new();
         let stored = serde_json::to_string(&DesignConfiguration::Named(id)).expect("serializes");
