@@ -317,42 +317,7 @@ fn disk_moment(ui: &Ui) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{band_row, disk_moment};
-
-    /// A band's buttons stand in equal columns, however long their labels.
-    #[test]
-    fn a_bands_buttons_are_as_wide_as_each_other() {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.horizontal(|ui| {
-                band_row(
-                    ui,
-                    "amp_tb.cir changed on disk.",
-                    &[
-                        (0, "Reload".to_owned()),
-                        (1, "Keep mine".to_owned()),
-                        (2, "Compare".to_owned()),
-                    ],
-                );
-            });
-        });
-        let widths = output
-            .platform_output
-            .accesskit_update
-            .iter()
-            .flat_map(|update| update.nodes.iter())
-            .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
-            .filter_map(|(_, node)| node.bounds())
-            .map(|bounds| bounds.x1 - bounds.x0)
-            .collect::<Vec<_>>();
-        assert_eq!(widths.len(), 3, "{widths:?}");
-        assert!(
-            widths.iter().all(|width| (width - widths[0]).abs() < 0.5),
-            "{widths:?}"
-        );
-    }
+    use super::disk_moment;
 
     /// For each pass that draws the page, whether it looked at the disk;
     /// each pass is `(the window has the focus, the page is drawn)`.

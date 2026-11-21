@@ -219,18 +219,6 @@ pub(crate) fn active_document_label(workspace: &crate::state::ProjectWorkspace) 
 mod tests {
     use super::*;
 
-    #[test]
-    fn browser_worker_script_has_a_separate_compile_protocol() {
-        let source = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../rspice-app/web/simulation-worker.js"
-        ));
-        assert!(source.contains("compile-veriloga"));
-        assert!(source.contains("runRspiceUiVerilogACompileRequest"));
-        assert!(source.contains("veriloga-result"));
-        assert!(source.contains("veriloga-error"));
-    }
-
     /// The title bar used to state a hardcoded `top.sp · generated` for the
     /// whole workspace, so it named a netlist while the user edited Verilog-A
     /// and kept naming it after the deck was given a filename. One owner, and

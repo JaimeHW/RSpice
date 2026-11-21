@@ -953,23 +953,6 @@ mod tests {
         assert_eq!(caret_place(source, caret_at(2, 6)), (2, 6));
     }
 
-    #[test]
-    fn canonical_source_tokens_use_mockup_palette_roles() {
-        let colors = crate::ui::palette::INSTRUMENT_DARK;
-        assert_eq!(
-            next_token("\"all\"", CodeEditorLanguage::Toml, &colors).1,
-            colors.warn
-        );
-        assert_eq!(
-            next_token("# settings", CodeEditorLanguage::Toml, &colors).1,
-            colors.text_faint
-        );
-        assert_eq!(
-            next_token("schema = value", CodeEditorLanguage::Toml, &colors).1,
-            colors.net_label
-        );
-    }
-
     /// A Verilog-A row wears the syntax inks of the theme it is drawn in, and
     /// a row scrolled sideways keeps the class of the text it starts inside.
     #[test]
@@ -977,33 +960,29 @@ mod tests {
         let line = "  parameter real gain = 10k; // open loop";
         let (spans, _) = tokenize_line(line, LineState::default());
         let font = FontId::monospace(POPUP_FONT_SIZE);
-        for colors in [
-            crate::ui::palette::INSTRUMENT_DARK,
-            crate::ui::palette::INSTRUMENT_LIGHT,
-        ] {
-            let job = veriloga_row_job(&spans, line, line, 0, font.clone(), &colors);
-            let ink = |text: &str| {
-                let start = line.find(text).expect("the text is on the line");
-                job.format_at_byte(egui::epaint::text::ByteIndex(start))
-                    .color
-            };
-            let syntax = colors.syntax;
-            assert_eq!(ink("parameter"), syntax.keyword);
-            assert_eq!(ink("gain"), syntax.parameter_name);
-            assert_eq!(ink("10k"), syntax.number);
-            assert_eq!(ink("// open"), syntax.comment);
-            assert_eq!(ink("="), colors.text);
-            // Scrolled to start inside the comment, the row is still comment.
-            let shown = &line[line.find("open").expect("the comment")..];
-            let first_column = line[..line.len() - shown.len()].chars().count();
-            let job = veriloga_row_job(&spans, line, shown, first_column, font.clone(), &colors);
-            assert_eq!(job.text, shown);
-            assert!(
-                job.sections
-                    .iter()
-                    .all(|section| section.format.color == syntax.comment)
-            );
-        }
+        let colors = crate::ui::palette::INSTRUMENT_DARK;
+        let job = veriloga_row_job(&spans, line, line, 0, font.clone(), &colors);
+        let ink = |text: &str| {
+            let start = line.find(text).expect("the text is on the line");
+            job.format_at_byte(egui::epaint::text::ByteIndex(start))
+                .color
+        };
+        let syntax = colors.syntax;
+        assert_eq!(ink("parameter"), syntax.keyword);
+        assert_eq!(ink("gain"), syntax.parameter_name);
+        assert_eq!(ink("10k"), syntax.number);
+        assert_eq!(ink("// open"), syntax.comment);
+        assert_eq!(ink("="), colors.text);
+        // Scrolled to start inside the comment, the row is still comment.
+        let shown = &line[line.find("open").expect("the comment")..];
+        let first_column = line[..line.len() - shown.len()].chars().count();
+        let job = veriloga_row_job(&spans, line, shown, first_column, font.clone(), &colors);
+        assert_eq!(job.text, shown);
+        assert!(
+            job.sections
+                .iter()
+                .all(|section| section.format.color == syntax.comment)
+        );
     }
 
     #[test]

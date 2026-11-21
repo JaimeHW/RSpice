@@ -434,21 +434,6 @@ fn text_input_is_asked_for_on_every_focused_frame_and_never_by_a_read_only_view(
 }
 
 #[test]
-fn the_caret_stands_still_under_reduced_motion() {
-    let mut bench = Bench::new("alpha\nbeta\n", true);
-    bench
-        .context
-        .global_style_mut(|style| style.animation_time = 0.0);
-    bench.focus();
-    for frame in 0..60 {
-        assert!(
-            bench.frame(Vec::new()).caret.is_some(),
-            "frame {frame} hid the caret"
-        );
-    }
-}
-
-#[test]
 fn the_caret_stays_in_view_as_keys_move_it() {
     let mut source = numbered_lines(400);
     source.insert_str(

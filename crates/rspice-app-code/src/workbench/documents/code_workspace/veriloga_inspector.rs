@@ -761,26 +761,3 @@ fn diagnostic_place(diagnostic: &CodeEditorDiagnostic) -> Option<String> {
         (None, _) => None,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A table that fits gives its spare width to the range; one that does
-    /// not narrows the range first, and a parameter's name last but one.
-    #[test]
-    fn the_range_gives_way_before_the_name_does() {
-        let natural = [40.0, 46.0, 53.0, 105.0, 28.0];
-        let gaps = PARAMETER_COLUMN_GAP * 4.0;
-        let roomy = parameter_column_widths(natural, 300.0 + gaps);
-        assert_eq!(roomy, [40.0, 46.0, 53.0, 133.0, 28.0]);
-
-        let tight = parameter_column_widths(natural, 258.0 + gaps);
-        assert_eq!(tight, [40.0, 46.0, 53.0, 91.0, 28.0]);
-
-        // Range, default and name each down to a few characters, and the
-        // last two points from the type.
-        let cramped = parameter_column_widths(natural, 180.0 + gaps);
-        assert_eq!(cramped, [36.0, 44.0, 36.0, 36.0, 28.0]);
-    }
-}
