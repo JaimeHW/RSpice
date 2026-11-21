@@ -12,8 +12,6 @@ pub mod port_overlay;
 pub mod property_values;
 pub mod pwl_editor;
 pub mod session;
-#[cfg(test)]
-mod source_guard;
 pub mod source_labels;
 pub mod symbol_editor;
 pub mod symbols;
