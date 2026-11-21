@@ -1146,9 +1146,9 @@ NOT_IN_BROWSER = "its samples are not kept in this browser"
 
 def quota_refusal_keeps_nothing(browser):
     """A run the store has no room to begin is not kept, and says so: the run states that its
-    results are not kept and that none of its points are, it passes its check, and the project
-    saves. Opened again, the project says the run's samples are not in this browser, and does
-    not call them damaged."""
+    results are not kept and that none of its points are, and it passes its check. Saved once the
+    storage has room again, the project keeps the run: opened again, the run reads its points, and
+    is neither called damaged nor said to be missing from this browser."""
     estimate = browser.call("POST", "/execute/async", {"args": [], "script": """
         const done = arguments[arguments.length - 1];
         navigator.storage.estimate().then(done, error => done({error: String(error)}));
@@ -1199,14 +1199,22 @@ def quota_refusal_keeps_nothing(browser):
     wait_until_ready(browser)
     browser.click("Schematic canvas", "canvas")
     choose_command(browser, "Open results workspace")
+
+    def points(shown):
+        return [c for c in controls(shown) if c["value"].endswith(" pts") and c["value"] != "0 pts"]
+
+    wait_for(lambda: points(browser.snapshot()), "the reopened run reading the points the save kept", 60)
     browser.click("Expand console", "button")
-    reopened = wait_for(lambda: (lambda shown: shown if reports(controls(shown), NOT_IN_BROWSER) else None)(
-        browser.snapshot()), "the reopened run saying its samples are not in this browser", 60)
-    browser.capture("quota-refusal-reopened")
+    problems = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                 if c["role"] == "tab" and c["label"].startswith("Problems")],
+                        "the reopened console's Problems tab")
+    click_control(browser, problems[0])
+    reopened = browser.capture("quota-refusal-reopened")
     browser.click("Collapse console", "button")
-    if reports(controls(reopened), ", corrupted") or reports(controls(reopened), "Damaged result"):
-        raise AssertionError("The reopened run whose samples are not in this browser is called damaged")
-    return {"quota_bytes": quota, "finding": line}
+    for refusal in (", corrupted", "Damaged result", NOT_IN_BROWSER):
+        if reports(controls(reopened), refusal):
+            raise AssertionError(f"The reopened run the save kept reports {refusal!r}")
+    return {"quota_bytes": quota, "finding": line, "reopened": points(reopened)[0]["value"]}
 
 
 def quota_stop_keeps_rows(browser):

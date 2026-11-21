@@ -895,10 +895,11 @@ pub fn storage_stop_message(stop: &ResultsStorageStop) -> String {
     } else {
         format!("the volume holding {} filled", stop.folder)
     };
-    // The store kept none of the run: a browser page still shows its samples, until it closes.
+    // The store kept none of the run: the page holds its samples, and a save keeps them, in the
+    // store once it has room or in the project file.
     if stop.kept_nothing() {
         let shown = if cfg!(target_arch = "wasm32") {
-            ", so this run's results are lost when this page closes"
+            ", so only this page holds this run's results until the project is saved"
         } else {
             ""
         };
