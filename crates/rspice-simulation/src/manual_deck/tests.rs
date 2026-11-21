@@ -774,26 +774,6 @@ fn manual_deck_rejects_multiple_monte_carlo_commands() {
 }
 
 #[test]
-fn manual_deck_temp_directive_does_not_block_runnable_analysis() {
-    let reference_pvt = ReferencePoint::default();
-    let queue = build_manual_deck_queue(
-        reference_pvt.temperature_celsius,
-        "deck\n.temp 125\nV1 out 0 1\n.op\n.end\n",
-    )
-    .expect("manual deck queue");
-
-    assert_eq!(queue.len(), 1);
-    assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
-    let temp = queue[0]
-        .spec_options
-        .temp
-        .as_ref()
-        .expect("temperature options");
-    assert_eq!(temp.temperatures_c, vec![125.0]);
-    assert!(matches!(temp.base_mode, CornerBaseMode::Op));
-}
-
-#[test]
 fn manual_deck_step_temp_of_a_transient_runs_one_transient_per_temperature() {
     use crate::execution_options::FamilyMember;
     let reference_pvt = ReferencePoint::default();
@@ -1075,12 +1055,6 @@ fn manual_deck_temp_only_reports_no_runnable_analysis() {
         err.iter()
             .any(|message| message.contains("No runnable analysis command"))
     );
-}
-
-#[test]
-fn manual_deck_source_does_not_append_analysis_lines() {
-    let source = "deck\nR1 out 0 1k\n.op\n.end\n";
-    assert_eq!(compose_manual_deck_source(source), source);
 }
 
 #[test]

@@ -1748,24 +1748,17 @@ endmodule
             .expect("the deck carries a .PSTB task")
     }
 
-    /// Every line the Studio wrote states `eigentol=`. It still reads, and it
-    /// builds the run the line would build without it.
+    /// Every line the Studio wrote states `eigentol=` and `nmults=`. Each still
+    /// reads, and builds the run the line would build without it.
     #[test]
-    fn retired_pstb_eigentol_in_a_deck_reads_as_absent() {
-        assert_eq!(
-            pstb_run_of(".pstb probe=L1 eigentol=1e-9"),
-            pstb_run_of(".pstb probe=L1")
-        );
-    }
-
-    /// Every line the Studio wrote states `nmults=`. It still reads, and it
-    /// builds the run the line would build without it.
-    #[test]
-    fn retired_pstb_nmults_in_a_deck_reads_as_absent() {
-        assert_eq!(
-            pstb_run_of(".pstb probe=L1 nmults=3"),
-            pstb_run_of(".pstb probe=L1")
-        );
+    fn retired_pstb_keys_in_a_deck_read_as_absent() {
+        for retired in ["eigentol=1e-9", "nmults=3"] {
+            assert_eq!(
+                pstb_run_of(&format!(".pstb probe=L1 {retired}")),
+                pstb_run_of(".pstb probe=L1"),
+                "{retired}"
+            );
+        }
     }
 
     /// The five options that used to reach a run only through the Studio's

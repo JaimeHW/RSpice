@@ -114,18 +114,15 @@ mod tests {
     }
 
     #[test]
-    fn retired_pstb_eigentol_in_a_study_file_reads_as_absent() {
-        let [stated, absent] = stated_and_absent("eigenvalue_tolerance", serde_json::json!(1e-9));
-        assert_eq!(stated, absent);
-        let written = serde_json::to_value(&stated).unwrap();
-        assert!(written.get("eigenvalue_tolerance").is_none(), "{written}");
-    }
-
-    #[test]
-    fn retired_pstb_nmults_in_a_study_file_reads_as_absent() {
-        let [stated, absent] = stated_and_absent("num_multipliers", serde_json::json!(3));
-        assert_eq!(stated, absent);
-        let written = serde_json::to_value(&stated).unwrap();
-        assert!(written.get("num_multipliers").is_none(), "{written}");
+    fn retired_pstb_fields_in_a_study_file_read_as_absent() {
+        for (key, value) in [
+            ("eigenvalue_tolerance", serde_json::json!(1e-9)),
+            ("num_multipliers", serde_json::json!(3)),
+        ] {
+            let [stated, absent] = stated_and_absent(key, value);
+            assert_eq!(stated, absent);
+            let written = serde_json::to_value(&stated).unwrap();
+            assert!(written.get(key).is_none(), "{written}");
+        }
     }
 }

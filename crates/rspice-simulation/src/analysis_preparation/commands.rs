@@ -1604,18 +1604,15 @@ mod tests {
     }
 
     #[test]
-    fn retired_pstb_eigentol_in_a_saved_dialog_reads_as_absent() {
-        for [stated, absent] in saved_pstb_dialogs("eigenvalue_tolerance", r#""1e-9""#) {
-            assert_eq!(written(&stated), written(&absent));
-            assert!(!written(&stated).1.contains("eigenvalue_tolerance"));
-        }
-    }
-
-    #[test]
-    fn retired_pstb_nmults_in_a_saved_dialog_reads_as_absent() {
-        for [stated, absent] in saved_pstb_dialogs("num_multipliers", r#""3""#) {
-            assert_eq!(written(&stated), written(&absent));
-            assert!(!written(&stated).1.contains("num_multipliers"));
+    fn retired_pstb_fields_in_a_saved_dialog_read_as_absent() {
+        for (field, value) in [
+            ("eigenvalue_tolerance", r#""1e-9""#),
+            ("num_multipliers", r#""3""#),
+        ] {
+            for [stated, absent] in saved_pstb_dialogs(field, value) {
+                assert_eq!(written(&stated), written(&absent));
+                assert!(!written(&stated).1.contains(field));
+            }
         }
     }
 }

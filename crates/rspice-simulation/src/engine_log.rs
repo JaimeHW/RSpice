@@ -811,37 +811,33 @@ mod tests {
         lock_queue(&queue).drain()
     }
 
-    /// The Verilog-A compiler reports a lost AC contribution while the run
-    /// elaborates its models.
+    /// The Verilog-A compiler (a lost AC contribution while the run elaborates
+    /// its models), the sparse solver (a changed factorization backend) and the
+    /// service driving a transient (carrying on without an operating point)
+    /// each speak for the run.
     #[test]
-    fn a_verilog_a_compiler_line_is_captured() {
-        let message = "ddt() on both sides of a product; reactive AC contribution omitted";
-        assert_eq!(
-            captured_from("rspice_veriloga::ir", message),
-            vec![core_record(0, log::Level::Warn, message)]
-        );
-    }
-
-    /// The sparse solver says when it changed factorization backends.
-    #[test]
-    fn a_sparse_solver_line_is_captured() {
-        let message = "klu backend could not factor this system; using faer fallback";
-        assert_eq!(
-            captured_from("rspice_matrix::sparse", message),
-            vec![core_record(0, log::Level::Warn, message)]
-        );
-    }
-
-    /// The service driving a transient says when it carried on without an
-    /// operating point.
-    #[test]
-    fn an_analysis_service_line_is_captured() {
-        let message = "DC OP computation failed: singular matrix (continuing with transient if \
-                       available)";
-        assert_eq!(
-            captured_from("rspice_simulation::engine_services::transient", message),
-            vec![core_record(0, log::Level::Warn, message)]
-        );
+    fn compiler_solver_and_analysis_service_lines_are_captured() {
+        for (target, message) in [
+            (
+                "rspice_veriloga::ir",
+                "ddt() on both sides of a product; reactive AC contribution omitted",
+            ),
+            (
+                "rspice_matrix::sparse",
+                "klu backend could not factor this system; using faer fallback",
+            ),
+            (
+                "rspice_simulation::engine_services::transient",
+                "DC OP computation failed: singular matrix (continuing with transient if \
+                 available)",
+            ),
+        ] {
+            assert_eq!(
+                captured_from(target, message),
+                vec![core_record(0, log::Level::Warn, message)],
+                "{target}"
+            );
+        }
     }
 
     /// A module of another crate of the engine's family speaks for the run

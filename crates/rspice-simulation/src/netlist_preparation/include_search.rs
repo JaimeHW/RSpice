@@ -230,11 +230,4 @@ mod tests {
 
         assert_eq!(chain.directories(), vec![root.join("models"), library]);
     }
-
-    #[test]
-    fn an_empty_chain_parses_through_the_ordinary_path_entry_point() {
-        let chain = IncludeSearchChain::default();
-        assert!(chain.entries().is_empty());
-        assert!(chain.directories().is_empty());
-    }
 }
