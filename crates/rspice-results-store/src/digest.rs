@@ -1,15 +1,16 @@
-//! SHA-256, the digest of one column, and the store's logical result digest.
+//! SHA-256, the store's logical result digest, and the digest of one column.
 //!
-//! A column's digest ([`ColumnDigest`]) is the SHA-256 of its rows' values as little-endian
-//! binary64, in row order: a column held in memory digests the same as the column a segment
-//! stores, so the same column has one identity wherever it is held.
+//! The segment's digest is logical: it hashes the decoded values' stored bits in canonical order
+//! (each row's x then its value slots, rows in order; then each event signal's changes), and the
+//! summaries a reader draws overviews from, each region's stored bytes in the order the segment
+//! holds them. A kept segment is named by its digest, so the name follows every stored bit: two
+//! runs that differ only in a signed zero or a NaN's payload are two segments. It does not change
+//! when the codec, the chunk size or the way rows were pushed changes.
 //!
-//! The segment's digest is logical: it hashes each column's digest (the run's x, then each value
-//! slot), each event signal's changes, and the summaries a reader draws overviews from, each
-//! region's stored bytes in the order the segment holds them. A kept segment is named by its
-//! digest, so the name follows every stored bit: two runs that differ only in a signed zero or a
-//! NaN's payload are two segments. It does not change when the codec, the chunk size or the way
-//! rows were pushed changes.
+//! A column's digest ([`ColumnDigest`]) identifies its values, as a result's digest identifies
+//! the result: the SHA-256 of its rows as little-endian binary64 in row order, each signed zero
+//! written as zero and each NaN as the one quiet NaN. A column held in memory digests the same as
+//! the column a segment stores, so the same values have one identity wherever they are held.
 
 use std::fmt;
 
@@ -60,12 +61,24 @@ impl Sha256 {
     }
 }
 
-const DIGEST_DOMAIN: &[u8] = b"rspice-results-store logical digest 3";
+const DIGEST_DOMAIN: &[u8] = b"rspice-results-store logical digest 2";
 
-/// The digest of one column of a run: the SHA-256 of its rows' values as little-endian binary64,
-/// in row order. A complete segment states one for each of its columns
-/// ([`crate::SegmentReader::column_digest`]), and a column held in memory digests the same, so the
-/// same column has the same digest wherever it is held.
+/// The bits a column digest writes for `value`: zero for either signed zero, and the one quiet
+/// NaN for any NaN, as a result's digest writes a value.
+fn canonical_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0
+    } else if value.is_nan() {
+        0x7ff8_0000_0000_0000
+    } else {
+        value.to_bits()
+    }
+}
+
+/// The digest of one column of a run: the SHA-256 of its rows as little-endian binary64 in row
+/// order, each signed zero written as zero and each NaN as the one quiet NaN. A complete segment
+/// states one for each of its columns ([`crate::SegmentReader::column_digest`]), and a column held
+/// in memory digests the same, so the same values have the same digest wherever they are held.
 #[derive(Clone, Default)]
 pub struct ColumnDigest(Sha256);
 
@@ -88,8 +101,8 @@ impl ColumnDigest {
         let mut staged = [0u8; 4096];
         for block in values.chunks(staged.len() / 8) {
             let bytes = &mut staged[..8 * block.len()];
-            for (out, value) in bytes.chunks_exact_mut(8).zip(block) {
-                out.copy_from_slice(&value.to_le_bytes());
+            for (out, &value) in bytes.chunks_exact_mut(8).zip(block) {
+                out.copy_from_slice(&canonical_bits(value).to_le_bytes());
             }
             self.0.update(bytes);
         }
@@ -114,6 +127,13 @@ impl ColumnDigest {
         let hasher = sha2::Sha256::deserialize(state).ok()?;
         Some(Self(Sha256(hasher)))
     }
+}
+
+/// The row stream, the column digests and the row count at a point a write may return to.
+pub(crate) struct RowsMark {
+    pub(crate) rows: ValueHasher,
+    pub(crate) columns: Vec<ColumnDigest>,
+    pub(crate) row_count: u64,
 }
 
 /// Values' bytes staged through a fixed buffer, so hashing a chunk allocates nothing.
@@ -172,6 +192,25 @@ impl ValueHasher {
         self.len += 8;
     }
 
+    /// Hash several values; the same bytes as one [`Self::value`] per value.
+    #[inline]
+    pub(crate) fn values(&mut self, mut values: &[f64]) {
+        while !values.is_empty() {
+            let room = (self.buffer.len() - self.len) / 8;
+            if room == 0 {
+                self.drain();
+                continue;
+            }
+            let take = room.min(values.len());
+            let out = &mut self.buffer[self.len..self.len + 8 * take];
+            for (out, &value) in out.chunks_exact_mut(8).zip(&values[..take]) {
+                out.copy_from_slice(&value.to_le_bytes());
+            }
+            self.len += 8 * take;
+            values = &values[take..];
+        }
+    }
+
     fn drain(&mut self) {
         self.hasher.update(&self.buffer[..self.len]);
         self.len = 0;
@@ -203,11 +242,13 @@ impl ValueHasher {
     }
 }
 
-/// Accumulates the logical digest of a segment as its rows and events are written.
+/// Accumulates the logical digest of a segment as its rows and events are written, and each
+/// column's digest.
 pub(crate) struct LogicalDigest {
+    rows: ValueHasher,
+    row_count: u64,
     /// One digest per column: the run's x, then each value slot.
     columns: Vec<ColumnDigest>,
-    row_count: u64,
     /// Every summary region, in the order the segment holds them: each chunk's level-1 buckets,
     /// and each `SUMMARY` frame's, as they follow the chunks, bucket by bucket. Chunk rows are a
     /// power of two, so a full `SUMMARY` frame always follows the chunk its rows end with and the
@@ -221,8 +262,9 @@ impl LogicalDigest {
     /// The digest of a segment of `slots` value slots and the event signals `event_signals`.
     pub(crate) fn new(slots: usize, event_signals: impl Iterator<Item = u32>) -> Self {
         Self {
-            columns: vec![ColumnDigest::default(); slots + 1],
+            rows: ValueHasher::default(),
             row_count: 0,
+            columns: vec![ColumnDigest::default(); slots + 1],
             summaries: ValueHasher::default(),
             events: event_signals
                 .map(|id| (id, ValueHasher::default(), 0))
@@ -230,14 +272,41 @@ impl LogicalDigest {
         }
     }
 
-    /// Hash a chunk's rows given as x and one column per value slot, each as long as x.
-    pub(crate) fn chunk<'a>(&mut self, x: &[f64], slots: impl Iterator<Item = &'a [f64]>) {
+    /// Hash `rows` rows of a row-major chunk: each row's x, then its slots.
+    pub(crate) fn rows(&mut self, x: &[f64], values: &[f64], slots: usize, rows: usize) {
+        for (row, &x) in x[..rows].iter().enumerate() {
+            self.rows.value(x);
+            self.rows.values(&values[row * slots..row * slots + slots]);
+        }
+        self.row_count += rows as u64;
+    }
+
+    /// Hash rows given as x and one column per value slot: the row stream, and each column's
+    /// digest.
+    pub(crate) fn columns(&mut self, x: &[f64], columns: &[Vec<f64>]) {
+        for (row, &x) in x.iter().enumerate() {
+            self.rows.value(x);
+            for column in columns {
+                self.rows.value(column[row]);
+            }
+        }
+        self.row_count += x.len() as u64;
+        self.column_values(x, columns.iter().map(Vec::as_slice));
+    }
+
+    /// Hash a chunk's columns into each column's digest: its x, and one column per value slot,
+    /// each as long as x.
+    pub(crate) fn column_values<'a>(&mut self, x: &[f64], slots: impl Iterator<Item = &'a [f64]>) {
         self.columns[0].values(x);
         for (column, values) in self.columns[1..].iter_mut().zip(slots) {
             debug_assert_eq!(values.len(), x.len());
             column.values(values);
         }
-        self.row_count += x.len() as u64;
+    }
+
+    /// The row stream's state after every row hashed so far.
+    pub(crate) fn rows_state(&mut self) -> [u8; HASH_STATE_LEN] {
+        self.rows.state()
     }
 
     /// Each column digest's state after every row hashed so far, the run's x first.
@@ -266,10 +335,14 @@ impl LogicalDigest {
         self.summaries = stream;
     }
 
-    /// The column digests and the row count, to put back with [`Self::resume_rows`] when the
-    /// rows hashed after this point are not kept.
-    pub(crate) fn rows_mark(&self) -> (Vec<ColumnDigest>, u64) {
-        (self.columns.clone(), self.row_count)
+    /// The row stream, the column digests and the row count, to put back with
+    /// [`Self::resume_rows`] when the rows hashed after this point are not kept.
+    pub(crate) fn rows_mark(&self) -> RowsMark {
+        RowsMark {
+            rows: self.rows.clone(),
+            columns: self.columns.clone(),
+            row_count: self.row_count,
+        }
     }
 
     /// The `index`-th event signal's stream and count, as [`Self::rows_mark`] keeps the rows'.
@@ -278,11 +351,12 @@ impl LogicalDigest {
         (stream.clone(), *count)
     }
 
-    /// Continue the column digests from `columns`, after `row_count` rows.
-    pub(crate) fn resume_rows(&mut self, columns: Vec<ColumnDigest>, row_count: u64) {
-        debug_assert_eq!(columns.len(), self.columns.len());
-        self.columns = columns;
-        self.row_count = row_count;
+    /// Continue the row stream and the column digests from `mark`.
+    pub(crate) fn resume_rows(&mut self, mark: RowsMark) {
+        debug_assert_eq!(mark.columns.len(), self.columns.len());
+        self.rows = mark.rows;
+        self.columns = mark.columns;
+        self.row_count = mark.row_count;
     }
 
     /// The `index`-th event signal's stream state after every change hashed so far.
@@ -312,10 +386,7 @@ impl LogicalDigest {
         hasher.update(&(schema_bytes.len() as u64).to_le_bytes());
         hasher.update(schema_bytes);
         hasher.update(&self.row_count.to_le_bytes());
-        hasher.update(&(columns.len() as u64).to_le_bytes());
-        for column in &columns {
-            hasher.update(&column.0);
-        }
+        hasher.update(&self.rows.finish().0);
         hasher.update(&self.summaries.finish().0);
         for (id, stream, count) in self.events {
             hasher.update(&id.to_le_bytes());

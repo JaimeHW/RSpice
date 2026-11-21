@@ -49,8 +49,8 @@ pub trait ColumnSource: Send + Sync {
     }
 
     /// The digest of the whole column, as its store states it: the
-    /// `rspice_results_store::ColumnDigest` of its rows, which the same column held in memory
-    /// has too. `None` when the store states none, as a run recovered without its end does not.
+    /// `rspice_results_store::ColumnDigest` of its rows, which the same values held in memory
+    /// have too. `None` when the store states none, as a run recovered without its end does not.
     fn column_digest(&self) -> Option<[u8; 32]> {
         None
     }
@@ -175,7 +175,8 @@ pub enum WindowLead {
 
 /// The digest of a column held in memory, as a results store digests each column it stores
 /// (`rspice_results_store::ColumnDigest`, which this build may not link): the SHA-256 of its rows
-/// as little-endian binary64, in row order.
+/// as little-endian binary64 in row order, each signed zero written as zero and each NaN as the
+/// one quiet NaN, as a result's digest writes a value.
 #[derive(Default)]
 struct ColumnHasher(sha2::Sha256);
 
@@ -185,8 +186,15 @@ impl ColumnHasher {
         let mut staged = [0u8; 4096];
         for block in values.chunks(staged.len() / 8) {
             let bytes = &mut staged[..8 * block.len()];
-            for (out, value) in bytes.chunks_exact_mut(8).zip(block) {
-                out.copy_from_slice(&value.to_le_bytes());
+            for (out, &value) in bytes.chunks_exact_mut(8).zip(block) {
+                let bits = if value == 0.0 {
+                    0
+                } else if value.is_nan() {
+                    0x7ff8_0000_0000_0000
+                } else {
+                    value.to_bits()
+                };
+                out.copy_from_slice(&bits.to_le_bytes());
             }
             self.0.update(bytes);
         }
@@ -203,8 +211,8 @@ impl ColumnHasher {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SamplesIdentity {
     /// The digest of the column the samples are a window of: the SHA-256 of its rows as
-    /// little-endian binary64, as a results store digests each column it stores
-    /// (`rspice_results_store::ColumnDigest`).
+    /// little-endian binary64, signed zeros and NaN payloads normalized, as a results store
+    /// digests each column it stores (`rspice_results_store::ColumnDigest`).
     pub column: [u8; 32],
     /// The rows that column holds.
     pub column_rows: u64,

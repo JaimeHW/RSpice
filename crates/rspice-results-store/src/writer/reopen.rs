@@ -17,7 +17,7 @@
 //! the crash tears that one provisional write itself.
 
 use super::{Batch, Encoder, IndexEntry, Layout};
-use crate::digest::{ColumnDigest, HASH_STATE_LEN, ValueHasher};
+use crate::digest::{ColumnDigest, HASH_STATE_LEN, RowsMark, ValueHasher};
 use crate::events::{EventBuffer, EventChange, decode_events};
 use crate::format::{FrameKind, LEVEL1_ROWS, chunk_summaries_at, summary_buckets_at};
 use crate::reader::{ChunkRef, EventsRef, SegmentReader};
@@ -219,8 +219,8 @@ impl<I: SegmentIo> Encoder<I> {
             })?
         };
 
-        // The digest streams at the cut: each column's and the summaries' after the last chunk
-        // kept, and the summaries' on over the `SUMMARY` frames that followed it.
+        // The digest streams at the cut: the rows', each column's and the summaries' after the
+        // last chunk kept, and the summaries' on over the `SUMMARY` frames that followed it.
         let (rows_stream, mut summaries_stream, since_chunk) = match k.checked_sub(1) {
             Some(previous) => {
                 let offset = chunks[previous].offset;
@@ -229,7 +229,15 @@ impl<I: SegmentIo> Encoder<I> {
                 let column_streams = (0..columns)
                     .map(|column| column_trailer(&payload, offset, columns - column))
                     .collect::<Result<Vec<_>, _>>()?;
-                (Some(column_streams), trailer(&payload, offset, 0)?, offset)
+                (
+                    Some(RowsMark {
+                        rows: trailer(&payload, offset, columns + 1)?,
+                        columns: column_streams,
+                        row_count: rows,
+                    }),
+                    trailer(&payload, offset, 0)?,
+                    offset,
+                )
             }
             None => (None, ValueHasher::default(), 0),
         };
@@ -268,8 +276,8 @@ impl<I: SegmentIo> Encoder<I> {
         encoder.index_frames = index_frames;
         encoder.pyramid = pyramid;
         encoder.events = buffers;
-        if let Some(stream) = rows_stream {
-            encoder.digest.resume_rows(stream, rows);
+        if let Some(mark) = rows_stream {
+            encoder.digest.resume_rows(mark);
         }
         encoder.digest.resume_summaries(summaries_stream);
         for (position, stream) in streams.into_iter().enumerate() {
@@ -334,8 +342,9 @@ impl<I: SegmentIo> Encoder<I> {
 }
 
 /// A digest state a real `CHUNK` or `EVENTS` frame ends with: `back` 0 is the last (an `EVENTS`
-/// frame's signal stream, a `CHUNK`'s summary stream), and a `CHUNK`'s column digests come before
-/// it, its last value slot's at 1 and its x's at the slot count plus one.
+/// frame's signal stream, a `CHUNK`'s summary stream); a `CHUNK`'s column digests come before
+/// it, its last value slot's at 1 and its x's at the slot count plus one, and its row stream
+/// before them.
 fn trailer(payload: &[u8], offset: u64, back: usize) -> Result<ValueHasher, StoreError> {
     trailer_state(payload, back)
         .and_then(ValueHasher::resumed)

@@ -368,7 +368,7 @@ impl<I: SegmentIo> Encoder<I> {
             + summary_crcs_len(layout.analog.len())
             + 16 * buckets * (layout.analog.len() + 1)
             + block_bytes * (layout.slots + 1)
-            + HASH_STATE_LEN * (layout.slots + 2);
+            + HASH_STATE_LEN * (layout.slots + 3);
         Self {
             frame: FrameBuf::with_capacity(chunk_frame),
             columns: vec![0.0; layout.slots * column_stride(chunk_rows)],
@@ -591,13 +591,15 @@ impl<I: SegmentIo> Encoder<I> {
         }
         let chunk_index = self.next_chunk;
         let (x_min, x_max) = self.encode_chunk(batch, chunk_index, 0);
-        // The frame ends with each column digest's state after this chunk, the run's x first,
-        // then the summary stream's, which a reopened segment continues from. A chunk the segment
-        // does not keep leaves the digests as they were.
+        // The frame ends with the digest's row stream state after this chunk, each column
+        // digest's, the run's x first, then the summary stream's, which a reopened segment
+        // continues from. A chunk the segment does not keep leaves the digests as they were.
         let mark = (self.digest.rows_mark(), self.digest.summaries_mark());
+        self.digest
+            .rows(&batch.x, &batch.values, self.layout.slots, batch.rows);
         let stride = column_stride(self.layout.chunk_rows);
         let columns = &self.columns;
-        self.digest.chunk(
+        self.digest.column_values(
             &batch.x[..batch.rows],
             (0..self.layout.slots).map(|slot| &columns[slot * stride..slot * stride + batch.rows]),
         );
@@ -608,6 +610,8 @@ impl<I: SegmentIo> Encoder<I> {
             &self.frame.payload()[region..region + region_len],
             1 + analog,
         );
+        let rows_state = self.digest.rows_state();
+        self.frame.put(&rows_state);
         for state in self.digest.column_states() {
             self.frame.put(&state);
         }
@@ -616,7 +620,7 @@ impl<I: SegmentIo> Encoder<I> {
         let offset = match self.emit_real() {
             Ok(offset) => offset,
             Err(error) => {
-                self.digest.resume_rows(mark.0.0, mark.0.1);
+                self.digest.resume_rows(mark.0);
                 self.digest.resume_summaries(mark.1);
                 return Err(error);
             }

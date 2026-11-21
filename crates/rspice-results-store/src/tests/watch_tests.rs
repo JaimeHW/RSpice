@@ -409,7 +409,7 @@ fn one_signal(events: u32) -> crate::Schema {
 /// with `END`.
 #[test]
 fn a_run_of_twenty_five_thousand_chunks_that_fills_its_volume_still_writes_end() {
-    let (chunks, _) = fill(on_volume(24 << 20, true), &one_signal(0), 0);
+    let (chunks, _) = fill(on_volume(26 << 20, true), &one_signal(0), 0);
     assert!(chunks > 25_000, "{chunks} chunks");
 }
 
@@ -429,6 +429,6 @@ fn a_run_of_three_hundred_event_signals_that_fills_its_volume_still_writes_end()
 /// end, and gives it back once `END` is written.
 #[test]
 fn a_run_on_a_host_that_cannot_report_free_space_still_writes_end() {
-    let (chunks, _) = fill(on_volume(24 << 20, false), &one_signal(0), 0);
+    let (chunks, _) = fill(on_volume(26 << 20, false), &one_signal(0), 0);
     assert!(chunks > 25_000, "{chunks} chunks");
 }

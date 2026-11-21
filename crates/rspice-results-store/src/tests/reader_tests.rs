@@ -423,3 +423,32 @@ fn every_column_states_the_digest_its_rows_have_in_memory() {
         assert_eq!(reader.column_digest(slots + 1), None);
     }
 }
+
+#[test]
+fn a_column_differing_only_in_a_signed_zero_or_a_nan_payload_has_one_digest_in_two_segments() {
+    let schema = mixed_schema();
+    let slots = schema.slots();
+    let (x, mut values) = rows(300, slots, 11);
+    let write = |values: &[f64]| {
+        let mut writer =
+            SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), 64).unwrap();
+        writer.push_rows(&x, values).unwrap();
+        let (receipt, io) = writer.finish(RunStatus::Completed).unwrap();
+        (
+            receipt.digest,
+            SegmentReader::open(io).unwrap().column_digest(1),
+        )
+    };
+    values[5 * slots] = 0.0;
+    values[7 * slots] = f64::NAN;
+    let (segment, column) = write(&values);
+    values[5 * slots] = -0.0;
+    values[7 * slots] = f64::from_bits(0xfff8_0000_0000_0001);
+    let (other_segment, other_column) = write(&values);
+    assert_ne!(
+        segment, other_segment,
+        "a segment's name follows every stored bit"
+    );
+    assert_eq!(column, other_column);
+    assert!(column.is_some());
+}

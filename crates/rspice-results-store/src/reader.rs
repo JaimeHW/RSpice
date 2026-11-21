@@ -1160,7 +1160,7 @@ impl<I: SegmentIo> SegmentReader<I> {
                 column.resize(chunk.rows as usize, 0.0);
                 self.decode_block(&chunk, slot + 1, column)?;
             }
-            digest.chunk(&x, columns.iter().map(Vec::as_slice));
+            digest.columns(&x, &columns);
         }
         // The summary regions in the order the segment holds them, as its writer hashed them.
         let mut regions: Vec<(u64, Region)> = self
