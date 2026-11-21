@@ -792,13 +792,20 @@ pub(super) fn displayed_pane_auto_y(
     } else {
         Vec::new()
     };
-    // Only the strip's first pane draws its expressions; the others must not
-    // widen themselves against a curve they do not carry.
-    let exprs = if ordinal == 0 {
-        resolve_strip_exprs(state, model, t)
-    } else {
-        Vec::new()
-    };
+    // A pane fits the expressions the stack draws on it: those its unit
+    // routed to it, or every one on the first pane when none was routed. It
+    // never widens itself against a curve another pane carries.
+    let routed = !model.expression_panes.is_empty();
+    let exprs: Vec<_> = resolve_strip_exprs(state, model, t)
+        .into_iter()
+        .filter(|expr| {
+            if routed {
+                pane.expressions.contains(&expr.slot)
+            } else {
+                ordinal == 0
+            }
+        })
+        .collect();
     let mut fit = PaneFit {
         traces: &pane.traces,
         expressions: &exprs,

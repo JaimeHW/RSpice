@@ -177,6 +177,33 @@ fn an_expression_that_fails_to_evaluate_opens_no_pane() {
     );
 }
 
+/// The inspector's Y range of a pane is the one the stack draws: a pane
+/// whose only curve is an expression its unit routed there reads that
+/// curve's span, and the first pane is not widened by it.
+#[test]
+fn a_panes_displayed_y_range_reads_the_expressions_drawn_on_it() {
+    let mut state = power_fixture();
+    add(&mut state, "V(out)*I(vdd)*1000");
+    draw(&mut state);
+    let tokens = Tokens::default();
+    let analysis = AnalysisPresentationKey::new(
+        state.model.simulation.retained.runs[0].dataset_id,
+        &state.model.simulation.retained.runs[0].analyses[0],
+    );
+    let mut extent_of = |unit: &str| {
+        state.results.results.session.active_wave_pane = Some(WavePanePresentationKey {
+            analysis,
+            unit: unit.to_owned(),
+        });
+        active_pane_extents(&tokens, &mut state.results_parts()).1
+    };
+    let (low, high) = extent_of("W").expect("the watts pane draws its expression");
+    // V(out)·I(vdd)·1000 runs from 0 down to -12 W.
+    assert!(low <= -12.0 && high >= 0.0 && low > -14.0, "{low}..{high}");
+    let (low, _) = extent_of("V").expect("the volts pane draws V(out) and V(in)");
+    assert!(low > -1.0, "the volts pane is not widened by watts: {low}");
+}
+
 #[test]
 fn a_declared_unit_survives_a_save_and_reload() {
     let mut state = power_fixture();

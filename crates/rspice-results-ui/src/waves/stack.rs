@@ -544,7 +544,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
     if visible.is_empty() {
         well_hint(
             ui,
-            "Nothing plotted — every strip is closed; restore them with HIDDEN above",
+            "Nothing plotted — every strip is closed; restore them with Hidden above",
         );
         return;
     }

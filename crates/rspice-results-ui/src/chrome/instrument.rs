@@ -181,7 +181,7 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
                                 .add_enabled_ui(availability.limits_available, |ui| {
                                     instrument_control(
                                         ui,
-                                        "LIM",
+                                        "Limits",
                                         host.controls().show_spec_limits,
                                         "Show exact compatible project specification limits",
                                     )
@@ -195,7 +195,7 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
                                 .add_enabled_ui(availability.envelope_available, |ui| {
                                     instrument_control(
                                         ui,
-                                        "ENV",
+                                        "Envelope",
                                         host.controls().show_family_envelope,
                                         "Show min/max envelope from retained family samples",
                                     )
@@ -207,7 +207,7 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
                             }
                             if instrument_control(
                                 ui,
-                                "GRID",
+                                "Grid",
                                 host.controls().show_minor_grid,
                                 "Show minor waveform grid",
                             )
@@ -235,7 +235,7 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
                                 instrument_separator(ui);
                                 if instrument_control(
                                     ui,
-                                    &format!("{hidden} HIDDEN"),
+                                    &format!("{hidden} hidden"),
                                     true,
                                     "Restore closed waveform strips",
                                 )
