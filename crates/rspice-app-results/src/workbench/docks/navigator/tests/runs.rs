@@ -34,12 +34,12 @@ fn a_runs_row_names_notes_pins_deletes_and_restores_it() {
             .retention()
             .is_pinned()
     );
-    let refusal = Some("The run is pinned; unpin it to delete it.".to_owned());
-    assert_eq!(delete_refusal(&host.results_parts(), dataset), refusal);
+    let refusal = "The run is pinned; unpin it to delete it.".to_owned();
     assert_eq!(
-        delete_run(&mut host.results_parts(), dataset),
-        Err(refusal.unwrap())
+        delete_refusal(&host.results_parts(), dataset),
+        Some(refusal.clone())
     );
+    assert_eq!(delete_run(&mut host.results_parts(), dataset), Err(refusal));
     assert_eq!(
         host.model.simulation.retained.runs.len(),
         1,
