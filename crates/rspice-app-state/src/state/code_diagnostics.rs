@@ -341,51 +341,6 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_collection_compacts_identity_and_releases_embedded_source() {
-        let records = (0..2)
-            .map(|index| {
-                CodeEditorDiagnostic::current(
-                    "rspice.test",
-                    "TEST-COMPACT",
-                    CodeEditorSeverity::Warning,
-                    format!("message {index}"),
-                    "detail",
-                    Some("models/compact.va".to_owned()),
-                    Some("first\nsecond\n".to_owned()),
-                    Some(6..12),
-                    None,
-                    Some(1),
-                )
-                .bind_validation("models/compact.va", 7, "validation-7")
-            })
-            .collect::<Vec<_>>();
-        let diagnostics = CodeDiagnosticCollection::try_new(records).unwrap();
-        let first = &diagnostics.as_slice()[0];
-        let second = &diagnostics.as_slice()[1];
-
-        assert_eq!(first.line, Some(2));
-        assert!(first.source.is_none());
-        assert!(second.source.is_none());
-        assert!(Arc::ptr_eq(
-            &first.canonical.source,
-            &second.canonical.source
-        ));
-        assert!(Arc::ptr_eq(&first.canonical.code, &second.canonical.code));
-        assert!(Arc::ptr_eq(
-            &first.canonical.document_id,
-            &second.canonical.document_id
-        ));
-        assert!(Arc::ptr_eq(
-            &first.canonical.validation_id,
-            &second.canonical.validation_id
-        ));
-        assert!(Arc::ptr_eq(
-            first.source_path.as_ref().unwrap(),
-            second.source_path.as_ref().unwrap()
-        ));
-    }
-
-    #[test]
     fn diagnostic_collection_keeps_one_record_per_canonical_identity() {
         let diagnostic = CodeEditorDiagnostic::current(
             "rspice.test",

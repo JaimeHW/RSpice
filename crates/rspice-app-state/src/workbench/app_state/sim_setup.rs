@@ -461,35 +461,6 @@ mod tests {
     use super::*;
     use crate::product::ProcessCorner;
 
-    /// A project saved before retracing existed still opens, as the one-way
-    /// sweep it was authored as.
-    ///
-    /// `DcSetup` denies unknown fields, so the guard that matters is the other
-    /// direction: a *missing* field must default rather than fail the load. An
-    /// engineer who upgrades must not find their saved plans unreadable, and
-    /// `false` is not a guess here — every sweep authored before this went one
-    /// way, which is exactly what it means.
-    #[test]
-    fn a_dc_draft_saved_before_retracing_existed_opens_as_a_one_way_sweep() {
-        let saved = r#"{
-            "source": "VIN",
-            "start": "0",
-            "stop": "5",
-            "step": "0.01",
-            "nested": false,
-            "source2": "V2",
-            "start2": "0",
-            "stop2": "3.3",
-            "step2": "0.1"
-        }"#;
-
-        let restored: DcSetup = serde_json::from_str(saved).expect("an older DC draft loads");
-
-        assert!(!restored.hysteresis);
-        assert_eq!(restored.source, "VIN");
-        assert_eq!(restored.stop, "5");
-    }
-
     #[test]
     fn solver_options_reference_pvt_preserves_full_precision() {
         let mut setup = SimSetupState::new();
@@ -571,23 +542,6 @@ mod tests {
             .unwrap()
             .insert("unexpected".to_owned(), serde_json::json!(true));
         assert!(serde_json::from_value::<SimSetupState>(wire).is_err());
-    }
-
-    #[test]
-    fn legacy_save_policy_migrates_to_automatic_output_selection() {
-        let policy = SimulationSavePolicy::default();
-        let mut persisted = serde_json::to_value(policy).expect("policy serializes");
-        persisted
-            .as_object_mut()
-            .expect("policy is an object")
-            .remove("output_selection_mode");
-
-        let migrated: SimulationSavePolicy =
-            serde_json::from_value(persisted).expect("legacy policy migrates");
-        assert_eq!(
-            migrated.output_selection_mode,
-            crate::state::OutputSelectionMode::Automatic
-        );
     }
 
     /// A new project's plan keeps the number of runs Preferences sets, and

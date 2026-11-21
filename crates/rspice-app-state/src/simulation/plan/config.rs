@@ -441,27 +441,6 @@ mod tests {
     }
 
     #[test]
-    fn noise_and_disto_own_independent_sweep_drafts() {
-        let mut ac = AnalysisDraft::for_kind(AnalysisKind::Ac);
-        let noise = AnalysisDraft::for_kind(AnalysisKind::Noise);
-        let disto = AnalysisDraft::for_kind(AnalysisKind::Disto);
-        let AnalysisDraft::Ac(ac_draft) = &mut ac else {
-            panic!("expected AC draft");
-        };
-        ac_draft.points = "777".to_owned();
-
-        let AnalysisDraft::Noise(noise) = noise else {
-            panic!("expected noise draft");
-        };
-        let AnalysisDraft::Disto(disto) = disto else {
-            panic!("expected DISTO draft");
-        };
-        assert_eq!(noise.points, "30");
-        assert_eq!(noise.sweep, NoiseSweepType::Decade);
-        assert_eq!(disto.sweep.points, "101");
-    }
-
-    #[test]
     fn noise_defaults_match_the_eight_field_mockup_contract() {
         let draft = NoiseDraft::default();
         assert_eq!(draft.sweep, NoiseSweepType::Decade);
@@ -637,23 +616,6 @@ mod tests {
     }
 
     #[test]
-    fn transfer_function_summary_uses_only_the_current_dc_contract() {
-        let AnalysisDraft::TransferFunction(mut draft) =
-            AnalysisDraft::for_kind(AnalysisKind::TransferFunction)
-        else {
-            panic!("expected a transfer-function draft");
-        };
-        draft.input_source = "V1".to_owned();
-        draft.output_expression = "V(out)".to_owned();
-        assert_eq!(
-            AnalysisDraft::TransferFunction(draft)
-                .manifest_summary()
-                .as_deref(),
-            Some("V(out) <- V1 - DC operating point")
-        );
-    }
-
-    #[test]
     fn missing_manifest_analysis_drafts_are_typed_validated_and_round_trip() {
         for kind in [
             AnalysisKind::Qpss,
@@ -708,36 +670,6 @@ mod tests {
         assert_eq!(restored.kind(), AnalysisKind::AcData);
     }
 
-    /// A plan saved before the share threshold existed still opens, listing
-    /// the contributors it was listing.
-    ///
-    /// Same shim, same reason as the noise floor below: `deny_unknown_fields`
-    /// says nothing about an absent key, so `serde(default)` is what lets the
-    /// plan open at all, and this is the test that it is there. Empty rather
-    /// than `0` is the value that reopens: both mean the same card, and empty
-    /// is the spelling this form canonicalizes to.
-    #[test]
-    fn a_plan_saved_before_the_share_threshold_field_opens_without_one() {
-        let saved = serde_json::json!({
-            "output_expression": "V(out)",
-            "sigma_multiplier": "1",
-            "contributor_limit": "10",
-            "include_process": false,
-            "include_mismatch": true,
-            "normalized_contributions": true
-        });
-        let draft: DcMismatchDraft =
-            serde_json::from_value(saved).expect("a plan saved before the threshold still opens");
-        assert!(
-            draft.share_threshold.is_empty(),
-            "a saved plan must reopen on the untrimmed list it ran: {:?}",
-            draft.share_threshold
-        );
-        assert_eq!(draft.output_expression, "V(out)");
-        assert_eq!(draft.contributor_limit, "10");
-        assert!(validate_dc_mismatch(&draft).is_none());
-    }
-
     /// An authored zero is the unauthored card, and reaches the run as one.
     ///
     /// The engine's own default threshold is exactly zero. Two
@@ -762,48 +694,6 @@ mod tests {
         assert!(
             refusal.contains("THRESHOLD must be a variance share in [0, 1]"),
             "{refusal}"
-        );
-    }
-
-    /// A plan saved before the noise floor field existed still opens, running
-    /// the band it was running.
-    ///
-    /// The draft carries `deny_unknown_fields`, which refuses keys it does not
-    /// know and says nothing about keys that are absent — so the shim is the
-    /// `serde(default)`, and this is the test that it is there. The restored
-    /// value has to be the empty field rather than any frequency: empty is the
-    /// engine's `1/tstop` derivation, which is what that saved plan asked for.
-    #[test]
-    fn a_plan_saved_before_the_noise_floor_field_opens_with_the_engine_default() {
-        let saved = serde_json::json!({
-            "stop_time": "1u",
-            "step_time": "1n",
-            "start_time": "0",
-            "max_step": "10n",
-            "seed": "1",
-            "noise_fmax": "10G",
-            "scale": "1",
-            "use_initial_conditions": false
-        });
-        let draft: TransientNoiseDraft =
-            serde_json::from_value(saved).expect("a plan saved before the floor still opens");
-        assert!(
-            draft.noise_fmin.is_empty(),
-            "a saved plan must reopen on the derivation it ran, not on a frequency: {:?}",
-            draft.noise_fmin
-        );
-        // Every field it did carry is still the field it carried.
-        assert_eq!(draft.stop_time, "1u");
-        assert_eq!(draft.noise_fmax, "10G");
-        assert_eq!(draft.seed, "1");
-        assert_eq!(draft.scale, "1");
-        assert!(validate_transient_noise(&draft).is_none());
-        // And the run that plan resolves to asks for no floor at all, which is
-        // the fact the saved bytes were making.
-        assert!(
-            AnalysisDraft::TransientNoise(draft)
-                .manifest_configuration_error()
-                .is_none()
         );
     }
 

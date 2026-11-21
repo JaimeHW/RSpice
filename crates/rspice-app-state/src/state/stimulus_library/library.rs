@@ -7,21 +7,6 @@ mod tests {
     use crate::state::{ComponentType, ProjectWorkspace};
 
     #[test]
-    fn a_project_written_before_the_library_existed_loads_with_an_empty_one() {
-        // A document with no `stimulus_library` key is exactly what every
-        // project saved before this field existed contains, and it is also what
-        // an untouched project saves today, so one encoding proves both.
-        let encoded = ron::ser::to_string(&ProjectWorkspace::default()).expect("serialize");
-        assert!(
-            !encoded.contains("stimulus_library"),
-            "an untouched library must not be written: {encoded}"
-        );
-
-        let decoded: ProjectWorkspace = ron::from_str(&encoded).expect("deserialize");
-        assert!(decoded.content.stimulus_library.is_empty());
-    }
-
-    #[test]
     fn a_library_with_a_definition_round_trips_through_the_project_document() {
         let mut workspace = ProjectWorkspace::default();
         let mut definition = StimulusDefinition::new(

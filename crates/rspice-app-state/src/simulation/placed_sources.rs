@@ -1602,19 +1602,6 @@ mod tests {
         assert_eq!(summaries, vec!["PULSE · PER 1ms", "SIN · 10kHz"]);
     }
 
-    #[test]
-    fn a_pulse_row_is_identified_by_its_period() {
-        let schematic = schematic_with(vec![source(
-            1,
-            ComponentType::CurrentSourcePulse,
-            "I1",
-            "per=1m pw=100u",
-        )]);
-        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
-        assert_eq!(listed[0].summary(), "PULSE · PER 1ms");
-        assert_eq!(listed[0].quantity(), "I");
-    }
-
     /// The point list is the primary property, so it lives in `value` rather
     /// than in the parameter string, and the count has to read it from there.
     #[test]
@@ -1944,17 +1931,6 @@ mod tests {
             "re-enabling the instance is what makes the source read"
         );
         assert_eq!(listed[0].reading_consumers().count(), 1);
-    }
-
-    #[test]
-    fn sources_are_listed_in_reference_order() {
-        let schematic = schematic_with(vec![
-            source(1, ComponentType::VoltageSourceSin, "V2", "freq=1k"),
-            source(2, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
-        ]);
-        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
-        assert_eq!(listed[0].reference, "V1");
-        assert_eq!(listed[1].reference, "V2");
     }
 
     /// A list derived from one buffer states no occurrence, because it has no

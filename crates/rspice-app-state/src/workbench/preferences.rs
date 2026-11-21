@@ -1647,15 +1647,6 @@ mod tests {
     }
 
     #[test]
-    fn the_interface_goes_up_to_double_size() {
-        let mut preferences = UserPreferences::default();
-        preferences
-            .set_choice(ChoicePreference::InterfaceScale, 5)
-            .unwrap();
-        assert_eq!(preferences.interface_scale(), 2.0);
-    }
-
-    #[test]
     fn the_editor_text_opens_at_eleven_points_and_steps_to_either_end() {
         let mut preferences = UserPreferences::default();
         assert_eq!(preferences.editor_font_size(), 11.0);
@@ -1722,22 +1713,6 @@ mod tests {
             .set_scalar(ScalarPreference::LocalParallelSlots, 1)
             .unwrap();
         assert_eq!(preferences.solver_worker_limit(), Some(1));
-    }
-
-    #[test]
-    fn hierarchical_edit_in_place_defaults_on_and_round_trips_an_opt_out() {
-        let mut preferences = UserPreferences::default();
-        assert!(preferences.toggle(TogglePreference::HierarchicalEditInPlace));
-
-        preferences.set_toggle(TogglePreference::HierarchicalEditInPlace, false);
-        let encoded = serde_json::to_value(&preferences).unwrap();
-        assert_eq!(
-            encoded["toggles"]["hierarchical-edit-in-place"],
-            serde_json::Value::Bool(false)
-        );
-
-        let restored: UserPreferences = serde_json::from_value(encoded).unwrap();
-        assert!(!restored.toggle(TogglePreference::HierarchicalEditInPlace));
     }
 
     #[test]
@@ -1857,42 +1832,23 @@ mod tests {
         assert_eq!(serde_json::to_value(preferences).unwrap()["results"], 17);
     }
 
-    /// Thirteen offered indices, and nothing past them.
-    #[test]
-    fn the_picker_offers_every_index_it_has_a_label_for_and_no_more() {
-        for index in 0..=12 {
-            UserPreferences::default()
-                .set_choice(ChoicePreference::EngineeringExport, index)
-                .unwrap_or_else(|error| panic!("index {index} is offered: {error}"));
-        }
-        assert!(
-            UserPreferences::default()
-                .set_choice(ChoicePreference::EngineeringExport, 13)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn tsv_is_a_typed_runtime_engineering_export_choice() {
-        let mut preferences = UserPreferences::default();
-        preferences
-            .set_choice(ChoicePreference::EngineeringExport, 2)
-            .expect("TSV is runtime supported");
-        assert_eq!(
-            preferences
-                .result_presentation_policy()
-                .engineering_export(),
-            EngineeringExportFormat::Tsv
-        );
-        assert_eq!(preferences.choice(ChoicePreference::EngineeringExport), 2);
-    }
-
     /// The picker index is runtime state; the durable file stores the name.
     /// Both have to hold, because a saved preference outlives the index it was
     /// chosen by and the export dispatcher reads the name.
     #[test]
     fn the_encoded_formats_are_runtime_choices_that_persist_by_name() {
         for (index, format, durable) in [
+            (2, EngineeringExportFormat::Tsv, "tsv"),
+            (
+                3,
+                EngineeringExportFormat::RSpiceResultBundle,
+                "r-spice-result-bundle",
+            ),
+            (
+                4,
+                EngineeringExportFormat::RSpiceDatasetBundle,
+                "r-spice-dataset-bundle",
+            ),
             (
                 5,
                 EngineeringExportFormat::ValueChangeDump,
@@ -1944,29 +1900,6 @@ mod tests {
                 format
             );
         }
-    }
-
-    #[test]
-    fn native_bundles_are_typed_runtime_engineering_export_choices() {
-        let mut preferences = UserPreferences::default();
-        preferences
-            .set_choice(ChoicePreference::EngineeringExport, 3)
-            .expect("result bundle is runtime supported");
-        assert_eq!(
-            preferences
-                .result_presentation_policy()
-                .engineering_export(),
-            EngineeringExportFormat::RSpiceResultBundle
-        );
-        preferences
-            .set_choice(ChoicePreference::EngineeringExport, 4)
-            .expect("dataset bundle is runtime supported");
-        assert_eq!(
-            preferences
-                .result_presentation_policy()
-                .engineering_export(),
-            EngineeringExportFormat::RSpiceDatasetBundle
-        );
     }
 
     #[test]

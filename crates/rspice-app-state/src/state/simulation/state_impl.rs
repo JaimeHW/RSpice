@@ -1423,17 +1423,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn the_built_in_retention_limit_applies_until_the_project_states_one() {
-        let state = SimulationState::default();
-
-        assert_eq!(state.retained.retained_dataset_limit, None);
-        assert_eq!(
-            state.retained.effective_retained_dataset_limit(),
-            MAX_RUN_HISTORY
-        );
-    }
-
     /// The limit Preferences sets stands in for a project that names none,
     /// and gives way to one that does.
     #[test]

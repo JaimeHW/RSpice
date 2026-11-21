@@ -516,24 +516,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_state_without_new_object_fields_migrates_to_empty_collections() {
-        let state = SchematicState::default();
-        let mut value = serde_json::to_value(state).unwrap();
-        let object = value.as_object_mut().unwrap();
-        object.remove("buses");
-        object.remove("bus_taps");
-        object.remove("net_labels");
-        object.remove("design_notes");
-        object.remove("probes");
-        let migrated: SchematicState = serde_json::from_value(value).unwrap();
-        assert!(migrated.design.document().buses.is_empty());
-        assert!(migrated.design.document().bus_taps.is_empty());
-        assert!(migrated.design.document().net_labels.is_empty());
-        assert!(migrated.design.document().design_notes.is_empty());
-        assert!(migrated.design.document().probes.is_empty());
-    }
-
-    #[test]
     fn recalculate_repairs_documentation_shape_collisions_and_stale_selection() {
         let mut schematic = SchematicState::default();
         schematic

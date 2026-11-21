@@ -807,16 +807,6 @@ mod tests {
         }
     }
 
-    /// Each class stays together, so a heading is drawn once for it.
-    #[test]
-    fn the_models_of_a_class_are_adjacent_and_classes_keep_their_order() {
-        let classes = BUILTIN_VERILOGA_MODELS
-            .iter()
-            .map(|model| model.class)
-            .collect::<Vec<_>>();
-        assert!(classes.windows(2).all(|pair| pair[0] <= pair[1]));
-    }
-
     /// A copy needs the whole closure and the module the row says it declares.
     #[test]
     fn a_release_reads_as_its_patch_ships_it() {

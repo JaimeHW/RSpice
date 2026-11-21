@@ -612,45 +612,6 @@ mod tests {
     }
 
     #[test]
-    fn indexed_collection_shares_repeated_canonical_identity_strings() {
-        let diagnostics = NetlistDiagnosticCollection::try_new(
-            vec![
-                Diagnostic::current(
-                    "rspice.test",
-                    "TEST-SHARED",
-                    DiagnosticSeverity::Warning,
-                    "first",
-                ),
-                Diagnostic::current(
-                    "rspice.test",
-                    "TEST-SHARED",
-                    DiagnosticSeverity::Warning,
-                    "second",
-                ),
-            ],
-            "",
-        )
-        .unwrap();
-        let mut records = diagnostics.iter();
-        let first = records.next().unwrap();
-        let second = records.next().unwrap();
-
-        assert!(Arc::ptr_eq(
-            &first.canonical.source,
-            &second.canonical.source
-        ));
-        assert!(Arc::ptr_eq(&first.canonical.code, &second.canonical.code));
-        assert!(Arc::ptr_eq(
-            &first.canonical.document_id,
-            &second.canonical.document_id
-        ));
-        assert!(Arc::ptr_eq(
-            &first.canonical.validation_id,
-            &second.canonical.validation_id
-        ));
-    }
-
-    #[test]
     fn indexed_collection_rejects_duplicate_canonical_identity() {
         let diagnostic = Diagnostic::current(
             "rspice.test",

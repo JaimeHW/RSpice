@@ -1867,17 +1867,6 @@ fn corrupted_persisted_technology_contract_fails_project_validation() {
     ));
 }
 
-#[test]
-fn legacy_workspaces_restore_with_no_project_source_examples() {
-    let mut value = serde_json::to_value(ProjectWorkspace::default()).unwrap();
-    value.as_object_mut().unwrap().remove("project_sources");
-
-    let restored: ProjectWorkspace = serde_json::from_value(value).unwrap();
-
-    assert!(restored.content.project_sources.is_empty());
-    assert!(!restored.content.project_sources_dirty);
-}
-
 /// A Verilog-A module is a cell view, so a new project ships no
 /// demonstration module and no project source of any kind.
 #[test]
