@@ -1504,6 +1504,11 @@ pub struct ResultsState {
     /// left, so what the reader changed is written back to it. Boxed to keep
     /// the results state inside its stack budget. Transient.
     pub(crate) working_view: Option<Box<working_view::QuickViewBinding>>,
+    /// The runs a working view read while they were still running, so each
+    /// is read again once it finishes. A run opened finished is read as it
+    /// is: its samples may be kept another way after a save, not grown.
+    /// Transient.
+    pub(crate) read_while_running: HashSet<DatasetId>,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
     pub analysis_expr_cache:

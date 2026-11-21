@@ -369,6 +369,12 @@ fn reread_grown(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simu
 /// Read `run` through `view`: each pane onto the same analysis of `run`, and
 /// a pane for each analysis of `run` the view does not draw yet.
 fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
+    let finished = if run.lifecycle.is_terminal() {
+        state.results.read_while_running.remove(&run.dataset_id)
+    } else {
+        state.results.read_while_running.insert(run.dataset_id);
+        false
+    };
     let Some(document) = state.model.workspace.content.visualization_document(view) else {
         return;
     };
@@ -379,7 +385,7 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
         .any(|binding| binding.dataset.dataset_id == run.dataset_id);
     // The run the view reads grew since the view last read it: it was shown
     // while still running, and has signals now that it had not then, or it
-    // finished.
+    // finished with samples it had not then.
     let grown = reads_run
         && document
             .datasets()
@@ -402,7 +408,7 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
                     })
                 });
                 signals_changed
-                    || (run.lifecycle.is_terminal()
+                    || (finished
                         && held.binding().content_digest
                             != super::retained_dataset_digest(state.results_reads(), run))
             });
