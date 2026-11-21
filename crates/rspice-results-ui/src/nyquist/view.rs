@@ -19,12 +19,15 @@ pub struct NyquistStability {
     pub phase_margin: Option<NyquistMargin>,
 }
 
-/// One nonempty retained loop-gain contour and its cached coordinate columns.
-/// The columns must contain the corresponding coordinate of every curve
-/// point; `mirror` is the negated imaginary column, the branch for negative
-/// frequencies.
+/// One nonempty retained loop-gain contour, the locus drawn through it and
+/// that locus's cached coordinate columns. The columns must contain the
+/// corresponding coordinate of every point of `drawn`; `mirror` is the
+/// negated imaginary column, the branch for negative frequencies.
 pub struct NyquistPlot<'a> {
+    /// The retained samples.
     pub curve: &'a NyquistData,
+    /// The locus as drawn, on the interpolant the margins are read from.
+    pub drawn: &'a NyquistData,
     pub real: &'a [f64],
     pub imaginary: &'a [f64],
     pub mirror: &'a [f64],
@@ -192,6 +195,7 @@ pub fn show(
     };
     let NyquistPlot {
         curve,
+        drawn,
         real: re,
         imaginary: im,
         mirror,
@@ -360,6 +364,25 @@ pub fn show(
         }
     }
 
+    // The retained samples, while the pointer is over the plot: the curve
+    // between them is the interpolant the margins are read on, not data.
+    if response
+        .response
+        .hover_pos()
+        .is_some_and(|pointer| response.plot_rect.contains(pointer))
+    {
+        let painter = plot_ui.painter().with_clip_rect(response.plot_rect);
+        for point in &curve.points {
+            let pos = crate::presentation::xy_screen_pos(
+                response.plot_rect,
+                (point.real, point.imag),
+                ranges.0,
+                ranges.1,
+            );
+            painter.circle_filled(pos, 2.5, c.traces[0]);
+        }
+    }
+
     if response.response.clicked() {
         *pin = match hovered {
             Some(hit) if *pin == Some(hit) => None,
@@ -384,7 +407,7 @@ pub fn show(
         }
         painter.circle_stroke(pos, 4.0, egui::Stroke::new(1.5, c.accent));
 
-        let frequency = curve.points.get(i).map(|p| p.frequency).unwrap_or(0.0);
+        let frequency = drawn.points.get(i).map(|p| p.frequency).unwrap_or(0.0);
         let magnitude = (re[i] * re[i] + im[i] * im[i]).sqrt();
         let phase_radians = im[i].atan2(re[i]);
         let rows = [

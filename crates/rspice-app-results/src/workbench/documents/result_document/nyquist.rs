@@ -63,6 +63,9 @@ pub(crate) fn loop_gain_source(state: ResultsReads<'_>) -> Option<LoopGainSource
 pub struct NyquistDerived {
     version: u64,
     locus: Arc<NyquistData>,
+    /// The locus as drawn, on the interpolant the margins are read from; the
+    /// columns below are its coordinates.
+    drawn: Arc<NyquistData>,
     real: Arc<[f64]>,
     imaginary: Arc<[f64]>,
     /// The negated imaginary column: the branch for negative frequencies.
@@ -123,6 +126,7 @@ fn locus(state: &mut ResultsParts<'_>) -> Locus {
     };
     super::frame_work::note(super::frame_work::DatasetWalk::LoopGainLocus);
     let locus = NyquistData::from_arrays(LOOP_GAIN_LOCUS_LABEL, &frequency, &real, &imaginary);
+    let drawn = locus.drawn_locus();
     let derived = NyquistDerived {
         version,
         stability: NyquistStability {
@@ -131,9 +135,10 @@ fn locus(state: &mut ResultsParts<'_>) -> Locus {
             gain_margin: locus.gain_margin(),
             phase_margin: locus.phase_margin(),
         },
-        real: locus.points.iter().map(|point| point.real).collect(),
-        imaginary: locus.points.iter().map(|point| point.imag).collect(),
-        mirror: locus.points.iter().map(|point| -point.imag).collect(),
+        real: drawn.points.iter().map(|point| point.real).collect(),
+        imaginary: drawn.points.iter().map(|point| point.imag).collect(),
+        mirror: drawn.points.iter().map(|point| -point.imag).collect(),
+        drawn: Arc::new(drawn),
         locus: Arc::new(locus),
     };
     let nyquist = &mut state.results.nyquist;
@@ -173,6 +178,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     };
     let source = NyquistPlot {
         curve: &derived.locus,
+        drawn: &derived.drawn,
         real: &derived.real,
         imaginary: &derived.imaginary,
         mirror: &derived.mirror,

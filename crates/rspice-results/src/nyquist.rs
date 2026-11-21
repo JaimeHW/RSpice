@@ -19,6 +19,9 @@
 //! - Margins are read from **interpolated** crossings, never from the nearest
 //!   sample. A margin is a ratio, so no absolute "close enough" tolerance can
 //!   be right at more than one locus scale.
+//! - The locus is **drawn on the interpolant the margins are read from**, not
+//!   as chords between samples, so every marker sits on the drawn curve and
+//!   the minimum distance to the critical point is measured on it too.
 
 use std::f64::consts::{PI, TAU};
 
@@ -189,6 +192,21 @@ pub const MARGIN_ERROR_DECIBELS: f64 = 0.01;
 /// own, for a loop of three coincident poles: the interpolation's stated error.
 pub const MARGIN_ERROR_DEGREES: f64 = 0.05;
 
+/// The most the drawn locus turns between two of its vertices, in radians:
+/// a degree, so the chord between them is within a forty-thousandth of the
+/// radius of the curve it stands for, below a pixel at any zoom a reader
+/// frames the critical point at.
+const DRAWN_TURN: f64 = PI / 180.0;
+
+/// The most |L| changes between two vertices of the drawn locus, in decades:
+/// a decibel, so a step the phase hardly turns on is still traced through its
+/// interpolant rather than spanned by one chord.
+const DRAWN_SWELL: f64 = 0.05;
+
+/// Golden-section steps refining the nearest approach to the critical point:
+/// sixty shrink the bracket below a part in 10^12 of a vertex spacing.
+const NEAREST_APPROACH_REFINEMENTS: usize = 60;
+
 // =============================================================================
 // Nyquist Data
 // =============================================================================
@@ -244,12 +262,41 @@ impl NyquistData {
         self.points.is_empty()
     }
 
-    /// Minimum distance from critical point (-1, 0)
+    /// The least `|1 + L|` along the drawn locus: its nearest approach to the
+    /// critical point, refined between the vertices that bracket it on the
+    /// margins' interpolant, never less than at a retained sample.
     pub fn min_distance_from_critical(&self) -> Option<f64> {
-        self.points
+        let sampled = self
+            .points
             .iter()
             .map(|p| p.distance_from_critical())
-            .fold(None, |acc, d| Some(acc.map_or(d, |a: f64| a.min(d))))
+            .fold(None, |acc, d| Some(acc.map_or(d, |a: f64| a.min(d))));
+        let drawn = self
+            .measured_branch()
+            .and_then(|branch| branch.nearest_approach());
+        match (sampled, drawn) {
+            (Some(sampled), Some(drawn)) => Some(sampled.min(drawn)),
+            (sampled, drawn) => sampled.or(drawn),
+        }
+    }
+
+    /// The locus as it is drawn: the interpolant the margins are read from,
+    /// traced between the samples rather than spanned by chords.
+    ///
+    /// Each step keeps its two samples and gains vertices on the interpolant
+    /// until no two turn more than a degree apart or swell more than a
+    /// decibel, so a coarse sweep draws a curve and a dense one draws its
+    /// samples. A step the interpolant cannot trace, beside a sample of zero
+    /// magnitude, stays a chord. A locus with fewer than two samples at
+    /// positive frequencies is drawn as it was retained.
+    pub fn drawn_locus(&self) -> NyquistData {
+        match self.measured_branch() {
+            Some(branch) => NyquistData {
+                name: self.name.clone(),
+                points: branch.drawn(),
+            },
+            None => self.clone(),
+        }
     }
 
     /// Whether the sweep's ends settle the closure the criterion needs.
@@ -432,6 +479,33 @@ impl NyquistData {
     }
 }
 
+/// Distance from −1 + j0 to a point of the plane.
+fn distance_from_critical((real, imag): (f64, f64)) -> f64 {
+    (real + 1.0).hypot(imag)
+}
+
+/// The least value `f` takes on `[lo, hi]`, by golden-section search: `f` is
+/// one smooth dip between two vertices of the drawn locus there.
+fn golden_minimum(mut lo: f64, mut hi: f64, f: impl Fn(f64) -> f64) -> f64 {
+    let ratio = 0.5 * (5f64.sqrt() - 1.0);
+    let (mut a, mut b) = (hi - ratio * (hi - lo), lo + ratio * (hi - lo));
+    let (mut fa, mut fb) = (f(a), f(b));
+    for _ in 0..NEAREST_APPROACH_REFINEMENTS {
+        if fa <= fb {
+            hi = b;
+            (b, fb) = (a, fa);
+            a = hi - ratio * (hi - lo);
+            fa = f(a);
+        } else {
+            lo = a;
+            (a, fa) = (b, fb);
+            b = lo + ratio * (hi - lo);
+            fb = f(b);
+        }
+    }
+    fa.min(fb)
+}
+
 /// Sine and cosine of an angle in degrees, exact on the axes: a phase of
 /// −180° is on the negative real axis, not 1e-16 below it, so a crossing a
 /// retained sample lands on is found at that sample.
@@ -506,6 +580,7 @@ fn critical_point_distance_to_segment(a: (f64, f64), b: (f64, f64)) -> f64 {
 /// interpolated across a ±180° discontinuity, and it is what lets a loop past
 /// −180° report a negative phase margin.
 struct MeasuredBranch {
+    frequency: Vec<f64>,
     log_frequency: Vec<f64>,
     log_magnitude: Vec<f64>,
     phase: Vec<f64>,
@@ -524,6 +599,7 @@ impl MeasuredBranch {
         }
 
         let mut branch = Self {
+            frequency: Vec::with_capacity(usable.len()),
             log_frequency: Vec::with_capacity(usable.len()),
             log_magnitude: Vec::with_capacity(usable.len()),
             phase: Vec::with_capacity(usable.len()),
@@ -547,6 +623,7 @@ impl MeasuredBranch {
                 unwrapped += step;
             }
             previous_raw = raw;
+            branch.frequency.push(point.frequency);
             branch.log_frequency.push(point.frequency.log10());
             branch.log_magnitude.push(point.magnitude().log10());
             branch.phase.push(unwrapped);
@@ -558,6 +635,103 @@ impl MeasuredBranch {
 
     fn len(&self) -> usize {
         self.log_frequency.len()
+    }
+
+    /// How many pieces the drawn locus cuts step `index` into: enough that no
+    /// piece turns more than [`DRAWN_TURN`] or swells more than
+    /// [`DRAWN_SWELL`], and one where the step cannot be traced.
+    fn pieces(&self, index: usize) -> usize {
+        let turn = (self.phase[index + 1] - self.phase[index]).abs() / DRAWN_TURN;
+        let swell = (self.log_magnitude[index + 1] - self.log_magnitude[index]).abs() / DRAWN_SWELL;
+        let pieces = turn.max(swell).ceil();
+        if pieces.is_finite() && pieces >= 1.0 {
+            pieces as usize
+        } else {
+            1
+        }
+    }
+
+    /// The log-frequency `piece / pieces` of the way along step `index`.
+    fn along(&self, index: usize, piece: usize, pieces: usize) -> f64 {
+        let (x0, x1) = (self.log_frequency[index], self.log_frequency[index + 1]);
+        x0 + (x1 - x0) * piece as f64 / pieces as f64
+    }
+
+    /// The point of the locus at log-frequency `x` inside step `index`, on the
+    /// margins' interpolant of its log-magnitude and unwrapped phase.
+    fn point_at(&self, index: usize, x: f64) -> Option<(f64, f64)> {
+        let magnitude = 10f64.powf(self.interpolate(&self.log_magnitude, index, x));
+        let (sin, cos) = self.interpolate(&self.phase, index, x).sin_cos();
+        let point = (magnitude * cos, magnitude * sin);
+        (point.0.is_finite() && point.1.is_finite()).then_some(point)
+    }
+
+    /// The vertices of the drawn locus, samples included, ascending.
+    fn drawn(&self) -> Vec<NyquistPoint> {
+        let sample = |index: usize| {
+            NyquistPoint::new(self.frequency[index], self.real[index], self.imag[index])
+        };
+        let mut points = Vec::with_capacity(self.len());
+        for index in 0..self.len() - 1 {
+            points.push(sample(index));
+            let pieces = self.pieces(index);
+            for piece in 1..pieces {
+                let x = self.along(index, piece, pieces);
+                if let Some((real, imag)) = self.point_at(index, x) {
+                    points.push(NyquistPoint::new(10f64.powf(x), real, imag));
+                }
+            }
+        }
+        points.push(sample(self.len() - 1));
+        points
+    }
+
+    /// The drawn locus's nearest approach to −1 + j0: the nearest of its
+    /// vertices, refined on the interpolant between the vertices either side.
+    fn nearest_approach(&self) -> Option<f64> {
+        let mut nearest: Option<(f64, usize, usize, usize)> = None;
+        for index in 0..self.len() - 1 {
+            let pieces = self.pieces(index);
+            for piece in 0..=pieces {
+                let point = match piece {
+                    0 => Some((self.real[index], self.imag[index])),
+                    last if last == pieces => Some((self.real[index + 1], self.imag[index + 1])),
+                    _ => self.point_at(index, self.along(index, piece, pieces)),
+                };
+                let Some(distance) = point.map(distance_from_critical) else {
+                    continue;
+                };
+                if nearest.is_none_or(|(closest, ..)| distance < closest) {
+                    nearest = Some((distance, index, piece, pieces));
+                }
+            }
+        }
+        let (closest, index, piece, pieces) = nearest?;
+        let refined = |index: usize, from: usize, to: usize, pieces: usize| {
+            golden_minimum(
+                self.along(index, from, pieces),
+                self.along(index, to, pieces),
+                |x| {
+                    self.point_at(index, x)
+                        .map_or(f64::INFINITY, distance_from_critical)
+                },
+            )
+        };
+        let mut nearest = closest.min(refined(
+            index,
+            piece.saturating_sub(1),
+            (piece + 1).min(pieces),
+            pieces,
+        ));
+        // A sample is a vertex of the steps either side of it.
+        if piece == pieces && index + 2 < self.len() {
+            nearest = nearest.min(refined(index + 1, 0, 1, self.pieces(index + 1)));
+        }
+        if piece == 0 && index > 0 {
+            let previous = self.pieces(index - 1);
+            nearest = nearest.min(refined(index - 1, previous - 1, previous, previous));
+        }
+        Some(nearest)
     }
 
     /// The log-frequency where step `index` crosses the negative real axis.
@@ -708,13 +882,15 @@ impl MeasuredBranch {
 // =============================================================================
 
 #[cfg(test)]
+mod drawn_tests;
+#[cfg(test)]
 mod tests {
     use super::*;
     use num_complex::Complex64;
 
     /// A log-spaced sweep of a closed-form loop gain, retained the way an STB
     /// run retains its contour: positive frequencies only, ascending.
-    fn swept_loop(
+    pub(super) fn swept_loop(
         f_start: f64,
         f_stop: f64,
         points_per_decade: usize,
@@ -742,7 +918,7 @@ mod tests {
     }
 
     /// L(s) = k / (1 + s/w)³ — the textbook conditionally stable loop.
-    fn three_pole(k: f64, f_pole: f64) -> impl Fn(Complex64) -> Complex64 {
+    pub(super) fn three_pole(k: f64, f_pole: f64) -> impl Fn(Complex64) -> Complex64 {
         let w = std::f64::consts::TAU * f_pole;
         move |s| k / (1.0 + s / w).powi(3)
     }
