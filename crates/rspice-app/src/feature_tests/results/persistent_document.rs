@@ -148,9 +148,13 @@ fn latest_tracking_fixture() -> LatestFixture {
     }
 }
 
-/// A Latest document whose newest run renamed the net it plots keeps
-/// drawing the dataset it last resolved, under a banner naming the cause
-/// and the control that settles it. Blanking the surface withheld the
+/// A signal name no run reference can catalogue: the newest run carrying it
+/// cannot build the retained source a document follows.
+const UNCATALOGUED_SIGNAL: &str = "V(out)\u{7}";
+
+/// A Latest document whose newest run cannot build its retained source
+/// keeps drawing the dataset it last resolved, under a banner naming the
+/// cause and the control that settles it. Blanking the surface withheld the
 /// evidence the reader already had.
 #[test]
 fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
@@ -163,15 +167,15 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
     } = latest_tracking_fixture();
     let good_dataset = app.state.model.simulation.retained.runs[0].dataset_id;
     let project_revision = app.state.model.workspace.content.project.revision();
-    // The newest run of the same authored analysis no longer carries the
-    // signal this document's traces name.
+    // The newest run of the same authored analysis names its signal in a
+    // way no run reference can catalogue.
     app.state.model.simulation.retained.runs.push(authored_run(
         2,
         plan_id,
         project_revision,
         source_digest,
         authored_analysis_id,
-        "V(renamed)",
+        UNCATALOGUED_SIGNAL,
     ));
     let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
     assert_ne!(good_dataset, stale_dataset);
@@ -218,6 +222,63 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
     );
 }
 
+/// A Latest document whose newest run renamed the net it plots moves onto
+/// that run all the same: the trace keeps its place, marked missing, and
+/// nothing is refused.
+#[test]
+fn a_latest_document_moves_onto_a_run_that_lacks_its_signal() {
+    let LatestFixture {
+        mut app,
+        document_id,
+        plan_id,
+        authored_analysis_id,
+        source_digest,
+    } = latest_tracking_fixture();
+    let project_revision = app.state.model.workspace.content.project.revision();
+    app.state.model.simulation.retained.runs.push(authored_run(
+        2,
+        plan_id,
+        project_revision,
+        source_digest,
+        authored_analysis_id,
+        "V(renamed)",
+    ));
+    let newest = app.state.model.simulation.retained.runs[1].dataset_id;
+
+    assert!(matches!(
+        refresh_latest_binding(&mut app.state.results_parts(), document_id),
+        LatestBinding::Current
+    ));
+    let document = app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("retained document");
+    assert!(
+        document
+            .panes()
+            .iter()
+            .filter_map(|pane| pane.binding)
+            .all(|binding| binding.dataset.dataset_id == newest),
+        "the view moved onto the newest run"
+    );
+    assert!(!document.traces().is_empty());
+    assert!(
+        document.traces().iter().all(|trace| trace.missing),
+        "the trace the run lacks stays, marked missing"
+    );
+    assert!(
+        app.state
+            .results
+            .results
+            .latest_retarget_failure(document_id, newest)
+            .is_none(),
+        "nothing was refused"
+    );
+}
+
 /// A refused retarget rebuilds the retained source dataset. Re-trying it
 /// every frame would pay for that rebuild every frame, so the refusal is
 /// held against the candidate that produced it.
@@ -237,7 +298,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
         project_revision,
         source_digest,
         authored_analysis_id,
-        "V(renamed)",
+        UNCATALOGUED_SIGNAL,
     ));
     let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
 
