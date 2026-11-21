@@ -155,7 +155,7 @@ fn peak_working_set() -> Option<u64> {
     // SAFETY: the current process's pseudo-handle needs no closing, and `counters` is a
     // `PROCESS_MEMORY_COUNTERS` of the `cb` bytes it is said to be.
     let read = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, cb) };
-    (read != 0).then(|| counters.peak_working_set_size as u64)
+    (read != 0).then_some(counters.peak_working_set_size as u64)
 }
 
 /// The process's peak resident set: the most physical memory it has held at once.

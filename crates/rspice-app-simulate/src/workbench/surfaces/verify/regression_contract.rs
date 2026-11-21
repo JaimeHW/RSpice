@@ -1732,9 +1732,9 @@ pub(super) fn evaluate_regression_waveform(
     if let Err(error) = validate_regression_waveform_data(pair.current) {
         return RegressionVerdict::NotEvaluated(format!("candidate {error}"));
     }
-    fn whole(
-        waveform: &crate::state::RetainedTrace,
-    ) -> Result<(std::borrow::Cow<'_, [f64]>, std::borrow::Cow<'_, [f64]>), String> {
+    /// A waveform's two columns, each borrowed or read.
+    type Columns<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
+    fn whole(waveform: &crate::state::RetainedTrace) -> Result<Columns<'_>, String> {
         let x = waveform
             .x
             .read_whole()

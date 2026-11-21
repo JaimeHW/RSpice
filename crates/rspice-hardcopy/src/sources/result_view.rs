@@ -750,11 +750,12 @@ fn quick_complex_plot<W: AsRef<RetainedWaveform>>(
     quick_plot_from_series(viewer, "Results", 0, series, None)
 }
 
+/// A source's two columns, each borrowed or read.
+type ColumnPair<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
+
 /// Both columns of a spectrum's or an eye's source: the transform folds every sample of the
 /// record, so it reads them whole, and a record past the whole-read budget is refused.
-fn whole_pair(
-    waveform: &RetainedWaveform,
-) -> Result<(std::borrow::Cow<'_, [f64]>, std::borrow::Cow<'_, [f64]>), HardcopySourceError> {
+fn whole_pair(waveform: &RetainedWaveform) -> Result<ColumnPair<'_>, HardcopySourceError> {
     let refused = |failure: rspice_results::waveform::ColumnReadFailure| {
         HardcopySourceError::InvalidVisualizationSource(format!(
             "{} could not be read: {failure}",

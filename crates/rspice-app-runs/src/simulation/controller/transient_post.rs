@@ -568,11 +568,12 @@ pub fn build_eye_from_waveform(
     ((eye_data.trace_count() > 0).then_some(eye_data), provenance)
 }
 
+/// A source's time and value columns, each borrowed or read.
+type SourceColumns<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
+
 /// Both columns of a derivation's source. A spectrum and an eye fold every sample of the record,
 /// so the task reads them whole, off the frame; a record past the whole-read budget is refused.
-fn whole_source(
-    source: &DerivedWaveformSource,
-) -> Result<(std::borrow::Cow<'_, [f64]>, std::borrow::Cow<'_, [f64]>), String> {
+fn whole_source(source: &DerivedWaveformSource) -> Result<SourceColumns<'_>, String> {
     let time = source
         .time
         .read_whole()

@@ -229,7 +229,7 @@ fn worker_pss_branch_currents_round_trip_and_reject_tamper() {
         panic!("PSS display");
     };
     assert_eq!(waveforms["I(V1)"].y_unit, "A");
-    validate_pss_display_contract(&time.in_memory().unwrap(), &waveforms, &point).unwrap();
+    validate_pss_display_contract(time.in_memory().unwrap(), &waveforms, &point).unwrap();
     let mut tampered = transport;
     tampered.buffers[buffer][0] += 1.0;
     assert!(

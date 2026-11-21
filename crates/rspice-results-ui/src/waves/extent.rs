@@ -71,7 +71,9 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
             && let Some((first, last)) = x.ends()
         {
             if model.x_scale == XScale::Log10 {
-                let positive = x.partition_point(|value| !(value > 0.0));
+                let positive = x.partition_point(|value| {
+                    value.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+                });
                 x.sample(positive).into_iter().for_each(&mut take);
             } else {
                 take(first);

@@ -50,7 +50,7 @@ impl<'a> SampleProjection<'a> {
             )));
         }
         let select = |values: &SharedWaveformValues| -> SharedWaveformValues {
-            values.gather(&self.indices).into()
+            values.gather(self.indices).into()
         };
         let mut projected = source.clone();
         projected.x = self

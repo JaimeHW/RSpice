@@ -194,9 +194,7 @@ pub fn show(
     let block = &matrix.blocks()[controls.block];
     // A stored matrix is read off the frame; it is drawn once it has arrived.
     let held = |values: &rspice_results::waveform::WaveformValues| values.fetch_whole().ready();
-    let Some(grid) = held(&analysis.waveforms[block.cells()[0]].x) else {
-        return None;
-    };
+    let grid = held(&analysis.waveforms[block.cells()[0]].x)?;
     // One coefficient sample, unavailable until its column has arrived.
     let coefficient = |values: &rspice_results::waveform::WaveformValues, sample: usize| {
         held(values).map_or(f64::NAN, |values| {

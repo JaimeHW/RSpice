@@ -89,6 +89,10 @@ pub const PEAK_EXCURSION_SHARE: f64 = 1.0e-3;
 pub trait Curve {
     /// The samples it holds.
     fn len(&self) -> usize;
+    /// Whether it holds no sample.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     /// Sample `index`, which is below [`Self::len`].
     fn at(&self, index: usize) -> f64;
     /// Whether its samples are known to ascend strictly, so a search need not read them all to
@@ -428,7 +432,8 @@ fn extrema<Y: Curve + ?Sized>(y: &Y, excursion: f64, peaks: bool) -> std::vec::I
     let mut found = Vec::new();
     let mut heading = Heading::Unknown;
     // The running top and bottom, each as (index, value).
-    let (mut top, mut bottom): (Option<(usize, f64)>, Option<(usize, f64)>) = (None, None);
+    let mut top: Option<(usize, f64)> = None;
+    let mut bottom: Option<(usize, f64)> = None;
     let keep = |index: usize, is_peak: bool, found: &mut Vec<usize>| {
         if is_peak == peaks && index != 0 && index != last {
             found.push(index);
