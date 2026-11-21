@@ -14,6 +14,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeasureGroup {
     Levels,
+    Statistics,
     Timing,
     StepResponse,
     FrequencyResponse,
@@ -21,8 +22,9 @@ pub enum MeasureGroup {
 }
 
 impl MeasureGroup {
-    pub const ALL: [MeasureGroup; 5] = [
+    pub const ALL: [MeasureGroup; 6] = [
         MeasureGroup::Levels,
+        MeasureGroup::Statistics,
         MeasureGroup::Timing,
         MeasureGroup::StepResponse,
         MeasureGroup::FrequencyResponse,
@@ -32,6 +34,7 @@ impl MeasureGroup {
     pub fn label(self) -> &'static str {
         match self {
             MeasureGroup::Levels => "Levels",
+            MeasureGroup::Statistics => "Statistics",
             MeasureGroup::Timing => "Edges and timing",
             MeasureGroup::StepResponse => "Step response",
             MeasureGroup::FrequencyResponse => "Frequency response",
@@ -147,6 +150,14 @@ const LEVEL_ARGUMENTS: [ArgumentSpec; 3] = [
 /// `rise`, `fall` and `slewRate` read the 0 % and 100 % levels from where
 /// the trace starts and ends, as ViVA's riseTime does.
 const EDGE_ARGUMENTS: [ArgumentSpec; 6] = edge_arguments("first sample", "last sample");
+/// Whether a deviation weighs the signal over its x-span or reads its
+/// samples as a statistical sample.
+const STATISTIC_TYPE: ArgumentSpec = arg(
+    "Type",
+    "type",
+    Choice(&["population", "sample"]),
+    Literal("population"),
+);
 
 pub const MEASUREMENTS: &[MeasureSpec] = &[
     MeasureSpec {
@@ -196,6 +207,62 @@ pub const MEASUREMENTS: &[MeasureSpec] = &[
         summary: "value at an x",
         description: "The signal's value at one point of the x-axis, interpolated between samples.",
         arguments: &[SIGNAL, arg("At x", "at", AxisPoint, Required)],
+    },
+    MeasureSpec {
+        name: "stddev",
+        aliases: &[],
+        group: MeasureGroup::Statistics,
+        summary: "standard deviation",
+        description: "The standard deviation of the signal's values, each weighted by the span \
+                      of the x-axis it holds, as avg weighs them; \"sample\" reads the samples \
+                      alone, unweighted, divided by N − 1.",
+        arguments: &[SIGNAL, STATISTIC_TYPE],
+    },
+    MeasureSpec {
+        name: "variance",
+        aliases: &[],
+        group: MeasureGroup::Statistics,
+        summary: "square of the deviation",
+        description: "The variance of the signal's values, each weighted by the span of the \
+                      x-axis it holds; \"sample\" reads the samples alone, unweighted, divided \
+                      by N − 1.",
+        arguments: &[SIGNAL, STATISTIC_TYPE],
+    },
+    MeasureSpec {
+        name: "median",
+        aliases: &[],
+        group: MeasureGroup::Statistics,
+        summary: "level held half the span",
+        description: "The level the signal is at or below for half of its x-span.",
+        arguments: &[SIGNAL],
+    },
+    MeasureSpec {
+        name: "percentile",
+        aliases: &[],
+        group: MeasureGroup::Statistics,
+        summary: "level held p % of the span",
+        description: "The level the signal is at or below for the given percentage of its \
+                      x-span: 50 is the median, 0 the minimum and 100 the maximum.",
+        arguments: &[SIGNAL, arg("Percentage", "p", Number, Required)],
+    },
+    MeasureSpec {
+        name: "skewness",
+        aliases: &[],
+        group: MeasureGroup::Statistics,
+        summary: "asymmetry about the mean",
+        description: "The third standardized moment of the signal's values over its x-span: 0 \
+                      for a symmetric signal, positive when its values reach further above the \
+                      mean than below.",
+        arguments: &[SIGNAL],
+    },
+    MeasureSpec {
+        name: "kurtosis",
+        aliases: &[],
+        group: MeasureGroup::Statistics,
+        summary: "weight of the extremes",
+        description: "The fourth standardized moment of the signal's values over its x-span, \
+                      Pearson's: 3 for Gaussian noise, 1.5 for a sine, 1.8 for a ramp.",
+        arguments: &[SIGNAL],
     },
     MeasureSpec {
         name: "cross",

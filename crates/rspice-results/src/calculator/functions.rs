@@ -507,31 +507,7 @@ pub(super) fn clip_x(
             "clip from {from} to {to} lies outside the trace, which runs from {first} to {last}"
         )));
     }
-    let inside = |at: f64| at >= low && at <= high;
-    let (mut out_x, mut out_y) = (Vec::new(), Vec::new());
-    for i in 0..x.len() {
-        if i > 0 {
-            // An interval end strictly between this sample and the one
-            // before it becomes a sample of its own.
-            let (x0, x1) = (x[i - 1], x[i]);
-            let mut ends = [low, high];
-            if x1 < x0 {
-                ends.reverse();
-            }
-            let ends = if low == high { &ends[..1] } else { &ends[..] };
-            for &end in ends {
-                if (x0 < end && end < x1) || (x1 < end && end < x0) {
-                    out_x.push(end);
-                    out_y.push(y[i - 1] + (y[i] - y[i - 1]) * (end - x0) / (x1 - x0));
-                }
-            }
-        }
-        if inside(x[i]) {
-            out_x.push(x[i]);
-            out_y.push(y[i]);
-        }
-    }
-    Ok((out_x, out_y))
+    Ok(super::series::Clipped::new(x.iter().copied().zip(y.iter().copied()), low, high).unzip())
 }
 
 /// `xval(w)` — the domain plotted against itself, so an expression can do

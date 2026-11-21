@@ -15,8 +15,10 @@ pub mod functions;
 mod measures;
 pub mod parser;
 pub mod retained;
+mod series;
 #[cfg(feature = "engine-evidence")]
 pub mod spice_parser;
+mod statistics;
 mod time_measures;
 pub mod value;
 

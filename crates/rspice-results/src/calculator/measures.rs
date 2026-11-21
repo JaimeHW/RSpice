@@ -8,8 +8,9 @@
 
 use super::complex_functions;
 use super::evaluator::EvaluationError;
+use super::series::Series;
 use super::value::{CalcValue, RealValue};
-use super::{frequency_measures, time_measures};
+use super::{catalogue, frequency_measures, statistics, time_measures};
 
 /// One evaluated argument of a function call.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +37,11 @@ pub(super) fn dispatch(name: &str, args: Vec<Argument>) -> Result<CalcValue, Eva
         return Err(EvaluationError::UnknownFunction(name.to_owned()));
     }
     let lower = name.to_ascii_lowercase();
+    if let Some(reduce) = reduction(&lower) {
+        reduction_arity(name, args.len())?;
+        let (x, y) = series(name, &args, 0)?;
+        return reduce(name, &Series::memory(x, y), &args[1..]).map(CalcValue::Real);
+    }
     if let Some(measure) =
         frequency_measures::lookup(&lower).or_else(|| time_measures::lookup(&lower))
     {
@@ -51,6 +57,39 @@ pub(super) fn dispatch(name: &str, args: Vec<Argument>) -> Result<CalcValue, Eva
         })
         .collect::<Result<Vec<_>, _>>()?;
     complex_functions::dispatch(name, values)
+}
+
+/// A measurement that reads a real trace in passes through [`Series`], so a
+/// stored trace is read a block at a time: the name as the reader spelled
+/// it, the trace, and the arguments after it.
+pub(super) type Reduction = fn(&str, &Series, &[Argument]) -> Result<RealValue, EvaluationError>;
+
+/// The reduction `name` (lower-cased) runs, if it is one.
+pub(super) fn reduction(name: &str) -> Option<Reduction> {
+    statistics::lookup(name)
+}
+
+/// Hold a reduction's call, trace included, to the argument count its
+/// catalogue entry states.
+pub(super) fn reduction_arity(name: &str, count: usize) -> Result<(), EvaluationError> {
+    let Some(spec) = catalogue::find(name) else {
+        return Ok(());
+    };
+    let least = spec
+        .arguments
+        .iter()
+        .filter(|argument| argument.default == catalogue::ArgumentDefault::Required)
+        .count();
+    let most = spec.arguments.len();
+    if count < least || count > most {
+        Err(EvaluationError::ArgCountMismatch {
+            func: name.to_owned(),
+            expected: if count < least { least } else { most },
+            actual: count,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 /// Which way an edge or crossing goes, as ViVA's "Edge Type" names it.

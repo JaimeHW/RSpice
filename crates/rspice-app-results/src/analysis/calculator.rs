@@ -192,6 +192,25 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             None => Err(EvaluationError::IdentifierNotFound(signal.to_string())),
         }
     }
+
+    fn stored_columns(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Option<(
+        &rspice_results::waveform::WaveformValues,
+        &rspice_results::waveform::WaveformValues,
+    )> {
+        // The axis and ground are read as values, as get_waveform reads them.
+        let special = matches!(
+            signal.to_ascii_uppercase().as_str(),
+            "TIME" | "T" | "FREQ" | "FREQUENCY" | "V(0)"
+        );
+        if special || dataset.is_some() {
+            return None;
+        }
+        rspice_results::calculator::retained::stored_real_columns(self.find_waveform(signal)?)
+    }
 }
 
 // =============================================================================

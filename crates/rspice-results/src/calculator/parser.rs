@@ -40,7 +40,16 @@ impl std::error::Error for ParseError {}
 /// signal: edge types, pulse levels and bandwidth shapes, spelled as ViVA
 /// spells them. The set is closed so that every other quoted text keeps
 /// naming a signal.
-pub(super) const OPTION_WORDS: &[&str] = &["rising", "falling", "either", "high", "low", "band"];
+pub(super) const OPTION_WORDS: &[&str] = &[
+    "rising",
+    "falling",
+    "either",
+    "high",
+    "low",
+    "band",
+    "population",
+    "sample",
+];
 
 // =============================================================================
 // Lexer

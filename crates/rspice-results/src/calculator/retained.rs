@@ -374,4 +374,40 @@ impl<W: AsRef<RetainedWaveform>> EvaluationContext for WaveformsContext<'_, W> {
     ) -> Result<CalcValue, EvaluationError> {
         self.get_waveform_with_policy(signal, dataset, self.complex_policy)
     }
+
+    fn stored_columns(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Option<(
+        &crate::waveform::WaveformValues,
+        &crate::waveform::WaveformValues,
+    )> {
+        // The axis and ground are read as values, as get_waveform reads them.
+        let special = matches!(
+            signal.to_ascii_uppercase().as_str(),
+            "TIME" | "T" | "FREQ" | "FREQUENCY" | "V(0)"
+        );
+        if special || dataset.is_some() || self.projection.is_some() {
+            return None;
+        }
+        stored_real_columns(find_waveform(self.waveforms, signal)?)
+    }
+}
+
+/// The stored columns of a real waveform, for a reduction to read a block at
+/// a time: `None` for one in memory, one with complex components, or a
+/// magnitude whose phase was not kept, which are read as values.
+pub fn stored_real_columns(
+    waveform: &RetainedWaveform,
+) -> Option<(
+    &crate::waveform::WaveformValues,
+    &crate::waveform::WaveformValues,
+)> {
+    let magnitude_only = waveform.name.starts_with('|') && waveform.name.ends_with('|');
+    (waveform.complex.is_none()
+        && !magnitude_only
+        && waveform.y.is_stored()
+        && waveform.x.len() == waveform.y.len())
+    .then_some((&waveform.x, &waveform.y))
 }

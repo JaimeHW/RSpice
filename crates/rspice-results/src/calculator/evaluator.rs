@@ -6,6 +6,7 @@
 use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, UnaryOp};
 use super::measures::Argument;
 pub use super::value::{CalcValue, RealValue};
+use crate::waveform::WaveformValues;
 
 /// Interface for retrieving simulation data
 pub trait EvaluationContext {
@@ -23,6 +24,18 @@ pub trait EvaluationContext {
         dataset: Option<&str>,
     ) -> Result<CalcValue, EvaluationError> {
         super::complex_functions::dispatch("mag", vec![self.get_waveform(signal, dataset)?])
+    }
+
+    /// The stored columns of `signal` when it is one stored real trace, so a
+    /// reduction over it reads them a block at a time instead of whole.
+    /// `None` for anything else (a trace in memory, a complex one, another
+    /// run's), which is read as a value.
+    fn stored_columns(
+        &self,
+        _signal: &str,
+        _dataset: Option<&str>,
+    ) -> Option<(&WaveformValues, &WaveformValues)> {
+        None
     }
 
     /// The exact event history of a bus or logic net, `D(name)`, for
@@ -143,6 +156,20 @@ pub fn evaluate(
                 } else {
                     ctx.get_magnitude(signal, dataset.as_deref())?.checked()
                 };
+            }
+            if let Some(reduce) = super::measures::reduction(&lower)
+                && let Some(first) = args.first()
+                && let Some(series) = stored_series(first, ctx)?
+            {
+                super::measures::reduction_arity(name, args.len())?;
+                let mut rest = Vec::with_capacity(args.len() - 1);
+                for arg in &args[1..] {
+                    rest.push(match arg {
+                        CalculatorExpr::Keyword(word) => Argument::Keyword(word.clone()),
+                        _ => Argument::Value(evaluate(arg, ctx)?),
+                    });
+                }
+                return CalcValue::Real(reduce(name, &series, &rest)?).checked();
             }
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
@@ -340,6 +367,9 @@ fn function_unit(
         "deriv" | "derivative" | "slewrate" => Ok(argument(0)?.divided_by(&x_unit()?)),
         "integ" | "integral" => Ok(argument(0)?.times(&x_unit()?)),
         "duty" | "dutycycle" | "overshoot" | "undershoot" | "thd" => named("%"),
+        "stddev" | "median" | "percentile" => argument(0),
+        "variance" => Ok(argument(0)?.times(&argument(0)?)),
+        "skewness" | "kurtosis" => Ok(Unit::none()),
         // The amplitude decibel of a power is a number with no meaning, so
         // it states none and names the power form instead.
         "db" | "db20" => {
@@ -423,6 +453,40 @@ fn function_unit(
         }
         _ => Err(format!("the unit of {name}() is not known")),
     }
+}
+
+/// The stored trace a reduction's first argument names, read where it is
+/// stored: a signal, or `clip` of one between two scalars. `None` when the
+/// argument is anything else, or names no stored trace.
+fn stored_series<'c>(
+    expr: &CalculatorExpr,
+    ctx: &'c impl EvaluationContext,
+) -> Result<Option<super::series::Series<'c>>, EvaluationError> {
+    use super::series::Series;
+    let columns = |expr: &CalculatorExpr| match expr {
+        CalculatorExpr::WaveformRef { signal, dataset } => {
+            ctx.stored_columns(signal, dataset.as_deref())
+        }
+        _ => None,
+    };
+    if let Some((x, y)) = columns(expr) {
+        return Ok(Some(Series::stored(x, y)));
+    }
+    if let CalculatorExpr::FunctionCall { name, args } = expr
+        && name.eq_ignore_ascii_case("clip")
+        && let [trace, from, to] = args.as_slice()
+        && let Some((x, y)) = columns(trace)
+    {
+        let end = |expr: &CalculatorExpr, what: &str| match evaluate(expr, ctx)? {
+            CalcValue::Real(RealValue::Scalar(value)) => Ok(value),
+            _ => Err(EvaluationError::TypeMismatch(format!(
+                "clip {what} must be a scalar"
+            ))),
+        };
+        let (from, to) = (end(from, "start")?, end(to, "end")?);
+        return Series::stored(x, y).clipped(from, to).map(Some);
+    }
+    Ok(None)
 }
 
 fn neg_value(value: CalcValue) -> Result<CalcValue, EvaluationError> {
@@ -643,6 +707,10 @@ mod tests {
             ("sin(phase_rad(V(out)))", "Hz", ""),
             ("tanh(V(out)/V(in))", "s", ""),
             ("V(out) > 2.5", "s", ""),
+            ("stddev(V(out))", "s", "V"),
+            ("variance(I(vdd), \"sample\")", "s", "A²"),
+            ("percentile(V(out), 90)", "s", "V"),
+            ("kurtosis(V(out))", "s", ""),
             ("if(V(out) > 2.5, V(out), 0)", "s", "V"),
             ("if(TIME < 0.001, 0, I(vdd))", "s", "A"),
         ];
