@@ -647,3 +647,82 @@ async fn a_sweep_deletes_only_the_stores_no_project_keeps() {
         JsFuture::from(promise).await.unwrap();
     }
 }
+
+#[wasm_bindgen_test]
+async fn a_comparison_runs_on_the_samples_the_store_keeps() {
+    use rspice_simulation_contract::worker_transport::{
+        WorkerColumn, WorkerComparedRun, WorkerComparedWaveform, WorkerComparison,
+    };
+    use rspice_vocabulary::product::{ContentDigest, DatasetBinding, DatasetId};
+    let store = "test-comparison";
+    let count = 2_000;
+    let digest = keep_run(store, 41, 1, count).await;
+    let open = ResultsStoreRequest::Open {
+        store: store.to_owned(),
+    };
+    assert!(matches!(
+        ask(&open, Array::new()).await.0,
+        ResultsStoreResponse::Opened { .. }
+    ));
+    // The baseline the page holds: the kept run's samples, but for one row that parts from it.
+    let (x, mut y) = rows(41, 1, 0, count as usize);
+    y[1_000] += 1.0;
+    let run = |x: WorkerColumn, y: WorkerColumn, name: &str| WorkerComparedRun {
+        binding: DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([5; 32])),
+        coordinate_unit: Some("s".to_owned()),
+        waveforms: vec![WorkerComparedWaveform {
+            name: name.to_owned(),
+            unit: Some("V".to_owned()),
+            x,
+            y,
+        }],
+    };
+    let stored = |column| WorkerColumn::Stored {
+        segment: digest.clone(),
+        window: whole(column, count),
+    };
+    let comparison = |baseline_name: &str| WorkerComparison {
+        candidate: run(stored(0), stored(1), "v(n0)"),
+        baseline: run(
+            WorkerColumn::Held { buffer: 0 },
+            WorkerColumn::Held { buffer: 1 },
+            baseline_name,
+        ),
+        signals: vec!["v(n0)".to_owned()],
+        alignment: rspice_results::waveform_comparison::ComparisonAlignmentDraft::AbsoluteXAxis,
+        alignment_signal: "v(n0)".to_owned(),
+        threshold: 0.0_f64.into(),
+        maximum_lag_samples: 0,
+        absolute_tolerance: 1e-9_f64.into(),
+        relative_tolerance: 0.0_f64.into(),
+    };
+    let held = || {
+        let buffers = Array::new();
+        buffers.push(&Float64Array::from(x.as_slice()));
+        buffers.push(&Float64Array::from(y.as_slice()));
+        buffers
+    };
+    let request = ResultsStoreRequest::Compare {
+        comparison: Box::new(comparison("v(n0)")),
+    };
+    match ask(&request, held()).await.0 {
+        ResultsStoreResponse::Compared { outcome } => {
+            assert_eq!(outcome.receipt.rows_compared, count as usize);
+            assert_eq!(outcome.places.len(), 1, "{:?}", outcome.places);
+            assert_eq!(outcome.places[0].worst_x, x[1_000]);
+            assert_eq!(outcome.coordinate_unit.as_deref(), Some("s"));
+        }
+        other => panic!("the runs were not compared: {other:?}"),
+    }
+    // The comparison's own refusal is its answer.
+    let request = ResultsStoreRequest::Compare {
+        comparison: Box::new(comparison("v(other)")),
+    };
+    match ask(&request, held()).await.0 {
+        ResultsStoreResponse::Uncompared { reason } => {
+            assert!(reason.contains("no signal named v(n0)"), "{reason}");
+        }
+        other => panic!("the refusal was not the answer: {other:?}"),
+    }
+    remove_store(store).await;
+}

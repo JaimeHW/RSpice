@@ -1,8 +1,9 @@
 //! Where a comparison runs. It reads every sample of the signals it compares,
 //! so it runs as a Results job, on a thread of its own, while the form shows
 //! how far it has got, and it keeps nothing once it answers: the samples it
-//! read go with it. On the web, which has no threads, it runs where it is
-//! asked.
+//! read go with it. In a browser it runs in the store worker that holds the
+//! project's kept samples, and is pending until the worker answers: the page
+//! never reads the samples it compares.
 //!
 //! A [`Worker`] is the whole of the arrangement: the comparison goes in when
 //! it starts, its progress and answer are the job's, and dropping it stops the
@@ -10,13 +11,14 @@
 
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::waveform::RetainedWaveform;
-use rspice_results::waveform_comparison::{
-    ComparisonAlignmentDraft, ComparisonOptions, ComparisonOutcome, ComparisonSide,
-    execute_comparison,
-};
+use rspice_results::waveform_comparison::{ComparisonAlignmentDraft, ComparisonOutcome};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_results::waveform_comparison::{ComparisonOptions, ComparisonSide, execute_comparison};
 
 use crate::product::DatasetBinding;
-use crate::workbench::results_job::{JobOutcome, JobState, JobStop, ResultsJob};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::results_job::JobStop;
+use crate::workbench::results_job::{JobOutcome, JobState, ResultsJob};
 
 /// One run's side of a comparison: the waveforms it compares, sharing their
 /// samples with the run.
@@ -38,6 +40,7 @@ pub(crate) struct Job {
     pub relative_tolerance: f64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Side {
     fn compared(&self) -> ComparisonSide<'_, RetainedWaveform> {
         ComparisonSide {
@@ -47,6 +50,7 @@ impl Side {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Job {
     fn run(
         &self,
@@ -90,7 +94,29 @@ pub(crate) struct Worker {
 }
 
 impl Worker {
+    /// Start `job`, in the browser's store worker.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn start(job: Job) -> Self {
+        let signals = job.signals.len();
+        let work = crate::state::run_store::browser::compare(
+            crate::state::run_store::browser::StoreComparison {
+                candidate: (job.candidate.binding, &job.candidate.analysis),
+                baseline: (job.baseline.binding, &job.baseline.analysis),
+                signals: job.signals.clone(),
+                alignment: job.alignment,
+                alignment_signal: job.alignment_signal.clone(),
+                threshold: job.threshold,
+                maximum_lag_samples: job.maximum_lag_samples,
+                absolute_tolerance: job.absolute_tolerance,
+                relative_tolerance: job.relative_tolerance,
+            },
+        );
+        let job = ResultsJob::awaiting(async move { work.await.map(Box::new) });
+        Self { job, signals }
+    }
+
     /// Start `job`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn start(job: Job) -> Self {
         let signals = job.signals.len();
         let total = signals as u64;

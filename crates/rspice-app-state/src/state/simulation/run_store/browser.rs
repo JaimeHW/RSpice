@@ -27,15 +27,16 @@ use js_sys::{Array, Float64Array, Reflect, Uint8Array};
 use rspice_results::saved_output::SavedOutputMaterializationStatus;
 use rspice_results::store_reader::{Segment, SegmentBytes, SegmentDigest, StoreReader};
 use rspice_results::waveform::{
-    ColumnTile, Read, ReadValue, StoredWindow, WaveformValues, WindowLead,
+    ColumnTile, Read, ReadValue, RetainedWaveform, StoredWindow, WaveformValues, WindowLead,
 };
 use rspice_results_store::{
     MemoryIo, RunStatus, SegmentIo, SegmentReader, SegmentState, SegmentWriter, StopReason,
     StoreError,
 };
 use rspice_simulation_contract::worker_transport::{
-    ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerF64, WorkerLead,
-    WorkerRead, WorkerReadValue, WorkerResultsSchema, WorkerWindow,
+    ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerColumn,
+    WorkerComparedRun, WorkerComparedWaveform, WorkerComparison, WorkerF64, WorkerLead, WorkerRead,
+    WorkerReadValue, WorkerResultsSchema, WorkerWindow,
 };
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -603,6 +604,145 @@ async fn write(segment: &Arc<Segment>) -> Result<(), String> {
         repaint();
     }
     Ok(())
+}
+
+/// A comparison of two runs, as the page states it for the store worker to run.
+pub struct StoreComparison<'a> {
+    pub candidate: (
+        rspice_vocabulary::product::DatasetBinding,
+        &'a rspice_results::analysis_result::AnalysisResult<RetainedWaveform>,
+    ),
+    pub baseline: (
+        rspice_vocabulary::product::DatasetBinding,
+        &'a rspice_results::analysis_result::AnalysisResult<RetainedWaveform>,
+    ),
+    pub signals: Vec<String>,
+    pub alignment: rspice_results::waveform_comparison::ComparisonAlignmentDraft,
+    pub alignment_signal: String,
+    pub threshold: f64,
+    pub maximum_lag_samples: u32,
+    pub absolute_tolerance: f64,
+    pub relative_tolerance: f64,
+}
+
+/// Run `comparison` in the store worker, which reads the samples the store keeps: the page sends
+/// the runs' column references, and reads now only the columns the store does not keep. The
+/// comparison's refusal is its answer.
+pub fn compare(
+    comparison: StoreComparison<'_>,
+) -> impl std::future::Future<
+    Output = Result<rspice_results::waveform_comparison::ComparisonOutcome, String>,
+> + 'static {
+    use rspice_results::waveform_comparison::ComparisonAlignmentDraft;
+    let mut names = comparison.signals.clone();
+    if comparison.alignment != ComparisonAlignmentDraft::AbsoluteXAxis {
+        names.push(comparison.alignment_signal.clone());
+    }
+    let mut held = Vec::new();
+    let candidate = compared_run(comparison.candidate, &names, &mut held);
+    let baseline = compared_run(comparison.baseline, &names, &mut held);
+    let request = candidate.and_then(|candidate| {
+        Ok(WorkerComparison {
+            candidate,
+            baseline: baseline?,
+            signals: comparison.signals,
+            alignment: comparison.alignment,
+            alignment_signal: comparison.alignment_signal,
+            threshold: comparison.threshold.into(),
+            maximum_lag_samples: comparison.maximum_lag_samples,
+            absolute_tolerance: comparison.absolute_tolerance.into(),
+            relative_tolerance: comparison.relative_tolerance.into(),
+        })
+    });
+    async move { compare_in_worker(request?, held).await }
+}
+
+/// The run `analysis`, `binding`, as the store worker compares it: the waveforms named `names`,
+/// each column a window of a segment the store keeps or, for one it does not keep, samples the
+/// page reads now and sends in `held`, where the column names its place.
+fn compared_run(
+    (binding, analysis): (
+        rspice_vocabulary::product::DatasetBinding,
+        &rspice_results::analysis_result::AnalysisResult<RetainedWaveform>,
+    ),
+    names: &[String],
+    held: &mut Vec<Vec<f64>>,
+) -> Result<WorkerComparedRun, String> {
+    let mut column = |values: &WaveformValues| -> Result<WorkerColumn, String> {
+        if let Some((source, window)) = values.stored_window()
+            && let Some((digest, column)) = source.identity()
+            && with(|client| client.kept.contains_key(&digest))
+        {
+            let lead = match window.lead {
+                WindowLead::None => WorkerLead::None,
+                WindowLead::Value(value) => WorkerLead::Value {
+                    value: value.into(),
+                },
+                WindowLead::Interpolated(fraction) => WorkerLead::Interpolated {
+                    fraction: fraction.into(),
+                },
+            };
+            return Ok(WorkerColumn::Stored {
+                segment: SegmentDigest(digest).to_string(),
+                window: WorkerWindow {
+                    column,
+                    first: window.first,
+                    rows: window.rows,
+                    lead,
+                },
+            });
+        }
+        let samples = values
+            .read_range(0..values.len())
+            .map_err(|failure| failure.to_string())?;
+        held.push(samples.into_owned());
+        Ok(WorkerColumn::Held {
+            buffer: (held.len() - 1) as u32,
+        })
+    };
+    let mut waveforms = Vec::new();
+    for waveform in analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| names.contains(&waveform.name))
+    {
+        waveforms.push(WorkerComparedWaveform {
+            name: waveform.name.clone(),
+            unit: waveform.unit.clone(),
+            x: column(&waveform.x)?,
+            y: column(&waveform.y)?,
+        });
+    }
+    Ok(WorkerComparedRun {
+        binding,
+        coordinate_unit: analysis.waveform_coordinate_unit().map(str::to_owned),
+        waveforms,
+    })
+}
+
+/// Run `comparison` in the store worker, with the samples `held` its columns name.
+async fn compare_in_worker(
+    comparison: WorkerComparison,
+    held: Vec<Vec<f64>>,
+) -> Result<rspice_results::waveform_comparison::ComparisonOutcome, String> {
+    let buffers = Array::new();
+    for samples in &held {
+        buffers.push(&Float64Array::from(samples.as_slice()));
+    }
+    drop(held);
+    match call(
+        &ResultsStoreRequest::Compare {
+            comparison: Box::new(comparison),
+        },
+        buffers,
+    )
+    .await?
+    .0
+    {
+        ResultsStoreResponse::Compared { outcome } => Ok(*outcome),
+        ResultsStoreResponse::Uncompared { reason } => Err(reason),
+        other => Err(refusal(other)),
+    }
 }
 
 /// The store kept none of the page's segment `digest`: the page keeps its samples, and the run

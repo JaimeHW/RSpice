@@ -6,9 +6,9 @@
 //! The window asks [`ResultsJob::state`] once a frame: atomics, and a lock the job holds only to
 //! name a new step, so a frame never waits on the job's work.
 //!
-//! In the browser a job runs to its end when it starts: the page has one thread, and the
-//! segments a Results job reads and writes live in the page's memory, where the simulation
-//! worker cannot reach them.
+//! In the browser a job that reads a project's kept samples runs in the store worker that holds
+//! them ([`ResultsJob::awaiting`]): the page sends what the job is and the job is pending until
+//! the worker answers. Any other job runs to its end when it starts, as the page has one thread.
 //!
 //! A job that is cancelled or fails leaves nothing behind: what it wrote is its own to delete,
 //! and a value it would have handed back is dropped on its thread.
@@ -286,6 +286,35 @@ impl<T: Send + 'static> ResultsJob<T> {
             shared.progress.held.store(false, Ordering::Release);
             run();
         }
+        job
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<T: 'static> ResultsJob<T> {
+    /// A job `work` does in another process, the browser's store worker: it is pending, with no
+    /// work stated, until the worker answers. A cancel drops the answer when it comes.
+    pub fn awaiting(work: impl std::future::Future<Output = Result<T, String>> + 'static) -> Self {
+        let shared = Arc::new(Shared {
+            progress: Arc::new(Progress::default()),
+            outcome: Mutex::new(None),
+            finished: AtomicBool::new(false),
+            taken: AtomicBool::new(false),
+        });
+        let job = Self {
+            shared: Arc::clone(&shared),
+        };
+        wasm_bindgen_futures::spawn_local(async move {
+            let answer = work.await;
+            let cancelled = shared.progress.cancel.load(Ordering::Acquire);
+            let outcome = match answer {
+                _ if cancelled => JobOutcome::Cancelled,
+                Ok(value) => JobOutcome::Done(value),
+                Err(reason) => JobOutcome::Failed(reason),
+            };
+            *lock(&shared.outcome) = Some(outcome);
+            shared.finished.store(true, Ordering::Release);
+        });
         job
     }
 }

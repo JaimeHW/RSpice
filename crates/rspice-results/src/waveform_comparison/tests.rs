@@ -49,6 +49,37 @@ fn compare(
     )
 }
 
+/// A process that holds a run's waveforms but not its analysis, as the browser's store worker
+/// does, compares them as the analysis would, and its outcome crosses back to the page whole.
+#[test]
+fn runs_compared_from_their_waveforms_answer_as_their_analyses_do() {
+    let candidate = source(1, 17, vec![0.0, 1.0, 2.0, 3.0], vec![0.0, 1.0, 5.0, 3.0]);
+    let baseline = source(2, 29, vec![0.0, 1.0, 2.0, 3.0], vec![0.0, 1.0, 2.0, 3.0]);
+    let signals = vec!["V(out)".to_owned()];
+    let options = || options(ComparisonAlignmentDraft::AbsoluteXAxis);
+    let whole = compare(&candidate, &baseline, &["V(out)"], options()).unwrap();
+    fn run(run: &SimulationRun) -> ComparedRun<'_, RetainedWaveform> {
+        ComparedRun {
+            binding: side(run).binding,
+            coordinate_unit: run.analyses[0].waveform_coordinate_unit(),
+            waveforms: &run.analyses[0].waveforms,
+        }
+    }
+    let waveforms = compare_runs(
+        run(&candidate),
+        run(&baseline),
+        &signals,
+        options(),
+        &mut |_, _| true,
+    )
+    .unwrap();
+    assert_eq!(waveforms, whole);
+    assert!(!whole.places.is_empty(), "the runs part at x = 2");
+    let crossed: ComparisonOutcome =
+        serde_json::from_str(&serde_json::to_string(&whole).unwrap()).unwrap();
+    assert_eq!(crossed, whole);
+}
+
 #[test]
 fn comparison_records_threshold_and_cross_correlation_alignment_parameters() {
     let threshold_candidate = source(1, 17, vec![0.0, 1.0, 2.0], vec![-1.0, 1.0, 3.0]);

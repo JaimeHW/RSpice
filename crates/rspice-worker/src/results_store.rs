@@ -17,15 +17,16 @@ use std::sync::Arc;
 use js_sys::{Array, Float64Array, Reflect, Uint8Array};
 use rspice_results::store_reader::{Segment, SegmentBytes, SegmentColumn, StoreReader};
 use rspice_results::waveform::{
-    ColumnTile, Read, ReadValue, StoredWindow, WaveformValues, WindowLead,
+    ColumnTile, Read, ReadValue, RetainedWaveform, StoredWindow, WaveformValues, WindowLead,
 };
 use rspice_results_store::{
     Digest, FreeSpace, Manifest, Member, OpfsIo, OpfsStoreDir, RunStatus, SegmentIo, SegmentReader,
     SegmentState, SegmentWriter, StopReason, StoreError, WatchedIo,
 };
 use rspice_simulation_contract::worker_transport::{
-    KeptSegmentRecord, ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding, WorkerF64,
-    WorkerLead, WorkerRead, WorkerReadValue, WorkerResultsSchema, WorkerWindow,
+    KeptSegmentRecord, ResultsStoreRequest, ResultsStoreResponse, ResultsStoreStanding,
+    WorkerColumn, WorkerComparedRun, WorkerComparison, WorkerF64, WorkerLead, WorkerRead,
+    WorkerReadValue, WorkerResultsSchema, WorkerWindow,
 };
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -199,6 +200,9 @@ async fn answer(
             values,
             read,
         } => return series(held(store)?, &digest, x, values, read).await,
+        ResultsStoreRequest::Compare { comparison } => {
+            compare(held(store)?, *comparison, buffers).await?
+        }
     };
     Ok((response, none()))
 }
@@ -712,6 +716,91 @@ async fn series(
     };
     let (value, buffers) = crossing(value);
     Ok((ResultsStoreResponse::Series { value }, buffers))
+}
+
+/// Compare two runs on the samples this store keeps, and on those the page sent beside the
+/// request: the comparison reads every sample of the signals it compares here, so the page holds
+/// none of them. The comparison's own refusal is its answer, not a failure of the worker.
+async fn compare(
+    store: &mut Store,
+    comparison: WorkerComparison,
+    buffers: &Array,
+) -> Result<ResultsStoreResponse, String> {
+    use rspice_results::waveform_comparison::{ComparedRun, ComparisonOptions, compare_runs};
+    let candidate = compared_waveforms(store, &comparison.candidate, buffers).await;
+    let baseline = compared_waveforms(store, &comparison.baseline, buffers).await;
+    let (candidate, baseline) = match (candidate, baseline) {
+        (Ok(candidate), Ok(baseline)) => (candidate, baseline),
+        (Err(reason), _) | (_, Err(reason)) => {
+            return Ok(ResultsStoreResponse::Uncompared { reason });
+        }
+    };
+    fn run<'a>(
+        run: &'a WorkerComparedRun,
+        waveforms: &'a [RetainedWaveform],
+    ) -> ComparedRun<'a, RetainedWaveform> {
+        ComparedRun {
+            binding: run.binding,
+            coordinate_unit: run.coordinate_unit.as_deref(),
+            waveforms,
+        }
+    }
+    let compared = compare_runs(
+        run(&comparison.candidate, &candidate[..]),
+        run(&comparison.baseline, &baseline[..]),
+        &comparison.signals,
+        ComparisonOptions {
+            alignment: comparison.alignment,
+            alignment_signal: &comparison.alignment_signal,
+            threshold: comparison.threshold.get(),
+            maximum_lag_samples: comparison.maximum_lag_samples,
+            absolute_tolerance: comparison.absolute_tolerance.get(),
+            relative_tolerance: comparison.relative_tolerance.get(),
+        },
+        &mut |_, _| true,
+    );
+    Ok(match compared {
+        Ok(outcome) => ResultsStoreResponse::Compared {
+            outcome: Box::new(outcome),
+        },
+        Err(reason) => ResultsStoreResponse::Uncompared { reason },
+    })
+}
+
+/// The waveforms of `run`, their columns read from this store's segments or from `buffers`.
+async fn compared_waveforms(
+    store: &mut Store,
+    run: &WorkerComparedRun,
+    buffers: &Array,
+) -> Result<Vec<RetainedWaveform>, String> {
+    let mut waveforms = Vec::with_capacity(run.waveforms.len());
+    for waveform in &run.waveforms {
+        let x = compared_column(store, &waveform.x, buffers).await?;
+        let y = compared_column(store, &waveform.y, buffers).await?;
+        waveforms.push(RetainedWaveform {
+            name: waveform.name.clone(),
+            x,
+            y,
+            unit: waveform.unit.clone(),
+            complex: None,
+        });
+    }
+    Ok(waveforms)
+}
+
+async fn compared_column(
+    store: &mut Store,
+    column: &WorkerColumn,
+    buffers: &Array,
+) -> Result<WaveformValues, String> {
+    match column {
+        WorkerColumn::Stored { segment, window } => {
+            let digest = digest_of(segment)?;
+            let (_, segment) = opened_segment(store, &digest).await?;
+            window_of(segment, *window)
+        }
+        WorkerColumn::Held { buffer } => Ok(WaveformValues::from(f64_buffer(buffers, *buffer)?)),
+    }
 }
 
 async fn keep(store: &mut Store, digests: &[String]) -> Result<ResultsStoreResponse, String> {

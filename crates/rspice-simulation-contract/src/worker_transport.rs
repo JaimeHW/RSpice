@@ -152,6 +152,57 @@ pub enum ResultsStoreRequest {
         values: WorkerWindow,
         read: WorkerRead,
     },
+    /// Compare two runs on the samples the store keeps, so the page never reads them: a column
+    /// the page holds itself crosses in the buffer [`WorkerColumn::Held`] names.
+    Compare { comparison: Box<WorkerComparison> },
+}
+
+/// A comparison of two runs' signals, as the store worker runs it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerComparison {
+    pub candidate: WorkerComparedRun,
+    pub baseline: WorkerComparedRun,
+    pub signals: Vec<String>,
+    pub alignment: rspice_results::waveform_comparison::ComparisonAlignmentDraft,
+    pub alignment_signal: String,
+    pub threshold: WorkerF64,
+    pub maximum_lag_samples: u32,
+    pub absolute_tolerance: WorkerF64,
+    pub relative_tolerance: WorkerF64,
+}
+
+/// One run of a comparison: the dataset it is, the unit of its X axis, and the waveforms the
+/// comparison reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerComparedRun {
+    pub binding: rspice_vocabulary::product::DatasetBinding,
+    pub coordinate_unit: Option<String>,
+    pub waveforms: Vec<WorkerComparedWaveform>,
+}
+
+/// A waveform of a compared run: its name, its unit, and where its columns are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerComparedWaveform {
+    pub name: String,
+    pub unit: Option<String>,
+    pub x: WorkerColumn,
+    pub y: WorkerColumn,
+}
+
+/// Where a compared column's samples are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum WorkerColumn {
+    /// A window of the kept segment `segment`.
+    Stored {
+        segment: String,
+        window: WorkerWindow,
+    },
+    /// Samples the page holds, which cross in the request's buffer `buffer`.
+    Held { buffer: u32 },
 }
 
 /// A float as its bits, so every value, NaN and the infinities among them, crosses exactly.
@@ -279,6 +330,14 @@ pub enum ResultsStoreResponse {
     },
     Series {
         value: WorkerReadValue,
+    },
+    /// What a comparison found.
+    Compared {
+        outcome: Box<rspice_results::waveform_comparison::ComparisonOutcome>,
+    },
+    /// Why the runs could not be compared, in the comparison's words.
+    Uncompared {
+        reason: String,
     },
     Failed {
         reason: String,
@@ -518,6 +577,60 @@ mod tests {
                 pixels: 800
             }
         );
+    }
+
+    #[test]
+    fn a_comparison_crosses_to_the_store_worker_with_its_columns_and_tolerances_exact() {
+        use rspice_vocabulary::product::{ContentDigest, DatasetBinding, DatasetId};
+        let run = |column: WorkerColumn| WorkerComparedRun {
+            binding: DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([3; 32])),
+            coordinate_unit: Some("s".to_owned()),
+            waveforms: vec![WorkerComparedWaveform {
+                name: "V(out)".to_owned(),
+                unit: Some("V".to_owned()),
+                x: column.clone(),
+                y: column,
+            }],
+        };
+        let request = ResultsStoreRequest::Compare {
+            comparison: Box::new(WorkerComparison {
+                candidate: run(WorkerColumn::Stored {
+                    segment: "ab".repeat(32),
+                    window: WorkerWindow {
+                        column: 1,
+                        first: 2,
+                        rows: 3,
+                        lead: WorkerLead::None,
+                    },
+                }),
+                baseline: run(WorkerColumn::Held { buffer: 0 }),
+                signals: vec!["V(out)".to_owned()],
+                alignment:
+                    rspice_results::waveform_comparison::ComparisonAlignmentDraft::AbsoluteXAxis,
+                alignment_signal: "V(out)".to_owned(),
+                threshold: 0.1_f64.into(),
+                maximum_lag_samples: 4,
+                absolute_tolerance: 1e-300_f64.into(),
+                relative_tolerance: f64::MIN_POSITIVE.into(),
+            }),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ResultsStoreRequest>(&json).unwrap(),
+            request
+        );
+        for response in [
+            ResultsStoreResponse::Full,
+            ResultsStoreResponse::Uncompared {
+                reason: "The baseline holds no signal named V(out).".to_owned(),
+            },
+        ] {
+            let json = serde_json::to_string(&response).unwrap();
+            assert_eq!(
+                serde_json::from_str::<ResultsStoreResponse>(&json).unwrap(),
+                response
+            );
+        }
     }
 
     #[test]

@@ -177,6 +177,8 @@ ALLOWED: dict[str, set[str]] = {
     "rspice-worker": {
         "rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy",
         "rspice-simulation-contract",
+        # It reads kept runs and compares them with the results reader and engine.
+        "rspice-results",
     },
 }
 HEADLESS = set(ALLOWED) - {

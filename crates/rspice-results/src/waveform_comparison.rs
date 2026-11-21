@@ -26,7 +26,7 @@ use rspice_vocabulary::product::DatasetBinding;
 
 /// How the baseline and candidate series are brought onto one X axis before
 /// they are compared.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ComparisonAlignmentDraft {
     #[default]
     FirstThresholdCrossing,
@@ -93,6 +93,34 @@ impl<W> Clone for ComparisonSide<'_, W> {
 
 impl<W> Copy for ComparisonSide<'_, W> {}
 
+/// One run of a comparison as the comparison reads it: the dataset it is, the unit of its X
+/// axis, and its waveforms. A process that holds the samples but not the analysis, such as the
+/// browser's store worker, compares runs in this form.
+#[derive(Debug)]
+pub struct ComparedRun<'a, W> {
+    pub binding: DatasetBinding,
+    pub coordinate_unit: Option<&'a str>,
+    pub waveforms: &'a [W],
+}
+
+impl<W> Clone for ComparedRun<'_, W> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<W> Copy for ComparedRun<'_, W> {}
+
+impl<'a, W> From<ComparisonSide<'a, W>> for ComparedRun<'a, W> {
+    fn from(side: ComparisonSide<'a, W>) -> Self {
+        Self {
+            binding: side.binding,
+            coordinate_unit: side.analysis.waveform_coordinate_unit(),
+            waveforms: &side.analysis.waveforms,
+        }
+    }
+}
+
 fn validate_strict_axis(name: &str, axis: &[f64]) -> Result<(), String> {
     if axis.is_empty() {
         return Err(format!("{name} has no X axis samples."));
@@ -119,12 +147,11 @@ fn exact_axis(left: &[f64], right: &[f64]) -> bool {
 }
 
 fn unique_waveform<'a, W: AsRef<RetainedWaveform>>(
-    analysis: &'a AnalysisResult<W>,
+    waveforms: &'a [W],
     signal_name: &str,
     run: &str,
 ) -> Result<&'a RetainedWaveform, String> {
-    let mut matching = analysis
-        .waveforms
+    let mut matching = waveforms
         .iter()
         .map(AsRef::as_ref)
         .filter(|waveform| waveform.name == signal_name);
@@ -173,14 +200,7 @@ fn unit_phrase(unit: Option<&str>) -> &str {
     unit.unwrap_or("no stated unit")
 }
 
-fn require_same_x_unit<W: AsRef<RetainedWaveform>>(
-    candidate: &AnalysisResult<W>,
-    baseline: &AnalysisResult<W>,
-) -> Result<(), String> {
-    let (here, there) = (
-        candidate.waveform_coordinate_unit(),
-        baseline.waveform_coordinate_unit(),
-    );
+fn require_same_x_unit(here: Option<&str>, there: Option<&str>) -> Result<(), String> {
     if here != there {
         return Err(format!(
             "The runs sweep different quantities: the X axis is in {} here and in {} in the baseline.",
@@ -200,7 +220,10 @@ pub fn comparison_signal_names<W: AsRef<RetainedWaveform>>(
     candidate: &AnalysisResult<W>,
     baseline: &AnalysisResult<W>,
 ) -> Result<Vec<String>, String> {
-    require_same_x_unit(candidate, baseline)?;
+    require_same_x_unit(
+        candidate.waveform_coordinate_unit(),
+        baseline.waveform_coordinate_unit(),
+    )?;
     let reference = candidate
         .waveforms
         .first()
@@ -618,7 +641,7 @@ pub struct ComparisonOptions<'a> {
 /// One place a compared signal parts from its baseline by more than the
 /// tolerance: a stretch of consecutive compared rows, on the candidate's own
 /// X axis.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ComparisonPlace {
     /// The signal, by its place in [`ComparisonOutcome::signals`].
     pub signal: usize,
@@ -633,7 +656,7 @@ pub struct ComparisonPlace {
 
 /// What a comparison found: its receipt, the signals it compared with their
 /// units, and every place they part from the baseline.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ComparisonOutcome {
     pub receipt: ComparisonReceipt,
     /// The compared signals; the receipt keys each by its place here.
@@ -653,8 +676,8 @@ struct ComparedSignal<'a> {
 }
 
 fn compared_signal<'a, W: AsRef<RetainedWaveform>>(
-    candidate: &'a AnalysisResult<W>,
-    baseline: &'a AnalysisResult<W>,
+    candidate: &'a [W],
+    baseline: &'a [W],
     name: &str,
 ) -> Result<ComparedSignal<'a>, String> {
     let signal = ComparedSignal {
@@ -889,25 +912,42 @@ pub fn execute_comparison<W: AsRef<RetainedWaveform>>(
     options: ComparisonOptions<'_>,
     progress: &mut dyn FnMut(usize, usize) -> bool,
 ) -> Result<ComparisonOutcome, String> {
+    compare_runs(
+        candidate.into(),
+        baseline.into(),
+        signals,
+        options,
+        progress,
+    )
+}
+
+/// [`execute_comparison`] of two runs in the form [`ComparedRun`] states them.
+pub fn compare_runs<W: AsRef<RetainedWaveform>>(
+    candidate: ComparedRun<'_, W>,
+    baseline: ComparedRun<'_, W>,
+    signals: &[String],
+    options: ComparisonOptions<'_>,
+    progress: &mut dyn FnMut(usize, usize) -> bool,
+) -> Result<ComparisonOutcome, String> {
     if signals.is_empty() {
         return Err("Choose at least one signal to compare.".to_owned());
     }
     if candidate.binding.dataset_id == baseline.binding.dataset_id {
         return Err("A run cannot be compared with itself; choose another baseline.".to_owned());
     }
-    require_same_x_unit(candidate.analysis, baseline.analysis)?;
+    require_same_x_unit(candidate.coordinate_unit, baseline.coordinate_unit)?;
     let tolerance = NumericTolerance::new(options.absolute_tolerance, options.relative_tolerance)
         .map_err(|_| "Tolerances must be finite and not negative.".to_owned())?;
     let compared = signals
         .iter()
-        .map(|name| compared_signal(candidate.analysis, baseline.analysis, name))
+        .map(|name| compared_signal(candidate.waveforms, baseline.waveforms, name))
         .collect::<Result<Vec<_>, _>>()?;
     let aligning = options.alignment != ComparisonAlignmentDraft::AbsoluteXAxis;
     let alignment_signal = aligning
         .then(|| {
             compared_signal(
-                candidate.analysis,
-                baseline.analysis,
+                candidate.waveforms,
+                baseline.waveforms,
                 options.alignment_signal,
             )
         })
@@ -1012,10 +1052,7 @@ pub fn execute_comparison<W: AsRef<RetainedWaveform>>(
             .iter()
             .map(|signal| signal.candidate.unit.clone())
             .collect(),
-        coordinate_unit: candidate
-            .analysis
-            .waveform_coordinate_unit()
-            .map(str::to_owned),
+        coordinate_unit: candidate.coordinate_unit.map(str::to_owned),
         places,
     })
 }
