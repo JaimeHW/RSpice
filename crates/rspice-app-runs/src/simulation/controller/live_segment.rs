@@ -54,6 +54,10 @@ impl LiveSegmentFollower {
                     }
                 }
                 Ok(Ok(None)) => {}
+                // The run names its segment before it writes the segment's header, so until
+                // rows were found the segment is opened again when due. A segment that was
+                // read before and cannot be read now has failed.
+                Ok(Err(_)) if self.rows.is_none() => {}
                 Ok(Err(error)) => {
                     self.failure = Some(error);
                     self.stopped = true;
@@ -91,5 +95,42 @@ impl LiveSegmentFollower {
     /// Stop following: an opening in flight finishes on its own and is dropped.
     pub(super) fn clear(&mut self) {
         *self = Self::default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A segment the run has named but not begun writing holds no header yet: opening it is
+    /// not a failure, and it is opened again when due.
+    #[test]
+    fn a_segment_not_yet_begun_is_opened_again_rather_than_given_up() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-live-rows-not-begun-{}.seg",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"").expect("an empty segment file is written");
+        let mut follower = LiveSegmentFollower::default();
+        follower.poll(Some(path.clone()));
+        while follower
+            .opening
+            .as_ref()
+            .is_some_and(|opening| !opening.is_finished())
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        follower.poll(Some(path.clone()));
+        let failure = follower.take_failure();
+        let stopped = follower.stopped;
+        std::thread::sleep(REOPEN_EVERY);
+        follower.poll(Some(path.clone()));
+        let opened_again = follower.opening.is_some();
+        follower.clear();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(failure, None);
+        assert!(!stopped);
+        assert!(opened_again, "the segment is opened again when due");
     }
 }
