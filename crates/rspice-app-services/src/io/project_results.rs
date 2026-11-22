@@ -35,9 +35,14 @@ pub fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationR
 /// A finished analysis is kept in the store as it is retained; one the store could not take
 /// then is written to it now, into the record and not the history, so the file still holds no
 /// samples. An analysis still running keeps only its record: its samples are a preview the
-/// finished result replaces.
+/// finished result replaces, whether it holds them in memory or reads them from the run's
+/// segment as it grows.
 pub fn capture_run(run: &SimulationRun) -> ProjectSimulationRun {
-    if !run.holds_samples_in_memory() {
+    // A preview drawn from the segment holds nothing in memory, and recording each of its
+    // columns is what froze the window, half a minute at a time, while a million-device run
+    // drew its preview: the record is taken again whenever the preview grows.
+    let previews = run.analyses.iter().any(|analysis| analysis.is_live_partial());
+    if !previews && !run.holds_samples_in_memory() {
         return ProjectSimulationRun::from(run);
     }
     let mut kept = run.clone();

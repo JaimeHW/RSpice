@@ -161,6 +161,33 @@ fn a_project_of_twenty_large_runs_saves_under_a_mebibyte_and_reopens_every_run()
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A running run's preview is a preview: its record names none of its columns, whether the
+/// preview holds its samples in memory or reads them from the run's segment, as a long run's does.
+#[test]
+fn a_running_runs_record_names_none_of_its_preview_columns_however_it_holds_them() {
+    let waveforms = (0..3)
+        .map(|k| {
+            RetainedTrace::new(
+                format!("I(R{k})"),
+                vec![0.0, 1.0e-9],
+                vec![1.0e-3, 2.0e-3],
+                "#ffffff",
+            )
+        })
+        .collect();
+    let mut run = SimulationRun::new(1);
+    run.keep_analysis(
+        AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "Transient")
+            .with_waveforms(waveforms),
+    );
+    run.store_samples().expect("the preview's columns are kept in a segment");
+    assert!(!run.holds_samples_in_memory());
+
+    let record = crate::io::capture_run(&run);
+    let written = serde_json::to_string(&record).expect("the record is written");
+    assert!(!written.contains("I(R1)"), "{written}");
+}
+
 #[test]
 fn a_saved_file_refuses_samples_held_in_memory_and_other_writers_keep_them() {
     let state = super::waveform_storage::complex_history();
