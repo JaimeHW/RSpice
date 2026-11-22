@@ -1054,6 +1054,7 @@ enum ProbeSignalOutcome {
     GroundReference,
     SavedOutputCreated { plan_name: String },
     SavedOutputAlreadyPresent { plan_name: String },
+    NotInLastRun,
     Rejected { reason: String },
 }
 
@@ -1274,6 +1275,29 @@ fn request_probe_signal(
     }
 }
 
+/// A read-only view writes neither its drawing nor the plan, so a probe there
+/// plots what the last run holds and asks the next run for nothing.
+fn request_retained_probe_signal(
+    state: &mut CanvasParts<'_>,
+    spelling: &OccurrenceProbeSpelling,
+) -> ProbeSignalOutcome {
+    let engine = spelling.engine();
+    if is_ground_voltage_expression(engine) {
+        return ProbeSignalOutcome::GroundReference;
+    }
+    match toggle_materialized_waveform(state, engine) {
+        Some(visible) => {
+            select_materialized_probe_trace(state, engine);
+            if visible {
+                ProbeSignalOutcome::WaveformShown
+            } else {
+                ProbeSignalOutcome::WaveformHidden
+            }
+        }
+        None => ProbeSignalOutcome::NotInLastRun,
+    }
+}
+
 fn request_probe_signal_visible(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
@@ -1338,11 +1362,12 @@ fn commit_element_current(
     state: &mut CanvasParts<'_>,
     drawn: &str,
     engine: &str,
+    request: ProbeRequest,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
     let occurrence = state.model.workspace.content.occurrence_path();
     match OccurrenceProbeSpelling::for_element(&occurrence, 'I', drawn, engine) {
         Some(spelling) => {
-            let outcome = request_probe_signal(state, &spelling);
+            let outcome = request(state, &spelling);
             (spelling, outcome)
         }
         None => (
@@ -1363,7 +1388,7 @@ fn commit_probe_request(
     state: &mut CanvasParts<'_>,
     name: &str,
     display: &str,
-    request: fn(&mut CanvasParts<'_>, &OccurrenceProbeSpelling) -> ProbeSignalOutcome,
+    request: ProbeRequest,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
     match probe_spelling_for(state, name, display) {
         Ok(spelling) => {
@@ -1463,6 +1488,9 @@ fn report_probe_outcome(state: &mut CanvasParts<'_>, display: &str, outcome: Pro
         ),
         ProbeSignalOutcome::SavedOutputAlreadyPresent { plan_name } => format!(
             "{display} is already a saved output of {plan_name}; it is plotted after the next run."
+        ),
+        ProbeSignalOutcome::NotInLastRun => format!(
+            "{display} is not in the last run, and a read-only view cannot add it to the plan."
         ),
         ProbeSignalOutcome::Rejected { reason } => format!("{display} not saved: {reason}."),
     });
@@ -1912,14 +1940,14 @@ fn probe_subject(
     subject: Option<ProbeSubject>,
     symbol_context: &SchematicSymbolContext,
 ) {
-    if let Err(reason) = probe_edit_identity_is_current(state) {
-        if state.schematic_edit_read_only() {
-            state.deny_read_only_edit();
-        } else {
-            state.prompt(format!("Probe not placed: {reason}"));
-        }
+    // A read-only view writes neither its drawing nor the plan: a probe there
+    // plots what the last run holds and keeps no marker.
+    let read_only = state.schematic_edit_read_only();
+    if !read_only && let Err(reason) = probe_edit_identity_is_current(state) {
+        state.prompt(format!("Probe not placed: {reason}"));
         return;
     }
+    let request = probe_request(read_only);
 
     if let Some(ProbeSubject::Wire(wire_id)) = subject {
         if let Some(net_name) = live_wire_probe_net_name(state, wire_id)
@@ -1928,19 +1956,8 @@ fn probe_subject(
             log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
             let display = format!("V({net_name})");
-            let (spelling, outcome) =
-                commit_probe_request(state, &net_name, &display, request_probe_signal);
-            let retain_marker = !matches!(
-                &outcome,
-                ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
-            );
-            report_probe_outcome(state, spelling.display(), outcome);
-            let binding = current_probe_output_binding(state, spelling.engine());
-            if retain_marker
-                && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&spelling), binding)
-            {
-                state.prompt(format!("Probe marker not kept: {reason}"));
-            }
+            let (spelling, outcome) = commit_probe_request(state, &net_name, &display, request);
+            finish_probe(state, grid_pos, &spelling, outcome, read_only);
             if net_name != "0"
                 && state
                     .model
@@ -1967,7 +1984,41 @@ fn probe_subject(
             }
             return;
         };
-        handle_component_probe(state, comp_id, grid_pos, symbol_context);
+        handle_component_probe(state, comp_id, grid_pos, symbol_context, read_only);
+    }
+}
+
+type ProbeRequest = fn(&mut CanvasParts<'_>, &OccurrenceProbeSpelling) -> ProbeSignalOutcome;
+
+/// How a probe asks for its signal: an editable view saves it for the next
+/// run as well; a read-only view only plots what the last run holds.
+fn probe_request(read_only: bool) -> ProbeRequest {
+    if read_only {
+        request_retained_probe_signal
+    } else {
+        request_probe_signal
+    }
+}
+
+/// Report what a probe got and, on an editable view, keep its marker.
+fn finish_probe(
+    state: &mut CanvasParts<'_>,
+    grid_pos: Point,
+    spelling: &OccurrenceProbeSpelling,
+    outcome: ProbeSignalOutcome,
+    read_only: bool,
+) {
+    let retain_marker = !read_only
+        && !matches!(
+            &outcome,
+            ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
+        );
+    report_probe_outcome(state, spelling.display(), outcome);
+    if retain_marker {
+        let binding = current_probe_output_binding(state, spelling.engine());
+        if let Err(reason) = retain_probe_flag(state, grid_pos, Some(spelling), binding) {
+            state.prompt(format!("Probe marker not kept: {reason}"));
+        }
     }
 }
 
@@ -1976,6 +2027,7 @@ fn handle_component_probe(
     comp_id: u64,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
+    read_only: bool,
 ) {
     if let Some(component) = state
         .model
@@ -2000,26 +2052,17 @@ fn handle_component_probe(
             return;
         };
 
+        let request = probe_request(read_only);
         let (spelling, outcome) = match probe {
             ComponentProbe::Voltage(net) => {
                 let display = format!("V({net})");
-                commit_probe_request(state, &net, &display, request_probe_signal)
+                commit_probe_request(state, &net, &display, request)
             }
             ComponentProbe::Current { drawn, engine } => {
-                commit_element_current(state, &drawn, &engine)
+                commit_element_current(state, &drawn, &engine, request)
             }
         };
-        let retain_marker = !matches!(
-            &outcome,
-            ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
-        );
-        report_probe_outcome(state, spelling.display(), outcome);
-        let binding = current_probe_output_binding(state, spelling.engine());
-        if retain_marker
-            && let Err(reason) = retain_probe_flag(state, grid_pos, Some(&spelling), binding)
-        {
-            state.prompt(format!("Probe marker not kept: {reason}"));
-        }
+        finish_probe(state, grid_pos, &spelling, outcome, read_only);
     }
 }
 

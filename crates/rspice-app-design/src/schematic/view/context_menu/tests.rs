@@ -577,8 +577,9 @@ fn actions_are_truthfully_disabled_without_a_compatible_selection() {
         .selection
         .select_component(999);
     assert!(!action_availability(ContextAction::Copy, &state).0);
+    // A probe plots what a run holds, so a read-only view still offers it.
     state.model.schematic.session.read_only = true;
-    assert!(!action_availability(ContextAction::Probe, &state).0);
+    assert!(action_availability(ContextAction::Probe, &state).0);
 
     let mut junction_state = DesignTestHost::default();
     let point = Point::new(4, 4);

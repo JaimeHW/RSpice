@@ -434,3 +434,54 @@ fn the_probe_row_on_a_wire_probes_it_with_no_second_click() {
     assert_eq!(state.model.schematic.session.editor.tool, Tool::Probe);
     assert_eq!(state.model.schematic.document().probes.len(), 1);
 }
+
+/// A read-only view (a block descended read-only, a shipped library, safe
+/// mode) still probes: the Probe tool's click is a probe rather than a
+/// refused edit, it plots what the last run holds, and it writes neither a
+/// marker into the drawing nor an output into the plan.
+#[test]
+fn a_read_only_view_probes_without_a_marker_or_a_plan_output() {
+    let click = Point::new(40, 20);
+    let mut state = wire_menu_host(click);
+    state.model.schematic.session.read_only = true;
+    state
+        .model
+        .simulation
+        .view
+        .waveforms
+        .push(RetainedTrace::new(
+            "V(OUT)",
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            "#ffffff",
+        ));
+    state.model.simulation.view.waveforms[0].visible = false;
+    let payloads_before = state
+        .model
+        .workspace
+        .content
+        .simulation_plan_payloads
+        .clone();
+    let symbol_context = schematic_symbol_context(&state);
+    let viewport = pointer_viewport();
+
+    let action = tool_pointer_view(&canvas_parts(&mut state)).action(
+        Tool::Probe,
+        &viewport,
+        &symbol_context,
+        viewport.schematic_to_screen(click),
+    );
+    let Some(ToolPointerAction::Probe(position)) = action else {
+        panic!("a probe click on a read-only view is a probe, not a refused edit: {action:?}");
+    };
+    handle_probe_click(&mut canvas_parts(&mut state), position, &symbol_context);
+
+    assert!(state.model.simulation.view.waveforms[0].visible);
+    assert_eq!(state.prompt_text(), Some("V(OUT) added to the plot."));
+    assert!(state.model.schematic.document().probes.is_empty());
+    assert!(!state.model.schematic.can_undo());
+    assert_eq!(
+        state.model.workspace.content.simulation_plan_payloads,
+        payloads_before
+    );
+}

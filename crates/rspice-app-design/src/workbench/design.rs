@@ -572,7 +572,12 @@ impl CommandSet for DesignCommand {
                 }
             }
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
-            _ if self.places() && reads.model.schematic_edit_read_only() => {
+            // A probe plots what a run holds and writes nothing, so it works on
+            // a view that refuses edits.
+            _ if self.places()
+                && self != Self::PlaceProbe
+                && reads.model.schematic_edit_read_only() =>
+            {
                 Some("the active schematic is read-only")
             }
             Self::PlaceInstance

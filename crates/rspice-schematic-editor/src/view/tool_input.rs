@@ -144,7 +144,6 @@ impl ToolPointerView<'_> {
             | Tool::DocumentationShape
             | Tool::Label
             | Tool::OffSheetConnector
-            | Tool::Probe
                 if !self.can_edit =>
             {
                 ToolPointerAction::ReadOnly

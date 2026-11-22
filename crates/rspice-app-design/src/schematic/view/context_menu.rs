@@ -1520,10 +1520,8 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
                 blocked.unwrap_or("Select one instance the generated netlist states"),
             )
         }
-        ContextAction::Probe => (
-            writable,
-            "The active schematic view is read-only; reopen it in an editable context to place a probe",
-        ),
+        // A probe plots what a run holds, so a read-only view offers it too.
+        ContextAction::Probe => (true, ""),
         ContextAction::SnapToStandardValue => {
             let blocked = super::standard_value_snap::snap_block_reason(state.model);
             (blocked.is_none(), blocked.unwrap_or_default())
