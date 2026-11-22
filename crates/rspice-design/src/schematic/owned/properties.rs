@@ -3,7 +3,7 @@ use super::super::{
     design_note::{DesignNote, DesignNoteKind, DesignReviewState, SymbolTextAlign},
     document_policy::{NetNamingPolicy, SchematicGridPitch},
     documentation_shape::{DocumentationShape, DocumentationShapeGeometry, SymbolStyle},
-    net_label::NetLabel,
+    net_label::{NetLabel, NetLabelKind, NetLabelSide},
 };
 use super::Schematic;
 use rspice_design_model::Point;
@@ -17,6 +17,11 @@ enum PropertyChange {
     LabelName {
         id: u64,
         name: String,
+    },
+    LabelKind {
+        id: u64,
+        kind: NetLabelKind,
+        side: NetLabelSide,
     },
     Note(DesignNote),
     Shape(DocumentationShape),
@@ -55,6 +60,20 @@ impl PreparedPropertyEdit<'_> {
                     .find(|label| label.id == id)
                 {
                     label.name = name;
+                    design.invalidate_topology();
+                }
+            }
+            PropertyChange::LabelKind { id, kind, side } => {
+                if let Some(label) = design
+                    .document
+                    .net_labels
+                    .iter_mut()
+                    .find(|label| label.id == id)
+                {
+                    label.kind = kind;
+                    label.side = side;
+                    // A supply's name is global, and an off-sheet connector
+                    // asks the checks for a partner.
                     design.invalidate_topology();
                 }
             }
@@ -181,6 +200,38 @@ impl Schematic {
             design: self,
             change: PropertyChange::Shape(candidate),
             description: "edit documentation shape properties",
+        }))
+    }
+    /// A placed label made another kind of label, or its name moved to
+    /// another side of its point.
+    pub fn prepare_net_label_kind(
+        &mut self,
+        expected: NetLabel,
+        kind: NetLabelKind,
+        side: NetLabelSide,
+    ) -> Result<Option<PreparedPropertyEdit<'_>>, String> {
+        let Some(current) = self
+            .document
+            .net_labels
+            .iter()
+            .find(|label| label.id == expected.id)
+        else {
+            return Err("The selected net label no longer exists.".to_owned());
+        };
+        if current != &expected {
+            return Err("The selected net label changed before commit.".to_owned());
+        }
+        if expected.kind == kind && expected.side == side {
+            return Ok(None);
+        }
+        Ok(Some(PreparedPropertyEdit {
+            design: self,
+            change: PropertyChange::LabelKind {
+                id: expected.id,
+                kind,
+                side,
+            },
+            description: "change net label kind",
         }))
     }
     pub fn prepare_net_label_rename(

@@ -6,6 +6,7 @@ use crate::state::{
 };
 use rspice_design::schematic::design_note::SymbolTextAlign;
 use rspice_design::schematic::documentation_shape::SymbolStyle;
+use rspice_design::schematic::net_label::{NetLabelKind, NetLabelSide};
 
 impl SchematicState {
     /// Make the changes a find and replace listed, as one undo step.
@@ -81,6 +82,26 @@ impl SchematicState {
             .design
             .prepare_documentation_shape_properties(expected, geometry, style)?
         else {
+            return Ok(false);
+        };
+        if read_only {
+            return Ok(false);
+        }
+        let committed = change.commit();
+        self.finish_document_edit(committed);
+        Ok(committed)
+    }
+
+    /// Make a placed label another kind of label, or stand its name on
+    /// another side of its point, as one undo step.
+    pub fn change_net_label_kind(
+        &mut self,
+        expected: NetLabel,
+        kind: NetLabelKind,
+        side: NetLabelSide,
+    ) -> Result<bool, String> {
+        let read_only = self.session.read_only;
+        let Some(change) = self.design.prepare_net_label_kind(expected, kind, side)? else {
             return Ok(false);
         };
         if read_only {

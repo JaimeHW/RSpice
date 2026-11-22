@@ -883,6 +883,7 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
         );
         property_row(ui, "Partners", &declaration.partners);
     }
+    super::annotation::net_label_rows(ui, cx);
 
     section_header(
         ui,
