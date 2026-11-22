@@ -157,6 +157,14 @@ rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["verilog
 # Mobile/tablet and other unqualified architectures retain portable bytecode.
 rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga"] }
 
+# The application menu winit builds on macOS: its Quit item is pointed at the
+# main window's close, so it asks about unsaved work. The versions and
+# features are winit's own, so nothing new is built.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5.2"
+objc2-app-kit = { version = "0.2.2", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = "0.2.2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

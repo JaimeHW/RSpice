@@ -39,6 +39,72 @@ fn load_window_icon() -> Option<egui::IconData> {
     })
 }
 
+/// Point the Quit item of the application menu winit builds on macOS at
+/// the main window's close.
+///
+/// That item, and ⌘Q with it, sends `terminate:`, which ends the process
+/// without the window hearing a close request, so nothing asks about unsaved
+/// work. Closing the window instead raises the close request the title-bar
+/// close raises, which asks as File > Exit does. winit builds the menu before
+/// the application is created, and the rest of it (Hide, Hide Others,
+/// Services, ⌘H) stays as macOS has it.
+#[cfg(target_os = "macos")]
+fn quit_through_the_window_close(cc: &eframe::CreationContext<'_>) {
+    use objc2::runtime::AnyObject;
+    use objc2::sel;
+    use objc2_app_kit::{NSApplication, NSView};
+    use objc2_foundation::MainThreadMarker;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return;
+    };
+    let Ok(handle) = cc.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: eframe lends the root window's live NSView, on the main thread.
+    let view: &NSView = unsafe { handle.ns_view.cast().as_ref() };
+    let Some(window) = view.window() else {
+        return;
+    };
+    // SAFETY: reads AppKit's own menu, on the main thread.
+    let Some(menu) = (unsafe { NSApplication::sharedApplication(main_thread).mainMenu() }) else {
+        return;
+    };
+    let Some(quit) = menu_item_sending(&menu, sel!(terminate:)) else {
+        return;
+    };
+    let window: &AnyObject = &window;
+    // SAFETY: AppKit's own menu item, changed on the main thread. It holds its
+    // target weakly, and the root window lives until the application ends.
+    unsafe {
+        quit.setTarget(Some(window));
+        quit.setAction(Some(sel!(performClose:)));
+    }
+}
+
+/// The item of `menu`'s submenus whose action is `action`.
+#[cfg(target_os = "macos")]
+fn menu_item_sending(
+    menu: &objc2_app_kit::NSMenu,
+    action: objc2::runtime::Sel,
+) -> Option<objc2::rc::Retained<objc2_app_kit::NSMenuItem>> {
+    // SAFETY: reads of AppKit's own menu, on the main thread, by index within
+    // each menu's item count.
+    unsafe {
+        (0..menu.numberOfItems())
+            .filter_map(|top| menu.itemAtIndex(top)?.submenu())
+            .find_map(|submenu| {
+                (0..submenu.numberOfItems())
+                    .filter_map(|index| submenu.itemAtIndex(index))
+                    .find(|item| item.action() == Some(action))
+            })
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     // Keep RSpice diagnostics visible while suppressing routine GPU backend
@@ -88,7 +154,11 @@ fn main() {
     if let Err(e) = eframe::run_native(
         "RSpice",
         options,
-        Box::new(|cc| Ok(Box::new(rspice_app::RSpiceApp::new(cc)))),
+        Box::new(|cc| {
+            #[cfg(target_os = "macos")]
+            quit_through_the_window_close(cc);
+            Ok(Box::new(rspice_app::RSpiceApp::new(cc)))
+        }),
     ) {
         log::error!("Failed to launch RSpice: {}", e);
         std::process::exit(1);
