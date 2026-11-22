@@ -17,6 +17,12 @@ const HALF: f32 = 7.0;
 
 /// Draw violation badges and the hover card for the closest hovered one.
 /// The app supplies only check results current for this design view.
+///
+/// Every finding at one place shares one badge, in the colour of the worst
+/// of them, and its hover card lists them all, worst first, as Altium lists
+/// the violations stacked on an object: badges drawn one per finding stacked
+/// into one triangle whose colour was whichever rule ran last, and the card
+/// reached only that one.
 pub fn draw_violation_markers(
     painter: &Painter,
     viewport: &Viewport,
@@ -26,30 +32,76 @@ pub fn draw_violation_markers(
 ) {
     let palette = Tokens::get(painter.ctx()).color;
     let cursor = cursor_screen_pos(view, viewport, canvas_hover);
-    let mut hovered: Option<(Pos2, &DrcViolation)> = None;
+    let mut hovered: Option<(f32, Pos2, &BadgeGroup<'_>)> = None;
 
-    for violation in violations {
-        let Some(world) = anchor(view, &violation.location) else {
-            continue;
-        };
-        let pos = viewport.schematic_to_screen(world);
+    let groups = badge_groups(view, violations);
+    for group in &groups {
+        let pos = viewport.schematic_to_screen(group.at);
         if !viewport.bounds.expand(HALF * 2.0).contains(pos) {
             continue;
         }
 
-        let color = severity_color(violation.severity, &palette);
+        let color = severity_color(group.worst(), &palette);
         draw_badge(painter, pos, color, palette.canvas_bg);
 
-        if let Some(cursor) = cursor
-            && cursor.distance(pos) <= HALF + 4.0
-        {
-            hovered = Some((pos, violation));
+        if let Some(cursor) = cursor {
+            let distance = cursor.distance(pos);
+            if distance <= HALF + 4.0 && hovered.is_none_or(|(closest, ..)| distance < closest) {
+                hovered = Some((distance, pos, group));
+            }
         }
     }
 
-    if let Some((pos, violation)) = hovered {
-        draw_hover_card(painter, viewport, pos, violation, &palette);
+    if let Some((_, pos, group)) = hovered {
+        draw_hover_card(painter, viewport, pos, &group.findings, &palette);
     }
+}
+
+/// The findings one badge stands for: every finding anchored at `at`, worst
+/// first, and in the order the check reported them within a severity.
+#[derive(Debug)]
+pub struct BadgeGroup<'a> {
+    pub at: Point,
+    pub findings: Vec<&'a DrcViolation>,
+}
+
+impl BadgeGroup<'_> {
+    /// The severity the badge is coloured by.
+    #[must_use]
+    pub fn worst(&self) -> DrcSeverity {
+        self.findings
+            .first()
+            .map_or(DrcSeverity::Info, |finding| finding.severity)
+    }
+}
+
+/// The badges `violations` draw in `view`: one per place a finding is
+/// anchored, in the order the check first reported a finding there.
+#[must_use]
+pub fn badge_groups<'a>(
+    view: &DesignView<'_>,
+    violations: &'a [DrcViolation],
+) -> Vec<BadgeGroup<'a>> {
+    let mut groups: Vec<BadgeGroup<'a>> = Vec::new();
+    for violation in violations {
+        let Some(at) = anchor(view, &violation.location) else {
+            continue;
+        };
+        match groups.iter_mut().find(|group| group.at == at) {
+            Some(group) => group.findings.push(violation),
+            None => groups.push(BadgeGroup {
+                at,
+                findings: vec![violation],
+            }),
+        }
+    }
+    for group in &mut groups {
+        // Stable, so findings of one severity keep the check's order.
+        group
+            .findings
+            .sort_by_key(|finding| std::cmp::Reverse(finding.severity));
+    }
+    groups
 }
 
 /// Ring radius of a related-object mark in screen px, clear of the badge the
@@ -281,50 +333,57 @@ fn draw_badge(painter: &Painter, center: Pos2, fill: egui::Color32, ink: egui::C
     painter.circle_filled(center + vec2(0.0, 3.4), 0.9, ink);
 }
 
-/// The hover card: severity + violation type, the message, and the
-/// suggested fix, in an elevated box clamped to the canvas.
+/// The hover card: for each finding at the badge, its severity and type, the
+/// message, and the suggested fix, in an elevated box clamped to the canvas.
 fn draw_hover_card(
     painter: &Painter,
     viewport: &Viewport,
     marker: Pos2,
-    violation: &DrcViolation,
+    findings: &[&DrcViolation],
     palette: &Palette,
 ) {
-    let title = format!(
-        "{} · {}",
-        violation.severity.display_name(),
-        violation.violation_type.description()
-    );
-    let fix = format!("Fix: {}", violation.violation_type.suggested_fix());
-
-    let title_galley = painter.layout_no_wrap(
-        title,
-        theme::mono(11.0, FontWeight::Medium),
-        severity_color(violation.severity, palette),
-    );
-    let message_galley = painter.layout_no_wrap(
-        elide_chars(&violation.message, 78),
-        theme::sans(11.0, FontWeight::Regular),
-        palette.text,
-    );
-    let fix_galley = painter.layout_no_wrap(
-        elide_chars(&fix, 78),
-        theme::sans(11.0, FontWeight::Regular),
-        palette.text_faint,
-    );
-
-    let (pad_x, pad_y, line_gap) = (9.0, 7.0, 4.0);
-    let width = title_galley
-        .size()
-        .x
-        .max(message_galley.size().x)
-        .max(fix_galley.size().x)
+    let (pad_x, pad_y, line_gap, finding_gap) = (9.0, 7.0, 4.0, 8.0);
+    let mut lines = Vec::with_capacity(findings.len() * 3);
+    for violation in findings {
+        let title = format!(
+            "{} · {}",
+            violation.severity.display_name(),
+            violation.violation_type.description()
+        );
+        let fix = format!("Fix: {}", violation.violation_type.suggested_fix());
+        lines.push((
+            painter.layout_no_wrap(
+                title,
+                theme::mono(11.0, FontWeight::Medium),
+                severity_color(violation.severity, palette),
+            ),
+            line_gap,
+        ));
+        lines.push((
+            painter.layout_no_wrap(
+                elide_chars(&violation.message, 78),
+                theme::sans(11.0, FontWeight::Regular),
+                palette.text,
+            ),
+            line_gap,
+        ));
+        lines.push((
+            painter.layout_no_wrap(
+                elide_chars(&fix, 78),
+                theme::sans(11.0, FontWeight::Regular),
+                palette.text_faint,
+            ),
+            finding_gap,
+        ));
+    }
+    let width = lines
+        .iter()
+        .map(|(galley, _)| galley.size().x)
+        .fold(0.0, f32::max)
         + pad_x * 2.0;
-    let height = title_galley.size().y
-        + message_galley.size().y
-        + fix_galley.size().y
-        + line_gap * 2.0
-        + pad_y * 2.0;
+    let gaps: f32 =
+        lines.iter().map(|(_, gap)| *gap).sum::<f32>() - lines.last().map_or(0.0, |(_, gap)| *gap);
+    let height = lines.iter().map(|(galley, _)| galley.size().y).sum::<f32>() + gaps + pad_y * 2.0;
 
     let mut origin = marker + vec2(12.0, -height - 6.0);
     let bounds = viewport.bounds;
@@ -346,10 +405,10 @@ fn draw_hover_card(
     );
 
     let mut y = origin.y + pad_y;
-    for galley in [title_galley, message_galley, fix_galley] {
+    for (galley, gap) in lines {
         let galley_height = galley.size().y;
         painter.galley(pos2(origin.x + pad_x, y), galley, palette.text);
-        y += galley_height + line_gap;
+        y += galley_height + gap;
     }
 }
 

@@ -255,3 +255,50 @@ fn a_point_on_a_later_sheet_is_anchored_where_that_sheet_draws_it() {
         Some(Point::new(40, 60))
     );
 }
+
+/// Several findings at one place share one badge, coloured by the worst of
+/// them whatever order the rules ran in, and the badge's card lists every one,
+/// worst first; a finding elsewhere has its own badge.
+#[test]
+fn findings_at_one_place_share_a_badge_coloured_by_the_worst() {
+    let finding = |id: usize, severity: DrcSeverity, x: f64| {
+        let mut violation = DrcViolation::new(
+            id,
+            DrcViolationType::UnconnectedPin,
+            format!("finding {id}"),
+            DrcLocation::Point { x, y: 20.0 },
+        );
+        violation.severity = severity;
+        violation
+    };
+    // The error is reported between two warnings, the last rule a warning.
+    let violations = [
+        finding(1, DrcSeverity::Warning, 40.0),
+        finding(2, DrcSeverity::Error, 40.0),
+        finding(3, DrcSeverity::Warning, 40.0),
+        finding(4, DrcSeverity::Info, 80.0),
+    ];
+    let document = SchematicDocument::default();
+    let view = DesignView {
+        document: &document,
+        canvas_cache: None,
+        sheet_catalog: None,
+        review_markers: Default::default(),
+    };
+
+    let groups = badge_groups(&view, &violations);
+
+    assert_eq!(groups.len(), 2, "one badge per place");
+    assert_eq!(groups[0].at, Point::new(40, 20));
+    assert_eq!(groups[0].worst(), DrcSeverity::Error);
+    assert_eq!(
+        groups[0]
+            .findings
+            .iter()
+            .map(|finding| finding.message.as_str())
+            .collect::<Vec<_>>(),
+        ["finding 2", "finding 1", "finding 3"],
+        "every finding there, worst first"
+    );
+    assert_eq!(groups[1].worst(), DrcSeverity::Info);
+}
