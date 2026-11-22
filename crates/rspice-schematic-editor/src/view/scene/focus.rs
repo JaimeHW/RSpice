@@ -1,13 +1,17 @@
 //! Selection-bound keyboard focus geometry on the active sheet.
 
 use super::super::{
-    design_notes::conservative_world_bounds as design_note_world_bounds, design_view::DesignView,
-    documentation_shapes::world_bounds as documentation_shape_bounds, drawing::probe_world_bounds,
-    net_labels::world_bounds as net_label_world_bounds, symbol_context::SchematicSymbolContext,
+    design_notes::conservative_world_bounds as design_note_world_bounds,
+    design_view::DesignView,
+    documentation_shapes::world_bounds as documentation_shape_bounds,
+    drawing::{ProbeVisualStatus, probe_drawn_bounds},
+    net_labels::world_bounds as net_label_world_bounds,
+    symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
 use crate::session::selection::SchematicKeyboardFocus;
 use egui::{Painter, Rect, Stroke};
+use rspice_design::schematic::probe::SchematicProbe;
 use rspice_design::schematic::selection::Selection;
 use rspice_design_model::Point;
 
@@ -18,6 +22,7 @@ pub fn draw_keyboard_focus(
     selection: &Selection,
     focus: Option<SchematicKeyboardFocus>,
     symbol_context: &SchematicSymbolContext,
+    probe_status: &dyn Fn(&SchematicProbe) -> ProbeVisualStatus,
 ) {
     let Some(focus) = focus else {
         return;
@@ -25,7 +30,7 @@ pub fn draw_keyboard_focus(
     if !keyboard_focus_matches_selection(view, selection, focus) {
         return;
     }
-    let Some((min, max)) = keyboard_focus_bounds(view, symbol_context, focus) else {
+    let Some((min, max)) = keyboard_focus_bounds(view, symbol_context, focus, probe_status) else {
         return;
     };
     let mut rect = Rect::from_two_pos(
@@ -91,6 +96,7 @@ fn keyboard_focus_bounds(
     view: &DesignView<'_>,
     symbol_context: &SchematicSymbolContext,
     focus: SchematicKeyboardFocus,
+    probe_status: &dyn Fn(&SchematicProbe) -> ProbeVisualStatus,
 ) -> Option<(Point, Point)> {
     let id = match focus {
         SchematicKeyboardFocus::Component(id)
@@ -148,7 +154,7 @@ fn keyboard_focus_bounds(
             .probes
             .iter()
             .find(|object| object.id == id)
-            .map(probe_world_bounds),
+            .map(|probe| probe_drawn_bounds(probe, probe_status(probe))),
         SchematicKeyboardFocus::DesignNote(id) => view
             .visible_design_notes()
             .iter()

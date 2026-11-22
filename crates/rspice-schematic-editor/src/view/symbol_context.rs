@@ -9,6 +9,7 @@ use rspice_design::{
         component::{Component, LibraryCellInstance},
         component_type::ComponentType,
         document::SchematicDocument,
+        probe::SchematicProbe,
         selection::Selection,
     },
     symbol_resolver::SymbolResolver,
@@ -194,7 +195,7 @@ impl SchematicSymbolContext {
     }
 
     pub fn content_bounds(&self, document: &SchematicDocument) -> Option<(i32, i32, i32, i32)> {
-        self.bounds_where(document, |_| true)
+        self.bounds_where(document, |_| true, SchematicProbe::world_bounds)
     }
 
     /// The world bounds of the objects `on_sheet` keeps: the open sheet's,
@@ -205,32 +206,36 @@ impl SchematicSymbolContext {
         document: &SchematicDocument,
         on_sheet: impl Fn(u64) -> bool,
     ) -> Option<(i32, i32, i32, i32)> {
-        self.bounds_where(document, |object| match object {
-            BoundedObject::Component(id)
-            | BoundedObject::Wire(id)
-            | BoundedObject::Bus(id)
-            | BoundedObject::BusTap(id)
-            | BoundedObject::NetLabel(id)
-            | BoundedObject::DesignNote(id)
-            | BoundedObject::DocumentationShape(id)
-            | BoundedObject::Probe(id) => on_sheet(id),
-            // A dot is named by where it sits; it counts when a dot of the
-            // open sheet sits there.
-            BoundedObject::Junction(pos) => document
-                .junctions
-                .iter()
-                .any(|junction| junction.pos == pos && on_sheet(junction.id)),
-        })
+        self.bounds_where(
+            document,
+            |object| match object {
+                BoundedObject::Component(id)
+                | BoundedObject::Wire(id)
+                | BoundedObject::Bus(id)
+                | BoundedObject::BusTap(id)
+                | BoundedObject::NetLabel(id)
+                | BoundedObject::DesignNote(id)
+                | BoundedObject::DocumentationShape(id)
+                | BoundedObject::Probe(id) => on_sheet(id),
+                // A dot is named by where it sits; it counts when a dot of the
+                // open sheet sits there.
+                BoundedObject::Junction(pos) => document
+                    .junctions
+                    .iter()
+                    .any(|junction| junction.pos == pos && on_sheet(junction.id)),
+            },
+            SchematicProbe::world_bounds,
+        )
     }
 
     /// The world bounds of what `selection` holds, `None` when it holds
-    /// nothing drawn.
+    /// nothing drawn. A probe counts by its marker and reference as drawn.
     pub fn selection_bounds(
         &self,
         document: &SchematicDocument,
         selection: &Selection,
     ) -> Option<(i32, i32, i32, i32)> {
-        self.bounds_where(document, |object| match object {
+        let selected = |object| match object {
             BoundedObject::Component(id) => selection.has_component(id),
             BoundedObject::Wire(id) => {
                 selection.has_wire(id)
@@ -250,13 +255,15 @@ impl SchematicSymbolContext {
             BoundedObject::DesignNote(id) => selection.has_design_note(id),
             BoundedObject::DocumentationShape(id) => selection.has_documentation_shape(id),
             BoundedObject::Probe(id) => selection.has_probe(id),
-        })
+        };
+        self.bounds_where(document, selected, SchematicProbe::layout_bounds)
     }
 
     fn bounds_where(
         &self,
         document: &SchematicDocument,
         mut keep: impl FnMut(BoundedObject) -> bool,
+        probe_bounds: fn(&SchematicProbe) -> (Point, Point),
     ) -> Option<(i32, i32, i32, i32)> {
         let mut bounds: Option<(i32, i32, i32, i32)> = None;
         let mut include = |min: Point, max: Point| {
@@ -337,7 +344,7 @@ impl SchematicSymbolContext {
 
         for probe in &document.probes {
             if keep(BoundedObject::Probe(probe.id)) {
-                let (min, max) = probe.world_bounds();
+                let (min, max) = probe_bounds(probe);
                 include(min, max);
             }
         }
@@ -421,7 +428,7 @@ impl SchematicSymbolContext {
         }
 
         for probe in &document.probes {
-            let (min, max) = probe.world_bounds();
+            let (min, max) = probe.layout_bounds();
             if window.takes_bounds(min, max) && !selection.has_probe(probe.id) {
                 selection.select_probe(probe.id);
                 count += 1;
@@ -672,6 +679,34 @@ mod tests {
             1
         );
         assert_eq!(selection.single_design_note(), Some(78));
+    }
+
+    /// A window drawn snugly around a probe's marker and label takes it:
+    /// the probe is judged by what is drawn, not by a box padded for status
+    /// text.
+    #[test]
+    fn a_snug_window_takes_a_probe_by_its_drawn_marker_and_label() {
+        let mut document = SchematicDocument::default();
+        document.probes.push(
+            rspice_design::schematic::probe::SchematicProbe::new(
+                5,
+                Point::new(100, 100),
+                "V(out)",
+                Some("V(out)".to_owned()),
+            )
+            .expect("probe"),
+        );
+        let mut selection = Selection::default();
+
+        let selected = SchematicSymbolContext::default().select_in_rect(
+            &document,
+            &mut selection,
+            SelectionWindow::new(80, 70, 160, 120, true),
+            false,
+        );
+
+        assert_eq!(selected, 1);
+        assert!(selection.has_probe(5));
     }
 
     #[test]

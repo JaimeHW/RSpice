@@ -17,6 +17,9 @@ const PROBE_CROSSHAIR_HALF_SPAN: i32 = 13;
 const PROBE_LABEL_X_OFFSET: i32 = 13;
 const PROBE_LABEL_ASCENT: i32 = 22;
 const PROBE_LABEL_ADVANCE: i32 = 7;
+/// The advance of one label character as the canvas draws it: monospace at
+/// the small text size.
+const PROBE_LABEL_GLYPH_ADVANCE: f32 = 6.7 * super::label_layout::SMALL_TEXT_WORLD / 11.0;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,9 +98,10 @@ impl SchematicProbe {
         self.saved_output_id = Some(saved_output_id);
     }
 
-    /// Conservative authored-space bounds used for fit, culling, selection
-    /// layout, and hardcopy policy. The canvas font scales with the drawing,
-    /// so its advance is stable in schematic coordinates.
+    /// Conservative authored-space bounds used for fit, culling and
+    /// hardcopy policy, where a box too large costs nothing. The canvas font
+    /// scales with the drawing, so its advance is stable in schematic
+    /// coordinates.
     #[must_use]
     pub fn world_bounds(&self) -> (Point, Point) {
         // Status copy (for example, "pending next run") is painted beside
@@ -119,6 +123,36 @@ impl SchematicProbe {
                 self.position.y.saturating_add(PROBE_CROSSHAIR_HALF_SPAN),
             ),
         )
+    }
+
+    /// The bounds of what the canvas draws: the crosshair, and beside it a
+    /// label `label_characters` long (the reference, with any status the
+    /// host paints after it).
+    #[must_use]
+    pub fn drawn_bounds(&self, label_characters: usize) -> (Point, Point) {
+        let label_width = (label_characters as f32 * PROBE_LABEL_GLYPH_ADVANCE).ceil() as i32;
+        (
+            Point::new(
+                self.position.x.saturating_sub(PROBE_CROSSHAIR_HALF_SPAN),
+                self.position.y.saturating_sub(PROBE_LABEL_ASCENT),
+            ),
+            Point::new(
+                self.position
+                    .x
+                    .saturating_add(PROBE_LABEL_X_OFFSET)
+                    .saturating_add(label_width)
+                    .max(self.position.x.saturating_add(PROBE_CROSSHAIR_HALF_SPAN)),
+                self.position.y.saturating_add(PROBE_CROSSHAIR_HALF_SPAN),
+            ),
+        )
+    }
+
+    /// The crosshair and its reference as drawn, whatever status a run
+    /// paints after them: what selection layout and window selection read,
+    /// so probes align by what is seen and a snug window takes one.
+    #[must_use]
+    pub fn layout_bounds(&self) -> (Point, Point) {
+        self.drawn_bounds(self.reference.chars().count())
     }
 }
 

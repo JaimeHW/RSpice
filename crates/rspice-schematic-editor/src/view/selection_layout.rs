@@ -240,7 +240,7 @@ fn selection_layout_targets(
             .find(|probe| probe.id == *id)
             .ok_or(SelectionLayoutError::StaleSelection)?;
         require_active_sheet(&view.design, probe.id)?;
-        let (min, max) = probe.world_bounds();
+        let (min, max) = probe.layout_bounds();
         targets.push(LayoutTarget {
             object: SelectionLayoutObject::Probe(*id),
             min,

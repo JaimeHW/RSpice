@@ -543,7 +543,7 @@ pub enum ProbeVisualStatus {
 }
 
 impl ProbeVisualStatus {
-    const fn suffix(self) -> &'static str {
+    pub(crate) const fn suffix(self) -> &'static str {
         match self {
             Self::Materialized => "",
             Self::Hidden => " · hidden",
@@ -625,6 +625,12 @@ pub fn draw_probe(
 /// to a stable world-space estimate just like component labels.
 pub fn probe_world_bounds(probe: &SchematicProbe) -> (Point, Point) {
     probe.world_bounds()
+}
+
+/// The bounds of the marker and the label [`draw_probe`] paints for it in
+/// `status`: what a ring around the probe hugs.
+pub fn probe_drawn_bounds(probe: &SchematicProbe, status: ProbeVisualStatus) -> (Point, Point) {
+    probe.drawn_bounds(probe.reference.chars().count() + status.suffix().chars().count())
 }
 
 /// Resolve a retained probe marker in screen space. The minimum radius keeps

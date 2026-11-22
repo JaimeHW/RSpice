@@ -457,7 +457,12 @@ pub fn draw_content(
                     normalized_probe_expression(trace) == normalized_probe_expression(expression)
                 });
         }
-        selected = selected || band_annotations.is_some_and(|band| band.takes_bounds(min, max));
+        // The band previews what its release selects, by the drawn marker.
+        selected = selected
+            || band_annotations.is_some_and(|band| {
+                let (min, max) = probe.layout_bounds();
+                band.takes_bounds(min, max)
+            });
         draw_probe(
             painter,
             viewport,

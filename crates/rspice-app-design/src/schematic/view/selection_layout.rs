@@ -564,6 +564,36 @@ mod tests {
         assert!(!state.model.schematic.can_undo());
     }
 
+    /// Probes align by what is drawn: aligned right, a short label and a
+    /// long one end together on the sheet, to the grid, rather than by a box
+    /// padded for status text the probes may never show.
+    #[test]
+    fn probes_align_by_their_drawn_labels() {
+        let mut state = DesignTestHost::default();
+        state.model.schematic.document_mut_for_test().probes = vec![
+            SchematicProbe::new(20, Point::new(10, 10), "V(out)", None).unwrap(),
+            SchematicProbe::new(21, Point::new(10, 40), "V(a_very_long_net_name)", None).unwrap(),
+        ];
+        let selection = &mut state.model.schematic.session.editor.selection;
+        selection.select_probe(20);
+        selection.select_probe(21);
+        state.model.schematic.init_undo_history();
+        let context = schematic_symbol_context(&state);
+
+        assert!(apply(&mut state, &context, SelectionLayoutCommand::AlignRight).unwrap());
+        let document = state.model.schematic.document();
+        let ends = document
+            .probes
+            .iter()
+            .map(|probe| probe.layout_bounds().1.x)
+            .collect::<Vec<_>>();
+        assert!(
+            (ends[0] - ends[1]).abs() * 2 <= document.grid_size,
+            "drawn label ends {ends:?} on a grid of {}",
+            document.grid_size
+        );
+    }
+
     /// Sheet 2 shares Sheet 1's coordinates, not its conductors: aligning
     /// Sheet 1's parts carries their own wires and leaves Sheet 2's wire end,
     /// lying on a moved pin's old position, where it was.

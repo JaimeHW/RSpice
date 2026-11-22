@@ -223,6 +223,7 @@ pub(super) fn draw_scene(
         &state.model.schematic.session.editor.selection,
         state.design.interaction.schematic_keyboard_focus,
         symbol_context,
+        &probe_status,
     );
 }
 
