@@ -9,20 +9,28 @@ use crate::workbench::state::WorkspaceDocumentId;
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
-/// One tab per cell view open in Design.
+/// One tab per cell view open in Design, named by its cell and view. Tabs
+/// that would read the same, one cell's name in two libraries, name the
+/// library too, so no two tabs read alike.
 pub fn design_documents(model: &Model) -> Vec<WorkspaceDocument> {
-    model
-        .workspace
-        .content
-        .open_views
-        .iter()
-        .map(|document| WorkspaceDocument {
+    let open = &model.workspace.content.open_views;
+    let short = |document: &crate::state::OpenCellView| {
+        format!(
+            "{} · {}",
+            document.reference.cell,
+            document.view_type.caption_for(&document.reference.view)
+        )
+    };
+    let labels = open.iter().map(short).collect::<Vec<_>>();
+    open.iter()
+        .zip(&labels)
+        .map(|(document, label)| WorkspaceDocument {
             id: WorkspaceDocumentId::CellView(document.reference.clone()),
-            label: format!(
-                "{} · {}",
-                document.reference.cell,
-                document.view_type.caption_for(&document.reference.view)
-            ),
+            label: if labels.iter().filter(|other| *other == label).count() > 1 {
+                format!("{}/{label}", document.reference.library)
+            } else {
+                label.clone()
+            },
             icon: icon_for_view(document.view_type),
             dirty: document.dirty,
         })

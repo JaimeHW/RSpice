@@ -20,6 +20,39 @@ fn multi_document_netlist_state() -> AppState {
     state
 }
 
+/// Two open views that would read alike, one cell's name in two
+/// libraries, name their library on their tabs; a tab no other reads like
+/// keeps its short name.
+#[test]
+fn tabs_that_would_read_alike_name_their_library() {
+    use rspice_app_design::workbench::chrome::document_bar::design::design_documents;
+    use rspice_app_state::state::{CellViewRef, OpenCellView};
+
+    let mut state = AppState::default();
+    state.model.workspace.content.open_views = [
+        ("user", "filter", "schematic"),
+        ("vendor", "filter", "schematic"),
+        ("user", "amp", "schematic"),
+    ]
+    .into_iter()
+    .map(|(library, cell, view)| {
+        OpenCellView::new(CellViewRef::new(library, cell, view), ViewType::Schematic)
+    })
+    .collect();
+    let labels = design_documents(&state.model)
+        .into_iter()
+        .map(|document| document.label)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        [
+            "user/filter \u{b7} schematic",
+            "vendor/filter \u{b7} schematic",
+            "amp \u{b7} schematic",
+        ]
+    );
+}
+
 #[test]
 fn design_strip_retains_the_single_active_cell_view() {
     assert!(!document_strip_visible(Workspace::Design, 0));
