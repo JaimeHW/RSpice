@@ -1818,9 +1818,7 @@ pub fn show(
         let color = horizontal_colors[slot];
         let hair = hairline(1.0, painter.pixels_per_point());
         painter.hline(plot_rect.x_range(), py, Stroke::new(hair, color));
-        painter.text(
-            pos2(plot_rect.left() + 4.0, py - 3.0),
-            Align2::LEFT_BOTTOM,
+        let label = painter.layout_no_wrap(
             format!(
                 "H{} {}",
                 slot + 1,
@@ -1833,6 +1831,14 @@ pub fn show(
             theme::mono(9.0, FontWeight::Medium),
             color,
         );
+        // Above its line, or under it where the plot's top would cut it.
+        let height = label.size().y;
+        let top = if py - 3.0 - height >= plot_rect.top() {
+            py - 3.0 - height
+        } else {
+            py + 3.0
+        };
+        painter.galley(pos2(plot_rect.left() + 4.0, top), label, color);
     }
     if let [Some(h1), Some(h2)] = spec.horizontal_cursors
         && h1.is_finite()
