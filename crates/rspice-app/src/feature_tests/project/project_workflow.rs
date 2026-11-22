@@ -75,7 +75,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     state.create_new_project();
     state.assert_project_open_fact();
 
-    assert_active_grid_pitch_contract(&state, rspice_app_state::state::SchematicGridPitch::Mil25);
+    assert_active_grid_pitch_contract(&state, rspice_app_state::state::SchematicGridPitch::Mm1_25);
     assert_eq!(
         state.model.schematic.session.editor.snap_engine.snap_radius,
         8
@@ -93,12 +93,12 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     state
         .model
         .preferences
-        .set_choice(ChoicePreference::SchematicGrid, 2)
+        .set_choice(ChoicePreference::SchematicGrid, 0)
         .unwrap();
     state.design.schematic_snap.grid_size = 777;
 
     assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
-    assert_active_grid_pitch_contract(&state, rspice_app_state::state::SchematicGridPitch::Metric);
+    assert_active_grid_pitch_contract(&state, rspice_app_state::state::SchematicGridPitch::Mm1);
     assert_eq!(
         state.model.schematic.session.editor.snap_engine.snap_radius,
         8

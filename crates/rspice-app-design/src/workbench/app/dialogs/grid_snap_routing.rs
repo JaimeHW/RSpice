@@ -20,13 +20,14 @@ use crate::workbench::state::WorkbenchSession;
 pub(crate) enum GridSnapSpacingChoice {
     #[default]
     Free,
-    Mil25,
-    Mil50,
-    Metric,
+    Mm1,
+    Mm1_25,
+    Mm2_5,
 }
 
 impl GridSnapSpacingChoice {
-    pub(crate) const ALL: [Self; 4] = [Self::Free, Self::Mil25, Self::Mil50, Self::Metric];
+    /// Free first, then the pitches finest first.
+    pub(crate) const ALL: [Self; 4] = [Self::Free, Self::Mm1, Self::Mm1_25, Self::Mm2_5];
 
     pub(crate) fn label(self) -> String {
         self.pitch().map_or_else(
@@ -38,17 +39,17 @@ impl GridSnapSpacingChoice {
     pub(crate) const fn pitch(self) -> Option<crate::state::SchematicGridPitch> {
         match self {
             Self::Free => None,
-            Self::Mil25 => Some(crate::state::SchematicGridPitch::Mil25),
-            Self::Mil50 => Some(crate::state::SchematicGridPitch::Mil50),
-            Self::Metric => Some(crate::state::SchematicGridPitch::Metric),
+            Self::Mm1_25 => Some(crate::state::SchematicGridPitch::Mm1_25),
+            Self::Mm2_5 => Some(crate::state::SchematicGridPitch::Mm2_5),
+            Self::Mm1 => Some(crate::state::SchematicGridPitch::Mm1),
         }
     }
 
     pub(crate) const fn from_pitch(pitch: crate::state::SchematicGridPitch) -> Self {
         match pitch {
-            crate::state::SchematicGridPitch::Mil25 => Self::Mil25,
-            crate::state::SchematicGridPitch::Mil50 => Self::Mil50,
-            crate::state::SchematicGridPitch::Metric => Self::Metric,
+            crate::state::SchematicGridPitch::Mm1_25 => Self::Mm1_25,
+            crate::state::SchematicGridPitch::Mm2_5 => Self::Mm2_5,
+            crate::state::SchematicGridPitch::Mm1 => Self::Mm1,
         }
     }
 }
@@ -66,7 +67,7 @@ impl Default for GridSnapRoutingDraft {
     fn default() -> Self {
         Self {
             grid_style: crate::state::GridStyle::Dots,
-            snap_spacing: GridSnapSpacingChoice::Mil50,
+            snap_spacing: GridSnapSpacingChoice::Mm2_5,
             snap_engine: crate::state::SnapEngine::default(),
             wire_routing: crate::state::WireRoutingMode::HorizontalFirst,
         }
@@ -417,7 +418,7 @@ pub(crate) mod tests {
         ));
         let draft = &mut state.design.grid_snap_routing.draft;
         draft.grid_style = GridStyle::Lines;
-        draft.snap_spacing = GridSnapSpacingChoice::Mil25;
+        draft.snap_spacing = GridSnapSpacingChoice::Mm1_25;
         draft.snap_engine.snap_radius = 9;
         draft.snap_engine.snap_to_grid = false;
         draft.snap_engine.snap_to_terminals = false;
@@ -431,7 +432,7 @@ pub(crate) mod tests {
         assert_eq!(state.design.grid, GridStyle::Lines);
         assert_eq!(
             state.model.schematic.document().document_policy.grid_pitch,
-            SchematicGridPitch::Mil25
+            SchematicGridPitch::Mm1_25
         );
         assert_eq!(state.model.schematic.document().grid_size, 5);
         assert!(state.model.schematic.can_undo());
@@ -743,7 +744,7 @@ pub(crate) mod tests {
             &mut state.workbench
         ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Lines;
-        state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
+        state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mm1_25;
         state
             .design
             .grid_snap_routing
@@ -765,7 +766,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             state.model.schematic.document().document_policy.grid_pitch,
-            SchematicGridPitch::Mil50
+            SchematicGridPitch::Mm2_5
         );
         assert!(state.design.grid_snap_routing.open);
         assert!(!state.model.schematic.can_undo());
@@ -782,7 +783,7 @@ pub(crate) mod tests {
             &mut state.workbench
         ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Lines;
-        state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
+        state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mm1_25;
 
         state.model.safe_mode.activate(
             LocalSafeModeOptions {
@@ -806,7 +807,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             state.model.schematic.document().document_policy.grid_pitch,
-            SchematicGridPitch::Mil50
+            SchematicGridPitch::Mm2_5
         );
         assert!(!state.model.schematic.can_undo());
     }
@@ -856,7 +857,7 @@ pub(crate) mod tests {
             &mut state.workbench
         ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Lines;
-        state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
+        state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mm1_25;
         state.model.schematic.arm_tool(Tool::Wire);
         state.model.schematic.session.editor.wire_drawing.active = true;
 
@@ -872,7 +873,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             state.model.schematic.document().document_policy.grid_pitch,
-            SchematicGridPitch::Mil50
+            SchematicGridPitch::Mm2_5
         );
         assert!(state.design.grid_snap_routing.open);
         assert!(!state.model.schematic.can_undo());
@@ -883,9 +884,9 @@ pub(crate) mod tests {
         use crate::state::Point;
 
         for (choice, expected_size, expected_position) in [
-            (GridSnapSpacingChoice::Mil50, 10, Point::new(10, 10)),
-            (GridSnapSpacingChoice::Mil25, 5, Point::new(5, 5)),
-            (GridSnapSpacingChoice::Metric, 4, Point::new(8, 8)),
+            (GridSnapSpacingChoice::Mm2_5, 10, Point::new(10, 10)),
+            (GridSnapSpacingChoice::Mm1_25, 5, Point::new(5, 5)),
+            (GridSnapSpacingChoice::Mm1, 4, Point::new(8, 8)),
         ] {
             let mut state = DesignTestHost::default();
             assert!(open_grid_snap_routing_dialog(
@@ -934,7 +935,7 @@ pub(crate) mod tests {
         ));
         let draft = &mut state.design.grid_snap_routing.draft;
         draft.grid_style = GridStyle::Lines;
-        draft.snap_spacing = GridSnapSpacingChoice::Mil25;
+        draft.snap_spacing = GridSnapSpacingChoice::Mm1_25;
         draft.snap_engine.snap_to_grid = false;
         draft.snap_engine.snap_to_terminals = false;
         draft.snap_engine.snap_to_junctions = false;

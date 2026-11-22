@@ -290,11 +290,11 @@ mod tests {
                 .design
                 .document_mut_for_test()
                 .document_policy
-                .grid_pitch = SchematicGridPitch::Mil25;
+                .grid_pitch = SchematicGridPitch::Mm1_25;
             schematic.design.document_mut_for_test().grid_size =
-                SchematicGridPitch::Mil25.canvas_grid_size();
+                SchematicGridPitch::Mm1_25.canvas_grid_size();
             schematic.session.editor.snap_engine.grid_size =
-                SchematicGridPitch::Mil25.canvas_grid_size();
+                SchematicGridPitch::Mm1_25.canvas_grid_size();
         }));
         assert_eq!(state.content_version(), baseline + 1);
 
@@ -312,25 +312,25 @@ mod tests {
     fn grid_pitch_undo_and_redo_reconcile_every_schematic_runtime_owner() {
         let mut state = SchematicState::default();
         state.init_undo_history();
-        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil50);
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mm2_5);
 
         assert!(state.with_undo("change schematic grid pitch", |schematic| {
             schematic
                 .design
                 .document_mut_for_test()
                 .document_policy
-                .grid_pitch = SchematicGridPitch::Mil25;
+                .grid_pitch = SchematicGridPitch::Mm1_25;
             schematic.design.document_mut_for_test().grid_size =
-                SchematicGridPitch::Mil25.canvas_grid_size();
+                SchematicGridPitch::Mm1_25.canvas_grid_size();
             schematic.session.editor.snap_engine.grid_size =
-                SchematicGridPitch::Mil25.canvas_grid_size();
+                SchematicGridPitch::Mm1_25.canvas_grid_size();
         }));
-        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mm1_25);
 
         assert!(state.undo());
-        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil50);
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mm2_5);
 
         assert!(state.redo());
-        assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);
+        assert_grid_pitch_contract(&state, SchematicGridPitch::Mm1_25);
     }
 }

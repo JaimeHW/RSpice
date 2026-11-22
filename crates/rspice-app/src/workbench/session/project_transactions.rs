@@ -1916,16 +1916,16 @@ mod tests {
         state.design.schematic_snap.grid_size = 999;
         let mut loaded = SchematicState::default();
         loaded.document_mut_for_test().document_policy.grid_pitch =
-            rspice_app_state::state::SchematicGridPitch::Metric;
+            rspice_app_state::state::SchematicGridPitch::Mm1;
         loaded.document_mut_for_test().grid_size = 123;
         loaded.session.editor.snap_engine = rspice_app_state::state::SnapEngine::default();
 
         replace_active_schematic_document(&mut state, loaded);
 
-        let expected = rspice_app_state::state::SchematicGridPitch::Metric.canvas_grid_size();
+        let expected = rspice_app_state::state::SchematicGridPitch::Mm1.canvas_grid_size();
         assert_eq!(
             state.model.schematic.document().document_policy.grid_pitch,
-            rspice_app_state::state::SchematicGridPitch::Metric
+            rspice_app_state::state::SchematicGridPitch::Mm1
         );
         assert_eq!(state.model.schematic.document().grid_size, expected);
         assert_eq!(

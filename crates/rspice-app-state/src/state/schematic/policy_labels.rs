@@ -25,9 +25,9 @@ mod tests {
     fn grid_labels_measure_the_pitch_on_the_printed_sheet() {
         use crate::state::SchematicGridPitch;
         for (pitch, label) in [
-            (SchematicGridPitch::Mil50, "2.5 mm"),
-            (SchematicGridPitch::Mil25, "1.25 mm"),
-            (SchematicGridPitch::Metric, "1 mm"),
+            (SchematicGridPitch::Mm2_5, "2.5 mm"),
+            (SchematicGridPitch::Mm1_25, "1.25 mm"),
+            (SchematicGridPitch::Mm1, "1 mm"),
         ] {
             assert_eq!(grid_pitch_label(pitch), label);
             let millimetres = label

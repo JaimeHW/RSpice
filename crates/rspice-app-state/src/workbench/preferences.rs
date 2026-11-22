@@ -761,7 +761,7 @@ impl ChoicePreference {
     /// on its first entry; a size list is in size order, so it does not.
     const fn default_value(self) -> u8 {
         match self {
-            Self::EditorFontSize => 2,
+            Self::EditorFontSize | Self::SchematicGrid => 2,
             _ => 0,
         }
     }

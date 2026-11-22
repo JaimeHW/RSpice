@@ -167,13 +167,13 @@ fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
         .set_choice(ChoicePreference::SchematicGrid, 1)
         .unwrap();
     let mut expected_snap = state.design.schematic_snap.clone();
-    expected_snap.grid_size = crate::state::SchematicGridPitch::Mil25.canvas_grid_size();
+    expected_snap.grid_size = crate::state::SchematicGridPitch::Mm1_25.canvas_grid_size();
 
     let created = state.new_schematic_document();
 
     assert_eq!(
         created.document().document_policy.grid_pitch,
-        crate::state::SchematicGridPitch::Mil25
+        crate::state::SchematicGridPitch::Mm1_25
     );
     assert_eq!(created.document().grid_size, expected_snap.grid_size);
     assert_eq!(created.session.editor.snap_engine, expected_snap);

@@ -555,7 +555,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
     apply_schematic_edit(
         &mut app.state.model,
         &mut app.state.workbench,
-        SchematicEdit::Grid(SchematicGridPitch::Mil25),
+        SchematicEdit::Grid(SchematicGridPitch::Mm1_25),
     );
     apply_schematic_edit(
         &mut app.state.model,
@@ -566,7 +566,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
     app.after_contribution();
     let schematic = &app.state.model.schematic;
     let policy = &schematic.document().document_policy;
-    assert_eq!(policy.grid_pitch, SchematicGridPitch::Mil25);
+    assert_eq!(policy.grid_pitch, SchematicGridPitch::Mm1_25);
     assert_eq!(policy.net_naming, NetNamingPolicy::SpiceCompatibleRelaxed);
     assert_eq!(schematic.document().grid_size, 5);
     assert_eq!(schematic.session.editor.snap_engine.grid_size, 5);
@@ -580,7 +580,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
     assert!(app.state.model.schematic.undo());
     let policy = &app.state.model.schematic.document().document_policy;
     assert_eq!(policy.net_naming, NetNamingPolicy::StrictCaseSensitive);
-    assert_eq!(policy.grid_pitch, SchematicGridPitch::Mil25);
+    assert_eq!(policy.grid_pitch, SchematicGridPitch::Mm1_25);
 }
 
 /// A typed title value lands when the field is left, as one undo step; the

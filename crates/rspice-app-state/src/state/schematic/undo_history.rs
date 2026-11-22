@@ -142,7 +142,7 @@ mod tests {
                 .design
                 .document_mut_for_test()
                 .document_policy
-                .grid_pitch = super::super::document_policy::SchematicGridPitch::Metric;
+                .grid_pitch = super::super::document_policy::SchematicGridPitch::Mm1;
             schematic.design.document_mut_for_test().grid_size = schematic
                 .design
                 .document()
@@ -159,11 +159,11 @@ mod tests {
         assert!(state.redo());
         assert_eq!(
             state.design.document().document_policy.grid_pitch,
-            super::super::document_policy::SchematicGridPitch::Metric
+            super::super::document_policy::SchematicGridPitch::Mm1
         );
         assert_eq!(
             state.design.document().grid_size,
-            super::super::document_policy::SchematicGridPitch::Metric.canvas_grid_size()
+            super::super::document_policy::SchematicGridPitch::Mm1.canvas_grid_size()
         );
     }
 

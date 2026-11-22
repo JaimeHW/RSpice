@@ -43,7 +43,7 @@ fn creating_cell_seeds_every_schematic_like_view_at_creation_time() {
     app.state
         .model
         .preferences
-        .set_choice(ChoicePreference::SchematicGrid, 2)
+        .set_choice(ChoicePreference::SchematicGrid, 0)
         .unwrap();
     app.state
         .model
@@ -87,11 +87,11 @@ fn creating_cell_seeds_every_schematic_like_view_at_creation_time() {
             .expect("document seeded when view is created");
         assert_eq!(
             document.document().document_policy.grid_pitch,
-            SchematicGridPitch::Metric
+            SchematicGridPitch::Mm1
         );
         assert_eq!(
             document.document().grid_size,
-            SchematicGridPitch::Metric.canvas_grid_size()
+            SchematicGridPitch::Mm1.canvas_grid_size()
         );
         assert_eq!(
             document.document().document_policy.net_naming,

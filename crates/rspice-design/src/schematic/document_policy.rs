@@ -6,26 +6,29 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A schematic's grid pitch, named by what it measures on the printed sheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
 pub enum SchematicGridPitch {
+    #[serde(rename = "1mm")]
+    Mm1,
+    #[serde(rename = "1.25mm")]
+    Mm1_25,
     #[default]
-    Mil50,
-    Mil25,
-    Metric,
+    #[serde(rename = "2.5mm")]
+    Mm2_5,
 }
 
 impl SchematicGridPitch {
-    /// Every pitch, coarsest first. A stored grid preference is an index
-    /// into this list.
-    pub const ALL: [Self; 3] = [Self::Mil50, Self::Mil25, Self::Metric];
+    /// Every pitch, finest first, the order every list shows them in. A
+    /// stored grid preference is an index into this list.
+    pub const ALL: [Self; 3] = [Self::Mm1, Self::Mm1_25, Self::Mm2_5];
 
     #[must_use]
     pub const fn canvas_grid_size(self) -> i32 {
         match self {
-            Self::Mil50 => 10,
-            Self::Mil25 => 5,
-            Self::Metric => 4,
+            Self::Mm2_5 => 10,
+            Self::Mm1_25 => 5,
+            Self::Mm1 => 4,
         }
     }
 }
@@ -174,7 +177,7 @@ mod tests {
     #[test]
     fn document_policy_round_trips_with_stable_names() {
         let policy = SchematicDocumentPolicy {
-            grid_pitch: SchematicGridPitch::Metric,
+            grid_pitch: SchematicGridPitch::Mm1,
             wire_junctions: WireJunctionPolicy::OrthogonalManual,
             selection_crossing: SelectionCrossingPolicy::Intersecting,
             net_naming: NetNamingPolicy::SpiceCompatibleRelaxed,

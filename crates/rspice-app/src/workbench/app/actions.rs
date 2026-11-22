@@ -229,7 +229,7 @@ mod shortcut_ownership_tests {
         use rspice_app_state::state::SchematicGridPitch;
 
         let mut app = RSpiceApp::test_instance();
-        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mm2_5);
 
         assert!(
             app.state
@@ -237,22 +237,22 @@ mod shortcut_ownership_tests {
                 .schematic
                 .with_undo("change schematic grid pitch", |schematic| {
                     schematic.document_mut_for_test().document_policy.grid_pitch =
-                        SchematicGridPitch::Mil25;
+                        SchematicGridPitch::Mm1_25;
                     schematic.document_mut_for_test().grid_size =
-                        SchematicGridPitch::Mil25.canvas_grid_size();
+                        SchematicGridPitch::Mm1_25.canvas_grid_size();
                     schematic.session.editor.snap_engine.grid_size =
-                        SchematicGridPitch::Mil25.canvas_grid_size();
+                        SchematicGridPitch::Mm1_25.canvas_grid_size();
                 })
         );
         app.state.design.schematic_snap =
             app.state.model.schematic.session.editor.snap_engine.clone();
-        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mm1_25);
 
         app.execute_command_key(ids::UNDO);
-        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mm2_5);
 
         app.execute_command_key(ids::REDO);
-        assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
+        assert_grid_pitch_contract(&app, SchematicGridPitch::Mm1_25);
     }
 
     /// One reviewed design-management transaction over the active document,
