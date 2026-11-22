@@ -593,6 +593,16 @@ impl RSpiceApp {
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.state.shell.quit_while_saving = true;
+        } else if !self.state.shell.exit_reviewed
+            && ctx.input(|input| input.viewport().close_requested())
+        {
+            // The title bar's close asks about unsaved work as File > Exit
+            // does; the close that exit sends once answered goes through.
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            crate::workbench::commands::file_action(
+                self,
+                crate::workbench::menu_bar::FileMenuAction::Exit,
+            );
         } else if should_persist_application_state(&self.state)
             && ctx.input(|input| input.viewport().close_requested())
             && self.state.hold_close_for_session_results()
@@ -1193,6 +1203,7 @@ impl RSpiceApp {
         );
 
         log::info!("application exit requested — closing viewport");
+        self.state.shell.exit_reviewed = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         self.state.shell.exit_requested = false;
     }
@@ -1296,6 +1307,68 @@ mod tests {
         UnresolvedBindingPolicy,
     };
     use rspice_design::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
+
+    /// A frame in which the window's title-bar close was pressed, and the
+    /// commands it sent the window.
+    fn close_frame(ctx: &Context, app: &mut RSpiceApp) -> Vec<egui::ViewportCommand> {
+        let input = egui::RawInput {
+            viewports: std::iter::once((
+                egui::ViewportId::ROOT,
+                egui::ViewportInfo {
+                    events: vec![egui::ViewportEvent::Close],
+                    ..Default::default()
+                },
+            ))
+            .collect(),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.prepare_frame(ui.ctx()));
+        output
+            .viewport_output
+            .remove(&egui::ViewportId::ROOT)
+            .map(|viewport| viewport.commands)
+            .unwrap_or_default()
+    }
+
+    /// The title bar's close asks about unsaved work as File > Exit does and
+    /// keeps the window open meanwhile. Once the exit is answered, the close
+    /// it sends goes through without asking again.
+    #[test]
+    fn the_title_bar_close_asks_what_file_exit_asks() {
+        use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        app.state.model.schematic.add_component(
+            rspice_app_state::state::ComponentType::Resistor,
+            rspice_app_state::state::Point::origin(),
+        );
+        assert!(
+            rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes_fresh(
+                &app.state
+            ),
+            "the fixture holds unsaved work"
+        );
+
+        let commands = close_frame(&ctx, &mut app);
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert_eq!(
+            app.state.workbench.confirmation_dialog.pending_action,
+            Some(ConfirmationAction::Exit)
+        );
+        assert!(!app.state.shell.exit_requested, "nothing closes unasked");
+
+        // The reader answered; the exit closes the window.
+        app.state.workbench.confirmation_dialog.pending_action = None;
+        app.state.shell.exit_requested = true;
+        app.process_exit_request(&ctx);
+        assert!(app.state.shell.exit_reviewed);
+        close_frame(&ctx, &mut app);
+        assert_eq!(
+            app.state.workbench.confirmation_dialog.pending_action, None,
+            "the exit's own close does not ask again"
+        );
+    }
 
     #[test]
     fn window_rendering_preserves_primary_drawers_and_console_expansion() {

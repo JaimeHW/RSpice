@@ -13,6 +13,9 @@ pub(crate) struct ShellState {
     pub(crate) help_center: crate::workbench::app::dialogs::help::HelpCenterDialogState,
     /// Flag to signal that application exit has been requested (after confirmation)
     pub(crate) exit_requested: bool,
+    /// The exit asked about the unsaved work and is closing the window, so
+    /// that close goes through instead of asking again.
+    pub(crate) exit_reviewed: bool,
     /// Quitting asks whether to wait for the save copying its results to
     /// another volume, or to quit without saving.
     pub(crate) quit_while_saving: bool,
