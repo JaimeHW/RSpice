@@ -35,11 +35,6 @@ use crate::workbench::app::actions::workspace::symbol_document::{
 };
 use crate::workbench::app_state::Model;
 
-/// Rows the pin table shows before its rows scroll: a symbol's pins are
-/// what the table is for, so it shows twice the rows a schematic's objects
-/// get under the manager's controls.
-const SHOWN_ROWS: f32 = 12.0;
-
 /// A cell of the pin table being edited: the rows the edit sets, the
 /// column, and the text typed or picked so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,12 +233,15 @@ pub(super) fn reorder_verbs(ui: &mut Ui, selected: bool) -> Option<BodyAction> {
 /// Escape drops it. A click selects its row, Ctrl+click adds or removes
 /// one, Shift+click selects the run from the last row clicked; a click on a
 /// selected row keeps the selection, so the cell edits every selected pin.
+/// The headings and rows take `height` and the rows scroll inside it.
 pub(super) fn pin_grid(
     ui: &mut Ui,
     projection: &EngineeringProjection,
     state: &mut EngineeringTableDialogState,
+    height: f32,
 ) -> Option<BodyAction> {
     let tokens = Tokens::get(ui.ctx());
+    let top = ui.cursor().top();
     if projection.rows.is_empty() {
         let empty = if projection.logical_rows == 0 {
             "This symbol has no pins."
@@ -273,12 +271,7 @@ pub(super) fn pin_grid(
             )
         })
         .collect::<Vec<_>>();
-    let rows_scroll = !tokens.metrics.is_touch();
-    let gutter = if rows_scroll {
-        ui.spacing().scroll.allocated_width() + GAP
-    } else {
-        0.0
-    };
+    let gutter = ui.spacing().scroll.allocated_width() + GAP;
     let room = (ui.available_width() - CHECK_WIDTH - GAP * headings.len() as f32 - gutter).max(0.0);
     let column_widths = content_column_widths(ui, projection, &headings, room);
     let mut action = None;
@@ -301,7 +294,7 @@ pub(super) fn pin_grid(
     let selection_fill = tokens.color.accent.gamma_multiply(0.10);
     // A selected row is tinted across its whole width, gaps and all.
     let row_width = CHECK_WIDTH + column_widths.iter().map(|width| width + GAP).sum::<f32>();
-    let mut rows = |ui: &mut Ui, visible: std::ops::Range<usize>| {
+    let rows = |ui: &mut Ui, visible: std::ops::Range<usize>| {
         Grid::new("symbol-pin-table-rows")
             .striped(true)
             .min_col_width(0.0)
@@ -404,24 +397,19 @@ pub(super) fn pin_grid(
                 }
             });
     };
-    if rows_scroll {
-        ScrollArea::vertical()
-            .id_salt("symbol-pin-table-rows-scroll")
-            .max_height(ROW_STRIDE * SHOWN_ROWS)
-            .auto_shrink([false, true])
-            .show_rows(ui, ROW_STRIDE, projection.rows.len(), |ui, visible| {
-                rows(ui, visible);
-            });
-    } else {
-        rows(ui, 0..projection.rows.len());
-    }
+    let headings_height = ui.cursor().top() - top;
+    ScrollArea::vertical()
+        .id_salt("symbol-pin-table-rows-scroll")
+        .max_height((height - headings_height).max(ROW_STRIDE))
+        .auto_shrink([false, true])
+        .show_rows(ui, ROW_STRIDE, projection.rows.len(), rows);
     action
 }
 
 /// A click on a row's cell: the row alone, Ctrl+click toggles it,
 /// Shift+click the run from the anchor; a plain click on a selected row
 /// keeps the selection, so an edit of its cell reaches every selected pin.
-fn click_row(
+pub(super) fn click_row(
     ui: &Ui,
     projection: &EngineeringProjection,
     state: &mut EngineeringTableDialogState,

@@ -18,6 +18,7 @@ fn table(app: &mut RSpiceApp) -> EngineeringTable<'_> {
         &mut state.design.symbol,
         &mut state.platform,
         &mut state.workbench,
+        &state.design.property_registry,
     )
 }
 

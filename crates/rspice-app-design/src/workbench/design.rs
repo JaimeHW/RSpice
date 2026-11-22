@@ -1823,6 +1823,7 @@ impl DesignFeature {
             symbol: &mut cx.state.symbol,
             platform: cx.platform,
             workbench: cx.wb,
+            registry: &cx.state.property_registry,
         }
         .render_engineering_table_dialog(ctx);
     }

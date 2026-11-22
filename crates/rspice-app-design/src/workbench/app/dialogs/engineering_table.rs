@@ -1,6 +1,6 @@
 //! Universal engineering-table view manager.
 
-use egui::{Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
+use egui::{Context, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
@@ -25,6 +25,7 @@ use crate::state::engineering_table::EngineeringTableViewStore;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
+mod object_cells;
 mod symbol_pins;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -106,6 +107,11 @@ pub struct EngineeringTableDialogState {
     pub row_details_id: Option<String>,
     /// The pin table's cell being edited, if any.
     pub pin_edit: Option<symbol_pins::PinCellEdit>,
+    /// The Object table's cell being edited, if any.
+    pub object_edit: Option<object_cells::ObjectCellEdit>,
+    /// The columns, sort and filter are unfolded above the rows. They open
+    /// folded, so the rows take the height.
+    pub(crate) setup_open: bool,
     /// The pin table's row a Shift+click selects the run from.
     pub(crate) pin_anchor: Option<usize>,
     pub(crate) saved_edit_id: Option<String>,
@@ -168,6 +174,8 @@ enum BodyAction {
     MovePins {
         later: bool,
     },
+    /// Set one cell of the parts these rows stand for.
+    EditObjects(object_cells::ObjectCellEdit),
 }
 
 /// The file the browser picker returned for one import, keyed to the token
@@ -389,6 +397,9 @@ pub struct EngineeringTable<'a> {
         &'a mut crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
     pub(in crate::workbench) platform: &'a mut PlatformState,
     pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+    /// The property sheets a cell's value is checked against, as the
+    /// inspector checks it.
+    pub(in crate::workbench) registry: &'a crate::properties::PropertyEditorSchema,
 }
 
 impl EngineeringTable<'_> {
@@ -446,11 +457,10 @@ impl EngineeringTable<'_> {
         }
         let manager = page == EngineeringTableDialogPage::Manager;
         let (title, primary) = match (manager, pin_table) {
-            // The table's name is the menu row's; Done keeps the view, the
-            // only thing the table changes.
+            // A cell edit is kept as it is made, one undo step each, so a
+            // table has nothing to apply or cancel but its view, which Done
+            // keeps. The Object table's name is the menu row's.
             (true, false) => ("Object table", "Done"),
-            // A pin edit is kept as it is made, one undo step each, so the
-            // table has nothing to apply or cancel but its view.
             (true, true) => ("Pin table", "Done"),
             (false, _) => ("Saved table views", "Done"),
         };
@@ -458,19 +468,25 @@ impl EngineeringTable<'_> {
             "Edit the symbol's pins: select rows, then edit a cell to set it on every selected \
              pin. Choose the columns and their order, and sort and filter the rows."
         } else {
-            "Choose the table's columns and their order, sort and filter its rows, and copy or export them."
+            "Edit the parts' names, values, parameters and purchasing fields: select rows, then \
+             edit a cell to set it on every selected part. Choose, sort and filter the columns."
         };
+        // Why no cell of the schematic can be edited, when none can.
+        let read_only = (!pin_table
+            && (self.model.schematic_edit_read_only() || self.model.safe_mode.project_read_only()))
+        .then(|| crate::workbench::app::actions::workspace::read_only_master_message(self.model));
         let mut action = None;
         let mut dialog = Dialog::new(title, primary)
             .description(description)
             .size(DialogSize::WideWorkflow)
             .overlay_scrollbar()
             .initial_focus(DialogInitialFocus::BodyControl)
-            // Enter in the pin table edits a cell or keeps the value typed in it.
-            .primary_on_enter(!pin_table);
-        // Saved views has one way back to the table, its primary.
-        if manager && !pin_table {
-            dialog = dialog.ghost("Cancel");
+            // Enter in a table edits a cell or keeps the value typed in it.
+            .primary_on_enter(!manager);
+        if manager {
+            // The rows take whatever height the surface has and scroll inside
+            // it, under set-up that folds away.
+            dialog = dialog.fill_available_height().manual_body_scroll();
         }
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = match page {
@@ -480,6 +496,7 @@ impl EngineeringTable<'_> {
                     &mut *self.dialog,
                     &self.views.saved,
                     &self.model.workspace.content.engineering_table_views.saved,
+                    read_only.as_deref(),
                 ),
                 EngineeringTableDialogPage::SavedViews => saved_views_body(
                     ui,
@@ -492,6 +509,11 @@ impl EngineeringTable<'_> {
                 | EngineeringTableDialogPage::Export
                 | EngineeringTableDialogPage::RowDetails => None,
             };
+            if manager {
+                // The body is the surface's whole track, so the footer stays
+                // at the surface's foot however tall the rows come out.
+                ui.expand_to_include_rect(ui.max_rect());
+            }
             Some(ui.make_persistent_id(("engineering-table-first", page)))
         });
 
@@ -504,8 +526,13 @@ impl EngineeringTable<'_> {
 
         match choice {
             // Escape while a cell is edited drops the edit, not the table.
-            DialogChoice::Cancelled if self.dialog.pin_edit.is_some() => {
+            DialogChoice::Cancelled
+                if self.dialog.pin_edit.is_some() || self.dialog.object_edit.is_some() =>
+            {
                 self.dialog.pin_edit = None;
+                if self.dialog.object_edit.take().is_some() {
+                    self.dialog.error = None;
+                }
                 self.dialog.focus_cell = self.dialog.active_cell;
             }
             DialogChoice::Primary if page == EngineeringTableDialogPage::Manager => {
@@ -614,6 +641,7 @@ impl EngineeringTable<'_> {
                 self.edit_symbol_pins(&rows, column, &text);
             }
             BodyAction::MovePins { later } => self.move_symbol_pins(later),
+            BodyAction::EditObjects(edit) => self.edit_object_cells(edit),
             BodyAction::ImportSaved => self.import_engineering_saved_view(),
             BodyAction::ExportSaved(id, scope) => self.export_engineering_saved_view(&id, scope),
             BodyAction::BeginRename(id, name) => {
@@ -1252,19 +1280,22 @@ const SECTION_GAP: f32 = 16.0;
 /// Width of the columns list: a column's name and its order controls.
 const COLUMNS_WIDTH: f32 = 280.0;
 
-/// The manager is what a reader configures about the table: which view it
-/// starts from, which columns it shows in which order, how its rows sort and
-/// filter, and the table itself under those choices. It used to state the
-/// grid's internal id and render window, a pixel width per column, a pin
-/// that nothing reads, the renderer's virtualization, overscan and frozen
-/// identifier policies, and a line of keyboard shortcuts; its verbs trailed
-/// under a table clipped by a sideways scroll.
+/// The manager is the table under what a reader configures about it: which
+/// view it starts from, then, folded until opened, which columns it shows in
+/// which order and how its rows sort and filter. The rows take the rest of
+/// the height. The table was six rows tall under the whole set-up. It used
+/// to state the grid's internal id and render window, a pixel width per
+/// column, a pin that nothing reads, the renderer's virtualization, overscan
+/// and frozen identifier policies, and a line of keyboard shortcuts; its
+/// verbs trailed under a table clipped by a sideways scroll. `read_only` is
+/// why the schematic's cells cannot be edited, when they cannot.
 fn manager_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
     state: &mut EngineeringTableDialogState,
     personal: &[crate::state::SavedEngineeringTableView],
     project: &[crate::state::SavedEngineeringTableView],
+    read_only: Option<&str>,
 ) -> Option<BodyAction> {
     let tokens = Tokens::get(ui.ctx());
     let mut action = None;
@@ -1310,147 +1341,161 @@ fn manager_body(
             action = Some(BodyAction::Manage);
         }
     });
+    let summary = setup_summary(dataset, state.draft.as_ref()?);
+    ui.add_space(SECTION_GAP / 2.0);
+    setup_fold(ui, &mut state.setup_open, &summary);
     let view = state.draft.as_mut()?;
-    ui.add_space(SECTION_GAP);
 
     let mut move_column = None;
     let mut remove_sort = None;
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(COLUMNS_WIDTH);
-            let reset = heading_row(ui, "Columns", |ui| {
-                Button::new("Reset").compact().show(ui).clicked()
-            });
-            if reset {
-                *view = EngineeringTableView::for_dataset(dataset);
-            }
-            let count = view.columns.len();
-            for index in 0..count {
-                let label = dataset
-                    .columns
-                    .iter()
-                    .find(|column| column.id == view.columns[index].column_id)
-                    .map(|column| column.label.as_str())
-                    .unwrap_or("Removed column");
-                ui.horizontal(|ui| {
-                    ui.set_min_height(tokens.metrics.ctl_h);
-                    ui.checkbox(&mut view.columns[index].visible, label);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        if IconButton::new(Icon::ChevronDown)
-                            .enabled(index + 1 < count)
-                            .side(24.0)
-                            .tooltip("Move column later")
-                            .show(ui)
-                            .clicked()
-                        {
-                            move_column = Some((index, index + 1));
+    if state.setup_open {
+        // However many columns there are, the set-up never takes more than
+        // half the height from the rows.
+        ScrollArea::vertical()
+            .id_salt("engineering-table-setup")
+            .max_height(ui.available_height() * 0.5)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(COLUMNS_WIDTH);
+                        let reset = heading_row(ui, "Columns", |ui| {
+                            Button::new("Reset").compact().show(ui).clicked()
+                        });
+                        if reset {
+                            *view = EngineeringTableView::for_dataset(dataset);
                         }
-                        if IconButton::new(Icon::ChevronUp)
-                            .enabled(index > 0)
-                            .side(24.0)
-                            .tooltip("Move column earlier")
-                            .show(ui)
-                            .clicked()
-                        {
-                            move_column = Some((index, index - 1));
+                        let count = view.columns.len();
+                        for index in 0..count {
+                            let label = dataset
+                                .columns
+                                .iter()
+                                .find(|column| column.id == view.columns[index].column_id)
+                                .map(|column| column.label.as_str())
+                                .unwrap_or("Removed column");
+                            ui.horizontal(|ui| {
+                                ui.set_min_height(tokens.metrics.ctl_h);
+                                ui.checkbox(&mut view.columns[index].visible, label);
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                        if IconButton::new(Icon::ChevronDown)
+                                            .enabled(index + 1 < count)
+                                            .side(24.0)
+                                            .tooltip("Move column later")
+                                            .show(ui)
+                                            .clicked()
+                                        {
+                                            move_column = Some((index, index + 1));
+                                        }
+                                        if IconButton::new(Icon::ChevronUp)
+                                            .enabled(index > 0)
+                                            .side(24.0)
+                                            .tooltip("Move column earlier")
+                                            .show(ui)
+                                            .clicked()
+                                        {
+                                            move_column = Some((index, index - 1));
+                                        }
+                                    },
+                                );
+                            });
                         }
                     });
-                });
-            }
-        });
-        ui.add_space(SECTION_GAP * 2.0);
-        ui.vertical(|ui| {
-            heading_row(ui, "Sort", |_| ());
-            let labels = dataset
-                .columns
-                .iter()
-                .map(|column| column.label.clone())
-                .collect::<Vec<_>>();
-            let directions = ["Ascending".to_owned(), "Descending".to_owned()];
-            for index in 0..view.sort.len() {
-                ui.horizontal(|ui| {
-                    row_label(ui, if index == 0 { "Sort by" } else { "Then by" });
-                    let current = dataset
-                        .columns
-                        .iter()
-                        .position(|column| column.id == view.sort[index].column_id);
-                    if let Some(picked) = select(
-                        ui,
-                        &format!("engineering-sort-column-{index}"),
-                        "Sort column",
-                        current.map_or("Column", |current| labels[current].as_str()),
-                        &labels,
-                        SELECT_WIDTH * 0.6,
-                    ) {
-                        view.sort[index].column_id = dataset.columns[picked].id.clone();
-                    }
-                    let direction =
-                        usize::from(view.sort[index].direction == SortDirection::Descending);
-                    if let Some(picked) = select(
-                        ui,
-                        &format!("engineering-sort-direction-{index}"),
-                        "Sort direction",
-                        &directions[direction],
-                        &directions,
-                        SELECT_WIDTH * 0.5,
-                    ) {
-                        view.sort[index].direction = if picked == 0 {
-                            SortDirection::Ascending
-                        } else {
-                            SortDirection::Descending
-                        };
-                    }
-                    if Button::new("Remove").compact().show(ui).clicked() {
-                        remove_sort = Some(index);
-                    }
-                });
-            }
-            if view.sort.len() < dataset.columns.len() {
-                ui.horizontal(|ui| {
-                    row_label(ui, if view.sort.is_empty() { "Sort by" } else { "" });
-                    if Button::new("Add sort column").show(ui).clicked()
-                        && let Some(column) = dataset.columns.iter().find(|column| {
-                            !view.sort.iter().any(|rule| rule.column_id == column.id)
-                        })
-                    {
-                        view.sort.push(EngineeringSortRule {
-                            column_id: column.id.clone(),
-                            direction: SortDirection::Ascending,
-                        });
-                    }
-                });
-            }
+                    ui.add_space(SECTION_GAP * 2.0);
+                    ui.vertical(|ui| {
+                        heading_row(ui, "Sort", |_| ());
+                        let labels = dataset
+                            .columns
+                            .iter()
+                            .map(|column| column.label.clone())
+                            .collect::<Vec<_>>();
+                        let directions = ["Ascending".to_owned(), "Descending".to_owned()];
+                        for index in 0..view.sort.len() {
+                            ui.horizontal(|ui| {
+                                row_label(ui, if index == 0 { "Sort by" } else { "Then by" });
+                                let current = dataset
+                                    .columns
+                                    .iter()
+                                    .position(|column| column.id == view.sort[index].column_id);
+                                if let Some(picked) = select(
+                                    ui,
+                                    &format!("engineering-sort-column-{index}"),
+                                    "Sort column",
+                                    current.map_or("Column", |current| labels[current].as_str()),
+                                    &labels,
+                                    SELECT_WIDTH * 0.6,
+                                ) {
+                                    view.sort[index].column_id = dataset.columns[picked].id.clone();
+                                }
+                                let direction = usize::from(
+                                    view.sort[index].direction == SortDirection::Descending,
+                                );
+                                if let Some(picked) = select(
+                                    ui,
+                                    &format!("engineering-sort-direction-{index}"),
+                                    "Sort direction",
+                                    &directions[direction],
+                                    &directions,
+                                    SELECT_WIDTH * 0.5,
+                                ) {
+                                    view.sort[index].direction = if picked == 0 {
+                                        SortDirection::Ascending
+                                    } else {
+                                        SortDirection::Descending
+                                    };
+                                }
+                                if Button::new("Remove").compact().show(ui).clicked() {
+                                    remove_sort = Some(index);
+                                }
+                            });
+                        }
+                        if view.sort.len() < dataset.columns.len() {
+                            ui.horizontal(|ui| {
+                                row_label(ui, if view.sort.is_empty() { "Sort by" } else { "" });
+                                if Button::new("Add sort column").show(ui).clicked()
+                                    && let Some(column) = dataset.columns.iter().find(|column| {
+                                        !view.sort.iter().any(|rule| rule.column_id == column.id)
+                                    })
+                                {
+                                    view.sort.push(EngineeringSortRule {
+                                        column_id: column.id.clone(),
+                                        direction: SortDirection::Ascending,
+                                    });
+                                }
+                            });
+                        }
 
-            ui.add_space(SECTION_GAP);
-            heading_row(ui, "Filter", |_| ());
-            ui.horizontal(|ui| {
-                ui.set_min_height(tokens.metrics.ctl_h);
-                ui.checkbox(&mut view.show_filter_row, "Filter rows by column");
-            });
-            if view.show_filter_row {
-                ui.horizontal(|ui| {
-                    row_label(ui, "Match");
-                    let grammars =
-                        EngineeringFilterGrammar::ALL.map(|grammar| grammar.label().to_owned());
-                    let current = EngineeringFilterGrammar::ALL
-                        .iter()
-                        .position(|grammar| *grammar == view.filter_grammar)
-                        .unwrap_or(0);
-                    if let Some(picked) = select(
-                        ui,
-                        "engineering-filter-grammar",
-                        "Match",
-                        &grammars[current],
-                        &grammars,
-                        SELECT_WIDTH,
-                    ) {
-                        view.filter_grammar = EngineeringFilterGrammar::ALL[picked];
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
-                    ui.label(
+                        ui.add_space(SECTION_GAP);
+                        heading_row(ui, "Filter", |_| ());
+                        ui.horizontal(|ui| {
+                            ui.set_min_height(tokens.metrics.ctl_h);
+                            ui.checkbox(&mut view.show_filter_row, "Filter rows by column");
+                        });
+                        if view.show_filter_row {
+                            ui.horizontal(|ui| {
+                                row_label(ui, "Match");
+                                let grammars = EngineeringFilterGrammar::ALL
+                                    .map(|grammar| grammar.label().to_owned());
+                                let current = EngineeringFilterGrammar::ALL
+                                    .iter()
+                                    .position(|grammar| *grammar == view.filter_grammar)
+                                    .unwrap_or(0);
+                                if let Some(picked) = select(
+                                    ui,
+                                    "engineering-filter-grammar",
+                                    "Match",
+                                    &grammars[current],
+                                    &grammars,
+                                    SELECT_WIDTH,
+                                ) {
+                                    view.filter_grammar = EngineeringFilterGrammar::ALL[picked];
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add_space(LABEL_WIDTH + ui.spacing().item_spacing.x);
+                                ui.label(
                     RichText::new(match view.filter_grammar {
                         EngineeringFilterGrammar::EngineeringValues => {
                             "Compare with engineering suffixes: >= 10k, 1p..5p."
@@ -1462,21 +1507,23 @@ fn manager_body(
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                     .color(tokens.color.text_dim),
                 );
-                });
-                for column in &dataset.columns {
-                    ui.horizontal(|ui| {
-                        row_label(ui, &column.label);
-                        ui.add_sized(
-                            [SELECT_WIDTH, tokens.metrics.ctl_h],
-                            TextEdit::singleline(
-                                view.filters.entry(column.id.clone()).or_default(),
-                            ),
-                        );
+                            });
+                            for column in &dataset.columns {
+                                ui.horizontal(|ui| {
+                                    row_label(ui, &column.label);
+                                    ui.add_sized(
+                                        [SELECT_WIDTH, tokens.metrics.ctl_h],
+                                        TextEdit::singleline(
+                                            view.filters.entry(column.id.clone()).or_default(),
+                                        ),
+                                    );
+                                });
+                            }
+                        }
                     });
-                }
-            }
-        });
-    });
+                });
+            });
+    }
     if let Some((from, to)) = move_column {
         let column = view.columns.remove(from);
         view.columns.insert(to, column);
@@ -1510,24 +1557,103 @@ fn manager_body(
         (_, _, Some(reorder)) => action = Some(reorder),
         _ => {}
     }
-    let grid_action = if pin_table {
-        symbol_pins::pin_grid(ui, &projection, state)
+    // The rows take the height left, less a line for a refusal under them.
+    let error_line = if state.error.is_some() {
+        tokens.metrics.ctl_h + ui.spacing().item_spacing.y
     } else {
-        engineering_grid_preview(
-            ui,
-            &projection,
-            &mut state.selected_row_ids,
-            &mut state.active_cell,
-            &mut state.focus_cell,
-        )
+        0.0
     };
-    if let Some(grid_action) = grid_action {
-        return Some(grid_action);
-    }
+    let height = ui.available_height() - error_line;
+    let grid_action = if pin_table {
+        symbol_pins::pin_grid(ui, &projection, state, height)
+    } else {
+        object_cells::object_grid(ui, &projection, state, read_only, height)
+    };
     if let Some(error) = &state.error {
         ui.colored_label(tokens.color.err, error);
     }
-    action
+    grid_action.or(action)
+}
+
+/// What the folded set-up holds while it is closed: how many columns show,
+/// and whether the rows are sorted or filtered.
+fn setup_summary(dataset: &EngineeringDataset, view: &EngineeringTableView) -> String {
+    let shown = view.columns.iter().filter(|column| column.visible).count();
+    let mut summary = format!("{shown} of {} columns", dataset.columns.len());
+    if let Some(label) = view.sort.first().and_then(|rule| {
+        dataset
+            .columns
+            .iter()
+            .find(|column| column.id == rule.column_id)
+            .map(|column| column.label.as_str())
+    }) {
+        summary.push_str(&format!(", sorted by {label}"));
+    }
+    if view.show_filter_row && view.filters.values().any(|text| !text.trim().is_empty()) {
+        summary.push_str(", filtered");
+    }
+    summary
+}
+
+/// The fold the columns, sort and filter sit in: a row that opens and
+/// closes it, naming what it holds and, beside that, what is set.
+fn setup_fold(ui: &mut Ui, open: &mut bool, summary: &str) {
+    const TITLE: &str = "Columns, sort and filter";
+    let tokens = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), tokens.metrics.ctl_h),
+        egui::Sense::click(),
+    );
+    if response.clicked() {
+        *open = !*open;
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, ui.is_enabled(), TITLE)
+    });
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_expanded(*open));
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 2.0, tokens.color.bg_hover);
+    }
+    let chevron = if *open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    chevron.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 10.0, rect.center().y),
+            Vec2::splat(16.0),
+        ),
+        tokens.color.text_dim,
+    );
+    let title = ui.painter().layout_no_wrap(
+        TITLE.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        tokens.color.text_faint,
+    );
+    let title_left = rect.left() + 24.0;
+    let title_width = title.size().x;
+    ui.painter().galley(
+        egui::pos2(title_left, rect.center().y - title.size().y * 0.5),
+        title,
+        tokens.color.text_faint,
+    );
+    let detail = ui.painter().layout_no_wrap(
+        summary.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        tokens.color.text_dim,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            title_left + title_width + 12.0,
+            rect.center().y - detail.size().y * 0.5,
+        ),
+        detail,
+        tokens.color.text_dim,
+    );
+    theme::paint_focus_ring(ui, &response, rect);
 }
 
 /// A row's label, on the manager's one label column.
@@ -1688,190 +1814,6 @@ fn table_cell(ui: &mut Ui, size: Vec2, text: &str, kind: TableCell) -> egui::Res
         color,
     );
     response
-}
-
-fn engineering_grid_preview(
-    ui: &mut Ui,
-    projection: &crate::state::engineering_table::EngineeringProjection,
-    selected_rows: &mut std::collections::BTreeSet<String>,
-    active_cell: &mut Option<(usize, usize)>,
-    focus_cell: &mut Option<(usize, usize)>,
-) -> Option<BodyAction> {
-    let tokens = Tokens::get(ui.ctx());
-    if projection.rows.is_empty() {
-        ui.label(RichText::new("No row matches the filters.").color(tokens.color.text_dim));
-        return None;
-    }
-
-    const CHECK_WIDTH: f32 = 28.0;
-    const GAP: f32 = 8.0;
-    const CELL_HEIGHT: f32 = 24.0;
-    const ROW_STRIDE: f32 = 28.0;
-    const SHOWN_ROWS: f32 = 6.0;
-    let headings = projection
-        .columns
-        .iter()
-        .map(|column| {
-            column.unit.as_ref().map_or_else(
-                || column.label.clone(),
-                |unit| format!("{} [{}]", column.label, unit),
-            )
-        })
-        .collect::<Vec<_>>();
-    // On touch the manager's controls fill the dialog's height above the
-    // table, so a scroller of the table's own showed one row inside the
-    // body's scroller. There the rows lie in the body, and the body's one
-    // scroller reaches them all.
-    let rows_scroll = !tokens.metrics.is_touch();
-    // The rows' scroll bar has a gutter of its own at the table's right: the
-    // columns stop short of it rather than run under the bar.
-    let gutter = if rows_scroll {
-        ui.spacing().scroll.allocated_width() + GAP
-    } else {
-        0.0
-    };
-    let room = (ui.available_width() - CHECK_WIDTH - GAP * headings.len() as f32 - gutter).max(0.0);
-    let column_widths = content_column_widths(ui, projection, &headings, room);
-    let mut action = None;
-    Grid::new("engineering-table-preview-grid")
-        .min_col_width(0.0)
-        .spacing(Vec2::new(GAP, 4.0))
-        .show(ui, |ui| {
-            ui.allocate_exact_size(Vec2::new(CHECK_WIDTH, CELL_HEIGHT), egui::Sense::hover());
-            for (heading, width) in headings.iter().zip(&column_widths) {
-                table_cell(
-                    ui,
-                    Vec2::new(*width, CELL_HEIGHT),
-                    heading,
-                    TableCell::Heading,
-                )
-                .on_hover_text(heading.as_str());
-            }
-            ui.end_row();
-        });
-    let mut rows = |ui: &mut Ui, visible: std::ops::Range<usize>| {
-        Grid::new("engineering-table-preview-rows")
-            .striped(true)
-            .min_col_width(0.0)
-            .spacing(Vec2::new(8.0, 4.0))
-            .show(ui, |ui| {
-                for row_index in visible {
-                    let row = &projection.rows[row_index];
-                    let mut selected = selected_rows.contains(&row.stable_id);
-                    let selected_response = ui
-                        .allocate_ui_with_layout(
-                            Vec2::new(CHECK_WIDTH, CELL_HEIGHT),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.set_min_size(Vec2::new(CHECK_WIDTH, CELL_HEIGHT));
-                                ui.checkbox(&mut selected, "")
-                            },
-                        )
-                        .inner
-                        .on_hover_text("Select row for copy or export");
-                    if selected_response.changed() {
-                        if selected {
-                            selected_rows.insert(row.stable_id.clone());
-                        } else {
-                            selected_rows.remove(&row.stable_id);
-                        }
-                    }
-                    for (column_index, (column, width)) in
-                        projection.columns.iter().zip(&column_widths).enumerate()
-                    {
-                        let selected_cell = *active_cell == Some((row_index, column_index));
-                        let text = row
-                            .cells
-                            .get(&column.id)
-                            .map(|cell| cell.display.as_str())
-                            .unwrap_or_default();
-                        let response = table_cell(
-                            ui,
-                            Vec2::new(*width, CELL_HEIGHT),
-                            text,
-                            TableCell::Value {
-                                active: selected_cell,
-                            },
-                        )
-                        .on_hover_text(text);
-                        if *focus_cell == Some((row_index, column_index)) {
-                            response.request_focus();
-                            *focus_cell = None;
-                        }
-                        if response.clicked() {
-                            *active_cell = Some((row_index, column_index));
-                            response.request_focus();
-                        }
-                        if response.has_focus() {
-                            let modifiers = ui.input(|input| input.modifiers);
-                            let move_to = ui.input(|input| {
-                                if input.key_pressed(egui::Key::ArrowLeft) {
-                                    Some((row_index, column_index.saturating_sub(1)))
-                                } else if input.key_pressed(egui::Key::ArrowRight) {
-                                    Some((
-                                        row_index,
-                                        (column_index + 1)
-                                            .min(projection.columns.len().saturating_sub(1)),
-                                    ))
-                                } else if input.key_pressed(egui::Key::ArrowUp) {
-                                    Some((row_index.saturating_sub(1), column_index))
-                                } else if input.key_pressed(egui::Key::ArrowDown) {
-                                    Some((
-                                        (row_index + 1)
-                                            .min(projection.rows.len().saturating_sub(1)),
-                                        column_index,
-                                    ))
-                                } else if input.key_pressed(egui::Key::Home) {
-                                    Some((if modifiers.ctrl { 0 } else { row_index }, 0))
-                                } else if input.key_pressed(egui::Key::End) {
-                                    Some((
-                                        if modifiers.ctrl {
-                                            projection.rows.len().saturating_sub(1)
-                                        } else {
-                                            row_index
-                                        },
-                                        projection.columns.len().saturating_sub(1),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            });
-                            if let Some(target) = move_to {
-                                *active_cell = Some(target);
-                                *focus_cell = Some(target);
-                            }
-                            if modifiers.shift
-                                && ui.input(|input| input.key_pressed(egui::Key::Space))
-                                && !selected_rows.insert(row.stable_id.clone())
-                            {
-                                selected_rows.remove(&row.stable_id);
-                            }
-                            if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                                action = Some(BodyAction::OpenDetails(row.stable_id.clone()));
-                            }
-                            if modifiers.command
-                                && ui.input(|input| input.key_pressed(egui::Key::C))
-                            {
-                                action = Some(BodyAction::Copy);
-                            }
-                        }
-                    }
-                    ui.end_row();
-                }
-            });
-    };
-    if rows_scroll {
-        ScrollArea::vertical()
-            .id_salt("engineering-table-preview-vertical")
-            .max_height(ROW_STRIDE * SHOWN_ROWS)
-            .auto_shrink([false, true])
-            .show_rows(ui, ROW_STRIDE, projection.rows.len(), |ui, visible| {
-                rows(ui, visible);
-            });
-    } else {
-        rows(ui, 0..projection.rows.len());
-    }
-    action
 }
 
 /// Width of a saved view's name on the saved views list.
@@ -2065,6 +2007,7 @@ pub mod tests {
         symbol: &'a mut crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
         platform: &'a mut PlatformState,
         workbench: &'a mut WorkbenchSession,
+        registry: &'a crate::properties::PropertyEditorSchema,
     ) -> EngineeringTable<'a> {
         EngineeringTable {
             dialog,
@@ -2073,6 +2016,7 @@ pub mod tests {
             symbol,
             platform,
             workbench,
+            registry,
         }
     }
 
@@ -2103,6 +2047,232 @@ pub mod tests {
                 .grid_id,
             crate::state::engineering_table::ACTIVE_SCHEMATIC_GRID_ID
         );
+    }
+
+    /// Three 1k resistors, R1 to R3, in a host with a project open, and the
+    /// table open on them.
+    #[cfg(test)]
+    fn three_resistors() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
+        state.model.project_open.set_from_lifecycle(true);
+        for (id, name) in [(1, "R1"), (2, "R2"), (3, "R3")] {
+            let mut part = crate::state::Component::new(
+                id,
+                ComponentType::Resistor,
+                Point::new(id as i32 * 100, 0),
+            );
+            part.name = name.to_owned();
+            part.value = "1k".to_owned();
+            state
+                .model
+                .schematic
+                .document_mut_for_test()
+                .components
+                .push(part);
+        }
+        state.model.schematic.init_undo_history();
+        assert!(open_engineering_table_dialog(
+            &mut state.design.engineering_table,
+            &state.design.engineering_table_views,
+            &state.model
+        ));
+        state
+    }
+
+    /// Keep `text` in the cell of `row` and `column`, with `rows` selected,
+    /// as the table does when Enter or a click away leaves the cell.
+    #[cfg(test)]
+    fn keep_cell(state: &mut DesignTestHost, rows: &[u64], row: u64, column: &str, text: &str) {
+        let edit = object_cells::ObjectCellEdit {
+            rows: rows.iter().map(|id| format!("component-{id}")).collect(),
+            row: format!("component-{row}"),
+            column: column.to_owned(),
+            text: text.to_owned(),
+            begun: true,
+        };
+        let mut platform = PlatformState::default();
+        let design = &mut *state.design;
+        table(
+            &mut design.engineering_table,
+            &mut design.engineering_table_views,
+            &mut state.model,
+            &mut design.symbol,
+            &mut platform,
+            &mut state.workbench,
+            &design.property_registry,
+        )
+        .edit_object_cells(edit);
+    }
+
+    #[cfg(test)]
+    fn part(state: &DesignTestHost, id: u64) -> crate::state::Component {
+        state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .cloned()
+            .expect("the part is there")
+    }
+
+    /// A value typed in a selected row's cell is set on every selected part,
+    /// by the inspector's rules (resistor code is kept as the number it
+    /// means), reads back in the inspector's field, and one Undo takes it
+    /// back from every part.
+    #[test]
+    fn a_value_cell_sets_every_selected_part_and_undoes_in_one_step() {
+        let mut state = three_resistors();
+        keep_cell(&mut state, &[1, 2], 1, "value", "4k7");
+
+        assert_eq!(state.design.engineering_table.error, None);
+        for id in [1, 2] {
+            assert_eq!(
+                crate::workbench::design::inspector::inline_instance::field_value(
+                    &part(&state, id),
+                    &crate::workbench::state::InlineEditField::Value
+                ),
+                "4.7k"
+            );
+        }
+        assert_eq!(part(&state, 3).value, "1k", "R3 was not selected");
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .components
+                .contains(&1)
+        );
+
+        assert!(state.model.schematic.undo());
+        assert_eq!(part(&state, 1).value, "1k");
+        assert_eq!(part(&state, 2).value, "1k");
+        assert!(!state.model.schematic.can_undo(), "the edit was one step");
+    }
+
+    /// A value the inspector refuses is refused at its cell with the
+    /// inspector's own reason, the part named when several were selected;
+    /// nothing is written and the cell opens again on the refused text.
+    #[test]
+    fn a_refused_cell_names_the_inspectors_reason_and_writes_nothing() {
+        let mut state = three_resistors();
+        let inspector = crate::workbench::design::inspector::inline_instance::prepare_field_edit(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &part(&state, 1),
+            &crate::workbench::state::InlineEditField::Value,
+            "1k+",
+        )
+        .expect_err("the inspector refuses 1k+");
+
+        keep_cell(&mut state, &[1], 1, "value", "1k+");
+        assert_eq!(
+            state.design.engineering_table.error.as_deref(),
+            Some(inspector.as_str())
+        );
+        let reopened = state
+            .design
+            .engineering_table
+            .object_edit
+            .clone()
+            .expect("the cell opens again");
+        assert_eq!(reopened.text, "1k+");
+        assert_eq!(reopened.column, "value");
+
+        keep_cell(&mut state, &[1, 2], 2, "value", "1k+");
+        assert_eq!(
+            state.design.engineering_table.error.as_deref(),
+            Some(format!("R1: {inspector}").as_str())
+        );
+        assert_eq!(part(&state, 1).value, "1k");
+        assert_eq!(part(&state, 2).value, "1k");
+        assert!(!state.model.schematic.can_undo());
+    }
+
+    /// A parameters line is held to the part's property sheet one parameter
+    /// at a time, as the inspector's rows hold it.
+    #[test]
+    fn a_parameters_cell_holds_each_parameter_to_its_sheet() {
+        let mut state = three_resistors();
+        keep_cell(&mut state, &[1], 1, "parameters", "noisy=maybe");
+        let refusal = state
+            .design
+            .engineering_table
+            .error
+            .clone()
+            .expect("noisy takes yes or no");
+        assert!(refusal.starts_with("noisy: "), "was {refusal}");
+        assert_eq!(part(&state, 1).params, "");
+
+        let inspector = crate::workbench::design::inspector::inline_instance::prepare_field_edit(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &part(&state, 1),
+            &crate::workbench::state::InlineEditField::Parameter("noisy".to_owned()),
+            "yes",
+        )
+        .expect("the inspector takes yes");
+        keep_cell(&mut state, &[1], 1, "parameters", "noisy=yes");
+        assert_eq!(state.design.engineering_table.error, None);
+        assert_eq!(
+            part(&state, 1).params,
+            inspector.params,
+            "stored as the inspector stores it"
+        );
+    }
+
+    /// A name is one part's: the name cell renames its own row whatever
+    /// else is selected, and a name another part has is refused for the
+    /// inspector's reason.
+    #[test]
+    fn a_name_cell_renames_its_own_part_alone() {
+        let mut state = three_resistors();
+        keep_cell(&mut state, &[1, 2], 1, "identifier", "R10");
+        assert_eq!(state.design.engineering_table.error, None);
+        assert_eq!(part(&state, 1).name, "R10");
+        assert_eq!(part(&state, 2).name, "R2");
+
+        keep_cell(&mut state, &[2], 2, "identifier", "r3");
+        let refusal = state
+            .design
+            .engineering_table
+            .error
+            .clone()
+            .expect("R3 is taken");
+        assert!(refusal.contains("already exists"), "was {refusal}");
+        assert_eq!(part(&state, 2).name, "R2");
+    }
+
+    /// The purchasing fields are columns of their own, left out of a new
+    /// view until ticked, and a cell of one sets that field on every
+    /// selected part.
+    #[test]
+    fn a_purchasing_field_is_a_column_whose_cells_set_every_selected_part() {
+        let mut state = three_resistors();
+        let draft = state
+            .design
+            .engineering_table
+            .draft
+            .clone()
+            .expect("the table has a view");
+        let mpn = draft
+            .columns
+            .iter()
+            .find(|column| column.column_id == "bom_mpn")
+            .expect("MPN is a column");
+        assert!(!mpn.visible, "a purchasing field is ticked in to show");
+
+        keep_cell(&mut state, &[2, 3], 3, "bom_mpn", " RC0603FR-074K7L ");
+        assert_eq!(state.design.engineering_table.error, None);
+        assert_eq!(part(&state, 1).bom.mpn, "");
+        assert_eq!(part(&state, 2).bom.mpn, "RC0603FR-074K7L");
+        assert_eq!(part(&state, 3).bom.mpn, "RC0603FR-074K7L");
     }
 
     /// Exporting the table again to the file it was exported to replaces

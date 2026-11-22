@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 pub use rspice_results::engineering_table::*;
 
+use rspice_design::schematic::bom::BomField;
 use rspice_design::symbol::SymbolDocument;
 use rspice_schematic_editor::symbol_editor::pin_table::{PIN_TABLE_GRID_ID, PinTableColumn};
 
@@ -29,7 +30,18 @@ pub fn active_schematic_dataset(schematic: &SchematicState) -> EngineeringDatase
         unit: unit.map(str::to_owned),
         identifier,
         numeric: matches!(id, "x" | "y"),
+        hidden_by_default: false,
     })
+    // A part's purchasing fields, each a column of its own under the key
+    // its property row has, left out of a view until ticked.
+    .chain(BomField::ALL.into_iter().map(|field| EngineeringColumn {
+        id: field.key().to_owned(),
+        label: field.label().to_owned(),
+        unit: None,
+        identifier: false,
+        numeric: false,
+        hidden_by_default: true,
+    }))
     .collect::<Vec<_>>();
     let mut rows = Vec::with_capacity(
         schematic.document().components.len()
@@ -80,6 +92,12 @@ pub fn active_schematic_dataset(schematic: &SchematicState) -> EngineeringDatase
             "owner".to_owned(),
             EngineeringCell::text("Active schematic"),
         );
+        for field in BomField::ALL {
+            cells.insert(
+                field.key().to_owned(),
+                EngineeringCell::text(component.bom.get(field)),
+            );
+        }
         rows.push(EngineeringRow {
             stable_id: format!("component-{}", component.id),
             cells,
@@ -185,6 +203,7 @@ pub fn symbol_pin_dataset(document: &SymbolDocument, source_revision: u64) -> En
             unit: column.unit().map(str::to_owned),
             identifier: column == PinTableColumn::Name,
             numeric: column.numeric(),
+            hidden_by_default: false,
         })
         .collect();
     let rows = (0..document.pins.len())

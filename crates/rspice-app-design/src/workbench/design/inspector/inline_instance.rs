@@ -91,6 +91,28 @@ pub fn prepare_field_edit(
     field: &InlineEditField,
     source: &str,
 ) -> Result<Component, String> {
+    prepare_field_edit_with(
+        &design.property_registry,
+        model,
+        wb,
+        component,
+        field,
+        source,
+    )
+}
+
+/// [`prepare_field_edit`] over the property sheets alone, for a surface
+/// that edits the inspector's fields away from the inspector, such as the
+/// Object table: its values pass the same gate and are refused for the same
+/// reasons.
+pub fn prepare_field_edit_with(
+    registry: &crate::properties::PropertyEditorSchema,
+    model: &Model,
+    wb: &WorkbenchSession,
+    component: &Component,
+    field: &InlineEditField,
+    source: &str,
+) -> Result<Component, String> {
     let mut authored = source.to_owned();
     let mut typed_value = None;
     // The part's value is its sheet's primary property, and is held to that
@@ -99,9 +121,7 @@ pub fn prepare_field_edit(
     let key = field_property(field, component);
     if let Some(key) = key
         && let Some(sheet) = crate::workbench::app::authoritative_component_property_sheet(
-            &design.property_registry,
-            model,
-            component,
+            registry, model, component,
         )?
         && let Some(definition) = sheet.get(key)
     {
@@ -134,7 +154,7 @@ pub fn prepare_field_edit(
     }
     let candidate = edited_component(component, field, &authored)?;
     if let Some(refusal) =
-        source_contract_rejection(design, &candidate, field, typed_value.as_ref())
+        source_contract_rejection(registry, &candidate, field, typed_value.as_ref())
     {
         return Err(refusal);
     }
@@ -173,22 +193,20 @@ pub fn prepare_field_edit(
 /// `edited_component` preparation the commit uses, so the gate can never judge a string the
 /// commit would not have written.
 fn source_contract_rejection(
-    design: &DesignState,
+    registry: &crate::properties::PropertyEditorSchema,
     component: &Component,
     field: &InlineEditField,
     typed_value: Option<&PropertyValue>,
 ) -> Option<String> {
-    let sheet = design.property_registry.get(component.kind)?;
+    let sheet = registry.get(component.kind)?;
     if matches!(field, InlineEditField::Instance) {
         // The reference designator is not a waveform field, and re-reading the
         // contract on a rename would refuse a rename for a value the rename
         // did not touch.
         return None;
     }
-    let mut values = crate::properties::property_bridge::collect_properties_from_component(
-        component,
-        &design.property_registry,
-    );
+    let mut values =
+        crate::properties::property_bridge::collect_properties_from_component(component, registry);
     // The edited field is presented as the *typed* value it commits as, which
     // is what the modal editor's own commit hands the gate. Without this the
     // gate saw the raw parameter text, and the waveform rules read that with a
@@ -473,7 +491,7 @@ fn restore_edit_focus(ctx: &egui::Context, cx: &Cx<'_, DesignFeature>) {
     }
 }
 
-pub(super) fn edit_description(field: &InlineEditField) -> String {
+pub fn edit_description(field: &InlineEditField) -> String {
     match field {
         InlineEditField::Instance => "rename instance".to_owned(),
         InlineEditField::Value => "edit instance value".to_owned(),

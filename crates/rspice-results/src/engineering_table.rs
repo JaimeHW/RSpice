@@ -142,7 +142,7 @@ impl EngineeringTableView {
                 .enumerate()
                 .map(|(index, column)| EngineeringColumnView {
                     column_id: column.id.clone(),
-                    visible: true,
+                    visible: !column.hidden_by_default,
                     pinned: index == 0,
                     width: if index == 0 { 160 } else { 120 },
                 })
@@ -174,7 +174,7 @@ impl EngineeringTableView {
             if !retained.contains(&column.id) {
                 self.columns.push(EngineeringColumnView {
                     column_id: column.id.clone(),
-                    visible: true,
+                    visible: !column.hidden_by_default,
                     pinned: index == 0,
                     width: if index == 0 { 160 } else { 120 },
                 });
@@ -464,6 +464,9 @@ pub struct EngineeringColumn {
     pub identifier: bool,
     /// Logical numeric type, retained even when a projection has no values.
     pub numeric: bool,
+    /// Left out of a new view until the reader ticks it: a column most
+    /// readers never need, which would otherwise take a share of the width.
+    pub hidden_by_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
