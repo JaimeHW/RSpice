@@ -306,6 +306,13 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         self.results.eye_timebase_for(owner)
     }
 
+    fn eye_fold_for(
+        &self,
+        owner: crate::state::SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        self.results.eye_fold_for(owner)
+    }
+
     fn displayed_dataset_view(
         &self,
         model: &crate::workbench::app_state::Model,

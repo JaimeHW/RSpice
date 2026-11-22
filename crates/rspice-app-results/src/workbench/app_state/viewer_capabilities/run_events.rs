@@ -89,6 +89,14 @@ impl ResultsReads<'_> {
     pub fn eye_timebase_for(self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.results.eye_timebase_for(owner)
     }
+
+    /// What folds this result's eye.
+    pub fn eye_fold_for(
+        self,
+        owner: SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        self.results.eye_fold_for(owner)
+    }
 }
 
 /// Whether a saved signal is a node voltage, `V(…)`.
@@ -112,6 +120,13 @@ impl ViewerHost for ResultsParts<'_> {
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.results_reads().eye_timebase_for(owner)
+    }
+
+    fn eye_fold_for(
+        &self,
+        owner: SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        self.results_reads().eye_fold_for(owner)
     }
 }
 

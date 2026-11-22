@@ -1,5 +1,5 @@
-//! EYE — density-rendered eye diagram with the compliance mask, measured
-//! metrics in the right panel.
+//! EYE — density-rendered eye diagram with the compliance mask and the
+//! bathtub under it, measured metrics in the right panel.
 //!
 //! Acquisitions are folded segments of the active transient (built by the
 //! eye pipeline). They are rasterized once per data revision into an
@@ -10,15 +10,15 @@
 use egui::Ui;
 
 use super::EyeDiagramState;
-use crate::eye_diagram::{
-    EyeData, EyeRateEditor, EyeTimebase, EyeTimebaseProvenance, parse_eye_timebase,
-};
-use crate::presentation::PlotView;
+use crate::eye_diagram::{BerEstimate, EyeData, EyeMeasurements, EyeTimebaseProvenance};
+use crate::fft::view::columns::{Fitting, fitted};
+use crate::presentation::{DECIBEL_PLACES, PlotView, fixed_places};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_signed, fmt_si_significant};
-use rspice_ui_kit::theme::{self, FontWeight};
-use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::chip;
+use rspice_ui_kit::plot::{
+    self, Axis, DrawMode, LimitLine, PlotSpec, Trace, XScale, fmt_si_significant,
+};
+use rspice_ui_kit::tokens::Tokens;
+use rspice_ui_kit::widgets::table::{Align, Cell, DataTable};
 
 use crate::presentation::well_hint;
 use crate::strip::{self, LegendChip};
@@ -52,126 +52,6 @@ impl std::fmt::Debug for EyeTexture {
 pub struct EyeViewResponse {
     pub plot: Option<plot::PlotResponse>,
     pub density_baked: bool,
-}
-
-// ---------------------------------------------------------------------------
-// timebase control
-// ---------------------------------------------------------------------------
-
-/// EYE docbar controls: the compliance mask, and what the eye folds at.
-pub fn inline_actions(
-    ui: &mut Ui,
-    eye: &mut EyeDiagramState,
-    timebase: Option<EyeTimebase>,
-    significant_digits: usize,
-) -> Option<EyeTimebase> {
-    let mut requested = None;
-    let mask_on = eye.show_mask;
-    let mask_response = chip(ui, "mask", mask_on).on_hover_text(if mask_on {
-        "Compliance mask on — tested against the loaded acquisitions"
-    } else {
-        "Compliance mask off — click to test the loaded acquisitions against it"
-    });
-    mask_response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, true, mask_on, "mask")
-    });
-    if mask_response.clicked() {
-        // Toggling runs the test now, against what is loaded now. Latching
-        // the verdict at load time is how an untested mask reads as a pass.
-        eye.set_show_mask(!mask_on);
-    }
-
-    let Some(timebase) = timebase else {
-        return requested;
-    };
-    let editing = eye.rate_editor.is_some();
-    let label = match timebase {
-        EyeTimebase::Auto => "auto".to_owned(),
-        EyeTimebase::Explicit { unit_interval } => {
-            fmt_si_significant(unit_interval, "s", significant_digits)
-        }
-    };
-    let rate_response = chip(ui, &label, editing).on_hover_text(match timebase {
-        EyeTimebase::Auto => "Bit period recovered from the waveform — click to set it",
-        EyeTimebase::Explicit { .. } => "Bit period set by you — click to change it",
-    });
-    rate_response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, true, editing, label.as_str())
-    });
-    if rate_response.clicked() {
-        eye.rate_editor = if editing {
-            None
-        } else {
-            Some(EyeRateEditor {
-                text: match timebase {
-                    EyeTimebase::Auto => String::new(),
-                    EyeTimebase::Explicit { unit_interval } => {
-                        fmt_si_significant(unit_interval, "s", significant_digits)
-                    }
-                },
-                error: None,
-                needs_focus: true,
-            })
-        };
-    }
-
-    // Take the editor for the frame so commit and cancel can replace it.
-    let mut editor = eye.rate_editor.take();
-    let mut commit = None;
-    if let Some(open) = editor.as_mut() {
-        let field = ui.add(
-            egui::TextEdit::singleline(&mut open.text)
-                .desired_width(96.0)
-                .font(theme::field_mono())
-                .hint_text("2.5G · 400p"),
-        );
-        if open.needs_focus {
-            field.request_focus();
-            open.needs_focus = false;
-        }
-        let escaped = field.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
-        if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            commit = Some(open.text.clone());
-        }
-        if escaped {
-            editor = None;
-        }
-        if let Some(open) = editor.as_ref()
-            && let Some(message) = open.error.as_deref()
-        {
-            ui.label(
-                egui::RichText::new(message)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(Tokens::get(ui.ctx()).color.err),
-            );
-        }
-    }
-    if let Some(text) = commit {
-        match parse_eye_timebase(&text) {
-            Ok(unit_interval) => {
-                requested = Some(EyeTimebase::Explicit { unit_interval });
-                editor = None;
-            }
-            Err(message) => {
-                editor = Some(EyeRateEditor {
-                    text,
-                    error: Some(message),
-                    needs_focus: false,
-                });
-            }
-        }
-    }
-    eye.rate_editor = editor;
-
-    if matches!(timebase, EyeTimebase::Explicit { .. })
-        && chip(ui, "auto", false)
-            .on_hover_text("Go back to recovering the bit period from the waveform")
-            .clicked()
-    {
-        requested = Some(EyeTimebase::Auto);
-        eye.rate_editor = None;
-    }
-    requested
 }
 
 /// What to tell the reader when no eye could be folded.
@@ -229,7 +109,18 @@ fn timebase_summary(eye: &EyeDiagramState, significant_digits: usize) -> String 
             rate(1.0 / unit_interval),
             if *incoherent { INCOHERENT_NOTE } else { "" },
         ),
-        Some(EyeTimebaseProvenance::AutoRejected(_) | EyeTimebaseProvenance::Unreadable(_))
+        Some(EyeTimebaseProvenance::Triggered {
+            unit_interval,
+            edge_count,
+        }) => format!(
+            "clock signal · {} · {edge_count} edges",
+            period(*unit_interval)
+        ),
+        Some(
+            EyeTimebaseProvenance::AutoRejected(_)
+            | EyeTimebaseProvenance::ClockRejected(_)
+            | EyeTimebaseProvenance::Unreadable(_),
+        )
         | None => rate(eye.data.data_rate),
     }
 }
@@ -238,7 +129,19 @@ fn timebase_summary(eye: &EyeDiagramState, significant_digits: usize) -> String 
 // center view
 // ---------------------------------------------------------------------------
 
-/// Render the eye.
+/// The share of the sheet's height the eye takes when the bathtub stands
+/// under it.
+const EYE_SHARE: f32 = 0.64;
+/// The largest a density texture is on either side, in device pixels: the
+/// size every GPU is guaranteed to take.
+const MAX_TEXTURE_SIDE: f32 = 2048.0;
+/// Positions across the unit interval the bathtub's fitted curve is drawn
+/// through.
+const BATHTUB_CURVE_POINTS: usize = 201;
+/// The least error rate the bathtub's axis reaches.
+const BATHTUB_FLOOR: f64 = 1e-18;
+
+/// Render the eye, and the bathtub of its crossings under it.
 pub fn show(
     ui: &mut Ui,
     eye: &EyeDiagramState,
@@ -271,12 +174,7 @@ pub fn show(
         data.traces.len(),
         data.ui_count,
     );
-    let legend = [LegendChip {
-        name: "density",
-        color: c.traces[0],
-        on: true,
-    }];
-    strip::StripHeader::new("EYE", &subtitle, &legend)
+    strip::StripHeader::new("EYE", &subtitle, &[])
         .incomplete(incoherent.then_some(INCOHERENT_REASON))
         .show(ui);
 
@@ -295,13 +193,14 @@ pub fn show(
     } else {
         Axis::with_ticks(x0, x1, "UI", &half_ticks)
     };
-    let accessible_detail = if eye.mask.enabled {
+    let settings = eye.settings();
+    let show_mask = settings.show_mask;
+    let accessible_detail = if show_mask {
         format!(
-            "{} folded acquisitions; compliance mask {}; {} violations from {} tested samples",
+            "{} folded acquisitions; compliance mask; {} violations from {} tested samples",
             data.traces.len(),
-            if eye.show_mask { "visible" } else { "hidden" },
-            eye.mask.violation_count,
-            eye.mask.total_samples
+            settings.mask.violation_count,
+            settings.mask.total_samples
         )
     } else {
         format!(
@@ -311,86 +210,96 @@ pub fn show(
     };
     let mut spec = PlotSpec::new(x_axis, XScale::Linear, Axis::linear(y0, y1, "V"))
         .accessible_name("Eye diagram")
-        .accessible_detail(&accessible_detail);
+        .accessible_detail(&accessible_detail)
+        .with_significant_digits(significant_digits);
 
-    // Bake (or fetch) the density texture. The bake walks every acquisition
-    // once; frames just draw the quad.
-    //
-    // It is baked over the data's own extent rather than the current view, so
-    // panning and zooming re-map the same texture instead of re-walking every
-    // acquisition. Before, a drag rebaked on every frame of the gesture — the
-    // one moment where the cost is most visible. The texture is therefore
-    // keyed by the data revision, its resolution and its ink, and the draw
-    // below maps the reader's window onto it.
-    let plot_rect = plot::plot_rect(ui, &spec);
-    let tex_size = [
-        (plot_rect.width().round() as usize).max(8),
-        (plot_rect.height().round() as usize).max(8),
-    ];
-    let revision = eye.data_revision();
-    let trace_color = c.traces[0];
-    let extent = (0.0_f64, ui_count, auto_y0, auto_y1);
-    let extent_bits = [
-        extent.0.to_bits(),
-        extent.1.to_bits(),
-        extent.2.to_bits(),
-        extent.3.to_bits(),
-    ];
-    let needs_bake = match texture.as_ref() {
-        Some(tex) => {
-            tex.revision != revision
-                || tex.size != tex_size
-                || tex.color != trace_color
-                || tex.extent_bits != extent_bits
-        }
-        None => true,
+    let bathtub = &eye.measurements.bathtub;
+    let has_bathtub = !bathtub.measured.is_empty();
+    let eye_height = if has_bathtub {
+        (ui.available_height() * EYE_SHARE).round()
+    } else {
+        ui.available_height()
     };
-    if needs_bake {
-        out.density_baked = true;
-        let image = rasterize_density(
-            data,
-            extent.0,
-            extent.1,
-            extent.2,
-            extent.3,
-            tex_size,
-            trace_color,
-        );
-        let handle =
-            ui.ctx()
-                .load_texture("rspice.eye.density", image, egui::TextureOptions::LINEAR);
-        *texture = Some(EyeTexture {
-            revision,
-            size: tex_size,
-            color: trace_color,
-            extent_bits,
-            handle,
-        });
-    }
-    let texture_id = texture.as_ref().map(|tex| tex.handle.id());
-    let density_uv = density_uv(extent, (x0, x1), (y0, y1));
+    let width = ui.available_width();
+    ui.allocate_ui(egui::vec2(width, eye_height), |ui| {
+        // Bake (or fetch) the density texture. The bake walks every
+        // acquisition once; frames just draw the quad.
+        //
+        // It is baked over the data's own extent rather than the current
+        // view, so panning and zooming re-map the same texture instead of
+        // re-walking every acquisition. It is keyed by the data revision,
+        // its resolution and its ink, and sized to the plot's device pixels
+        // within the side every GPU takes.
+        let plot_rect = plot::plot_rect(ui, &spec);
+        let pixels = ui.ctx().pixels_per_point();
+        let side = |points: f32| (points * pixels).round().clamp(8.0, MAX_TEXTURE_SIDE) as usize;
+        let tex_size = [side(plot_rect.width()), side(plot_rect.height())];
+        let revision = eye.data_revision();
+        let trace_color = c.traces[0];
+        let extent = (0.0_f64, ui_count, auto_y0, auto_y1);
+        let extent_bits = [
+            extent.0.to_bits(),
+            extent.1.to_bits(),
+            extent.2.to_bits(),
+            extent.3.to_bits(),
+        ];
+        let needs_bake = match texture.as_ref() {
+            Some(tex) => {
+                tex.revision != revision
+                    || tex.size != tex_size
+                    || tex.color != trace_color
+                    || tex.extent_bits != extent_bits
+            }
+            None => true,
+        };
+        if needs_bake {
+            out.density_baked = true;
+            let image = rasterize_density(
+                data,
+                extent.0,
+                extent.1,
+                extent.2,
+                extent.3,
+                tex_size,
+                trace_color,
+            );
+            let handle =
+                ui.ctx()
+                    .load_texture("rspice.eye.density", image, egui::TextureOptions::LINEAR);
+            *texture = Some(EyeTexture {
+                revision,
+                size: tex_size,
+                color: trace_color,
+                extent_bits,
+                handle,
+            });
+        }
+        let texture_id = texture.as_ref().map(|tex| tex.handle.id());
+        let density_uv = density_uv(extent, (x0, x1), (y0, y1));
 
-    // Underlay: the density quad, then the mask above it.
-    let show_mask = eye.show_mask && eye.mask.enabled && !eye.mask.inner.points.is_empty();
-    let mask_fill = {
-        let [r, g, b, _] = c.err.to_array();
-        egui::Color32::from_rgba_unmultiplied(r, g, b, 26)
-    };
-    // The absolute mask mapped into display coordinates (unit intervals,
-    // volts): time is scaled by the UI ratio so the mask keeps its per-UI
-    // geometry at any data rate, voltage lands on the axis as stored.
-    let mask_points: Vec<(f64, f64)> = eye.mask.inner_in_ui_volts().points;
-    let err = c.err;
-    spec.underlay = Some(Box::new(move |painter, mapper| {
-        if let Some(texture_id) = texture_id {
-            painter.image(texture_id, mapper.rect, density_uv, egui::Color32::WHITE);
-        }
-        if show_mask {
+        // Underlay: the density quad, then the mask above it, placed on
+        // this eye's centre and threshold.
+        let mask_points: Vec<(f64, f64)> = if show_mask {
+            settings.mask.polygon(eye.mask_frame()).points
+        } else {
+            Vec::new()
+        };
+        let mask_fill = {
+            let [r, g, b, _] = c.err.to_array();
+            egui::Color32::from_rgba_unmultiplied(r, g, b, 26)
+        };
+        let err = c.err;
+        spec.underlay = Some(Box::new(move |painter, mapper| {
+            if let Some(texture_id) = texture_id {
+                painter.image(texture_id, mapper.rect, density_uv, egui::Color32::WHITE);
+            }
             let points: Vec<egui::Pos2> = mask_points
                 .iter()
                 .map(|&(t_ui, volts)| egui::pos2(mapper.x(t_ui), mapper.y(volts)))
                 .collect();
             if points.len() >= 3 {
+                // A custom mask need not be convex: its outline is what
+                // the test reads, and the fill is only a wash under it.
                 painter.add(egui::Shape::convex_polygon(
                     points.clone(),
                     mask_fill,
@@ -405,12 +314,109 @@ pub fn show(
                     4.0,
                 ));
             }
-        }
-    }));
+        }));
+        out.plot = Some(plot::show(ui, &spec, cache, None, None));
+    });
 
-    let response = plot::show(ui, &spec, cache, None, None);
-    out.plot = Some(response);
+    if has_bathtub {
+        show_bathtub(ui, eye, cache, significant_digits);
+    }
     out
+}
+
+/// The bathtub of the eye's crossings: the error rate against the sampling
+/// position across one unit interval from the crossing, the counted points
+/// apart from the fitted curve, with the opening read at the error rate the
+/// reader chose.
+fn show_bathtub(
+    ui: &mut Ui,
+    eye: &EyeDiagramState,
+    cache: &mut plot::DecimationCache,
+    significant_digits: usize,
+) {
+    let c = Tokens::get(ui.ctx()).color;
+    let bathtub = &eye.measurements.bathtub;
+    let rate = eye.settings().opening_ber;
+    let subtitle = bathtub_summary(&eye.measurements, rate, significant_digits);
+    strip::StripHeader::new(
+        "BATHTUB",
+        &subtitle,
+        &[
+            LegendChip {
+                name: "counted",
+                color: c.traces[0],
+                on: true,
+            },
+            LegendChip {
+                name: "fitted",
+                color: c.traces[1],
+                on: bathtub.fit.is_some(),
+            },
+        ],
+    )
+    .show(ui);
+
+    let floor = BATHTUB_FLOOR.min(rate / 1e3);
+    let (measured_x, measured_y): (Vec<f64>, Vec<f64>) = bathtub.measured.iter().copied().unzip();
+    let (fit_x, fit_y): (Vec<f64>, Vec<f64>) = bathtub
+        .fit
+        .as_ref()
+        .map(|fit| {
+            (0..BATHTUB_CURVE_POINTS)
+                .map(|step| {
+                    #[allow(clippy::cast_precision_loss)]
+                    let position = step as f64 / (BATHTUB_CURVE_POINTS - 1) as f64;
+                    (position, fit.ber_at(position).clamp(floor, 1.0))
+                })
+                .unzip()
+        })
+        .unwrap_or_default();
+    let mut spec = PlotSpec::new(
+        Axis::linear_with(0.0, 1.0, "UI", 6).with_label("Sampling phase from the crossing"),
+        XScale::Linear,
+        Axis::log_decades(floor, 1.0, ""),
+    )
+    .with_log_y()
+    .with_y_without_unit("BER")
+    .accessible_name("Bathtub")
+    .with_significant_digits(significant_digits);
+    if !fit_x.is_empty() {
+        spec.traces.push(Trace::new(&fit_x, &fit_y, c.traces[1]));
+    }
+    spec.traces.push(
+        Trace::new(&measured_x, &measured_y, c.traces[0])
+            .draw(DrawMode::Points)
+            .show_single_point(),
+    );
+    spec.limit_lines.push(LimitLine {
+        y: rate,
+        color: c.text_dim,
+        label: format!("{rate:e}"),
+    });
+    plot::show(ui, &spec, cache, None, None);
+}
+
+/// What the bathtub reads: the opening at the chosen rate and the jitter the
+/// fit separates, or why it draws only what it counted.
+fn bathtub_summary(m: &EyeMeasurements, rate: f64, significant_digits: usize) -> String {
+    let bathtub = &m.bathtub;
+    let Some(fit) = bathtub.fit.as_ref() else {
+        return format!(
+            "counted only · {} crossings, too few to extrapolate from",
+            bathtub.crossing_count
+        );
+    };
+    let seconds = |value: f64| fmt_si_significant(value, "s", significant_digits);
+    let opening = fit.opening(rate).map_or_else(
+        || "closed".to_owned(),
+        |opening| fmt_si_significant(opening, "UI", significant_digits),
+    );
+    format!(
+        "opening {opening} at {rate:e} · RJ {} rms · DJ {} · {} crossings",
+        seconds(fit.random_rms()),
+        seconds(fit.deterministic()),
+        fit.crossing_count,
+    )
 }
 
 /// Where the reader's window sits inside the baked density texture.
@@ -593,8 +599,8 @@ fn accumulate_line(
 
 /// Eye metrics + mask verdict.
 pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str, significant_digits: usize) {
+    section_header(ui, "Eye", None);
     if eye.data.traces.is_empty() {
-        section_header(ui, "Eye", None);
         crate::presentation::panel_note(
             ui,
             &unavailable_hint(eye, source).unwrap_or_else(|| {
@@ -603,97 +609,162 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str, significant
         );
         return;
     }
+    let rows = metric_rows(
+        &eye.measurements,
+        eye.settings().opening_ber,
+        significant_digits,
+    );
+    metrics_table(ui, "rspice.results.eye.metrics", &rows);
 
-    section_header(ui, "Eye", None);
-    let rows = metric_rows(&eye.measurements, significant_digits);
-    crate::presentation::stat_table(ui, &rows);
-
-    if eye.mask.enabled {
+    let settings = eye.settings();
+    if settings.show_mask {
         section_header(ui, "Mask", None);
-        let mask = &eye.mask;
+        let mask = &settings.mask;
         let rows = [
-            ("Template", mask.name.clone(), false),
             (
-                "Violations",
-                format!("{} / {}", mask.violation_count, mask.total_samples),
-                true,
+                "Violations".to_owned(),
+                format!("{} of {} samples", mask.violation_count, mask.total_samples),
             ),
             (
-                "Margin",
-                or_unmeasured(mask.margin, |value| {
-                    fmt_si_signed(value * 100.0, "%", significant_digits)
+                "Clearance".to_owned(),
+                or_unmeasured(mask.clearance, |value| {
+                    fmt_si_significant(value * 100.0, "%", significant_digits)
                 }),
-                true,
             ),
         ];
-        crate::presentation::stat_table(ui, &rows);
-        // The mask is stored in absolute units at its authoring rate; when
-        // the on-screen eye runs at a different rate, the mask time is
-        // scaled by the UI ratio (see `EyeMask::inner_in_ui_volts`) — say so.
-        let reference = mask.reference_data_rate;
-        let current = eye.data.data_rate;
-        if reference > 0.0 && (reference - current).abs() > reference * 1e-6 {
-            crate::presentation::panel_note(
-                ui,
-                &format!(
-                    "Mask authored at {} — time scaled to the current UI.",
-                    fmt_si_significant(reference, "b/s", significant_digits)
-                ),
-            );
-        }
+        metrics_table(ui, "rspice.results.eye.mask", &rows);
     }
 }
 
-/// The eye's figures at the reader's significant digits: a 1.49 V opening
-/// reads `1.49 V` and a 9.6 ps edge `9.6 ps`, never `1 V` and `10 ps`.
-fn metric_rows(
-    m: &super::EyeMeasurements,
-    significant_digits: usize,
-) -> [(&'static str, String, bool); 9] {
+/// A two-column table of named figures, flush in the details pane.
+fn metrics_table(ui: &mut Ui, id: &str, rows: &[(String, String)]) {
+    let columns = fitted(
+        ui,
+        vec![
+            Fitting {
+                head: "Measurement".to_owned(),
+                tooltip: None,
+                align: Align::Left,
+                cells: rows.iter().map(|row| (row.0.clone(), false)).collect(),
+            },
+            Fitting {
+                head: "Value".to_owned(),
+                tooltip: None,
+                align: Align::Right,
+                cells: rows.iter().map(|row| (row.1.clone(), true)).collect(),
+            },
+        ],
+    );
+    DataTable::new(id, &columns, rows.len()).show(ui, |index| {
+        vec![
+            Cell::text(rows[index].0.clone()),
+            Cell::number(rows[index].1.clone()),
+        ]
+    });
+}
+
+/// The eye's figures at the reader's significant digits, each in its unit:
+/// the levels and their spread, the opening, the edges, S/N, Q and the error
+/// rate it implies, and the jitter, measured and separated by the fit.
+fn metric_rows(m: &EyeMeasurements, rate: f64, significant_digits: usize) -> Vec<(String, String)> {
     let value = |value: f64, unit: &str| fmt_si_significant(value, unit, significant_digits);
-    [
-        (
-            "Unit interval",
-            format!(
-                "{} ({})",
-                value(m.unit_interval, "s"),
-                value(m.data_rate, "b/s")
-            ),
-            true,
+    let mut rows = vec![(
+        "Unit interval".to_owned(),
+        format!(
+            "{} ({})",
+            value(m.unit_interval, "s"),
+            value(m.data_rate, "b/s")
         ),
-        ("Eye height", value(m.eye_height, "V"), true),
-        ("Eye width", value(m.eye_width, "UI"), true),
-        ("Jitter rms", value(m.jitter_rms, "s"), false),
-        ("Jitter p-p", value(m.jitter_pp, "s"), false),
-        (
-            "Crossing",
+    )];
+    let two_level = m.levels.len() == 2;
+    for (index, level) in m.levels.iter().enumerate() {
+        let name = if two_level {
+            ["Zero level", "One level"][index].to_owned()
+        } else {
+            format!("Level {index}")
+        };
+        rows.push((name.clone(), value(level.mean, "V")));
+        rows.push((format!("{name} σ"), value(level.sigma, "V")));
+    }
+    rows.push((
+        "Amplitude".to_owned(),
+        or_unmeasured(m.amplitude, |amplitude| value(amplitude, "V")),
+    ));
+    if m.openings.len() > 1 {
+        for (index, opening) in m.openings.iter().enumerate() {
+            rows.push((
+                format!("Opening {index} height"),
+                value(opening.height, "V"),
+            ));
+            rows.push((format!("Opening {index} width"), value(opening.width, "UI")));
+        }
+    } else {
+        rows.push(("Eye height".to_owned(), value(m.eye_height, "V")));
+        rows.push(("Eye width".to_owned(), value(m.eye_width, "UI")));
+        rows.push((
+            "Crossing".to_owned(),
             or_unmeasured(m.crossing_percentage, |crossing| {
                 value(crossing * 100.0, "%")
             }),
-            false,
-        ),
-        (
-            "Rise 20–80",
-            or_unmeasured(m.rise_time, |rise| value(rise, "s")),
-            false,
-        ),
-        (
-            "Fall 80–20",
-            or_unmeasured(m.fall_time, |fall| value(fall, "s")),
-            false,
-        ),
-        (
-            "Q factor",
-            or_unmeasured(m.q_factor, |q| {
-                if q.is_infinite() {
-                    "∞".to_owned()
-                } else {
-                    value(q, "")
-                }
-            }),
-            false,
-        ),
-    ]
+        ));
+    }
+    rows.push((
+        "Rise 20–80".to_owned(),
+        or_unmeasured(m.rise_time, |rise| value(rise, "s")),
+    ));
+    rows.push((
+        "Fall 80–20".to_owned(),
+        or_unmeasured(m.fall_time, |fall| value(fall, "s")),
+    ));
+    rows.push((
+        "S/N".to_owned(),
+        or_unmeasured(m.snr_db, |snr| {
+            if snr.is_infinite() {
+                "∞".to_owned()
+            } else {
+                format!("{} dB", fixed_places(snr, DECIBEL_PLACES))
+            }
+        }),
+    ));
+    rows.push((
+        "Q factor".to_owned(),
+        or_unmeasured(m.q_factor, |q| {
+            if q.is_infinite() {
+                "∞".to_owned()
+            } else {
+                value(q, "")
+            }
+        }),
+    ));
+    rows.push((
+        "BER from Q".to_owned(),
+        match m.ber {
+            BerEstimate::FromQ(ber) => value(ber, ""),
+            BerEstimate::NoRandomNoise => "none: no random noise".to_owned(),
+            BerEstimate::Unmeasured => "—".to_owned(),
+        },
+    ));
+    rows.push(("Jitter p-p".to_owned(), value(m.jitter_pp, "s")));
+    rows.push(("Jitter rms".to_owned(), value(m.jitter_rms, "s")));
+    match m.bathtub.fit.as_ref() {
+        Some(fit) => {
+            rows.push(("RJ rms".to_owned(), value(fit.random_rms(), "s")));
+            rows.push(("DJ δδ".to_owned(), value(fit.deterministic(), "s")));
+            rows.push((
+                format!("TJ at {rate:e}"),
+                or_unmeasured(fit.total_jitter(rate), |tj| value(tj, "s")),
+            ));
+            rows.push((
+                format!("Opening at {rate:e}"),
+                or_unmeasured(fit.opening(rate), |opening| value(opening, "UI")),
+            ));
+        }
+        None => rows.push((
+            "RJ and DJ".to_owned(),
+            format!("{} crossings, too few to fit", m.bathtub.crossing_count),
+        )),
+    }
+    rows
 }
 
 /// An em dash where the data could not support a figure.
@@ -717,17 +788,17 @@ mod tests {
             rise_time: Some(9.6e-12),
             ..Default::default()
         };
-        let rows = metric_rows(&measurements, 4);
-        let row = |name: &str| {
+        let rows = metric_rows(&measurements, 1e-12, 4);
+        let row = |rows: &[(String, String)], name: &str| {
             rows.iter()
                 .find(|row| row.0 == name)
                 .map(|row| row.1.clone())
                 .expect("the row is listed")
         };
-        assert_eq!(row("Eye height"), "1.49 V");
-        assert_eq!(row("Rise 20–80"), "9.6 ps");
+        assert_eq!(row(&rows, "Eye height"), "1.49 V");
+        assert_eq!(row(&rows, "Rise 20–80"), "9.6 ps");
         assert_eq!(
-            metric_rows(&measurements, 3)[1].1,
+            row(&metric_rows(&measurements, 1e-12, 3), "Eye height"),
             "1.49 V",
             "three digits keep all three"
         );

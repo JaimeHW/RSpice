@@ -99,14 +99,14 @@ pub(in crate::workbench) struct UiSessionWire {
     browser_spoken_feedback: bool,
     #[serde(default)]
     text_locale: rspice_app_workbench::workbench::localization::UiTextLocale,
-    /// Bit periods the reader pinned eyes to, for results that carry prepared
+    /// What the reader set eye sheets to, for results that carry prepared
     /// provenance. Legacy keys name a run-local analysis id that a later
     /// session will never mint again, so they are dropped on save rather than
     /// restored onto whichever result inherits the number.
     #[serde(default)]
-    eye_timebase: Vec<(
+    eye_settings: Vec<(
         rspice_results_ui::eye_diagram::EyeTimebaseKey,
-        rspice_results_ui::eye_diagram::EyeTimebase,
+        rspice_results_ui::eye_diagram::EyeSettings,
     )>,
 }
 
@@ -210,13 +210,13 @@ impl UiSessionWire {
             preferences: preferences.clone(),
             browser_spoken_feedback: settings.browser_spoken_feedback,
             text_locale: workbench.text_locale,
-            eye_timebase: results
+            eye_settings: results
                 .results
                 .session
-                .eye_timebase
+                .eye_settings
                 .iter()
                 .filter(|(key, _)| key.is_persistable())
-                .map(|(key, timebase)| (*key, *timebase))
+                .map(|(key, settings)| (*key, settings.clone()))
                 .collect(),
         }
     }
@@ -268,8 +268,8 @@ impl UiSessionWire {
         state.platform.autosave_minutes = ser.autosave_minutes;
         state.settings.browser_spoken_feedback = ser.browser_spoken_feedback;
         state.workbench.text_locale = ser.text_locale;
-        state.results.results.session.eye_timebase = ser
-            .eye_timebase
+        state.results.results.session.eye_settings = ser
+            .eye_settings
             .into_iter()
             .filter(|(key, _)| key.is_persistable())
             .collect();

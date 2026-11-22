@@ -28,6 +28,18 @@ pub trait ViewerHost: RunEventSink {
     fn fft_input_options(&self) -> FftInputOptions;
     /// The bit period the reader chose for this result's eye.
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase;
+    /// What folds this result's eye: its signal, its clock and the clock's
+    /// period. A host that keeps only a period folds the spectrum's signal
+    /// on an ideal clock at it.
+    fn eye_fold_for(
+        &self,
+        owner: SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        rspice_results_ui::eye_diagram::EyeFold {
+            timebase: self.eye_timebase_for(owner),
+            ..rspice_results_ui::eye_diagram::EyeFold::default()
+        }
+    }
 }
 
 /// The application, as the run tier sees it.

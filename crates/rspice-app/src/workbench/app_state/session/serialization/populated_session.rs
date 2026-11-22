@@ -227,12 +227,19 @@ fn populate_ui_session(state: &mut AppState) {
     state.workbench.text_locale =
         rspice_app_workbench::workbench::localization::UiTextLocale::PseudoExpanded;
     state.results.results.session.viewer = rspice_results::result_presentation::ResultViewer::Bode;
-    state.results.results.session.eye_timebase.insert(
+    state.results.results.session.eye_settings.insert(
         rspice_results_ui::eye_diagram::EyeTimebaseKey::Prepared(
             rspice_app_state::product::AnalysisInstanceId::new(),
         ),
-        rspice_results_ui::eye_diagram::EyeTimebase::Explicit {
-            unit_interval: 1e-9,
+        rspice_results_ui::eye_diagram::EyeSettings {
+            fold: rspice_results_ui::eye_diagram::EyeFold {
+                timebase: rspice_results_ui::eye_diagram::EyeTimebase::Explicit {
+                    unit_interval: 1e-9,
+                },
+                ..Default::default()
+            },
+            levels: 4,
+            ..Default::default()
         },
     );
 }

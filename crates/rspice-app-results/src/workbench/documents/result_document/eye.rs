@@ -1,4 +1,5 @@
-//! Application coordination for eye presentation and source-bound timebase requests.
+//! Application coordination for the eye: its settings, kept per result, and
+//! the sheet's bar, figures and picture.
 
 use super::{
     ResultViewer,
@@ -6,24 +7,55 @@ use super::{
 };
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
-use rspice_results_ui::eye_diagram::view;
+use rspice_results_ui::eye_diagram::{bar, view};
 
-/// Apply a timebase request to the immutable source selected by the document.
-pub fn inline_actions(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let owner = state.model.active_specialized_viewer_cache_provenance();
-    let timebase = owner.map(|owner| state.results.eye_timebase_for(owner));
+/// Take in the settings kept for the result shown, so its levels, error rate
+/// and mask are the ones the reader left.
+fn adopt_settings(state: &mut ResultsParts<'_>) {
+    let Some(owner) = state.model.active_specialized_viewer_cache_provenance() else {
+        return;
+    };
+    let settings = state.results.eye_settings_for(owner);
+    state.analysis.eye_diagram_state.adopt_settings(&settings);
+}
+
+/// The sheet's controls, left in its bar: the signal, the clock, the levels,
+/// the error rate and the mask. What the reader sets is kept for the result.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    adopt_settings(state);
+    let sources: Vec<String> = state
+        .model
+        .simulation
+        .active_analysis()
+        .map(|analysis| {
+            analysis
+                .waveforms
+                .iter()
+                .map(|waveform| waveform.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
     let significant_digits = significant_digits(state.results_reads());
-    let requested = view::inline_actions(
+    let changed = bar::domain_bar(
         ui,
-        &mut state.analysis.eye_diagram_state,
-        timebase,
+        &state.analysis.eye_diagram_state,
+        &sources,
         significant_digits,
     );
-    if let Some(owner) = owner
-        && let Some(timebase) = requested
+    if let Some(settings) = changed
+        && let Some(owner) = state.model.active_specialized_viewer_cache_provenance()
     {
-        state.results.set_eye_timebase(owner, timebase);
+        state.analysis.eye_diagram_state.adopt_settings(&settings);
+        state.results.set_eye_settings(owner, settings);
     }
+    true
+}
+
+/// What the sheet reads out right in its bar: the mask's verdict.
+pub fn inline_actions(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    adopt_settings(state);
+    let significant_digits = significant_digits(state.results_reads());
+    bar::outputs(ui, &state.analysis.eye_diagram_state, significant_digits);
 }
 
 /// The reader's significant digits, which the eye's figures read at.
@@ -36,32 +68,30 @@ fn significant_digits(state: ResultsReads<'_>) -> usize {
     )
 }
 
-fn selected_source(state: ResultsReads<'_>) -> &str {
-    state
-        .analysis
-        .fft_state
-        .selected_source
-        .as_deref()
-        .unwrap_or("the active trace")
+/// The signal the eye folds, as the sheet names it.
+fn selected_source(state: ResultsReads<'_>) -> String {
+    let named = state
+        .model
+        .active_specialized_viewer_cache_provenance()
+        .and_then(|owner| state.results.eye_fold_for(owner).source);
+    named
+        .or_else(|| state.analysis.fft_state.selected_source.clone())
+        .unwrap_or_else(|| "the active trace".to_owned())
 }
 
 pub fn unavailable_hint(state: ResultsReads<'_>) -> Option<String> {
-    view::unavailable_hint(&state.analysis.eye_diagram_state, selected_source(state))
+    view::unavailable_hint(&state.analysis.eye_diagram_state, &selected_source(state))
 }
 
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let source = state
-        .analysis
-        .fft_state
-        .selected_source
-        .as_deref()
-        .unwrap_or("the active trace");
+    adopt_settings(state);
+    let source = selected_source(state.results_reads());
     let plot_view = state.results.session.plot_view(ResultViewer::Eye, 0);
     let significant_digits = significant_digits(state.results_reads());
     let out = view::show(
         ui,
         &state.analysis.eye_diagram_state,
-        source,
+        &source,
         plot_view,
         &mut state.results.session.eye_texture,
         &mut state.results.session.cache,
@@ -83,10 +113,11 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    adopt_settings(state);
     view::right_panel(
         ui,
         &state.analysis.eye_diagram_state,
-        selected_source(state.results_reads()),
+        &selected_source(state.results_reads()),
         significant_digits(state.results_reads()),
     );
 }

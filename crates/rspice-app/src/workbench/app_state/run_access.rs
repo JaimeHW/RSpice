@@ -30,6 +30,13 @@ impl ViewerHost for AppState {
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.results_reads().eye_timebase_for(owner)
     }
+
+    fn eye_fold_for(
+        &self,
+        owner: SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        self.results_reads().eye_fold_for(owner)
+    }
 }
 
 impl RunHost for AppState {

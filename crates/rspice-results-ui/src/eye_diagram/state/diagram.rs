@@ -1,11 +1,11 @@
 //! Eye diagram viewer state.
 //!
-//! Loaded data, measurements, compliance mask and local controls consumed by
-//! `eye_diagram::view`. The data revision keys the view's density texture.
+//! Loaded data, its measurements and the reader's settings for it, consumed
+//! by `eye_diagram::view`. The data revision keys the
+//! view's density texture.
 
-use super::super::EyeData;
-use super::super::EyeMeasurements;
-use super::{EyeMask, EyeTimebaseProvenance};
+use super::super::{EyeData, EyeMeasureOptions, EyeMeasurements, calculate_eye_measurements_with};
+use super::{EyeSettings, EyeTimebaseProvenance, MaskFrame};
 
 /// Complete eye diagram viewer state
 #[derive(Debug, Clone, Default)]
@@ -14,36 +14,19 @@ pub struct EyeDiagramState {
     pub data: EyeData,
     /// Measurements derived from the data
     pub measurements: EyeMeasurements,
-    /// Compliance mask
-    pub mask: EyeMask,
-    /// Draw the mask
-    pub show_mask: bool,
+    /// What the reader set the sheet to for the result shown: the levels
+    /// the eye is measured with, the error rate it is read at and the mask.
+    /// The host keeps them per result and hands them back each frame.
+    settings: EyeSettings,
     /// What the loaded data was folded at, when the controller said.
     ///
     /// The sheet quotes this beside the eye: an eye whose bit period was
     /// recovered from six edges and one whose rate the reader stated are not
     /// the same claim, and only one of them is the reader's own.
     timebase_provenance: Option<EyeTimebaseProvenance>,
-    /// The bit-period editor, while it is open.
-    ///
-    /// A half-typed rate belongs to the viewer, not to the project: it lives
-    /// here beside the eye it is about rather than in the Results document's
-    /// persisted presentation state, which a draft has no business entering.
-    pub rate_editor: Option<EyeRateEditor>,
     /// Bumped on every load so display caches can key on it rather than on
     /// data identity.
     data_revision: u64,
-}
-
-/// The open bit-period editor: what the reader has typed, and why it was
-/// refused if it was.
-#[derive(Debug, Clone, Default)]
-pub struct EyeRateEditor {
-    pub text: String,
-    pub error: Option<String>,
-    /// Set for the frame the editor opens, so the field takes focus once
-    /// instead of taking it back every frame and never letting go.
-    pub needs_focus: bool,
 }
 
 impl EyeDiagramState {
@@ -55,6 +38,30 @@ impl EyeDiagramState {
     /// What the eye on screen was folded at, when it is known.
     pub fn timebase_provenance(&self) -> Option<&EyeTimebaseProvenance> {
         self.timebase_provenance.as_ref()
+    }
+
+    /// The settings the eye is measured and masked with.
+    pub fn settings(&self) -> &EyeSettings {
+        &self.settings
+    }
+
+    /// Take in the settings the host keeps for the result shown: a change
+    /// of levels measures the eye again, a change of mask tests it again.
+    pub fn adopt_settings(&mut self, settings: &EyeSettings) {
+        // The last test's verdict is the sheet's, not the reader's setting.
+        let mut incoming = settings.clone();
+        incoming.mask.clear_test();
+        let mut held = self.settings.clone();
+        held.mask.clear_test();
+        if incoming == held {
+            return;
+        }
+        let remeasure = incoming.levels != held.levels;
+        self.settings = incoming;
+        if remeasure {
+            self.recalculate_measurements();
+        }
+        self.run_mask_test();
     }
 
     /// Load eye data and recalculate measurements
@@ -72,32 +79,52 @@ impl EyeDiagramState {
         self.data = data;
         self.timebase_provenance = provenance;
         self.recalculate_measurements();
-        if self.show_mask {
-            self.mask.enabled = true;
-        }
         self.run_mask_test();
     }
 
-    /// Show or hide the compliance mask.
-    ///
-    /// Enabling the mask runs the test against the acquisitions that are
-    /// loaded now. The verdict used to be latched at load time, so a reader
-    /// who turned the mask on after the eye arrived read `0 / 0` violations
-    /// — a pass — over a mask that had never been tested against anything.
+    /// Show or hide the compliance mask, testing it against the
+    /// acquisitions loaded now.
     pub fn set_show_mask(&mut self, show: bool) {
-        self.show_mask = show;
-        self.mask.enabled = show;
+        self.settings.show_mask = show;
         self.run_mask_test();
     }
 
     /// Recalculate measurements from current data
     pub fn recalculate_measurements(&mut self) {
-        self.measurements = super::super::calculate_eye_measurements(&self.data);
+        self.measurements = calculate_eye_measurements_with(
+            &self.data,
+            &EyeMeasureOptions {
+                levels: self.settings.levels,
+                ..EyeMeasureOptions::default()
+            },
+        );
+    }
+
+    /// Where the mask is centred on the loaded eye: the window's centre and
+    /// the threshold of its middle opening, with the eye's amplitude.
+    pub fn mask_frame(&self) -> MaskFrame {
+        let openings = &self.measurements.openings;
+        let threshold = if openings.len() > 1 {
+            openings[(openings.len() - 1) / 2].threshold
+        } else {
+            self.data.v_cross
+        };
+        MaskFrame {
+            centre_ui: f64::from(self.data.ui_count) / 2.0,
+            threshold,
+            amplitude: self.measurements.amplitude.unwrap_or(self.data.swing),
+        }
     }
 
     /// Update the mask verdict for the currently loaded acquisitions.
     pub fn run_mask_test(&mut self) {
-        self.mask.test_traces(
+        if !self.settings.show_mask {
+            self.settings.mask.clear_test();
+            return;
+        }
+        let frame = self.mask_frame();
+        self.settings.mask.test_traces(
+            frame,
             self.data
                 .traces
                 .iter()

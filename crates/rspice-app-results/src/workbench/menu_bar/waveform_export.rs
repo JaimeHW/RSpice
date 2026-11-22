@@ -753,7 +753,14 @@ fn eye_measurements_csv(state: ResultsReads<'_>) -> Option<PreparedTypedResultCs
             format!("auto from {edge_count} edges{confidence}")
         }
         Some(EyeTimebaseProvenance::Explicit { .. }) => "explicit".to_owned(),
-        Some(EyeTimebaseProvenance::AutoRejected(_) | EyeTimebaseProvenance::Unreadable(_))
+        Some(EyeTimebaseProvenance::Triggered { edge_count, .. }) => {
+            format!("clock signal, {edge_count} edges")
+        }
+        Some(
+            EyeTimebaseProvenance::AutoRejected(_)
+            | EyeTimebaseProvenance::ClockRejected(_)
+            | EyeTimebaseProvenance::Unreadable(_),
+        )
         | None => "unknown".to_owned(),
     };
     let contents = rspice_formats::result_csv::encode_eye_measurements_csv(
@@ -761,7 +768,7 @@ fn eye_measurements_csv(state: ResultsReads<'_>) -> Option<PreparedTypedResultCs
         eye.data.ui_count,
         &unit_interval_source,
         m,
-        rspice_core::analysis::signal_integrity::DEFAULT_OPENING_BER,
+        eye.settings().opening_ber,
     );
     Some(PreparedTypedResultCsv {
         default_name: "rspice-eye.csv",

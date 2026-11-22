@@ -22,6 +22,45 @@ pub enum EyeTimebase {
     Explicit { unit_interval: f64 },
 }
 
+/// A clock signal an eye is triggered from: each acquisition starts at one
+/// of its rising crossings of `threshold`, in volts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EyeClockSignal {
+    pub signal: String,
+    pub threshold: f64,
+}
+
+/// What folds the eye, as ViVA's eye assistant offers it: a recovered or a
+/// stated ideal clock, with an optional offset, or a clock signal with a
+/// threshold; and the signal folded.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EyeFold {
+    /// The signal folded; `None` folds the signal the spectrum reads.
+    pub source: Option<String>,
+    /// The ideal clock's period, recovered or stated.
+    pub timebase: EyeTimebase,
+    /// When the ideal clock's first edge falls, in seconds: the time every
+    /// acquisition starts at, a period apart. `None` places the data's
+    /// crossings half a unit interval in, so the opening is centred.
+    pub offset: Option<f64>,
+    /// The clock signal the eye is triggered from instead of an ideal
+    /// clock.
+    pub clock: Option<EyeClockSignal>,
+}
+
+impl EyeFold {
+    /// Whether the offset and the clock a loaded eye was folded with are
+    /// the ones asked for, ignoring the period, which the provenance
+    /// answers.
+    pub fn same_trigger(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.offset.map(f64::to_bits) == other.offset.map(f64::to_bits)
+            && self.clock == other.clock
+    }
+}
+
 /// Which result a timebase choice belongs to.
 ///
 /// Keyed on the prepared analysis instance so the choice survives a re-run of
@@ -68,9 +107,18 @@ pub enum EyeTimebaseProvenance {
         /// being asked for.
         incoherent: bool,
     },
+    /// Triggered from a clock signal's rising edges, at their median
+    /// spacing.
+    Triggered {
+        unit_interval: f64,
+        edge_count: usize,
+    },
     /// Nothing was folded: the waveform does not carry a recoverable bit
     /// period and the reader has not stated one.
     AutoRejected(UiEstimateRejection),
+    /// Nothing was folded: the clock signal does not trigger, or is not in
+    /// the result; the reason in the reader's words.
+    ClockRejected(String),
     /// Nothing was folded: the record could not be read, its store having failed or the record
     /// being larger than the loaded results may hold.
     Unreadable(String),
@@ -88,7 +136,8 @@ impl EyeTimebaseProvenance {
             Self::Unreadable(reason) => {
                 return Some(format!("{source} could not be read: {reason}"));
             }
-            Self::Auto { .. } | Self::Explicit { .. } => return None,
+            Self::ClockRejected(reason) => return Some(reason.clone()),
+            Self::Auto { .. } | Self::Explicit { .. } | Self::Triggered { .. } => return None,
         };
         Some(match rejection {
             UiEstimateRejection::NoSignalSwing => {

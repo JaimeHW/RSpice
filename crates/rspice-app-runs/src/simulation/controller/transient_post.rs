@@ -12,8 +12,8 @@ use crate::state::{
 use rspice_app_services::workbench::results_job::{JobOutcome, JobStop, ResultsJob};
 use rspice_results::waveform::HeldColumn;
 use rspice_results_ui::eye_diagram::{
-    EyeData, EyeDataBuilder, EyeTimebase, EyeTimebaseProvenance, crossing_phase_at,
-    estimate_unit_interval, fold_anchor,
+    EyeData, EyeDataBuilder, EyeFold, EyeTimebase, EyeTimebaseProvenance, centring_delay,
+    clock_trigger, crossing_phase_at, estimate_unit_interval, fold_anchor,
 };
 use rspice_results_ui::fft::{FftInputError, FftInputOptions, PreparedFftInput};
 
@@ -57,7 +57,10 @@ struct DerivedWaveformSource {
     time: SharedWaveformValues,
     values: SharedWaveformValues,
     fft_options: FftInputOptions,
-    eye_timebase: EyeTimebase,
+    eye_fold: EyeFold,
+    /// The time and value columns of the clock signal the eye is triggered
+    /// from, when it is; `Err` names a clock the result does not hold.
+    eye_clock: Option<Result<(SharedWaveformValues, SharedWaveformValues), String>>,
 }
 
 /// A folded eye and the period it was folded at — including the case where
@@ -86,6 +89,8 @@ pub struct TransientPostCoordinator {
     pub fft_task: Option<PendingDerivedViewTask>,
     pub(super) eye_loaded: Option<LoadedDerivedView>,
     pub fft_loaded: Option<LoadedDerivedView>,
+    /// What the eye being folded, or on screen, was asked to be folded by.
+    eye_fold: Option<EyeFold>,
 }
 
 impl SimulationController {
@@ -169,6 +174,7 @@ impl SimulationController {
         self.cancel_task_slot(DerivedViewKind::Fft);
         self.transient_post.eye_loaded = None;
         self.transient_post.fft_loaded = None;
+        self.transient_post.eye_fold = None;
         state.apply_run_event(RunEvent::TransientResultReplaced);
     }
 
@@ -178,11 +184,17 @@ impl SimulationController {
         // is not this eye at a different zoom, it is a different measurement.
         // Editing the rate has to rebuild, not be swallowed by the
         // already-have-data shortcut below.
+        // The same holds for the signal and the clock it is folded by.
         if let Some(analysis) = self.active_transient_analysis_key(state.model()) {
-            let requested = state.eye_timebase_for(analysis);
-            if !eye_matches_timebase(state.viewer_reading().eye_timebase.as_ref(), requested) {
+            let requested = state.eye_fold_for(analysis);
+            if !eye_answers_fold(
+                state.viewer_reading().eye_timebase.as_ref(),
+                self.transient_post.eye_fold.as_ref(),
+                &requested,
+            ) {
                 self.cancel_task_slot(DerivedViewKind::EyeDiagram);
                 self.transient_post.eye_loaded = None;
+                self.transient_post.eye_fold = None;
                 state.apply_run_event(RunEvent::EyeTimebaseChanged);
             }
         }
@@ -220,6 +232,7 @@ impl SimulationController {
             });
             return DerivedViewerLoadState::Unavailable;
         };
+        self.transient_post.eye_fold = Some(source.eye_fold.clone());
         self.spawn_derived_view_task(DerivedViewKind::EyeDiagram, source);
         DerivedViewerLoadState::Loading
     }
@@ -440,9 +453,22 @@ impl SimulationController {
     ) -> Option<DerivedWaveformSource> {
         let analysis = state.model().simulation.active_analysis()?;
         let analysis_key = self.active_transient_analysis_key(state.model())?;
-        let preferred_source = state.viewer_reading().fft_source;
+        let eye_fold = state.eye_fold_for(analysis_key);
+        // The eye folds the signal its sheet names, or the spectrum's.
+        let preferred_source = eye_fold
+            .source
+            .clone()
+            .or_else(|| state.viewer_reading().fft_source);
         let (source_name, waveform) =
             Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_source.as_deref())?;
+        let eye_clock = eye_fold.clock.as_ref().map(|clock| {
+            analysis
+                .waveforms
+                .iter()
+                .find(|waveform| waveform.name == clock.signal)
+                .map(|waveform| (waveform.x.clone(), waveform.y.clone()))
+                .ok_or_else(|| format!("The clock signal {} is not in this result", clock.signal))
+        });
 
         Some(DerivedWaveformSource {
             analysis: analysis_key,
@@ -450,7 +476,8 @@ impl SimulationController {
             time: waveform.x.clone(),
             values: waveform.y.clone(),
             fft_options: state.fft_input_options(),
-            eye_timebase: state.eye_timebase_for(analysis_key),
+            eye_fold,
+            eye_clock,
         })
     }
 
@@ -495,6 +522,27 @@ pub fn eye_matches_timebase(
         (EyeTimebaseProvenance::Unreadable(_), _) => true,
         _ => false,
     }
+}
+
+/// Does the eye on screen, or the one being folded, answer the fold being
+/// asked for: the same signal, clock and offset it was asked to be folded
+/// by, and the period [`eye_matches_timebase`] reads off its provenance? An
+/// eye triggered from a clock signal takes its period from the clock, so
+/// only the clock is compared.
+pub fn eye_answers_fold(
+    loaded: Option<&EyeTimebaseProvenance>,
+    folded_by: Option<&EyeFold>,
+    requested: &EyeFold,
+) -> bool {
+    if let Some(folded_by) = folded_by {
+        if !folded_by.same_trigger(requested) {
+            return false;
+        }
+        if requested.clock.is_some() {
+            return true;
+        }
+    }
+    eye_matches_timebase(loaded, requested.timebase)
 }
 
 /// Number of unit intervals the folded window spans.
@@ -576,10 +624,113 @@ fn whole_source(source: &DerivedWaveformSource) -> Result<SourceColumns, String>
 
 fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
     let (data, provenance) = match whole_source(source) {
-        Ok((time, values)) => build_eye_from_waveform(&time, &values, source.eye_timebase),
+        Ok((time, values)) => match &source.eye_clock {
+            None => build_eye_on_ideal_clock(&time, &values, &source.eye_fold),
+            Some(Err(reason)) => (None, EyeTimebaseProvenance::ClockRejected(reason.clone())),
+            Some(Ok((clock_time, clock_values))) => {
+                match (
+                    clock_time.fetch_whole_waiting(),
+                    clock_values.fetch_whole_waiting(),
+                ) {
+                    (Ok(clock_time), Ok(clock_values)) => build_eye_on_clock_signal(
+                        &time,
+                        &values,
+                        (&*clock_time, &*clock_values),
+                        &source.eye_fold,
+                    ),
+                    (Err(reason), _) | (_, Err(reason)) => {
+                        (None, EyeTimebaseProvenance::Unreadable(reason))
+                    }
+                }
+            }
+        },
         Err(reason) => (None, EyeTimebaseProvenance::Unreadable(reason)),
     };
     EyeBuild { data, provenance }
+}
+
+/// Fold on an ideal clock: recovered or stated, from the offset the reader
+/// stated or with the opening centred.
+pub fn build_eye_on_ideal_clock(
+    time: &[f64],
+    values: &[f64],
+    fold: &EyeFold,
+) -> (Option<EyeData>, EyeTimebaseProvenance) {
+    let Some(offset) = fold.offset else {
+        return build_eye_from_waveform(time, values, fold.timebase);
+    };
+    let unit_interval = match fold.timebase {
+        EyeTimebase::Explicit { unit_interval } => unit_interval,
+        EyeTimebase::Auto => return build_eye_from_waveform(time, values, fold.timebase),
+    };
+    let incoherent =
+        crossing_phase_at(time, values, unit_interval).is_some_and(|fit| !fit.is_coherent());
+    let eye_data = EyeDataBuilder::new()
+        .bit_period(unit_interval)
+        .ui_count(EYE_WINDOW_UI)
+        .skip_initial(EYE_SKIP_INITIAL)
+        .fold_anchor(Some(offset))
+        .build(time, values);
+    (
+        (eye_data.trace_count() > 0).then_some(eye_data),
+        EyeTimebaseProvenance::Explicit {
+            unit_interval,
+            incoherent,
+        },
+    )
+}
+
+/// Fold from a clock signal: every acquisition starts at one of its rising
+/// crossings of the threshold, delayed by the offset the reader stated or
+/// by what centres the data's crossings.
+pub fn build_eye_on_clock_signal(
+    time: &[f64],
+    values: &[f64],
+    clock: (&[f64], &[f64]),
+    fold: &EyeFold,
+) -> (Option<EyeData>, EyeTimebaseProvenance) {
+    let Some(signal) = fold.clock.as_ref() else {
+        return build_eye_on_ideal_clock(time, values, fold);
+    };
+    let trigger = match clock_trigger(clock.0, clock.1, signal.threshold) {
+        Ok(trigger) => trigger,
+        Err(rejection) => {
+            return (
+                None,
+                EyeTimebaseProvenance::ClockRejected(format!(
+                    "No eye from the clock {}: {rejection}",
+                    signal.signal
+                )),
+            );
+        }
+    };
+    let (low, high) = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {
+            (low.min(value), high.max(value))
+        });
+    let level = 0.5 * (low + high);
+    let delay = fold
+        .offset
+        .or_else(|| centring_delay(&trigger, time, values, level))
+        .unwrap_or(0.0);
+    let edge_count = trigger.edges.len();
+    let starts: Vec<f64> = trigger.edges.iter().map(|edge| edge + delay).collect();
+    let eye_data = EyeDataBuilder::new()
+        .bit_period(trigger.period)
+        .ui_count(EYE_WINDOW_UI)
+        .skip_initial(EYE_SKIP_INITIAL)
+        .triggers(starts)
+        .build(time, values);
+    (
+        (eye_data.trace_count() > 0).then_some(eye_data),
+        EyeTimebaseProvenance::Triggered {
+            unit_interval: trigger.period,
+            edge_count,
+        },
+    )
 }
 
 /// The spectrum's input: the record validated a block at a time as it is read, and only the rows

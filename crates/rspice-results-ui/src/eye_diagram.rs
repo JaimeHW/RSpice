@@ -3,17 +3,21 @@
 //! Core owns waveform folding and eye measurements; results owns retained mask
 //! geometry and compliance calculations. This module coordinates viewer state.
 
+pub mod bar;
 pub mod state;
 pub mod view;
 
 pub use rspice_results::engine_evidence::EyeTrace;
 pub use rspice_results::engine_evidence::{
-    EyeData, EyeDataBuilder, EyeMeasurements, UiEstimateRejection, calculate_eye_measurements,
-    crossing_phase_at, estimate_unit_interval, fold_anchor,
+    Bathtub, BerEstimate, ClockTrigger, ClockTriggerRejection, DEFAULT_OPENING_BER, DualDiracFit,
+    EyeData, EyeDataBuilder, EyeLevel, EyeMeasureOptions, EyeMeasurements, EyeOpening,
+    MAX_EYE_LEVELS, MIN_EYE_LEVELS, UiEstimateRejection, calculate_eye_measurements,
+    calculate_eye_measurements_with, centring_delay, clock_trigger, crossing_phase_at,
+    estimate_unit_interval, fold_anchor,
 };
 pub use state::{
-    EyeDiagramState, EyeRateEditor, EyeTimebase, EyeTimebaseKey, EyeTimebaseProvenance,
-    parse_eye_timebase,
+    EyeClockSignal, EyeDiagramState, EyeFold, EyeSettings, EyeTimebase, EyeTimebaseKey,
+    EyeTimebaseProvenance, OPENING_RATES, parse_eye_timebase,
 };
 
 // =============================================================================
@@ -23,7 +27,7 @@ pub use state::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eye_diagram::state::EyeMask;
+    use crate::eye_diagram::state::{EyeMask, MaskShape};
 
     /// Trapezoidal NRZ, one bit per unit interval, 20–80 % edge of 50 ps.
     ///
@@ -92,9 +96,8 @@ mod tests {
     }
 
     /// The default mask is a keep-out over the eye *opening*. A clean PRBS7
-    /// eye at the levels the mask was authored against must not touch it —
-    /// which is only true once the fold puts the opening at the window
-    /// centre, where the mask sits.
+    /// eye must not touch it — which is only true once the fold puts the
+    /// opening at the window centre, where the mask sits.
     #[test]
     fn a_clean_prbs7_eye_clears_the_default_compliance_mask() {
         let (time, signal) = prbs7_waveform(-0.4, 0.4);
@@ -106,17 +109,46 @@ mod tests {
         );
 
         let mut state = EyeDiagramState::default();
-        state.mask = EyeMask::default();
         state.load_data(data);
         state.set_show_mask(true);
 
-        assert!(state.mask.total_samples > 0, "the mask tested nothing");
-        assert_eq!(
-            state.mask.violation_count, 0,
-            "a clean eye touched the opening mask"
-        );
-        let margin = state.mask.margin.expect("a tested mask has a margin");
-        assert!(margin > 0.0, "clean eye reported {margin} margin");
+        let mask = &state.settings().mask;
+        assert!(mask.total_samples > 0, "the mask tested nothing");
+        assert_eq!(mask.violation_count, 0, "a clean eye touched the mask");
+        let clearance = mask.clearance.expect("a tested mask has a clearance");
+        assert!(clearance > 0.0, "clean eye reported {clearance} clearance");
+    }
+
+    /// A mask drawn for a single-ended 0 to 1.2 V eye sits on its 0.6 V
+    /// threshold and counts exactly the samples the fixture puts in the
+    /// opening: three on one acquisition that sags to mid-level at the
+    /// sampling instant.
+    #[test]
+    fn a_single_ended_eye_reports_violations_only_where_the_fixture_puts_them() {
+        let (time, signal) = prbs7_waveform(0.0, 1.2);
+        let mut data = folded_eye(&time, &signal);
+        let clean = data.trace_count();
+        data.add_trace(EyeTrace::new(vec![0.95, 1.0, 1.05], vec![0.62, 0.6, 0.58]));
+
+        let mut state = EyeDiagramState::default();
+        state.adopt_settings(&EyeSettings {
+            mask: EyeMask {
+                shape: MaskShape::Hexagon,
+                width_ui: 0.5,
+                flat_ui: 0.2,
+                height: Some(0.4),
+                ..EyeMask::default()
+            },
+            show_mask: true,
+            ..EyeSettings::default()
+        });
+        state.load_data(data);
+
+        let frame = state.mask_frame();
+        assert!((frame.threshold - 0.6).abs() < 1e-9, "{frame:?}");
+        let mask = &state.settings().mask;
+        assert_eq!(mask.violation_count, 3, "of {} acquisitions", clean + 1);
+        assert!(mask.clearance.is_some_and(|clearance| clearance < 0.0));
     }
 
     /// Enabling the mask tests the acquisitions that are loaded now. The
@@ -134,16 +166,24 @@ mod tests {
 
         let mut state = EyeDiagramState::default();
         state.load_data(data);
-        assert_eq!(state.mask.total_samples, 0, "mask off, nothing tested");
+        assert_eq!(
+            state.settings().mask.total_samples,
+            0,
+            "mask off, nothing tested"
+        );
 
         state.set_show_mask(true);
-        assert_eq!(state.mask.total_samples, 3);
-        assert_eq!(state.mask.violation_count, 3);
-        let margin = state.mask.margin.expect("a tested mask has a margin");
-        assert!(margin < 0.0, "a violated mask reported {margin} margin");
+        let mask = &state.settings().mask;
+        assert_eq!(mask.total_samples, 3);
+        assert_eq!(mask.violation_count, 3);
+        let clearance = mask.clearance.expect("a tested mask has a clearance");
+        assert!(
+            clearance < 0.0,
+            "a violated mask reported {clearance} clearance"
+        );
 
         state.set_show_mask(false);
-        assert_eq!(state.mask.total_samples, 0);
-        assert_eq!(state.mask.margin, None);
+        assert_eq!(state.settings().mask.total_samples, 0);
+        assert_eq!(state.settings().mask.clearance, None);
     }
 }

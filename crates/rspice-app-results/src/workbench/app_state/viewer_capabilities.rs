@@ -15,7 +15,7 @@ use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, ResultsState, histogram_is_available, loop_gain_source,
 };
-use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
+use rspice_results_ui::eye_diagram::{EyeFold, EyeSettings, EyeTimebase, EyeTimebaseKey};
 
 /// Provenance for the mutable specialized result caches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -114,31 +114,50 @@ impl ResultsState {
     /// the simulation controller, because the choice is the reader's and the
     /// controller must not reach up into `workbench::documents` to read it.
     pub fn eye_timebase_for(&self, provenance: SpecializedViewerCacheProvenance) -> EyeTimebase {
+        self.eye_fold_for(provenance).timebase
+    }
+
+    /// What folds this result's eye: its signal, its clock and the clock's
+    /// period.
+    pub fn eye_fold_for(&self, provenance: SpecializedViewerCacheProvenance) -> EyeFold {
+        self.eye_settings_for(provenance).fold
+    }
+
+    /// What the reader set this result's eye sheet to.
+    pub fn eye_settings_for(&self, provenance: SpecializedViewerCacheProvenance) -> EyeSettings {
         self.session
-            .eye_timebase
+            .eye_settings
             .get(&eye_timebase_key(provenance))
-            .copied()
+            .cloned()
             .unwrap_or_default()
     }
 
     /// Record the reader's bit period for this result.
-    ///
-    /// Setting it back to [`EyeTimebase::Auto`] forgets the entry rather than
-    /// storing a default, so a session file carries only the rates a reader
-    /// actually stated.
     pub fn set_eye_timebase(
         &mut self,
         provenance: SpecializedViewerCacheProvenance,
         timebase: EyeTimebase,
     ) {
+        let mut settings = self.eye_settings_for(provenance);
+        settings.fold.timebase = timebase;
+        self.set_eye_settings(provenance, settings);
+    }
+
+    /// Record what the reader set this result's eye sheet to.
+    ///
+    /// Settings back at their defaults forget the entry rather than storing
+    /// them, so a session file carries only what a reader actually set.
+    pub fn set_eye_settings(
+        &mut self,
+        provenance: SpecializedViewerCacheProvenance,
+        mut settings: EyeSettings,
+    ) {
+        settings.mask.clear_test();
         let key = eye_timebase_key(provenance);
-        match timebase {
-            EyeTimebase::Auto => {
-                self.session.eye_timebase.remove(&key);
-            }
-            explicit => {
-                self.session.eye_timebase.insert(key, explicit);
-            }
+        if settings == EyeSettings::default() {
+            self.session.eye_settings.remove(&key);
+        } else {
+            self.session.eye_settings.insert(key, settings);
         }
     }
 }

@@ -101,6 +101,13 @@ impl ViewerHost for RunView<'_, '_> {
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.peers.results().eye_timebase_for(owner)
     }
+
+    fn eye_fold_for(
+        &self,
+        owner: SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        self.peers.results().eye_fold_for(owner)
+    }
 }
 
 impl RunHost for RunView<'_, '_> {
@@ -239,6 +246,13 @@ impl ViewerHost for FrozenRun {
 
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.results.eye_timebase_for(owner)
+    }
+
+    fn eye_fold_for(
+        &self,
+        owner: SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        self.results.eye_fold_for(owner)
     }
 }
 

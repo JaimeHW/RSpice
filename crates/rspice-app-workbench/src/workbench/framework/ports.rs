@@ -190,6 +190,17 @@ pub trait ResultsPort {
     fn fft_input_options(&self) -> FftInputOptions;
     /// The bit period the reader chose for the eye of the result `owner`.
     fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase;
+    /// What folds the eye of the result `owner`: its signal, its clock and
+    /// the clock's period.
+    fn eye_fold_for(
+        &self,
+        owner: SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeFold {
+        rspice_results_ui::eye_diagram::EyeFold {
+            timebase: self.eye_timebase_for(owner),
+            ..rspice_results_ui::eye_diagram::EyeFold::default()
+        }
+    }
     /// The retained dataset the workspace shows opened directly, over the
     /// model's runs and the session's open documents; `None` when the
     /// workspace shows no dataset, or one that is no longer retained as it

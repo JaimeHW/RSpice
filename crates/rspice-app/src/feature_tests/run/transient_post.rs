@@ -502,7 +502,38 @@ fn a_stated_rate_is_kept_against_its_own_result() {
         state.results.results.eye_timebase_for(first),
         EyeTimebase::Auto
     );
-    assert!(state.results.results.session.eye_timebase.is_empty());
+    assert!(state.results.results.session.eye_settings.is_empty());
+}
+
+/// The eye's signal, clock, levels and error rate are kept against the
+/// plan card's analysis, so a re-run of the card, a new dataset of the same
+/// prepared analysis, opens with them.
+#[test]
+fn the_eye_source_and_rate_survive_a_rerun() {
+    let mut state = AppState::default();
+    let instance = AnalysisInstanceId::new();
+    let first = SpecializedViewerCacheProvenance::for_prepared_analysis(DatasetId::new(), instance);
+    let rerun = SpecializedViewerCacheProvenance::for_prepared_analysis(DatasetId::new(), instance);
+    let mut settings = state.results.results.eye_settings_for(first);
+    settings.fold.source = Some("V(data)".to_owned());
+    settings.fold.timebase = EyeTimebase::Explicit {
+        unit_interval: 1e-9,
+    };
+    settings.levels = 4;
+    settings.opening_ber = 1e-15;
+    state
+        .results
+        .results
+        .set_eye_settings(first, settings.clone());
+    assert_eq!(state.results.results.eye_settings_for(rerun), settings);
+    let fold = state.results.results.eye_fold_for(rerun);
+    assert_eq!(fold.source.as_deref(), Some("V(data)"));
+    assert_eq!(
+        state.results.results.eye_timebase_for(rerun),
+        EyeTimebase::Explicit {
+            unit_interval: 1e-9
+        }
+    );
 }
 
 /// A finished transient retires the spectrum and the eye of the result it

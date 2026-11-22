@@ -3,7 +3,7 @@ use crate::{
     chrome::instrument::ResultPlotTool,
     derived::DerivedSeries,
     events::DigitalEventSelection,
-    eye_diagram::{EyeTimebase, view::EyeTexture},
+    eye_diagram::view::EyeTexture,
     fft::view::FftSeries,
     presentation::PlotView,
     selection::{ResultBrowserSelectionKey, SelectedResultTrace},
@@ -933,13 +933,18 @@ pub struct ResultViewerState {
     /// each unit a strip of its own.
     pub strip_layouts:
         HashMap<AnalysisPresentationKey, Vec<rspice_results::visualization_document::Strip>>,
-    /// Bit period the reader has pinned the eye to, per result.
+    /// What the reader set the eye sheet to, per result: the signal and the
+    /// clock that fold it, its levels, the error rate it is read at and its
+    /// mask.
     ///
-    /// Absent means the eye recovers the period from the waveform. Project
-    /// scoped like the log-axis panes: a rate stated about one project's
-    /// result is not a statement about the next project's, and
+    /// Absent means the sheet's defaults: a recovered clock on the spectrum's
+    /// signal. Project scoped like the log-axis panes: a rate stated about
+    /// one project's result is not a statement about the next project's, and
     /// `clear_project_scoped_state` resets it with the rest of the document.
-    pub eye_timebase: std::collections::HashMap<crate::eye_diagram::EyeTimebaseKey, EyeTimebase>,
+    pub eye_settings: std::collections::HashMap<
+        crate::eye_diagram::EyeTimebaseKey,
+        crate::eye_diagram::EyeSettings,
+    >,
     /// Identity map behind the ordinal compatibility projection.
     pub expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
     /// The inline expression editor, when open (one strip at a time).
@@ -1701,7 +1706,7 @@ impl ResultViewerState {
     /// Two stores are deliberately absent. `views` keys a strip's window by
     /// the authored analysis rather than by one dataset, precisely so the
     /// window survives a re-run; a document-keyed window belongs to its
-    /// document. `eye_timebase` keeps its prepared keys for the same reason,
+    /// document. `eye_settings` keeps its prepared keys for the same reason,
     /// and only its dataset-named legacy keys are pruned.
     ///
     pub fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
@@ -1731,7 +1736,7 @@ impl ResultViewerState {
         self.waveform_colors.retain(|key, _| live(key.analysis()));
         self.waveform_looks.retain(|key, _| live(key.analysis()));
         self.hidden_family_traces.retain(|key| live(key.analysis()));
-        self.eye_timebase.retain(|key, _| match key {
+        self.eye_settings.retain(|key, _| match key {
             crate::eye_diagram::EyeTimebaseKey::Prepared(_) => true,
             crate::eye_diagram::EyeTimebaseKey::Legacy(dataset, _) => retained.contains(dataset),
         });

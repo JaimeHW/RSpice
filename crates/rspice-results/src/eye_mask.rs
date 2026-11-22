@@ -1,158 +1,311 @@
-//! Eye compliance mask, stored in absolute units.
+//! The eye's compliance mask, drawn by the reader.
 //!
-//! Mask geometry is stored as (seconds, volts) together with the data rate
-//! and signal levels it was authored against, so a saved mask no longer
-//! distorts silently when the data rate or swing of the measured eye
-//! changes. Legacy masks — normalized to the eye window and swing — are
-//! migrated on deserialization (see the `Deserialize` impl).
+//! A mask is a keep-out shape over the eye's opening — a hexagon, a
+//! diamond, a rectangle or a polygon of the reader's own — sized in unit
+//! intervals and volts and centred on the eye it is tested against: half
+//! way across the folded window and on the eye's threshold, so a mask drawn
+//! for a single-ended 0 to 1.2 V eye sits on 0.6 V, not on 0 V. An offset
+//! moves it off that centre, a margin grows or shrinks it about its centre,
+//! and an automatic fit sizes it to the largest the eye clears.
+//!
+//! No standard's mask ships: a named template is a compliance claim, and
+//! the eye sheet does not model a standard's reference equaliser or clock
+//! recovery. A mask is exchanged as a small text file of its vertices.
 
 use serde::{Deserialize, Serialize};
 
-/// Nominal authoring context shared by the built-in default mask and the
-/// legacy migration: matches `EyeData::default()` (1 Gb/s, 0.8 V swing
-/// centered on 0 V) and the legacy 2-UI eye window every normalized mask
-/// was defined against.
-const NOMINAL_DATA_RATE: f64 = 1e9;
-const NOMINAL_SWING: f64 = 0.8;
-const NOMINAL_V_CROSS: f64 = 0.0;
-const LEGACY_WINDOW_UI: f64 = 2.0;
+/// The drawn shapes of a mask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MaskShape {
+    /// Pointed at the crossings' sides, flat over the top and bottom.
+    #[default]
+    Hexagon,
+    Diamond,
+    Rectangle,
+    /// The reader's own vertices.
+    Custom,
+}
 
-/// Eye mask for compliance testing.
-///
-/// Geometry is absolute: polygon points are (time in seconds, voltage in
-/// volts). Time is measured from the start of the eye window at
-/// `reference_data_rate` — one unit interval is `1 / reference_data_rate`
-/// seconds — and voltages are plain volts on the eye's vertical axis.
-#[derive(Debug, Clone, Serialize)]
+impl MaskShape {
+    pub const ALL: [Self; 4] = [Self::Hexagon, Self::Diamond, Self::Rectangle, Self::Custom];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hexagon => "Hexagon",
+            Self::Diamond => "Diamond",
+            Self::Rectangle => "Rectangle",
+            Self::Custom => "Custom",
+        }
+    }
+}
+
+/// Fewest vertices a custom mask has.
+pub const MIN_MASK_VERTICES: usize = 3;
+/// Share of the eye's amplitude an unsized mask is tall.
+const UNSIZED_HEIGHT_SHARE: f64 = 0.4;
+/// How much of the clearance an automatic fit takes, so the fitted mask
+/// does not touch the sample that bounds it.
+const FIT_SHARE: f64 = 0.98;
+
+/// A mask: its shape, its size, where it sits relative to the eye and the
+/// result of its last test.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EyeMask {
-    /// Mask is enabled
-    pub enabled: bool,
-    /// Mask name (e.g., "100GBASE-KR4")
-    pub name: String,
-    /// Inner polygon (forbidden region), absolute (seconds, volts)
-    pub inner: MaskPolygon,
-    /// Outer polygon (boundary), absolute (seconds, volts)
-    pub outer: Option<MaskPolygon>,
-    /// Data rate (b/s) the mask geometry was authored at; defines the unit
-    /// interval the stored times are measured in
-    pub reference_data_rate: f64,
-    /// Crossing level (V) the mask was authored around
-    pub reference_v_cross: f64,
-    /// Signal swing (V, peak-to-peak) at authoring time
-    pub reference_swing: f64,
-    /// Mask violation count
-    pub violation_count: usize,
-    /// Total samples tested
-    pub total_samples: usize,
-    /// Geometric margin from the last test — how far the mask can be grown
-    /// about its centre before the first sample touches it, as a fraction of
-    /// its authored size. Negative when the eye already violates. `None`
-    /// until a test has run against acquisitions. Never serialized: it is a
-    /// property of the data on screen, not of the mask.
+    pub shape: MaskShape,
+    /// Full width, in unit intervals.
+    pub width_ui: f64,
+    /// Width of a hexagon's flat top and bottom, in unit intervals.
+    pub flat_ui: f64,
+    /// Full height, in volts; `None` until sized, when it is a share of the
+    /// eye's amplitude.
+    pub height: Option<f64>,
+    /// A custom mask's vertices about its centre, in unit intervals and
+    /// volts.
+    pub vertices: Vec<(f64, f64)>,
+    /// How far the centre sits right of the window's centre, in unit
+    /// intervals, and above the eye's threshold, in volts.
+    pub offset_ui: f64,
+    pub offset_v: f64,
+    /// How much larger the mask is tested than drawn, as a fraction of its
+    /// size: negative shrinks it.
+    pub margin: f64,
+    /// Samples inside the mask at the last test.
     #[serde(skip)]
-    pub margin: Option<f64>,
+    pub violation_count: usize,
+    /// Samples tested.
+    #[serde(skip)]
+    pub total_samples: usize,
+    /// How far the tested mask could grow about its centre before a sample
+    /// touches it, as a fraction of its size; negative when it is already
+    /// violated. `None` until tested.
+    #[serde(skip)]
+    pub clearance: Option<f64>,
 }
 
 impl Default for EyeMask {
     fn default() -> Self {
         Self {
-            enabled: false,
-            name: "Generic".to_string(),
-            inner: MaskPolygon::default_inner(),
-            outer: None,
-            reference_data_rate: NOMINAL_DATA_RATE,
-            reference_v_cross: NOMINAL_V_CROSS,
-            reference_swing: NOMINAL_SWING,
+            shape: MaskShape::Hexagon,
+            width_ui: 0.5,
+            flat_ui: 0.2,
+            height: None,
+            vertices: Vec::new(),
+            offset_ui: 0.0,
+            offset_v: 0.0,
+            margin: 0.0,
             violation_count: 0,
             total_samples: 0,
-            margin: None,
+            clearance: None,
         }
     }
 }
 
+/// Where a mask is centred on one eye: the window's centre, in unit
+/// intervals, and the eye's threshold, in volts, with the amplitude an
+/// unsized mask takes its height from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaskFrame {
+    pub centre_ui: f64,
+    pub threshold: f64,
+    pub amplitude: f64,
+}
+
 impl EyeMask {
-    /// Count how many samples fall inside the compliance mask.
-    ///
-    /// Trace samples are already display-space (unit intervals, volts) — the
-    /// same space the absolute mask maps into. The polygon is mapped once
-    /// rather than per sample; its times scale by the UI ratio while its
-    /// voltages stay absolute (see [`EyeMask::inner_in_ui_volts`]).
+    /// Whether the drawn size is a mask: a positive width and height, and
+    /// enough vertices for a custom one.
+    pub fn validate(&self) -> Result<(), String> {
+        let positive = |value: f64| value.is_finite() && value > 0.0;
+        if !positive(self.width_ui) {
+            return Err("The mask's width must be a positive number of unit intervals".into());
+        }
+        if !(self.flat_ui.is_finite() && (0.0..self.width_ui).contains(&self.flat_ui)) {
+            return Err("The hexagon's flat must be narrower than the mask".into());
+        }
+        if self.height.is_some_and(|height| !positive(height)) {
+            return Err("The mask's height must be a positive number of volts".into());
+        }
+        if self.shape == MaskShape::Custom && self.vertices.len() < MIN_MASK_VERTICES {
+            return Err(format!(
+                "A custom mask needs at least {MIN_MASK_VERTICES} vertices"
+            ));
+        }
+        if !(self.offset_ui.is_finite() && self.offset_v.is_finite()) {
+            return Err("The mask's offset must be a number".into());
+        }
+        if !(self.margin.is_finite() && self.margin > -1.0) {
+            return Err("The mask's margin must be above −100 %".into());
+        }
+        Ok(())
+    }
+
+    /// The height the mask is drawn at on an eye of `amplitude`.
+    pub fn drawn_height(&self, amplitude: f64) -> f64 {
+        self.height
+            .unwrap_or(UNSIZED_HEIGHT_SHARE * amplitude.abs())
+    }
+
+    /// The shape's vertices about its centre, before the margin, in unit
+    /// intervals and volts.
+    pub fn outline(&self, amplitude: f64) -> Vec<(f64, f64)> {
+        let half_w = 0.5 * self.width_ui;
+        let half_h = 0.5 * self.drawn_height(amplitude);
+        let half_flat = 0.5 * self.flat_ui;
+        match self.shape {
+            MaskShape::Hexagon => vec![
+                (-half_w, 0.0),
+                (-half_flat, half_h),
+                (half_flat, half_h),
+                (half_w, 0.0),
+                (half_flat, -half_h),
+                (-half_flat, -half_h),
+            ],
+            MaskShape::Diamond => {
+                vec![(-half_w, 0.0), (0.0, half_h), (half_w, 0.0), (0.0, -half_h)]
+            }
+            MaskShape::Rectangle => vec![
+                (-half_w, -half_h),
+                (-half_w, half_h),
+                (half_w, half_h),
+                (half_w, -half_h),
+            ],
+            MaskShape::Custom => self.vertices.clone(),
+        }
+    }
+
+    /// The mask as tested on the eye `frame` describes: placed and grown by
+    /// its margin, in the eye's unit intervals and volts.
+    pub fn polygon(&self, frame: MaskFrame) -> MaskPolygon {
+        let centre = (
+            frame.centre_ui + self.offset_ui,
+            frame.threshold + self.offset_v,
+        );
+        let scale = 1.0 + self.margin;
+        MaskPolygon {
+            points: self
+                .outline(frame.amplitude)
+                .into_iter()
+                .map(|(x, y)| (centre.0 + x * scale, centre.1 + y * scale))
+                .collect(),
+        }
+    }
+
+    /// Count the samples of `traces` inside the mask on the eye `frame`
+    /// describes, and how far it clears them.
     pub fn test_traces<'a>(
         &mut self,
+        frame: MaskFrame,
         traces: impl Iterator<Item = (&'a [f64], &'a [f64])> + Clone,
     ) {
+        let polygon = self.polygon(frame);
         self.violation_count = 0;
         self.total_samples = 0;
-        self.margin = None;
-        if !self.enabled {
-            return;
-        }
-
-        let inner = self.inner_in_ui_volts();
         for (time, amplitude) in traces.clone() {
             let n = time.len().min(amplitude.len());
             for i in 0..n {
-                if inner.contains(time[i], amplitude[i]) {
+                if polygon.contains(time[i], amplitude[i]) {
                     self.violation_count += 1;
                 }
                 self.total_samples += 1;
             }
         }
-        self.margin = geometric_margin(&inner, traces);
+        self.clearance = geometric_margin(&polygon, traces);
     }
 
-    /// One unit interval in seconds at the authoring rate (guarded against
-    /// degenerate stored rates).
-    fn reference_ui_seconds(&self) -> f64 {
-        if self.reference_data_rate.is_finite() && self.reference_data_rate > 0.0 {
-            1.0 / self.reference_data_rate
-        } else {
-            1.0 / NOMINAL_DATA_RATE
+    /// Forget the last test.
+    pub fn clear_test(&mut self) {
+        self.violation_count = 0;
+        self.total_samples = 0;
+        self.clearance = None;
+    }
+
+    /// The mask sized to the largest of its shape that `traces` clear about
+    /// its centre, with no margin: its width and height scaled together, so
+    /// the shape stays the one drawn. `None` when there is nothing to fit
+    /// to or no size clears the eye.
+    pub fn fitted<'a>(
+        &self,
+        frame: MaskFrame,
+        traces: impl Iterator<Item = (&'a [f64], &'a [f64])> + Clone,
+    ) -> Option<Self> {
+        let unmargined = Self {
+            margin: 0.0,
+            ..self.clone()
+        };
+        let clearance = geometric_margin(&unmargined.polygon(frame), traces)?;
+        let scale = (1.0 + clearance) * FIT_SHARE;
+        if !(scale.is_finite() && scale > 0.0) {
+            return None;
         }
-    }
-
-    /// The inner polygon mapped to display coordinates: x in unit
-    /// intervals, y in volts.
-    ///
-    /// Time mapping: stored times are seconds at the reference data rate.
-    /// When the current data rate differs from the reference, we scale the
-    /// mask times by the UI ratio (current bit period / reference bit
-    /// period) rather than keeping absolute seconds — a compliance mask is
-    /// a statement about eye geometry *per unit interval*, and absolute
-    /// seconds would smear it across many UIs (or collapse it to a sliver)
-    /// at other rates. Dividing the scaled time by the current bit period
-    /// to reach UI coordinates cancels the current rate, so the display
-    /// coordinate is simply `t_seconds × reference_data_rate`, independent
-    /// of the data on screen.
-    ///
-    /// Voltages are absolute and map straight onto the volt axis — that is
-    /// the fidelity fix: the forbidden region no longer dilates with the
-    /// measured swing.
-    pub fn inner_in_ui_volts(&self) -> MaskPolygon {
-        let ui = self.reference_ui_seconds();
-        MaskPolygon {
-            points: self
-                .inner
-                .points
+        Some(Self {
+            width_ui: self.width_ui * scale,
+            flat_ui: self.flat_ui * scale,
+            height: Some(self.drawn_height(frame.amplitude) * scale),
+            vertices: self
+                .vertices
                 .iter()
-                .map(|&(t_s, volts)| (t_s / ui, volts))
+                .map(|&(x, y)| (x * scale, y * scale))
                 .collect(),
+            margin: 0.0,
+            ..unmargined
+        })
+    }
+
+    /// The mask as a text file: one vertex about its centre per line, in
+    /// unit intervals and volts, before its margin and offset.
+    pub fn to_text(&self, amplitude: f64) -> String {
+        let mut text = String::from(
+            "# RSpice eye mask: vertices about the mask's centre\n# unit_intervals volts\n",
+        );
+        for (x, y) in self.outline(amplitude) {
+            text.push_str(&format!("{x} {y}\n"));
         }
+        text
+    }
+
+    /// A custom mask from a text file of vertices, one `unit_intervals
+    /// volts` pair per line; `#` starts a comment.
+    pub fn from_text(text: &str) -> Result<Self, String> {
+        let mut vertices = Vec::new();
+        for (number, line) in text.lines().enumerate() {
+            let line = line.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut fields = line
+                .split(|c: char| c.is_whitespace() || c == ',')
+                .filter(|field| !field.is_empty());
+            let parse = |field: Option<&str>| {
+                field
+                    .and_then(|field| field.parse::<f64>().ok())
+                    .filter(|value| value.is_finite())
+            };
+            match (parse(fields.next()), parse(fields.next()), fields.next()) {
+                (Some(x), Some(y), None) => vertices.push((x, y)),
+                _ => {
+                    return Err(format!(
+                        "Line {} is not a vertex: write unit intervals then volts",
+                        number + 1
+                    ));
+                }
+            }
+        }
+        let mask = Self {
+            shape: MaskShape::Custom,
+            vertices,
+            ..Self::default()
+        };
+        mask.validate()?;
+        Ok(mask)
     }
 }
 
-/// How far the mask can be scaled about its centre before the first sample
-/// falls inside it, less one.
-///
-/// This is the margin an eye instrument reports: a positive value is
-/// headroom — the eye would still pass a mask that much larger — and a
-/// negative one says how far the mask must shrink to pass. It is a geometric
-/// property of the acquisitions against the polygon, which is what the reader
-/// is asking when they ask how close this eye is to failing.
-///
-/// `None` when there is nothing to test against.
+/// How far `polygon` can be scaled about its centre before the first
+/// sample falls inside it, less one: positive headroom, negative how far it
+/// must shrink to pass. `None` when there is nothing to test against.
 fn geometric_margin<'a>(
-    inner: &MaskPolygon,
+    polygon: &MaskPolygon,
     traces: impl Iterator<Item = (&'a [f64], &'a [f64])> + Clone,
 ) -> Option<f64> {
     /// Largest scaling searched. Beyond this the mask has left the eye
@@ -161,10 +314,10 @@ fn geometric_margin<'a>(
     /// Bisection steps; the bracket is `MAX_SCALE` wide.
     const STEPS: usize = 22;
 
-    if inner.points.len() < 3 {
+    if polygon.points.len() < MIN_MASK_VERTICES {
         return None;
     }
-    let center = inner.centroid()?;
+    let center = polygon.centroid()?;
     let has_samples = traces
         .clone()
         .any(|(time, amplitude)| time.len().min(amplitude.len()) > 0);
@@ -173,7 +326,7 @@ fn geometric_margin<'a>(
     }
 
     let violates = |scale: f64| {
-        let scaled = inner.scaled_about(center, scale);
+        let scaled = polygon.scaled_about(center, scale);
         traces.clone().any(|(time, amplitude)| {
             let n = time.len().min(amplitude.len());
             (0..n).any(|i| scaled.contains(time[i], amplitude[i]))
@@ -183,8 +336,6 @@ fn geometric_margin<'a>(
     if !violates(MAX_SCALE) {
         return Some(MAX_SCALE - 1.0);
     }
-    // A degenerate polygon contains nothing, so the search is always
-    // bracketed and an already-violating mask returns a negative margin.
     let mut clear = 0.0f64;
     let mut hit = MAX_SCALE;
     for _ in 0..STEPS {
@@ -198,134 +349,18 @@ fn geometric_margin<'a>(
     Some(0.5 * (clear + hit) - 1.0)
 }
 
-/// Migration shim: legacy masks stored polygons normalized to the eye
-/// window / swing and carried no reference fields. The presence of
-/// `reference_data_rate` marks the absolute format; without it, every
-/// polygon is reinterpreted from the legacy normalized form under the
-/// nominal authoring context.
-impl<'de> Deserialize<'de> for EyeMask {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct EyeMaskDe {
-            #[serde(default)]
-            enabled: bool,
-            #[serde(default = "default_mask_name")]
-            name: String,
-            #[serde(default)]
-            inner: MaskPolygon,
-            #[serde(default)]
-            outer: Option<MaskPolygon>,
-            /// Present only in the absolute format.
-            #[serde(default)]
-            reference_data_rate: Option<f64>,
-            #[serde(default)]
-            reference_v_cross: Option<f64>,
-            #[serde(default)]
-            reference_swing: Option<f64>,
-            #[serde(default)]
-            violation_count: usize,
-            #[serde(default)]
-            total_samples: usize,
-        }
-
-        let de = EyeMaskDe::deserialize(deserializer)?;
-        let (inner, outer, rate, v_cross, swing) = match de.reference_data_rate {
-            // Absolute format: points are already (seconds, volts).
-            Some(rate) => (
-                de.inner,
-                de.outer,
-                rate,
-                de.reference_v_cross.unwrap_or(NOMINAL_V_CROSS),
-                de.reference_swing.unwrap_or(NOMINAL_SWING),
-            ),
-            // Legacy normalized format: (t, v) in 0..1 of the 2-UI window /
-            // fraction of swing about the crossing, authored against the
-            // nominal context.
-            None => (
-                MaskPolygon::from_legacy_normalized(&de.inner.points),
-                de.outer
-                    .as_ref()
-                    .map(|p| MaskPolygon::from_legacy_normalized(&p.points)),
-                NOMINAL_DATA_RATE,
-                NOMINAL_V_CROSS,
-                NOMINAL_SWING,
-            ),
-        };
-        Ok(Self {
-            enabled: de.enabled,
-            name: de.name,
-            inner,
-            outer,
-            reference_data_rate: rate,
-            reference_v_cross: v_cross,
-            reference_swing: swing,
-            violation_count: de.violation_count,
-            total_samples: de.total_samples,
-            // A margin is a property of the data on screen, not of the mask,
-            // so a restored mask has none until it is tested.
-            margin: None,
-        })
-    }
-}
-
-fn default_mask_name() -> String {
-    "Generic".to_string()
-}
-
-/// Polygon for mask definition
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// A closed polygon in the eye's unit intervals and volts.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MaskPolygon {
-    /// Vertices. In an [`EyeMask`] these are absolute (seconds, volts);
-    /// [`EyeMask::inner_in_ui_volts`] maps them to display coordinates,
-    /// where `contains` then operates.
     pub points: Vec<(f64, f64)>,
 }
 
 impl MaskPolygon {
-    /// Default inner mask: hexagonal keep-out spanning the eye opening at
-    /// the centre of the nominal 1 Gb/s two-UI window, ±0.2 V about a 0 V
-    /// crossing level (25 % of the nominal 0.8 V swing) — the same geometry
-    /// the old normalized mask produced on the default eye.
-    ///
-    /// It sits on the *opening*, at 1 UI, not on a crossing: a mask
-    /// straddling a crossing would be violated by every waveform that has
-    /// edges, which is all of them. The fold anchors the opening at 1 UI for
-    /// exactly this reason.
-    pub fn default_inner() -> Self {
-        Self {
-            points: vec![
-                (0.70e-9, 0.0),
-                (0.80e-9, 0.20),
-                (1.20e-9, 0.20),
-                (1.30e-9, 0.0),
-                (1.20e-9, -0.20),
-                (0.80e-9, -0.20),
-            ],
-        }
-    }
-
-    /// Convert a legacy normalized polygon — t in 0..1 of the 2-UI eye
-    /// window, v as a fraction of the swing about the crossing — into
-    /// absolute (seconds, volts) under the nominal authoring context.
-    fn from_legacy_normalized(points: &[(f64, f64)]) -> Self {
-        let window_seconds = LEGACY_WINDOW_UI / NOMINAL_DATA_RATE;
-        Self {
-            points: points
-                .iter()
-                .map(|&(tn, vn)| (tn * window_seconds, NOMINAL_V_CROSS + vn * NOMINAL_SWING))
-                .collect(),
-        }
-    }
-
-    /// Area centroid, which is the point a compliance mask grows and shrinks
-    /// about. Falls back to the vertex mean for a degenerate (zero-area)
-    /// polygon, where the area centroid is undefined.
+    /// Area centroid, the point a mask grows and shrinks about; the vertex
+    /// mean for a polygon of no area.
     fn centroid(&self) -> Option<(f64, f64)> {
         let n = self.points.len();
-        if n < 3 {
+        if n < MIN_MASK_VERTICES {
             return None;
         }
         let mut twice_area = 0.0;
@@ -342,8 +377,10 @@ impl MaskPolygon {
         if twice_area.abs() > f64::EPSILON {
             return Some((cx / (3.0 * twice_area), cy / (3.0 * twice_area)));
         }
-        let mean_x = self.points.iter().map(|p| p.0).sum::<f64>() / n as f64;
-        let mean_y = self.points.iter().map(|p| p.1).sum::<f64>() / n as f64;
+        #[allow(clippy::cast_precision_loss)]
+        let count = n as f64;
+        let mean_x = self.points.iter().map(|p| p.0).sum::<f64>() / count;
+        let mean_y = self.points.iter().map(|p| p.1).sum::<f64>() / count;
         (mean_x.is_finite() && mean_y.is_finite()).then_some((mean_x, mean_y))
     }
 
@@ -363,25 +400,21 @@ impl MaskPolygon {
         }
     }
 
-    /// Check if point is inside polygon (ray casting)
+    /// Whether `(x, y)` is inside, by ray casting.
     pub fn contains(&self, x: f64, y: f64) -> bool {
-        if self.points.len() < 3 {
+        if self.points.len() < MIN_MASK_VERTICES {
             return false;
         }
-
         let mut inside = false;
         let n = self.points.len();
-
         for i in 0..n {
             let j = (i + 1) % n;
             let (xi, yi) = self.points[i];
             let (xj, yj) = self.points[j];
-
             if ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
                 inside = !inside;
             }
         }
-
         inside
     }
 }
@@ -390,53 +423,103 @@ impl MaskPolygon {
 mod tests {
     use super::*;
 
-    /// Old sessions stored polygons normalized to the eye window and swing,
-    /// with no reference fields — exactly this payload shape. Loading one
-    /// must yield the absolute equivalent under the nominal context.
+    /// A single-ended 0 to 1.2 V eye folded over two unit intervals.
+    const SINGLE_ENDED: MaskFrame = MaskFrame {
+        centre_ui: 1.0,
+        threshold: 0.6,
+        amplitude: 1.2,
+    };
+
     #[test]
-    fn legacy_normalized_mask_migrates_to_absolute_units() {
-        let legacy = r#"{
-            "enabled": true,
-            "name": "100GBASE-KR4",
-            "inner": { "points": [[0.35, 0.0], [0.5, 0.25], [0.65, 0.0], [0.5, -0.25]] },
-            "outer": null,
-            "violation_count": 3,
-            "total_samples": 100
-        }"#;
-        let mask: EyeMask = serde_json::from_str(legacy).expect("legacy mask loads");
-        assert!(mask.enabled);
-        assert_eq!(mask.name, "100GBASE-KR4");
-        assert_eq!(mask.violation_count, 3);
-        // 0.35 of the 2-UI / 1 Gb/s window = 0.70 ns; 0.25 of 0.8 V = 0.2 V.
-        assert!((mask.inner.points[0].0 - 0.70e-9).abs() < 1e-18);
-        assert!((mask.inner.points[1].1 - 0.20).abs() < 1e-12);
-        assert_eq!(mask.reference_data_rate, NOMINAL_DATA_RATE);
-        // Display geometry is unchanged by the migration: 0.35 × 2 UI = 0.7 UI.
-        let ui = mask.inner_in_ui_volts();
-        assert!((ui.points[0].0 - 0.70).abs() < 1e-12);
+    fn a_mask_sits_on_the_eyes_threshold_not_on_zero_volts() {
+        let mask = EyeMask {
+            height: Some(0.4),
+            ..EyeMask::default()
+        };
+        let polygon = mask.polygon(SINGLE_ENDED);
+        assert!(polygon.contains(1.0, 0.6));
+        assert!(!polygon.contains(1.0, 0.0));
+        let top = polygon.points.iter().map(|p| p.1).fold(f64::MIN, f64::max);
+        let bottom = polygon.points.iter().map(|p| p.1).fold(f64::MAX, f64::min);
+        assert!((top - 0.8).abs() < 1e-12 && (bottom - 0.4).abs() < 1e-12);
     }
 
     #[test]
-    fn absolute_mask_round_trips() {
-        let mask = EyeMask::default();
-        let json = serde_json::to_string(&mask).expect("mask serializes");
-        let back: EyeMask = serde_json::from_str(&json).expect("absolute mask loads");
-        assert_eq!(back.inner.points, mask.inner.points);
-        assert_eq!(back.reference_data_rate, mask.reference_data_rate);
-        assert_eq!(back.reference_swing, mask.reference_swing);
+    fn offset_and_margin_move_and_grow_the_mask_about_its_centre() {
+        let mask = EyeMask {
+            shape: MaskShape::Rectangle,
+            width_ui: 0.4,
+            height: Some(0.2),
+            offset_ui: 0.1,
+            offset_v: -0.05,
+            margin: 0.5,
+            ..EyeMask::default()
+        };
+        let polygon = mask.polygon(SINGLE_ENDED);
+        let xs: Vec<f64> = polygon.points.iter().map(|p| p.0).collect();
+        let ys: Vec<f64> = polygon.points.iter().map(|p| p.1).collect();
+        let span = |values: &[f64]| {
+            values.iter().copied().fold(f64::MIN, f64::max)
+                - values.iter().copied().fold(f64::MAX, f64::min)
+        };
+        assert!((span(&xs) - 0.6).abs() < 1e-12);
+        assert!((span(&ys) - 0.3).abs() < 1e-12);
+        assert!(polygon.contains(1.1, 0.55));
     }
 
-    /// The mask is pinned to unit intervals, not absolute screen seconds:
-    /// the display mapping depends only on the reference rate.
     #[test]
-    fn display_mapping_pins_mask_to_unit_intervals() {
-        let mask = EyeMask::default();
-        let ui = mask.inner_in_ui_volts();
-        assert!((ui.points[0].0 - 0.70).abs() < 1e-12);
-        assert!((ui.points[3].0 - 1.30).abs() < 1e-12);
-        assert!(ui.contains(1.0, 0.0));
-        assert!(!ui.contains(0.2, 0.0));
-        assert!(mask.inner_in_ui_volts().contains(1.0, 0.1));
-        assert!(!mask.inner_in_ui_volts().contains(1.0, 0.5));
+    fn a_fit_grows_the_mask_to_just_inside_the_samples_around_it() {
+        // Samples on the opening's rim: 0.3 UI either side, 0.25 V above
+        // and below the threshold.
+        let time = [0.7, 1.3, 1.0, 1.0];
+        let volts = [0.6, 0.6, 0.85, 0.35];
+        let traces = [(&time[..], &volts[..])];
+        let mask = EyeMask {
+            shape: MaskShape::Diamond,
+            width_ui: 0.2,
+            height: Some(0.1),
+            ..EyeMask::default()
+        };
+        let fitted = mask
+            .fitted(SINGLE_ENDED, traces.iter().copied())
+            .expect("samples bound it");
+        assert!(
+            (fitted.width_ui - 0.6 * FIT_SHARE).abs() < 1e-5,
+            "{fitted:?}"
+        );
+        assert!((fitted.height.unwrap() - 0.3 * FIT_SHARE).abs() < 1e-5);
+        let mut tested = fitted;
+        tested.test_traces(SINGLE_ENDED, traces.iter().copied());
+        assert_eq!(tested.violation_count, 0);
+    }
+
+    #[test]
+    fn a_mask_round_trips_through_its_text_file() {
+        let mask = EyeMask {
+            height: Some(0.3),
+            ..EyeMask::default()
+        };
+        let text = mask.to_text(1.2);
+        let read = EyeMask::from_text(&text).expect("its own file reads");
+        assert_eq!(read.shape, MaskShape::Custom);
+        assert_eq!(read.outline(1.2), mask.outline(1.2));
+        assert!(EyeMask::from_text("0 0\n1 1\n").is_err());
+        let error = EyeMask::from_text("0 0\n1 x\n0.5 1\n").expect_err("a bad line");
+        assert!(error.contains("Line 2"), "{error}");
+    }
+
+    #[test]
+    fn a_mask_drawn_too_small_or_too_flat_is_refused() {
+        assert!(EyeMask::default().validate().is_ok());
+        let flat = EyeMask {
+            flat_ui: 0.6,
+            ..EyeMask::default()
+        };
+        assert!(flat.validate().is_err());
+        let low = EyeMask {
+            height: Some(0.0),
+            ..EyeMask::default()
+        };
+        assert!(low.validate().is_err());
     }
 }

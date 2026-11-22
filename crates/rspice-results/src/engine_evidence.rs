@@ -13,8 +13,11 @@ pub use rspice_core::analysis::s_param::{
     MAX_NETWORK_DIAGNOSTIC_PORTS, SampledPassivity, network_quality_with_abort,
 };
 pub use rspice_core::analysis::signal_integrity::{
-    EyeData, EyeDataBuilder, EyeMeasurements, EyeTrace, UiEstimateRejection,
-    calculate_eye_measurements, crossing_phase_at, estimate_unit_interval, fold_anchor,
+    Bathtub, BerEstimate, ClockTrigger, ClockTriggerRejection, DEFAULT_OPENING_BER, DualDiracFit,
+    EyeData, EyeDataBuilder, EyeLevel, EyeMeasureOptions, EyeMeasurements, EyeOpening, EyeTrace,
+    MAX_EYE_LEVELS, MIN_EYE_LEVELS, UiEstimateRejection, calculate_eye_measurements,
+    calculate_eye_measurements_with, centring_delay, clock_trigger, crossing_phase_at,
+    estimate_unit_interval, fold_anchor,
 };
 pub use rspice_core::analysis::{AssertViolation, AssertionReport};
 pub use rspice_core::circuit::{DeviceOpEntry, DeviceOpReport, ModuleOpQuantity, ModuleOpReport};
