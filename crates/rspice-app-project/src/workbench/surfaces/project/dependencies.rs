@@ -223,7 +223,10 @@ fn dependency_bar(
                 .checked_sub(1)
                 .and_then(|index| kinds.get(index).copied());
         }
-        rspice_ui_kit::widgets::menu_button(ui, "Add", |ui| {
+        // The kit's button, so Add reads as its neighbours do, with the
+        // chevron of a button that opens a menu.
+        let add = Button::new("Add").menu().show(ui);
+        egui::Popup::menu(&add).show(|ui| {
             ui.set_min_width(160.0);
             for addition in Addition::ALL {
                 let refusal = addition_refusal(cx, addition);
