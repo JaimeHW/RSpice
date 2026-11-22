@@ -309,3 +309,39 @@ fn a_stored_run_s_events_dump_from_the_store_as_from_the_traces_read_back() {
         String::from_utf8_lossy(&whole)
     );
 }
+
+/// What a device reported is never replaced by the parameter a store kept for it, and each
+/// parameter is adopted once, in whatever case a column spells its name.
+#[test]
+fn an_instance_parameter_is_adopted_once_and_never_over_what_the_device_reported() {
+    let mut shell = transient_shell(&Schema::default()).unwrap();
+    shell.device_op_traces.push(TransientDeviceOpTrace {
+        device_name: "M1".to_owned(),
+        parameter: "gm".to_owned(),
+        values: vec![1e-3, 2e-3],
+    });
+    let mut adoption = InstanceParameterAdoption::of(&shell);
+    adoption.adopt(&mut shell, "m1", "GM", vec![9.0, 9.0]);
+    adoption.adopt(&mut shell, "R1", "r", vec![1e3, 1e3]);
+    adoption.adopt(&mut shell, "r1", "R", vec![2e3, 2e3]);
+    adoption.adopt(&mut shell, "R2", "r", vec![5e3, 5e3]);
+    let traces: Vec<(&str, &str, &[f64])> = shell
+        .device_op_traces
+        .iter()
+        .map(|trace| {
+            (
+                trace.device_name.as_str(),
+                trace.parameter.as_str(),
+                trace.values.as_slice(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        traces,
+        [
+            ("M1", "gm", &[1e-3, 2e-3][..]),
+            ("R1", "r", &[1e3, 1e3][..]),
+            ("R2", "r", &[5e3, 5e3][..]),
+        ]
+    );
+}

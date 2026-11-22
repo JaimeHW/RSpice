@@ -89,12 +89,17 @@ impl StoreReader {
     pub fn new(reader: SegmentReader<SegmentBytes>) -> Self {
         let schema = reader.schema();
         let mut slot_signals = vec![None; reader.slots()];
-        for signal in 0..schema.signals.len() {
-            if let Some(slot) = schema.slot_of(signal)
+        // Each analog signal's first slot is the slots of the signals before it, counted as the
+        // walk passes them: one pass, where asking the schema per signal recounts them each time.
+        let mut slot = 0;
+        for (signal, described) in schema.signals.iter().enumerate() {
+            let width = described.kind.slots();
+            if width > 0
                 && let Some(entry) = slot_signals.get_mut(slot)
             {
                 *entry = Some(signal);
             }
+            slot += width;
         }
         let digest = match reader.state() {
             SegmentState::Complete { digest, .. } => Some(*digest),

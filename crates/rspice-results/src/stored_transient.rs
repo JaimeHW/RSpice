@@ -7,6 +7,8 @@
 //! from, and moves rows and events back into the shell, so every reader of a stored run (the
 //! command line's outputs, the simulation crate's post-processing) reads it the same way.
 
+use std::collections::{HashMap, HashSet};
+
 use rspice_core::analysis::transient::{
     DigitalTrace, RealTrace, TransientDeviceOpTrace, TransientResult, TransientStoreTrace,
 };
@@ -73,14 +75,14 @@ impl<I: SegmentIo> StoredTransientRun<I> {
             StoreError::Schema("the segment holds more rows than this host can address".into())
         })?;
         fill_rows(&mut self.reader, &self.targets, &mut self.shell, 0, rows)?;
+        let mut adoption = InstanceParameterAdoption::of(&self.shell);
         for (slot, &target) in self.targets.iter().enumerate() {
             let SlotTarget::Parameter(index) = target else {
                 continue;
             };
             let values = self.reader.read_slot(slot, 0, rows)?;
             let (device, parameter) = &self.parameters[index];
-            self.shell
-                .adopt_instance_parameter(device, parameter, values);
+            adoption.adopt(&mut self.shell, device, parameter, values);
         }
         Ok(())
     }
@@ -567,6 +569,19 @@ pub fn slot_targets<I: SegmentIo>(
 ) -> Result<Vec<SlotTarget>, String> {
     let (mut next_node, mut next_branch, mut parameters) = (0usize, 0usize, 0usize);
     let mut targets = Vec::with_capacity(reader.slots());
+    // A device value and a store trace are found by name, once each: indexed here, so a run with
+    // a device value of each of a million devices finds them all in one pass, not one search of
+    // every trace per value. The first trace of a name is the one a search would find.
+    let mut device_traces = HashMap::with_capacity(shell.device_op_traces.len());
+    for (index, trace) in shell.device_op_traces.iter().enumerate() {
+        device_traces
+            .entry((trace.device_name.as_str(), trace.parameter.as_str()))
+            .or_insert(index);
+    }
+    let mut store_traces = HashMap::with_capacity(shell.store_traces.len());
+    for (index, trace) in shell.store_traces.iter().enumerate() {
+        store_traces.entry(trace.name.as_str()).or_insert(index);
+    }
     for signal in &reader.schema().signals {
         // An event signal takes no slot; its changes are read on their own.
         if signal.kind.slots() == 0 {
@@ -582,12 +597,9 @@ pub fn slot_targets<I: SegmentIo>(
             continue;
         }
         if signal.quantity == "device_op" {
-            let index = shell
-                .device_op_traces
-                .iter()
-                .position(|trace| {
-                    trace.device_name == signal.path && trace.parameter == signal.name
-                })
+            let index = device_traces
+                .get(&(signal.path.as_str(), signal.name.as_str()))
+                .copied()
                 .ok_or_else(|| {
                     format!(
                         "the transient store's device value '{}' of '{}' is not a result device \
@@ -599,10 +611,9 @@ pub fn slot_targets<I: SegmentIo>(
             continue;
         }
         if signal.quantity == "store" {
-            let index = shell
-                .store_traces
-                .iter()
-                .position(|trace| trace.name == signal.name)
+            let index = store_traces
+                .get(signal.name.as_str())
+                .copied()
                 .ok_or_else(|| {
                     format!(
                         "the transient store's trace '{}' is not a result store trace",
@@ -642,6 +653,53 @@ pub fn slot_targets<I: SegmentIo>(
         });
     }
     Ok(targets)
+}
+
+/// The device traces a result holds, by name, for taking back the instance parameters a store
+/// kept as columns: each is adopted as [`TransientResult::adopt_instance_parameter`] adopts one,
+/// unless the device already reported it, without a search of every trace per parameter. A run
+/// of a million devices takes back a million of them.
+pub struct InstanceParameterAdoption {
+    held: HashSet<(String, String)>,
+}
+
+impl InstanceParameterAdoption {
+    /// The traces `shell` holds now.
+    pub fn of(shell: &TransientResult) -> Self {
+        Self {
+            held: shell
+                .device_op_traces
+                .iter()
+                .map(|trace| {
+                    (
+                        trace.device_name.to_ascii_lowercase(),
+                        trace.parameter.to_ascii_lowercase(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// Adopt `parameter` of `device` into `shell` as the constant trace `values`, unless a trace
+    /// of that name, in any case, is there already.
+    pub fn adopt(
+        &mut self,
+        shell: &mut TransientResult,
+        device: &str,
+        parameter: &str,
+        values: Vec<f64>,
+    ) {
+        if self
+            .held
+            .insert((device.to_ascii_lowercase(), parameter.to_ascii_lowercase()))
+        {
+            shell.device_op_traces.push(TransientDeviceOpTrace {
+                device_name: device.to_owned(),
+                parameter: parameter.to_owned(),
+                values,
+            });
+        }
+    }
 }
 
 /// `(device, parameter)` of each instance-parameter column, in slot order: what
