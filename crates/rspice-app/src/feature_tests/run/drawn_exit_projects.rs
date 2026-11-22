@@ -21,9 +21,9 @@ fn corpus(relative: &str) -> PathBuf {
         .join(relative)
 }
 
-/// The inspector row a placed part's value is typed into: for a source, the
-/// row of the sheet property that holds it, as the inspector names it; the
-/// Value row for every other part.
+/// The inspector row a placed part's value is typed into: the row of the
+/// sheet property that holds it, as the inspector names it; the Value row
+/// for a part whose value is no property of its sheet.
 fn value_row(row: &str) -> &'static str {
     match row {
         "Voltage Source" => "DC voltage, V",
@@ -33,6 +33,8 @@ fn value_row(row: &str) -> &'static str {
         "Resistor" => "Resistance, Ω",
         "Capacitor" => "Capacitance, F",
         "Inductor" => "Inductance, H",
+        "Behavioral Source" => "Expression",
+        "Diode" => "Model",
         _ => "Value",
     }
 }
@@ -323,7 +325,10 @@ mod c04 {
                 "behavioral",
                 "Behavioral Source",
                 at,
-                &[("Instance", name), ("Value", expression)],
+                &[
+                    ("Instance", name),
+                    (value_row("Behavioral Source"), expression),
+                ],
             );
             e.connect(&pins, &[net, "0"]);
         };
