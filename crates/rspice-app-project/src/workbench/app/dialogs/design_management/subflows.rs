@@ -13,17 +13,46 @@ pub(super) fn design_management_subflow_body(
     write_allowed: bool,
 ) -> egui::Response {
     let mut first_response = None;
-    single_pane(ui, |pane| {
-        first_response = Some(subflow_fields(
-            pane,
-            dialog,
-            workspace,
-            libraries,
-            schematic,
-            drawing_sheet_personal,
-            write_allowed,
-        ));
-    });
+    if dialog.page == DesignManagementPage::RenumberPreview {
+        // The scope and order beside the list they produce: every part's
+        // new name, live, with its Keep tick.
+        let mut toggled = None;
+        split_surface(ui, RENUMBER_FIELDS_FRACTION, |left, right| {
+            Frame::NONE
+                .inner_margin(Margin::symmetric(PANE_INSET as i8, 0))
+                .show(left, |pane| {
+                    first_response = Some(subflow_fields(
+                        pane,
+                        dialog,
+                        workspace,
+                        libraries,
+                        schematic,
+                        drawing_sheet_personal,
+                        write_allowed,
+                    ));
+                });
+            if let Some(table) = dialog.renumber_table.as_ref() {
+                toggled = renumber_list(right, table, write_allowed);
+            }
+        });
+        if let Some(object) = toggled
+            && !dialog.inputs.renumber_keep.remove(&object)
+        {
+            dialog.inputs.renumber_keep.insert(object);
+        }
+    } else {
+        single_pane(ui, |pane| {
+            first_response = Some(subflow_fields(
+                pane,
+                dialog,
+                workspace,
+                libraries,
+                schematic,
+                drawing_sheet_personal,
+                write_allowed,
+            ));
+        });
+    }
     first_response.unwrap_or_else(|| {
         let (_, response) = ui.allocate_exact_size(Vec2::ZERO, Sense::hover());
         response
@@ -370,22 +399,6 @@ pub(super) fn subflow_fields(
                     (RenumberOrder::DownThenAcross, "Down then across"),
                 ],
                 &mut dialog.inputs.renumber_order,
-                write_allowed,
-            );
-            field_combo(
-                ui,
-                "Protected references",
-                &[
-                    (
-                        ProtectedReferencePolicy::RetainLockedAndExternalIds,
-                        "Retain locked and external IDs",
-                    ),
-                    (
-                        ProtectedReferencePolicy::IncludeAfterReview,
-                        "Include after review",
-                    ),
-                ],
-                &mut dialog.inputs.protected_references,
                 write_allowed,
             );
             response

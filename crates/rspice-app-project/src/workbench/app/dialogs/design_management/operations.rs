@@ -335,7 +335,13 @@ pub(super) fn commit_design_management_subflow(
                 .annotation()
                 .preview_renumbering(&request)
                 .map_err(|error| error.to_string())?;
-            let mapping_count = preview.mappings.len();
+            // A part renumbered to the name it already has is recorded,
+            // but it is not a change.
+            let changes = preview
+                .mappings
+                .values()
+                .filter(|mapping| mapping.old_reference != mapping.new_reference)
+                .count();
             draft
                 .annotation_mut()
                 .commit_renumbering(&preview, &request)
@@ -343,8 +349,8 @@ pub(super) fn commit_design_management_subflow(
             (
                 DesignManagementTab::Annotation,
                 Some(format!(
-                    "{mapping_count} reference change{}",
-                    if mapping_count == 1 { "" } else { "s" }
+                    "{} changed",
+                    super::widgets::counted(changes, "name")
                 )),
             )
         }
@@ -494,6 +500,7 @@ pub(super) fn renumber_request(
             }
             let object = SchematicObjectKey::new(cell_view_key, component.id)
                 .map_err(|error| error.to_string())?;
+            let locked = inputs.renumber_keep.contains(&object);
             let sheet_id =
                 design_management.sheet_for_object_or_active(cell_view_key, component.id);
             let (page, zones) = sheet_id
@@ -511,7 +518,7 @@ pub(super) fn renumber_request(
                     x: i64::from(component.pos.x),
                     y: i64::from(component.pos.y),
                 },
-                locked: false,
+                locked,
                 external: false,
                 imported: false,
             });
@@ -533,11 +540,117 @@ pub(super) fn renumber_request(
     Ok(RenumberRequest {
         scope,
         order: inputs.renumber_order,
-        protected_references: inputs.protected_references,
-        protected_reviewed: inputs.protected_references
-            == ProtectedReferencePolicy::IncludeAfterReview,
+        // A ticked part keeps its name: the tick is the protection.
+        protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
+        protected_reviewed: false,
         objects,
     })
+}
+
+/// Work the Renumber list out again if what it was worked out from has
+/// changed since: the scope, the order, the Keep ticks or the draft.
+pub(super) fn refresh_renumber_table(
+    dialog: &mut DesignManagementDialogState,
+    workspace: &crate::state::ProjectWorkspace,
+    schematic: &crate::state::SchematicState,
+) {
+    let Some(draft) = dialog.draft.as_ref() else {
+        dialog.renumber_table = None;
+        return;
+    };
+    let basis = RenumberBasis {
+        scope: dialog.inputs.renumber_scope,
+        order: dialog.inputs.renumber_order,
+        keep: dialog.inputs.renumber_keep.clone(),
+        revision: draft.revision(),
+    };
+    if dialog
+        .renumber_table
+        .as_ref()
+        .is_some_and(|table| table.basis == basis)
+    {
+        return;
+    }
+    let table = match renumber_request(
+        workspace,
+        schematic,
+        draft,
+        &dialog.owner_key,
+        &dialog.inputs,
+    ) {
+        Err(problem) => RenumberTable {
+            basis,
+            rows: Vec::new(),
+            problem: Some(problem),
+        },
+        Ok(request) => {
+            let (mappings, problem) = match draft.annotation().preview_renumbering(&request) {
+                Ok(preview) => (preview.mappings, None),
+                // Every part in scope is kept: nothing would change.
+                Err(crate::state::DesignManagementError::NoChanges(_)) => (BTreeMap::new(), None),
+                Err(error) => (BTreeMap::new(), Some(renumber_problem(&error))),
+            };
+            let rows = request
+                .sequence()
+                .into_iter()
+                .map(|object| RenumberRow {
+                    object: object.object.clone(),
+                    current: object.current_reference.clone(),
+                    new: mappings.get(&object.object).map_or_else(
+                        || object.current_reference.clone(),
+                        |mapping| mapping.new_reference.clone(),
+                    ),
+                    sheet: sheet_label(draft, &dialog.owner_key, object),
+                    kept: object.locked,
+                })
+                .collect();
+            RenumberTable {
+                basis,
+                rows,
+                problem,
+            }
+        }
+    };
+    dialog.renumber_table = Some(table);
+}
+
+/// Why the parts cannot be renumbered, in the reader's words where the
+/// model's are an engineer's.
+fn renumber_problem(error: &crate::state::DesignManagementError) -> String {
+    use crate::state::DesignManagementError as Error;
+    match error {
+        Error::EmptyRenumberScope => "This scope holds no parts to renumber.".to_owned(),
+        Error::AnnotationRangeExhausted(prefix) => {
+            format!("No free {prefix} number is left in the reserved ranges.")
+        }
+        Error::DuplicateReferenceDesignator(name) => {
+            format!("Two parts are named {name}: rename one before renumbering.")
+        }
+        error => error.to_string(),
+    }
+}
+
+/// The sheet a listed part is on, with its cell's name when the part is in
+/// another cell view than the open one.
+fn sheet_label(
+    catalog: &DesignManagementCatalog,
+    owner_key: &str,
+    object: &AnnotationObject,
+) -> String {
+    let cell_view_key = object.object.cell_view_key();
+    let sheet = object
+        .sheet_id
+        .and_then(|id| catalog.sheet_catalog(cell_view_key)?.find(id))
+        .map_or_else(String::new, |sheet| sheet.name().to_owned());
+    if cell_view_key == owner_key {
+        return sheet;
+    }
+    let cell = cell_view_key.split('/').nth(1).unwrap_or(cell_view_key);
+    if sheet.is_empty() {
+        cell.to_owned()
+    } else {
+        format!("{cell} \u{00b7} {sheet}")
+    }
 }
 
 /// Each sheet of `cell_view_key` with its place in page order, from 0, and

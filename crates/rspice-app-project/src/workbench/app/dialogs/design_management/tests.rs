@@ -272,3 +272,265 @@ fn a_new_sheet_or_variant_opens_unnamed_and_create_waits_for_a_name() {
         );
     }
 }
+
+/// Forty resistors, twenty on each of two sheets, every one named so that
+/// renumbering changes it, with Design management open over them.
+fn forty_parts_on_two_sheets() -> FeatureHarness<ProjectFeature> {
+    let mut harness = harness();
+    harness.open_project_session();
+    let document = harness.model.schematic.document_mut_for_test();
+    for id in 1..=40_u64 {
+        let place = i32::try_from((id - 1) % 20).unwrap();
+        document.components.push(
+            crate::state::Component::new(
+                id,
+                crate::state::ComponentType::Resistor,
+                Point::new(place % 5 * 100, place / 5 * 200),
+            )
+            .with_name_value(format!("R{}", 100 + id), "1k"),
+        );
+    }
+    open_design_management_dialog(
+        &mut harness.state.design_management,
+        &mut harness.model,
+        &harness.platform,
+        &mut harness.wb,
+    );
+    let dialog = &mut harness.state.design_management;
+    let owner = dialog.owner_key.clone();
+    let sheets = dialog
+        .draft
+        .as_mut()
+        .unwrap()
+        .sheet_catalog_mut(&owner)
+        .unwrap();
+    let first = sheets.sheets()[0].id();
+    let second = sheets
+        .create_sheet_with_page_format(
+            SheetDefinition {
+                name: "Output".to_owned(),
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: None,
+            },
+            Some(first),
+            SchematicSheetFormat::default(),
+        )
+        .unwrap();
+    let revision = sheets.revision();
+    sheets.assign_objects(revision, second, 21..=40).unwrap();
+    dialog.reset_inputs_for_page(DesignManagementPage::RenumberPreview, None, None);
+    harness
+}
+
+/// What the Renumber list says of each part it lists, by the part's name:
+/// its row's reading, "R101 \u{2192} R1" or "R101 kept". The list scrolls,
+/// so it is read the way a reader reads it, scrolling to its end.
+fn read_renumber_list(
+    ctx: &Context,
+    harness: &mut FeatureHarness<ProjectFeature>,
+) -> BTreeMap<String, String> {
+    let mut rows = BTreeMap::new();
+    let mut events = Vec::new();
+    for _ in 0..60 {
+        let nodes = frame(ctx, harness, std::mem::take(&mut events));
+        let mut bottom = None;
+        for (_, node) in &nodes {
+            // A row is a label, whose words egui gives as its value.
+            let Some(label) = node.value() else { continue };
+            let Some((name, _)) = label
+                .split_once(" \u{2192} ")
+                .or_else(|| label.split_once(" kept"))
+            else {
+                continue;
+            };
+            if node.role() == egui::accesskit::Role::Label {
+                rows.insert(name.to_owned(), label.to_owned());
+                bottom = node.bounds().map(|bounds| {
+                    egui::pos2(
+                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    )
+                });
+            }
+        }
+        if rows.len() == 40 {
+            break;
+        }
+        if let Some(pointer) = bottom {
+            events = vec![
+                egui::Event::PointerMoved(pointer),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -120.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+        }
+    }
+    rows
+}
+
+/// Scroll the Renumber list back to its first row, with the pointer still
+/// over it from reading it.
+fn scroll_to_top(ctx: &Context, harness: &mut FeatureHarness<ProjectFeature>) {
+    for _ in 0..10 {
+        let _ = frame(
+            ctx,
+            harness,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Page,
+                delta: egui::vec2(0.0, 10.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+}
+
+/// The number in a reference designator such as R17.
+fn number(name: &str) -> u32 {
+    name.trim_start_matches(char::is_alphabetic)
+        .parse()
+        .unwrap()
+}
+
+/// Renumbering forty parts on two sheets lists every part's new name before
+/// anything changes, numbers the first sheet before the second, and leaves
+/// the three parts whose Keep tick is set with the names they had. What the
+/// list showed is what the parts are called once the change is applied.
+#[test]
+fn renumber_lists_every_new_name_first_and_keeps_ticked_parts() {
+    let ctx = themed_context();
+    let mut harness = forty_parts_on_two_sheets();
+
+    let before = read_renumber_list(&ctx, &mut harness);
+    assert_eq!(before.len(), 40, "the list does not show every part");
+    let new_name = |label: &str| label.split_once(" \u{2192} ").unwrap().1.to_owned();
+    let mut first_sheet = Vec::new();
+    let mut second_sheet = Vec::new();
+    for id in 1..=40_u64 {
+        let label = &before[&format!("R{}", 100 + id)];
+        let target = if id <= 20 {
+            &mut first_sheet
+        } else {
+            &mut second_sheet
+        };
+        target.push(number(&new_name(label)));
+    }
+    assert!(
+        first_sheet.iter().max() < second_sheet.iter().min(),
+        "the second sheet is numbered before the first: {first_sheet:?} {second_sheet:?}"
+    );
+
+    // Tick Keep on the parts that would become R1, R2 and R3, at the top of
+    // the list.
+    let kept = before
+        .iter()
+        .filter(|(_, label)| ["R1", "R2", "R3"].contains(&new_name(label).as_str()))
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(kept.len(), 3);
+    scroll_to_top(&ctx, &mut harness);
+    for name in &kept {
+        let nodes = frame(&ctx, &mut harness, Vec::new());
+        let (tick, _) = node(
+            &nodes,
+            egui::accesskit::Role::CheckBox,
+            &format!("Keep {name}"),
+        );
+        let _ = frame(&ctx, &mut harness, vec![click(*tick)]);
+    }
+    scroll_to_top(&ctx, &mut harness);
+    let shown = read_renumber_list(&ctx, &mut harness);
+    assert_eq!(shown.len(), 40, "the list does not show every part");
+    for name in &kept {
+        assert_eq!(shown[name], format!("{name} kept"));
+    }
+    let promised = shown
+        .iter()
+        .filter(|(name, _)| !kept.contains(name))
+        .map(|(name, label)| (name.clone(), new_name(label)))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(promised.len(), 37);
+
+    let nodes = frame(&ctx, &mut harness, Vec::new());
+    let (renumber, button) = node(&nodes, egui::accesskit::Role::Button, "Renumber");
+    assert!(!button.is_disabled());
+    let _ = frame(&ctx, &mut harness, vec![click(*renumber)]);
+    assert_eq!(
+        harness.state.design_management.page,
+        DesignManagementPage::Manager
+    );
+    let nodes = frame(&ctx, &mut harness, Vec::new());
+    assert!(
+        says(&nodes, "37 names changed"),
+        "the count includes kept parts"
+    );
+    let (apply, _) = node(&nodes, egui::accesskit::Role::Button, MANAGER_PRIMARY);
+    let _ = frame(&ctx, &mut harness, vec![click(*apply)]);
+
+    let names = harness
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|component| (format!("R{}", 100 + component.id), component.name.clone()))
+        .collect::<BTreeMap<_, _>>();
+    for name in &kept {
+        assert_eq!(&names[name], name, "a kept part was renamed");
+    }
+    for (name, new) in &promised {
+        assert_eq!(&names[name], new, "{name} is not called what the list said");
+    }
+}
+
+/// A part renumbered to the name it already has is not counted as a
+/// change: the list's count and the note after Renumber leave it out.
+#[test]
+fn a_part_that_keeps_its_name_is_not_counted_as_a_change() {
+    let ctx = themed_context();
+    let mut harness = harness();
+    harness.open_project_session();
+    for (id, name, x) in [(1, "R1", 0), (2, "R7", 100)] {
+        harness
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                crate::state::Component::new(
+                    id,
+                    crate::state::ComponentType::Resistor,
+                    Point::new(x, 0),
+                )
+                .with_name_value(name, "1k"),
+            );
+    }
+    open_design_management_dialog(
+        &mut harness.state.design_management,
+        &mut harness.model,
+        &harness.platform,
+        &mut harness.wb,
+    );
+    harness.state.design_management.reset_inputs_for_page(
+        DesignManagementPage::RenumberPreview,
+        None,
+        None,
+    );
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = frame(&ctx, &mut harness, Vec::new());
+    }
+    assert!(says(&nodes, "R1 \u{2192} R1"));
+    assert!(says(&nodes, "R7 \u{2192} R2"));
+    assert!(says(&nodes, "1 change \u{00b7} 2 parts"));
+    let (renumber, _) = node(&nodes, egui::accesskit::Role::Button, "Renumber");
+    let _ = frame(&ctx, &mut harness, vec![click(*renumber)]);
+    let nodes = frame(&ctx, &mut harness, Vec::new());
+    assert!(
+        says(&nodes, "1 name changed"),
+        "a part that keeps its name is counted"
+    );
+}

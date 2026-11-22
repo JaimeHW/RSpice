@@ -624,3 +624,175 @@ pub(super) fn parse_reserved_ranges(text: &str) -> Result<Vec<AnnotationReserved
     }
     Ok(ranges)
 }
+
+/// The Renumber list's columns: the Keep tick, the name a part has, the
+/// name it would get, and its sheet.
+const RENUMBER_COLUMNS: [f32; 4] = [0.12, 0.26, 0.26, 0.36];
+const RENUMBER_ROW_HEIGHT: f32 = 29.0;
+/// How tall the list stands before it scrolls.
+const RENUMBER_LIST_HEIGHT: f32 = 12.0 * RENUMBER_ROW_HEIGHT;
+
+/// The Renumber page's list: every part in scope in the order it is
+/// numbered, the name it has and the name it would get. A new name reads in
+/// the body colour; a name that stays, because the part is kept or already
+/// has it, is dimmed. Returns the part whose Keep tick was clicked.
+pub(super) fn renumber_list(
+    ui: &mut Ui,
+    table: &RenumberTable,
+    write_allowed: bool,
+) -> Option<SchematicObjectKey> {
+    section_header(
+        ui,
+        "Names",
+        Some(&format!(
+            "{} \u{00b7} {}",
+            counted(table.changes(), "change"),
+            counted(table.rows.len(), "part")
+        )),
+    );
+    paint_table_header(
+        ui,
+        &RENUMBER_COLUMNS,
+        &["Keep", "Name", "New name", "Sheet"],
+    );
+    if table.rows.is_empty() {
+        empty_table_row(
+            ui,
+            table
+                .problem
+                .as_deref()
+                .unwrap_or("This scope holds no parts to renumber."),
+        );
+        return None;
+    }
+    let mut toggled = None;
+    egui::ScrollArea::vertical()
+        .id_salt("renumber-names")
+        .max_height(RENUMBER_LIST_HEIGHT)
+        .auto_shrink([false, true])
+        .show_rows(ui, RENUMBER_ROW_HEIGHT, table.rows.len(), |ui, rows| {
+            for index in rows {
+                let row = &table.rows[index];
+                if renumber_row(ui, index, row, write_allowed) {
+                    toggled = Some(row.object.clone());
+                }
+            }
+        });
+    toggled
+}
+
+/// One part's row of the Renumber list; whether its Keep tick was clicked.
+fn renumber_row(ui: &mut Ui, index: usize, row: &RenumberRow, write_allowed: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let total = RENUMBER_COLUMNS.iter().sum::<f32>();
+    let widths = RENUMBER_COLUMNS.map(|weight| width * weight / total);
+    let background = ui.painter().add(egui::Shape::Noop);
+    let mut kept = row.kept;
+    let cells = ui.allocate_ui_with_layout(
+        vec2(width, RENUMBER_ROW_HEIGHT),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.set_min_size(vec2(width, RENUMBER_ROW_HEIGHT));
+            ui.allocate_ui_with_layout(
+                vec2(widths[0], RENUMBER_ROW_HEIGHT),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_size(vec2(widths[0], RENUMBER_ROW_HEIGHT));
+                    ui.add_space(PANE_INSET);
+                    ui.add_enabled(write_allowed, egui::Checkbox::without_text(&mut kept))
+                },
+            )
+            .inner
+        },
+    );
+    let tick = cells.inner;
+    let rect = cells.response.rect;
+    tick.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            write_allowed,
+            row.kept,
+            format!("Keep {}", row.current),
+        )
+    });
+    // The row reads as the change it makes, for whoever cannot see it.
+    ui.interact(rect, ui.id().with(("renumber-row", index)), Sense::hover())
+        .widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Label,
+                true,
+                if row.kept {
+                    format!("{} kept", row.current)
+                } else {
+                    format!("{} \u{2192} {}", row.current, row.new)
+                },
+            )
+        });
+    let painter = ui.painter();
+    painter.set(
+        background,
+        egui::Shape::rect_filled(
+            rect,
+            0.0,
+            if ui.rect_contains_pointer(rect) {
+                t.color.bg_hover
+            } else {
+                t.color.bg_inset
+            },
+        ),
+    );
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let stays = row.current == row.new;
+    let mut left = rect.left();
+    for (column, cell_width) in widths.iter().enumerate() {
+        let cell = egui::Rect::from_min_size(
+            egui::pos2(left, rect.top()),
+            vec2(*cell_width, rect.height()),
+        );
+        left += cell_width;
+        if column == 0 {
+            continue;
+        }
+        painter.vline(
+            cell.left(),
+            cell.y_range(),
+            Stroke::new(1.0, t.color.border),
+        );
+        let (text, font, color) = match column {
+            1 => (
+                row.current.as_str(),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                t.color.text,
+            ),
+            2 => (
+                row.new.as_str(),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                if stays {
+                    t.color.text_dim
+                } else {
+                    t.color.text
+                },
+            ),
+            _ => (
+                row.sheet.as_str(),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                t.color.text_dim,
+            ),
+        };
+        painter
+            .with_clip_rect(cell.shrink2(vec2(PANE_INSET, 2.0)))
+            .text(
+                cell.left_center() + vec2(PANE_INSET, 0.0),
+                egui::Align2::LEFT_CENTER,
+                text,
+                font,
+                color,
+            );
+    }
+    tick.clicked()
+}

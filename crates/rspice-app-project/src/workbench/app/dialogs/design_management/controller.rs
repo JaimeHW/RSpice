@@ -14,6 +14,13 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
         return;
     }
     let page = parts.dialog.page;
+    if page == DesignManagementPage::RenumberPreview {
+        super::operations::refresh_renumber_table(
+            parts.dialog,
+            &parts.model.workspace,
+            &parts.model.schematic,
+        );
+    }
     let manager_dirty = parts.dialog.dirty();
     let discard = parts.dialog.discard_confirmation;
     // A new edit invalidates a previously displayed discard confirmation.
@@ -295,9 +302,16 @@ const NOTHING_PENDING: &str = "No reviewed design changes are pending.";
 const SHEET_NAME_NEEDED: &str = "Type a name for the new sheet.";
 /// What Create waits for on a new variant.
 const VARIANT_NAME_NEEDED: &str = "Type a name for the new variant.";
+/// What Renumber waits for while every part in scope keeps its name.
+const NOTHING_TO_RENUMBER: &str = "No part in this scope would change its name.";
 /// What a page waits for rather than fails on: the footer states it as a
 /// hint, and the primary stays disabled until it is given.
-const AT_REST: [&str; 3] = [NOTHING_PENDING, SHEET_NAME_NEEDED, VARIANT_NAME_NEEDED];
+const AT_REST: [&str; 4] = [
+    NOTHING_PENDING,
+    SHEET_NAME_NEEDED,
+    VARIANT_NAME_NEEDED,
+    NOTHING_TO_RENUMBER,
+];
 
 pub(super) fn validate_design_management_page(
     dialog: &DesignManagementDialogState,
@@ -384,8 +398,15 @@ pub(super) fn validate_design_management_page(
             }
         }
         DesignManagementPage::RenumberPreview => {
-            if model.schematic.document().components.is_empty() {
-                return Err("The active schematic has no instances to annotate.".to_owned());
+            let table = dialog
+                .renumber_table
+                .as_ref()
+                .ok_or_else(|| "The list of new names is unavailable.".to_owned())?;
+            if let Some(problem) = &table.problem {
+                return Err(problem.clone());
+            }
+            if table.changes() == 0 {
+                return Err(NOTHING_TO_RENUMBER.to_owned());
             }
         }
         DesignManagementPage::AnnotationPolicy => {

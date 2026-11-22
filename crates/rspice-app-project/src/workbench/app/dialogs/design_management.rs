@@ -42,6 +42,9 @@ const MANAGER_INITIAL_HEIGHT: f32 = 590.0;
 const SUBFLOW_INITIAL_HEIGHT: f32 = 610.0;
 const SPLIT_BREAKPOINT: f32 = 720.0;
 const MAIN_SPLIT_LEFT_FRACTION: f32 = 0.5;
+/// The share of the Renumber page its fields take; its list of names takes
+/// the rest, as Altium's Annotate gives its proposed change list.
+const RENUMBER_FIELDS_FRACTION: f32 = 0.34;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DesignManagementTab {
@@ -203,7 +206,8 @@ pub struct SubflowInputs {
     model_equivalence: ModelEquivalencePolicy,
     renumber_scope: RenumberScopeChoice,
     renumber_order: RenumberOrder,
-    protected_references: ProtectedReferencePolicy,
+    /// The parts whose Keep tick is set: Renumber leaves their names alone.
+    renumber_keep: BTreeSet<SchematicObjectKey>,
     prefix_allocation: AnnotationPrefixAllocation,
     reserved_ranges: String,
     imported_ids: ImportedReferencePolicy,
@@ -234,7 +238,7 @@ impl Default for SubflowInputs {
             model_equivalence: ModelEquivalencePolicy::RequireQualifiedReplacement,
             renumber_scope: RenumberScopeChoice::WholeProject,
             renumber_order: RenumberOrder::AcrossThenDown,
-            protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            renumber_keep: BTreeSet::new(),
             prefix_allocation: AnnotationPrefixAllocation::ByDeviceFamily,
             reserved_ranges: String::new(),
             imported_ids: ImportedReferencePolicy::PreserveWithSourceMap,
@@ -242,6 +246,50 @@ impl Default for SubflowInputs {
             audit_view_checks: HierarchyViewChecks::AllDeclaredFallbacks,
             audit_protected_boundaries: ProtectedBoundaryChecks::SignaturesAndPins,
         }
+    }
+}
+
+/// What the Renumber list was worked out from; a change to any of it works
+/// the list out again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenumberBasis {
+    scope: RenumberScopeChoice,
+    order: RenumberOrder,
+    keep: BTreeSet<SchematicObjectKey>,
+    revision: u64,
+}
+
+/// One part on the Renumber list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenumberRow {
+    object: SchematicObjectKey,
+    /// The name the part has.
+    current: String,
+    /// The name it would get; its own name while it is kept, or while the
+    /// parts cannot be renumbered as they stand.
+    new: String,
+    /// The sheet the part is on.
+    sheet: String,
+    kept: bool,
+}
+
+/// The Renumber page's list: every part in scope, in the order Renumber
+/// numbers them, with the name each has and the name it would get.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenumberTable {
+    basis: RenumberBasis,
+    rows: Vec<RenumberRow>,
+    /// Why the parts cannot be renumbered as they stand, if they cannot.
+    problem: Option<String>,
+}
+
+impl RenumberTable {
+    /// How many parts would change their name.
+    fn changes(&self) -> usize {
+        self.rows
+            .iter()
+            .filter(|row| row.current != row.new)
+            .count()
     }
 }
 
@@ -255,6 +303,8 @@ pub struct DesignManagementDialogState {
     pub draft: Option<DesignManagementCatalog>,
     pub inputs: SubflowInputs,
     input_baseline: Option<SubflowInputs>,
+    /// The Renumber page's list as last worked out.
+    renumber_table: Option<RenumberTable>,
     selection_object_ids: Vec<u64>,
     all_object_ids: Vec<u64>,
     selection_summary: String,
@@ -278,6 +328,7 @@ impl Default for DesignManagementDialogState {
             draft: None,
             inputs: SubflowInputs::default(),
             input_baseline: None,
+            renumber_table: None,
             selection_object_ids: Vec::new(),
             all_object_ids: Vec::new(),
             selection_summary: "No complete schematic objects selected".to_owned(),
@@ -415,6 +466,7 @@ impl DesignManagementDialogState {
         self.page = page;
         self.inputs = inputs.clone();
         self.input_baseline = (page != DesignManagementPage::Manager).then_some(inputs);
+        self.renumber_table = None;
         self.error = None;
         self.discard_confirmation = false;
         self.body_scroll_offset = 0.0;
