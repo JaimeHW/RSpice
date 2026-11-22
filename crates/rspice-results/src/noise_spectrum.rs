@@ -136,13 +136,22 @@ pub fn retained_noise_waveform_is_renderable<W: AsRef<RetainedWaveform>>(wavefor
     noise_waveform_is_renderable(waveform.as_ref(), &mut || {})
 }
 
-/// The ordinary-noise result kinds admitted by both display and publication.
+/// The noise result kinds whose densities the Noise sheet draws, admitted
+/// by both display and publication: ordinary and harmonic-balance noise,
+/// and periodic noise referred to the output, to the input or to an edge's
+/// timing. A periodic result retained as phase noise renames its density
+/// `phase_noise`, so it never resolves a spectrum here and stays the phase
+/// noise sheet's.
 pub fn is_ordinary_noise_result(
     success: bool,
     analysis_type: crate::analysis_type::AnalysisType,
 ) -> bool {
     use crate::analysis_type::AnalysisType;
-    success && matches!(analysis_type, AnalysisType::Noise | AnalysisType::Hbnoise)
+    success
+        && matches!(
+            analysis_type,
+            AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Pnoise
+        )
 }
 
 /// Resolve an ordinary-noise offering from retained data with optional scan accounting.

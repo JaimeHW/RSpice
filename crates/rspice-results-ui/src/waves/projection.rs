@@ -648,7 +648,11 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             } else if matches!(
                 analysis.analysis_type,
                 AnalysisType::Noise | AnalysisType::Hbnoise
-            ) {
+            ) || (analysis.analysis_type == AnalysisType::Pnoise
+                && waveform.unit.as_deref() != Some("dBc/Hz"))
+            {
+                // A periodic noise run referred to the carrier's phase keeps
+                // decibels, read as they are.
                 // Voltage and current PSDs share the square-root projection;
                 // the retained unit selects nV/√Hz or nA/√Hz.
                 TraceKind::NoiseDensity

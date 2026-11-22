@@ -227,7 +227,7 @@ fn selected_noise_analysis(state: ResultsReads<'_>) -> Option<(usize, &AnalysisR
     Some((selected, &run.analyses[selected]))
 }
 
-fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrumModel> {
+pub(super) fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrumModel> {
     let run = state.model.simulation.active_run()?;
     let (_, analysis) = selected_noise_analysis(state)?;
     let shape = noise_spectrum_shape(state, run.dataset_id, analysis)?;
@@ -246,9 +246,23 @@ fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrumModel> {
             (summary.total_rms, summary.input_rms, Some(summary.band))
         });
 
+    let output = analysis.waveforms.iter().find(|waveform| {
+        rspice_results::noise_spectrum::retained_noise_reference(&waveform.name)
+            == Some(rspice_results::noise_spectrum::RetainedNoiseReference::Output)
+    });
+    let total_rms_unit = match output.and_then(|waveform| waveform.unit.as_deref()) {
+        Some("A²/Hz") => "A rms",
+        _ => "V rms",
+    };
+    let jitter = analysis
+        .noise_summary
+        .as_ref()
+        .filter(|summary| summary.is_timing())
+        .map(|summary| edge_jitter(output, summary));
     Some(NoiseSpectrumModel {
         frequency,
         total_rms,
+        total_rms_unit,
         input_rms,
         input_rms_unit: analysis
             .noise_summary
@@ -257,7 +271,37 @@ fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrumModel> {
                 summary.input_rms_unit()
             }),
         band,
+        jitter,
     })
+}
+
+/// An edge's jitter from its timing density, read whole once it has arrived:
+/// the rms of the edge's deviation over the analysis band, and Jc and Jcc
+/// where the sweep reaches half the carrier.
+fn edge_jitter(
+    density: Option<&RetainedTrace>,
+    summary: &crate::state::NoiseSummary,
+) -> inspector::EdgeJitter {
+    use rspice_results::phase_noise::{cycle_jitter, integrate_density};
+    let samples = density.and_then(|density| {
+        Some((
+            density.x.fetch_whole().ready()?,
+            density.y.fetch_whole().ready()?,
+        ))
+    });
+    let Some((frequency, density)) = samples else {
+        return inspector::EdgeJitter {
+            rms_s: None,
+            cycle: None,
+        };
+    };
+    inspector::EdgeJitter {
+        rms_s: integrate_density(&frequency, &density, summary.band).map(f64::sqrt),
+        cycle: summary
+            .conversion
+            .as_ref()
+            .and_then(|conversion| cycle_jitter(&frequency, &density, conversion.carrier_hz)),
+    }
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {

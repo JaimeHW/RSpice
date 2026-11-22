@@ -183,4 +183,215 @@ mod tests {
         assert_eq!(label, "second");
         assert_eq!(summary.band, (2.0, 20.0));
     }
+
+    /// A stored periodic-noise run over `frequency`: its output density in
+    /// `unit`, each contributor's density after it, and the summary the
+    /// engine keeps, on a 1 GHz carrier.
+    fn stored_periodic_noise_run(
+        frequency: Vec<f64>,
+        unit: &str,
+        densities: Vec<(String, Vec<f64>)>,
+        output_quantity: crate::state::PeriodicNoiseOutputQuantity,
+        summary: NoiseSummary,
+    ) -> SimulationRun {
+        use super::super::test_fixtures::{completed_prepared_run, digest, stored_transient};
+        let (mut stored, _) = stored_transient(frequency, densities, Some([0x5e; 32]));
+        for waveform in &mut stored.waveforms {
+            waveform.unit = Some(unit.to_owned());
+        }
+        stored.analysis_type = AnalysisType::Pnoise;
+        stored.label = "PNOISE".to_owned();
+        stored.family_metadata = Some(crate::state::AnalysisResultFamilyMetadata::PeriodicNoise {
+            output_quantity,
+            carrier_frequency_hz: Some(1.0e9),
+        });
+        let mut run = completed_prepared_run(
+            crate::product::SimulationPlanId::new(),
+            crate::product::ObjectRevision::INITIAL,
+            digest(0x5e),
+        );
+        run.add_analysis(stored.with_noise_summary(summary));
+        run
+    }
+
+    /// A periodic-noise run referred to the output opens on the Noise sheet:
+    /// its V²/Hz density and every contributor's are the spectrum, and the
+    /// contributor table lists the run's ranked rows.
+    #[test]
+    fn a_periodic_noise_run_opens_on_its_spectrum_with_its_ranked_contributors() {
+        let frequency = vec![1.0e3, 1.0e4, 1.0e5, 1.0e6];
+        let thermal = vec![4.0e-17; 4];
+        let flicker: Vec<f64> = frequency.iter().map(|f| 1.0e-12 / f).collect();
+        let output = thermal.iter().zip(&flicker).map(|(a, b)| a + b).collect();
+        let rows = vec![
+            crate::state::NoiseContributorRow {
+                device: "R1".into(),
+                mechanism: "thermal".into(),
+                power: 4.0e-11,
+                share_pct: 85.0,
+            },
+            crate::state::NoiseContributorRow {
+                device: "M1".into(),
+                mechanism: "flicker".into(),
+                power: 6.9e-12,
+                share_pct: 15.0,
+            },
+        ];
+        let run = stored_periodic_noise_run(
+            frequency,
+            "V²/Hz",
+            vec![
+                ("onoise".to_owned(), output),
+                ("noise(M1 flicker)".to_owned(), flicker),
+                ("noise(R1 thermal)".to_owned(), thermal),
+            ],
+            crate::state::PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity,
+            NoiseSummary {
+                rows: rows.clone(),
+                total_rms: Some(6.9e-6),
+                band: (1.0e3, 1.0e6),
+                ..NoiseSummary::default()
+            },
+        );
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        state.quick_frame();
+
+        assert_eq!(
+            super::super::opening_sheet(state.results_reads()),
+            Some(super::super::ResultViewer::NoiseContrib)
+        );
+        let index = bode::selected_noise_analysis_index(state.results_reads());
+        assert_eq!(index, Some(0));
+        let view::ContributorEvidence::Retained { summary, .. } =
+            selected_evidence(&state.model.simulation, index)
+        else {
+            panic!("the run's contributors are bound");
+        };
+        assert_eq!(summary.rows, rows);
+        let model = bode::build_noise_model(state.results_reads()).expect("the spectrum is read");
+        assert_eq!(&model.frequency[..], &[1.0e3, 1.0e4, 1.0e5, 1.0e6]);
+        assert_eq!(model.total_rms_unit, "V rms");
+        assert_eq!(model.jitter, None);
+    }
+
+    /// A periodic-noise run referred to the carrier's phase keeps decibels:
+    /// it is the Phase Noise sheet's, and the Noise sheet beside it draws
+    /// only the run's densities.
+    #[test]
+    fn a_phase_referenced_periodic_noise_run_stays_off_the_noise_sheet() {
+        let offsets = vec![1.0e3, 1.0e4, 1.0e5];
+        let mut run = stored_periodic_noise_run(
+            offsets.clone(),
+            "dBc/Hz",
+            vec![
+                ("phase_noise".to_owned(), vec![-80.0, -100.0, -120.0]),
+                ("noise(R1 thermal)".to_owned(), vec![-90.0, -110.0, -130.0]),
+            ],
+            crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+            NoiseSummary {
+                band: (1.0e3, 1.0e5),
+                ..NoiseSummary::default()
+            },
+        );
+        run.add_analysis(
+            AnalysisResult::new(2, AnalysisType::Noise, "NOISE").with_waveforms(vec![
+                RetainedTrace::new("onoise", offsets, vec![1.0e-16, 1.0e-17, 1.0e-18], "#fff")
+                    .with_unit("V²/Hz"),
+            ]),
+        );
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        state.results.results.session.viewer = super::super::ResultViewer::NoiseContrib;
+        state.quick_frame();
+
+        let tokens = crate::ui::tokens::Tokens::default();
+        let presentation = state.model.preferences.result_presentation_policy();
+        let models = super::super::waves::cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &tokens,
+        );
+        let drawn: Vec<_> = models.iter().map(|model| model.analysis_type).collect();
+        assert_eq!(drawn, [AnalysisType::Noise]);
+    }
+
+    /// A periodic-noise run sampled at an edge's timing reads as that edge's
+    /// jitter: a flat s²/Hz density S to half the carrier integrates to
+    /// √(SΔf), and Jc and Jcc are the closed forms of its weighted integrals.
+    #[test]
+    fn a_timing_noise_run_reads_its_edge_jitter_where_the_closed_form_puts_it() {
+        use rspice_core::analysis::pnoise::{
+            PeriodicNoiseSamplePoint, PeriodicNoiseSampling, PeriodicNoiseSamplingEvidence,
+        };
+        let (carrier, density) = (1.0e9_f64, 1.0e-34_f64);
+        let frequency = vec![1.0e3, 1.0e4, 1.0e5, 1.0e6, 1.0e7, 1.0e8, 5.0e8];
+        let sampling = PeriodicNoiseSamplingEvidence {
+            carrier_frequency_hz: carrier,
+            request: PeriodicNoiseSampling::Edge {
+                edge: Default::default(),
+            },
+            output: PeriodicNoiseSamplePoint {
+                node: "clk".into(),
+                reference: None,
+                phase_degrees: 0.0,
+                voltage: 0.5,
+                slew_volts_per_second: 1.0e10,
+            },
+            reference: None,
+            nominal_delay_seconds: None,
+        };
+        let run = stored_periodic_noise_run(
+            frequency.clone(),
+            "s²/Hz",
+            vec![("onoise".to_owned(), vec![density; frequency.len()])],
+            crate::state::PeriodicNoiseOutputQuantity::TimingNoisePowerSpectralDensity,
+            NoiseSummary {
+                conversion: Some(crate::state::PeriodicNoiseConversionEvidence {
+                    sampling: Some(sampling),
+                    input_source: String::new(),
+                    carrier_hz: carrier,
+                    input_sideband: 0,
+                    output_sideband: 0,
+                    max_sideband: 4,
+                }),
+                band: (1.0e3, 5.0e8),
+                ..NoiseSummary::default()
+            },
+        );
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        state.quick_frame();
+
+        assert_eq!(
+            super::super::opening_sheet(state.results_reads()),
+            Some(super::super::ResultViewer::NoiseContrib)
+        );
+        let model = bode::build_noise_model(state.results_reads()).expect("the spectrum is read");
+        let jitter = model.jitter.expect("a timing run reads as jitter");
+        let (low, high) = (1.0e3, carrier / 2.0);
+        let close = |value: f64, expected: f64| (value / expected - 1.0).abs() < 1.0e-6;
+        let rms = jitter.rms_s.expect("the band is inside the sweep");
+        assert!(close(rms, (density * (high - low)).sqrt()), "{rms}");
+
+        // ∫ sin²(af) = f/2 − sin(2af)/4a; ∫ sin⁴(af) = 3f/8 − sin(2af)/4a + sin(4af)/32a.
+        let a = std::f64::consts::PI / carrier;
+        let sin2 = |f: f64| f / 2.0 - (2.0 * a * f).sin() / (4.0 * a);
+        let sin4 = |f: f64| {
+            3.0 * f / 8.0 - (2.0 * a * f).sin() / (4.0 * a) + (4.0 * a * f).sin() / (32.0 * a)
+        };
+        let cycle = jitter.cycle.expect("the sweep reaches half the carrier");
+        let jc = (4.0 * density * (sin2(high) - sin2(low))).sqrt();
+        let jcc = (16.0 * density * (sin4(high) - sin4(low))).sqrt();
+        assert!(close(cycle.cycle_s, jc), "{} vs {jc}", cycle.cycle_s);
+        assert!(
+            close(cycle.cycle_to_cycle_s, jcc),
+            "{} vs {jcc}",
+            cycle.cycle_to_cycle_s
+        );
+    }
 }

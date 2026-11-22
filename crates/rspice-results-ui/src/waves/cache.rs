@@ -201,10 +201,16 @@ impl ModelsCache {
                     || model.analysis_type.is_raw_frequency_curve()
             }
             ResultViewer::SParameters => model.analysis_type.is_network_response(),
-            ResultViewer::NoiseContrib => matches!(
-                model.analysis_type,
-                AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise
-            ),
+            ResultViewer::NoiseContrib => match model.analysis_type {
+                AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise => true,
+                // A periodic noise run referred to the carrier's phase keeps
+                // decibels, and is the Phase Noise sheet's.
+                AnalysisType::Pnoise => model
+                    .traces
+                    .iter()
+                    .any(|trace| trace.kind == super::TraceKind::NoiseDensity),
+                _ => false,
+            },
             _ => true,
         });
         let models = Arc::new(built);

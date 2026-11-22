@@ -48,9 +48,23 @@ pub struct BodeResponse<'a> {
 pub struct NoiseSpectrumModel {
     pub frequency: HeldColumn,
     pub total_rms: Option<f64>,
+    /// What the output-referred density integrates to: `V rms`, or `A rms`
+    /// for a current.
+    pub total_rms_unit: &'static str,
     pub input_rms: Option<f64>,
     pub input_rms_unit: &'static str,
     pub band: Option<(f64, f64)>,
+    /// An edge's jitter, for a periodic noise run sampled at an edge's
+    /// timing: its density is the edge's timing in s²/Hz, not a voltage.
+    pub jitter: Option<EdgeJitter>,
+}
+
+/// An edge's jitter from its timing density over the band: the rms of the
+/// edge's deviation, and Jc and Jcc where the sweep reaches half the carrier.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeJitter {
+    pub rms_s: Option<f64>,
+    pub cycle: Option<rspice_results::phase_noise::CycleJitter>,
 }
 
 /// Render the inspector for the response qualified by the host document,
@@ -415,39 +429,39 @@ pub fn noise_spectrum_right_panel(
             model.frequency.last().copied().unwrap_or_default(),
         )
     });
-    let rows = [
+    let figure = |value: Option<f64>, unit: &str| {
         (
-            "Band",
-            format!(
-                "{} – {}",
-                frequency_readout(quantity_policy, band.0, significant_digits),
-                frequency_readout(quantity_policy, band.1, significant_digits)
-            ),
-            false,
+            or_dash(value.map(|value| fmt_si_significant(value, unit, significant_digits))),
+            value.is_some(),
+        )
+    };
+    let mut rows = vec![(
+        "Band",
+        format!(
+            "{} – {}",
+            frequency_readout(quantity_policy, band.0, significant_digits),
+            frequency_readout(quantity_policy, band.1, significant_digits)
         ),
-        (
-            "Output integrated",
-            model.total_rms.map_or_else(
-                || "—".to_owned(),
-                |value| rspice_ui_kit::plot::fmt_si_significant(value, "V rms", significant_digits),
-            ),
-            model.total_rms.is_some(),
-        ),
-        (
-            "Input referred",
-            model.input_rms.map_or_else(
-                || "—".to_owned(),
-                |value| {
-                    rspice_ui_kit::plot::fmt_si_significant(
-                        value,
-                        model.input_rms_unit,
-                        significant_digits,
-                    )
-                },
-            ),
-            model.input_rms.is_some(),
-        ),
-    ];
+        false,
+    )];
+    match model.jitter {
+        Some(jitter) => {
+            let (text, strong) = figure(jitter.rms_s, "s rms");
+            rows.push(("Jitter", text, strong));
+            if let Some(cycle) = jitter.cycle {
+                let (text, _) = figure(Some(cycle.cycle_s), "s rms");
+                rows.push(("Jc", text, false));
+                let (text, _) = figure(Some(cycle.cycle_to_cycle_s), "s rms");
+                rows.push(("Jcc", text, false));
+            }
+        }
+        None => {
+            let (text, strong) = figure(model.total_rms, model.total_rms_unit);
+            rows.push(("Output integrated", text, strong));
+        }
+    }
+    let (text, strong) = figure(model.input_rms, model.input_rms_unit);
+    rows.push(("Input referred", text, strong));
     crate::presentation::stat_table(ui, &rows);
 }
 
