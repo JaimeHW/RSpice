@@ -628,7 +628,10 @@ impl Host for RSpiceApp {
                     app.state.results.results.session.viewer.tab_label()
                 )
             }
-            _ => workspace.inspector_title().to_owned(),
+            Workspace::Design => "Inspector".to_owned(),
+            Workspace::Simulate => "Analysis".to_owned(),
+            Workspace::Stimulus => "Definition details".to_owned(),
+            Workspace::Models => "Model details".to_owned(),
         }
     }
 

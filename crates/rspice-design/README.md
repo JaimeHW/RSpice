@@ -30,7 +30,7 @@ crates, and refuses egui, eframe, winit, wgpu and rfd in its closure.
 | `parameters` | The lexer for authored SPICE parameter text that lookups and structural edits share |
 | `netlist_document` | `NetlistDocument`, the project-owned netlist source with its include outline, provenance and bounded find and replace |
 | `owned_netlist` | Owned SPICE source metadata, edit strategies and bounded revision history |
-| `project_sources` | `ProjectSourceRegistry`: sealed Verilog-A and automation source bundles under portable logical paths, valid on native and WebAssembly alike |
+| `project_sources` | `ProjectSourceRegistry`: Verilog-A source bundles under portable logical paths, valid on native and WebAssembly alike |
 | `occurrence` | `DocumentOccurrence`, the rooted instance chain an open document edits, and its pruning against the surviving library |
 | `references` | Hierarchy reference renames and lossless probe-expression rewrites |
 | `rf_ports` | `RfPort` and `RfPortMode`, the RF-port declarations schematic inspection and simulation preparation share |

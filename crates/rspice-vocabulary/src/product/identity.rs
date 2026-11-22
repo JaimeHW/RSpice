@@ -110,8 +110,8 @@ macro_rules! define_derivable_uuid_id {
 }
 
 // The identities the product model actually mints. `DesignId`, `TestbenchId`,
-// `RunSetId`, `VerificationPlanId`, `AutomationPipelineId`, `ModelBindingId`,
-// and `ReleaseCandidateId` were declared here too and never constructed
+// `RunSetId`, `VerificationPlanId`, `ModelBindingId` and
+// `ReleaseCandidateId` were declared here too and never constructed
 // anywhere — vocabulary for object kinds that do not exist yet. Reintroducing
 // one is a single line whenever the object arrives.
 define_derivable_uuid_id!(ProjectId);

@@ -54,19 +54,6 @@ impl Workspace {
             Self::Netlist => "Netlist",
         }
     }
-
-    pub const fn inspector_title(self) -> &'static str {
-        match self {
-            Self::Project => "Project details",
-            Self::Design => "Inspector",
-            Self::Simulate => "Analysis",
-            Self::Stimulus => "Definition details",
-            Self::Results => "Data inspector",
-            Self::Verify => "Verification",
-            Self::Models => "Model details",
-            Self::Netlist => "Source",
-        }
-    }
 }
 
 /// The built-in models and the SPICE packs shipped beside the binary.

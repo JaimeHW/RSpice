@@ -309,7 +309,7 @@ fn intro_lines(model: &ShortcutReferenceModel) -> Vec<IntroLine> {
     push_intro_heading(&mut lines, "PORTABILITY AND PRIVACY");
     push_intro_wrapped(
         &mut lines,
-        "This reference contains shortcut bindings and execution policies only. It omits credentials, source paths, project identity, recent activity, automation state, and protected-override acknowledgements.",
+        "This reference contains shortcut bindings and execution policies only. It omits credentials, source paths, project identity, recent activity and protected-override acknowledgements.",
         TextStyle::Notice,
         0.0,
     );

@@ -1,8 +1,6 @@
 //! The code feature: the Netlist workspace, the Verilog-A views the Design
 //! workspace opens, the landing Design shows for a project its deck owns,
 //! and the source editors they share.
-//!
-//! What it has not registered yet, the shell's legacy tables still serve.
 
 pub mod commands;
 pub mod deck_run;

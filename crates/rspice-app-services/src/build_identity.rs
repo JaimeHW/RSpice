@@ -4,9 +4,6 @@
 //! The shell's build script stamps these values, and the shell installs them
 //! here once at startup. The services and runs below the shell read the build
 //! here instead of compiling in variables that only the shell's build emits.
-//! The managed runtime's verification key is deliberately not part of it: a
-//! trust anchor stays a compile-time constant where it is verified, so an
-//! uninstalled key can never be read.
 
 use std::sync::OnceLock;
 

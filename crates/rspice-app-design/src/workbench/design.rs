@@ -1,7 +1,5 @@
 //! The design feature: the schematic and symbol canvases, the stimulus
 //! library, and the dialogs that edit what they draw.
-//!
-//! What it has not registered yet, the shell's legacy tables still serve.
 
 pub mod commands;
 pub mod inspector;
