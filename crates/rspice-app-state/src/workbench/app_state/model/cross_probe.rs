@@ -10,7 +10,7 @@ use rspice_schematic_editor::view::cross_probe::{self, LocateSignalError};
 use rspice_simulation::netlist_gen::SheetNetGeometry;
 
 use super::Model;
-use crate::state::SheetId;
+use crate::state::{Point, SheetId};
 
 impl Model {
     /// Select a result signal only through the map belonging to the active
@@ -96,6 +96,28 @@ impl Model {
                 .map(|geometry| &geometry.net_to_points),
         };
         cross_probe::select_signal_conductor(&view, editor, signal)
+    }
+
+    /// The drawn part a current trace is read through, on the open drawing
+    /// at the occurrence in front: its id, where it sits and the name the
+    /// drawing gives it. Read only through a map current for the drawing, by
+    /// [`cross_probe::locate_signal_device`]'s rules.
+    pub fn locate_signal_device(
+        &self,
+        signal: &str,
+    ) -> Result<(u64, Point, String), LocateSignalError> {
+        let occurrence = self.workspace.content.occurrence_path();
+        let key = self.workspace.content.active_schematic_reference().key();
+        let view = cross_probe::CrossProbeView {
+            document: self.schematic.document(),
+            sheet_catalog: self.workspace.content.design_management.sheet_catalog(&key),
+            occurrence: &occurrence,
+            net_to_points: self
+                .active_sheet_net_geometry()
+                .map(|geometry| &geometry.net_to_points),
+        };
+        cross_probe::locate_signal_device(&view, signal)
+            .map(|component| (component.id, component.pos, component.name.clone()))
     }
 
     /// Whether the retained cross-probe map belongs to the open cell as it is

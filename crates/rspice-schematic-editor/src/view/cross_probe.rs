@@ -81,17 +81,50 @@ pub fn probed_net(signal: &str) -> Option<(&str, NetQuantity)> {
     })
 }
 
+/// The device a current is read through: `I(R1)`, or one pin's current as
+/// `Ib(Q1)` or `Ix(U1:a)` name it. `None` for anything else, an expression of
+/// currents among them.
+pub fn probed_device(signal: &str) -> Option<&str> {
+    let signal = signal.trim();
+    let (head, tail) = signal.split_once('(')?;
+    let mut letters = head.chars();
+    let current = letters
+        .next()
+        .is_some_and(|letter| letter.eq_ignore_ascii_case(&'I'));
+    let pin = letters.as_str();
+    if !current || pin.len() > 1 || !pin.chars().all(|letter| letter.is_ascii_alphabetic()) {
+        return None;
+    }
+    let inner = tail.strip_suffix(')')?.trim();
+    if inner.is_empty() || inner.contains(['(', ')']) {
+        return None;
+    }
+    let device = inner
+        .split_once(':')
+        .map_or(inner, |(device, _)| device)
+        .trim();
+    (!device.is_empty()).then_some(device)
+}
+
+/// Whether a result signal names one thing the schematic draws: a net's
+/// voltage or digital lane, or a device's current.
+pub fn locates_on_schematic(signal: &str) -> bool {
+    probed_net(signal).is_some() || probed_device(signal).is_some()
+}
+
 /// Why a result signal could not be located on the schematic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocateSignalError {
-    /// The signal is an expression or a device current, not a node voltage,
-    /// so no single conductor carries it.
+    /// The signal is computed from other signals, so no one net or device
+    /// carries it.
     NotANet,
     /// No retained cross-probe map matches the drawing as it stands, so the
     /// net's geometry is unknown.
     NoCurrentMap,
     /// The map is current but knows no conductor by that name.
     UnknownNet(String),
+    /// The drawing has no device the engine names so.
+    UnknownDevice(String),
     /// The signal is read inside another instance than the one this tab is
     /// editing, so no conductor on screen carries it.
     OtherOccurrence(String),
@@ -101,7 +134,9 @@ impl LocateSignalError {
     pub fn message(&self, signal: &str) -> String {
         match self {
             Self::NotANet => {
-                format!("{signal} is derived, not a node voltage — no single conductor carries it.")
+                format!(
+                    "{signal} is computed from other signals, so no one net or part carries it."
+                )
             }
             Self::NoCurrentMap => {
                 "The schematic changed since this result was produced; run again to cross-probe it."
@@ -109,6 +144,9 @@ impl LocateSignalError {
             }
             Self::UnknownNet(net) => {
                 format!("No sheet of this drawing has a conductor named {net}.")
+            }
+            Self::UnknownDevice(device) => {
+                format!("No sheet of this drawing has a part named {device}.")
             }
             Self::OtherOccurrence(occurrence) => {
                 format!(
@@ -196,6 +234,31 @@ fn borrow_signal_conductor<'a>(
         .find(|(name, points)| name.eq_ignore_ascii_case(&target.leaf) && !points.is_empty())
         .map(|(name, points)| (name.as_str(), points.as_slice()))
         .ok_or(LocateSignalError::UnknownNet(target.leaf.clone()))
+}
+
+/// The drawn device a current trace is read through, on any sheet of the
+/// drawing: `I(R1)` is the resistor `R1`, `Ib(Q1)` the transistor `Q1`.
+///
+/// The same address rules as a net's: the trace's scope must be the tab's own
+/// occurrence, and only a map current for this drawing answers, since a part
+/// renamed or replaced since the run is not the one that carried the current.
+pub fn locate_signal_device<'a>(
+    view: &CrossProbeView<'a>,
+    signal: &str,
+) -> Result<&'a Component, LocateSignalError> {
+    let device = probed_device(signal).ok_or(LocateSignalError::NotANet)?;
+    if view.net_to_points.is_none() {
+        return Err(LocateSignalError::NoCurrentMap);
+    }
+    let (scope, leaf) = match ProbeTarget::parse(device) {
+        Ok(target) => (target.scope, target.leaf),
+        Err(_) => (InstancePath::root(), device.to_owned()),
+    };
+    if !scope.same_engine_scope(view.occurrence) {
+        return Err(LocateSignalError::OtherOccurrence(scope.to_string()));
+    }
+    component_for_engine_device(&view.document.components, view.occurrence, device)
+        .ok_or(LocateSignalError::UnknownDevice(leaf))
 }
 
 /// How many of the objects a failed run named this sheet currently draws.
@@ -400,8 +463,79 @@ mod tests {
             .expect_err("an expression is not a net");
 
         assert_eq!(error, LocateSignalError::NotANet);
-        assert!(error.message("V(out)-V(in)").contains("derived"));
+        assert_eq!(
+            error.message("V(out)-V(in)"),
+            "V(out)-V(in) is computed from other signals, so no one net or part carries it."
+        );
         assert!(editor.selection.is_empty());
+    }
+
+    /// A current names the part it flows through: `I(R1)`, or one pin's
+    /// current as `Ib(Q1)` or `Ix(U1:a)`; an expression of currents names
+    /// none.
+    #[test]
+    fn a_current_names_the_part_it_flows_through() {
+        assert_eq!(probed_device("I(R1)"), Some("R1"));
+        assert_eq!(probed_device(" i(x1.r1) "), Some("x1.r1"));
+        assert_eq!(probed_device("Ib(Q1)"), Some("Q1"));
+        assert_eq!(probed_device("Ix(U1:a)"), Some("U1"));
+        assert_eq!(probed_device("I(R1)+I(R2)"), None);
+        assert_eq!(probed_device("I(R1)*2"), None);
+        assert_eq!(probed_device("V(out)"), None);
+        assert_eq!(probed_device("Ixy(R1)"), None);
+        assert_eq!(probed_device("I()"), None);
+        assert!(locates_on_schematic("I(R1)"));
+        assert!(locates_on_schematic("D(q)"));
+        assert!(!locates_on_schematic("V(out)-V(in)"));
+    }
+
+    /// `I(R1)` is the resistor the drawing calls R1, on the tab's own
+    /// occurrence and through a current map only; read in another instance,
+    /// or naming a part the drawing lacks, it says which.
+    #[test]
+    fn a_device_current_locates_its_drawn_part() {
+        use rspice_design::schematic::component::Component;
+        use rspice_design::schematic::component_type::ComponentType;
+
+        let (mut document, points, _) = fixture();
+        document.components.push(
+            Component::new(7, ComponentType::Resistor, Point::new(200, 200))
+                .with_name_value("R1", "1k"),
+        );
+        let root = InstancePath::root();
+        let view = CrossProbeView {
+            document: &document,
+            sheet_catalog: None,
+            occurrence: &root,
+            net_to_points: Some(&points),
+        };
+
+        let part = locate_signal_device(&view, "I(R1)").expect("R1 is drawn");
+        assert_eq!((part.id, part.name.as_str()), (7, "R1"));
+        assert_eq!(
+            locate_signal_device(&view, "I(R9)").map(|part| part.id),
+            Err(LocateSignalError::UnknownDevice("R9".to_owned()))
+        );
+        assert_eq!(
+            LocateSignalError::UnknownDevice("R9".to_owned()).message("I(R9)"),
+            "No sheet of this drawing has a part named R9."
+        );
+        assert!(matches!(
+            locate_signal_device(&view, "I(x1.r1)"),
+            Err(LocateSignalError::OtherOccurrence(_))
+        ));
+        assert_eq!(
+            locate_signal_device(&view, "I(R1)-I(R2)").map(|part| part.id),
+            Err(LocateSignalError::NotANet)
+        );
+        let stale = CrossProbeView {
+            net_to_points: None,
+            ..view
+        };
+        assert_eq!(
+            locate_signal_device(&stale, "I(R1)").map(|part| part.id),
+            Err(LocateSignalError::NoCurrentMap)
+        );
     }
 
     #[test]

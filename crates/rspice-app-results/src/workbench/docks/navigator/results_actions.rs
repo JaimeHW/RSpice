@@ -24,6 +24,7 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 use super::super::super::commands::result_navigation::{open_run_log, producing_run};
 use super::results::{RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT, ResultArtifact};
 use rspice_app_workbench::workbench::docks::navigator::row_context_menu;
+use rspice_schematic_editor::view::cross_probe;
 
 /// A tick on a row, or a tick drawn across a range of rows with Shift.
 pub(super) fn update_result_browser_multi_selection(
@@ -643,14 +644,16 @@ pub(super) fn result_signal_context_menu(
         let signal_name = key
             .resolve(&state.model.simulation.retained.runs)
             .map(|(.., waveform)| waveform.name.clone());
+        let refusal = match &signal_name {
+            None => Some("This signal is no longer in its run.".to_owned()),
+            Some(signal) => schematic_refusal(signal),
+        };
         let cross_probe = ui.add_enabled(
-            signal_name.is_some(),
+            refusal.is_none(),
             egui::Button::new("Show on schematic"),
         );
-        if signal_name.is_none() {
-            cross_probe
-                .clone()
-                .on_disabled_hover_text("This signal is no longer in its run.");
+        if let Some(refusal) = refusal {
+            cross_probe.clone().on_disabled_hover_text(refusal);
         }
         if cross_probe.clicked() {
             if let Some(signal) = signal_name {
@@ -694,7 +697,28 @@ fn open_signal_table(
     }
 }
 
+/// Why `signal` has nothing one can show on the schematic: it is computed
+/// from other signals rather than carried by one net or part.
+fn schematic_refusal(signal: &str) -> Option<String> {
+    (!cross_probe::locates_on_schematic(signal))
+        .then(|| cross_probe::LocateSignalError::NotANet.message(signal))
+}
+
+/// Show what carries `signal` on the schematic: the conductor of a net's
+/// voltage, or the part a current flows through, selected and centred.
 fn show_signal_on_schematic(state: &mut ResultsParts<'_>, signal: &str) {
+    if cross_probe::probed_device(signal).is_some() {
+        match state.model.locate_signal_device(signal) {
+            Ok((component, position, name)) => {
+                state.show_component_on_schematic(component, position);
+                state.workbench.outbox.push(PromptAfterCommands(format!(
+                    "Selected {name} from {signal}."
+                )));
+            }
+            Err(error) => state.workbench.prompt(error.message(signal)),
+        }
+        return;
+    }
     match state.model.select_signal_conductor(signal) {
         Ok(net) => {
             execute(state, ids::DESIGN_WORKSPACE);
@@ -719,7 +743,12 @@ pub(super) fn locate_on_schematic_menu(
 ) {
     let signal = signal.to_owned();
     response.context_menu(|ui| {
-        if ui.button("Show on schematic").clicked() {
+        let refusal = schematic_refusal(&signal);
+        let show = ui.add_enabled(refusal.is_none(), egui::Button::new("Show on schematic"));
+        if let Some(refusal) = refusal {
+            show.clone().on_disabled_hover_text(refusal);
+        }
+        if show.clicked() {
             show_signal_on_schematic(state, &signal);
             ui.close();
         }

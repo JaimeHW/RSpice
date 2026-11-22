@@ -473,6 +473,39 @@ fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
     );
 }
 
+/// A device current shows its part: I(R1) selects and centres the resistor
+/// the drawing calls R1 and opens Design there. A part the drawing does not
+/// have, or an expression of currents, says so and stays in Results.
+#[test]
+fn cross_probing_a_device_current_selects_its_part() {
+    use rspice_app_state::state::{Component, ComponentType, Point};
+    let mut app = result_app_with_current_out_map(false);
+    let place = Point::new(200, 0);
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(Component::new(7, ComponentType::Resistor, place).with_name_value("R1", "1k"));
+
+    let error = cross_probe(&mut app, "I(R9)").expect_err("the drawing has no R9");
+    assert_eq!(error, "No sheet of this drawing has a part named R9.");
+    let error = cross_probe(&mut app, "I(R1)-I(R9)").expect_err("an expression has no part");
+    assert_eq!(
+        error,
+        "I(R1)-I(R9) is computed from other signals, so no one net or part carries it."
+    );
+    assert_eq!(app.state.workbench.workspace, Workspace::Results);
+
+    let part = cross_probe(&mut app, "I(R1)").expect("R1 is drawn");
+
+    assert_eq!(part, "R1");
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    let editor = &app.state.model.schematic.session.editor;
+    assert!(editor.selection.has_component(7), "R1 is selected");
+    assert_eq!(editor.center_request, Some(place), "and centred");
+}
+
 #[test]
 fn stale_cross_probe_map_fails_without_leaving_results() {
     let mut app = result_app_with_current_out_map(true);

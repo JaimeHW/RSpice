@@ -25,6 +25,7 @@ use super::super::super::design_system::{
 use super::super::super::state::Workspace;
 use super::{result_authority, run_details};
 use rspice_results::number_format::fmt_si_significant;
+use rspice_schematic_editor::view::cross_probe::probed_device;
 
 pub(in crate::workbench) fn results(
     ui: &mut Ui,
@@ -287,17 +288,26 @@ fn selected_result_trace(
 
         if is_schematic_cross_probe_candidate(selected.source_name()) {
             let signal = selected.source_name().to_owned();
+            let device = probed_device(&signal).is_some();
             let unavailable = schematic_cross_probe_unavailability(state.model, selected, &signal);
-            let mut response =
-                ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
+            let mut response = ui.add_enabled(
+                unavailable.is_none(),
+                egui::Button::new(if device {
+                    "Cross-probe part"
+                } else {
+                    "Cross-probe net"
+                }),
+            );
             if let Some(reason) = unavailable {
                 response = response.on_hover_text(reason);
             }
             if response.clicked() {
                 match cross_probe_trace_to_design(state, &signal) {
-                    Ok(net) => state.workbench.outbox.push(PromptAfterCommands(format!(
-                        "Selected conductor {net} from {signal}."
-                    ))),
+                    Ok(name) => state.workbench.outbox.push(PromptAfterCommands(if device {
+                        format!("Selected {name} from {signal}.")
+                    } else {
+                        format!("Selected conductor {name} from {signal}.")
+                    })),
                     Err(message) => state.prompt(message),
                 }
             }
@@ -674,7 +684,7 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
 }
 
 fn is_schematic_cross_probe_candidate(signal: &str) -> bool {
-    (signal.starts_with("V(") || signal.starts_with("I(")) && signal.ends_with(')')
+    (signal.starts_with("V(") && signal.ends_with(')')) || probed_device(signal).is_some()
 }
 
 fn schematic_cross_probe_unavailability(
@@ -682,12 +692,13 @@ fn schematic_cross_probe_unavailability(
     selected: &rspice_results_ui::selection::SelectedResultTrace,
     signal: &str,
 ) -> Option<String> {
-    let Some(net) = rspice_schematic_editor::view::cross_probe::wrapped_signal_name(signal, 'V')
-    else {
-        return Some(format!(
-            "{signal} is a device current or derived quantity; no single schematic net carries it."
-        ));
-    };
+    let device = probed_device(signal).is_some();
+    let net = rspice_schematic_editor::view::cross_probe::wrapped_signal_name(signal, 'V');
+    if net.is_none() && !device {
+        return Some(
+            rspice_schematic_editor::view::cross_probe::LocateSignalError::NotANet.message(signal),
+        );
+    }
     if !model.result_mapping_is_current() {
         return Some(
             "The schematic changed since this result was produced; run again to cross-probe it."
@@ -712,6 +723,14 @@ fn schematic_cross_probe_unavailability(
                 .to_owned(),
         );
     }
+    let Some(net) = net else {
+        // A current names its part; the part's own rules say whether this
+        // drawing, at this occurrence, has it.
+        return model
+            .locate_signal_device(signal)
+            .err()
+            .map(|error| error.message(signal));
+    };
     let here = model.workspace.content.occurrence_path(); // only that occurrence answers for a trace
     // A trace is scoped by written instance names, `xamp` for a cell drawn
     // `amp`, so its scope is compared with the drawn occurrence by those names
@@ -750,6 +769,14 @@ pub fn cross_probe_trace_to_design(
         .ok_or_else(|| "No result trace is selected.".to_owned())?;
     if let Some(reason) = schematic_cross_probe_unavailability(state.model, selected, signal) {
         return Err(reason);
+    }
+    if probed_device(signal).is_some() {
+        let (component, position, name) = state
+            .model
+            .locate_signal_device(signal)
+            .map_err(|error| error.message(signal))?;
+        state.show_component_on_schematic(component, position);
+        return Ok(name);
     }
     let net = state
         .model
