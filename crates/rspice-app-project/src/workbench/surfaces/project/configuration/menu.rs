@@ -256,6 +256,10 @@ fn show(ctx: &egui::Context, menu_id: egui::Id, menu: &RowMenu, opened: bool) ->
         egui::LayerId::new(egui::Order::Foreground, menu_id),
     )
     .kind(egui::PopupKind::Menu)
+    // A menu, not a stack of buttons: one column of full-width rows in the
+    // menu style, as every desktop tool's context menu reads.
+    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+    .style(egui::containers::menu::menu_style)
     .open_memory(opened.then_some(egui::SetOpenCommand::Bool(true)))
     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
     .show(|ui| {
