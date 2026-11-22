@@ -1,5 +1,5 @@
 //! Importing an LTspice (`.asc`) or QSPICE (`.qsch`) schematic into the open
-//! project.
+//! project, or into a new one named after the file when none is open.
 //!
 //! The drawing becomes a cell of the active library with a schematic view.
 //! A symbol RSpice draws no part for becomes a cell of its own, and a block's
@@ -131,7 +131,8 @@ struct ImportedTree {
     directive_blocks: Vec<(u64, rspice_design_model::Point, Vec<String>)>,
 }
 
-/// Imports the schematic at `path` into the open project and opens it,
+/// Imports the schematic at `path` into the open project, or into a new one
+/// named after the file when none is open, and opens it,
 /// saying on the status line what came across and how much did not; when
 /// something did not, the Problems page opens on a row for each. Returns
 /// that sentence.
@@ -146,6 +147,19 @@ pub(crate) fn import_foreign_schematic_file(
 ) -> Result<String, String> {
     if let Some(refusal) = foreign_import_refusal(&app.state) {
         return Err(format!("The schematic cannot be imported: {refusal}."));
+    }
+    let source = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    if !app.state.platform.project_lifecycle.is_open() {
+        // As a netlist opened with no project open is: a project named after
+        // the file, made only once the file reads as a drawing, so a file
+        // that does not leaves the landing as it was.
+        read_drawing(tool, path)?;
+        app.state
+            .create_imported_schematic_project(&source)
+            .map_err(|refusal| format!("The schematic cannot be imported: {refusal}"))?;
     }
     let library = app
         .state
@@ -204,10 +218,6 @@ pub(crate) fn import_foreign_schematic_file(
         model_cards(&plan, &tree.model_cards),
         &includes,
         &mut notices,
-    );
-    let source = path.file_name().map_or_else(
-        || path.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
     );
     let asking = (!adopted).then(|| Asking {
         title: format!("Import {} Schematic", tool.label()),

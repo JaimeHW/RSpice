@@ -714,8 +714,11 @@ impl CodeCommand {
             Self::SaveDeckAs => ("Save deck as\u{2026}", "File", imports),
             Self::SaveNetlistAsDeck => ("Save netlist as deck\u{2026}", "File", imports),
             Self::ImportVerilogA => ("Import Verilog/Verilog-A/AMS\u{2026}", "File", imports),
-            Self::ImportLtspiceSchematic => ("Import LTspice schematic\u{2026}", "File", imports),
-            Self::ImportQspiceSchematic => ("Import QSPICE schematic\u{2026}", "File", imports),
+            // With no project open the import makes one, as opening a deck does.
+            Self::ImportLtspiceSchematic => {
+                ("Import LTspice schematic\u{2026}", "File", opens_file)
+            }
+            Self::ImportQspiceSchematic => ("Import QSPICE schematic\u{2026}", "File", opens_file),
             Self::ExportNetlist => ("Export netlist\u{2026}", "File", open),
             Self::ExportBillOfMaterials => ("Export bill of materials\u{2026}", "File", open),
             Self::ExportDeck => ("Export deck\u{2026}", "File", open),

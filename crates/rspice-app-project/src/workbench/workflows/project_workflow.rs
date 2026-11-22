@@ -214,21 +214,39 @@ pub fn new_project_announcement(params: &NewProjectParams) -> String {
 /// what the reader asked for; a "Created project" line would describe a
 /// project they never asked for.
 pub fn netlist_project(display_name: &str) -> (NewProjectParams, String) {
-    const FALLBACK_NAME: &str = "Netlist Project";
+    let params = project_named_after(display_name, "Netlist Project");
+    let announcement = format!("Opened netlist project {} ({display_name}).", params.name);
+    (params, announcement)
+}
+
+/// The project another program's schematic is imported into when none is
+/// open, with how the replacement states itself: named after the drawing's
+/// file, as [`netlist_project`] names a netlist's.
+pub fn imported_schematic_project(display_name: &str) -> (NewProjectParams, String) {
+    let params = project_named_after(display_name, "Imported Schematic");
+    let announcement = format!(
+        "Created project {} for the imported schematic {display_name}.",
+        params.name
+    );
+    (params, announcement)
+}
+
+/// A new project named after the file stem of `display_name` when that is a
+/// valid project name, and `fallback` otherwise.
+fn project_named_after(display_name: &str, fallback: &str) -> NewProjectParams {
     let mut params = NewProjectParams {
         name: std::path::Path::new(display_name)
             .file_stem()
             .and_then(|stem| stem.to_str())
             .filter(|stem| !stem.trim().is_empty())
-            .unwrap_or(FALLBACK_NAME)
+            .unwrap_or(fallback)
             .to_owned(),
         ..NewProjectParams::default()
     };
     if params.validate().is_err() {
-        params.name = FALLBACK_NAME.to_owned();
+        fallback.clone_into(&mut params.name);
     }
-    let announcement = format!("Opened netlist project {} ({display_name}).", params.name);
-    (params, announcement)
+    params
 }
 
 /// Refuse a new project while a run is in progress or `params` do not name a

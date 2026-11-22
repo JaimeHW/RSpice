@@ -1186,6 +1186,55 @@ fn an_import_asks_before_its_analyses_replace_the_active_plan() {
     assert_eq!(kept, ["Default plan", "one", "two"]);
 }
 
+/// With no project open, importing a drawing makes a project named after its
+/// file, as opening a netlist does, and the drawing is that project's top
+/// cell. A file that does not read as a drawing leaves the landing as it was.
+#[test]
+fn an_import_with_no_project_open_makes_a_project_named_after_the_file() {
+    let folder = drawing_folder();
+    let file = folder.join("lowpass.asc");
+    std::fs::write(
+        &file,
+        "Version 4\nSHEET 1 880 680\n\
+         SYMBOL res 32 64 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+         TEXT 32 240 Left 2 !.op\n",
+    )
+    .expect("schematic");
+    let broken = folder.join("broken.asc");
+    std::fs::write(&broken, "Version 4\nFLAG 32 176\n").expect("file");
+    let mut app = RSpiceApp::test_instance();
+    app.state.close_project_session();
+    assert!(!app.state.platform.project_lifecycle.is_open());
+
+    import_foreign_schematic_file(&mut app, &broken, ForeignTool::Ltspice, &mut replace)
+        .expect_err("a file that is no drawing is refused");
+    assert!(
+        !app.state.platform.project_lifecycle.is_open(),
+        "the landing stays"
+    );
+
+    let said =
+        import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice, &mut |question| {
+            panic!("the new project adopts the drawing: {question:?}")
+        })
+        .expect("the drawing imports");
+    std::fs::remove_dir_all(&folder).ok();
+    assert!(app.state.platform.project_lifecycle.is_open());
+    let content = &app.state.model.workspace.content;
+    assert_eq!(content.project.display_name(), "lowpass");
+    let drawing = content.active_view.clone();
+    assert_eq!(drawing.cell, "lowpass");
+    assert_eq!(content.simulation_root_reference(), drawing);
+    assert_eq!(
+        said,
+        format!(
+            "Imported LTspice schematic lowpass.asc as {}: 1 part; its 1 analysis is the active plan `lowpass`.",
+            drawing.display_path()
+        )
+    );
+    assert_eq!(app.state.prompt_text(), Some(said.as_str()));
+}
+
 /// LTspice 26.1.1 and QSPICE read values past the sixth of an `EXP` source
 /// differently, and both draw `mc()` anew at every `.step` point, so the
 /// source program decides what the imported deck's cards mean.

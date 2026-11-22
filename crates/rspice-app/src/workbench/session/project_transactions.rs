@@ -151,6 +151,25 @@ impl AppState {
             );
         }
     }
+
+    /// Replace the session with a new project for another program's
+    /// schematic imported with none open, named and announced as
+    /// [`project_workflow::imported_schematic_project`] says. The refusal, if
+    /// the project could not be made.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn create_imported_schematic_project(
+        &mut self,
+        display_name: &str,
+    ) -> Result<(), String> {
+        let (params, announcement) = project_workflow::imported_schematic_project(display_name);
+        let model_restore_errors = replace_with_new_project(self, &params, announcement)?;
+        project_workflow::emit_session_model_restore_errors(
+            &mut self.model,
+            "imported schematic project",
+            model_restore_errors,
+        );
+        Ok(())
+    }
 }
 
 /// The replacement every creator shares. The new project is built off
