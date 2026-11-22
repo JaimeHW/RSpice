@@ -288,16 +288,16 @@ fn a_peak_marker_climbs_to_its_peak_and_finds_it_again_when_the_curve_moves() {
     let (x, y) = damped_sine();
     // Placed by eye a few samples off the third peak.
     let seed = extremum(4) + 7.0 * DT;
-    let found = nearest(&x, &y, seed, Anchor::Peak).expect("the marker is on a hill");
+    let found = nearest(&x, &y, seed, Anchor::Peak { size: 0.0 }).expect("the marker is on a hill");
     assert_extremum(found, 4);
-    let valley = nearest(&x, &y, extremum(3) - 5.0 * DT, Anchor::Valley).unwrap();
+    let valley = nearest(&x, &y, extremum(3) - 5.0 * DT, Anchor::Valley { size: 0.0 }).unwrap();
     assert_extremum(valley, 3);
 
     // The result changes: the same circuit rings a little later. The marker
     // keeps its seed and lands on the peak as it now is.
     let delay = 9.0 * DT;
     let later: Vec<f64> = x.iter().map(|t| damped((t - delay).max(0.0))).collect();
-    let moved = nearest(&x, &later, seed, Anchor::Peak).unwrap();
+    let moved = nearest(&x, &later, seed, Anchor::Peak { size: 0.0 }).unwrap();
     assert!(
         (moved.x - (extremum(4) + delay)).abs() <= 0.5 * DT * (1.0 + 1e-9),
         "the peak moved with the curve: {} against {}",
@@ -315,13 +315,47 @@ fn a_crossing_marker_takes_the_crossing_of_its_level_nearest_it() {
     assert_eq!(nearest(&x, &y, 0.0, Anchor::Crossing { level: 2.0 }), None);
 }
 
+/// A peak marker takes a minimum size: a bump on the hill's flank smaller
+/// than it is noise the marker climbs past to the top, a bump larger than it
+/// is a peak of its own, and a top that does not fall away by the size on
+/// both sides is none.
+#[test]
+fn a_peak_marker_climbs_past_a_bump_smaller_than_its_size() {
+    // Up from 0 to 1 at x = 60 and down to 0 at x = 100, with a bump of
+    // 0.05 at x = 20 that the curve falls 1/30 from before it climbs on.
+    let x: Vec<f64> = (0..=100).map(f64::from).collect();
+    let mut y: Vec<f64> = x
+        .iter()
+        .map(|t| {
+            if *t <= 60.0 {
+                t / 60.0
+            } else {
+                (100.0 - t) / 40.0
+            }
+        })
+        .collect();
+    y[20] += 0.05;
+    let at = |size: f64| nearest(&x, &y, 18.0, Anchor::Peak { size }).map(|found| found.x);
+    // With no size, any top the curve falls away from takes it.
+    assert_eq!(at(0.0), Some(20.0));
+    assert_eq!(at(0.02), Some(20.0));
+    // A size above the bump climbs past it.
+    assert_eq!(at(0.1), Some(60.0));
+    // No top stands that far clear.
+    assert_eq!(at(2.0), None);
+    // Turned over, the same holds of a valley.
+    let sunk: Vec<f64> = y.iter().map(|value| -value).collect();
+    let valley = nearest(&x, &sunk, 18.0, Anchor::Valley { size: 0.1 }).map(|found| found.x);
+    assert_eq!(valley, Some(60.0));
+}
+
 #[test]
 fn a_peak_marker_on_a_curve_that_only_rises_has_no_peak() {
     let x: Vec<f64> = (0..10).map(f64::from).collect();
     let y = x.clone();
-    assert_eq!(nearest(&x, &y, 4.2, Anchor::Peak), None);
+    assert_eq!(nearest(&x, &y, 4.2, Anchor::Peak { size: 0.0 }), None);
     assert_eq!(
-        nearest(&x, &y, 4.2, Anchor::Valley),
+        nearest(&x, &y, 4.2, Anchor::Valley { size: 0.0 }),
         None,
         "nor a valley: the bottom is its first sample"
     );

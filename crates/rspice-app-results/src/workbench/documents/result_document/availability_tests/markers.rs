@@ -81,7 +81,7 @@ fn an_edit_cannot_succeed_after_its_marker_has_been_removed() {
             &mut state.results_parts(),
             marker,
             "Later edit",
-            MarkerKind::Peak
+            MarkerKind::Peak(Default::default())
         )
         .is_err()
     );

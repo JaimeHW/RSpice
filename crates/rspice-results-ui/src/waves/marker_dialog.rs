@@ -10,7 +10,8 @@
 
 use crate::session::{MarkerEditDraft, MarkerSelector, ResultViewerState, TypedEntry};
 use rspice_results::result_presentation::{
-    AnalysisPresentationKey, CrossingLevel, MarkerKind, MarkerOffset, WaveformPresentationKey,
+    AnalysisPresentationKey, CrossingLevel, FeatureSize, MarkerKind, MarkerOffset,
+    WaveformPresentationKey,
 };
 use rspice_ui_kit::plot::{SampleInterpolation, fmt_si_significant};
 use rspice_ui_kit::widgets::{CommandForm, DialogChoice, FormRows};
@@ -34,6 +35,7 @@ pub fn open(state: &mut ResultViewerState, selector: MarkerSelector) {
         kind,
         level: None,
         by: None,
+        size: None,
     });
 }
 
@@ -204,6 +206,16 @@ pub fn show(
     {
         draft.by = Some(entry(offset.by.0, digits));
     }
+    if let MarkerKind::Peak(size) | MarkerKind::Valley(size) = draft.kind
+        && draft.size.is_none()
+    {
+        // The default size reads as a blank field.
+        draft.size = Some(if size.0 > 0.0 {
+            entry(size.0, digits)
+        } else {
+            TypedEntry::default()
+        });
+    }
 
     // The kind as drafted, with what was typed read into it.
     let resolved: Result<MarkerKind, String> = match draft.kind {
@@ -224,6 +236,26 @@ pub fn show(
                 })
             })
             .ok_or_else(|| format!("Type the amount as a number{}.", in_unit(&unit))),
+        MarkerKind::Peak(size) | MarkerKind::Valley(size) => draft
+            .size
+            .as_ref()
+            .and_then(|typed| {
+                if typed.text.trim().is_empty() {
+                    Some(0.0)
+                } else {
+                    typed_value(typed, size.0, &unit).filter(|size| *size > 0.0)
+                }
+            })
+            .map(|size| match draft.kind {
+                MarkerKind::Peak(_) => MarkerKind::Peak(FeatureSize(size)),
+                _ => MarkerKind::Valley(FeatureSize(size)),
+            })
+            .ok_or_else(|| {
+                format!(
+                    "Type the minimum size as a number above zero{}, or leave it blank.",
+                    in_unit(&unit)
+                )
+            }),
         kind => Ok(kind),
     };
     let stands = resolved.as_ref().ok().map(|&kind| {
@@ -281,6 +313,7 @@ pub fn show(
                 };
                 draft.level = None;
                 draft.by = None;
+                draft.size = None;
             }
             if let Some((_, why)) = draft.kind.dialog_label().split_once(" \u{2014} ") {
                 rows.derived(why);
@@ -298,6 +331,18 @@ pub fn show(
                             "",
                             &unit,
                             "",
+                        );
+                    }
+                }
+                MarkerKind::Peak(_) | MarkerKind::Valley(_) => {
+                    if let Some(size) = draft.size.as_mut() {
+                        rows.quantity(
+                            "Minimum size",
+                            egui::Id::new("rspice.results.marker-edit.size"),
+                            &mut size.text,
+                            "",
+                            &unit,
+                            "blank: any size",
                         );
                     }
                 }

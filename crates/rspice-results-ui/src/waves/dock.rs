@@ -116,9 +116,10 @@ pub(crate) fn strip_lane_rows(
 pub fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
     match kind {
         MarkerKind::Note | MarkerKind::Vertical => t.color.text,
-        MarkerKind::Peak | MarkerKind::Valley | MarkerKind::Crossing(_) | MarkerKind::Offset(_) => {
-            t.color.accent
-        }
+        MarkerKind::Peak(_)
+        | MarkerKind::Valley(_)
+        | MarkerKind::Crossing(_)
+        | MarkerKind::Offset(_) => t.color.accent,
         MarkerKind::Spec => t.color.warn,
     }
 }

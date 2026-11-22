@@ -755,7 +755,7 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
     let mut state = marker_fixture();
     state.quick_frame();
     let marker = state.place_marker("V(out)", 0.5).expect("a marker");
-    state.mark(marker, "overshoot", MarkerKind::Peak);
+    state.mark(marker, "overshoot", MarkerKind::Peak(Default::default()));
 
     marker_dialog::open(&mut state.results_parts(), marker);
 
@@ -768,13 +768,13 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
         .expect("draft opened");
     assert_eq!(draft.selector, marker);
     assert_eq!(draft.note, "overshoot");
-    assert_eq!(draft.kind, MarkerKind::Peak);
+    assert_eq!(draft.kind, MarkerKind::Peak(Default::default()));
 }
 
 #[test]
 fn only_a_spec_marker_declines_to_report_a_trace_value() {
     assert!(MarkerKind::Note.rides_a_trace());
-    assert!(MarkerKind::Peak.rides_a_trace());
+    assert!(MarkerKind::Peak(Default::default()).rides_a_trace());
     assert!(
         !MarkerKind::Spec.rides_a_trace(),
         "a spec constrains the axis position, not one curve"

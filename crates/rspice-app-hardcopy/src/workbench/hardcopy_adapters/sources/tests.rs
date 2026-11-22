@@ -613,7 +613,9 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
                     trace_id,
                     coordinate: TypedValue::Real(1.0),
                     label: "Peak".to_owned(),
-                    kind: PlotMarkerKind::Peak,
+                    kind: PlotMarkerKind::Peak {
+                        size: Default::default(),
+                    },
                     scope: PlotMarkerScope::Pane,
                     source_specification: None,
                 },

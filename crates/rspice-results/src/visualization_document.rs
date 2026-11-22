@@ -1888,12 +1888,19 @@ pub struct Cursor {
 pub enum PlotMarkerKind {
     #[default]
     PointNote,
-    Peak,
+    /// The top of the hill the trace climbs to from the marker's X, at
+    /// least `size` clear of the curve either side, found again whenever the
+    /// curve changes.
+    Peak {
+        size: crate::result_presentation::FeatureSize,
+    },
     SpecificationLine,
     MeasurementAnchor,
-    /// The local minimum the trace descends to from the marker's X, found
-    /// again whenever the curve changes.
-    Valley,
+    /// The bottom of the basin the trace descends to from the marker's X,
+    /// at least `size` deep, found again whenever the curve changes.
+    Valley {
+        size: crate::result_presentation::FeatureSize,
+    },
     /// The crossing of `level` nearest the marker's X, found again whenever
     /// the curve changes.
     Crossing {
@@ -1912,10 +1919,14 @@ pub enum PlotMarkerKind {
 impl PlotMarkerKind {
     pub const ALL: [Self; 8] = [
         Self::PointNote,
-        Self::Peak,
+        Self::Peak {
+            size: crate::result_presentation::FeatureSize(0.0),
+        },
         Self::SpecificationLine,
         Self::MeasurementAnchor,
-        Self::Valley,
+        Self::Valley {
+            size: crate::result_presentation::FeatureSize(0.0),
+        },
         Self::Crossing {
             level: crate::result_presentation::CrossingLevel(0.0),
         },
@@ -1930,10 +1941,10 @@ impl PlotMarkerKind {
     pub const fn label(self) -> &'static str {
         match self {
             Self::PointNote => "Point note",
-            Self::Peak => "Peak flag",
+            Self::Peak { .. } => "Peak flag",
             Self::SpecificationLine => "Specification line",
             Self::MeasurementAnchor => "Measurement anchor",
-            Self::Valley => "Valley flag",
+            Self::Valley { .. } => "Valley flag",
             Self::Crossing { .. } => "Crossing flag",
             Self::VerticalLine => "Vertical line",
             Self::Offset { .. } => "Offset flag",

@@ -259,10 +259,12 @@ pub fn find<X: Curve + ?Sized, Y: Curve + ?Sized>(
 /// The feature a search marker rides.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Anchor {
-    /// The local maximum the curve climbs to from the marker.
-    Peak,
-    /// The local minimum the curve descends to from the marker.
-    Valley,
+    /// The top of the hill the marker stands on, which stands at least
+    /// `size` clear of the curve either side of it. A size of zero takes
+    /// any top the curve falls away from.
+    Peak { size: f64 },
+    /// The bottom of the basin the marker stands in, `size` deep at least.
+    Valley { size: f64 },
     /// The crossing of `level` nearest the marker.
     Crossing { level: f64 },
 }
@@ -273,7 +275,9 @@ pub enum Anchor {
 /// hill it is on, and a valley marker descends to the bottom of its basin,
 /// so a marker placed by eye on a peak lands on that peak, and when the
 /// result under it changes it finds that peak again rather than staying
-/// where the old one was. A crossing marker takes the crossing of its level
+/// where the old one was. It climbs past a dip no deeper than its size, so
+/// noise on a flank is not the top, and the top must fall away by more than
+/// that on both sides before the record ends. A crossing marker takes the crossing of its level
 /// nearest the seed. `None` when the curve has no such feature there: a peak
 /// marker on a curve that only rises, or a level the curve never crosses.
 pub fn nearest<X: Curve + ?Sized, Y: Curve + ?Sized>(
@@ -285,8 +289,8 @@ pub fn nearest<X: Curve + ?Sized, Y: Curve + ?Sized>(
     let count = ordered_len(x, y).ok()?;
     let (x, y) = (&Prefix(x, count), &Prefix(y, count));
     match anchor {
-        Anchor::Peak => climb(x, y, seed, |candidate, here| candidate > here),
-        Anchor::Valley => climb(x, y, seed, |candidate, here| candidate < here),
+        Anchor::Peak { size } => summit(x, y, seed, size.max(0.0), |a, b| a > b),
+        Anchor::Valley { size } => summit(x, y, seed, size.max(0.0), |a, b| a < b),
         Anchor::Crossing { level } => crossings(x, y, level)
             .into_iter()
             .min_by(|a, b| (a - seed).abs().total_cmp(&(b - seed).abs()))
@@ -479,13 +483,17 @@ fn extrema<Y: Curve + ?Sized>(y: &Y, excursion: f64, peaks: bool) -> std::vec::I
     found.into_iter()
 }
 
-/// Walk from the sample nearest `seed` to the neighbour `better` prefers
-/// until none is, then back to the first sample of a flat top. `None` when
-/// the walk ends on the first or last sample.
-fn climb<X: Curve + ?Sized, Y: Curve + ?Sized>(
+/// Walk from the sample nearest `seed` to the top `better` prefers: up the
+/// hill it stands on and past any dip of `size` or less on the way, back
+/// and forth until neither side holds a better sample before the curve
+/// falls more than `size` from the best, then back to the first sample of a
+/// flat top. `None` when on either side the record ends or breaks before
+/// the curve falls that far.
+fn summit<X: Curve + ?Sized, Y: Curve + ?Sized>(
     x: &X,
     y: &Y,
     seed: f64,
+    size: f64,
     better: impl Fn(f64, f64) -> bool,
 ) -> Option<FeaturePoint> {
     let finite = |index: usize| y.at(index).is_finite();
@@ -495,52 +503,53 @@ fn climb<X: Curve + ?Sized, Y: Curve + ?Sized>(
         |a: &usize, b: &usize| (x.at(*a) - seed).abs().total_cmp(&(x.at(*b) - seed).abs());
     let after = partition(x, |at| at < seed);
     let around = [after.checked_sub(1), (after < x.len()).then_some(after)];
-    let mut here = if around.iter().all(|index| index.is_none_or(finite)) {
+    let here = if around.iter().all(|index| index.is_none_or(finite)) {
         around.into_iter().flatten().min_by(distance)
     } else {
         (0..x.len()).filter(|index| finite(*index)).min_by(distance)
     }?;
     let last = x.len() - 1;
-    let right = |here: usize| (here < last && finite(here + 1)).then(|| here + 1);
-    let left = |here: usize| (here > 0 && finite(here - 1)).then(|| here - 1);
-    let step = match (right(here), left(here)) {
-        (Some(r), Some(l)) if better(y.at(r), y.at(here)) && better(y.at(l), y.at(here)) => {
-            if better(y.at(r), y.at(l)) {
-                1
-            } else {
-                -1
+    let step = |index: usize, rightward: bool| {
+        if rightward {
+            (index < last && finite(index + 1)).then(|| index + 1)
+        } else {
+            (index > 0 && finite(index - 1)).then(|| index - 1)
+        }
+    };
+    // The best sample one way from `start` before the curve falls more than
+    // `size` from the best so far, and whether it fell that far.
+    let walk = |start: usize, rightward: bool| {
+        let mut best = start;
+        let mut at = start;
+        while let Some(next) = step(at, rightward) {
+            at = next;
+            if better(y.at(at), y.at(best)) {
+                best = at;
+            } else if (y.at(best) - y.at(at)).abs() > size {
+                return (best, true);
             }
         }
-        (Some(r), _) if better(y.at(r), y.at(here)) => 1,
-        (_, Some(l)) if better(y.at(l), y.at(here)) => -1,
-        _ => 0,
+        (best, false)
     };
-    loop {
-        let next = match step {
-            1 => right(here),
-            -1 => left(here),
-            _ => None,
-        };
-        match next {
-            Some(next) if better(y.at(next), y.at(here)) => here = next,
-            _ => break,
+    let mut top = here;
+    let (top, falls_both_ways) = loop {
+        let (right, falls_right) = walk(top, true);
+        let (left, falls_left) = walk(right, false);
+        if left == right {
+            break (right, falls_right && falls_left);
         }
-    }
+        top = left;
+    };
+    let mut top = top;
     // A flat top is held at its first sample.
-    while let Some(previous) = left(here)
-        && y.at(previous) == y.at(here)
+    while let Some(previous) = step(top, false)
+        && y.at(previous) == y.at(top)
     {
-        here = previous;
+        top = previous;
     }
-    // The walk must have come to a top the curve leaves on both sides.
-    let rises_after = (here + 1..x.len())
-        .take_while(|index| finite(*index))
-        .find(|index| y.at(*index) != y.at(here))
-        .is_some_and(|index| better(y.at(here), y.at(index)));
-    let rises_before = left(here).is_some_and(|previous| better(y.at(here), y.at(previous)));
-    (here != 0 && rises_before && rises_after).then(|| FeaturePoint {
-        x: x.at(here),
-        y: y.at(here),
+    falls_both_ways.then(|| FeaturePoint {
+        x: x.at(top),
+        y: y.at(top),
     })
 }
 

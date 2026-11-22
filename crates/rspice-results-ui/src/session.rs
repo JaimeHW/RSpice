@@ -101,11 +101,14 @@ pub struct MarkerEditDraft {
     pub level: Option<TypedEntry>,
     /// An offset's amount as typed; `None` until the dialog first shows it.
     pub by: Option<TypedEntry>,
+    /// A peak's or a valley's minimum size as typed, blank for the default;
+    /// `None` until the dialog first shows it.
+    pub size: Option<TypedEntry>,
 }
 
 /// A number typed in a dialog beside the text it was seeded with, so one
 /// left as it was keeps the value it was seeded from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TypedEntry {
     pub seed: String,
     pub text: String,

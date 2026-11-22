@@ -255,7 +255,7 @@ fn a_base_marker_reads_the_analytic_differences() {
         let marker = state
             .place_marker(&trace.source_waveform_name, extremum(k) + offset * DT)
             .expect("a marker");
-        state.mark(marker, "", MarkerKind::Peak);
+        state.mark(marker, "", MarkerKind::Peak(Default::default()));
         ids.push(marker);
     }
     state.results.results.session.readout_base =
@@ -425,7 +425,7 @@ fn an_offset_marker_three_db_below_a_low_pass_peak_reads_where_it_falls() {
     let peak = state
         .place_marker("|V(out)|", 4.0e3)
         .expect("a marker on |V(out)|");
-    state.mark(peak, "", MarkerKind::Peak);
+    state.mark(peak, "", MarkerKind::Peak(Default::default()));
 
     let models = strip(&mut state);
     let model = &models[0];

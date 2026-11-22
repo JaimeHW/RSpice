@@ -919,12 +919,14 @@ pub const fn marker_kind_of_retained(
     use crate::results::visualization_document::PlotMarkerKind;
     match kind {
         PlotMarkerKind::PointNote | PlotMarkerKind::MeasurementAnchor => MarkerKind::Note,
-        PlotMarkerKind::Peak => MarkerKind::Peak,
-        PlotMarkerKind::Valley => MarkerKind::Valley,
+        PlotMarkerKind::Peak { size } => MarkerKind::Peak(size),
+        PlotMarkerKind::Valley { size } => MarkerKind::Valley(size),
         PlotMarkerKind::Crossing { level } => MarkerKind::Crossing(level),
         PlotMarkerKind::SpecificationLine => MarkerKind::Spec,
         PlotMarkerKind::VerticalLine => MarkerKind::Vertical,
-        PlotMarkerKind::Offset { from, by } => MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset { from, by }),
+        PlotMarkerKind::Offset { from, by } => {
+            MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset { from, by })
+        }
     }
 }
 
@@ -935,12 +937,14 @@ pub(crate) const fn retained_kind_of_marker(
     use crate::results::visualization_document::PlotMarkerKind;
     match kind {
         MarkerKind::Note => PlotMarkerKind::PointNote,
-        MarkerKind::Peak => PlotMarkerKind::Peak,
-        MarkerKind::Valley => PlotMarkerKind::Valley,
+        MarkerKind::Peak(size) => PlotMarkerKind::Peak { size },
+        MarkerKind::Valley(size) => PlotMarkerKind::Valley { size },
         MarkerKind::Crossing(level) => PlotMarkerKind::Crossing { level },
         MarkerKind::Spec => PlotMarkerKind::SpecificationLine,
         MarkerKind::Vertical => PlotMarkerKind::VerticalLine,
-        MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset { from, by }) => PlotMarkerKind::Offset { from, by },
+        MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset { from, by }) => {
+            PlotMarkerKind::Offset { from, by }
+        }
     }
 }
 

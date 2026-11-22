@@ -22,7 +22,7 @@ fn a_retained_document_marker_and_a_spec_limit_reach_the_page_as_themselves() {
         vec![
             RetainedQuickMarker {
                 label: "D7 · settling".to_owned(),
-                kind: MarkerKind::Peak,
+                kind: MarkerKind::Peak(Default::default()),
                 x: 1.0,
                 trace_name: Some("V(out)".to_owned()),
             },

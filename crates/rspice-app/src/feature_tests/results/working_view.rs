@@ -133,9 +133,13 @@ fn assert_kept(state: &AppState, analysis: AnalysisPresentationKey, phase: &str)
         .filter(|marker| marker.analysis == analysis)
         .collect::<Vec<_>>();
     assert_eq!(markers.len(), 1, "{phase}: the marker stays");
-    assert_eq!(markers[0].kind, MarkerKind::Peak, "{phase}");
     assert_eq!(
-        nearest(&TIME, &RERUN_OUT, markers[0].x, Anchor::Peak).map(|found| found.x),
+        markers[0].kind,
+        MarkerKind::Peak(Default::default()),
+        "{phase}"
+    );
+    assert_eq!(
+        nearest(&TIME, &RERUN_OUT, markers[0].x, Anchor::Peak { size: 0.0 }).map(|found| found.x),
         Some(0.75),
         "{phase}: the peak marker finds the re-run's peak"
     );
@@ -194,7 +198,7 @@ fn a_working_view_keeps_the_readers_changes_through_a_rerun_a_restart_and_a_reop
         &mut state.results_parts(),
         marker,
         "V(out)",
-        MarkerKind::Peak,
+        MarkerKind::Peak(Default::default()),
     )
     .expect("the marker becomes a peak marker");
     set_trace_color(&mut state.results_parts(), first, "V(out)", Some(ORANGE))

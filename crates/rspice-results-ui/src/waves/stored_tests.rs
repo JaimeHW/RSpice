@@ -597,8 +597,13 @@ fn a_peak_marker_on_a_stored_trace_is_searched_for_once() {
     let anchor = anchor_key(model, &model.traces[0]);
     let put = 10_000.0e-9;
     let (before, work) = (rows_read(), ColumnWork::read());
-    let found = super::cursor_values::marker_position(model, &anchor, put, MarkerKind::Peak)
-        .expect("the trace climbs to a peak");
+    let found = super::cursor_values::marker_position(
+        model,
+        &anchor,
+        put,
+        MarkerKind::Peak(Default::default()),
+    )
+    .expect("the trace climbs to a peak");
     // sin(row / 10^4) peaks at row 10^4 * pi / 2.
     let peak = (1.0e4 * std::f64::consts::FRAC_PI_2).round() * 1.0e-9;
     assert!(
@@ -616,7 +621,12 @@ fn a_peak_marker_on_a_stored_trace_is_searched_for_once() {
     let (before, work) = (rows_read(), ColumnWork::read());
     for _ in 0..10 {
         assert_eq!(
-            super::cursor_values::marker_position(model, &anchor, put, MarkerKind::Peak),
+            super::cursor_values::marker_position(
+                model,
+                &anchor,
+                put,
+                MarkerKind::Peak(Default::default())
+            ),
             Ok(found)
         );
     }

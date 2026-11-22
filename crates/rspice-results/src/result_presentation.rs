@@ -582,10 +582,12 @@ pub enum MarkerKind {
     /// A freeform annotation on a sample.
     #[default]
     Note,
-    /// The local maximum the trace climbs to from where the marker was put.
-    Peak,
-    /// The local minimum the trace descends to from where the marker was put.
-    Valley,
+    /// The top of the hill the trace climbs to from where the marker was
+    /// put, standing at least its size clear of the curve either side.
+    Peak(FeatureSize),
+    /// The bottom of the basin the trace descends to from where the marker
+    /// was put, at least its size deep.
+    Valley(FeatureSize),
     /// The crossing of a level nearest where the marker was put.
     Crossing(CrossingLevel),
     /// A limit the design is measured against. Drawn as a limit line,
@@ -607,6 +609,22 @@ pub struct MarkerOffset {
     pub by: CrossingLevel,
 }
 
+/// How far a peak must stand clear of the curve either side of it, or a
+/// valley sink below it, in its trace's unit, for a marker to take it: a
+/// smaller bump is noise the search climbs past. Zero takes any top the
+/// curve falls away from, as a marker always has. Compared bit for bit.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FeatureSize(pub f64);
+
+impl PartialEq for FeatureSize {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for FeatureSize {}
+
 /// The level a crossing marker finds, compared bit for bit so a marker kind
 /// stays comparable.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -627,8 +645,8 @@ impl MarkerKind {
     /// names the choice.
     pub const ALL: [MarkerKind; 6] = [
         MarkerKind::Note,
-        MarkerKind::Peak,
-        MarkerKind::Valley,
+        MarkerKind::Peak(FeatureSize(0.0)),
+        MarkerKind::Valley(FeatureSize(0.0)),
         MarkerKind::Crossing(CrossingLevel(0.0)),
         MarkerKind::Vertical,
         MarkerKind::Spec,
@@ -638,8 +656,8 @@ impl MarkerKind {
     pub const fn label(self) -> &'static str {
         match self {
             MarkerKind::Note => "note",
-            MarkerKind::Peak => "peak",
-            MarkerKind::Valley => "valley",
+            MarkerKind::Peak(_) => "peak",
+            MarkerKind::Valley(_) => "valley",
             MarkerKind::Crossing(_) => "crossing",
             MarkerKind::Spec => "spec",
             MarkerKind::Vertical => "vertical",
@@ -651,10 +669,10 @@ impl MarkerKind {
     pub const fn dialog_label(self) -> &'static str {
         match self {
             MarkerKind::Note => "Note — a remark about this point on the curve",
-            MarkerKind::Peak => {
+            MarkerKind::Peak(_) => {
                 "Peak — the local maximum it sits on, found again as the curve changes"
             }
-            MarkerKind::Valley => {
+            MarkerKind::Valley(_) => {
                 "Valley — the local minimum it sits on, found again as the curve changes"
             }
             MarkerKind::Crossing(_) => {
@@ -673,8 +691,8 @@ impl MarkerKind {
         matches!(
             (self, other),
             (MarkerKind::Note, MarkerKind::Note)
-                | (MarkerKind::Peak, MarkerKind::Peak)
-                | (MarkerKind::Valley, MarkerKind::Valley)
+                | (MarkerKind::Peak(_), MarkerKind::Peak(_))
+                | (MarkerKind::Valley(_), MarkerKind::Valley(_))
                 | (MarkerKind::Crossing(_), MarkerKind::Crossing(_))
                 | (MarkerKind::Spec, MarkerKind::Spec)
                 | (MarkerKind::Vertical, MarkerKind::Vertical)
@@ -688,8 +706,8 @@ impl MarkerKind {
     pub const fn search(self) -> Option<crate::feature_search::Anchor> {
         use crate::feature_search::Anchor;
         match self {
-            MarkerKind::Peak => Some(Anchor::Peak),
-            MarkerKind::Valley => Some(Anchor::Valley),
+            MarkerKind::Peak(size) => Some(Anchor::Peak { size: size.0 }),
+            MarkerKind::Valley(size) => Some(Anchor::Valley { size: size.0 }),
             MarkerKind::Crossing(level) => Some(Anchor::Crossing { level: level.0 }),
             MarkerKind::Note | MarkerKind::Spec | MarkerKind::Vertical | MarkerKind::Offset(_) => {
                 None

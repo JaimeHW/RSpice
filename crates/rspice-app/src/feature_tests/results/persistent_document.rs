@@ -976,7 +976,9 @@ fn the_marker_dialog_applies_to_the_view_it_opened_on() {
         &mut app.state.results_parts(),
         retained,
         "retained",
-        rspice_app_results::workbench::documents::result_document::MarkerKind::Peak,
+        rspice_app_results::workbench::documents::result_document::MarkerKind::Peak(
+            Default::default(),
+        ),
     )
     .expect("the document edit commits");
 
@@ -985,7 +987,9 @@ fn the_marker_dialog_applies_to_the_view_it_opened_on() {
     assert_eq!(in_document[0].label, "retained");
     assert_eq!(
         in_document[0].kind,
-        rspice_app_state::results::visualization_document::PlotMarkerKind::Peak
+        rspice_app_state::results::visualization_document::PlotMarkerKind::Peak {
+            size: Default::default(),
+        }
     );
     assert_eq!(
         working_view_markers(&app)[0].label,
