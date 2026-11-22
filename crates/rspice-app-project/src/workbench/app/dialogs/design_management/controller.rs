@@ -31,11 +31,7 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
         } else {
             true
         };
-    let description = if page == DesignManagementPage::Manager {
-        MANAGER_DESCRIPTION
-    } else {
-        "Review the source, the proposed change, the resulting revision, and the rule it must keep before applying this operation to the draft."
-    };
+    let description = page.description();
     let initial_height = if page == DesignManagementPage::Manager {
         MANAGER_INITIAL_HEIGHT
     } else {

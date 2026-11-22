@@ -42,7 +42,6 @@ const MANAGER_INITIAL_HEIGHT: f32 = 590.0;
 const SUBFLOW_INITIAL_HEIGHT: f32 = 610.0;
 const SPLIT_BREAKPOINT: f32 = 720.0;
 const MAIN_SPLIT_LEFT_FRACTION: f32 = 0.5;
-const SUBFLOW_LEFT_FRACTION: f32 = 0.66;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DesignManagementTab {
@@ -114,17 +113,20 @@ impl DesignManagementPage {
         }
     }
 
-    const fn code(self) -> &'static str {
+    /// What the page is for, in a sentence under its title.
+    const fn description(self) -> &'static str {
         match self {
-            Self::Manager => "DESIGN",
-            Self::NewSheet => "SHEET+",
-            Self::MoveSelection => "MOVE",
-            Self::NewVariant => "VAR+",
-            Self::CompareVariants => "VAR\u{0394}",
-            Self::VariantMatrix => "MATRIX",
-            Self::RenumberPreview => "REFDES",
-            Self::AnnotationPolicy => "POLICY",
-            Self::HierarchyAudit => "HIER",
+            Self::Manager => MANAGER_DESCRIPTION,
+            Self::NewSheet => "Add a sheet to this cell view's drawing.",
+            Self::MoveSelection => "Move the selected objects to another sheet of this cell view.",
+            Self::NewVariant => "Add an assembly variant of this design.",
+            Self::CompareVariants => "Compare two assembly variants.",
+            Self::VariantMatrix => "Set the rules variant substitutions follow.",
+            Self::RenumberPreview => {
+                "Every part's new name is listed before anything changes. Tick Keep to leave a part's name as it is."
+            }
+            Self::AnnotationPolicy => "Set how reference designators are numbered.",
+            Self::HierarchyAudit => "Check how every instance in the hierarchy resolves to a view.",
         }
     }
 }
@@ -639,15 +641,11 @@ fn format_reserved_ranges(ranges: &[AnnotationReservedRange]) -> String {
         .join("; ")
 }
 
-fn main_split_widths(available: f32) -> (f32, f32) {
+/// The widths of a split's two panes, the left taking `left_fraction` of
+/// what is `available`.
+fn split_widths(available: f32, left_fraction: f32) -> (f32, f32) {
     let usable = available.max(0.0);
-    let left = (usable * MAIN_SPLIT_LEFT_FRACTION).floor();
-    (left, (usable - left).max(0.0))
-}
-
-fn subflow_split_widths(available: f32) -> (f32, f32) {
-    let usable = available.max(0.0);
-    let left = (usable * SUBFLOW_LEFT_FRACTION).floor();
+    let left = (usable * left_fraction).floor();
     (left, (usable - left).max(0.0))
 }
 

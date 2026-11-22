@@ -12,35 +12,10 @@ pub(super) fn design_management_subflow_body(
     drawing_sheet_personal: &crate::workbench::DrawingSheetPersonalPreferences,
     write_allowed: bool,
 ) -> egui::Response {
-    let page = dialog.page;
-    let before = subflow_before(dialog, page);
-    let subject = subflow_subject(dialog, page);
-    let after = subflow_after(dialog, page);
     let mut first_response = None;
-    split_surface(ui, SUBFLOW_LEFT_FRACTION, |left, right| {
-        section_header(
-            left,
-            &format!("{} \u{00b7} semantic preview", page.code()),
-            Some(&format!(
-                "revision {}",
-                dialog.draft.as_ref().map_or(0, |draft| draft.revision())
-            )),
-        );
-        semantic_change_map(left, &before, &subject, &after, page.title());
-        left.columns(2, |columns| {
-            let (preview, properties) = columns.split_at_mut(1);
-            schematic_preview(&mut preview[0], page.code());
-            property_row(
-                &mut properties[0],
-                "Validation",
-                "connectivity \u{00b7} hierarchy \u{00b7} configuration",
-            );
-            property_row(&mut properties[0], "Recovery", "one explicit predecessor");
-        });
-
-        section_header(right, "Transaction inputs", Some("source resolved"));
+    single_pane(ui, |pane| {
         first_response = Some(subflow_fields(
-            right,
+            pane,
             dialog,
             workspace,
             libraries,

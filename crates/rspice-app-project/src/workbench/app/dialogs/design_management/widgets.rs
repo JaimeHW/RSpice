@@ -67,12 +67,7 @@ pub(super) fn split_surface(
         return;
     }
 
-    let (left_width, right_width) =
-        if (left_fraction - MAIN_SPLIT_LEFT_FRACTION).abs() < f32::EPSILON {
-            main_split_widths(available)
-        } else {
-            subflow_split_widths(available)
-        };
+    let (left_width, right_width) = split_widths(available, left_fraction);
     let divider_x = origin.x + left_width;
     let left_rect = egui::Rect::from_min_size(
         origin + padding,
@@ -105,6 +100,35 @@ pub(super) fn split_surface(
         Stroke::new(1.0, t.color.border),
     );
     ui.advance_cursor_after_rect(surface);
+}
+
+/// One pane for a page that is fields alone, as wide as the manager's left
+/// pane, or the dialog's width when it is narrow. Fields carry no inset of
+/// their own, so the pane stands the dialog's whole inset in: its labels
+/// start where the title and the footer do.
+pub(super) fn single_pane(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
+    let available = ui.available_width().max(1.0);
+    let origin = ui.next_widget_position();
+    let padding = vec2(crate::ui::widgets::DIALOG_BODY_INSET, tokens::SP_5);
+    let width = if available < SPLIT_BREAKPOINT {
+        available
+    } else {
+        split_widths(available, MAIN_SPLIT_LEFT_FRACTION).0
+    };
+    let mut pane = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_size(
+                origin + padding,
+                vec2((width - padding.x * 2.0).max(1.0), 10_000.0),
+            ))
+            .layout(Layout::top_down(Align::Min)),
+    );
+    content(&mut pane);
+    let height = pane.min_rect().height() + padding.y * 2.0;
+    ui.advance_cursor_after_rect(egui::Rect::from_min_size(
+        origin,
+        vec2(available, height.max(80.0)),
+    ));
 }
 
 /// A pane's actions: one row under what they act on, on the pane's inset.
@@ -599,187 +623,4 @@ pub(super) fn parse_reserved_ranges(text: &str) -> Result<Vec<AnnotationReserved
         });
     }
     Ok(ranges)
-}
-
-pub(super) fn semantic_change_map(
-    ui: &mut Ui,
-    before: &str,
-    subject: &str,
-    after: &str,
-    operation: &str,
-) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        for (index, (label, value, detail)) in [
-            ("Current source", before, "unchanged until commit"),
-            ("Proposed transaction", subject, operation),
-            ("Result", after, "new stable revision"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            Frame::NONE
-                .fill(t.color.bg_inset)
-                .stroke(Stroke::new(1.0, t.color.border))
-                .inner_margin(Margin::same(8))
-                .show(ui, |ui| {
-                    ui.set_min_width(116.0);
-                    ui.label(
-                        egui::RichText::new(label)
-                            .size(tokens::FS_0)
-                            .color(t.color.text_dim),
-                    );
-                    ui.label(
-                        egui::RichText::new(value)
-                            .size(tokens::FS_1)
-                            .color(t.color.text),
-                    );
-                    ui.label(
-                        egui::RichText::new(detail)
-                            .size(tokens::FS_0)
-                            .color(t.color.text_dim),
-                    );
-                });
-            if index < 2 {
-                ui.label(egui::RichText::new("→").color(t.color.accent));
-            }
-        }
-    });
-}
-
-pub(super) fn schematic_preview(ui: &mut Ui, code: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
-    ui.painter().rect_stroke(
-        rect,
-        0.0,
-        Stroke::new(1.0, t.color.border),
-        egui::StrokeKind::Inside,
-    );
-    for x in (0..16).map(|index| rect.left() + 8.0 + index as f32 * 24.0) {
-        for y in (0..7).map(|index| rect.top() + 8.0 + index as f32 * 24.0) {
-            if rect.contains(egui::pos2(x, y)) {
-                ui.painter()
-                    .circle_filled(egui::pos2(x, y), 1.0, t.color.canvas_grid);
-            }
-        }
-    }
-    let center = rect.center();
-    ui.painter().line_segment(
-        [center - vec2(94.0, 0.0), center + vec2(94.0, 0.0)],
-        Stroke::new(1.5, t.color.wire),
-    );
-    let opamp_center = center - vec2(42.0, 0.0);
-    let opamp = [
-        opamp_center + vec2(-24.0, -25.0),
-        opamp_center + vec2(-24.0, 25.0),
-        opamp_center + vec2(24.0, 0.0),
-        opamp_center + vec2(-24.0, -25.0),
-    ];
-    ui.painter().add(egui::Shape::line(
-        opamp.to_vec(),
-        Stroke::new(1.5, t.color.symbol),
-    ));
-    ui.painter().text(
-        opamp_center + vec2(-15.0, -10.0),
-        egui::Align2::CENTER_CENTER,
-        "−",
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        t.color.symbol,
-    );
-    ui.painter().text(
-        opamp_center + vec2(-15.0, 10.0),
-        egui::Align2::CENTER_CENTER,
-        "+",
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        t.color.symbol,
-    );
-    let resistor_center = center + vec2(56.0, 0.0);
-    let resistor = [
-        resistor_center + vec2(-28.0, 0.0),
-        resistor_center + vec2(-21.0, -9.0),
-        resistor_center + vec2(-14.0, 9.0),
-        resistor_center + vec2(-7.0, -9.0),
-        resistor_center + vec2(0.0, 9.0),
-        resistor_center + vec2(7.0, -9.0),
-        resistor_center + vec2(14.0, 9.0),
-        resistor_center + vec2(21.0, -9.0),
-        resistor_center + vec2(28.0, 0.0),
-    ];
-    ui.painter().add(egui::Shape::line(
-        resistor.to_vec(),
-        Stroke::new(1.5, t.color.symbol),
-    ));
-    ui.painter().text(
-        rect.center_bottom() - vec2(0.0, 14.0),
-        egui::Align2::CENTER_BOTTOM,
-        code,
-        theme::mono(tokens::FS_1, FontWeight::SemiBold),
-        t.color.accent,
-    );
-}
-
-pub(super) fn subflow_before(
-    dialog: &DesignManagementDialogState,
-    page: DesignManagementPage,
-) -> String {
-    match page {
-        DesignManagementPage::NewSheet | DesignManagementPage::MoveSelection => dialog
-            .draft
-            .as_ref()
-            .and_then(|draft| draft.sheet_catalog(&dialog.owner_key))
-            .map_or_else(
-                || "no sheet catalog".to_owned(),
-                |catalog| format!("sheet revision {}", catalog.revision()),
-            ),
-        DesignManagementPage::NewVariant
-        | DesignManagementPage::CompareVariants
-        | DesignManagementPage::VariantMatrix => format!(
-            "{} governed variants",
-            dialog
-                .draft
-                .as_ref()
-                .map_or(0, |draft| draft.variants().variants().len())
-        ),
-        DesignManagementPage::RenumberPreview | DesignManagementPage::AnnotationPolicy => format!(
-            "annotation policy {}",
-            dialog
-                .draft
-                .as_ref()
-                .map_or(0, |draft| draft.annotation().policy().revision())
-        ),
-        DesignManagementPage::HierarchyAudit => "active hierarchy resolution".to_owned(),
-        DesignManagementPage::Manager => "working revision".to_owned(),
-    }
-}
-
-pub(super) fn subflow_subject(
-    dialog: &DesignManagementDialogState,
-    page: DesignManagementPage,
-) -> String {
-    match page {
-        DesignManagementPage::NewSheet => dialog.inputs.sheet_name.clone(),
-        DesignManagementPage::MoveSelection => dialog.selection_summary.clone(),
-        DesignManagementPage::NewVariant => dialog.inputs.variant_name.clone(),
-        DesignManagementPage::CompareVariants => "differences between variants".to_owned(),
-        DesignManagementPage::VariantMatrix => "governed override matrix".to_owned(),
-        DesignManagementPage::RenumberPreview => "stable old-to-new mapping".to_owned(),
-        DesignManagementPage::AnnotationPolicy => dialog.inputs.reserved_ranges.clone(),
-        DesignManagementPage::HierarchyAudit => "configuration-bound audit".to_owned(),
-        DesignManagementPage::Manager => "reviewed aggregate".to_owned(),
-    }
-}
-
-pub(super) fn subflow_after(
-    dialog: &DesignManagementDialogState,
-    _page: DesignManagementPage,
-) -> String {
-    format!(
-        "draft revision {}",
-        dialog
-            .draft
-            .as_ref()
-            .map_or(0, DesignManagementCatalog::revision)
-    )
 }
