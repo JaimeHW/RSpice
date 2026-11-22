@@ -732,33 +732,111 @@ mod tests {
         );
     }
 
-    #[test]
-    fn open_is_unavailable_for_mixed_selection() {
+    /// Two resistors joined by a wire, with a third beside them: what a
+    /// selection box drawn round the first two would take, wire and all.
+    fn two_resistors_boxed_with_their_wire() -> (DesignTestHost, u64) {
         let mut state = DesignTestHost::default();
-        let id = state
+        let schematic = &mut state.model.schematic;
+        let r1 = schematic.add_component(ComponentType::Resistor, Point::origin());
+        let r2 = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
+        schematic.add_component(ComponentType::Resistor, Point::new(160, 0));
+        let inner = schematic
+            .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
+            .expect("inner wire");
+        schematic
+            .add_wire(vec![Point::new(100, 0), Point::new(140, 0)])
+            .expect("outer wire");
+        let selection = &mut schematic.session.editor.selection;
+        selection.select_component(r1);
+        selection.select_component(r2);
+        selection.select_wire(inner);
+        (state, inner)
+    }
+
+    /// A box drawn round a block takes its wires too, and Create hierarchy
+    /// was greyed for it. The whole wires, junctions and labels the box takes
+    /// are left to the plan; a piece of a wire or a bus is still refused, and
+    /// a sheet move still carries instances only.
+    #[test]
+    fn create_hierarchy_takes_the_wires_a_box_takes_with_the_instances() {
+        let (mut state, inner) = two_resistors_boxed_with_their_wire();
+        assert!(state.model.create_hierarchy_available());
+        assert!(!state.model.sheet_move_available());
+        let label = state
             .model
             .schematic
-            .add_component(ComponentType::Resistor, Point::origin());
-        let wire = state
-            .model
-            .schematic
-            .add_wire(vec![Point::origin(), Point::new(20, 0)])
-            .expect("wire");
+            .add_net_label(Point::new(40, 0), "mid".to_owned());
         state
             .model
             .schematic
             .session
             .editor
             .selection
-            .select_component(id);
-        state
+            .select_net_label(label);
+        assert!(state.model.create_hierarchy_available());
+
+        let mut with_piece = state.model.schematic.session.editor.selection.clone();
+        with_piece.select_wire_segment(inner, 0);
+        let mut with_bus = state.model.schematic.session.editor.selection.clone();
+        let bus = state
             .model
             .schematic
-            .session
-            .editor
-            .selection
-            .select_wire(wire);
-        assert!(!state.model.create_hierarchy_available());
+            .add_bus(vec![Point::new(0, 80), Point::new(80, 80)], None)
+            .expect("bus");
+        with_bus.select_bus(bus);
+        for refused in [with_piece, with_bus] {
+            state.model.schematic.session.editor.selection = refused;
+            assert!(!state.model.create_hierarchy_available());
+        }
+
+        let (mut state, _) = two_resistors_boxed_with_their_wire();
+        let parent = state.model.workspace.content.active_view.clone();
+        open_create_hierarchy_dialog(
+            &mut state.design.create_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        );
+        assert!(state.design.create_hierarchy.open);
+        commit_create_hierarchy(
+            &mut state.design.create_hierarchy,
+            &mut state.design.symbol,
+            &mut state.model,
+            &state.workbench,
+        )
+        .expect("the boxed block becomes a cell");
+        let resistors = state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .filter(|component| component.kind == ComponentType::Resistor)
+            .count();
+        assert_eq!(resistors, 2, "both boxed resistors are in the new cell");
+        let parent_parts = &state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&parent.key())
+            .expect("parent buffer")
+            .document()
+            .components;
+        let count = |kind| {
+            parent_parts
+                .iter()
+                .filter(|component| component.kind == kind)
+                .count()
+        };
+        assert_eq!(
+            (
+                parent_parts.len(),
+                count(ComponentType::Resistor),
+                count(ComponentType::CellInstance)
+            ),
+            (2, 1, 1),
+            "the parent keeps the third resistor beside the new instance"
+        );
     }
 
     #[test]

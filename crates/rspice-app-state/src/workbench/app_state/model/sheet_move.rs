@@ -25,14 +25,36 @@ use rspice_simulation::netlist_gen::{
 };
 
 impl Model {
-    /// Whether the selection is one or more complete instances on a
-    /// writable schematic, and nothing else: what hierarchy extraction and
-    /// a sheet move both carry.
+    /// Whether Create hierarchy can take the selection: one or more
+    /// complete instances on a writable schematic. The whole wires,
+    /// junctions and net labels a selection box takes with the instances
+    /// are left to the extraction plan, which works out for itself which
+    /// conductors and labels go with the block, as Virtuoso's Make Cell takes
+    /// a mixed selection. A piece of a wire, a bus, a tap, a note, a shape, a
+    /// probe or a port is refused.
     pub fn create_hierarchy_available(&self) -> bool {
+        let selection = &self.schematic.session.editor.selection;
+        self.selected_instances_extractable()
+            && selection.count()
+                == selection.components.len()
+                    + selection.wires.len()
+                    + selection.junctions.len()
+                    + selection.net_labels.len()
+    }
+
+    /// Whether the selection is one or more complete instances on a
+    /// writable schematic, and nothing else: what a sheet move carries.
+    pub fn sheet_move_available(&self) -> bool {
+        let selection = &self.schematic.session.editor.selection;
+        self.selected_instances_extractable() && selection.count() == selection.components.len()
+    }
+
+    /// Whether the selection holds at least one instance, every one of
+    /// them a part of this writable schematic and none an interface port.
+    fn selected_instances_extractable(&self) -> bool {
         let selection = &self.schematic.session.editor.selection;
         !self.schematic_edit_read_only()
             && !selection.components.is_empty()
-            && selection.count() == selection.components.len()
             && selection.components.iter().all(|id| {
                 self.schematic
                     .document()
@@ -98,7 +120,7 @@ impl Model {
     /// internal conductors and create exact typed contracts for every
     /// source/destination boundary terminal.
     pub fn selected_component_sheet_move_plan(&self) -> Result<SheetMoveConnectivityPlan, String> {
-        if !self.create_hierarchy_available() {
+        if !self.sheet_move_available() {
             return Err(
                 "A governed sheet move requires one or more complete, writable schematic instances and no partial or non-instance selections."
                     .to_owned(),

@@ -1483,7 +1483,7 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
         ),
         ContextAction::CreateHierarchy => (
             state.model.create_hierarchy_available(),
-            "Select one or more complete editable instances and no partial objects",
+            "Select one or more editable instances, with no port, bus, note or piece of a wire",
         ),
         ContextAction::CreateSymbolFromPorts => (
             writable

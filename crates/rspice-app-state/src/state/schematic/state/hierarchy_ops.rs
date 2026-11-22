@@ -10,10 +10,17 @@ use super::*;
 use std::collections::HashMap;
 
 impl SchematicState {
+    /// The selection as hierarchy extraction reads it: its instances, and
+    /// how many objects it holds besides the whole wires, junctions and net
+    /// labels a selection box takes with them, which the plan places itself.
     fn hierarchy_source(&self) -> HierarchySource<'_> {
+        let selection = &self.session.editor.selection;
         self.design.hierarchy_source(
-            &self.session.editor.selection.components,
-            self.session.editor.selection.count(),
+            &selection.components,
+            selection.count()
+                - selection.wires.len()
+                - selection.junctions.len()
+                - selection.net_labels.len(),
         )
     }
 
