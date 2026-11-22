@@ -37,6 +37,7 @@
 //! ISO 7200 makes mandatory are always on the form; their values may stay
 //! empty until the drawing is signed.
 
+use super::form_table::*;
 use super::*;
 
 use DrawingSheetTitleFieldId as Field;
@@ -45,48 +46,22 @@ use DrawingSheetTitleFieldId as Field;
 const FORM_WIDTH_UM: u64 = 180_000;
 /// The form's depth: four rows.
 const FORM_HEIGHT_UM: u64 = 45_000;
-const ROW_UM: u64 = FORM_HEIGHT_UM / 4;
 
-/// ISO 3098 heights the form letters at.
-const CAPTION_UM: u64 = 1_800;
-const VALUE_UM: u64 = 2_500;
 /// The identification number stands a step above the other values, as the
 /// figures of ISO 7200 set it apart.
 const IDENTIFIER_UM: u64 = 3_500;
 
-/// One cell of the form as designed.
-struct FormCell {
-    caption: &'static str,
-    x_um: u64,
-    width_um: u64,
-    /// The first row the cell covers, from the top, and how many it spans.
-    row: u64,
-    rows: u64,
-    /// What it letters, the first being the field the cell is for.
-    lines: &'static [FormLine],
-}
+/// The form: four rows of 11.25 mm, captions over their values.
+const FORM: FormTable = FormTable {
+    width_um: FORM_WIDTH_UM,
+    height_um: FORM_HEIGHT_UM,
+    rows: 4,
+    captions: DrawingSheetTitleCaptionPlacement::Over,
+    cells: &FORM_CELLS,
+};
 
-/// A field a form cell letters.
-struct FormLine {
-    field: DrawingSheetTitleFieldId,
-    /// The row of the cell's span the value is seated on, from its first.
-    row: u64,
-    lettering_um: u64,
-    /// Lines a long value wraps onto.
-    max_lines: u8,
-}
-
-const fn line(field: DrawingSheetTitleFieldId) -> FormLine {
-    FormLine {
-        field,
-        row: 0,
-        lettering_um: VALUE_UM,
-        max_lines: 1,
-    }
-}
-
-/// The form, row by row and left to right.
-const FORM: [FormCell; 13] = [
+/// The form's cells, row by row and left to right.
+const FORM_CELLS: [FormCell; 13] = [
     FormCell {
         caption: "Created by",
         x_um: 0,
@@ -281,13 +256,14 @@ pub const fn iso_7200_typical_chars(field: DrawingSheetTitleFieldId) -> Option<u
 impl DrawingSheetTitleBlockTemplate {
     /// Whether a sheet on this template must show `field`: the fields every
     /// block shows, on ISO 7200's form the fields the standard makes
-    /// mandatory, and on ASME Y14.1's every field of its blocks A to L, whose
-    /// cells the form always draws. No sheet hides them; their values may
-    /// stay empty.
+    /// mandatory, on ASME Y14.1's every field of its blocks A to L, whose
+    /// cells the form always draws, and on the compact form every field it
+    /// carries. No sheet hides them; their values may stay empty.
     #[must_use]
     pub fn requires_field(self, field: DrawingSheetTitleFieldId) -> bool {
         field.policy().required_visible
             || (self == Self::Standard && ISO_7200_MANDATORY_FIELDS.contains(&field))
+            || (self == Self::Compact && COMPACT_FORM_FIELDS.contains(&field))
             || (self == Self::AsmeY141 && ASME_Y14_1_FORM_FIELDS.contains(&field))
     }
 
@@ -296,6 +272,7 @@ impl DrawingSheetTitleBlockTemplate {
     pub const fn required_field_note(self) -> &'static str {
         match self {
             Self::Standard => "ISO 7200 makes this field mandatory on its form.",
+            Self::Compact => "The compact block always carries this field.",
             Self::AsmeY141 => "ASME Y14.1's form always carries this field.",
             Self::OrganizationManaged | Self::None => "Every title block carries this field.",
         }
@@ -313,6 +290,7 @@ impl SchematicSheetFormat {
         let template = self.title_block.template;
         let on_form = match template {
             DrawingSheetTitleBlockTemplate::Standard => ISO_7200_FORM_FIELDS.contains(&field),
+            DrawingSheetTitleBlockTemplate::Compact => COMPACT_FORM_FIELDS.contains(&field),
             DrawingSheetTitleBlockTemplate::AsmeY141 => {
                 ASME_Y14_1_FORM_FIELDS.contains(&field)
                     || ASME_Y14_1_SUPPLEMENTARY_FIELDS.contains(&field)
@@ -331,16 +309,6 @@ impl SchematicSheetFormat {
     }
 }
 
-/// A form cell where the sheet's fields place it, in the form's own frame.
-struct Placed {
-    cell: &'static FormCell,
-    x_um: u64,
-    width_um: u64,
-    /// Whether the cell letters nothing: a run of hidden fields with no cell
-    /// beside it in the row to take its width.
-    blank: bool,
-}
-
 /// Lay out ISO 7200's form on a block `width_um` by `height_um`: the form
 /// is designed at 180 × 45 mm, and a block stretched across the drawing
 /// area keeps its proportions.
@@ -349,158 +317,5 @@ pub(super) fn iso_7200_form_layout(
     width_um: u64,
     height_um: u64,
 ) -> DrawingSheetTitleLayout {
-    let shown = |field| format.title_field_shown(field);
-    let across = |x_um: u64| x_um * width_um / FORM_WIDTH_UM;
-    let down = |y_um: u64| y_um * height_um / FORM_HEIGHT_UM;
-    let padding_um = DRAWING_SHEET_TITLE_CELL_PADDING_UM;
-    let cells = place_form_cells(&shown)
-        .into_iter()
-        .map(|placed| {
-            let cell = placed.cell;
-            let (left_um, right_um) = (across(placed.x_um), across(placed.x_um + placed.width_um));
-            let row_top_um = cell.row * ROW_UM;
-            let (top_um, bottom_um) = (down(row_top_um), down(row_top_um + cell.rows * ROW_UM));
-            let lettered_um = (right_um - left_um).saturating_sub(padding_um * 2);
-            // Captions and values sit on the fractions of a row every title
-            // block seats them on.
-            let seat = |row: u64, (numerator, denominator): (u64, u64)| {
-                down(row * ROW_UM + ROW_UM * numerator / denominator)
-            };
-            let (caption, values) = if placed.blank {
-                (None, Vec::new())
-            } else {
-                (
-                    Some(DrawingSheetTitleCaption {
-                        text: cell.caption,
-                        placement: DrawingSheetTitleCaptionPlacement::Over,
-                        x_um: left_um + padding_um,
-                        seat_um: seat(cell.row, DRAWING_SHEET_TITLE_CAPTION_POSITION),
-                        width_um: lettered_um,
-                        lettering_um: CAPTION_UM,
-                    }),
-                    cell.lines
-                        .iter()
-                        .filter(|line| shown(line.field))
-                        .map(|line| DrawingSheetTitleValue {
-                            text: DrawingSheetTitleText::Field(line.field),
-                            x_um: left_um + padding_um,
-                            seat_um: seat(cell.row + line.row, DRAWING_SHEET_TITLE_VALUE_POSITION),
-                            width_um: lettered_um,
-                            lettering_um: line.lettering_um,
-                            emphasised: line.field.emphasised(),
-                            max_lines: line.max_lines,
-                            // ISO 3098's least baseline spacing for lettering
-                            // that may carry diacritics, 19/10 of its height.
-                            line_pitch_um: down(line.lettering_um * 19 / 10),
-                            upper_case: false,
-                        })
-                        .collect(),
-                )
-            };
-            DrawingSheetTitleCell {
-                x_um: left_um,
-                y_um: top_um,
-                width_um: right_um - left_um,
-                height_um: bottom_um - top_um,
-                caption,
-                values,
-            }
-        })
-        .collect();
-    DrawingSheetTitleLayout::from_cells(width_um, height_um, 0, cells)
-}
-
-/// Every cell of the form the sheet's fields leave on it, row by row, with
-/// the width each takes once hidden fields have given theirs away.
-fn place_form_cells(shown: &impl Fn(DrawingSheetTitleFieldId) -> bool) -> Vec<Placed> {
-    let mut placed = Vec::with_capacity(FORM.len());
-    for row in 0..FORM_HEIGHT_UM / ROW_UM {
-        // A cell spanning rows stands in each of them, and the cells of a
-        // row share width only within the runs it divides the row into.
-        let mut run = Vec::new();
-        for cell in FORM
-            .iter()
-            .filter(|cell| cell.row <= row && row < cell.row + cell.rows)
-        {
-            if cell.rows == 1 {
-                run.push(cell);
-                continue;
-            }
-            share_run(&run, shown, &mut placed);
-            run.clear();
-            if cell.row == row {
-                placed.push(Placed {
-                    cell,
-                    x_um: cell.x_um,
-                    width_um: cell.width_um,
-                    blank: false,
-                });
-            }
-        }
-        share_run(&run, shown, &mut placed);
-    }
-    placed
-}
-
-/// Place a run of side-by-side cells in one row: each hidden cell merges
-/// into the shown cell on its left, or on its right when it starts the row,
-/// so every rule that remains stands where the form puts it.
-fn share_run(
-    run: &[&'static FormCell],
-    shown: &impl Fn(DrawingSheetTitleFieldId) -> bool,
-    placed: &mut Vec<Placed>,
-) {
-    let Some(first) = run.first() else {
-        return;
-    };
-    let visible = run
-        .iter()
-        .map(|cell| shown(cell.lines[0].field))
-        .collect::<Vec<_>>();
-    if !visible.contains(&true) {
-        placed.extend(run.iter().map(|cell| Placed {
-            cell,
-            x_um: cell.x_um,
-            width_um: cell.width_um,
-            blank: true,
-        }));
-        return;
-    }
-    let mut widths = run.iter().map(|cell| cell.width_um).collect::<Vec<_>>();
-    let mut index = 0;
-    while index < run.len() {
-        if visible[index] {
-            index += 1;
-            continue;
-        }
-        let start = index;
-        while index < run.len() && !visible[index] {
-            index += 1;
-        }
-        let given_um = run[start..index]
-            .iter()
-            .map(|cell| cell.width_um)
-            .sum::<u64>();
-        // Into the cell on the left, or the one on the right for the first
-        // cells of a row; a run that is hidden whole has none and stays
-        // blank.
-        if let Some(neighbour) = start
-            .checked_sub(1)
-            .or((index < run.len()).then_some(index))
-        {
-            widths[neighbour] += given_um;
-        }
-    }
-    let mut x_um = first.x_um;
-    for ((cell, width_um), visible) in run.iter().zip(widths).zip(visible) {
-        if visible {
-            placed.push(Placed {
-                cell,
-                x_um,
-                width_um,
-                blank: false,
-            });
-            x_um += width_um;
-        }
-    }
+    form_layout(&FORM, format, width_um, height_um)
 }

@@ -379,6 +379,7 @@ fn builtin_frame_references(presets: &[PortableDrawingSheetPreset]) -> Vec<Built
         }
         let title_block = match preset.format.title_block.template {
             DrawingSheetTitleBlockTemplate::Standard => Some("standard"),
+            DrawingSheetTitleBlockTemplate::Compact => Some("compact-form"),
             DrawingSheetTitleBlockTemplate::AsmeY141 => Some("asme-y14-1"),
             DrawingSheetTitleBlockTemplate::None
             | DrawingSheetTitleBlockTemplate::OrganizationManaged => None,
@@ -403,6 +404,7 @@ fn border_identity(border: DrawingSheetBorderTemplate) -> &'static str {
 fn title_block_identity(template: DrawingSheetTitleBlockTemplate) -> &'static str {
     match template {
         DrawingSheetTitleBlockTemplate::Standard => "builtin/standard",
+        DrawingSheetTitleBlockTemplate::Compact => "builtin/compact-form",
         DrawingSheetTitleBlockTemplate::AsmeY141 => "builtin/asme-y14-1",
         DrawingSheetTitleBlockTemplate::OrganizationManaged => "organization-managed",
         DrawingSheetTitleBlockTemplate::None => "none",

@@ -431,7 +431,7 @@ impl DrawingSheetTitleBlockTemplate {
     pub fn revision_advisory(self, revision: &str) -> Option<&'static str> {
         match self {
             Self::AsmeY141 => drawing_sheet_asme_revision_advisory(revision),
-            Self::Standard | Self::OrganizationManaged | Self::None => {
+            Self::Standard | Self::Compact | Self::OrganizationManaged | Self::None => {
                 drawing_sheet_revision_advisory(revision)
             }
         }
@@ -595,19 +595,6 @@ mod seat {
         bottom_um - FOOT_CLEAR_UM - drawing_sheet_mono_em_um(lettering_um) * 12 / 20
     }
 
-    /// A line on the baseline that centres capitals `cap_um` high in the
-    /// stretch from `top_um` to `bottom_um`: lines of two heights on one
-    /// baseline, such as an inline heading and its value.
-    pub(super) const fn on_centred_baseline(
-        top_um: u64,
-        bottom_um: u64,
-        cap_um: u64,
-        lettering_um: u64,
-    ) -> u64 {
-        let baseline_um = top_um + (bottom_um - top_um + cap_um) / 2;
-        baseline_um - drawing_sheet_mono_baseline_offset_um(lettering_um)
-    }
-
     /// The first of `lines` lines, `pitch_um` apart, centred between `top_um`
     /// and `bottom_um` from the first line's capitals to the last line's
     /// descenders.
@@ -718,7 +705,12 @@ impl Cell {
             text,
             placement: DrawingSheetTitleCaptionPlacement::Inline,
             x_um: self.x_um + PADDING_UM,
-            seat_um: seat::on_centred_baseline(self.y_um, self.bottom_um(), ENTRY_UM, HEADING_UM),
+            seat_um: drawing_sheet_seat_on_centred_baseline(
+                self.y_um,
+                self.bottom_um(),
+                ENTRY_UM,
+                HEADING_UM,
+            ),
             width_um: width_um.min(self.lettered_um()),
             lettering_um: HEADING_UM,
         }
@@ -735,7 +727,12 @@ impl Cell {
         DrawingSheetTitleValue {
             text,
             x_um,
-            seat_um: seat::on_centred_baseline(self.y_um, self.bottom_um(), ENTRY_UM, ENTRY_UM),
+            seat_um: drawing_sheet_seat_on_centred_baseline(
+                self.y_um,
+                self.bottom_um(),
+                ENTRY_UM,
+                ENTRY_UM,
+            ),
             width_um: (self.x_um + self.width_um - PADDING_UM).saturating_sub(x_um),
             lettering_um: ENTRY_UM,
             emphasised: false,
@@ -964,7 +961,12 @@ fn approval_cells(form: AsmeY141TitleBlockForm) -> Vec<DrawingSheetTitleCell> {
             height_um: headings_um,
         };
         let caption = DrawingSheetTitleCaption {
-            seat_um: seat::on_centred_baseline(cell.y_um, cell.bottom_um(), HEADING_UM, HEADING_UM),
+            seat_um: drawing_sheet_seat_on_centred_baseline(
+                cell.y_um,
+                cell.bottom_um(),
+                HEADING_UM,
+                HEADING_UM,
+            ),
             ..cell.heading_inline(heading)
         };
         cells.push(cell.finish(Some(caption), Vec::new()));

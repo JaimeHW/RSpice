@@ -42,6 +42,8 @@ enum DrawingSheetTitleBlockTemplateWire {
     /// forms.
     Compact,
     Standard,
+    #[serde(rename = "compact-form")]
+    CompactForm,
     OrganizationManaged,
     None,
     #[serde(rename = "asme-y14-1")]
@@ -94,6 +96,9 @@ impl DrawingSheetTitleBlockWire {
             }
             DrawingSheetTitleBlockTemplateWire::Standard => {
                 DrawingSheetTitleBlockTemplate::Standard
+            }
+            DrawingSheetTitleBlockTemplateWire::CompactForm => {
+                DrawingSheetTitleBlockTemplate::Compact
             }
             DrawingSheetTitleBlockTemplateWire::OrganizationManaged => {
                 DrawingSheetTitleBlockTemplate::OrganizationManaged

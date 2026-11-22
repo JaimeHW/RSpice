@@ -477,6 +477,12 @@ pub enum DrawingSheetTitleBlockTemplate {
     /// ISO 7200's 180 mm block, drawn as the standard's form.
     #[default]
     Standard,
+    /// A 110 × 32 mm block of the fields a schematic is read by, each
+    /// caption inline before its value. Written `compact-form`: the retired
+    /// 130 mm block was written `compact` (see the `title_block_wire`
+    /// module).
+    #[serde(rename = "compact-form")]
+    Compact,
     OrganizationManaged,
     None,
     /// ASME Y14.1's block, drawn as the standard's form: Fig 5-1 on A to C
@@ -493,6 +499,7 @@ impl DrawingSheetTitleBlockTemplate {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Standard => "ISO 7200",
+            Self::Compact => "Compact",
             Self::OrganizationManaged => "Organization block",
             Self::None => "No title block",
             Self::AsmeY141 => "ASME Y14.1",
@@ -505,6 +512,7 @@ impl DrawingSheetTitleBlockTemplate {
     pub const fn dimensions_um(self) -> Option<(u64, u64)> {
         match self {
             Self::Standard => Some((180_000, 45_000)),
+            Self::Compact => Some((110_000, 32_000)),
             Self::OrganizationManaged => Some((180_000, 50_000)),
             Self::None | Self::AsmeY141 => None,
         }
@@ -516,7 +524,7 @@ impl DrawingSheetTitleBlockTemplate {
     pub const fn outline_um(self) -> u64 {
         match self {
             Self::AsmeY141 => 600,
-            Self::Standard | Self::OrganizationManaged | Self::None => {
+            Self::Standard | Self::Compact | Self::OrganizationManaged | Self::None => {
                 DRAWING_SHEET_TITLE_OUTLINE_UM
             }
         }
@@ -1573,6 +1581,7 @@ impl SchematicSheetFormat {
     pub fn title_block_field_order(&self) -> Vec<DrawingSheetTitleFieldId> {
         match self.title_block.template {
             DrawingSheetTitleBlockTemplate::Standard => return ISO_7200_FORM_FIELDS.to_vec(),
+            DrawingSheetTitleBlockTemplate::Compact => return COMPACT_FORM_FIELDS.to_vec(),
             DrawingSheetTitleBlockTemplate::AsmeY141 => {
                 // The supplementary strip stands above the block.
                 return ASME_Y14_1_SUPPLEMENTARY_FIELDS
@@ -1875,6 +1884,7 @@ pub const fn drawing_sheet_title_block_rows(
 ) -> Option<usize> {
     match template {
         DrawingSheetTitleBlockTemplate::Standard => Some(4),
+        DrawingSheetTitleBlockTemplate::Compact => Some(5),
         DrawingSheetTitleBlockTemplate::OrganizationManaged => Some(5),
         // A, B, the drawing number's row and the bottom row.
         DrawingSheetTitleBlockTemplate::AsmeY141 => Some(4),
@@ -1989,8 +1999,13 @@ pub use zones::*;
 pub(super) mod title_flow;
 use title_flow::flowed_title_layout;
 
+pub(super) mod form_table;
+
 pub(super) mod iso_7200_form;
 pub use iso_7200_form::*;
+
+pub(super) mod compact_form;
+pub use compact_form::*;
 
 pub(super) mod asme_y14_1_form;
 pub use asme_y14_1_form::*;

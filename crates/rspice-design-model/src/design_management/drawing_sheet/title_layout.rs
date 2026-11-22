@@ -529,6 +529,9 @@ pub fn drawing_sheet_title_layout(
         DrawingSheetTitleBlockTemplate::Standard => {
             Some(iso_7200_form_layout(format, width_um, height_um))
         }
+        DrawingSheetTitleBlockTemplate::Compact => {
+            Some(compact_form_layout(format, width_um, height_um))
+        }
         DrawingSheetTitleBlockTemplate::AsmeY141 => format
             .asme_title_block_form()
             .map(|form| asme_y14_1_form_layout(format, form)),

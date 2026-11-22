@@ -50,6 +50,23 @@ pub const fn drawing_sheet_mono_baseline_offset_um(lettering_um: u64) -> u64 {
     drawing_sheet_mono_em_um(lettering_um) * 3 / 8
 }
 
+/// The point a line is seated on so that its baseline is the one that
+/// centres capitals `cap_um` high in the stretch from `top_um` to
+/// `bottom_um`: lines of two heights on one baseline, such as an inline
+/// caption and its value. A seat is the point the canvas centres a line on
+/// and the plot sets its baseline 3/8 of an em below (see
+/// [`drawing_sheet_mono_baseline_offset_um`]).
+#[must_use]
+pub(in crate::design_management) const fn drawing_sheet_seat_on_centred_baseline(
+    top_um: u64,
+    bottom_um: u64,
+    cap_um: u64,
+    lettering_um: u64,
+) -> u64 {
+    let baseline_um = top_um + (bottom_um - top_um + cap_um) / 2;
+    baseline_um - drawing_sheet_mono_baseline_offset_um(lettering_um)
+}
+
 /// The heights a title block letters its fields at, on every sheet: 1.8 mm
 /// captions and 2.5 mm values, the row ISO 3098 gives A4.
 ///
