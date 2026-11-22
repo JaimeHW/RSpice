@@ -822,6 +822,10 @@ pub struct DrawingSheetProjectSettings {
     pub remember_last_explicit_format: bool,
     #[serde(default)]
     pub last_explicit_format: Option<SchematicSheetFormat>,
+    /// The logo every title block seats in the cell that names the legal
+    /// owner, like the owner's name a value of the project's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_logo: Option<DrawingSheetOwnerLogo>,
 }
 
 impl Default for DrawingSheetProjectSettings {
@@ -839,6 +843,7 @@ impl Default for DrawingSheetProjectSettings {
             new_sheet_policy: DrawingSheetNewSheetPolicy::ProjectDefault,
             remember_last_explicit_format: false,
             last_explicit_format: None,
+            owner_logo: None,
         }
     }
 }
@@ -855,6 +860,7 @@ struct DrawingSheetProjectSettingsWire {
     new_sheet_policy: DrawingSheetNewSheetPolicy,
     remember_last_explicit_format: bool,
     last_explicit_format: Option<SchematicSheetFormat>,
+    owner_logo: Option<DrawingSheetOwnerLogo>,
 }
 
 impl Default for DrawingSheetProjectSettingsWire {
@@ -874,6 +880,7 @@ impl Default for DrawingSheetProjectSettingsWire {
             new_sheet_policy: settings.new_sheet_policy,
             remember_last_explicit_format: settings.remember_last_explicit_format,
             last_explicit_format: settings.last_explicit_format,
+            owner_logo: settings.owner_logo,
         }
     }
 }
@@ -920,6 +927,7 @@ impl<'de> Deserialize<'de> for DrawingSheetProjectSettings {
             new_sheet_policy: wire.new_sheet_policy,
             remember_last_explicit_format: wire.remember_last_explicit_format,
             last_explicit_format,
+            owner_logo: wire.owner_logo,
         };
         settings.normalize_preset_references();
         settings.validate().map_err(D::Error::custom)?;

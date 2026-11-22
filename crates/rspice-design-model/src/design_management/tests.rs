@@ -7,6 +7,7 @@ mod asme_form;
 mod drawing_sheet_release;
 mod frame;
 mod manual_annotation;
+mod owner_logo;
 mod sheet_lifecycle;
 mod title_fields;
 mod title_layout;

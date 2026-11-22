@@ -511,6 +511,136 @@ impl DrawingSheetTitleLayout {
     }
 }
 
+/// Where a title block seats the owner's logo, in the block's upright frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawingSheetTitleLogoSeat {
+    /// Distance from the block's left edge to the logo's left edge.
+    pub x_um: u64,
+    /// Distance from the block's top edge to the logo's top edge.
+    pub y_um: u64,
+    pub width_um: u64,
+    pub height_um: u64,
+}
+
+/// The least height a logo stands at beneath the owner's name: a cell with
+/// less room under the name seats the logo beside it instead.
+const LOGO_BENEATH_LEAST_UM: u64 = 5_000;
+
+/// How much of the owner's cell a logo beside the name may take across it,
+/// so the name keeps most of its cell.
+const LOGO_BESIDE_SHARE: (u64, u64) = (2, 5);
+
+impl DrawingSheetTitleLayout {
+    /// Seat the owner's logo, whose picture is `pixel_size` wide and high,
+    /// in the cell that letters the legal owner, and say where it stands.
+    ///
+    /// A cell with room beneath the name, as ISO 7200's legal owner has,
+    /// seats the logo there, under the deepest the name may wrap. A cell of
+    /// one line, as the compact block's Owner row and ASME Y14.1's block A
+    /// are, seats it at its left as tall as the cell holds, and moves the
+    /// caption and the name to its right. Either way the logo keeps its
+    /// proportions and stands as far inside the cell's rules as the
+    /// lettering does. `None` where the block letters no owner.
+    pub fn seat_owner_logo(
+        &mut self,
+        (pixel_width, pixel_height): (u32, u32),
+    ) -> Option<DrawingSheetTitleLogoSeat> {
+        if pixel_width == 0 || pixel_height == 0 {
+            return None;
+        }
+        let cell = self
+            .cells
+            .iter_mut()
+            .find(|cell| cell.value(DrawingSheetTitleFieldId::Organization).is_some())?;
+        let lettering_x_um = cell
+            .values
+            .iter()
+            .map(|value| value.x_um)
+            .chain(cell.caption.map(|caption| caption.x_um))
+            .min()?;
+        let inset_um = lettering_x_um.saturating_sub(cell.x_um);
+        let vertical_inset_um = inset_um.min(cell.height_um / 8);
+        let left_um = cell.x_um + inset_um;
+        let right_um = (cell.x_um + cell.width_um).saturating_sub(inset_um);
+        let bottom_um = (cell.y_um + cell.height_um).saturating_sub(vertical_inset_um);
+        // The foot of the lowest line the cell may letter.
+        let lettering_foot_um = cell
+            .values
+            .iter()
+            .map(|value| {
+                value.seat_um
+                    + u64::from(value.max_lines.max(1) - 1) * value.line_pitch_um
+                    + value.lettering_um
+            })
+            .chain(
+                cell.caption
+                    .map(|caption| caption.seat_um + caption.lettering_um),
+            )
+            .max()?;
+        let beneath_um = lettering_foot_um + vertical_inset_um;
+        if bottom_um.saturating_sub(beneath_um) >= LOGO_BENEATH_LEAST_UM {
+            return Some(fit_logo(
+                (left_um, beneath_um),
+                (right_um.saturating_sub(left_um), bottom_um - beneath_um),
+                (pixel_width, pixel_height),
+            ));
+        }
+        let top_um = cell.y_um + vertical_inset_um;
+        let (share, whole) = LOGO_BESIDE_SHARE;
+        let seat = fit_logo(
+            (left_um, top_um),
+            (
+                right_um.saturating_sub(left_um) * share / whole,
+                bottom_um.saturating_sub(top_um),
+            ),
+            (pixel_width, pixel_height),
+        );
+        // Every run of lettering moves right by as much: a caption lettered
+        // before the name keeps its length, and every other run keeps the
+        // end it reaches to.
+        let shift_um = (seat.x_um + seat.width_um + inset_um).saturating_sub(lettering_x_um);
+        if let Some(caption) = &mut cell.caption {
+            let end_um = caption.x_um + caption.width_um;
+            caption.x_um += shift_um;
+            caption.width_um = match caption.placement {
+                DrawingSheetTitleCaptionPlacement::Inline => {
+                    caption.width_um.min(right_um.saturating_sub(caption.x_um))
+                }
+                DrawingSheetTitleCaptionPlacement::Over => end_um.saturating_sub(caption.x_um),
+            };
+        }
+        for value in &mut cell.values {
+            let end_um = value.x_um + value.width_um;
+            value.x_um += shift_um;
+            value.width_um = end_um.saturating_sub(value.x_um);
+        }
+        Some(seat)
+    }
+}
+
+/// A picture `pixel_size` wide and high, as large as it stands in the box
+/// at `origin_um` of `size_um` with its proportions kept: against the box's
+/// left edge and centred down it.
+fn fit_logo(
+    (x_um, y_um): (u64, u64),
+    (width_um, height_um): (u64, u64),
+    (pixel_width, pixel_height): (u32, u32),
+) -> DrawingSheetTitleLogoSeat {
+    let (pixel_width, pixel_height) = (u64::from(pixel_width), u64::from(pixel_height));
+    let (fitted_width_um, fitted_height_um) = if width_um * pixel_height >= height_um * pixel_width
+    {
+        (height_um * pixel_width / pixel_height, height_um)
+    } else {
+        (width_um, width_um * pixel_height / pixel_width)
+    };
+    DrawingSheetTitleLogoSeat {
+        x_um,
+        y_um: y_um + (height_um - fitted_height_um) / 2,
+        width_um: fitted_width_um.max(1),
+        height_um: fitted_height_um.max(1),
+    }
+}
+
 /// What a sheet says of a title value its block cuts short.
 pub const DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY: &str =
     "Longer than its cell in this sheet's title block holds; it prints cut short.";
@@ -540,6 +670,27 @@ pub fn drawing_sheet_title_layout(
         }
         DrawingSheetTitleBlockTemplate::None => None,
     }
+}
+
+/// The title block `geometry` places on the sheet `format` authors, with the
+/// project's `owner_logo` seated in the cell that names the legal owner, and
+/// where the logo stands; `None` when the sheet carries no block. A block
+/// whose organization template draws its own logo seats no other.
+#[must_use]
+pub fn drawing_sheet_title_layout_with_owner_logo(
+    format: &SchematicSheetFormat,
+    geometry: &DrawingSheetGeometry,
+    owner_logo: Option<&DrawingSheetOwnerLogo>,
+) -> Option<(DrawingSheetTitleLayout, Option<DrawingSheetTitleLogoSeat>)> {
+    let mut layout = drawing_sheet_title_layout(format, geometry)?;
+    let seat = owner_logo
+        .filter(|_| {
+            format
+                .title_block_logo(geometry.effective_title_block_template)
+                .is_none()
+        })
+        .and_then(|logo| layout.seat_owner_logo(logo.pixel_size()));
+    Some((layout, seat))
 }
 
 /// Characters lettered at `lettering_um` that fit across `width_um`, and at

@@ -16,6 +16,8 @@ work-observation = []
 test-support = []
 
 [dependencies]
+# The owner's logo is stored in a project file as Base64.
+base64.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

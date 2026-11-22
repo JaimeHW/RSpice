@@ -66,6 +66,10 @@ pub enum DesignManagementError {
     /// person correcting it needs to read it.
     #[error("{0}")]
     DocumentControl(&'static str),
+    /// A logo the project cannot take, said the way the person importing it
+    /// needs to read it.
+    #[error("{0}")]
+    InvalidOwnerLogo(&'static str),
     #[error("{field} contains {actual} bytes; maximum is {maximum}")]
     TextTooLong {
         field: &'static str,

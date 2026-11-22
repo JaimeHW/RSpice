@@ -2010,6 +2010,9 @@ pub use frame::*;
 pub(super) mod lettering;
 pub use lettering::*;
 
+pub(super) mod owner_logo;
+pub use owner_logo::*;
+
 pub(super) mod presets;
 pub use presets::*;
 
