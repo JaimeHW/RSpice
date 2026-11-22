@@ -100,69 +100,186 @@ fn cursors_page_shown(workbench: &WorkbenchSession) -> bool {
 /// The dock's Cursors page: its controls on the toolbar band, then what
 /// the cursors and markers read, or how to place one.
 pub fn cursors_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let session = &state.results.session;
-    let need_models = (session.cursor_readout_active() && session.cursor_strip.is_some())
-        || on_screen_strips(state.results_reads())
-            .into_iter()
-            .any(|key| session.strip_markers(key).next().is_some());
-    let shown = with_readout(
-        state,
-        &Tokens::get(ui.ctx()),
-        need_models,
-        |session, source| {
-            // With nothing to read the page is one line, with no band over it.
-            if !dock::page_has_readings(session, source) {
-                return None;
-            }
-            let tables = dock::cursor_tables(session, source, &Tokens::get(ui.ctx()));
-            let copied = console::toolbar(ui, |ui| cursors_toolbar(ui, session, &tables));
-            if copied {
-                ui.ctx().copy_text(
-                    tables
-                        .iter()
-                        .map(rspice_results_ui::waves::cursor_table::CursorTable::tsv)
-                        .collect::<Vec<_>>()
-                        .join("\n\n"),
-                );
-            }
-            dock::cursors_page(ui, session, source, &tables).map(|actions| (actions, copied))
-        },
-    );
-    match shown {
-        Some((actions, copied)) => {
-            if copied {
-                state.prompt("Copied the cursor table");
-            }
-            apply_marker_actions(state, actions);
+    use rspice_results_ui::waves::cursor_table::CursorTable;
+    let shown = with_readout(state, &Tokens::get(ui.ctx()), true, |session, source| {
+        // With no strip to read the page is one line, with no band over it.
+        if source.models.is_empty() {
+            return None;
         }
-        None => {
-            ui.add_space(console::CONSOLE_BODY_PADDING_TOP);
-            if console::prose_fits(ui) {
-                console::padded(ui, |ui| {
-                    console::muted(
-                        ui,
-                        "No cursors or markers. Switch on A|B in the sheet's bar and click a plot to place A, then B.",
-                    );
-                });
-            }
+        let tables = if dock::page_has_readings(session, source) {
+            dock::cursor_tables(session, source, &Tokens::get(ui.ctx()))
+        } else {
+            Vec::new()
+        };
+        let outcome = console::toolbar(ui, |ui| cursors_toolbar(ui, session, &tables));
+        if outcome.copied {
+            ui.ctx().copy_text(
+                tables
+                    .iter()
+                    .map(CursorTable::tsv)
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            );
         }
+        let placed = outcome
+            .add
+            .and_then(|choice| add_reading(session, source, choice));
+        if outcome.add.is_some() {
+            ui.ctx().request_repaint();
+        }
+        let actions = if tables.is_empty() {
+            None
+        } else {
+            dock::cursors_page(ui, session, source, &tables)
+        };
+        Some((actions, outcome.copied, placed))
+    });
+    let Some((actions, copied, placed)) = shown else {
+        empty_cursors_page(ui);
+        return;
+    };
+    if copied {
+        state.prompt("Copied the cursor table");
+    }
+    if let Some((spot, vertical)) = placed {
+        add_marker(state, spot, vertical);
+    }
+    match actions {
+        Some(actions) => apply_marker_actions(state, actions),
+        None => empty_cursors_page(ui),
     }
 }
 
-/// The Cursors page's controls: the base every difference is read
-/// against, and Copy at the right. Says whether Copy was pressed.
+/// Add what the page's Add list names at `choice`: a cursor pair or a
+/// horizontal cursor at once, or where a marker goes, and whether it is a
+/// vertical one, for the host to place.
+fn add_reading(
+    session: &mut ResultViewerState,
+    source: ReadoutInput<'_>,
+    choice: usize,
+) -> Option<(rspice_results_ui::waves::cursor_table::MarkerSpot, bool)> {
+    use rspice_results_ui::waves::cursor_table;
+    match cursor_table::ADD_CHOICES.get(choice).copied()? {
+        "Delta pair" => {
+            cursor_table::add_delta_pair(session, source);
+            None
+        }
+        "Horizontal cursor" => {
+            cursor_table::add_horizontal(session, source);
+            None
+        }
+        choice => cursor_table::marker_spot(session, source)
+            .map(|spot| (spot, choice == "Vertical marker")),
+    }
+}
+
+/// Add from the Cursors page, as picking `choice` in its Add list does.
+#[cfg(test)]
+pub(super) fn add_from_cursors_page(state: &mut ResultsParts<'_>, choice: &str) {
+    let index = rspice_results_ui::waves::cursor_table::ADD_CHOICES
+        .iter()
+        .position(|name| *name == choice)
+        .expect("an Add choice");
+    if let Some((spot, vertical)) =
+        with_readout(state, &Tokens::default(), true, |session, source| {
+            add_reading(session, source, index)
+        })
+    {
+        add_marker(state, spot, vertical);
+    }
+}
+
+/// The Cursors page's tables, as it would draw them now.
+#[cfg(test)]
+pub(super) fn cursor_tables(
+    state: &mut ResultsParts<'_>,
+) -> Vec<rspice_results_ui::waves::cursor_table::CursorTable> {
+    with_readout(state, &Tokens::default(), true, |session, source| {
+        dock::cursor_tables(session, source, &Tokens::default())
+    })
+}
+
+/// The page with nothing to read: one line saying how to place a cursor.
+fn empty_cursors_page(ui: &mut Ui) {
+    ui.add_space(console::CONSOLE_BODY_PADDING_TOP);
+    if console::prose_fits(ui) {
+        console::padded(ui, |ui| {
+            console::muted(
+                ui,
+                "No cursors or markers. Add one, or switch on A|B in the sheet's bar and click a plot to place A, then B.",
+            );
+        });
+    }
+}
+
+/// Place the marker Add asked for: a vertical marker as it is, a point
+/// marker with its dialog open, as a click on the plot places one.
+fn add_marker(
+    state: &mut ResultsParts<'_>,
+    spot: rspice_results_ui::waves::cursor_table::MarkerSpot,
+    vertical: bool,
+) {
+    let placement = super::super::MarkerPlacement {
+        analysis: spot.analysis,
+        anchor: spot.anchor,
+        trace_name: spot.trace_name,
+        x: spot.x,
+        samples: &spot.samples,
+    };
+    let Some(selector) = super::super::place_marker(state, placement) else {
+        return;
+    };
+    if vertical {
+        if let Err(error) = super::super::commit_marker_edit(
+            state,
+            selector,
+            "",
+            super::super::MarkerKind::Vertical,
+        ) {
+            state.prompt(format!("Could not make the marker vertical: {error}"));
+        }
+    } else {
+        super::marker_dialog::open(state, selector);
+    }
+}
+
+/// What the reader asked of the Cursors page's toolbar this frame.
+#[derive(Default)]
+struct ToolbarOutcome {
+    copied: bool,
+    /// The Add choice picked, by its place in the list.
+    add: Option<usize>,
+}
+
+/// The Cursors page's controls: Add, the base every difference is read
+/// against and Snap, then Copy at the right.
 fn cursors_toolbar(
     ui: &mut Ui,
     session: &mut ResultViewerState,
     tables: &[rspice_results_ui::waves::cursor_table::CursorTable],
-) -> bool {
+) -> ToolbarOutcome {
     use rspice_ui_kit::widgets::{
         chip_width, compact_chip, compact_select_mono_width, compact_select_mono_with_response,
     };
-    let mut copied = false;
+    let mut outcome = ToolbarOutcome::default();
     ui.horizontal(|ui| {
         ui.set_min_height(Tokens::get(ui.ctx()).metrics.ctl_h);
         ui.spacing_mut().item_spacing.x = 6.0;
+        // Add reads as its own name, and a pick places what it names.
+        let choices: Vec<String> = rspice_results_ui::waves::cursor_table::ADD_CHOICES
+            .iter()
+            .map(|choice| (*choice).to_owned())
+            .collect();
+        let width = compact_select_mono_width(ui, &choices);
+        outcome.add = compact_select_mono_with_response(
+            ui,
+            "results.cursors.add",
+            "Add a cursor or marker",
+            "Add",
+            &choices,
+            width,
+        )
+        .picked;
         // Every column of every table can be the base; a table without it
         // reads against its own first column.
         let columns: Vec<_> = tables
@@ -193,6 +310,15 @@ fn cursors_toolbar(
                 session.readout_base = Some(columns[picked].0);
             }
         }
+        if compact_chip(ui, "Snap", session.snap_to_samples, chip_width(ui, "Snap"))
+            .on_hover_text(
+                "Stand the cursors and the markers placed from here on retained samples \
+                 rather than between them",
+            )
+            .clicked()
+        {
+            session.snap_to_samples = !session.snap_to_samples;
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if !tables.is_empty()
                 && compact_chip(ui, "Copy", false, chip_width(ui, "Copy"))
@@ -201,11 +327,11 @@ fn cursors_toolbar(
                     )
                     .clicked()
             {
-                copied = true;
+                outcome.copied = true;
             }
         });
     });
-    copied
+    outcome
 }
 
 pub(crate) fn inline_cursor_readout(

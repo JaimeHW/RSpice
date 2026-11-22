@@ -112,7 +112,7 @@ pub(crate) fn strip_lane_rows(
 /// a peak as a called-out feature, a note as neutral annotation.
 pub fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
     match kind {
-        MarkerKind::Note => t.color.text,
+        MarkerKind::Note | MarkerKind::Vertical => t.color.text,
         MarkerKind::Peak | MarkerKind::Valley | MarkerKind::Crossing(_) => t.color.accent,
         MarkerKind::Spec => t.color.warn,
     }

@@ -591,6 +591,8 @@ pub enum MarkerKind {
     /// A limit the design is measured against. Drawn as a limit line,
     /// because a spec constrains the axis position, not one curve.
     Spec,
+    /// A vertical marker: a line at its X, reading every trace it crosses.
+    Vertical,
 }
 
 /// The level a crossing marker finds, compared bit for bit so a marker kind
@@ -611,11 +613,12 @@ impl MarkerKind {
     /// Every kind a marker may be given. A crossing's level is the trace's
     /// value where the marker is when the kind is chosen; the level here only
     /// names the choice.
-    pub const ALL: [MarkerKind; 5] = [
+    pub const ALL: [MarkerKind; 6] = [
         MarkerKind::Note,
         MarkerKind::Peak,
         MarkerKind::Valley,
         MarkerKind::Crossing(CrossingLevel(0.0)),
+        MarkerKind::Vertical,
         MarkerKind::Spec,
     ];
 
@@ -627,6 +630,7 @@ impl MarkerKind {
             MarkerKind::Valley => "valley",
             MarkerKind::Crossing(_) => "crossing",
             MarkerKind::Spec => "spec",
+            MarkerKind::Vertical => "vertical",
         }
     }
 
@@ -644,6 +648,7 @@ impl MarkerKind {
                 "Crossing — where the curve crosses its level, found again as the curve changes"
             }
             MarkerKind::Spec => "Spec — a limit line the design is measured against",
+            MarkerKind::Vertical => "Vertical — a line at this X, reading every trace it crosses",
         }
     }
 
@@ -656,6 +661,7 @@ impl MarkerKind {
                 | (MarkerKind::Valley, MarkerKind::Valley)
                 | (MarkerKind::Crossing(_), MarkerKind::Crossing(_))
                 | (MarkerKind::Spec, MarkerKind::Spec)
+                | (MarkerKind::Vertical, MarkerKind::Vertical)
         )
     }
 
@@ -667,14 +673,14 @@ impl MarkerKind {
             MarkerKind::Peak => Some(Anchor::Peak),
             MarkerKind::Valley => Some(Anchor::Valley),
             MarkerKind::Crossing(level) => Some(Anchor::Crossing { level: level.0 }),
-            MarkerKind::Note | MarkerKind::Spec => None,
+            MarkerKind::Note | MarkerKind::Spec | MarkerKind::Vertical => None,
         }
     }
 
-    /// A spec marker constrains the X position alone and so carries no
-    /// trace value in the readout.
+    /// A spec or vertical marker stands at an X alone, drawn across every
+    /// pane, rather than on one curve.
     pub const fn rides_a_trace(self) -> bool {
-        !matches!(self, MarkerKind::Spec)
+        !matches!(self, MarkerKind::Spec | MarkerKind::Vertical)
     }
 }
 

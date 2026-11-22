@@ -317,6 +317,125 @@ fn a_base_marker_reads_the_analytic_differences() {
     }
 }
 
+/// A cursor's X is typed in place: a click on it in the Cursors table opens
+/// it, and the typed value is where the cursor then stands.
+#[test]
+fn a_typed_cursor_value_lands_on_that_x() {
+    let mut state = host_on(damped_run());
+    place_cursors(&mut state, Some(1.0e-3), Some(2.0e-3));
+    let ctx = theme_context();
+    whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    let shapes = whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    let page_top = FRAME.y - 240.0;
+    let (_, cell) = placed_texts(&shapes)
+        .into_iter()
+        .find(|(text, rect)| text == "1 ms" && rect.top() > page_top)
+        .expect("A's X in the table");
+    let at = cell.center();
+    whole_frame(
+        &ctx,
+        &mut state.results_parts(),
+        vec![egui::Event::PointerMoved(at)],
+    );
+    for pressed in [true, false] {
+        whole_frame(
+            &ctx,
+            &mut state.results_parts(),
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            }],
+        );
+    }
+    let key = |key: egui::Key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    };
+    // The field opens on the printed X and takes the keyboard.
+    whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    let mut typing = vec![key(egui::Key::End)];
+    typing.extend(std::iter::repeat_with(|| key(egui::Key::Backspace)).take(8));
+    typing.push(egui::Event::Text("1.25 ms".to_owned()));
+    whole_frame(&ctx, &mut state.results_parts(), typing);
+    whole_frame(
+        &ctx,
+        &mut state.results_parts(),
+        vec![key(egui::Key::Enter)],
+    );
+    let a = state.results.results.session.cursors.a.expect("A stands");
+    assert!(
+        (a - 1.25e-3).abs() < 1e-15,
+        "A typed to 1.25 ms stands at {a}"
+    );
+    assert_eq!(state.results.results.session.cursors.b, Some(2.0e-3));
+}
+
+/// Add places a cursor pair a third and two thirds across the strip, and a
+/// vertical marker at its middle, which the table reads as a column of its
+/// own over every trace.
+#[test]
+fn add_places_a_delta_pair_and_a_vertical_marker_the_table_reads() {
+    let mut state = host_on(damped_run());
+    state.quick_frame();
+    super::super::readout::add_from_cursors_page(&mut state.results_parts(), "Delta pair");
+    let cursors = state.results.results.session.cursors;
+    assert!((cursors.a.unwrap() - STOP / 3.0).abs() < 1e-15);
+    assert!((cursors.b.unwrap() - STOP * 2.0 / 3.0).abs() < 1e-15);
+    super::super::readout::add_from_cursors_page(&mut state.results_parts(), "Vertical marker");
+    let marker = state
+        .results
+        .results
+        .session
+        .document_markers
+        .last()
+        .expect("the vertical marker")
+        .clone();
+    assert_eq!(marker.kind, MarkerKind::Vertical);
+    assert!((marker.x - STOP / 2.0).abs() < 1e-15);
+
+    let tables = super::super::readout::cursor_tables(&mut state.results_parts());
+    assert_eq!(tables.len(), 1);
+    let table = &tables[0];
+    assert_eq!(
+        table.heads(),
+        vec![
+            "A".to_owned(),
+            "B".to_owned(),
+            format!("M{}", marker.retained_id.get()),
+            "B-A".to_owned(),
+            format!("M{}-A", marker.retained_id.get()),
+        ],
+        "three columns read against A, and no slope past a pair"
+    );
+    // The strip's middle is the sine's fifth zero crossing: the marker's
+    // column reads 0 there, not the floating point's remainder.
+    let row = &table.bands[0].rows[0];
+    assert_eq!(row.name, "V(out)");
+    assert_eq!(row.cells[2], "0 V");
+}
+
+/// With Snap on, a cursor put between samples stands on the nearest one.
+#[test]
+fn snap_stands_a_cursor_on_the_nearest_sample() {
+    let mut state = host_on(damped_run());
+    state.results.results.session.snap_to_samples = true;
+    let between = 400.4 * DT;
+    place_cursors(&mut state, Some(between), None);
+    let ctx = theme_context();
+    whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    let a = state.results.results.session.cursors.a.expect("A stands");
+    assert_eq!(
+        a.to_bits(),
+        time()[400].to_bits(),
+        "A snapped from {between} to {a}"
+    );
+}
+
 /// With the horizontal-cursor tool, a click on the pane places H1, a second
 /// H2, and a press near H1 moves H1; the plot dimensions ΔY between them and
 /// the dock states H1, H2 and ΔY in the pane's unit.

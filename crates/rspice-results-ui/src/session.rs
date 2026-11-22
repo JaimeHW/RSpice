@@ -836,6 +836,9 @@ pub struct ResultViewerState {
     /// The column the Cursors table reads every other column's differences
     /// against: the first column while `None` or once it is gone.
     pub readout_base: Option<ReadingColumnId>,
+    /// Cursors and placed markers stand on retained samples rather than
+    /// between them: the Cursors page's Snap.
+    pub snap_to_samples: bool,
     /// Unit-scoped panes the user put on a logarithmic Y axis.
     ///
     /// This lived in egui's persisted memory under a hand-built id, which put

@@ -542,6 +542,10 @@ fn show_strips(
             trace_width,
         },
     );
+    // The Cursors page's Snap stands A and B on samples however they moved.
+    if rspice_results_ui::waves::cursor_table::snap_cursors(&mut state.results.session, &models) {
+        ui.ctx().request_repaint();
+    }
 }
 
 /// What the inspector's Active pane section reports about the pane the

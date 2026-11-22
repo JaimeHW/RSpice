@@ -923,6 +923,7 @@ pub const fn marker_kind_of_retained(
         PlotMarkerKind::Valley => MarkerKind::Valley,
         PlotMarkerKind::Crossing { level } => MarkerKind::Crossing(level),
         PlotMarkerKind::SpecificationLine => MarkerKind::Spec,
+        PlotMarkerKind::VerticalLine => MarkerKind::Vertical,
     }
 }
 
@@ -937,6 +938,7 @@ pub(crate) const fn retained_kind_of_marker(
         MarkerKind::Valley => PlotMarkerKind::Valley,
         MarkerKind::Crossing(level) => PlotMarkerKind::Crossing { level },
         MarkerKind::Spec => PlotMarkerKind::SpecificationLine,
+        MarkerKind::Vertical => PlotMarkerKind::VerticalLine,
     }
 }
 

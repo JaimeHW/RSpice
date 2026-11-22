@@ -419,7 +419,7 @@ pub fn plot_markers<'a>(
     for marker in markers {
         let color = marker.color;
         let label = marker.label;
-        if marker.kind == MarkerKind::Spec {
+        if !marker.kind.rides_a_trace() {
             // A spec constrains the X position, which every pane of the
             // strip shares — so it draws on all of them.
             projected.push(plot::Marker::limit_line(marker.x, color, label));

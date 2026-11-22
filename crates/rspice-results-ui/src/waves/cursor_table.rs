@@ -21,7 +21,10 @@ use super::readout::{
 use super::{StripModel, anchor_key};
 use crate::session::{HorizontalCursors, ReadingColumnId, ResultViewerState};
 use egui::Ui;
-use rspice_results::result_presentation::{WavePanePresentationKey, WaveformPresentationKey};
+use rspice_results::result_presentation::{
+    AnalysisPresentationKey, WavePanePresentationKey, WaveformPresentationKey,
+};
+use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::{CursorId, CursorPair, TraceLook, XScale, paint_trace_swatch};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -484,10 +487,206 @@ pub fn nearest_sample_x(
         })
         .or_else(|| readout_traces(model).next())?;
     let (xs, _) = trace.held()?;
+    let distance = |left: &f64, right: &f64| (left - x).abs().total_cmp(&(right - x).abs());
+    if trace.shape.is_single_ascending() {
+        let at = xs.partition_point(|sample| *sample < x);
+        return [at.checked_sub(1), Some(at)]
+            .into_iter()
+            .flatten()
+            .filter_map(|index| xs.get(index).copied())
+            .filter(|sample| sample.is_finite())
+            .min_by(distance);
+    }
     xs.iter()
         .copied()
         .filter(|sample| sample.is_finite())
-        .min_by(|left, right| (left - x).abs().total_cmp(&(right - x).abs()))
+        .min_by(distance)
+}
+
+/// `x`, or the retained sample nearest it while the page snaps.
+fn snapped(
+    state: &ResultViewerState,
+    model: &StripModel,
+    anchor: Option<&WaveformPresentationKey>,
+    x: f64,
+) -> f64 {
+    if state.snap_to_samples {
+        nearest_sample_x(model, anchor, x).unwrap_or(x)
+    } else {
+        x
+    }
+}
+
+/// Put A and B on the nearest retained sample of the trace A rides, while
+/// the page snaps; says whether either moved.
+pub fn snap_cursors(state: &mut ResultViewerState, models: &[StripModel]) -> bool {
+    if !state.snap_to_samples {
+        return false;
+    }
+    let Some(model) = state
+        .cursor_strip
+        .and_then(|index| models.iter().find(|model| model.analysis_index == index))
+    else {
+        return false;
+    };
+    let anchor = state.cursor_a_anchor.clone();
+    let mut moved = false;
+    for id in [CursorId::A, CursorId::B] {
+        if let Some(x) = state.cursors.get(id)
+            && let Some(sample) = nearest_sample_x(model, anchor.as_ref(), x)
+            && sample.to_bits() != x.to_bits()
+        {
+            state.cursors.set(id, sample);
+            moved = true;
+        }
+    }
+    moved
+}
+
+/// The strip a reading added from the page goes on: the one the cursors
+/// stand on, else the first on screen.
+fn followed_model(state: &ResultViewerState, source: ReadoutInput<'_>) -> Option<usize> {
+    let models = source.models;
+    state
+        .cursor_strip
+        .filter(|_| state.cursor_readout_active())
+        .and_then(|index| {
+            models
+                .iter()
+                .position(|model| model.analysis_index == index)
+        })
+        .or_else(|| {
+            models
+                .iter()
+                .position(|model| source.on_screen_strips.contains(&model.analysis_key))
+        })
+}
+
+/// The X window a strip shows: the reader's zoom, or its whole record.
+fn shown_x_window(state: &ResultViewerState, model: &StripModel) -> Option<(f64, f64)> {
+    super::stack::shared_x_view(state, model.analysis_key).or_else(|| {
+        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+        for trace in readout_traces(model) {
+            if let Some((xs, _)) = trace.held()
+                && let (Some(first), Some(last)) = (xs.first(), xs.last())
+            {
+                low = low.min(first.min(*last));
+                high = high.max(first.max(*last));
+            }
+        }
+        (low < high).then_some((low, high))
+    })
+}
+
+/// The point `fraction` of the way across `window`, evenly on the strip's
+/// own scale.
+fn window_point(model: &StripModel, (low, high): (f64, f64), fraction: f64) -> f64 {
+    match model.x_scale {
+        XScale::Log10 if low > 0.0 && high > 0.0 => {
+            10f64.powf(low.log10() + (high.log10() - low.log10()) * fraction)
+        }
+        _ => low + (high - low) * fraction,
+    }
+}
+
+/// What the page's Add offers, in its order.
+pub const ADD_CHOICES: [&str; 4] = [
+    "Delta pair",
+    "Vertical marker",
+    "Horizontal cursor",
+    "Point marker",
+];
+
+/// Place A a third and B two thirds across the followed strip's window,
+/// arming the cursor tool; says whether there was a strip to place them on.
+pub fn add_delta_pair(state: &mut ResultViewerState, source: ReadoutInput<'_>) -> bool {
+    let Some(model) = followed_model(state, source).map(|index| &source.models[index]) else {
+        return false;
+    };
+    let Some(window) = shown_x_window(state, model) else {
+        return false;
+    };
+    state.arm_cursor_tool();
+    state.cursors = CursorPair::default();
+    state.cursor_strip = Some(model.analysis_index);
+    state.cursor_a_anchor = None;
+    let a = snapped(state, model, None, window_point(model, window, 1.0 / 3.0));
+    let b = snapped(state, model, None, window_point(model, window, 2.0 / 3.0));
+    state.cursors.a = Some(a);
+    state.cursors.b = Some(b);
+    state.stepping_cursor = CursorId::A;
+    true
+}
+
+/// Place a horizontal cursor on the followed strip's active pane: H1 at
+/// three quarters of what its traces reach, H2 at a quarter. Says whether
+/// one was placed; a pane with both placed takes no third.
+pub fn add_horizontal(state: &mut ResultViewerState, source: ReadoutInput<'_>) -> bool {
+    let Some(model) = followed_model(state, source).map(|index| &source.models[index]) else {
+        return false;
+    };
+    let panes = model.unit_panes();
+    let Some(pane) = state
+        .active_wave_pane
+        .as_ref()
+        .filter(|active| active.analysis == model.analysis_key)
+        .and_then(|active| panes.iter().find(|pane| pane.unit == active.unit))
+        .or_else(|| panes.first())
+    else {
+        return false;
+    };
+    let key = WavePanePresentationKey {
+        analysis: model.analysis_key,
+        unit: pane.unit.to_owned(),
+    };
+    let Some(slot) = state
+        .pane_horizontal_cursors(&key)
+        .iter()
+        .position(Option::is_none)
+    else {
+        return false;
+    };
+    let Some((low, high)) =
+        super::stack::pane_trace_extremes(&mut state.derived, model, &pane.traces, None, |_| {})
+            .range()
+    else {
+        return false;
+    };
+    let fraction = if slot == 0 { 0.75 } else { 0.25 };
+    state.set_horizontal_cursor(key, slot, low + (high - low) * fraction);
+    true
+}
+
+/// Where a marker added from the page goes: on the trace A rides, else the
+/// followed strip's first, at the middle of the strip's window.
+pub struct MarkerSpot {
+    pub analysis: AnalysisPresentationKey,
+    pub anchor: WaveformPresentationKey,
+    pub trace_name: String,
+    pub x: f64,
+    /// The trace's X samples, for a saved view to land the marker on one.
+    pub samples: SharedWaveformValues,
+}
+
+pub fn marker_spot(state: &ResultViewerState, source: ReadoutInput<'_>) -> Option<MarkerSpot> {
+    let model = &source.models[followed_model(state, source)?];
+    let trace = state
+        .cursor_a_anchor
+        .as_ref()
+        .and_then(|anchor| {
+            readout_traces(model)
+                .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
+        })
+        .or_else(|| readout_traces(model).find(|trace| !trace.overlay))?;
+    let anchor = anchor_key(model, trace);
+    let x = window_point(model, shown_x_window(state, model)?, 0.5);
+    Some(MarkerSpot {
+        analysis: model.analysis_key,
+        x: snapped(state, model, Some(&anchor), x),
+        anchor,
+        trace_name: trace.name.clone(),
+        samples: trace.x.clone(),
+    })
 }
 
 /// Paint the page's tables, then its horizontal cursors, and take what the
@@ -848,6 +1047,12 @@ fn move_column(
     x: f64,
     requests: &mut MarkerActions,
 ) {
+    let x = snapped(
+        state,
+        &source.models[reading.model],
+        reading.anchor.as_ref(),
+        x,
+    );
     match reading.id {
         ReadingColumnId::Cursor(id) => {
             state.cursors.set(id, x);

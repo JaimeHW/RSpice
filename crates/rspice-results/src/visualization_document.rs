@@ -1899,10 +1899,12 @@ pub enum PlotMarkerKind {
     Crossing {
         level: crate::result_presentation::CrossingLevel,
     },
+    /// A line at the marker's X, reading every trace it crosses.
+    VerticalLine,
 }
 
 impl PlotMarkerKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::PointNote,
         Self::Peak,
         Self::SpecificationLine,
@@ -1911,6 +1913,7 @@ impl PlotMarkerKind {
         Self::Crossing {
             level: crate::result_presentation::CrossingLevel(0.0),
         },
+        Self::VerticalLine,
     ];
 
     #[must_use]
@@ -1922,6 +1925,7 @@ impl PlotMarkerKind {
             Self::MeasurementAnchor => "Measurement anchor",
             Self::Valley => "Valley flag",
             Self::Crossing { .. } => "Crossing flag",
+            Self::VerticalLine => "Vertical line",
         }
     }
 }
