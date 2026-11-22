@@ -579,35 +579,32 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         "{libraries:?}"
     );
 
+    // The blocks the plan and the model libraries took leave the sheet; the
+    // start-up guess, which no plan field holds, is a SPICE directive note
+    // where the block stood, and runs from there.
     let document = model.schematic.document();
     let notes = document
         .design_notes
         .iter()
-        .map(|note| note.text.as_str())
+        .map(|note| (note.kind, note.text.as_str()))
         .collect::<Vec<_>>();
     assert_eq!(
         notes,
-        [
-            ".tran 0 20m 0 10u\n.param R=1k\n.include buffers.lib",
-            ".step param R list 1k 2k\n.meas TRAN vmax MAX V(out)",
-            ".model D1N D(Is=1n)\n.nodeset V(out)=0",
-        ]
+        [(
+            rspice_app_state::state::DesignNoteKind::SpiceDirective,
+            ".nodeset V(out)=0"
+        )]
     );
-    // The start-up guess has no field in the plan: it is the design's Added
-    // lines, which every run of the design appends to its netlist.
     assert_eq!(
         rspice_design::added_lines::added_lines_of(
             &model.workspace.content.added_lines,
             &model.workspace.content.active_view,
         ),
-        Some(".nodeset V(out)=0")
+        None
     );
     assert!(
-        log.iter().any(|line| line
-            == &format!(
-                "`.nodeset V(out)=0` runs from the Added lines of {}.",
-                model.workspace.content.active_view.display_path()
-            )),
+        log.iter()
+            .any(|line| line == "`.nodeset V(out)=0` runs from the SPICE directive on the sheet."),
         "{log:#?}"
     );
 
@@ -842,11 +839,12 @@ TEXT 32 270 Left 2 !.model MYD D(Is={saturation})
     }
 }
 
-/// A directive block stays on the sheet as the drawing lettered it, whole,
-/// while the plan takes the analysis it holds: what a run reads and what the
-/// sheet shows are separate.
+/// The plan takes a directive block's analysis, and the rest of the block,
+/// which the netlist carries as written, stays where the block stood as a
+/// SPICE directive note: the sheet shows no second, inert copy of the
+/// analysis the plan runs.
 #[test]
-fn a_directive_block_stays_on_the_sheet_while_the_plan_takes_its_analysis() {
+fn a_directive_blocks_analysis_goes_to_the_plan_and_the_rest_is_a_spice_directive() {
     let folder = drawing_folder();
     let file = folder.join("lines.asc");
     std::fs::write(
@@ -861,10 +859,19 @@ fn a_directive_block_stays_on_the_sheet_while_the_plan_takes_its_analysis() {
     import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
     std::fs::remove_dir_all(&folder).ok();
     let model = &app.state.model;
-    let notes = &model.schematic.document().design_notes;
-    assert!(
-        notes.iter().any(|note| note.text == ".tran 1m\nK1 L1 L2 1"),
-        "{notes:?}"
+    let notes = model
+        .schematic
+        .document()
+        .design_notes
+        .iter()
+        .map(|note| (note.kind, note.text.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        notes,
+        [(
+            rspice_app_state::state::DesignNoteKind::SpiceDirective,
+            "K1 L1 L2 1"
+        )]
     );
     let plan = model
         .sim_setup
@@ -875,6 +882,72 @@ fn a_directive_block_stays_on_the_sheet_while_the_plan_takes_its_analysis() {
             .iter()
             .any(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_))),
         "the plan still holds the analysis"
+    );
+}
+
+/// An imported drawing's `.ic` is a SPICE directive note where its block
+/// stood, and a run starts from it: the capacitor of an RC charging toward
+/// 1 V through 1 kΩ starts the transient at the 0.3 V the drawing states and
+/// reaches `1 - 0.7·exp(-1)` one time constant later.
+#[test]
+fn an_imported_initial_condition_starts_the_transient_where_it_says() {
+    let folder = drawing_folder();
+    let file = folder.join("charge.asc");
+    std::fs::write(
+        &file,
+        "Version 4\nSHEET 1 880 680\n\
+         WIRE 96 96 32 96\nWIRE 208 96 176 96\nWIRE 288 96 208 96\n\
+         FLAG 32 176 0\nFLAG 208 160 0\nFLAG 288 96 out\n\
+         SYMBOL voltage 32 80 R0\nSYMATTR InstName V1\nSYMATTR Value 1\n\
+         SYMBOL res 192 80 R90\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+         SYMBOL cap 192 96 R0\nSYMATTR InstName C1\nSYMATTR Value 1u\n\
+         TEXT 32 240 Left 2 !.tran 0 1m 0 10u\\n.ic V(out)=0.3\n",
+    )
+    .expect("schematic");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    std::fs::remove_dir_all(&folder).ok();
+    let notes = app
+        .state
+        .model
+        .schematic
+        .document()
+        .design_notes
+        .iter()
+        .map(|note| (note.kind, note.text.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        notes,
+        [(
+            rspice_app_state::state::DesignNoteKind::SpiceDirective,
+            ".ic V(out)=0.3".to_owned()
+        )]
+    );
+    let content = &app.state.model.workspace.content;
+    assert_eq!(
+        rspice_design::added_lines::added_lines_of(&content.added_lines, &content.active_view),
+        None,
+        "the note is the only place the card is written"
+    );
+
+    run_the_active_plan(&mut app);
+    let run = app.state.model.simulation.active_run().expect("a run");
+    assert!(run.success, "{:?}", run.analyses);
+    let wave = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| analysis.waveforms.iter())
+        .find(|wave| wave.name.eq_ignore_ascii_case("V(out)"))
+        .expect("the run saves V(out)");
+    let times = wave.x.samples(..).collect::<Vec<f64>>();
+    let volts = wave.y.samples(..).collect::<Vec<f64>>();
+    assert!((volts[0] - 0.3).abs() < 1e-3, "starts at {}", volts[0]);
+    let (end, at_end) = (times[times.len() - 1], volts[volts.len() - 1]);
+    let charged = 1.0 - 0.7 * (-end / 1e-3).exp();
+    assert!(
+        (end - 1e-3).abs() < 1e-9 && (at_end - charged).abs() < 5e-3,
+        "{at_end} V at {end} s, against {charged} V"
     );
 }
 

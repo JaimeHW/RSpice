@@ -148,6 +148,8 @@ pub struct ForeignDirective {
     pub position: Point,
     pub text: String,
     pub lettering: ForeignLettering,
+    /// The note the block is drawn as on the imported sheet, if it was drawn.
+    pub note: Option<u64>,
 }
 
 /// A symbol RSpice has no component for, as a cell for the project library:
@@ -2296,7 +2298,7 @@ impl Builder<'_> {
                         let empty = drawn.iter().take_while(|line| line.trim().is_empty());
                         let first = position
                             + Point::new(0, (advance * empty.count() as f32).round() as i32);
-                        match DesignNote::new(
+                        let note = match DesignNote::new(
                             id,
                             first,
                             DesignNoteKind::PlainText,
@@ -2305,15 +2307,20 @@ impl Builder<'_> {
                             Ok(note) => {
                                 let note = lettered_note(note, first, &lettering);
                                 self.document.design_notes.push(note);
+                                Some(id)
                             }
-                            Err(error) => self.notice(format!(
-                                "The directive block at line {line} was not drawn: {error}."
-                            )),
-                        }
+                            Err(error) => {
+                                self.notice(format!(
+                                    "The directive block at line {line} was not drawn: {error}."
+                                ));
+                                None
+                            }
+                        };
                         self.directives.push(ForeignDirective {
                             position,
                             text,
                             lettering,
+                            note,
                         });
                     }
                 }

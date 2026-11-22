@@ -8,8 +8,9 @@
 //! after the cell, constant parameters its design variables, the drawing's
 //! model text and the source program's own cards for the models its parts
 //! name a model library of the project, and every file the drawing includes
-//! a model library bound in place. Any other card the netlist can carry goes
-//! into the design's Added lines. A card with no project place stays on the
+//! a model library bound in place. Any other card the netlist can carry is a
+//! SPICE directive note where its block stood, or, when the block was not
+//! drawn, the design's Added lines. A card with no project place stays on the
 //! sheet as text. Every notice is written to the log.
 
 mod plan;
@@ -86,6 +87,9 @@ struct ImportedTree {
     cards: Vec<ForeignCard>,
     model_cards: Vec<String>,
     notices: Vec<(ForeignNoticeSeverity, String)>,
+    /// The top drawing's directive blocks: the note each is drawn as, where
+    /// the block stands, and the text of each of its cards.
+    directive_blocks: Vec<(u64, rspice_design_model::Point, Vec<String>)>,
 }
 
 /// Imports the schematic at `path` into the open project and opens it.
@@ -134,6 +138,7 @@ pub(crate) fn import_foreign_schematic_file(
 
     let mut includes = resolve_includes(&access, &mut plan, &mut notices);
     bind_model_files(&mut tree, &library, &mut includes);
+    draw_directive_notes(&mut tree, &mut plan, &mut notices);
     note_cards_with_no_place(&plan, &mut notices);
 
     let mut own_sheets = add_symbol_cells(&mut app.state, &library, &mut tree.cells)?;
@@ -221,10 +226,29 @@ fn import_tree(
             )
         });
     }
+    let directive_blocks = if top {
+        imported
+            .directives
+            .iter()
+            .filter_map(|directive| {
+                let cards = foreign_directive_cards(std::slice::from_ref(directive));
+                directive.note.map(|note| {
+                    (
+                        note,
+                        directive.position,
+                        cards.into_iter().map(|card| card.text).collect(),
+                    )
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut tree = ImportedTree {
         document: imported.document,
         cells: Vec::new(),
         cards,
+        directive_blocks,
         model_cards: imported.model_cards,
         notices: imported
             .notices
@@ -401,8 +425,88 @@ fn resolve_includes(
     found
 }
 
-/// Says which cards found no project place: the sheet shows them, as it
-/// shows every directive block the drawing drew, but nothing runs them.
+/// Makes each directive block of the drawing a SPICE directive note of the
+/// cards the netlist carries that no project place took, so editing the
+/// note on the sheet edits what runs, as editing the block did in the source
+/// program. Cards the plan or the model libraries took leave the sheet, which
+/// would otherwise show a second, inert copy of them. Cards nothing runs stay
+/// as plain text, below the directive's lines. A card no note can hold stays
+/// in the design's Added lines.
+fn draw_directive_notes(
+    tree: &mut ImportedTree,
+    plan: &mut ForeignPlan,
+    notices: &mut Vec<(ForeignNoticeSeverity, String)>,
+) {
+    use rspice_design::schematic::design_note::{DesignNoteKind, lettered_note_line_advance};
+
+    for (id, position, texts) in &tree.directive_blocks {
+        let of_block =
+            |card: &ForeignCard| card.position == *position && texts.contains(&card.text);
+        let (carried, others): (Vec<_>, Vec<_>) = std::mem::take(&mut plan.added_lines)
+            .into_iter()
+            .partition(|card| of_block(card));
+        plan.added_lines = others;
+        let kept = plan
+            .kept
+            .iter()
+            .filter(|(card, _)| of_block(card))
+            .map(|(card, _)| card.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let notes = &mut tree.document.design_notes;
+        let Some(index) = notes.iter().position(|note| note.id == *id) else {
+            plan.added_lines.extend(carried);
+            continue;
+        };
+        if carried.is_empty() && kept.is_empty() {
+            notes.remove(index);
+            continue;
+        }
+        if carried.is_empty() {
+            let note = &mut notes[index];
+            let _ = note.update(DesignNoteKind::PlainText, kept);
+            continue;
+        }
+        let directive = carried
+            .iter()
+            .map(|card| card.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let note = &mut notes[index];
+        if let Err(error) = note.update(DesignNoteKind::SpiceDirective, directive.clone()) {
+            notices.push((
+                ForeignNoticeSeverity::Notice,
+                format!("A directive block could not become a SPICE directive note: {error}."),
+            ));
+            plan.added_lines.extend(carried);
+            continue;
+        }
+        for card in &carried {
+            notices.push((
+                ForeignNoticeSeverity::Notice,
+                format!(
+                    "`{}` runs from the SPICE directive on the sheet.",
+                    card.text.lines().next().unwrap_or_default()
+                ),
+            ));
+        }
+        if kept.is_empty() {
+            continue;
+        }
+        let mut plain = note.clone();
+        let advance = lettered_note_line_advance(plain.text_size_percent);
+        let lines = directive.lines().count() as f32;
+        plain.pos.y += (advance * lines).round() as i32;
+        plain.id = rspice_design::schematic::identity::SchematicIdentity::with_cursor(*id + 1)
+            .allocate(&tree.document);
+        if plain.update(DesignNoteKind::PlainText, kept).is_ok() {
+            tree.document.design_notes.push(plain);
+        }
+    }
+}
+
+/// Says which cards found no project place: the sheet shows them as text,
+/// but nothing runs them.
 fn note_cards_with_no_place(
     plan: &ForeignPlan,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
