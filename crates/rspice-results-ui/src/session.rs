@@ -803,6 +803,8 @@ pub struct ResultViewerState {
     pub op_collapsed: std::collections::BTreeSet<String>,
     /// OP sheet row the reader picked. Transient.
     pub op_selected: Option<crate::op_inspector::OpSelection>,
+    /// The other run's operating point the OP sheet compares with. Transient.
+    pub op_compare: Option<crate::op_inspector::OpCompare>,
     /// The axis-limit field being typed, if any.
     ///
     /// Editing is transactional like the marker dialog: the pinned interval

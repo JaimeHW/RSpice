@@ -216,6 +216,7 @@ struct OpPlanKey {
     sort: viewer::OpSort,
     collapsed: BTreeSet<String>,
     significant_digits: usize,
+    compare: Option<viewer::OpCompare>,
 }
 impl OpPlanKey {
     fn controls(&self) -> viewer::OpControls<'_> {
@@ -249,6 +250,7 @@ fn op_plan(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) -> O
                 .displayed_significant_digits()
                 .get(),
         ),
+        compare: state.results.session.op_compare,
     };
     if let Some(plan) = state.results.plans.op.as_ref()
         && plan.key == key
@@ -258,16 +260,93 @@ fn op_plan(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) -> O
     let analysis_result = state.model.simulation.active_analysis()?;
     let detail = retained_detail(analysis_result);
     frame_work::note(DatasetWalk::OpPlan);
-    let display = viewer::OpPlan::new(
+    let mut display = viewer::OpPlan::new(
         key.controls(),
         analysis_result.dc_op.as_ref(),
         analysis_result.device_op.as_ref(),
         detail.as_ref(),
     );
+    if let Some(compare) = key.compare
+        && let Some(baseline) = state
+            .model
+            .simulation
+            .retained
+            .runs
+            .iter()
+            .find(|run| run.dataset_id == compare.baseline)
+            .and_then(|run| baseline_analysis(run, analysis_result.analysis_type))
+    {
+        display = display.with_baseline(
+            viewer::OpBaseline::new(baseline.dc_op.as_ref(), baseline.device_op.as_ref()),
+            compare.delta,
+            analysis_result.dc_op.as_ref(),
+            analysis_result.device_op.as_ref(),
+        );
+    }
     let built = Arc::new(OpPlan { key, display });
     state.results.plans.op = Some(Arc::clone(&built));
     Some(built)
 }
+/// The analysis of `run` whose operating point another of `kind` compares
+/// against: a solved one that retained values.
+fn baseline_analysis(
+    run: &crate::state::SimulationRun,
+    kind: AnalysisType,
+) -> Option<&crate::state::AnalysisResult> {
+    run.analyses.iter().find(|analysis| {
+        analysis.success
+            && analysis.analysis_type == kind
+            && (analysis.dc_op.is_some() || analysis.device_op.is_some())
+    })
+}
+
+/// A run as the bar names it: by its number, and its label unless the label
+/// already starts with that number.
+fn run_label(run: &crate::state::SimulationRun) -> String {
+    let name = format!("Run {}", run.id);
+    let label = run.label.trim();
+    if label.is_empty() {
+        name
+    } else if label
+        .strip_prefix(&name)
+        .is_some_and(|rest| !rest.starts_with(|next: char| next.is_ascii_digit()))
+    {
+        label.to_owned()
+    } else {
+        format!("{name} \u{b7} {label}")
+    }
+}
+
+/// The other runs whose operating point the shown one can be compared with.
+fn baseline_candidates(state: ResultsReads<'_>) -> Vec<(crate::product::DatasetId, String)> {
+    let simulation = &state.model.simulation;
+    let (Some(active), Some(kind)) = (
+        simulation.active_run(),
+        simulation
+            .active_analysis()
+            .map(|analysis| analysis.analysis_type),
+    ) else {
+        return Vec::new();
+    };
+    simulation
+        .retained
+        .runs
+        .iter()
+        .filter(|run| run.dataset_id != active.dataset_id)
+        .filter(|run| baseline_analysis(run, kind).is_some())
+        .map(|run| (run.dataset_id, run_label(run)))
+        .collect()
+}
+
+/// The sheet's controls in its bar: the operating point to compare with.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    if selected_op_evidence(state.results_reads()).is_none() {
+        return false;
+    }
+    let candidates = baseline_candidates(state.results_reads());
+    viewer::domain_bar(ui, &candidates, &mut state.results.session.op_compare)
+}
+
 /// The plan of the analysis on display, built once however many surfaces ask.
 fn active_plan(state: &mut ResultsParts<'_>) -> Option<Arc<OpPlan>> {
     let key = state.model.simulation.active_run().and_then(|run| {
@@ -437,6 +516,24 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         plan.as_ref().and_then(|plan| plan.display.scope_note()),
         detail.as_ref(),
     );
+    if let Some(plan) = plan.as_ref() {
+        let baseline = plan.key.compare.and_then(|compare| {
+            state
+                .model
+                .simulation
+                .retained
+                .runs
+                .iter()
+                .find(|run| run.dataset_id == compare.baseline)
+                .map(run_label)
+        });
+        viewer::summary_panel(
+            ui,
+            &plan.display,
+            baseline.as_deref(),
+            plan.key.significant_digits,
+        );
+    }
     if let Some(action) = action {
         apply_action(state, action);
     }

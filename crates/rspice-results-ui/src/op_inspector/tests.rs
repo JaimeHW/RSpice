@@ -1348,3 +1348,73 @@ fn a_failed_solve_says_so_above_the_rows() {
         "the problem row took more than its one line"
     );
 }
+
+/// Two operating points differ in the rows the second one changed and in
+/// no other: a moved node, a moved device quantity, and a branch only one
+/// of them reports.
+#[test]
+fn two_operating_points_differ_only_in_the_rows_that_changed() {
+    let (dc, report) = evidence_fixture(8, 6);
+    let baseline = OpBaseline::new(Some(&dc), Some(&report));
+    assert!(changed_rows(Some(&dc), Some(&report), &baseline).is_empty());
+
+    let (mut moved_dc, mut moved_report) = (dc.clone(), report.clone());
+    moved_dc.node_voltages[3].value += 0.25;
+    // A change below a solver's rounding is no change.
+    moved_dc.node_voltages[5].value *= 1.0 + 1e-12;
+    moved_report.entries[2].params[1].1 *= 2.0;
+    moved_dc.branch_currents.pop();
+    let changed = changed_rows(Some(&moved_dc), Some(&moved_report), &baseline);
+    assert_eq!(
+        changed,
+        [
+            (OpRowKind::Node, dc.node_voltages[3].name.clone()),
+            (OpRowKind::Branch, dc.branch_currents[3].name.clone()),
+            (OpRowKind::Device, report.entries[2].name.clone()),
+        ]
+    );
+
+    // The plan counts them, out of every row either side reports.
+    let plan = OpPlan::new(
+        OpControls {
+            filter: "",
+            sort: &OpSort::new(),
+            collapsed: &BTreeSet::new(),
+            significant_digits: 4,
+        },
+        Some(&moved_dc),
+        Some(&moved_report),
+        None,
+    )
+    .with_baseline(baseline, true, Some(&moved_dc), Some(&moved_report));
+    assert_eq!(plan.changed, Some(3));
+}
+
+/// A transistor outside its gain region is flagged, one in it is not, and
+/// the summary adds up the power the devices report.
+#[test]
+fn the_summary_flags_bias_and_adds_up_dissipation() {
+    assert!(off_bias("MOSFET", "triode"));
+    assert!(off_bias("MOSFET", "cutoff"));
+    assert!(!off_bias("MOSFET", "saturation"));
+    assert!(!off_bias("BJT", "active"));
+    assert!(off_bias("BJT", "saturation"));
+    assert!(!off_bias("DIODE", "forward"));
+
+    let (_, mut report) = evidence_fixture(0, 3);
+    report.entries[1].region = Some("triode");
+    for (entry, power) in report.entries.iter_mut().zip([1.0e-3, 4.0e-3, 0.5e-3]) {
+        entry.params.push(("power", power));
+    }
+    let summary = OpSummary::of(Some(&report));
+    assert!((summary.dissipated.unwrap() - 5.5e-3).abs() < 1e-15);
+    assert_eq!(
+        summary.largest,
+        Some((report.entries[1].name.clone(), 4.0e-3))
+    );
+    assert_eq!(
+        summary.off_bias,
+        [(report.entries[1].name.clone(), "triode")]
+    );
+    assert_eq!(summary.biased, 3);
+}

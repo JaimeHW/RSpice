@@ -21,7 +21,7 @@ use rspice_results::operating_point::{
 };
 use rspice_ui_kit::{
     panels::{WorkbenchIcon, section_block_gap, section_header},
-    plot::fmt_si_significant,
+    plot::{fmt_si_signed, fmt_si_significant},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Button, PROBLEM_MARK_SIDE, Problem, measurement_table, paint_problem_mark},
@@ -762,6 +762,14 @@ pub struct OpPlan {
     /// The one line a filter that matched nothing leaves on the sheet.
     no_match: Option<String>,
     scope_note: Option<&'static str>,
+    /// The power and bias sums over every device.
+    summary: OpSummary,
+    /// The operating point the values read against, and whether as changes.
+    compare: Option<(OpBaseline, bool)>,
+    /// How many rows differ from the baseline, when there is one.
+    changed: Option<usize>,
+    /// Every retained row, shown or filtered out.
+    row_total: usize,
 }
 
 impl OpPlan {
@@ -797,6 +805,73 @@ impl OpPlan {
             node_shown,
             no_match,
             scope_note: reduced_scope_note(devices, detail),
+            summary: OpSummary::of(devices),
+            compare: None,
+            changed: None,
+            row_total: dc.map_or(0, |dc| dc.node_voltages.len() + dc.branch_currents.len())
+                + devices.map_or(0, |report| report.entries.len()),
+        }
+    }
+
+    /// This plan read against `baseline`: each value as itself or, with
+    /// `delta`, as its change, and the rows that moved counted.
+    #[must_use]
+    pub fn with_baseline(
+        mut self,
+        baseline: OpBaseline,
+        delta: bool,
+        dc: Option<&DcOpResult>,
+        devices: Option<&DeviceOpReport>,
+    ) -> Self {
+        self.changed = Some(changed_rows(dc, devices, &baseline).len());
+        self.compare = Some((baseline, delta));
+        self
+    }
+
+    /// One cell of `row` under `column`, read against the baseline when the
+    /// sheet compares: a moved value is marked, and as a change it is signed.
+    fn cell(&self, row: RowSource<'_>, kind: OpRowKind, column: &PlanColumn) -> CellValue {
+        let digits = self.significant_digits;
+        let Some((baseline, delta)) = self.compare.as_ref() else {
+            return row.cell(column, digits);
+        };
+        let held = baseline.value(kind, row.name(), &column.label);
+        match (row.quantity(column), held) {
+            (Some((value, unit)), Some(base)) if value.is_finite() && base.is_finite() => {
+                let changed = differs(value, base);
+                if !*delta {
+                    let (mantissa, unit) = value_parts(value, &unit, digits);
+                    CellValue::Number {
+                        mantissa,
+                        unit,
+                        changed,
+                    }
+                } else if changed {
+                    let (mantissa, unit) = split_value(fmt_si_signed(value - base, &unit, digits));
+                    CellValue::Number {
+                        mantissa,
+                        unit,
+                        changed,
+                    }
+                } else {
+                    CellValue::Same
+                }
+            }
+            // A reading the baseline lacks is a change, and as a change it
+            // has nothing to be measured from.
+            (Some(_), None) if *delta => CellValue::Number {
+                mantissa: "new".to_owned(),
+                unit: String::new(),
+                changed: true,
+            },
+            _ => match row.cell(column, digits) {
+                CellValue::Number { mantissa, unit, .. } => CellValue::Number {
+                    mantissa,
+                    unit,
+                    changed: held.is_none(),
+                },
+                other => other,
+            },
         }
     }
 
@@ -858,6 +933,313 @@ impl OpPlan {
     }
 }
 
+/// The operating point the sheet reads against, and how it reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpCompare {
+    /// The dataset of the other run whose operating point is the baseline.
+    pub baseline: rspice_vocabulary::product::DatasetId,
+    /// Each value as its change from the baseline's rather than itself.
+    pub delta: bool,
+}
+
+/// Another operating point's readings by row, which the sheet compares this
+/// one against.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OpBaseline {
+    nodes: BTreeMap<String, f64>,
+    branches: BTreeMap<String, f64>,
+    /// Each device's quantities, by device and then by quantity.
+    devices: BTreeMap<String, BTreeMap<String, f64>>,
+}
+
+impl OpBaseline {
+    pub fn new(dc: Option<&DcOpResult>, devices: Option<&DeviceOpReport>) -> Self {
+        let scalars = |rows: &[OperatingPointValue]| {
+            rows.iter()
+                .map(|row| (row.name.clone(), row.value))
+                .collect()
+        };
+        Self {
+            nodes: dc.map(|dc| scalars(&dc.node_voltages)).unwrap_or_default(),
+            branches: dc
+                .map(|dc| scalars(&dc.branch_currents))
+                .unwrap_or_default(),
+            devices: devices
+                .map(|report| {
+                    report
+                        .entries
+                        .iter()
+                        .map(|entry| (entry.name.clone(), device_quantities(entry)))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The baseline's reading of `quantity` on the row `name`. A node or a
+    /// branch has one reading, whatever its column is called.
+    fn value(&self, kind: OpRowKind, name: &str, quantity: &str) -> Option<f64> {
+        match kind {
+            OpRowKind::Node => self.nodes.get(name).copied(),
+            OpRowKind::Branch => self.branches.get(name).copied(),
+            OpRowKind::Device => self.devices.get(name)?.get(quantity).copied(),
+        }
+    }
+}
+
+/// A device's quantities by name, as its columns read them.
+fn device_quantities(entry: &DeviceOpEntry) -> BTreeMap<String, f64> {
+    let (_, quantities) = device_reading(entry);
+    quantities
+        .map(|(name, value, _)| (name.to_owned(), value))
+        .collect()
+}
+
+/// Whether two readings of one quantity differ by more than the rounding in
+/// a solver's last digits.
+fn differs(current: f64, baseline: f64) -> bool {
+    (current - baseline).abs() > 1e-9 * current.abs().max(baseline.abs()) + 1e-18
+}
+
+/// The rows whose readings differ from `baseline`'s, in sheet order: a value
+/// that moved, or a row or a quantity only one of the two reports.
+pub fn changed_rows(
+    dc: Option<&DcOpResult>,
+    devices: Option<&DeviceOpReport>,
+    baseline: &OpBaseline,
+) -> Vec<(OpRowKind, String)> {
+    let mut changed = Vec::new();
+    let mut scalars =
+        |kind: OpRowKind, rows: &[OperatingPointValue], held: &BTreeMap<String, f64>| {
+            for row in rows {
+                if held
+                    .get(&row.name)
+                    .is_none_or(|base| differs(row.value, *base))
+                {
+                    changed.push((kind, row.name.clone()));
+                }
+            }
+            for name in held.keys() {
+                if !rows.iter().any(|row| row.name == *name) {
+                    changed.push((kind, name.clone()));
+                }
+            }
+        };
+    scalars(
+        OpRowKind::Node,
+        dc.map_or(&[][..], |dc| dc.node_voltages.as_slice()),
+        &baseline.nodes,
+    );
+    scalars(
+        OpRowKind::Branch,
+        dc.map_or(&[][..], |dc| dc.branch_currents.as_slice()),
+        &baseline.branches,
+    );
+    let entries = devices.map_or(&[][..], |report| report.entries.as_slice());
+    for entry in entries {
+        let current = device_quantities(entry);
+        let same = baseline.devices.get(&entry.name).is_some_and(|held| {
+            held.len() == current.len()
+                && current
+                    .iter()
+                    .all(|(name, value)| held.get(name).is_some_and(|base| !differs(*value, *base)))
+        });
+        if !same {
+            changed.push((OpRowKind::Device, entry.name.clone()));
+        }
+    }
+    for name in baseline.devices.keys() {
+        if !entries.iter().any(|entry| entry.name == *name) {
+            changed.push((OpRowKind::Device, name.clone()));
+        }
+    }
+    changed
+}
+
+/// Whether a device sits outside the region its family is biased in for
+/// gain: a MOSFET out of saturation, a bipolar transistor out of forward
+/// active. A switch sits there by design; the sheet marks it and judges
+/// nothing.
+fn off_bias(family: &str, region: &str) -> bool {
+    match family {
+        "BJT" => !matches!(region, "active" | "forward"),
+        family if !leading_quantities(family).is_empty() => region != "saturation",
+        _ => false,
+    }
+}
+
+/// The quantity a device reports its conductive power under.
+const POWER_QUANTITY: &str = "power";
+
+/// What the details pane sums over every device: the power dissipated and
+/// who dissipates most, and the transistors outside their gain region.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OpSummary {
+    /// The sum of every device's reported power.
+    pub dissipated: Option<f64>,
+    /// The device that dissipates most, and how much.
+    pub largest: Option<(String, f64)>,
+    /// Devices outside their family's gain region, with the region.
+    pub off_bias: Vec<(String, &'static str)>,
+    /// How many transistors report a region the summary judged.
+    pub biased: usize,
+}
+
+impl OpSummary {
+    pub fn of(devices: Option<&DeviceOpReport>) -> Self {
+        let entries = devices.map_or(&[][..], |report| report.entries.as_slice());
+        let powers: Vec<(&str, f64)> = entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .quantities()
+                    .find(|(name, ..)| *name == POWER_QUANTITY)
+                    .map(|(_, value, _)| (entry.name.as_str(), value))
+            })
+            .filter(|(_, value)| value.is_finite())
+            .collect();
+        Self {
+            dissipated: (!powers.is_empty()).then(|| powers.iter().map(|(_, value)| value).sum()),
+            largest: powers
+                .iter()
+                .max_by(|left, right| left.1.total_cmp(&right.1))
+                .map(|(name, value)| ((*name).to_owned(), *value)),
+            off_bias: entries
+                .iter()
+                .filter_map(|entry| {
+                    let region = entry.region?;
+                    off_bias(entry.device_kind, region).then(|| (entry.name.clone(), region))
+                })
+                .collect(),
+            biased: entries
+                .iter()
+                .filter(|entry| {
+                    entry.region.is_some()
+                        && (entry.device_kind == "BJT"
+                            || !leading_quantities(entry.device_kind).is_empty())
+                })
+                .count(),
+        }
+    }
+}
+
+/// The details pane's sums: the power the devices dissipate and the largest
+/// share of it, the transistors outside their gain region, and, when the
+/// sheet compares, the baseline and how many rows moved.
+pub fn summary_panel(
+    ui: &mut Ui,
+    plan: &OpPlan,
+    baseline: Option<&str>,
+    significant_digits: usize,
+) {
+    let summary = &plan.summary;
+    if let Some(dissipated) = summary.dissipated {
+        section_header(ui, "Power", None);
+        let mut rows = vec![(
+            "Dissipated",
+            fmt_si_significant(dissipated, "W", significant_digits),
+            true,
+        )];
+        if let Some((name, power)) = &summary.largest {
+            rows.push((
+                "Largest",
+                format!(
+                    "{name} \u{b7} {}",
+                    fmt_si_significant(*power, "W", significant_digits)
+                ),
+                false,
+            ));
+        }
+        crate::presentation::stat_table(ui, &rows);
+    }
+    if summary.biased > 0 {
+        section_header(ui, "Bias", None);
+        if summary.off_bias.is_empty() {
+            crate::presentation::stat_table(
+                ui,
+                &[(
+                    "Gain region",
+                    format!("all {} transistors", summary.biased),
+                    false,
+                )],
+            );
+        } else {
+            let rows: Vec<(&str, String, bool)> = summary
+                .off_bias
+                .iter()
+                .map(|(name, region)| (name.as_str(), (*region).to_owned(), false))
+                .collect();
+            crate::presentation::stat_table(ui, &rows);
+        }
+    }
+    if let (Some(baseline), Some(changed)) = (baseline, plan.changed) {
+        section_header(ui, "Compare", None);
+        crate::presentation::stat_table(
+            ui,
+            &[
+                ("Baseline", baseline.to_owned(), false),
+                (
+                    "Changed rows",
+                    format!("{changed} of {}", plan.row_total),
+                    true,
+                ),
+            ],
+        );
+    }
+}
+
+/// The baseline select: the width of a run's number and a short label.
+const BASELINE_WIDTH: f32 = 168.0;
+
+/// The sheet's controls in its bar: the other run's operating point to
+/// compare against, and whether each value reads as itself or as its change.
+/// `false` when no other run holds an operating point.
+pub fn domain_bar(
+    ui: &mut Ui,
+    candidates: &[(rspice_vocabulary::product::DatasetId, String)],
+    compare: &mut Option<OpCompare>,
+) -> bool {
+    if candidates.is_empty() {
+        *compare = None;
+        return false;
+    }
+    let current = compare.filter(|held| candidates.iter().any(|(id, _)| *id == held.baseline));
+    let mut names = vec!["No baseline".to_owned()];
+    names.extend(candidates.iter().map(|(_, label)| label.clone()));
+    let index = current
+        .and_then(|held| candidates.iter().position(|(id, _)| *id == held.baseline))
+        .map_or(0, |at| at + 1);
+    crate::chrome::bars::bar_label(ui, "Compare");
+    let mut next = current;
+    if let Some(picked) = rspice_ui_kit::widgets::select(
+        ui,
+        "rspice.results.op.baseline",
+        "Baseline operating point",
+        &names[index],
+        &names,
+        BASELINE_WIDTH,
+    ) {
+        next = picked.checked_sub(1).map(|at| OpCompare {
+            baseline: candidates[at].0,
+            delta: current.is_none_or(|held| held.delta),
+        });
+    }
+    if let Some(held) = next.as_mut() {
+        let mut reading = usize::from(held.delta);
+        if rspice_ui_kit::widgets::segmented(
+            ui,
+            "rspice.results.op.reading",
+            &["Value", "\u{394} from baseline"],
+            &mut reading,
+            rspice_ui_kit::widgets::SegmentedWidth::Natural,
+        ) {
+            held.delta = reading == 1;
+        }
+    }
+    *compare = next;
+    true
+}
+
 /// One retained row, node or branch or device.
 #[derive(Clone, Copy)]
 enum RowSource<'a> {
@@ -867,7 +1249,14 @@ enum RowSource<'a> {
 
 /// What one cell of a row holds.
 enum CellValue {
-    Number { mantissa: String, unit: String },
+    /// A value; `changed` when it moved from the baseline's.
+    Number {
+        mantissa: String,
+        unit: String,
+        changed: bool,
+    },
+    /// A change of nothing from the baseline.
+    Same,
     Refused,
     Missing,
 }
@@ -917,7 +1306,11 @@ impl<'a> RowSource<'a> {
         match self.quantity(column) {
             Some((value, unit)) if value.is_finite() => {
                 let (mantissa, unit) = value_parts(value, &unit, significant_digits);
-                CellValue::Number { mantissa, unit }
+                CellValue::Number {
+                    mantissa,
+                    unit,
+                    changed: false,
+                }
             }
             Some(_) => CellValue::Refused,
             None => CellValue::Missing,
@@ -951,7 +1344,11 @@ impl<'a> RowSource<'a> {
 /// A finite value as a mantissa to `significant_digits` and the prefix and
 /// unit that belong after it.
 fn value_parts(value: f64, unit: &str, significant_digits: usize) -> (String, String) {
-    let text = fmt_si_significant(value, unit, significant_digits);
+    split_value(fmt_si_significant(value, unit, significant_digits))
+}
+
+/// A printed value as its mantissa and the prefix and unit after it.
+fn split_value(text: String) -> (String, String) {
     match text.split_once(' ') {
         Some((mantissa, suffix)) => (mantissa.to_owned(), suffix.to_owned()),
         None => (text, String::new()),
@@ -1400,14 +1797,22 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         let painter = painter.with_clip_rect(cell.intersect(painter.clip_rect()));
         let font = theme::mono(tokens::FS_1, FontWeight::Regular);
         match value {
-            CellValue::Number { mantissa, unit } => {
+            CellValue::Number {
+                mantissa,
+                unit,
+                changed,
+            } => {
                 let edge = mantissa_edge(cell, unit_slot);
                 painter.text(
                     egui::pos2(edge, cell.center().y),
                     egui::Align2::RIGHT_CENTER,
                     mantissa,
                     font.clone(),
-                    self.colors.text,
+                    if changed {
+                        self.colors.accent
+                    } else {
+                        self.colors.text
+                    },
                 );
                 if !unit.is_empty() {
                     painter.text(
@@ -1444,6 +1849,15 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
                     egui::pos2(mantissa_edge(cell, unit_slot), cell.center().y),
                     egui::Align2::RIGHT_CENTER,
                     "\u{2014}",
+                    font,
+                    self.colors.text_faint,
+                );
+            }
+            CellValue::Same => {
+                painter.text(
+                    egui::pos2(mantissa_edge(cell, unit_slot), cell.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    "0",
                     font,
                     self.colors.text_faint,
                 );
@@ -1492,12 +1906,20 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         if section.region {
             let cell = self.grid.value_cell(left, y, ROW_H, slot, width);
             if let Some(region) = row.region().filter(|_| self.grid.shows_whole(cell)) {
+                // A transistor outside its gain region reads in the warning
+                // ink, so a triode or saturated device stands out of the list.
+                let flagged =
+                    matches!(row, RowSource::Device(entry) if off_bias(entry.device_kind, region));
                 values.with_clip_rect(cell.intersect(values_clip)).text(
                     egui::pos2(cell.left() + CELL_INSET, cell.center().y),
                     egui::Align2::LEFT_CENTER,
                     region,
                     theme::sans(tokens::FS_1, FontWeight::Regular),
-                    self.colors.text_dim,
+                    if flagged {
+                        self.colors.warn
+                    } else {
+                        self.colors.text_dim
+                    },
                 );
             }
             slot += 1;
@@ -1510,7 +1932,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
                     &values,
                     cell,
                     unit_slot,
-                    row.cell(column, self.plan.significant_digits),
+                    self.plan.cell(row, section.kind, column),
                 );
             }
         }
