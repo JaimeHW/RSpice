@@ -61,17 +61,93 @@ fn project_module_evidence(
         .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(reference));
     Some(match bundle {
         Some(bundle) if bundle.validation_is_current() => ComponentModelEvidence::resolved(module),
-        Some(_) => ComponentModelEvidence::failed(
-            module,
-            Problem::Warning,
-            "Recompile needed: the module changed since its compile".to_owned(),
-        ),
+        Some(bundle) => {
+            let (problem, text) = uncompiled_module_problem(bundle, view);
+            ComponentModelEvidence::failed(module, problem, text)
+        }
         None => ComponentModelEvidence::failed(
             module,
             Problem::Failure,
             "No Verilog-A/AMS source for this view".to_owned(),
         ),
     })
+}
+
+/// Why a module whose source has no current compile cannot be taken as it
+/// stands: its last compile of this very source failed, it has never
+/// compiled, or it compiled and has changed since.
+///
+/// The last two read alike from the source alone, which forgets its compile
+/// on any edit; a module that once compiled has stated its ports on the view.
+fn uncompiled_module_problem(
+    bundle: &crate::state::ProjectSourceBundle,
+    view: &crate::state::View,
+) -> (Problem, String) {
+    use crate::state::ProjectSourceQualificationDisposition;
+    let digest = bundle.closure_digest();
+    let attempts = bundle.qualifications();
+    if let Some(failed) = attempts.last().filter(|attempt| {
+        attempt.source_closure_digest == digest
+            && attempt.disposition == ProjectSourceQualificationDisposition::Failed
+    }) {
+        let errors = failed.error_count.max(1);
+        let text = if errors == 1 {
+            "Compile failed: 1 error".to_owned()
+        } else {
+            format!("Compile failed: {errors} errors")
+        };
+        return (Problem::Failure, text);
+    }
+    let compiled_once = view.metadata.contains_key("veriloga.ports")
+        || attempts
+            .iter()
+            .any(|attempt| attempt.disposition == ProjectSourceQualificationDisposition::Passed);
+    if compiled_once {
+        (
+            Problem::Warning,
+            "Recompile needed: the module changed since its compile".to_owned(),
+        )
+    } else {
+        (
+            Problem::Failure,
+            "Not compiled: compile the module to run it".to_owned(),
+        )
+    }
+}
+
+/// The sections a library states for `model`, by name: a card's own, or
+/// every section one of a binned family's bins is stated in.
+pub(super) fn model_sections(
+    library: &crate::state::model_library::ModelLibrary,
+    model: &str,
+) -> Vec<String> {
+    let of_card = |card: &str| {
+        library
+            .model_definition_metadata
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(card))
+            .map(|(_, metadata)| {
+                metadata
+                    .sections
+                    .iter()
+                    .map(|section| section.name.clone())
+                    .collect::<Vec<_>>()
+            })
+    };
+    of_card(model)
+        .or_else(|| {
+            library.bin_family(model).map(|family| {
+                let mut sections = family
+                    .bins
+                    .iter()
+                    .flat_map(|bin| of_card(&bin.name).unwrap_or_default())
+                    .collect::<Vec<_>>();
+                sections.sort_by_key(|section| section.to_ascii_lowercase());
+                sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+                sections
+            })
+        })
+        .unwrap_or_default()
 }
 
 pub fn component_model_evidence(model: &Model, component: &Component) -> ComponentModelEvidence {
@@ -120,7 +196,30 @@ pub fn component_model_evidence(model: &Model, component: &Component) -> Compone
                 .flatten()
                 .find_map(|candidate| library.bindable_model(candidate))
             {
-                return bindable_model_evidence(library, &model);
+                let evidence = bindable_model_evidence(library, &model);
+                // A section the model does not define is refused when the
+                // deck is written; the row says so now.
+                if evidence.problem.is_none()
+                    && let Some(section) = binding
+                        .model_section
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|section| !section.is_empty())
+                    && !model_sections(library, model.name())
+                        .iter()
+                        .any(|defined| defined.eq_ignore_ascii_case(section))
+                {
+                    let text = format!(
+                        "Section {section} is not defined for model {}",
+                        model.name()
+                    );
+                    return ComponentModelEvidence::failed(
+                        model.name().to_owned(),
+                        Problem::Failure,
+                        text,
+                    );
+                }
+                return evidence;
             }
         }
 
@@ -203,11 +302,20 @@ fn bindable_model_evidence(
         crate::state::model_library::BindableModel::Card(card) => {
             catalog_model_evidence(library, card)
         }
+        // The instance binds the family, so the family is what the row names;
+        // the bin at fault is named in the problem.
         crate::state::model_library::BindableModel::Family(family) => family
             .bins
             .iter()
-            .map(|bin| catalog_model_evidence(library, bin))
-            .find(|evidence| evidence.problem.is_some())
+            .find_map(|bin| {
+                let (problem, text) = catalog_model_evidence(library, bin).problem?;
+                let text = if text.contains(bin.name.as_str()) {
+                    text
+                } else {
+                    format!("{text} (bin {})", bin.name)
+                };
+                Some(ComponentModelEvidence::failed(family.name, problem, text))
+            })
             .unwrap_or_else(|| ComponentModelEvidence::resolved(family.name.to_owned())),
     }
 }

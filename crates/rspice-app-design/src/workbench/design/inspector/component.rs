@@ -477,18 +477,18 @@ pub(super) fn bound_model_section_choices(
     let Some(library) = model.model_library_manager.get_library(&binding.library) else {
         return Vec::new();
     };
-    let mut sections = library
-        .model_definition_metadata
-        .iter()
-        .find(|(model, _)| model.eq_ignore_ascii_case(selected_model))
-        .map(|(_, metadata)| {
-            metadata
-                .sections
-                .iter()
-                .map(|section| section.name.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let mut sections = super::model_evidence::model_sections(library, selected_model);
+    sections.sort_by_key(|section| section.to_ascii_lowercase());
+    sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    let mut choices = vec![(String::new(), "default".to_owned())];
+    choices.extend(
+        sections
+            .iter()
+            .map(|section| (section.clone(), section.clone())),
+    );
+    // A section the model does not define stays the row's value, so the row
+    // says what the instance holds, and is marked as one the model lacks; the
+    // model's problem line says what that means.
     if let Some(section) = binding
         .model_section
         .as_deref()
@@ -497,15 +497,8 @@ pub(super) fn bound_model_section_choices(
             .iter()
             .any(|candidate| candidate.eq_ignore_ascii_case(section))
     {
-        sections.push(section.to_owned());
+        choices.push((section.to_owned(), format!("{section} \u{b7} not defined")));
     }
-    sections.sort_by_key(|section| section.to_ascii_lowercase());
-    sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-    let mut choices = vec![(String::new(), "default".to_owned())];
-    choices.extend(sections.into_iter().map(|section| {
-        let display = section.clone();
-        (section, display)
-    }));
     choices
 }
 
