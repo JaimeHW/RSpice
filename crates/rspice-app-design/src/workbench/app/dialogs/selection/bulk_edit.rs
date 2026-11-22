@@ -233,8 +233,9 @@ pub struct SelectionBulkEditDialogState {
     pub(crate) property: SelectionBulkProperty,
     pub(crate) new_value: String,
     pub(crate) unset_behavior: SelectionBulkUnsetBehavior,
-    /// The sections a model section can be set to, from the libraries the
-    /// matched instances are bound to. Resolved when the filter changes.
+    /// The sections a model section can be set to: those every ticked
+    /// instance's library defines. Resolved when the filter, the property or
+    /// a tick changes.
     pub bound_sections: Vec<String>,
     authority: Option<SelectionBulkEditAuthority>,
     pub(crate) error: Option<String>,
@@ -277,6 +278,8 @@ enum SelectionBulkBodyAction {
     FilterChanged,
     /// The property changed: the ticks stand, less the rows it cannot reach.
     PropertyChanged,
+    /// A row was ticked or unticked.
+    TicksChanged,
     SaveFilter,
     LoadFilter,
     DeleteFilter,
@@ -314,7 +317,7 @@ pub fn open_selection_bulk_edit_dialog(
     let property = SelectionBulkProperty::default();
     let rows = build_rows(model, &filter, property);
     let selected = selected_rows(model, &rows);
-    let bound_sections = bound_library_sections(model, &rows);
+    let bound_sections = bound_library_sections(model, &rows, &selected);
     // Nothing is proposed: the value is the user's to choose, and Apply
     // waits for it.
     *dialog = SelectionBulkEditDialogState {
@@ -450,18 +453,18 @@ fn handle_selection_bulk_body_action(
             filters.active = filter.clone();
             let property = bulk_edit.property;
             let rows = build_rows(model, &filter, property);
-            bulk_edit.bound_sections = bound_library_sections(model, &rows);
             bulk_edit.selected = rows
-                .into_iter()
-                .filter(SelectionBulkRow::editable)
-                .map(|row| row.key)
+                .iter()
+                .filter(|row| row.editable())
+                .map(|row| row.key.clone())
                 .collect();
+            refresh_bound_sections(bulk_edit, model, &rows);
             bulk_edit.error = None;
             bulk_edit.authority = Some(SelectionBulkEditAuthority::capture(model));
         }
-        SelectionBulkBodyAction::PropertyChanged => {
+        SelectionBulkBodyAction::PropertyChanged | SelectionBulkBodyAction::TicksChanged => {
             let rows = build_rows(model, &bulk_edit.filter, bulk_edit.property);
-            bulk_edit.bound_sections = bound_library_sections(model, &rows);
+            refresh_bound_sections(bulk_edit, model, &rows);
             bulk_edit.error = None;
         }
         SelectionBulkBodyAction::SaveFilter => {
@@ -518,6 +521,19 @@ fn commit_selection_bulk_edit(
         .ok_or_else(|| "Bulk-edit document authority is missing.".to_owned())?;
     authority.validate_commit(model)?;
     let rows = build_rows(model, &dialog.filter, dialog.property);
+    let section = dialog.new_value.trim();
+    if dialog.property == SelectionBulkProperty::ModelSection
+        && dialog.unset_behavior != SelectionBulkUnsetBehavior::RestoreInheritedValue
+        && !section.is_empty()
+        && !section.eq_ignore_ascii_case("inherit")
+        && !bound_library_sections(model, &rows, &dialog.selected)
+            .iter()
+            .any(|bound| bound.eq_ignore_ascii_case(section))
+    {
+        return Err(format!(
+            "Section {section} is not defined by every ticked part's library."
+        ));
+    }
     let selected_active_ids = rows
         .iter()
         .filter(|row| row.editable() && dialog.selected.contains(&row.key))
@@ -915,7 +931,7 @@ fn selection_filter_panel(
     pane_content(ui, |ui| {
         selection_filter_fields(ui, dialog, hierarchy_path, action);
         ui.add_space(12.0);
-        selection_results(ui, dialog, rows);
+        selection_results(ui, dialog, rows, action);
     });
 }
 
@@ -923,6 +939,7 @@ fn selection_results(
     ui: &mut Ui,
     dialog: &mut SelectionBulkEditDialogState,
     rows: &[SelectionBulkRow],
+    action: &mut SelectionBulkBodyAction,
 ) {
     // A check box is never narrower than a control is tall, so its column
     // is as wide as the box the rows actually lay out.
@@ -996,6 +1013,7 @@ fn selection_results(
                             } else {
                                 dialog.selected.remove(&row.key);
                             }
+                            *action = SelectionBulkBodyAction::TicksChanged;
                         }
                         result_cell(ui, object_w, row.object.as_str()).on_hover_text(&row.object);
                         result_cell(ui, path_w, RichText::new(&row.path).monospace())
@@ -1255,7 +1273,7 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
     }
 }
 
-const NO_BOUND_SECTIONS: &str = "The bound library defines no model sections.";
+const NO_BOUND_SECTIONS: &str = "No model section is defined by every bound library.";
 
 /// Why Apply is waiting on the value, or `None` once there is one to apply.
 ///
@@ -1275,18 +1293,50 @@ fn missing_value_reason(dialog: &SelectionBulkEditDialogState) -> Option<&'stati
     })
 }
 
-/// The sections the matched instances' model libraries define, once each.
+/// Re-reads the sections the ticked parts can take, and lets go of a chosen
+/// section that one of them no longer has.
+fn refresh_bound_sections(
+    dialog: &mut SelectionBulkEditDialogState,
+    model: &Model,
+    rows: &[SelectionBulkRow],
+) {
+    dialog.bound_sections = bound_library_sections(model, rows, &dialog.selected);
+    if dialog.property == SelectionBulkProperty::ModelSection
+        && !dialog.new_value.is_empty()
+        && !dialog
+            .bound_sections
+            .iter()
+            .any(|section| section.eq_ignore_ascii_case(&dialog.new_value))
+    {
+        dialog.new_value.clear();
+    }
+}
+
+/// The sections every ticked instance's model library defines, once each.
 ///
-/// Read from the same library records Models ▸ Corners & sections lists: the
-/// sections each library's corners bind, and the sections its model
-/// metadata declares. A library this project does not hold contributes
-/// nothing, and nothing is offered that no bound library defines.
-fn bound_library_sections(model: &Model, rows: &[SelectionBulkRow]) -> Vec<String> {
-    let instances = rows
-        .iter()
-        .filter(|row| row.key.kind == SelectionBulkRowKind::Instance)
+/// A section is written to every ticked part, so it is offered only when
+/// each of their libraries has it, as Virtuoso offers only the sections of
+/// the library being edited. With nothing ticked, the matched instances
+/// stand in for the ticks. Read from the same library records Models ▸
+/// Corners & sections lists: the sections each library's corners bind, and
+/// the sections its model metadata declares. A library this project does
+/// not hold defines nothing, so a part bound to one leaves nothing to offer.
+fn bound_library_sections(
+    model: &Model,
+    rows: &[SelectionBulkRow],
+    selected: &BTreeSet<SelectionBulkRowKey>,
+) -> Vec<String> {
+    let instance_rows = || {
+        rows.iter()
+            .filter(|row| row.key.kind == SelectionBulkRowKind::Instance)
+    };
+    let mut instances = instance_rows()
+        .filter(|row| row.editable() && selected.contains(&row.key))
         .map(|row| row.key.object_id)
         .collect::<BTreeSet<_>>();
+    if instances.is_empty() {
+        instances = instance_rows().map(|row| row.key.object_id).collect();
+    }
     let libraries = model
         .schematic
         .document()
@@ -1296,27 +1346,41 @@ fn bound_library_sections(model: &Model, rows: &[SelectionBulkRow]) -> Vec<Strin
         .filter_map(|component| component.library_cell.as_ref())
         .map(|binding| binding.library.as_str())
         .collect::<BTreeSet<_>>();
-    let mut sections = Vec::new();
+    let mut common: Option<Vec<String>> = None;
     for name in libraries {
-        let Some(library) = model.model_library_manager.get_library(name) else {
-            continue;
-        };
-        sections.extend(
-            library
-                .corners
-                .values()
-                .flat_map(|corner| corner.effective_section_bindings())
-                .map(|binding| binding.section),
-        );
-        sections.extend(
-            library
-                .model_definition_metadata
-                .values()
-                .flat_map(|metadata| metadata.sections.iter())
-                .map(|section| section.name.clone()),
-        );
+        let mut sections = model
+            .model_library_manager
+            .get_library(name)
+            .map(|library| {
+                library
+                    .corners
+                    .values()
+                    .flat_map(|corner| corner.effective_section_bindings())
+                    .map(|binding| binding.section)
+                    .chain(
+                        library
+                            .model_definition_metadata
+                            .values()
+                            .flat_map(|metadata| metadata.sections.iter())
+                            .map(|section| section.name.clone()),
+                    )
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        sections.retain(|section| !section.trim().is_empty());
+        common = Some(match common {
+            None => sections,
+            Some(mut kept) => {
+                kept.retain(|section| {
+                    sections
+                        .iter()
+                        .any(|other| other.eq_ignore_ascii_case(section))
+                });
+                kept
+            }
+        });
     }
-    sections.retain(|section: &String| !section.trim().is_empty());
+    let mut sections = common.unwrap_or_default();
     sections.sort_by_key(|section| section.to_ascii_lowercase());
     sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
     sections

@@ -350,6 +350,125 @@ fn bulk_edit_offers_the_bound_librarys_sections() {
     );
 }
 
+/// A section is written to every ticked part, so the list holds only the
+/// sections every ticked part's library defines. It offered the union, and
+/// a section of one library was written into parts bound to another.
+#[test]
+fn bulk_edit_offers_only_sections_every_ticked_library_has() {
+    let mut state = DesignTestHost::default();
+    let mut second = component(2, "X2", None);
+    second.library_cell.as_mut().expect("bound").library = "digital".to_owned();
+    state.model.schematic.document_mut_for_test().components =
+        vec![component(1, "X1", None), second];
+    state.model.schematic.init_undo_history();
+    for (name, sections) in [("analog", ["tt", "ff"]), ("digital", ["TT", "ss"])] {
+        let mut library = crate::state::model_library::ModelLibrary::new(name);
+        for (index, section) in sections.into_iter().enumerate() {
+            library.corners.insert(
+                section.to_owned(),
+                rspice_model_library::ProcessCorner::from_composite_section(
+                    section,
+                    std::path::PathBuf::from(format!("{name}.lib")),
+                    index == 0,
+                ),
+            );
+        }
+        state.model.model_library_manager.add_library(library);
+    }
+    for id in [1, 2] {
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
+    }
+    let act = |state: &mut DesignTestHost, action: SelectionBulkBodyAction| {
+        handle_selection_bulk_body_action(
+            &mut state.design.selection_bulk_edit,
+            &mut state.design.schematic_bulk_edit_filters,
+            &state.model,
+            action,
+        );
+    };
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
+    state.design.selection_bulk_edit.property = SelectionBulkProperty::ModelSection;
+    act(&mut state, SelectionBulkBodyAction::PropertyChanged);
+    assert_eq!(state.design.selection_bulk_edit.bound_sections, ["tt"]);
+
+    let second_row = state
+        .design
+        .selection_bulk_edit
+        .selected
+        .iter()
+        .find(|key| key.object_id == 2)
+        .cloned()
+        .expect("X2 is ticked");
+    state
+        .design
+        .selection_bulk_edit
+        .selected
+        .remove(&second_row);
+    act(&mut state, SelectionBulkBodyAction::TicksChanged);
+    assert_eq!(
+        state.design.selection_bulk_edit.bound_sections,
+        ["ff", "tt"],
+        "with X2 unticked, X1's library alone decides"
+    );
+    state.design.selection_bulk_edit.new_value = "ff".to_owned();
+
+    state
+        .design
+        .selection_bulk_edit
+        .selected
+        .insert(second_row.clone());
+    act(&mut state, SelectionBulkBodyAction::TicksChanged);
+    assert_eq!(state.design.selection_bulk_edit.bound_sections, ["tt"]);
+    assert!(
+        state.design.selection_bulk_edit.new_value.is_empty(),
+        "a section X2's library lacks is let go when X2 is ticked"
+    );
+
+    state.design.selection_bulk_edit.new_value = "ff".to_owned();
+    let before = state.model.schematic.document().components.clone();
+    assert!(
+        commit_selection_bulk_edit(
+            &mut state.design.selection_bulk_edit,
+            &mut state.model,
+            &mut state.workbench,
+        )
+        .is_err(),
+        "ff is never written into a part bound to a library without it"
+    );
+    assert_eq!(state.model.schematic.document().components, before);
+
+    state.design.selection_bulk_edit.new_value = "tt".to_owned();
+    commit_selection_bulk_edit(
+        &mut state.design.selection_bulk_edit,
+        &mut state.model,
+        &mut state.workbench,
+    )
+    .expect("a section both libraries define applies");
+    let sections: Vec<Option<&str>> = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|part| {
+            part.library_cell
+                .as_ref()
+                .and_then(|binding| binding.model_section.as_deref())
+        })
+        .collect();
+    assert_eq!(sections, vec![Some("tt"), Some("tt")]);
+}
+
 #[test]
 fn invalid_target_preflight_never_partially_mutates() {
     let mut schematic = SchematicState::default();
