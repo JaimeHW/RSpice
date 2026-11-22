@@ -25,11 +25,16 @@ use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Design rule setup";
 pub const PRIMARY: &str = "Apply";
-const DESCRIPTION: &str = "The severity each design rule is reported at in this project, and \
-    whether a finding of it may be waived. Saved with the project.";
+/// Whether a finding may be waived is the rule's, not the project's: KiCad's
+/// and Virtuoso's rule setups set a severity per rule and leave waiving to the
+/// finding itself, so the Waivable column states it and nothing here sets it.
+const DESCRIPTION: &str = "The severity each design rule is reported at in this project. Saved \
+    with the project. Waivable and Lowest allowed come with the rule.";
 
 /// What the last column states, for a reader who asks.
-const LOWEST_ALLOWED: &str = "The lowest severity this project may report the rule at; a finding     on an instance the deck cannot write is held at the second where one is named";
+const LOWEST_ALLOWED: &str = "The lowest severity this project may set the rule to. Where a \
+    second severity is shown, a part that cannot be netlisted at all refuses the run, so its \
+    finding is held at that severity whatever is set.";
 /// Why Apply is unavailable while the draft is the project's deck.
 pub const UNCHANGED: &str = "No rule's severity has changed.";
 
@@ -266,13 +271,13 @@ fn rule_row(
     ui.end_row();
 }
 
-/// The lowest the rule may be set, and, where a finding on an instance the
-/// deck cannot write is held higher whatever is set, that floor beside it.
+/// The lowest the rule may be set, and, where a finding on a part the
+/// netlister cannot write is held higher whatever is set, that floor beside it.
 fn floor_cell(rule: DrcViolationType) -> String {
     let floor = rule.rule().floor;
     if floor.unwritten_instance > floor.deck {
         format!(
-            "{} \u{00b7} {} if unwritten",
+            "{} \u{00b7} {} if it cannot be netlisted",
             floor.deck.display_name(),
             floor.unwritten_instance.display_name()
         )
@@ -336,7 +341,7 @@ mod tests {
         assert!(refused_options(DrcViolationType::EmptyName).is_empty());
         assert_eq!(
             floor_cell(DrcViolationType::EmptyName),
-            "Info \u{00b7} Error if unwritten"
+            "Info \u{00b7} Error if it cannot be netlisted"
         );
         assert_eq!(floor_cell(DrcViolationType::DuplicateName), "Error");
     }
