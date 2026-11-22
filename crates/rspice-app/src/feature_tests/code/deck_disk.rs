@@ -52,7 +52,11 @@ fn edited_then_changed_on_disk(path: &std::path::Path) -> AppState {
     ));
     std::fs::write(path, ON_DISK).expect("another writer");
     assert_eq!(
-        deck_files::check_disk(&mut state.model, &mut state.code.netlist),
+        deck_files::check_disk(
+            &mut state.model,
+            &mut state.code.netlist,
+            state.workbench.messages()
+        ),
         Vec::<String>::new()
     );
     state
@@ -229,7 +233,11 @@ fn comparing_an_include_with_its_file_names_the_include_on_the_tab() {
         ".model dmod d is=3e-14\n".to_owned()
     ));
     std::fs::write(&include, ".model dmod d is=5e-14\n").expect("another writer");
-    let _ = deck_files::check_disk(&mut state.model, &mut state.code.netlist);
+    let _ = deck_files::check_disk(
+        &mut state.model,
+        &mut state.code.netlist,
+        state.workbench.messages(),
+    );
     let key = state
         .code
         .netlist

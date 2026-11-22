@@ -85,6 +85,7 @@ pub(super) fn list(
             parts.open_documents,
             parts.runs,
             id,
+            messages,
         )
     {
         asked.prompt = Some(error);

@@ -189,6 +189,7 @@ pub fn reopen(
             open_documents,
             runs,
             deck,
+            messages,
         );
         if let Err(refusal) = opened {
             model.record(LogSeverity::Error, LogSource::Netlist, refusal);

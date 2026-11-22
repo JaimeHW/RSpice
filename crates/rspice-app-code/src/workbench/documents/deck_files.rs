@@ -20,6 +20,7 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use crate::state::{DeckId, NetlistDocumentId, StoredDeck, StoredDeckFile, TextEncoding};
+use crate::workbench::MessageId;
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, NetlistRoot, NetlistTab, OwnedNetlistReplacement,
 };
@@ -380,7 +381,11 @@ fn deck_file_keys(netlist: &NetlistDocumentState) -> Vec<Option<String>> {
 /// whose tab holds edits keeps them and its tab shows the change. The
 /// notices to show: one for each file read again.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn check_disk(model: &mut Model, netlist: &mut NetlistDocumentState) -> Vec<String> {
+pub fn check_disk(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    messages: crate::workbench::MessageCatalog,
+) -> Vec<String> {
     let mut notices = Vec::new();
     for include in deck_file_keys(netlist) {
         let Some(file) = netlist
@@ -397,7 +402,9 @@ pub fn check_disk(model: &mut Model, netlist: &mut NetlistDocumentState) -> Vec<
             OnDisk::Changed(change) => {
                 let name = file.name();
                 take_disk_text(model, netlist, include.as_deref(), change);
-                notices.push(format!("Reloaded {name}: changed on disk."));
+                notices.push(
+                    messages.format(MessageId::NetlistDeckReloadedChanged, &[("name", &name)]),
+                );
             }
         }
     }
@@ -406,7 +413,11 @@ pub fn check_disk(model: &mut Model, netlist: &mut NetlistDocumentState) -> Vec<
 
 /// Where there is no file system, nothing on disk changes.
 #[cfg(target_arch = "wasm32")]
-pub fn check_disk(_model: &mut Model, _netlist: &mut NetlistDocumentState) -> Vec<String> {
+pub fn check_disk(
+    _model: &mut Model,
+    _netlist: &mut NetlistDocumentState,
+    _messages: crate::workbench::MessageCatalog,
+) -> Vec<String> {
     Vec::new()
 }
 
@@ -1058,22 +1069,25 @@ pub fn deck_from_generated(source: &str, design: &str, when: &str) -> String {
 pub fn sync_before_run(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<Vec<String>, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (model, netlist);
+        let _ = (model, netlist, messages);
         Ok(Vec::new())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         if let Some(missing) = missing_deck(model, netlist) {
-            return Err(format!(
-                "{} is not at {}.",
-                missing.name,
-                missing.path.display()
+            return Err(messages.format(
+                MessageId::NetlistDeckMissing,
+                &[
+                    ("name", &missing.name),
+                    ("path", &missing.path.display().to_string()),
+                ],
             ));
         }
-        let notices = check_disk(model, netlist);
+        let notices = check_disk(model, netlist, messages);
         let Some(deck) = netlist.open_deck.as_mut().filter(|deck| !deck.is_stored()) else {
             return Ok(notices);
         };
@@ -1081,9 +1095,9 @@ pub fn sync_before_run(
             .chain(&deck.includes)
             .find(|file| file.disk_change.is_some())
         {
-            return Err(format!(
-                "Run is waiting: {} changed on disk. Reload it, keep yours or compare the two.",
-                changed.name()
+            return Err(messages.format(
+                MessageId::NetlistRunWaitsOnDisk,
+                &[("name", &changed.name())],
             ));
         }
         for file in std::iter::once(&mut deck.root).chain(deck.includes.iter_mut()) {
@@ -1417,6 +1431,15 @@ pub fn keep_stored_edit(model: &mut Model, deck: &mut OpenDeck, include: Option<
     content.decks_dirty = true;
 }
 
+/// Why another deck cannot be opened while `unsaved`, a file of the open
+/// deck, holds edits: its edits are never dropped for another deck.
+pub fn save_first(messages: crate::workbench::MessageCatalog, unsaved: &OpenFile) -> String {
+    messages.format(
+        MessageId::NetlistSaveBeforeAnotherDeck,
+        &[("name", &unsaved.name())],
+    )
+}
+
 /// Add a new deck the project keeps as text, named `deck<N>.cir` after the
 /// first number no deck has, and bring it to the front: what New deck makes
 /// where there is no file system, a title line and `.end`, or `text`. Its
@@ -1428,12 +1451,10 @@ pub fn new_stored_deck(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     text: Option<String>,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<String, String> {
     if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
-        return Err(format!(
-            "Save {} before opening another deck.",
-            unsaved.name()
-        ));
+        return Err(save_first(messages, unsaved));
     }
     let content = &mut *model.workspace.content;
     let names = content
@@ -1464,12 +1485,10 @@ pub fn add_stored_decks(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     decks: Vec<StoredDeck>,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<Vec<String>, String> {
     if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
-        return Err(format!(
-            "Save {} before opening another deck.",
-            unsaved.name()
-        ));
+        return Err(save_first(messages, unsaved));
     }
     let content = &mut *model.workspace.content;
     let mut names = content
@@ -1527,6 +1546,7 @@ pub fn open_deck(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     path: &Path,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<(), String> {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     if let Some(open) = &netlist.open_deck {
@@ -1535,10 +1555,7 @@ pub fn open_deck(
             return Ok(());
         }
         if let Some(unsaved) = open.unsaved() {
-            return Err(format!(
-                "Save {} before opening another deck.",
-                unsaved.name()
-            ));
+            return Err(save_first(messages, unsaved));
         }
     }
     let root = read_file(&path)?;
@@ -1617,16 +1634,14 @@ pub fn open_deck_by_id(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     id: DeckId,
+    messages: crate::workbench::MessageCatalog,
 ) -> Result<(), String> {
     if netlist.open_deck.as_ref().is_some_and(|deck| deck.id == id) {
         show_deck(model, netlist);
         return Ok(());
     }
     if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
-        return Err(format!(
-            "Save {} before opening another deck.",
-            unsaved.name()
-        ));
+        return Err(save_first(messages, unsaved));
     }
     let deck = model
         .workspace

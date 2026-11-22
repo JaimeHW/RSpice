@@ -123,12 +123,14 @@ impl AppState {
         if new_project {
             candidate.create_netlist_project(&decks[0].name);
         }
+        let messages = self.workbench.messages();
         let names = match rspice_app_code::workbench::documents::deck_files::add_stored_decks(
             &mut candidate.model,
             &mut candidate.code.netlist,
             &mut candidate.code.netlist_open_documents,
             &mut candidate.runs,
             decks,
+            messages,
         ) {
             Ok(names) => names,
             Err(error) => {
@@ -467,7 +469,12 @@ impl AppState {
             .open_deck
             .as_ref()
             .and_then(|deck| deck.unsaved())
-            .map(|unsaved| format!("Save {} before opening another deck.", unsaved.name()))
+            .map(|unsaved| {
+                rspice_app_code::workbench::documents::deck_files::save_first(
+                    self.workbench.messages(),
+                    unsaved,
+                )
+            })
     }
 
     /// The generated netlist as a deck: a first line naming the design and,
@@ -523,12 +530,14 @@ impl AppState {
                 std::iter::empty::<&str>(),
             ));
         }
+        let messages = self.workbench.messages();
         let name = match rspice_app_code::workbench::documents::deck_files::new_stored_deck(
             &mut candidate.model,
             &mut candidate.code.netlist,
             &mut candidate.code.netlist_open_documents,
             &mut candidate.runs,
             text,
+            messages,
         ) {
             Ok(name) => name,
             Err(error) => {
@@ -575,10 +584,11 @@ impl AppState {
             .as_ref()
             .and_then(rspice_app_code::workbench::documents::deck_files::OpenDeck::unsaved)
         {
-            self.prompt(format!(
-                "Save {} before opening another deck.",
-                unsaved.name()
-            ));
+            let refusal = rspice_app_code::workbench::documents::deck_files::save_first(
+                self.workbench.messages(),
+                unsaved,
+            );
+            self.prompt(refusal);
             return false;
         }
         let name = path.file_name().map_or_else(
@@ -589,12 +599,14 @@ impl AppState {
         if new_project {
             candidate.create_netlist_project(&name);
         }
+        let messages = self.workbench.messages();
         if let Err(error) = rspice_app_code::workbench::documents::deck_files::open_deck(
             &mut candidate.model,
             &mut candidate.code.netlist,
             &mut candidate.code.netlist_open_documents,
             &mut candidate.runs,
             path,
+            messages,
         ) {
             self.prompt(error);
             return false;

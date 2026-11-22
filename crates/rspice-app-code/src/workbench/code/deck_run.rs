@@ -61,7 +61,7 @@ fn check_deck_run(cx: &mut Cx<'_, CodeFeature>, for_run: bool) -> DeckCheck {
     }
     // A file changed on disk under edits holds the check until the reader
     // answers for it.
-    match deck_files::sync_before_run(cx.model, &mut cx.state.netlist) {
+    match deck_files::sync_before_run(cx.model, &mut cx.state.netlist, cx.wb.messages()) {
         Ok(notices) => {
             for notice in notices {
                 cx.wb.prompt(notice);
