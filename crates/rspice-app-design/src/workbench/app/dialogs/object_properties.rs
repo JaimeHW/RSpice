@@ -145,6 +145,8 @@ impl ObjectPropertiesDialogState {
                     kind: note.kind,
                     text: note.text.clone(),
                     review_state: note.review.as_ref().map(|review| review.state),
+                    text_size_percent: note.text_size_percent,
+                    align: note.alignment(),
                 },
             )),
             source: Some(source),
@@ -213,6 +215,7 @@ pub enum PropertyCommit {
         kind: DesignNoteKind,
         text: String,
         review_state: Option<DesignReviewState>,
+        lettering: (u16, rspice_design::schematic::design_note::SymbolTextAlign),
     },
     DocumentationShape {
         expected: DocumentationShape,
@@ -312,6 +315,7 @@ enum DraftResolutionSource {
         kind: DesignNoteKind,
         text: String,
         review_state: Option<DesignReviewState>,
+        lettering: (u16, rspice_design::schematic::design_note::SymbolTextAlign),
     },
     DocumentationShape {
         original: DocumentationShape,
@@ -554,6 +558,7 @@ pub fn draft_resolution_key(model: &Model, draft: &ObjectPropertiesDraft) -> Dra
                 kind: draft.kind,
                 text: draft.text.clone(),
                 review_state: draft.review_state,
+                lettering: (draft.text_size_percent, draft.align),
             },
         ),
         ObjectPropertiesDraft::DocumentationShape(draft) => (
@@ -663,7 +668,8 @@ fn apply_commit(
             kind,
             text,
             review_state,
-        } => schematic.edit_design_note_properties(expected, kind, text, review_state),
+            lettering,
+        } => schematic.edit_design_note_properties(expected, kind, text, review_state, lettering),
         PropertyCommit::DocumentationShape {
             expected,
             geometry,
@@ -795,6 +801,7 @@ fn validate_design_note_draft(
                     kind: draft.kind,
                     text,
                     review_state: draft.review_state,
+                    lettering: (draft.text_size_percent, draft.align),
                 }),
                 None,
             )
@@ -1329,6 +1336,8 @@ pub mod tests {
             kind: DesignNoteKind::ReviewNote,
             text: "Review updated bias path".to_owned(),
             review_state: Some(DesignReviewState::Resolved),
+            text_size_percent: original.text_size_percent,
+            align: original.align,
         };
 
         let DraftValidation::Valid(commit, None) = validate_design_note_draft(&schematic, &draft)
@@ -1369,6 +1378,8 @@ pub mod tests {
             kind: DesignNoteKind::RequirementLink,
             text: "REQ 19".to_owned(),
             review_state: None,
+            text_size_percent: 100,
+            align: Default::default(),
         };
         assert!(matches!(
             validate_design_note_draft(&schematic, &invalid),

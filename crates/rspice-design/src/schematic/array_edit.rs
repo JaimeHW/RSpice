@@ -593,6 +593,10 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
                         }
                     })?;
                 item.layer = source.layer;
+                item.text_size_percent = source.text_size_percent;
+                item.anchor_mark_hidden = source.anchor_mark_hidden;
+                item.lettering = source.lettering;
+                item.align = source.align;
                 item.validate()
                     .map_err(|_| SchematicArrayError::InvalidGeometry {
                         object_id: source.id,

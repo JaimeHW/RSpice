@@ -41,9 +41,12 @@ impl SchematicState {
         pending: PendingDesignNotePlacement,
     ) -> Result<u64, DesignNoteError> {
         self.validate_pending_design_note(&pending)?;
-        let edit = self
-            .design
-            .place_design_note(pos, pending.kind, pending.text)?;
+        let edit = self.design.place_design_note(
+            pos,
+            pending.kind,
+            pending.text,
+            (pending.text_size_percent, pending.align),
+        )?;
         self.session.editor.selection.clear();
         self.session.editor.selection.select_design_note(edit.value);
         self.finish_document_edit(edit.committed);

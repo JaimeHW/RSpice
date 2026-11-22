@@ -506,13 +506,20 @@ impl<'a> SemanticSceneCompiler<'a> {
             }
             let scale = f64::from(note.text_scale());
             let mut origin = self.schematic_point(note.pos)?;
+            // Each line stands on the note's point by the edge it is aligned by.
+            let anchor = match note.align {
+                SymbolTextAlign::Left => TextAnchor::Start,
+                SymbolTextAlign::Center => TextAnchor::Middle,
+                SymbolTextAlign::Right => TextAnchor::End,
+            };
             for line in note.text.lines() {
-                self.add_text(
+                self.add_text_placed(
                     origin,
                     line,
                     SceneFont::Sans,
                     (2_800.0 * scale).round() as u64,
                     annotation_stroke.color,
+                    (anchor, SceneTextRotation::Upright),
                 )?;
                 origin = self.offset_scene_point(origin, 0, (3_400.0 * scale).round() as i64)?;
             }

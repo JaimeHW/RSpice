@@ -4,6 +4,7 @@ use crate::state::{
     DesignNote, DesignNoteKind, DesignReviewState, DocumentationShape, DocumentationShapeGeometry,
     NetLabel, NetNamingPolicy, Point, SchematicGridPitch, SchematicState,
 };
+use rspice_design::schematic::design_note::SymbolTextAlign;
 use rspice_design::schematic::documentation_shape::SymbolStyle;
 
 impl SchematicState {
@@ -48,11 +49,16 @@ impl SchematicState {
         kind: DesignNoteKind,
         text: String,
         review_state: Option<DesignReviewState>,
+        lettering: (u16, SymbolTextAlign),
     ) -> Result<bool, String> {
         let read_only = self.session.read_only;
-        let Some(change) =
-            self.design
-                .prepare_design_note_properties(expected, kind, text, review_state)?
+        let Some(change) = self.design.prepare_design_note_properties(
+            expected,
+            kind,
+            text,
+            review_state,
+            lettering,
+        )?
         else {
             return Ok(false);
         };

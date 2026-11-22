@@ -1,6 +1,6 @@
 //! Property candidates validate before an editor opens their document scope.
 use super::super::{
-    design_note::{DesignNote, DesignNoteKind, DesignReviewState},
+    design_note::{DesignNote, DesignNoteKind, DesignReviewState, SymbolTextAlign},
     document_policy::{NetNamingPolicy, SchematicGridPitch},
     documentation_shape::{DocumentationShape, DocumentationShapeGeometry, SymbolStyle},
     net_label::NetLabel,
@@ -119,6 +119,7 @@ impl Schematic {
         kind: DesignNoteKind,
         text: String,
         review_state: Option<DesignReviewState>,
+        lettering: (u16, SymbolTextAlign),
     ) -> Result<Option<PreparedPropertyEdit<'_>>, String> {
         let Some(current) = self
             .document
@@ -131,7 +132,11 @@ impl Schematic {
         if current != &expected {
             return Err("The selected design note changed before commit.".to_owned());
         }
-        let mut candidate = expected.clone();
+        let (size_percent, align) = lettering;
+        let mut candidate = expected
+            .clone()
+            .with_text_size_percent(size_percent)
+            .with_alignment(align);
         candidate
             .update(kind, text)
             .map_err(|error| error.to_string())?;

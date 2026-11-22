@@ -20,6 +20,9 @@ pub struct DesignNoteDialogState {
     pub(crate) kind: crate::state::DesignNoteKind,
     pub text: String,
     pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+    /// The note's size, in percent of the standard size.
+    pub text_size_percent: u16,
+    pub align: rspice_design::schematic::design_note::SymbolTextAlign,
 }
 
 impl DesignNoteDialogState {
@@ -29,6 +32,8 @@ impl DesignNoteDialogState {
             kind: crate::state::DesignNoteKind::PlainText,
             text: String::new(),
             source: Some(source),
+            text_size_percent: 100,
+            align: Default::default(),
         };
     }
 
@@ -63,7 +68,13 @@ pub(in crate::workbench) fn render_design_note_dialog(
             Err(refusal) => Err(refusal.as_str()),
         })
         .show(ctx, |rows| {
-            note_placement::show(rows, &mut draft.kind, &mut draft.text)
+            note_placement::show(
+                rows,
+                &mut draft.kind,
+                &mut draft.text,
+                &mut draft.text_size_percent,
+                &mut draft.align,
+            )
         });
 
     match choice {
@@ -130,7 +141,9 @@ fn validate_draft(
         source.topology_version,
         &model.schematic.document().design_notes,
     ) {
-        Ok(pending) => Ok(pending.with_source(source.clone())),
+        Ok(pending) => Ok(pending
+            .with_source(source.clone())
+            .with_lettering(draft.text_size_percent, draft.align)),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -202,6 +215,55 @@ pub mod tests {
         assert!(state.design.design_note.source.is_none());
         assert_eq!(pending.source, Some(source));
         assert!(state.model.schematic.document().design_notes.is_empty());
+    }
+
+    /// The size and alignment chosen on the form are the placed note's; a
+    /// later change of them is one undo step.
+    #[test]
+    fn a_note_keeps_the_size_and_alignment_it_was_placed_with() {
+        use crate::state::Point;
+        use rspice_design::schematic::design_note::SymbolTextAlign;
+        let mut state = DesignTestHost::default();
+        state
+            .design
+            .design_note
+            .open(schematic_editor_request_source(&state));
+        state.design.design_note.text = "Power stage".to_owned();
+        state.design.design_note.text_size_percent = 200;
+        state.design.design_note.align = SymbolTextAlign::Right;
+        let pending = validate_draft(&state).expect("valid draft");
+        let id = state
+            .model
+            .schematic
+            .place_pending_design_note(Point::new(40, 40), pending)
+            .unwrap();
+        let placed = state.model.schematic.document().design_notes[0].clone();
+        assert_eq!(placed.id, id);
+        assert_eq!(placed.text_size_percent, 200);
+        assert_eq!(placed.alignment(), SymbolTextAlign::Right);
+
+        state.model.schematic.init_undo_history();
+        assert!(
+            state
+                .model
+                .schematic
+                .edit_design_note_properties(
+                    placed.clone(),
+                    placed.kind,
+                    placed.text.clone(),
+                    None,
+                    (75, SymbolTextAlign::Center),
+                )
+                .unwrap()
+        );
+        let edited = &state.model.schematic.document().design_notes[0];
+        assert_eq!(
+            (edited.text_size_percent, edited.alignment()),
+            (75, SymbolTextAlign::Center)
+        );
+        assert!(state.model.schematic.undo());
+        assert_eq!(state.model.schematic.document().design_notes[0], placed);
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// A form left open while the drawing changes under it, or while another

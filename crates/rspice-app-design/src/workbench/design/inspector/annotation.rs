@@ -1,10 +1,13 @@
 //! The editable rows of a documentation shape and a note.
 //!
-//! A shape's stroke, dash and fill take the symbol editor's words, so a box
-//! drawn on a sheet and a box drawn in a symbol are styled alike. Each change
-//! is one undo step.
+//! A shape's stroke, dash and fill, and a note's size and alignment, take
+//! the symbol editor's words, so what is drawn on a sheet and what is drawn
+//! in a symbol are styled alike. Each change is one undo step.
 
 use super::*;
+use rspice_design::schematic::design_note::{
+    DESIGN_NOTE_SIZE_CHOICES, DesignNote, SymbolTextAlign, design_note_size_label,
+};
 use rspice_design::schematic::documentation_shape::{
     DocumentationShape, SymbolDash, SymbolFill, SymbolStroke,
 };
@@ -88,5 +91,56 @@ pub(super) fn shape_style_rows(
         Ok(true) => sync_active_schematic(cx.model, cx.wb),
         Ok(false) => {}
         Err(error) => cx.wb.prompt(format!("Shape not changed: {error}")),
+    }
+}
+
+/// Size and Align.
+pub(super) fn note_lettering_rows(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, note: &DesignNote) {
+    let writable = !cx.model.schematic_edit_read_only();
+    let current = note.text_size_percent;
+    let mut sizes = DESIGN_NOTE_SIZE_CHOICES
+        .iter()
+        .map(|percent| (percent.to_string(), design_note_size_label(*percent)))
+        .collect::<Vec<_>>();
+    if !DESIGN_NOTE_SIZE_CHOICES.contains(&current) {
+        // A size a drawing brought in keeps its place in the list.
+        sizes.push((current.to_string(), design_note_size_label(current)));
+    }
+    let mut selected = current.to_string();
+    let mut size_percent = current;
+    if property_row_combo(
+        ui,
+        "Size",
+        ("note-size", note.id),
+        &mut selected,
+        &sizes,
+        writable,
+    ) && let Ok(picked) = selected.parse::<u16>()
+    {
+        size_percent = picked;
+    }
+    let align = choice_row(
+        ui,
+        "Align",
+        ("note-align", note.id),
+        &SymbolTextAlign::ALL,
+        SymbolTextAlign::label,
+        note.alignment(),
+        writable,
+    )
+    .unwrap_or(note.alignment());
+    if size_percent == current && align == note.alignment() {
+        return;
+    }
+    match cx.model.schematic.edit_design_note_properties(
+        note.clone(),
+        note.kind,
+        note.text.clone(),
+        note.review.as_ref().map(|review| review.state),
+        (size_percent, align),
+    ) {
+        Ok(true) => sync_active_schematic(cx.model, cx.wb),
+        Ok(false) => {}
+        Err(error) => cx.wb.prompt(format!("Note not changed: {error}")),
     }
 }

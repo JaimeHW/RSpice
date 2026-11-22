@@ -1,9 +1,10 @@
 //! Design-note placement fields.
 //!
-//! Two questions: which kind of note, and what it says. The canvas draws the
-//! note itself once the tool is armed, so the form draws no second copy of it.
+//! Which kind of note, what it says, and how it is lettered. The canvas draws
+//! the note itself once the tool is armed, so the form draws no second copy
+//! of it.
 
-use rspice_design::schematic::design_note::DesignNoteKind;
+use rspice_design::schematic::design_note::{DesignNoteKind, SymbolTextAlign};
 use rspice_ui_kit::widgets::FormRows;
 
 /// Three lines: enough for a note worth placing, short enough that the form
@@ -19,12 +20,15 @@ pub fn show(
     rows: &mut FormRows<'_>,
     kind: &mut DesignNoteKind,
     text: &mut String,
+    size_percent: &mut u16,
+    align: &mut SymbolTextAlign,
 ) -> Option<egui::Id> {
     let labels = DesignNoteKind::ALL.map(|kind| kind.label().to_owned());
     if let Some(index) = rows.select("Type", "design-note-kind", kind.label(), &labels) {
         *kind = DesignNoteKind::ALL[index];
     }
     let response = rows.text_multiline("Text", text_id(), text, sample(*kind), TEXT_LINES);
+    crate::object_properties::note_lettering_rows(rows, size_percent, align);
     Some(response.id)
 }
 

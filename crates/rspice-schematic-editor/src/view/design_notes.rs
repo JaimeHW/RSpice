@@ -18,8 +18,7 @@ use super::viewport::Viewport;
 
 pub(crate) const FONT_WORLD_SIZE: f32 = DESIGN_NOTE_FONT_WORLD;
 pub(crate) const LINE_ADVANCE_WORLD: f32 = DESIGN_NOTE_LINE_ADVANCE_WORLD;
-/// The top-left corner of a note's first line, from its anchor.
-pub(crate) const OFFSET_X_WORLD: f32 = DESIGN_NOTE_TEXT_OFFSET_WORLD.0;
+/// How far below its anchor a note's first line stands.
 pub(crate) const OFFSET_Y_WORLD: f32 = DESIGN_NOTE_TEXT_OFFSET_WORLD.1;
 /// The anchor marker's radius, in world units.
 pub(crate) const MARKER_RADIUS_WORLD: f32 = 2.0;
@@ -56,11 +55,7 @@ fn screen_layout(
         ctx.pixels_per_point(),
     )?;
     let anchor = viewport.schematic_to_screen(note.pos);
-    let text_origin = anchor
-        + vec2(
-            OFFSET_X_WORLD * viewport.zoom,
-            OFFSET_Y_WORLD * viewport.zoom,
-        );
+    let text_origin = anchor + vec2(0.0, OFFSET_Y_WORLD * viewport.zoom);
     let mut lines = Vec::new();
     let mut bounds = Rect::from_min_size(text_origin, egui::Vec2::ZERO);
     for (index, source) in text.split('\n').enumerate() {
@@ -73,9 +68,11 @@ fn screen_layout(
                 color,
             )
         });
+        // Each line stands on the point by the edge the note is aligned by.
+        let start = note.line_start_world(galley.size().x / viewport.zoom) * viewport.zoom;
         let position = text_origin
             + vec2(
-                0.0,
+                start,
                 index as f32 * LINE_ADVANCE_WORLD * scale * viewport.zoom,
             );
         let rect = Rect::from_min_size(position, galley.size());
@@ -270,16 +267,18 @@ pub fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Point) {
         );
     }
     let (width, height) = note.text_extent_world(rendered_text);
-    let (width, height) = (width.ceil() as i32, height.ceil() as i32);
+    let start = note.line_start_world(width);
+    let (left, right) = (
+        start.min(0.0).floor() as i32,
+        (start + width).max(0.0).ceil() as i32,
+    );
     (
-        note.pos,
+        Point::new(note.pos.x.saturating_add(left), note.pos.y),
         Point::new(
-            note.pos
-                .x
-                .saturating_add(OFFSET_X_WORLD.ceil() as i32 + width),
+            note.pos.x.saturating_add(right),
             note.pos
                 .y
-                .saturating_add(OFFSET_Y_WORLD.ceil() as i32 + height),
+                .saturating_add(OFFSET_Y_WORLD.ceil() as i32 + height.ceil() as i32),
         ),
     )
 }
@@ -357,6 +356,59 @@ mod tests {
                 bounds.right_bottom() + egui::Vec2::splat(0.1)
             ),
             None
+        );
+    }
+
+    /// A note aligned left reads on from its point, one centred stands about
+    /// it, and one aligned right ends short of it; at twice the size it
+    /// letters twice as tall. A click finds it where it is painted.
+    #[test]
+    fn a_notes_size_and_alignment_letter_it_that_way_on_the_canvas() {
+        use rspice_design::schematic::design_note::SymbolTextAlign;
+        let ctx = initialized_context();
+        let viewport = Viewport {
+            offset: Pos2::ZERO,
+            zoom: 2.0,
+            bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(800.0)),
+        };
+        let context = DesignNoteRenderContext {
+            view_path: "work/top/schematic",
+            component_count: 0,
+            conductor_count: 0,
+        };
+        let note = DesignNote::new(
+            32,
+            Point::new(150, 40),
+            DesignNoteKind::PlainText,
+            "Bias network",
+        )
+        .unwrap();
+        let anchor = viewport.schematic_to_screen(note.pos);
+        let painted = |note: &DesignNote| {
+            hit_bounds(&ctx, &viewport, note, &context)
+                .expect("visible note")
+                .shrink(POINTER_SLOP)
+        };
+
+        let left = painted(&note.clone().with_alignment(SymbolTextAlign::Left));
+        assert!(left.left() > anchor.x, "{left:?} from {anchor:?}");
+        let centred = painted(&note.clone().with_alignment(SymbolTextAlign::Center));
+        assert!((centred.center().x - anchor.x).abs() < 1.0, "{centred:?}");
+        let right = painted(&note.clone().with_alignment(SymbolTextAlign::Right));
+        assert!(right.right() < anchor.x, "{right:?} from {anchor:?}");
+        assert!((left.width() - right.width()).abs() < 0.5);
+
+        let large = painted(&note.clone().with_text_size_percent(200));
+        let ratio = large.height() / left.height();
+        assert!(
+            (1.9..=2.1).contains(&ratio),
+            "twice the size, {ratio} as tall"
+        );
+
+        let notes = vec![note.with_alignment(SymbolTextAlign::Right)];
+        assert_eq!(
+            design_note_at(&ctx, &viewport, &notes, &context, right.center()),
+            Some(32)
         );
     }
 

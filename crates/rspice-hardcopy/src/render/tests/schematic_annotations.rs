@@ -1,8 +1,10 @@
 //! A printed schematic draws its documentation shapes in the stroke, dash
-//! and fill the canvas draws them in.
+//! and fill the canvas draws them in, and letters its notes at the size and
+//! alignment the canvas letters them at.
 
 use super::schematic_labels::{compile, sheet};
 use super::*;
+use rspice_design::schematic::design_note::{DesignNote, DesignNoteKind, SymbolTextAlign};
 use rspice_design::schematic::documentation_shape::{
     DocumentationShape, DocumentationShapeGeometry, SymbolDash, SymbolFill, SymbolStroke,
     SymbolStyle,
@@ -127,4 +129,48 @@ fn a_shapes_stroke_dash_and_fill_print_as_the_canvas_draws_them() {
         fills.iter().all(|(index, _)| *index < rectangle.min(line)),
         "a fill prints under the outlines"
     );
+}
+
+/// A note aligned right prints each line ending on its point and one centred
+/// prints them about it, at the note's size: a note at twice the size prints
+/// twice the type the standard one does. SVG export writes the same anchors.
+#[test]
+fn a_notes_size_and_alignment_print_as_the_canvas_letters_them() {
+    let note = |id, text: &str, size, align| {
+        DesignNote::new(
+            id,
+            rspice_design_model::Point::new(100, 40 * id as i32),
+            DesignNoteKind::PlainText,
+            text,
+        )
+        .unwrap()
+        .with_text_size_percent(size)
+        .with_alignment(align)
+    };
+    let mut printed = sheet(Vec::new());
+    printed.design_notes = vec![
+        note(1, "Standard", 100, SymbolTextAlign::Left),
+        note(2, "Heading", 200, SymbolTextAlign::Right),
+        note(3, "Centred one\nCentred two", 150, SymbolTextAlign::Center),
+    ];
+    let compiled = compile(&printed);
+    let printed = |wanted: &str| {
+        compiled
+            .texts()
+            .into_iter()
+            .find(|(text, ..)| *text == wanted)
+            .map(|(_, x, _, anchor, size)| (x, anchor, size))
+            .unwrap_or_else(|| panic!("{wanted:?} prints: {:?}", compiled.texts()))
+    };
+    let (standard_x, anchor, standard) = printed("Standard");
+    assert_eq!(anchor, TextAnchor::Start);
+    let (heading_x, anchor, heading) = printed("Heading");
+    assert_eq!(anchor, TextAnchor::End);
+    assert_eq!(heading, standard * 2);
+    assert_eq!(heading_x, standard_x, "both stand on x = 100");
+    for line in ["Centred one", "Centred two"] {
+        let (x, anchor, size) = printed(line);
+        assert_eq!((x, anchor), (standard_x, TextAnchor::Middle), "{line}");
+        assert_eq!(size * 2, standard * 3);
+    }
 }

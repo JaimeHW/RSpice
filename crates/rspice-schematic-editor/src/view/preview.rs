@@ -157,6 +157,9 @@ pub fn draw_design_note_preview(
     let Ok(note) = DesignNote::new(0, position, pending.kind, pending.text.clone()) else {
         return;
     };
+    let note = note
+        .with_text_size_percent(pending.text_size_percent)
+        .with_alignment(pending.align);
     draw_design_note(
         painter,
         viewport,

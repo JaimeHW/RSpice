@@ -7,6 +7,7 @@
 //! flat trace prints as a flat line rather than as nothing at all.
 
 use super::*;
+use rspice_design::schematic::design_note::SymbolTextAlign;
 use rspice_design::schematic::{bus_route, drawing_metrics};
 
 pub(super) fn layer_mapping(
@@ -218,20 +219,24 @@ pub fn schematic_bounds(
             continue;
         }
         bounds.include(note.pos);
-        let lines = note.text.lines().collect::<Vec<_>>();
-        let width = lines.iter().map(|line| line.len()).max().unwrap_or(1);
-        // At the note's own size, rounded up.
-        let percent = (f64::from(note.text_scale()) * 100.0).round() as i64;
-        let scaled = |extent: i64| extent.saturating_mul(percent).saturating_add(99) / 100;
+        // At the note's own size, by the canvas's measure of its lines, which
+        // reaches past the print's: every line's anchor, the last one's too,
+        // stands inside.
+        let (width, height) = note.text_extent_world(&note.text);
+        let reach = f64::from(width).ceil() as i64;
+        // The lines run on from the point, about it, or up to it.
+        let (left, right) = match note.align {
+            SymbolTextAlign::Left => (0, reach),
+            SymbolTextAlign::Center => (reach.saturating_add(1) / 2, reach.saturating_add(1) / 2),
+            SymbolTextAlign::Right => (reach, 0),
+        };
         bounds.include_i64(
-            i64::from(note.pos.x).saturating_add(scaled(
-                i64::try_from(width).unwrap_or(i64::MAX).saturating_mul(2),
-            )),
-            i64::from(note.pos.y).saturating_add(scaled(
-                i64::try_from(lines.len())
-                    .unwrap_or(i64::MAX)
-                    .saturating_mul(4),
-            )),
+            i64::from(note.pos.x).saturating_sub(left),
+            i64::from(note.pos.y),
+        );
+        bounds.include_i64(
+            i64::from(note.pos.x).saturating_add(right),
+            i64::from(note.pos.y).saturating_add(f64::from(height).ceil() as i64),
         );
     }
     for shape in &schematic.documentation_shapes {

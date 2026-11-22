@@ -177,6 +177,7 @@ fn retained_properties_reject_changed_context_without_committing() {
                             DesignNoteKind::PlainText,
                             "Changed note".to_owned(),
                             None,
+                            (100, Default::default()),
                         )
                         .unwrap()
                 );

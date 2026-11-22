@@ -10,7 +10,10 @@
 
 use rspice_design::schematic::{
     bus::{Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation},
-    design_note::{DesignNote, DesignNoteKind, DesignReviewState},
+    design_note::{
+        DESIGN_NOTE_SIZE_CHOICES, DesignNote, DesignNoteKind, DesignReviewState, SymbolTextAlign,
+        design_note_size_label,
+    },
     documentation_shape::{
         DocumentationShape, DocumentationShapeGeometry, DocumentationShapeKind, SymbolDash,
         SymbolFill, SymbolStroke, SymbolStyle, geometry_from_points,
@@ -75,6 +78,9 @@ pub struct DesignNoteObjectPropertiesDraft {
     pub kind: DesignNoteKind,
     pub text: String,
     pub review_state: Option<DesignReviewState>,
+    /// The note's size, in percent of the standard size.
+    pub text_size_percent: u16,
+    pub align: SymbolTextAlign,
 }
 
 /// A shape's fields as typed. A rectangle, and a callout's box, are told as
@@ -294,7 +300,11 @@ impl ObjectPropertiesDraft {
             }
             Self::NamedNet(draft) => draft.name.trim() != draft.original.name,
             Self::DesignNote(draft) => {
-                let mut candidate = draft.original.clone();
+                let mut candidate = draft
+                    .original
+                    .clone()
+                    .with_text_size_percent(draft.text_size_percent)
+                    .with_alignment(draft.align);
                 candidate
                     .update(draft.kind, draft.text.clone())
                     .map_or_else(
@@ -505,6 +515,7 @@ pub fn show(
             focus = Some(text);
             edited |= response.changed();
             line_under(rows, Some(text), owns(NOTE_TEXT_FIELD), refusal, None);
+            edited |= note_lettering_rows(rows, &mut draft.text_size_percent, &mut draft.align);
             if draft.kind == DesignNoteKind::ReviewNote {
                 let current = draft.review_state.unwrap_or(DesignReviewState::Open);
                 let options = DesignReviewState::ALL.map(|state| state.label().to_owned());
@@ -575,6 +586,40 @@ fn orientation_row(rows: &mut FormRows<'_>, orientation: &mut BusTapOrientation)
             true
         }
     })
+}
+
+/// A note's Size and Align, as a symbol's text is told them. Returns whether
+/// a choice changed. Shared by the placement form and Properties.
+pub fn note_lettering_rows(
+    rows: &mut FormRows<'_>,
+    size_percent: &mut u16,
+    align: &mut SymbolTextAlign,
+) -> bool {
+    let sizes = DESIGN_NOTE_SIZE_CHOICES.map(design_note_size_label);
+    let mut edited = false;
+    if let Some(&next) = rows
+        .select(
+            "Size",
+            "design-note-size",
+            &design_note_size_label(*size_percent),
+            &sizes,
+        )
+        .and_then(|index| DESIGN_NOTE_SIZE_CHOICES.get(index))
+        && next != *size_percent
+    {
+        *size_percent = next;
+        edited = true;
+    }
+    let aligns = SymbolTextAlign::ALL.map(|align| align.label().to_owned());
+    if let Some(&next) = rows
+        .select("Align", "design-note-align", align.label(), &aligns)
+        .and_then(|index| SymbolTextAlign::ALL.get(index))
+        && next != *align
+    {
+        *align = next;
+        edited = true;
+    }
+    edited
 }
 
 /// A shape's style as the symbol editor names it: the outline's stroke and

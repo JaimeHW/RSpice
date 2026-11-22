@@ -3,8 +3,8 @@
 use crate::requests::EditorRequestSource;
 
 use rspice_design::schematic::design_note::{
-    DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, normalize_design_note_text,
-    validate_kind_text,
+    DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, SymbolTextAlign,
+    normalize_design_note_text, validate_kind_text,
 };
 
 /// Frozen, validated one-shot placement payload. The UI also binds the
@@ -20,6 +20,9 @@ pub struct PendingDesignNotePlacement {
     /// concurrent note-edit gap without treating documentation as electrical.
     pub expected_design_notes: Vec<DesignNote>,
     pub source: Option<EditorRequestSource>,
+    /// The note's size, in percent of the standard size.
+    pub text_size_percent: u16,
+    pub align: SymbolTextAlign,
 }
 
 impl PendingDesignNotePlacement {
@@ -38,7 +41,17 @@ impl PendingDesignNotePlacement {
             topology_version,
             expected_design_notes: expected_design_notes.to_vec(),
             source: None,
+            text_size_percent: 100,
+            align: SymbolTextAlign::Left,
         })
+    }
+
+    /// The same placement lettered at `size_percent` and aligned `align`.
+    #[must_use]
+    pub fn with_lettering(mut self, size_percent: u16, align: SymbolTextAlign) -> Self {
+        self.text_size_percent = size_percent;
+        self.align = align;
+        self
     }
 
     pub fn with_source(mut self, source: EditorRequestSource) -> Self {

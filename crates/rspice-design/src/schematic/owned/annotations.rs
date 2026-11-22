@@ -1,6 +1,8 @@
 //! Durable annotation placement, review and candidate repair operations.
 use super::super::{
-    design_note::{DesignNote, DesignNoteError, DesignNoteKind, DesignReviewMutation},
+    design_note::{
+        DesignNote, DesignNoteError, DesignNoteKind, DesignReviewMutation, SymbolTextAlign,
+    },
     documentation_shape::{
         DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
     },
@@ -14,9 +16,13 @@ impl Schematic {
         pos: Point,
         kind: DesignNoteKind,
         text: String,
+        lettering: (u16, SymbolTextAlign),
     ) -> Result<DocumentEdit<u64>, DesignNoteError> {
         let id = self.allocate_id();
-        let mut note = DesignNote::new(id, pos, kind, text)?;
+        let (size_percent, align) = lettering;
+        let mut note = DesignNote::new(id, pos, kind, text)?
+            .with_text_size_percent(size_percent)
+            .with_alignment(align);
         if kind == DesignNoteKind::ReviewNote {
             let anchor = self
                 .document

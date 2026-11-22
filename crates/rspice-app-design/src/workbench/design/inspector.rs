@@ -778,6 +778,7 @@ fn note_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
     object_title(ui, "Note", Some(note.kind.label()), None);
     section_block_gap(ui);
     property_row(ui, "Text", &note.text);
+    annotation::note_lettering_rows(ui, cx, &note);
     property_row(ui, "Layer", note.layer.label());
     sheet_row(ui, cx.model, id);
     if let Some(review) = note.review.as_ref() {

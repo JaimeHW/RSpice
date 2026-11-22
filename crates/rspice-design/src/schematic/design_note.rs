@@ -11,6 +11,7 @@ use super::label_layout::{
 };
 
 use rspice_design_model::Point;
+pub use rspice_design_model::symbol_geometry::SymbolTextAlign;
 
 /// Maximum authored note source retained in a schematic document.
 pub const MAX_DESIGN_NOTE_TEXT_LEN: usize = 4096;
@@ -41,6 +42,19 @@ fn standard_text_size() -> u16 {
 
 fn is_standard_text_size(percent: &u16) -> bool {
     *percent == STANDARD_TEXT_SIZE_PERCENT
+}
+
+fn is_left(align: &SymbolTextAlign) -> bool {
+    *align == SymbolTextAlign::Left
+}
+
+/// The sizes a note is offered at, in percent of the standard size: smaller
+/// print for a side remark, larger for a heading on the sheet.
+pub const DESIGN_NOTE_SIZE_CHOICES: [u16; 8] = [50, 75, 100, 125, 150, 200, 300, 400];
+
+/// A note size as the reader is shown it.
+pub fn design_note_size_label(percent: u16) -> String {
+    format!("{percent}%")
 }
 
 /// The four documentation semantics exposed by the mockup-owned placement
@@ -400,6 +414,11 @@ pub struct DesignNote {
     /// did there; `pos` is then the point the drawing stood it on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lettering: Option<NoteLettering>,
+    /// Which edge of each line stands on the note's point: the lines read on
+    /// from it, are centred on it, or end at it. A note lettered as a drawing
+    /// lettered it keeps its alignment in `lettering`.
+    #[serde(default, skip_serializing_if = "is_left")]
+    pub align: SymbolTextAlign,
 }
 
 impl DesignNote {
@@ -423,7 +442,44 @@ impl DesignNote {
             text_size_percent: STANDARD_TEXT_SIZE_PERCENT,
             anchor_mark_hidden: false,
             lettering: None,
+            align: SymbolTextAlign::Left,
         })
+    }
+
+    /// Which edge of each line stands on the note's point.
+    pub fn alignment(&self) -> SymbolTextAlign {
+        match self.lettering.map(|lettering| lettering.along) {
+            None => self.align,
+            Some(TextEdge::Start) => SymbolTextAlign::Left,
+            Some(TextEdge::Center) => SymbolTextAlign::Center,
+            Some(TextEdge::End) => SymbolTextAlign::Right,
+        }
+    }
+
+    /// The same note with each line aligned `align` on its point.
+    #[must_use]
+    pub fn with_alignment(mut self, align: SymbolTextAlign) -> Self {
+        if let Some(lettering) = self.lettering.as_mut() {
+            lettering.along = match align {
+                SymbolTextAlign::Left => TextEdge::Start,
+                SymbolTextAlign::Center => TextEdge::Center,
+                SymbolTextAlign::Right => TextEdge::End,
+            };
+        } else {
+            self.align = align;
+        }
+        self
+    }
+
+    /// Where a line `width` world units long starts, from the note's point
+    /// along x: past the anchor mark, centred on the point, or ending short
+    /// of the mark.
+    pub fn line_start_world(&self, width: f32) -> f32 {
+        match self.align {
+            SymbolTextAlign::Left => DESIGN_NOTE_TEXT_OFFSET_WORLD.0,
+            SymbolTextAlign::Center => -width * 0.5,
+            SymbolTextAlign::Right => -DESIGN_NOTE_TEXT_OFFSET_WORLD.0 - width,
+        }
     }
 
     /// The same note lettered as a drawing lettered it.
