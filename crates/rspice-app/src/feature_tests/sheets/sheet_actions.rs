@@ -547,3 +547,40 @@ fn moving_a_sheet_publishes_the_whole_order() {
     assert_eq!(entries[0].page, 1, "print order follows catalog order");
     assert_eq!(entries[1].page, 2);
 }
+
+/// A project whose sheet defaults say "Ask in the New Sheet dialog" asks:
+/// New sheet creates nothing yet and opens Design management's New sheet
+/// page, the format step, with the new sheet going after the active one.
+#[test]
+fn under_ask_a_new_sheet_opens_the_format_step_first() {
+    use rspice_app_project::workbench::app::dialogs::design_management::DesignManagementPage;
+    use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+    use rspice_app_state::state::DrawingSheetNewSheetPolicy;
+
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let key = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let designs = &mut app.state.model.workspace.content.design_management;
+    designs
+        .bootstrap_for_cell_view(&key, "Sheet 1", [])
+        .expect("first sheet");
+    let mut settings = designs.drawing_sheet_settings().clone();
+    settings.new_sheet_policy = DrawingSheetNewSheetPolicy::Ask;
+    let revision = designs.revision();
+    designs
+        .update_drawing_sheet_settings(revision, settings)
+        .expect("the policy publishes");
+
+    app.execute_command_key(SheetsCommand::NewSheet.key());
+
+    assert_eq!(sheet_entries(&app.state).len(), 1, "nothing is created yet");
+    let dialog = &app.state.project.design_management;
+    assert!(dialog.open);
+    assert_eq!(dialog.page, DesignManagementPage::NewSheet);
+}

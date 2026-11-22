@@ -399,6 +399,17 @@ impl Request for RevealSheetSection {
     const DRAIN: Drain = Drain::SheetSection;
 }
 
+/// Ask on Design management's New sheet page which drawing sheet a new sheet
+/// is printed on, the new sheet going after the active one. Raised by the
+/// sheets feature's New sheet under the project's "Ask" policy, and taken
+/// straight after the call that raised it.
+#[derive(Clone, Copy, Debug)]
+pub struct AskNewSheetFormat;
+
+impl Request for AskNewSheetFormat {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Put this text on the platform clipboard.
 #[derive(Clone, Debug)]
 pub struct ClipboardText(pub String);

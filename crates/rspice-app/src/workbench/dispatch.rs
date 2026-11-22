@@ -64,12 +64,13 @@ use rspice_app_workbench::workbench::framework::command_registry::{
 use rspice_app_workbench::workbench::framework::feature::{Execute, held_back};
 use rspice_app_workbench::workbench::framework::host::{Host, InspectorScope};
 use rspice_app_workbench::workbench::framework::requests::{
-    self, ApplyPathVariables, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel,
-    ClearSelectedModel, CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid,
-    MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition,
-    OpenSymbolAuthoring, PrintActiveView, ProjectFileAction, PromptAfterCommands,
-    RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter, ShowProjectDeck,
-    ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
+    self, ApplyPathVariables, ApplyWaveformDefaults, ArmPartPlacement, AskNewSheetFormat,
+    BindComponentModel, ClearSelectedModel, CloseForLiveMirror, ConfirmPackAttach, ExportDataset,
+    FollowSchematicGrid, MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor,
+    OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
+    PromptAfterCommands, RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter,
+    ShowProjectDeck, ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms,
+    VoidVerilogAEvidence,
 };
 
 /// Whether the command `key` names runs at once while the focused source
@@ -343,6 +344,11 @@ impl RSpiceApp {
             |app, CommitSheetSection(ctx)| {
                 app.commit_inspector_section(InspectorScope::Document(Workspace::Design), &ctx);
             },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, AskNewSheetFormat| ask_new_sheet_format(&mut app.state),
         );
         requests::drain(
             self,
@@ -679,6 +685,40 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
     );
     state.prompt(text);
     false
+}
+
+/// Open Design management on its New sheet page, the new sheet going after
+/// the active one, so a project that asks for each new sheet's drawing sheet
+/// asks there.
+fn ask_new_sheet_format(state: &mut crate::workbench::AppState) {
+    use rspice_app_project::workbench::app::dialogs::design_management::{
+        DesignManagementPage, DesignManagementTab, open_design_management_on,
+    };
+    use rspice_app_workbench::workbench::routing::{
+        navigation::RouteTransitionSource, surface_catalog::SurfaceId, surface_route::SurfaceRoute,
+    };
+
+    let route = SurfaceRoute::surface(SurfaceId::DesignManagement);
+    if let Err(error) = state.workbench.navigate(route, RouteTransitionSource::User) {
+        state.workbench.prompt(error.to_string());
+        return;
+    }
+    let dialog = &mut state.project.design_management;
+    open_design_management_on(
+        dialog,
+        &mut state.model,
+        &state.platform,
+        &mut state.workbench,
+        DesignManagementTab::Sheets,
+    );
+    if dialog.open {
+        let configurations = state.model.workspace.content.configuration_sets.clone();
+        dialog.reset_inputs_for_page(
+            DesignManagementPage::NewSheet,
+            Some(&configurations),
+            state.model.active_sheet_id(),
+        );
+    }
 }
 
 /// Have the code feature carry out what the netlist page's editor raised,

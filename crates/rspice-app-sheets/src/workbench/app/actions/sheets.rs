@@ -19,6 +19,7 @@ use crate::state::{
 use crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::CanvasGesturePort;
+use crate::workbench::framework::requests::AskNewSheetFormat;
 use crate::workbench::state::WorkbenchSession;
 
 /// One sheet as the navigation surfaces present it.
@@ -152,6 +153,27 @@ pub(in crate::workbench) fn new_sheet_after(
         let outcome =
             second_sheet(model, workbench, gesture).map(|name| format!("Created sheet `{name}`."));
         return workbench.report(outcome);
+    }
+    // A project that asks for each new sheet's drawing sheet asks on Design
+    // management's New sheet page, which puts the sheet after the active one:
+    // the sheet it goes after comes forward first.
+    if model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .new_sheet_policy
+        == DrawingSheetNewSheetPolicy::Ask
+    {
+        if let Some(after) = after
+            && model.active_sheet_id() != Some(after)
+            && let Err(error) =
+                model.activate_sheet(after, |model| gesture.let_go_of_canvas_gesture(model))
+        {
+            return workbench.report(Err(error));
+        }
+        workbench.outbox.push(AskNewSheetFormat);
+        return Ok("Choose the new sheet's drawing sheet.".to_owned());
     }
     match create(model, after) {
         Ok((id, name)) => {
@@ -497,8 +519,9 @@ fn create(model: &mut Model, insert_after: Option<SheetId>) -> Result<(SheetId, 
 }
 
 /// Resolve the drawing sheet a newly created sheet is printed on, under the
-/// project's own new-sheet policy. `Ask` has no reviewer here, so it uses the
-/// remembered explicit format the design manager would have offered first.
+/// project's own new-sheet policy. `Ask` reaches here only when a drawing is
+/// first split into sheets, which Design management's New sheet page does not
+/// do, so it takes the format that page would have offered first.
 fn new_sheet_page_format(
     settings: &crate::state::DrawingSheetProjectSettings,
     catalog: &SheetCatalog,
