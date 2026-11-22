@@ -7,6 +7,7 @@
 //! trailing group has drawn; a chosen reference PVT is committed here.
 
 use crate::state::command_catalog::CommandKey;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::run_preflight;
 use crate::workbench::chrome::toolbar::run_config_chip::{
     RunChipRequest, deck_chip, run_config_selector,
@@ -15,7 +16,7 @@ use crate::workbench::chrome::toolbar::simulate::{
     RunControls, RunEntry, pvt_selector, run_controls,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
-use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::feature::{CodePort, Cx};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 
@@ -123,34 +124,12 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
             ui.ctx().os(),
         ),
     };
-    let primary = entry(primary);
-    // Run runs the deck the code feature names, when it names one; the plan
-    // otherwise. On the Netlist workspace that is the deck tab Run runs;
-    // elsewhere, the project's deck while the deck is the project's
-    // simulation. A deck whose file is missing is named too, and Run waits
-    // until it is found.
-    let code = cx.peers.code();
-    let project_deck = |id| {
-        cx.model
-            .workspace
-            .content
-            .decks
-            .iter()
-            .find(|deck| deck.id == id)
-    };
-    let (unreadable, deck) = if cx.wb.workspace == Workspace::Netlist {
-        let unreadable = code.unreadable_run_deck().and_then(project_deck);
-        let deck = code
-            .manual_deck()
-            .map(|deck| deck.name.to_owned())
-            .or_else(|| unreadable.map(crate::state::ProjectDeck::name));
-        (unreadable, deck)
-    } else {
-        let run_deck = code.project_run_deck(cx.model);
-        let named = run_deck.and_then(|deck| project_deck(deck.id));
-        let unreadable = named.filter(|_| run_deck.is_some_and(|deck| deck.missing));
-        (unreadable, named.map(crate::state::ProjectDeck::name))
-    };
+    let mut primary = entry(primary);
+    let (unreadable, deck) = run_deck(cx.wb.workspace, cx.peers.code(), cx.model);
+    // The menu names what Run runs: a deck is not the active plan.
+    if deck.is_some() && primary.key == SimulateCommand::Run.key() {
+        primary.label = RUN_DECK;
+    }
     let unavailable_reason = (!primary.enabled).then(|| match unreadable {
         Some(deck) if !execution_active => missing_deck_reason(cx, deck),
         _ => unavailable_reason(cx, primary.key, execution_active),
@@ -164,6 +143,49 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
         unavailable_reason,
         deck,
     }
+}
+
+/// What Run reads as wherever it runs a deck: the run menu's entry, the run
+/// history's primary and every list of the commands.
+pub const RUN_DECK: &str = "Run deck";
+
+/// The deck Run runs as the context stands, by its file's name, and the
+/// project's entry for it while that file cannot be read; no name while Run
+/// runs the plan. On the Netlist workspace that is the deck tab Run runs;
+/// elsewhere, the project's deck while the deck is the project's
+/// simulation. A deck whose file is missing is named too, and Run waits
+/// until it is found.
+pub fn run_deck<'m>(
+    workspace: Workspace,
+    code: &dyn CodePort,
+    model: &'m Model,
+) -> (Option<&'m crate::state::ProjectDeck>, Option<String>) {
+    let project_deck = |id| {
+        model
+            .workspace
+            .content
+            .decks
+            .iter()
+            .find(|deck| deck.id == id)
+    };
+    if workspace == Workspace::Netlist {
+        let unreadable = code.unreadable_run_deck().and_then(project_deck);
+        let deck = code
+            .manual_deck()
+            .map(|deck| deck.name.to_owned())
+            .or_else(|| unreadable.map(crate::state::ProjectDeck::name));
+        (unreadable, deck)
+    } else {
+        let run_deck = code.project_run_deck(model);
+        let named = run_deck.and_then(|deck| project_deck(deck.id));
+        let unreadable = named.filter(|_| run_deck.is_some_and(|deck| deck.missing));
+        (unreadable, named.map(crate::state::ProjectDeck::name))
+    }
+}
+
+/// Whether Run runs a deck as the context stands, rather than the plan.
+pub fn runs_deck(workspace: Workspace, code: &dyn CodePort, model: &Model) -> bool {
+    run_deck(workspace, code, model).1.is_some()
 }
 
 /// Why Run cannot run `deck`: its file is not where the project says.

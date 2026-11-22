@@ -785,6 +785,16 @@ impl Host for RSpiceApp {
     }
 
     fn label(&self, key: CommandKey) -> &'static str {
+        // Run names what it runs: a deck is not the active plan.
+        if key == rspice_app_simulate::workbench::simulate::commands::SimulateCommand::Run.key()
+            && rspice_app_simulate::workbench::simulate::chrome::runs_deck(
+                self.state.workbench.workspace,
+                &*self.state.code,
+                &self.state.model,
+            )
+        {
+            return rspice_app_simulate::workbench::simulate::chrome::RUN_DECK;
+        }
         // Update pins names the drawing it takes the pins from, so every
         // place the command is shown says which one.
         if key

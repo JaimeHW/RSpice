@@ -2563,8 +2563,7 @@ mod tests {
             .nodes
             .iter()
             .filter(|(_, node)| {
-                node.role() == egui::accesskit::Role::Button
-                    && node.label() == Some("Run active plan")
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Run deck")
             })
             .filter_map(|(_, node)| {
                 let bounds = node.bounds()?;
@@ -2607,10 +2606,10 @@ mod tests {
         run_history_pass(ctx, app, Vec::new()).expect("the run history draws its primary")
     }
 
-    /// The run history's primary runs what Run would if raised now. On the
-    /// Netlist workspace with a deck in front that is the deck, not the active
-    /// plan: the primary is enabled before any check, and a click checks the
-    /// deck and runs it.
+    /// The run history's primary runs what Run would if raised now, and says
+    /// so. On the Netlist workspace with a deck in front that is the deck, not
+    /// the active plan: the primary reads Run deck, is enabled before any
+    /// check, and a click checks the deck and runs it.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {

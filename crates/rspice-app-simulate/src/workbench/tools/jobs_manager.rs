@@ -361,6 +361,12 @@ impl SimulateFeature {
             "Cancelling…"
         } else if snapshot.running {
             "Stop active run"
+        } else if crate::workbench::simulate::chrome::runs_deck(
+            cx.wb.workspace,
+            cx.peers.code(),
+            cx.model,
+        ) {
+            crate::workbench::simulate::chrome::RUN_DECK
         } else {
             "Run active plan"
         };

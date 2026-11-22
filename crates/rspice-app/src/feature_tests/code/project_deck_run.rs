@@ -3,13 +3,18 @@
 //! never check the schematic the project does not have, and a deck whose
 //! file is missing says so. A project with a design runs its plan.
 
+use egui::accesskit::Role;
+
 use super::netlist_first::netlist_first_app;
 use super::netlist_session::relaunch;
+use crate::feature_tests::replay::Replay;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
-use rspice_app_state::state::SimulationRunIntent;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_state::state::{SimulationPage, SimulationRunIntent};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{CommandAvailability, ids};
+use rspice_app_workbench::workbench::framework::host::Host;
 
 /// The run control as `app` draws it, by its name and whether it is
 /// unavailable; `None` on a workspace whose toolbar carries none, the
@@ -174,6 +179,59 @@ fn a_missing_deck_refuses_run_from_the_project_workspace_with_its_reason() {
     );
 }
 
+/// Run's menu names what Run runs, as the run control does: Run deck, not
+/// the active plan, and no plan options under it. Every list of the
+/// commands names it the same, and what would open or edit a plan is off
+/// and says why.
+#[test]
+fn the_run_menu_reads_run_deck_and_offers_nothing_of_a_plan() {
+    let mut replay = Replay::of(netlist_first_app());
+    replay.app.state.workbench.activate(Workspace::Simulate);
+    replay.frames(Vec::new());
+
+    let menu = replay.click("More run commands", Role::Button);
+    let entries: Vec<&str> = menu
+        .iter()
+        .filter(|control| control.role == Role::Button)
+        .map(|control| control.label.as_str())
+        .collect();
+    assert!(
+        entries
+            .iter()
+            .any(|label| *label == "Run deck" || label.starts_with("Run deck (")),
+        "the menu's first entry runs the deck: {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|label| label.starts_with("Check and netlist")),
+        "the deck is checked as Run would check it: {entries:?}"
+    );
+    for absent in ["Run active plan", "Global solver & convergence"] {
+        assert!(
+            !entries.iter().any(|label| label.starts_with(absent)),
+            "{absent:?} in the run menu: {entries:?}"
+        );
+    }
+
+    assert_eq!(
+        Host::label(&replay.app, SimulateCommand::Run.key()),
+        "Run deck"
+    );
+    for plan in [
+        SimulateCommand::ManagePlans,
+        SimulateCommand::AddAnalysis,
+        SimulateCommand::Options,
+        SimulateCommand::Page(SimulationPage::Analyses),
+    ] {
+        assert_eq!(
+            replay.app.command_availability(plan.key()),
+            CommandAvailability::Disabled("this project runs its deck, not a simulation plan"),
+            "{plan:?}"
+        );
+    }
+}
+
 /// A project with a design runs its plan from the Design workspace, whatever
 /// deck the Netlist workspace holds.
 #[test]
@@ -190,6 +248,10 @@ fn a_project_with_a_design_runs_its_plan() {
     assert!(
         label.starts_with("Run active"),
         "Run names the plan: {label}"
+    );
+    assert_eq!(
+        Host::label(&app, SimulateCommand::Run.key()),
+        "Run active plan"
     );
     app.execute_command_key(ids::RUN_SIMULATION);
 

@@ -92,10 +92,18 @@ impl CommandSet for SimulateCommand {
     /// the analysis catalogue edit the plan catalog through the active plan's
     /// stable identity, so a project whose plan never migrated to it has
     /// nothing to select, nothing to add to, and no dialog worth opening.
-    /// The run history, the solver settings and the pages always run.
+    /// The run history, the solver settings and the pages always run, but
+    /// for a project whose simulation is its deck: it has no plan, so what
+    /// opens or edits one says so instead.
     fn availability(self, reads: &Reads<'_, SimulateFeature>) -> CommandAvailability {
         let simulation = &reads.model.simulation;
+        let runs_its_deck = reads.model.is_netlist_first_without_schematic();
         let (enabled, reason) = match self {
+            Self::ManagePlans | Self::AddAnalysis | Self::Options | Self::Page(_)
+                if runs_its_deck =>
+            {
+                (false, "this project runs its deck, not a simulation plan")
+            }
             Self::Run => (
                 !simulation.execution.has_active_execution()
                     && !simulation.execution.trigger_simulation,

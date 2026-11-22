@@ -243,9 +243,13 @@ pub(in crate::workbench) fn run_controls(
                                 pressed = Some(entry.key);
                             }
                         }
-                        ui.separator();
-                        if run_menu_item(ui, &controls.options) {
-                            pressed = Some(controls.options.key);
+                        // The plan's options are no deck's: a deck states
+                        // its own, on its `.options` cards.
+                        if controls.deck.is_none() {
+                            ui.separator();
+                            if run_menu_item(ui, &controls.options) {
+                                pressed = Some(controls.options.key);
+                            }
                         }
                     })
                 })
