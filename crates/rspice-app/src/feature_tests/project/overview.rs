@@ -196,9 +196,16 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
     let deck = snapshot.deck.as_ref().expect("the deck is the first row");
     assert_eq!(deck.name, "front_end.sp");
     assert_eq!(deck.role, "Deck");
+    // What it is under Views; where its file is under Library, by the folder
+    // holding it, with the whole path on hover.
+    assert_eq!(deck.views, "SPICE deck");
     assert!(
-        deck.views.starts_with("SPICE \u{b7} ") && deck.views.ends_with("front_end.sp"),
-        "the deck row names its file: {deck:?}"
+        deck.library.starts_with("rspice_test_deck_")
+            && deck
+                .library_hint
+                .as_deref()
+                .is_some_and(|path| path.ends_with("front_end.sp")),
+        "the deck row names its folder and file: {deck:?}"
     );
     assert_eq!(
         deck.intent,

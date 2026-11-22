@@ -122,11 +122,15 @@ fn row_cells(row: &CellRowSnapshot, now_ms: u64) -> Vec<Cell> {
         None if row.unsaved => Cell::number("Unsaved").sort_by(SortKey::Number(now_ms as f64)),
         None => Cell::absent().sort_by(SortKey::Missing),
     };
+    let library = Cell::text(&row.library);
     vec![
         // Unsaved is the editor tab's neutral dot, not a warning: nothing is
         // wrong with a cell being edited.
         if row.unsaved { name.unsaved() } else { name },
-        Cell::text(&row.library),
+        match &row.library_hint {
+            Some(hint) => library.hint(hint),
+            None => library,
+        },
         Cell::text(row.role),
         modified,
         Cell::text(&row.views),

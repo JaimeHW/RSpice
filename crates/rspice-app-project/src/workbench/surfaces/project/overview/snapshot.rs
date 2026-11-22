@@ -133,6 +133,9 @@ pub struct ProblemSnapshot {
 pub struct CellRowSnapshot {
     pub name: String,
     pub library: String,
+    /// The Library column's words in full where they are short for more: a
+    /// deck's whole path beside the folder it is in.
+    pub library_hint: Option<String>,
     /// What the cell is to the project: its top, a testbench a configuration
     /// runs, its deck; empty for any other cell.
     pub role: &'static str,
@@ -202,8 +205,9 @@ impl OperationSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SourceDeckSnapshot {
     pub(super) name: String,
-    /// Where the deck's file is, as the project stores it.
-    pub(super) path: String,
+    /// Where the deck's file is, as the project stores it; `None` for a deck
+    /// the project keeps as text.
+    pub(super) path: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -254,8 +258,8 @@ fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
     let deck = model.workspace.content.decks.first()?;
     // A deck the project keeps as text has no path; its row says so.
     let path = match &deck.source {
-        crate::state::DeckSource::File { path } => path.to_string_lossy().into_owned(),
-        crate::state::DeckSource::Stored(_) => "kept in the project".to_owned(),
+        crate::state::DeckSource::File { path } => Some(path.clone()),
+        crate::state::DeckSource::Stored(_) => None,
     };
     Some(SourceDeckSnapshot {
         name: deck.name(),
@@ -263,14 +267,41 @@ fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
     })
 }
 
-/// The deck as the first row of a netlist-first project's Cells table.
+/// The deck as the first row of a netlist-first project's Cells table: what
+/// it is under Views, and where its file is where a cell's library is, by
+/// the folder holding it, the whole path on hover.
 fn deck_row(deck: &SourceDeckSnapshot) -> CellRowSnapshot {
+    // A deck under the project folder is stored relative to it: its folder
+    // as written, or the project's own when it has none. One elsewhere is
+    // named by the folder holding it.
+    let (library, library_hint) = match &deck.path {
+        Some(path) => {
+            let folder = path
+                .parent()
+                .filter(|folder| !folder.as_os_str().is_empty());
+            let library = match folder {
+                None => "Project folder".to_owned(),
+                Some(folder) if path.is_relative() => folder.to_string_lossy().into_owned(),
+                Some(folder) => folder.file_name().map_or_else(
+                    || folder.to_string_lossy().into_owned(),
+                    |name| name.to_string_lossy().into_owned(),
+                ),
+            };
+            (
+                library,
+                Some(crate::workbench::project::dependency_status::shown_path(
+                    path,
+                )),
+            )
+        }
+        None => ("In the project".to_owned(), None),
+    };
     CellRowSnapshot {
         name: deck.name.clone(),
-        library: String::new(),
+        library,
+        library_hint,
         role: "Deck",
-        // What it is and where its file is.
-        views: format!("SPICE \u{b7} {}", deck.path),
+        views: "SPICE deck".to_owned(),
         instances: None,
         unsaved: false,
         saved_ms: None,
@@ -621,6 +652,7 @@ fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
                 CellRowSnapshot {
                     name: cell.name.clone(),
                     library: library.display_name().to_owned(),
+                    library_hint: None,
                     role: if top {
                         "Top"
                     } else if testbench {
