@@ -17,7 +17,7 @@ use serde::Serialize;
 
 use super::*;
 use crate::state::model_library::ModelSourceAuthority;
-use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey};
+use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey, least_width};
 use crate::workbench::design_system::property_row_toned;
 use crate::workbench::project::dependency_status::{
     DependencyKind, DependencyLibrary, DependencyRow, UNSET, dependency_status_key,
@@ -30,8 +30,13 @@ use crate::workbench::project::library_dialogs::library_files::{
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
 
-const DEPENDENCY_SPLIT_BREAKPOINT: f32 = 640.0;
-const DEPENDENCY_LEFT_SHARE: f32 = 0.40;
+/// The technology card's least and most width beside the ledger. Below the
+/// least its values are cut; past the most they have all the room a fact
+/// takes, and the ledger is the side that uses more.
+const TECHNOLOGY_CARD_LEAST: f32 = 360.0;
+const TECHNOLOGY_CARD_MOST: f32 = 560.0;
+/// What the ledger's frame and its scroll bar take beside its columns.
+const LEDGER_CHROME: f32 = 12.0;
 /// Shortest the split panes are ever drawn, so a very short viewport still
 /// opens a readable table rather than seating an action bar under a header.
 const DEPENDENCY_MIN_PANE_HEIGHT: f32 = 260.0;
@@ -106,7 +111,12 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         filtered: !filter.is_empty(),
     };
     let width = visible_workspace_width(ui);
-    if width < DEPENDENCY_SPLIT_BREAKPOINT {
+    // Side by side only while each keeps its least: the ledger every column
+    // at its least, the card its values whole. Narrower, the card stands over
+    // the ledger and both take the whole width, as a property sheet docks
+    // over its list when the window is narrow.
+    let ledger_least = least_width(&ledger_columns()) + LEDGER_CHROME;
+    if width < TECHNOLOGY_CARD_LEAST + 1.0 + ledger_least {
         dependency_pane(ui, width, 0.0, |ui| {
             technology_binding_panel(ui, cx);
             dependency_inventory(ui, cx, &view, width, 0.0);
@@ -114,8 +124,12 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         return;
     }
     let pane_height = visible_workspace_height(ui).max(DEPENDENCY_MIN_PANE_HEIGHT);
-    let left_width = (width * DEPENDENCY_LEFT_SHARE).floor().max(240.0);
-    let right_width = (width - left_width - 1.0).max(320.0);
+    // The card takes what is left beside the ledger's least, up to its most;
+    // the ledger takes the rest.
+    let left_width = (width - 1.0 - ledger_least)
+        .clamp(TECHNOLOGY_CARD_LEAST, TECHNOLOGY_CARD_MOST)
+        .floor();
+    let right_width = width - left_width - 1.0;
     let shown = ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
         dependency_pane(ui, left_width, pane_height, |ui| {
@@ -218,7 +232,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         value_row(ui, "Technology", &binding.display_label());
         value_row(ui, "Model library", binding.model_library());
         let source = shown_path(binding.root_source());
-        value_row(ui, "Main model file", &source);
+        path_row(ui, "Main model file", &source);
         let files = binding.source_closure().len();
         value_row(
             ui,
@@ -237,26 +251,28 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         .as_ref()
         .and_then(crate::state::ProjectTechnologyBinding::pdk_package)
     {
+        // One fact a row, as a property sheet lists them: a row of four
+        // facts is cut at the second.
         value_row(
             ui,
             "PDK package",
-            &format!(
-                "{} \u{00b7} {} \u{00b7} {} nm \u{00b7} {}",
-                pin.package_id(),
-                pin.revision(),
-                pin.process_node_nm(),
-                pin.stack_name()
-            ),
+            &format!("{} {}", pin.package_id(), pin.revision()),
+        );
+        value_row(
+            ui,
+            "Process",
+            &format!("{} nm \u{00b7} {}", pin.process_node_nm(), pin.stack_name()),
         );
         value_row(ui, "Publisher", pin.publisher_id());
         value_row(
             ui,
-            "Package digests",
-            &format!(
-                "manifest {} \u{00b7} archive {}",
-                short_identity(&pin.manifest_digest().to_string()),
-                short_identity(&pin.archive_digest().to_string())
-            ),
+            "Manifest digest",
+            &short_identity(&pin.manifest_digest().to_string()),
+        );
+        value_row(
+            ui,
+            "Archive digest",
+            &short_identity(&pin.archive_digest().to_string()),
         );
     } else {
         property_row_toned(ui, "PDK package", "Not attached", t.color.text_faint);
@@ -324,6 +340,16 @@ fn value_row(ui: &mut Ui, label: &str, value: &str) {
         crate::workbench::design_system::property_row_wrapped(ui, label, value);
     } else {
         property_row(ui, label, value);
+    }
+}
+
+/// [`value_row`] for a path: cut from the middle, so the file it names stays
+/// in view.
+fn path_row(ui: &mut Ui, label: &str, path: &str) {
+    if Tokens::get(ui.ctx()).metrics.is_touch() {
+        crate::workbench::design_system::property_row_wrapped(ui, label, path);
+    } else {
+        crate::workbench::design_system::property_row_path(ui, label, path);
     }
 }
 

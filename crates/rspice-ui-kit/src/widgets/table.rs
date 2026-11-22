@@ -227,6 +227,13 @@ impl Column {
     }
 }
 
+/// The least width `columns` take side by side, each at its least: a table
+/// narrower than this scrolls sideways. A page that lays a table beside
+/// something else gives it this much before it shares out the rest.
+pub fn least_width(columns: &[Column]) -> f32 {
+    columns.iter().map(|column| column.width).sum()
+}
+
 /// The widths `columns` take across `available` points: fixed columns at their
 /// width, the spare shared among the flexible ones by their share. When the
 /// fixed widths and the flexible minimums exceed `available`, every column
