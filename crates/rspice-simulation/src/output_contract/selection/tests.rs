@@ -132,6 +132,48 @@ fn explicit_output_modes_do_not_invent_quantities() {
     }
 }
 
+/// A first run plots something: the output ports when the design has any,
+/// else the nets the drawing names, else, on a small design, every node.
+#[test]
+fn automatic_outputs_plot_ports_else_named_nets_else_every_node() {
+    let plan_id = SimulationPlanId::new();
+    let plotted = |nets: Vec<DesignNet>| {
+        let (outputs, _) = effective_plan_saved_outputs(
+            OutputSelectionMode::Automatic,
+            &[],
+            &[],
+            &root_occurrence(nets),
+            plan_id,
+        )
+        .expect("automatic selection");
+        outputs
+            .into_iter()
+            .filter(|output| output.display_intent == SavedOutputDisplayIntent::Plot)
+            .map(|output| output.source_expression)
+            .collect::<Vec<_>>()
+    };
+    let ground = || output_test_net("0", true, NetClass::Ground, None);
+
+    assert_eq!(
+        plotted(vec![
+            ground(),
+            output_test_net("out", true, NetClass::Signal, None),
+            output_test_net("net1", false, NetClass::Signal, None),
+        ]),
+        vec!["V(out)"],
+        "with no port, the named net"
+    );
+    assert_eq!(
+        plotted(vec![
+            ground(),
+            output_test_net("net1", false, NetClass::Signal, None),
+            output_test_net("net2", false, NetClass::Signal, None),
+        ]),
+        vec!["V(net1)", "V(net2)"],
+        "with nothing named, every node of a small design"
+    );
+}
+
 /// A probe joins the bounded automatic set rather than replacing it, so a
 /// net probed after a run does not take the other nets out of the next one.
 /// A net asked for both ways is saved once, as the probe asked for it; an

@@ -449,12 +449,22 @@ fn automatic_outputs(
         }
     }
 
-    let mut outputs = Vec::with_capacity(candidates.len().min(AUTOMATIC_OUTPUT_HARD_LIMIT));
-    for candidate in candidates.into_iter().take(AUTOMATIC_OUTPUT_HARD_LIMIT) {
-        // The design's own outputs are plotted, and what a plan plots streams while the run
-        // goes, so the plot grows as a transient runs unless the plan turns live delivery off.
-        // A net kept for the data browser alone is not streamed.
-        let plotted = candidate.priority <= 1;
+    candidates.truncate(AUTOMATIC_OUTPUT_HARD_LIMIT);
+    // What the run plots of what it saves: the design's output ports; with no
+    // port, the nets the drawing names; with nothing named, every node of a
+    // small design, the only kind whose unnamed nets are saved. A first run
+    // therefore ends on a curve, as ADE plots its outputs on completion.
+    let plotted_rank = candidates
+        .iter()
+        .map(|candidate| candidate.priority)
+        .min()
+        .map_or(1, |rank| rank.max(1));
+    let mut outputs = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        // What a plan plots streams while the run goes, so the plot grows as a transient runs
+        // unless the plan turns live delivery off. A net kept for the data browser alone is not
+        // streamed.
+        let plotted = candidate.priority <= plotted_rank;
         let mut output = SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
             candidate.spelling.display().to_owned(),
