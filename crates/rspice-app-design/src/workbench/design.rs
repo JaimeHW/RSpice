@@ -901,23 +901,18 @@ impl CommandSet for DesignCommand {
             }
             Self::NextViolation => navigation(cx).cycle_violation(1),
             Self::PreviousViolation => navigation(cx).cycle_violation(-1),
-            // Off leaves the violations on the drawing: hiding them as well
-            // is the visibility dialog's choice.
+            // Off puts back the layer that was on before, the display
+            // options' choice; with none to go back to, the values go and the
+            // check marks stay.
             Self::AnnotateOperatingPoint => {
-                let annotations = &mut cx.state.schematic_visibility.annotations;
-                *annotations = if *annotations == SchematicAnnotationVisibility::OperatingPoint {
-                    SchematicAnnotationVisibility::ViolationsOnly
-                } else {
-                    SchematicAnnotationVisibility::OperatingPoint
-                };
+                toggle_annotation_layer(cx.state, SchematicAnnotationVisibility::OperatingPoint);
             }
             // On, the status bar says which instant the badges read.
             Self::AnnotateTransientVoltages => {
-                let annotations = &mut cx.state.schematic_visibility.annotations;
-                if *annotations == SchematicAnnotationVisibility::TransientVoltages {
-                    *annotations = SchematicAnnotationVisibility::ViolationsOnly;
-                } else {
-                    *annotations = SchematicAnnotationVisibility::TransientVoltages;
+                if toggle_annotation_layer(
+                    cx.state,
+                    SchematicAnnotationVisibility::TransientVoltages,
+                ) {
                     let status =
                         transient_annotation_status(cx.model, cx.peers.results().cursors().a);
                     cx.wb.prompt(status);
@@ -1174,6 +1169,24 @@ fn findings_to_visit(reads: &Reads<'_, DesignFeature>) -> bool {
         .active_design_check_status(facts)
         .current_receipt()
         .is_some_and(|receipt| !receipt.result.violations().is_empty())
+}
+
+/// Turn the annotation `layer` on, remembering the layer it replaces, or off,
+/// putting that layer back. Returns whether it is now on.
+fn toggle_annotation_layer(state: &mut DesignState, layer: SchematicAnnotationVisibility) -> bool {
+    let annotations = &mut state.schematic_visibility.annotations;
+    if *annotations == layer {
+        *annotations = state
+            .annotations_before_toggle
+            .take()
+            .filter(|before| *before != layer)
+            .unwrap_or(SchematicAnnotationVisibility::ViolationsOnly);
+        false
+    } else {
+        state.annotations_before_toggle = Some(*annotations);
+        *annotations = layer;
+        true
+    }
 }
 
 /// Arm `tool` on the schematic, as every placement that is a tool does.

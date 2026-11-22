@@ -969,7 +969,8 @@ fn design_follows_the_view_in_front() {
 }
 
 /// Annotate DC operating point shows the operating point on the schematic
-/// while checked and leaves only the violations drawn while not.
+/// while checked; unchecked, it puts back the layer the display options had
+/// on, or leaves only the check marks when there was none.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn annotate_dc_operating_point_switches_the_schematic_annotation() {
@@ -990,6 +991,23 @@ fn annotate_dc_operating_point_switches_the_schematic_annotation() {
         app.state.design.schematic_visibility.annotations,
         SchematicAnnotationVisibility::OperatingPoint
     );
+
+    // Hidden chosen in the display options comes back when the toggle that
+    // replaced it goes off; so does it after the transient's.
+    for toggle in [key, DesignCommand::AnnotateTransientVoltages.key()] {
+        app.state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
+        app.execute(toggle);
+        assert_ne!(
+            app.state.design.schematic_visibility.annotations,
+            SchematicAnnotationVisibility::Hidden
+        );
+        app.execute(toggle);
+        assert_eq!(
+            app.state.design.schematic_visibility.annotations,
+            SchematicAnnotationVisibility::Hidden,
+            "{toggle:?} off puts Hidden back"
+        );
+    }
 }
 
 /// Merge all windows and Recover off-screen windows are a desktop

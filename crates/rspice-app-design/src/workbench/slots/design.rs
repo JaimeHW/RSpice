@@ -170,6 +170,9 @@ pub struct DesignState {
     /// Device-local schematic display policy. Presentation choices are
     /// restored with the session and are never written to project data.
     pub schematic_visibility: SchematicVisibilityPolicy,
+    /// The annotation layer that was on when Annotate operating point or
+    /// Annotate transient was turned on, which turning it off puts back.
+    pub annotations_before_toggle: Option<crate::state::SchematicAnnotationVisibility>,
     /// Optional drawing-sheet construction detail shown around the permanent
     /// authored paper boundary. Output inclusion remains independently owned
     /// by Print and Export.

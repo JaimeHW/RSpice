@@ -457,7 +457,8 @@ fn copy_as_image_draws_the_selection_or_else_the_view() {
 
 /// Annotate transient voltages is a check-mark row beside the DC one: it
 /// takes the DC operating point's place on the canvas, says in the status bar
-/// which instant it reads (or why there is none), and turns off again.
+/// which instant it reads (or why there is none), and turning it off again
+/// puts back the operating point it took the place of.
 #[test]
 fn annotate_transient_voltages_takes_the_operating_points_place() {
     let mut app = title_test_app();
@@ -486,6 +487,6 @@ fn annotate_transient_voltages_takes_the_operating_points_place() {
     app.execute(transient);
     assert_eq!(
         (app.checked(transient), app.checked(dc)),
-        (Some(false), Some(false))
+        (Some(false), Some(true))
     );
 }
