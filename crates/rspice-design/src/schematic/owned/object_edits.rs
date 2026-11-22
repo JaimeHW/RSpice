@@ -224,6 +224,46 @@ impl Schematic {
         })
     }
 
+    /// Replace every instance `authorities` names with `target`, as one undo
+    /// step. Each replacement is validated against what the ones before it
+    /// left, exactly as one replacement is, and the first refusal leaves the
+    /// drawing as it was: a set replaced in part would be one no review saw.
+    pub fn replace_instances(
+        &mut self,
+        authorities: &[SchematicReplacementAuthority],
+        target: &SchematicReplacementTargetSpec,
+    ) -> Result<DocumentEdit<Vec<SchematicReplacementImpact>>, SchematicReplacementError> {
+        let mut candidate = self.document.clone();
+        let mut impacts = Vec::with_capacity(authorities.len());
+        let mut counters = Vec::new();
+        for authority in authorities {
+            let context = ReplacementContext {
+                selected_component: Some(authority.component_id()),
+                topology_version: self.topology_version,
+            };
+            let replacement =
+                InstanceReplacement::prepare(&mut candidate, context, authority, target)?;
+            impacts.push(replacement.impact());
+            counters.extend(replacement.reference_counter());
+            replacement.commit();
+        }
+        if impacts.is_empty() {
+            return Err(SchematicReplacementError::NoChanges);
+        }
+        let state = self.name_current();
+        self.history
+            .begin(&self.document, Some(state), "replace instances");
+        self.document = candidate;
+        for (prefix, number) in counters {
+            self.identity.record_component_number(prefix, number);
+        }
+        self.invalidate_topology();
+        Ok(DocumentEdit {
+            value: impacts,
+            committed: self.end_operation(),
+        })
+    }
+
     pub fn update_instance_interface<'ports>(
         &mut self,
         component_id: u64,

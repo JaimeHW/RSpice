@@ -40,6 +40,9 @@ pub struct ReplaceInstanceDialogState {
     pub(crate) candidate_libraries: Vec<String>,
     /// What the reader typed to narrow the list.
     pub(crate) query: String,
+    /// Replace every instance of the source's master on the drawing, not
+    /// only the one selected.
+    pub(crate) every_instance: bool,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) replacement_authority: Option<crate::state::SchematicReplacementAuthority>,
     pub(crate) initial_target_identity: String,
@@ -72,6 +75,7 @@ impl ReplaceInstanceDialogState {
             candidates: request.candidates,
             candidate_libraries: request.candidate_libraries,
             query: String::new(),
+            every_instance: false,
             authority: Some(request.authority),
             replacement_authority: Some(request.replacement_authority),
             initial_target_identity: request.initial_target_identity,
@@ -98,7 +102,7 @@ impl ReplaceInstanceDialogState {
 const TITLE: &str = "Replace instance";
 const PRIMARY: &str = "Replace";
 /// The sentence assistive technology reads for the whole form.
-const DESCRIPTION: &str = "Replace the selected instance's master, keeping the pins and authored values the new master can carry.";
+const DESCRIPTION: &str = "Replace the selected instance's master, or every instance of it, keeping the pins and authored values the new master can carry.";
 /// The mapping table's columns: what the current master has, which of the
 /// two it is, and what the replacement makes of it.
 const MAPPING_COLUMNS: [TableColumn<'static>; 3] = [
@@ -131,6 +135,7 @@ struct ValidationCacheKey {
     source_component_id: u64,
     selected_component_id: Option<u64>,
     query: String,
+    every_instance: bool,
     dirty: bool,
     preview_error: Option<String>,
     schematic_edit_read_only: bool,
@@ -388,6 +393,18 @@ impl ReplaceInstance<'_> {
             .as_ref()
             .and_then(|evidence| dropped_parameter_consequence(evidence.dropped_parameters));
         let table = evidence.as_ref().map(ReplacementEvidence::table);
+        // Every instance of the master, as KiCad's Change Symbols and
+        // Virtuoso's Replace offer beside the selected one.
+        let others = other_instances(self.model, self.dialog.source_component_id).len();
+        let every_instance = self
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == self.dialog.source_component_id)
+            .map(|source| format!("All {} instances of {}", others + 1, master_name(source)))
+            .unwrap_or_default();
         let dialog = &mut *self.dialog;
         let groups = candidate_groups(&dialog.candidate_libraries);
         let select_groups = groups
@@ -409,6 +426,17 @@ impl ReplaceInstance<'_> {
             .consequence(consequence.as_deref())
             .show(ctx, |rows| {
                 rows.value("Current", &dialog.current);
+                if others > 0 {
+                    let mut scope = usize::from(dialog.every_instance);
+                    if rows.choice(
+                        "Instances",
+                        &["This instance", every_instance.as_str()],
+                        &mut scope,
+                    ) {
+                        dialog.every_instance = scope == 1;
+                        dialog.preview_error = None;
+                    }
+                }
                 // A searchable list grouped by library, as KiCad's Change
                 // Symbol opens its chooser: a catalog of every library cell
                 // is too long to scroll.
@@ -449,6 +477,10 @@ impl ReplaceInstance<'_> {
         let Some(authority) = self.dialog.replacement_authority.clone() else {
             return;
         };
+        if self.dialog.every_instance {
+            self.commit_every_instance(&authority, &resolved);
+            return;
+        }
         match self
             .model
             .schematic
@@ -467,21 +499,10 @@ impl ReplaceInstance<'_> {
                         || "the instance".to_owned(),
                         |component| component.name.clone(),
                     );
-                let connections = impact.preserved_connections;
-                let parameters = impact.preserved_parameters;
                 self.workbench.prompt(format!(
-                    "Replaced {replaced} with {}; {connections} {} and {parameters} {} kept.",
+                    "Replaced {replaced} with {}; {}",
                     resolved.display,
-                    if connections == 1 {
-                        "connection"
-                    } else {
-                        "connections"
-                    },
-                    if parameters == 1 {
-                        "parameter value"
-                    } else {
-                        "parameter values"
-                    },
+                    kept(impact.preserved_connections, impact.preserved_parameters),
                 ));
                 self.dialog.close();
             }
@@ -490,6 +511,55 @@ impl ReplaceInstance<'_> {
             }
         }
     }
+
+    /// Replace the source and every other instance of its master as one
+    /// undo step, each validated as it stands now.
+    fn commit_every_instance(
+        &mut self,
+        source: &SchematicReplacementAuthority,
+        resolved: &ResolvedReplacement,
+    ) {
+        let master = master_name(source.source_component()).to_owned();
+        let outcome =
+            every_instance_authorities(self.registry, self.model, source).and_then(|authorities| {
+                self.model
+                    .schematic
+                    .replace_instances(&authorities, &resolved.target)
+                    .map_err(|error| error.to_string())
+            });
+        match outcome {
+            Ok(impacts) => {
+                sync_active_schematic(self.model, self.workbench);
+                let connections = impacts.iter().map(|impact| impact.preserved_connections);
+                let parameters = impacts.iter().map(|impact| impact.preserved_parameters);
+                self.workbench.prompt(format!(
+                    "Replaced {} instances of {master} with {}; {}",
+                    impacts.len(),
+                    resolved.display,
+                    kept(connections.sum(), parameters.sum()),
+                ));
+                self.dialog.close();
+            }
+            Err(error) => self.dialog.preview_error = Some(error),
+        }
+    }
+}
+
+/// What a replacement kept, as the end of its status line.
+fn kept(connections: usize, parameters: usize) -> String {
+    format!(
+        "{connections} {} and {parameters} {} kept.",
+        if connections == 1 {
+            "connection"
+        } else {
+            "connections"
+        },
+        if parameters == 1 {
+            "parameter value"
+        } else {
+            "parameter values"
+        },
+    )
 }
 
 fn validate_draft(
@@ -521,7 +591,13 @@ fn validate_draft(
                 .to_owned(),
         );
     }
-    let validation = resolve_replacement(registry, model, authority, &draft.replacement);
+    let validation = resolve_replacement(
+        registry,
+        model,
+        authority,
+        &draft.replacement,
+        draft.every_instance,
+    );
     if !draft.dirty
         && let ReplacementValidation::Valid(resolved) = &validation
     {
@@ -550,6 +626,7 @@ fn validation_for_repaint(
         source_component_id: draft.source_component_id,
         selected_component_id: model.schematic.session.editor.selection.single_component(),
         query: draft.replacement.trim().to_ascii_lowercase(),
+        every_instance: draft.every_instance,
         dirty: draft.dirty,
         preview_error: draft.preview_error.clone(),
         schematic_edit_read_only: model.schematic_edit_read_only(),
@@ -583,6 +660,7 @@ fn resolve_replacement(
     model: &Model,
     authority: &SchematicReplacementAuthority,
     authored: &str,
+    every_instance: bool,
 ) -> ReplacementValidation {
     let catalog = instance_catalog(registry, model);
     let entry = match resolve_instance_catalog_entry(&catalog, authored) {
@@ -606,7 +684,19 @@ fn resolve_replacement(
         Ok(preview) => preview,
         Err(error) => return ReplacementValidation::Invalid(error.to_string()),
     };
-    if let Err(refusal) = validate_downstream(model, authority, &target) {
+    let downstream = if every_instance {
+        // Every instance is checked as the commit will make it: all of them
+        // replaced together, each against what the ones before it left.
+        match every_instance_authorities(registry, model, authority) {
+            Ok(authorities) => validate_downstream_with(model, |candidate| {
+                candidate.replace_instances(&authorities, &target).map(drop)
+            }),
+            Err(error) => return ReplacementValidation::Invalid(error),
+        }
+    } else {
+        validate_downstream(model, authority, &target)
+    };
+    if let Err(refusal) = downstream {
         return ReplacementValidation::Invalid(refusal.message());
     }
     ReplacementValidation::Valid(Box::new(ResolvedReplacement {
@@ -971,10 +1061,24 @@ fn validate_downstream(
     authority: &SchematicReplacementAuthority,
     target: &SchematicReplacementTargetSpec,
 ) -> Result<(), DownstreamRefusal> {
+    validate_downstream_with(model, |candidate| {
+        candidate
+            .replace_selected_instance(authority, target)
+            .map(drop)
+    })
+}
+
+/// [`validate_downstream`] for the drawing `replace` makes of a copy of the
+/// open one.
+fn validate_downstream_with(
+    model: &Model,
+    replace: impl FnOnce(
+        &mut crate::state::SchematicState,
+    ) -> Result<(), crate::state::SchematicReplacementError>,
+) -> Result<(), DownstreamRefusal> {
     let refused = |kind, message: String| DownstreamRefusal { kind, message };
     let mut candidate = model.schematic.clone();
-    candidate
-        .replace_selected_instance(authority, target)
+    replace(&mut candidate)
         .map_err(|error| refused(NoReplacement::LosesConnections, error.to_string()))?;
 
     let baseline_hierarchy = model.workspace.resolve_hierarchy_with_active(
@@ -1082,12 +1186,64 @@ fn generate_candidate_netlist(
 }
 
 fn current_display(component: &Component) -> String {
-    let master = component
+    format!("{} \u{00b7} {}", component.name, master_name(component))
+}
+
+/// The name a placed part's master is read by: its cell, or its kind.
+fn master_name(component: &Component) -> &str {
+    component
         .library_cell
         .as_ref()
         .map(|binding| binding.cell.as_str())
-        .unwrap_or_else(|| component.kind.display_name());
-    format!("{} \u{00b7} {master}", component.name)
+        .unwrap_or_else(|| component.kind.display_name())
+}
+
+/// Whether two placed parts are instances of one master: the same kind and
+/// symbol, and, bound to a library cell, the same cell view of it.
+fn same_master(a: &Component, b: &Component) -> bool {
+    a.kind == b.kind
+        && a.symbol_variant == b.symbol_variant
+        && match (&a.library_cell, &b.library_cell) {
+            (Some(a), Some(b)) => a.library == b.library && a.cell == b.cell && a.view == b.view,
+            (None, None) => true,
+            _ => false,
+        }
+}
+
+/// The drawing's other instances of `source_id`'s master, in drawing order.
+fn other_instances(model: &Model, source_id: u64) -> Vec<&Component> {
+    let components = &model.schematic.document().components;
+    let Some(source) = components
+        .iter()
+        .find(|component| component.id == source_id)
+    else {
+        return Vec::new();
+    };
+    components
+        .iter()
+        .filter(|component| component.id != source_id && same_master(source, component))
+        .collect()
+}
+
+/// The authority every instance replaced together needs: the reviewed
+/// source's own first, then each other instance of its master's, as it
+/// stands now.
+fn every_instance_authorities(
+    registry: &PropertyEditorSchema,
+    model: &Model,
+    source: &SchematicReplacementAuthority,
+) -> Result<Vec<SchematicReplacementAuthority>, String> {
+    let mut authorities = vec![source.clone()];
+    for other in other_instances(model, source.component_id()) {
+        let authority = authored_source_spec(registry, model, other).and_then(|spec| {
+            model
+                .schematic
+                .replacement_authority_for(other.id, spec)
+                .map_err(|error| error.to_string())
+        });
+        authorities.push(authority.map_err(|error| format!("{}: {error}", other.name))?);
+    }
+    Ok(authorities)
 }
 
 #[cfg(test)]
@@ -1254,6 +1410,62 @@ pub(crate) mod tests {
             "{prompt}"
         );
         assert!(!prompt.contains("primitive/"), "{prompt}");
+    }
+
+    /// Every instance of the master is replaced at once when the reader asks
+    /// for it, and the whole replacement is one step of the history.
+    #[test]
+    fn every_instance_of_the_master_is_replaced_as_one_undo_step() {
+        let mut state = placed_source("");
+        state
+            .model
+            .schematic
+            .add_component(ComponentType::VoltageSource, Point::new(200, 0));
+        let masters = |state: &DesignTestHost| {
+            state
+                .model
+                .schematic
+                .document()
+                .components
+                .iter()
+                .map(|component| (component.kind, component.library_cell.clone()))
+                .collect::<Vec<_>>()
+        };
+        let before = masters(&state);
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
+        assert_eq!(
+            other_instances(
+                &state.model,
+                state.design.replace_instance.source_component_id
+            )
+            .len(),
+            1
+        );
+        state.design.replace_instance.every_instance = true;
+        let replacement = state.design.replace_instance.replacement.clone();
+        ReplaceInstance {
+            dialog: &mut state.design.replace_instance,
+            registry: &state.design.property_registry,
+            model: &mut state.model,
+            workbench: &mut state.workbench,
+        }
+        .commit_instance_replacement();
+
+        let prompt = state.prompt_text().unwrap_or_default().to_owned();
+        assert!(
+            prompt.starts_with(&format!("Replaced 2 instances of V DC with {replacement};")),
+            "{prompt}"
+        );
+        let after = masters(&state);
+        assert_ne!(after[0], before[0]);
+        assert_eq!(after[0], after[1], "both stand on the new master");
+        assert!(state.model.schematic.undo());
+        assert_eq!(masters(&state), before, "one undo puts both back");
     }
 
     #[test]

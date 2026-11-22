@@ -55,6 +55,45 @@ impl SchematicState {
         )
     }
 
+    /// [`Self::replacement_authority_with_spec`] for `component_id` whether or
+    /// not it is the one selected: the authority each other instance of a
+    /// master needs when every instance of it is replaced together.
+    pub fn replacement_authority_for(
+        &self,
+        component_id: u64,
+        source_spec: SchematicReplacementSourceSpec,
+    ) -> Result<SchematicReplacementAuthority, SchematicReplacementError> {
+        if self.session.read_only {
+            return Err(SchematicReplacementError::ReadOnly);
+        }
+        replacement_edit::replacement_authority_with_spec(
+            self.design.document(),
+            ReplacementContext {
+                selected_component: Some(component_id),
+                topology_version: self.topology_version(),
+            },
+            source_spec,
+        )
+    }
+
+    /// Replace every instance `authorities` names with `target` as one undo
+    /// step, or none of them.
+    pub fn replace_instances(
+        &mut self,
+        authorities: &[SchematicReplacementAuthority],
+        target: &SchematicReplacementTargetSpec,
+    ) -> Result<Vec<SchematicReplacementImpact>, SchematicReplacementError> {
+        if self.session.read_only {
+            return Err(SchematicReplacementError::ReadOnly);
+        }
+        let edit = self.design.replace_instances(authorities, target)?;
+        self.finish_document_edit(edit.committed);
+        if !edit.committed {
+            return Err(SchematicReplacementError::CommitFailed);
+        }
+        Ok(edit.value)
+    }
+
     /// Analyze the exact candidate against current selection and topology.
     pub fn preview_instance_replacement(
         &self,
