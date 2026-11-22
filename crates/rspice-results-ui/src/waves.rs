@@ -26,6 +26,7 @@ pub mod lanes;
 pub mod logic;
 pub mod marker_dialog;
 pub mod navigation;
+pub mod notes;
 pub mod pane;
 mod plot_menu;
 mod policy;

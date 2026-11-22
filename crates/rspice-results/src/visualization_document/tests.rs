@@ -2779,3 +2779,66 @@ fn a_measurement_changes_its_definition_and_its_place() {
         serde_json::from_value(serde_json::to_value(&document).unwrap()).unwrap();
     assert_eq!(decoded.measurements(), document.measurements());
 }
+
+/// A note stands on a point of the data, or on a place in the frame of one
+/// strip of the pane, and keeps it through a save and a load; a point off
+/// the axes is refused.
+#[test]
+fn a_note_on_a_point_of_the_data_or_a_strips_frame_keeps_its_place_through_a_save() {
+    let (mut document, _) = document();
+    let pane = document.panes()[0].id;
+    let on_data = AnnotationAnchor::Data {
+        x: 0.25,
+        y: 1.5,
+        unit: "V".to_owned(),
+    };
+    let in_frame = AnnotationAnchor::Pane {
+        x_fraction: 0.5,
+        y_fraction: 0.25,
+        unit: Some("A".to_owned()),
+    };
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::AddAnnotation {
+                    pane_id: pane,
+                    anchor: on_data.clone(),
+                    text: "Overshoot".to_owned(),
+                },
+                DocumentEdit::AddAnnotation {
+                    pane_id: pane,
+                    anchor: in_frame.clone(),
+                    text: "Supply".to_owned(),
+                },
+            ],
+        )
+        .unwrap();
+    let saved = serde_json::to_string(&document).unwrap();
+    let loaded: VisualizationDocument = serde_json::from_str(&saved).unwrap();
+    let anchors: Vec<_> = loaded
+        .annotations()
+        .iter()
+        .map(|note| note.anchor.clone())
+        .collect();
+    assert_eq!(anchors, vec![on_data, in_frame]);
+    let refused = document.transact(
+        document.revision(),
+        vec![DocumentEdit::AddAnnotation {
+            pane_id: pane,
+            anchor: AnnotationAnchor::Data {
+                x: f64::INFINITY,
+                y: 0.0,
+                unit: String::new(),
+            },
+            text: "Lost".to_owned(),
+        }],
+    );
+    assert!(matches!(
+        refused,
+        Err(VisualizationError::InvalidValue {
+            field: "annotation.anchor",
+            ..
+        })
+    ));
+}

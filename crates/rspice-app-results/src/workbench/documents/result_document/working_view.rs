@@ -24,9 +24,9 @@ use rspice_results_ui::waves::lanes::EventLaneLayout;
 
 use crate::product::{DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{
-    AxisOrientation, AxisScale, DocumentEdit, EntityRef, NewAxis, PaneId, ResultDocumentTracking,
-    ResultDocumentTrackingMode, SourceDataset, Strip, TypedValue, VisualizationDocument,
-    WorkingPane, WorkingViewSource,
+    AnnotationAnchor, AxisOrientation, AxisScale, DocumentEdit, EntityRef, NewAxis, PaneId,
+    ResultDocumentTracking, ResultDocumentTrackingMode, SourceDataset, Strip, TypedValue,
+    VisualizationDocument, WorkingPane, WorkingViewSource,
 };
 use crate::state::SimulationRun;
 use crate::ui::plot::XScale;
@@ -1653,6 +1653,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         None => HashMap::new(),
     };
     let mut markers = Vec::new();
+    let mut notes = Vec::new();
     for &(index, key, pane_id) in &panes {
         let analysis = &run.analyses[index];
         let Some(pane) = document.panes().iter().find(|pane| pane.id == pane_id) else {
@@ -1833,6 +1834,22 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
                 note: super::marker_note(&marker.label, &trace.label),
             });
         }
+        // A note is taken with the trace it stands on, to be drawn once
+        // the strip models can be read.
+        for annotation in document
+            .annotations()
+            .iter()
+            .filter(|annotation| annotation.pane_id == pane_id)
+        {
+            let trace = match &annotation.anchor {
+                AnnotationAnchor::Trace { trace_id, .. } => document
+                    .trace(*trace_id)
+                    .filter(|trace| trace.pane_id == pane_id)
+                    .cloned(),
+                _ => None,
+            };
+            notes.push((index, key, pane_id, annotation.clone(), trace));
+        }
     }
     // A marker's anchor is read through the strip models, which may be
     // built as it is read, once every pane is drawn. A marker on a trace
@@ -1863,8 +1880,20 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
             note: marker.note,
         });
     }
+    // A note on a trace stands on its drawn curve, read through the strip
+    // models as a marker's anchor is, once every pane is drawn.
+    let notes: Vec<_> = notes
+        .into_iter()
+        .filter_map(|(index, key, pane_id, annotation, trace)| {
+            let trace: Vec<_> = trace.iter().collect();
+            super::notes::document_note((view, pane_id, key), &annotation, &trace, |trace| {
+                super::waves::source_waveform_anchor_in(state, index, trace_signal(trace))
+            })
+        })
+        .collect();
     let session = &mut state.results.session;
     session.project_document_markers(anchored);
+    session.project_document_notes(notes);
     session.working_view_panes = panes
         .iter()
         .map(|&(_, analysis, pane_id)| PersistentPaneContext {

@@ -17,7 +17,7 @@ use rspice_results::{
         ResultArtifactPresentationKey, ResultViewer, SourceWaveformPresentationKey,
         WavePanePresentationKey, WaveformPresentationKey, viewer_uses_wave_stack,
     },
-    visualization_document::{MarkerId, PaneId},
+    visualization_document::{AnnotationId, MarkerId, PaneId},
 };
 use rspice_ui_kit::plot::{CursorId, CursorPair, DecimationCache};
 use rspice_vocabulary::product::{DatasetId, ResultDocumentId};
@@ -134,6 +134,70 @@ pub struct DocumentMarker {
     pub x: f64,
     pub kind: MarkerKind,
     pub note: String,
+}
+
+/// Where one note lives: the view that keeps it, the pane, and the view's
+/// own serial for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoteSelector {
+    pub document_id: ResultDocumentId,
+    pub pane_id: PaneId,
+    pub note_id: AnnotationId,
+}
+
+/// Per-frame projection of the notes the view being drawn keeps, as
+/// [`DocumentMarker`] is of its markers: rebuilt every frame, never saved.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentNote {
+    pub document_id: ResultDocumentId,
+    pub pane_id: PaneId,
+    pub retained_id: AnnotationId,
+    /// The strip the note is written on.
+    pub analysis: AnalysisPresentationKey,
+    pub anchor: NoteAnchor,
+    pub text: String,
+}
+
+impl DocumentNote {
+    pub fn selector(&self) -> NoteSelector {
+        NoteSelector {
+            document_id: self.document_id,
+            pane_id: self.pane_id,
+            note_id: self.retained_id,
+        }
+    }
+}
+
+/// What a note stands on.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NoteAnchor {
+    /// A place in the frame of the strip whose first axis reads `unit` (the
+    /// analysis' first strip when `None`), as shares of its width and height
+    /// from its top left: it stays put as the view zooms and pans.
+    Frame {
+        unit: Option<String>,
+        x: f32,
+        y: f32,
+    },
+    /// The point of a curve at `x`, which follows the curve through a zoom,
+    /// a pan and a re-run.
+    Trace {
+        anchor: WaveformPresentationKey,
+        trace_name: String,
+        x: f64,
+    },
+    /// A point of the data, `y` read on the axis of `unit`: it moves with
+    /// the axes and stays where it is when the curves move.
+    Data { unit: String, x: f64, y: f64 },
+}
+
+/// A note being written where it stands; one being added has no `note` yet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteDraft {
+    pub analysis: AnalysisPresentationKey,
+    pub note: Option<NoteSelector>,
+    pub anchor: NoteAnchor,
+    pub text: String,
 }
 
 /// One marker to draw or list.
@@ -746,6 +810,11 @@ pub struct ResultViewerState {
     /// Transient by construction — it is a projection of retained document
     /// entities, never a second owner of them, and is never serialized.
     pub document_markers: Vec<DocumentMarker>,
+    /// Notes of the views being drawn, projected as `document_markers` are:
+    /// rebuilt every frame, never saved.
+    pub document_notes: Vec<DocumentNote>,
+    /// The note being written where it stands, if any.
+    pub note_draft: Option<NoteDraft>,
     /// The A│B cursor tool.
     pub cursor_tool: CursorTool,
     /// Polar sheet controls: the network term, the radius ruling, the decade
@@ -1151,6 +1220,35 @@ impl ResultViewerState {
         }
     }
 
+    /// Replace the notes drawn with those of the view being drawn.
+    pub fn project_document_notes(&mut self, notes: Vec<DocumentNote>) {
+        self.document_notes = notes;
+        if let Some(note) = self.note_draft.as_ref().and_then(|draft| draft.note)
+            && !self
+                .document_notes
+                .iter()
+                .any(|kept| kept.selector() == note)
+        {
+            // The note vanished under the field: nothing is left to write to.
+            self.note_draft = None;
+        }
+    }
+
+    /// Notes on one strip: those of the view that keeps the strip, verified
+    /// against its pane as [`Self::strip_markers`] does.
+    pub fn strip_notes(
+        &self,
+        analysis: AnalysisPresentationKey,
+    ) -> impl Iterator<Item = &DocumentNote> {
+        let pane = self.pane_for(analysis);
+        self.document_notes.iter().filter(move |note| {
+            note.analysis == analysis
+                && pane.is_some_and(|context| {
+                    context.document_id == note.document_id && context.pane_id == note.pane_id
+                })
+        })
+    }
+
     /// One retained overlay marker by its document serial.
     pub fn document_marker(&self, marker_id: MarkerId) -> Option<&DocumentMarker> {
         self.document_markers
@@ -1374,6 +1472,7 @@ impl ResultViewerState {
         }
         self.persistent_pane_context = None;
         self.document_markers.clear();
+        self.document_notes.clear();
         self.document_presentation = None;
     }
 

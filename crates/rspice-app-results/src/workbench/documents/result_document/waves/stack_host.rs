@@ -110,6 +110,16 @@ impl StackHost for WaveStackHost<'_, '_> {
     fn refuse(&mut self, reason: String) {
         self.0.prompt(reason);
     }
+    fn offers_notes(&self, model: &StripModel) -> bool {
+        self.0
+            .results
+            .session
+            .pane_for(model.analysis_key)
+            .is_some()
+    }
+    fn edit_note(&mut self, _model: &StripModel, edit: rspice_results_ui::waves::notes::NoteEdit) {
+        super::super::notes::edit_note(self.0, edit);
+    }
     fn send_to_calculator(&mut self, model: &StripModel, trace: &StripTrace) {
         run_on_trace(
             self.0,

@@ -346,6 +346,7 @@ pub(super) fn validate_annotation(
         AnnotationAnchor::Pane {
             x_fraction,
             y_fraction,
+            ..
         } if !x_fraction.is_finite()
             || !y_fraction.is_finite()
             || !(0.0..=1.0).contains(x_fraction)
@@ -367,6 +368,25 @@ pub(super) fn validate_annotation(
             } else {
                 Err(VisualizationError::InterpolationRequired)
             }
+        }
+        AnnotationAnchor::Data { x, y, .. } if !x.is_finite() || !y.is_finite() => {
+            Err(VisualizationError::InvalidValue {
+                field: "annotation.anchor",
+                message: "data coordinates must be finite".to_owned(),
+            })
+        }
+        AnnotationAnchor::Pane {
+            unit: Some(unit), ..
+        }
+        | AnnotationAnchor::Data { unit, .. }
+            if unit.len() > MAX_UNIT_AXIS_BYTES || unit.chars().any(char::is_control) =>
+        {
+            Err(VisualizationError::InvalidValue {
+                field: "annotation.anchor",
+                message: format!(
+                    "the unit must be control-free and at most {MAX_UNIT_AXIS_BYTES} bytes"
+                ),
+            })
         }
         _ => Ok(()),
     }

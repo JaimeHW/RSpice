@@ -32,8 +32,8 @@ pub(crate) enum PlotChoice {
     Cursor(CursorId),
     /// Put a marker on this curve at the X clicked.
     Marker(usize),
-    /// Add a note at the point clicked.
-    Note,
+    /// Add a note at the point clicked, or on this curve at the X clicked.
+    Note(Option<usize>),
     /// Fit every axis of the strip, and the shared X, to the curves again.
     Fit,
     /// Copy what the readout reads at the X clicked.
@@ -75,8 +75,20 @@ pub(crate) fn show(
         pick(ui, &marker, PlotChoice::Marker(index), &mut chosen);
     }
     if offers.notes {
-        let response = ui.button("Add note here");
-        pick(ui, &response, PlotChoice::Note, &mut chosen);
+        let response = ui
+            .button("Add note here")
+            .on_hover_text("Write a note at this point of the axes");
+        pick(ui, &response, PlotChoice::Note(None), &mut chosen);
+        let on_curve = ui
+            .add_enabled(nearest.is_some(), egui::Button::new("Add note on curve"))
+            .on_disabled_hover_text(no_curve);
+        if let (Some(index), Some(trace)) = (place.trace, nearest) {
+            let on_curve = on_curve.on_hover_text(format!(
+                "Write a note on {} at the X clicked, which follows the curve",
+                trace.name
+            ));
+            pick(ui, &on_curve, PlotChoice::Note(Some(index)), &mut chosen);
+        }
     }
     ui.separator();
     let response = ui

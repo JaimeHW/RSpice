@@ -619,6 +619,7 @@ pub(super) fn canonical_annotation_semantics(
         AnnotationAnchor::Pane {
             x_fraction,
             y_fraction,
+            ..
         } => {
             let x_fraction = f64::from(*x_fraction).clamp(0.0, 1.0);
             let y_fraction = f64::from(*y_fraction).clamp(0.0, 1.0);
@@ -653,6 +654,12 @@ pub(super) fn canonical_annotation_semantics(
                     .and_then(|(x, y)| semantic_position_in_scene(scene, x, y).ok()),
             )
         }
+        AnnotationAnchor::Data { x, y, .. } => (
+            None,
+            Some(*x),
+            Some(*y),
+            semantic_position_in_scene(scene, *x, *y).ok(),
+        ),
     };
     SemanticPlotAnnotation {
         annotation_id: annotation.id.get(),

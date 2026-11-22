@@ -238,6 +238,106 @@ fn a_working_view_keeps_the_readers_changes_through_a_rerun_a_restart_and_a_reop
     assert_kept(&state, rerun, "after a save and reopen");
 }
 
+/// The two notes on the quick view of `analysis`: one on the output's curve
+/// at X 0.5, wherever a re-run takes the curve, and one at a point of the
+/// axes.
+fn assert_notes(state: &AppState, analysis: AnalysisPresentationKey, phase: &str) {
+    use rspice_results_ui::session::NoteAnchor;
+    let notes: Vec<_> = state
+        .results
+        .results
+        .session
+        .document_notes
+        .iter()
+        .filter(|note| note.analysis == analysis)
+        .map(|note| (note.text.as_str(), &note.anchor))
+        .collect();
+    assert_eq!(notes.len(), 2, "{phase}: both notes stay: {notes:?}");
+    assert!(
+        matches!(
+            notes[0],
+            ("Peak", NoteAnchor::Trace { trace_name, x, .. }) if trace_name == "V(out)" && *x == 0.5
+        ),
+        "{phase}: the note on the curve stays on it: {notes:?}"
+    );
+    assert_eq!(
+        notes[1],
+        (
+            "Knee",
+            &NoteAnchor::Data {
+                unit: "V".to_owned(),
+                x: 0.25,
+                y: 0.75,
+            }
+        ),
+        "{phase}: the note on the axes stays at its point"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_note_keeps_its_place_through_a_zoom_a_rerun_and_a_restart() {
+    use rspice_app_results::workbench::documents::result_document::notes::edit_note;
+    use rspice_results_ui::session::NoteAnchor;
+    use rspice_results_ui::waves::notes::NoteEdit;
+
+    let host = state_with_current_clean_drc();
+    let mut state = AppState::default();
+    state.model = host.model;
+    state.runs = host.runs;
+    state.workbench.activate(Workspace::Results);
+
+    run_plan(&mut state, FIRST_OUT);
+    let first = show_newest(&mut state);
+    quick_frame(&mut state);
+    let (analysis, anchor) =
+        source_waveform_anchor(&mut state.results_parts(), "V(out)").expect("V(out) is drawn");
+    assert_eq!(analysis, first);
+    let on_curve = NoteAnchor::Trace {
+        anchor,
+        trace_name: "V(out)".to_owned(),
+        x: 0.5,
+    };
+    let on_axes = NoteAnchor::Data {
+        unit: "V".to_owned(),
+        x: 0.25,
+        y: 0.75,
+    };
+    for (anchor, text) in [(on_curve, "Peak"), (on_axes, "Knee")] {
+        edit_note(
+            &mut state.results_parts(),
+            NoteEdit::Add {
+                analysis,
+                anchor,
+                text: text.to_owned(),
+            },
+        );
+    }
+    quick_frame(&mut state);
+    assert_notes(&state, first, "as written");
+
+    rspice_results_ui::waves::stack::set_shared_x_view(
+        &mut state.results.results.session,
+        first,
+        Some((0.375, 0.625)),
+    );
+    quick_frame(&mut state);
+    assert_notes(&state, first, "after a zoom");
+
+    run_plan(&mut state, RERUN_OUT);
+    let rerun = show_newest(&mut state);
+    quick_frame(&mut state);
+    assert_notes(&state, rerun, "after the re-run");
+
+    let mut storage = super::two_windows::MemoryStorage::default();
+    state.store_session(&mut storage);
+    drop(state);
+    let mut state = AppState::restore_eframe_session(&storage).expect("the session restores");
+    let rerun = show_newest(&mut state);
+    quick_frame(&mut state);
+    assert_notes(&state, rerun, "after a restart");
+}
+
 /// The view of `state`'s plan, which every run of it is drawn through.
 fn plan_view(state: &AppState) -> rspice_app_state::product::ResultDocumentId {
     let run = state.model.simulation.active_run().expect("a shown run");

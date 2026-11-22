@@ -1640,6 +1640,16 @@ where
     BoundedString::<MAX_UNIT_AXIS_BYTES>::deserialize(deserializer).map(|value| value.0)
 }
 
+fn deserialize_optional_unit_axis_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<BoundedString<MAX_UNIT_AXIS_BYTES>>::deserialize(deserializer)
+        .map(|value| value.map(|value| value.0))
+}
+
 /// One row of a pane's event-lane stack.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -2208,16 +2218,37 @@ where
         .map(|value| value.map(|value| value.0))
 }
 
+/// What an annotation stands on.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "kind", content = "value")]
 pub enum AnnotationAnchor {
+    /// A place in the pane's frame, as shares of its width and height from
+    /// its top left: it stays put as the view zooms and pans.
     Pane {
         x_fraction: f32,
         y_fraction: f32,
+        /// The strip of a pane of several whose frame it is in, by the unit
+        /// of the strip's first axis; the pane's first strip when absent.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_optional_unit_axis_string"
+        )]
+        unit: Option<String>,
     },
+    /// The point of a trace at `coordinate`, which follows the trace.
     Trace {
         trace_id: TraceId,
         coordinate: TypedValue,
+    },
+    /// A point of the pane's data: `x` on its abscissa and `y` on the axis
+    /// that reads `unit`, empty for a plain number. It follows the view as
+    /// it zooms and pans, and stays where it is when the traces move.
+    Data {
+        x: f64,
+        y: f64,
+        #[serde(deserialize_with = "deserialize_unit_axis_string")]
+        unit: String,
     },
 }
 

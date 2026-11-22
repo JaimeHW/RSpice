@@ -103,13 +103,13 @@ pub trait StackHost {
     fn nothing_plotted_hint(&self) -> &'static str {
         NOTHING_PLOTTED_HINT
     }
-    /// Whether the host takes a note added at a point of a plot, which the
-    /// plot's menu then offers.
-    fn offers_notes(&self) -> bool {
+    /// Whether the host keeps notes on `model`'s plots, which the plot's
+    /// menu then offers to add.
+    fn offers_notes(&self, _model: &StripModel) -> bool {
         false
     }
-    /// Add a note at (`x`, `y`) of `pane`'s plot, `y` read on its first axis.
-    fn add_note(&mut self, _model: &StripModel, _pane: &UnitPane, _x: f64, _y: f64) {}
+    /// Keep what the reader did to a note on `model`'s plot.
+    fn edit_note(&mut self, _model: &StripModel, _edit: super::notes::NoteEdit) {}
     /// Hand `trace` to the waveform calculator, as the plot's menu asks.
     fn send_to_calculator(&mut self, _model: &StripModel, _trace: &StripTrace) {}
     /// Evaluate `text` as the abscissa a pane is drawn against, once per
@@ -2091,8 +2091,7 @@ fn show_unit_pane(
             .strip_markers(model.analysis_key)
             .map(|marker| pane_view::MarkerPresentation {
                 anchor: marker.anchor(),
-                x: marker_x(model, host.session(), marker)
-                    .unwrap_or_else(|seed| seed),
+                x: marker_x(model, host.session(), marker).unwrap_or_else(|seed| seed),
                 kind: marker.kind(),
                 color: marker_color(marker.kind(), &t),
                 label: marker_label(marker),
@@ -2229,6 +2228,13 @@ fn show_unit_pane(
         super::axes::note_room(ui.ctx(), model.analysis_key, axes_response.room);
     }
     let secondary_views = axes_response.ranges;
+    super::notes::show(
+        ui,
+        host,
+        model,
+        pane,
+        &super::notes::NoteFrame::of(&response, model, log_y, &secondary, interpolation),
+    );
     // A pane becomes the active one when the reader acts on it: a click, a
     // drag, a cursor placed. Pointing at it is not acting on it, and a pane
     // that took the instrument's actions as the pointer crossed it handed
@@ -2365,7 +2371,7 @@ fn plot_menu(
         });
     let against = chrome.then(|| abscissa_menu(host.session(), model, pane, None));
     let offers = MenuOffers {
-        notes: host.offers_notes(),
+        notes: host.offers_notes(model),
         against: against.as_ref().map(|menu| {
             (
                 menu,
@@ -2416,9 +2422,17 @@ fn plot_menu(
                 .copy_text(super::plot_menu::copied_values(&place.values));
             super::plot_menu::PlotChoice::CopyValues
         }
-        super::plot_menu::PlotChoice::Note => {
-            host.add_note(model, pane, place.x, place.y);
-            super::plot_menu::PlotChoice::Note
+        super::plot_menu::PlotChoice::Note(on_curve) => {
+            let trace = on_curve.and_then(|index| model.traces.get(index));
+            super::notes::begin(
+                ui,
+                host.session_mut(),
+                model,
+                pane,
+                (place.x, place.y),
+                trace,
+            );
+            super::plot_menu::PlotChoice::Note(on_curve)
         }
         super::plot_menu::PlotChoice::Cursor(cursor) => {
             place_cursor(host, model, cursor, place.x, place.trace);

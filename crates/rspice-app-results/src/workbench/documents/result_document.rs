@@ -25,6 +25,7 @@ mod instrument;
 pub mod manifest;
 pub(crate) mod network_matrix;
 mod noise_contrib;
+pub mod notes;
 mod nyquist;
 pub(crate) use nyquist::loop_gain_source;
 pub mod op_inspector;

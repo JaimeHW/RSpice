@@ -1202,6 +1202,20 @@ pub fn project_pane_presentation(
         });
     }
     state.results.session.project_document_markers(markers);
+    let traces: Vec<_> = pane.traces.iter().collect();
+    let notes = pane
+        .annotations
+        .iter()
+        .filter_map(|annotation| {
+            super::notes::document_note(
+                (pane.document_id, pane.id, analysis_key),
+                annotation,
+                &traces,
+                |trace| super::waves::source_waveform_anchor(state, &trace.label),
+            )
+        })
+        .collect();
+    state.results.session.project_document_notes(notes);
     Ok(())
 }
 
