@@ -7,6 +7,7 @@
 
 use super::{Model, WorkbenchSession, sync_active_schematic};
 use crate::state::{Component, ComponentType};
+use rspice_vocabulary::quantity::engineering::parse_engineering_value;
 
 /// Whether a part's value is drawn from a preferred-number series.
 pub(crate) const fn takes_standard_value(kind: ComponentType) -> bool {
@@ -27,12 +28,19 @@ fn snaps(model: &Model) -> Vec<(Component, Component)> {
         .iter()
         .filter(|part| selection.components.contains(&part.id) && takes_standard_value(part.kind))
         .filter_map(|part| {
-            let snapped = series.snap_text(part.value.trim())?;
-            (snapped != part.value).then(|| {
-                let mut candidate = part.clone();
-                candidate.value = snapped;
-                (part.clone(), candidate)
-            })
+            // Judged by the number, not the text: `4700`, `4.7 kΩ` and
+            // `10.0k` are members already, and rewriting them as `4.7k`,
+            // `4.7kΩ` and `10k` changed no value while the command counted
+            // them as snapped.
+            let text = part.value.trim();
+            let value = parse_engineering_value(text).ok()?;
+            let nearest = series.snap(value)?;
+            if (nearest - value).abs() <= 1e-9 * value.abs() {
+                return None;
+            }
+            let mut candidate = part.clone();
+            candidate.value = series.snap_text(text)?;
+            Some((part.clone(), candidate))
         })
         .collect()
 }
@@ -131,5 +139,69 @@ mod tests {
             "4.6kΩ"
         );
         assert_eq!(state.model.schematic.document().components[1].value, "105n");
+    }
+
+    /// Values on the series already, however they are written, keep their
+    /// text: with only those selected the command is off, and beside one
+    /// real change it counts and rewrites that one alone.
+    #[test]
+    fn values_already_on_the_series_keep_their_text() {
+        let mut state = DesignTestHost::default();
+        state.model.workspace.content.standard_value_series = ESeries::E12;
+        let part = |id, kind, name: &str, value: &str| {
+            Component::new(id, kind, Point::new(id as i32 * 200, 0)).with_name_value(name, value)
+        };
+        let standard = ["4700", "10.0k", "4.7K", "4.7 kΩ", "1meg"];
+        let mut parts = standard
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                part(
+                    index as u64 + 1,
+                    ComponentType::Resistor,
+                    &format!("R{}", index + 1),
+                    value,
+                )
+            })
+            .collect::<Vec<_>>();
+        parts.push(part(6, ComponentType::Capacitor, "C1", "2.2µF"));
+        parts.push(part(7, ComponentType::Resistor, "R7", "4.6k"));
+        state.model.schematic.document_mut_for_test().components = parts;
+        state.model.schematic.init_undo_history();
+        let selection = &mut state.model.schematic.session.editor.selection;
+        for id in 1..=6 {
+            selection.select_component(id);
+        }
+        assert!(
+            snap_block_reason(&state.model).is_some(),
+            "nothing selected is off the series"
+        );
+
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(7);
+        assert_eq!(snap_block_reason(&state.model), None);
+        run_snap_to_standard_value(&mut state.model, &mut state.workbench);
+
+        let values = state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .map(|part| part.value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            ["4700", "10.0k", "4.7K", "4.7 kΩ", "1meg", "2.2µF", "4.7k"]
+        );
+        assert_eq!(
+            state.prompt_text(),
+            Some("Snapped 1 value to the E12 series.")
+        );
     }
 }
