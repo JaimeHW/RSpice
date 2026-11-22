@@ -1135,6 +1135,14 @@ impl StripModel {
         trace.y.fetch_whole().ready()?.get(sample).copied()
     }
 
+    /// One trace's retained values, whole, when they are in memory.
+    pub fn sample_values(
+        &self,
+        trace_index: usize,
+    ) -> Option<rspice_results::waveform::HeldColumn> {
+        self.traces.get(trace_index)?.y.fetch_whole().ready()
+    }
+
     /// Display name of one trace, for a column heading.
     pub fn trace_heading(&self, index: usize) -> Option<(&str, egui::Color32)> {
         self.traces

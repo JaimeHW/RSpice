@@ -669,6 +669,53 @@ fn go_to_id() -> egui::Id {
     egui::Id::new("rspice.results.table.go-to")
 }
 
+/// Where the sheet keeps the rows whose values print widest, with the rows
+/// they were found among.
+fn widest_id() -> egui::Id {
+    egui::Id::new("rspice.results.table.widest")
+}
+
+/// The row positions whose words are the widest each value column prints:
+/// its most negative and most positive values, and the values of either
+/// sign nearest zero, which take the smallest prefix.
+fn widest_rows(model: &StripModel, rows: RowSelection, columns: &[usize]) -> Vec<usize> {
+    let mut widest = Vec::new();
+    for &trace in columns {
+        let Some(values) = model.sample_values(trace) else {
+            continue;
+        };
+        // Most negative, most positive, smallest positive, negative
+        // nearest zero.
+        let mut picks: [Option<(usize, f64)>; 4] = [None; 4];
+        for position in 0..rows.len() {
+            let Some(&value) = rows
+                .sample_at(position)
+                .and_then(|sample| values.get(sample))
+            else {
+                continue;
+            };
+            if !value.is_finite() {
+                continue;
+            }
+            let better = [
+                picks[0].is_none_or(|(_, held)| value < held),
+                picks[1].is_none_or(|(_, held)| value > held),
+                value > 0.0 && picks[2].is_none_or(|(_, held)| value < held),
+                value < 0.0 && picks[3].is_none_or(|(_, held)| value > held),
+            ];
+            for (pick, better) in picks.iter_mut().zip(better) {
+                if better {
+                    *pick = Some((position, value));
+                }
+            }
+        }
+        widest.extend(picks.iter().flatten().map(|(position, _)| *position));
+    }
+    widest.sort_unstable();
+    widest.dedup();
+    widest
+}
+
 /// The visible row that shows `sample`, or the nearest one the stride
 /// keeps.
 fn row_of_sample(rows: RowSelection, sample: usize) -> Option<usize> {
@@ -774,11 +821,35 @@ pub fn show_samples(
         cells
     };
 
-    // Each column is as wide as its head and the widest of the rows at
+    // The rows' words change with the analysis, the row set, the columns,
+    // the digits and the cursors.
+    let revision = egui::Id::new((
+        "rspice.results.table.rows",
+        model.analysis_key(),
+        (rows.start, rows.end, rows.stride),
+        &columns,
+        significant_digits,
+        cursor_a_row,
+        cursor_b_row,
+    ))
+    .value();
+    // Each column is as wide as its head, its widest values and the rows at
     // either end of the selection, and the columns share what the pane
     // leaves, so the table runs the pane's width.
+    let widest =
+        match ui.data(|data| data.get_temp::<(u64, std::sync::Arc<Vec<usize>>)>(widest_id())) {
+            Some((key, widest)) if key == revision => widest,
+            _ => {
+                let widest = std::sync::Arc::new(widest_rows(model, rows, &columns));
+                ui.data_mut(|data| {
+                    data.insert_temp(widest_id(), (revision, std::sync::Arc::clone(&widest)))
+                });
+                widest
+            }
+        };
     let sizing: Vec<usize> = (0..rows.len().min(SIZING_ROWS))
         .chain(rows.len().saturating_sub(SIZING_ROWS)..rows.len())
+        .chain(widest.iter().copied())
         .collect();
     let sized: Vec<Vec<Cell>> = sizing.iter().map(|&row| row_cells(row)).collect();
     let fitting: Vec<Fitting> = std::iter::once("Row".to_owned())
@@ -797,18 +868,6 @@ pub fn show_samples(
         .collect();
     let table_columns = fitted(ui, fitting);
 
-    // The rows' words change with the analysis, the row set, the columns,
-    // the digits and the cursors.
-    let revision = egui::Id::new((
-        "rspice.results.table.rows",
-        model.analysis_key(),
-        (rows.start, rows.end, rows.stride),
-        &columns,
-        significant_digits,
-        cursor_a_row,
-        cursor_b_row,
-    ))
-    .value();
     let search = ui
         .data(|data| data.get_temp::<String>(search_id()))
         .unwrap_or_default();
@@ -936,7 +995,19 @@ pub fn inline_actions(
         });
     }
 
-    search_and_go_to(ui);
+    // The status keeps its room: the search and Go to fold into Find when
+    // the bar cannot hold them beside it.
+    let status_width = source.status.map_or(0.0, |status| {
+        ui.painter()
+            .layout_no_wrap(
+                status.to_owned(),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                egui::Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+    });
+    search_and_go_to(ui, status_width);
 
     if let Some(status) = source.status {
         ui.label(
@@ -947,15 +1018,39 @@ pub fn inline_actions(
     }
 }
 
+/// Width of the bar's search field.
+const SEARCH_WIDTH: f32 = 120.0;
+/// Width of the bar's Go to field.
+const GO_TO_WIDTH: f32 = 96.0;
+
 /// The bar's search, which keeps the rows that contain what was typed, and
-/// Go to, which selects the row nearest the X value typed.
-fn search_and_go_to(ui: &mut Ui) {
+/// Go to, which selects the row nearest the X value typed: in the bar when
+/// it holds them and `reserve` beside them, else behind Find.
+fn search_and_go_to(ui: &mut Ui, reserve: f32) {
+    let spacing = ui.spacing().item_spacing.x;
+    let room = ui.clip_rect().right() - ui.cursor().min.x;
+    if room >= SEARCH_WIDTH + GO_TO_WIDTH + 3.0 * spacing + reserve {
+        search_fields(ui);
+        return;
+    }
+    let find = rspice_ui_kit::widgets::Button::new("Find")
+        .menu()
+        .accessible_label("Search the rows or go to an X value")
+        .show(ui);
+    egui::Popup::menu(&find)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.horizontal(|ui| search_fields(ui));
+        });
+}
+
+fn search_fields(ui: &mut Ui) {
     let mut search = ui
         .data(|data| data.get_temp::<String>(search_id()))
         .unwrap_or_default();
     let field = ui.add(
         egui::TextEdit::singleline(&mut search)
-            .desired_width(120.0)
+            .desired_width(SEARCH_WIDTH)
             .font(theme::field_mono())
             .hint_text("Search…"),
     );
@@ -969,7 +1064,7 @@ fn search_and_go_to(ui: &mut Ui) {
         .unwrap_or_default();
     let field = ui.add(
         egui::TextEdit::singleline(&mut text)
-            .desired_width(96.0)
+            .desired_width(GO_TO_WIDTH)
             .font(theme::field_mono())
             .hint_text("Go to X…"),
     );
