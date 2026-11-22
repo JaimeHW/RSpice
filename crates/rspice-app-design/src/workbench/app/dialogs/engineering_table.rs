@@ -444,11 +444,13 @@ impl EngineeringTable<'_> {
         }
         let manager = page == EngineeringTableDialogPage::Manager;
         let (title, primary) = match (manager, pin_table) {
-            (true, false) => ("Engineering table view", "Apply table view"),
+            // The table's name is the menu row's; Done keeps the view, the
+            // only thing the table changes.
+            (true, false) => ("Object table", "Done"),
             // A pin edit is kept as it is made, one undo step each, so the
             // table has nothing to apply or cancel but its view.
             (true, true) => ("Pin table", "Done"),
-            (false, _) => ("Saved engineering table views", "Done"),
+            (false, _) => ("Saved table views", "Done"),
         };
         let description = if pin_table {
             "Edit the symbol's pins: select rows, then edit a cell to set it on every selected \
@@ -680,12 +682,6 @@ impl EngineeringTable<'_> {
         view.normalize_for(dataset);
         self.views.set_working(view, dataset);
         self.dialog.close();
-        // The pin table's edits were each kept as they were made; Done only
-        // keeps its view, and says nothing a pin edit would contradict.
-        if !is_pin_table(dataset) {
-            self.workbench
-                .prompt("Engineering table view applied on this device; the project is unchanged.");
-        }
     }
 
     fn copy_engineering_table(&mut self, dataset: &EngineeringDataset) {
@@ -703,7 +699,7 @@ impl EngineeringTable<'_> {
                     .outbox
                     .push(crate::workbench::framework::requests::ClipboardText(text));
                 self.workbench.prompt(format!(
-                    "{rows} engineering table row{} copied with headers and displayed units.",
+                    "{rows} row{} copied with headers and displayed units.",
                     if rows == 1 { "" } else { "s" }
                 ));
             }
