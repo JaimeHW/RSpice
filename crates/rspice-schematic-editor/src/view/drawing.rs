@@ -535,7 +535,10 @@ pub enum ProbeVisualStatus {
     Materialized,
     Hidden,
     Pending,
+    /// The run said it could not produce this probe's signal.
     Unavailable,
+    /// The probe sits on nothing that conducts, so it measures no signal.
+    NotConnected,
     Disabled,
 }
 
@@ -546,6 +549,7 @@ impl ProbeVisualStatus {
             Self::Hidden => " · hidden",
             Self::Pending => " · pending next run",
             Self::Unavailable => " · unavailable",
+            Self::NotConnected => " · not connected",
             Self::Disabled => " · disabled",
         }
     }
@@ -565,7 +569,7 @@ pub fn draw_probe(
         ProbeVisualStatus::Hidden => palette.text_faint,
         ProbeVisualStatus::Pending => palette.warn,
         ProbeVisualStatus::Unavailable => palette.err,
-        ProbeVisualStatus::Disabled => palette.text_faint,
+        ProbeVisualStatus::NotConnected | ProbeVisualStatus::Disabled => palette.text_faint,
     };
     let ppp = painter.pixels_per_point();
     let center = viewport.schematic_to_screen(probe.position);

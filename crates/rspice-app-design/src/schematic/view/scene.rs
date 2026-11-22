@@ -152,10 +152,12 @@ pub(super) fn draw_scene(
         );
     }
 
-    let probe_statuses = probe_visual_statuses(state);
+    let mut probe_statuses = probe_visual_statuses(state);
+    probe_statuses.stranded = stranded_probes(painter.ctx(), state, symbol_context);
     let probe_status =
         |probe: &crate::state::SchematicProbe| probe_visual_status(probe, &probe_statuses);
     let selected_trace_expression = || state.selected_trace().map(|trace| trace.source_name());
+    let hover = canvas_hover(painter.ctx(), available, viewport, state, symbol_context);
     scene::draw_content(
         painter,
         available,
@@ -196,6 +198,7 @@ pub(super) fn draw_scene(
         },
         || state.model.workspace.content.active_view.display_path(),
     );
+    show_probe_unavailable_reason(painter, state, hover, &probe_statuses);
 
     super::drawing_sheet::draw_overflow_advisories(
         painter,
@@ -223,12 +226,53 @@ pub(super) fn draw_scene(
     );
 }
 
+/// While the pointer rests on a probe the last run could not produce, the
+/// run's reason, beside the pointer.
+fn show_probe_unavailable_reason(
+    painter: &Painter,
+    state: &CanvasFacts<'_>,
+    hover: Option<PointerTarget>,
+    statuses: &ProbeMaterializationStatuses,
+) {
+    let Some(PointerTarget::Probe(id)) = hover else {
+        return;
+    };
+    let Some(probe) = state
+        .model
+        .schematic
+        .document()
+        .probes
+        .iter()
+        .find(|probe| probe.id == id)
+    else {
+        return;
+    };
+    if probe_visual_status(probe, statuses) != ProbeVisualStatus::Unavailable {
+        return;
+    }
+    let Some(reason) = probe_unavailable_reason(probe, statuses) else {
+        return;
+    };
+    egui::Tooltip::always_open(
+        painter.ctx().clone(),
+        painter.layer_id(),
+        egui::Id::new("rspice.schematic.probe-unavailable"),
+        egui::PopupAnchor::Pointer,
+    )
+    .show(|ui| ui.label(reason));
+}
+
 fn probe_visual_status(
     probe: &crate::state::SchematicProbe,
     statuses: &ProbeMaterializationStatuses,
 ) -> ProbeVisualStatus {
     if !probe.enabled {
         return ProbeVisualStatus::Disabled;
+    }
+    // On nothing that conducts, a probe measures nothing, whatever a run
+    // before said of the signal it was placed on.
+    if probe.source_expression.is_none() || statuses.stranded.contains(&probe.id) {
+        return ProbeVisualStatus::NotConnected;
     }
     if let Some(status) = probe
         .saved_output_id
@@ -244,17 +288,86 @@ fn probe_visual_status(
     }) {
         return status;
     }
-    if probe.source_expression.is_some() {
-        ProbeVisualStatus::Pending
-    } else {
-        ProbeVisualStatus::Unavailable
-    }
+    ProbeVisualStatus::Pending
+}
+
+/// Why the last run could not produce `probe`'s signal, as its receipt says.
+fn probe_unavailable_reason<'a>(
+    probe: &crate::state::SchematicProbe,
+    statuses: &'a ProbeMaterializationStatuses,
+) -> Option<&'a str> {
+    probe
+        .saved_output_id
+        .and_then(|output_id| statuses.unavailable_by_output_id.get(&output_id))
+        .or_else(|| {
+            probe.source_expression.as_deref().and_then(|expression| {
+                statuses
+                    .unavailable_by_expression
+                    .get(&normalized_probe_expression(expression))
+            })
+        })
+        .map(String::as_str)
 }
 
 #[derive(Default)]
 struct ProbeMaterializationStatuses {
     by_output_id: std::collections::HashMap<crate::product::SavedOutputId, ProbeVisualStatus>,
     by_expression: std::collections::HashMap<String, ProbeVisualStatus>,
+    /// The run's reason for each signal it could not produce.
+    unavailable_by_output_id: std::collections::HashMap<crate::product::SavedOutputId, String>,
+    unavailable_by_expression: std::collections::HashMap<String, String>,
+    /// The open sheet's probes that sit on no wire and no part.
+    stranded: StrandedProbes,
+}
+
+type StrandedProbes = std::sync::Arc<std::collections::HashSet<u64>>;
+
+/// The open sheet's probes that sit on no wire and no part (their wire was
+/// deleted, or they were moved off it), so they measure no signal. Found
+/// again only when the drawing's topology or a probe's place changes.
+fn stranded_probes(
+    ctx: &egui::Context,
+    state: &CanvasFacts<'_>,
+    symbol_context: &SchematicSymbolContext,
+) -> StrandedProbes {
+    let document = state.model.schematic.document();
+    let key: (OpenPinsKey, Vec<(u64, Point)>) = (
+        (
+            state.model.schematic.topology_version(),
+            super::symbol_context_revision(state),
+            super::sheet_visibility::active_sheet_id(state),
+        ),
+        document
+            .probes
+            .iter()
+            .map(|probe| (probe.id, probe.position))
+            .collect(),
+    );
+    let id = egui::Id::new("rspice.schematic.stranded_probes");
+    if let Some((cached, stranded)) =
+        ctx.data(|data| data.get_temp::<((OpenPinsKey, Vec<(u64, Point)>), StrandedProbes)>(id))
+        && cached == key
+    {
+        return stranded;
+    }
+    let view = state.design_view();
+    let components = view.visible_objects(&document.components, |item| item.id);
+    let stranded = StrandedProbes::new(
+        document
+            .probes
+            .iter()
+            .filter(|probe| {
+                view.object_is_visible(probe.id)
+                    && view.active_wire_at(probe.position).is_none()
+                    && symbol_context
+                        .component_at_resolved_symbol(&components, probe.position)
+                        .is_none()
+            })
+            .map(|probe| probe.id)
+            .collect(),
+    );
+    ctx.data_mut(|data| data.insert_temp(id, (key, StrandedProbes::clone(&stranded))));
+    stranded
 }
 
 fn probe_visual_statuses(state: &CanvasFacts<'_>) -> ProbeMaterializationStatuses {
@@ -294,7 +407,14 @@ fn probe_visual_statuses(state: &CanvasFacts<'_>) -> ProbeMaterializationStatuse
                     ProbeVisualStatus::Materialized
                 }
             }
-            crate::state::SavedOutputMaterializationStatus::Unavailable { .. } => {
+            crate::state::SavedOutputMaterializationStatus::Unavailable { reason } => {
+                statuses
+                    .unavailable_by_output_id
+                    .insert(receipt.output_id, reason.clone());
+                statuses.unavailable_by_expression.insert(
+                    normalized_probe_expression(&receipt.source_expression),
+                    reason.clone(),
+                );
                 ProbeVisualStatus::Unavailable
             }
             crate::state::SavedOutputMaterializationStatus::Deferred
@@ -1086,22 +1206,23 @@ pub mod tests {
         }
     }
 
+    /// A probe on nothing is "not connected", in the faint tone; a probe on
+    /// a signal waits for its run; a red "unavailable" is only ever what a
+    /// run's receipt said, and it carries the run's reason.
     #[test]
-    fn probe_visual_state_distinguishes_unavailable_pending_and_disabled() {
+    fn probe_visual_state_separates_not_connected_from_what_a_run_could_not_produce() {
         let mut probe =
             crate::state::SchematicProbe::new(1, Point::origin(), "P1", None).expect("probe");
         let mut statuses = ProbeMaterializationStatuses::default();
         assert_eq!(
             probe_visual_status(&probe, &statuses),
-            ProbeVisualStatus::Unavailable
+            ProbeVisualStatus::NotConnected
         );
 
         probe.reference = "V(out)".to_owned();
         probe.source_expression = Some("V(out)".to_owned());
-        probe.bind_saved_output(
-            crate::product::SimulationPlanId::new(),
-            crate::product::SavedOutputId::new(),
-        );
+        let output = crate::product::SavedOutputId::new();
+        probe.bind_saved_output(crate::product::SimulationPlanId::new(), output);
         assert_eq!(
             probe_visual_status(&probe, &statuses),
             ProbeVisualStatus::Pending
@@ -1115,6 +1236,29 @@ pub mod tests {
             probe_visual_status(&probe, &statuses),
             ProbeVisualStatus::Materialized,
             "cross-plan synthesized output receipts resolve by stable electrical identity"
+        );
+
+        statuses.stranded = std::sync::Arc::new([probe.id].into_iter().collect());
+        assert_eq!(
+            probe_visual_status(&probe, &statuses),
+            ProbeVisualStatus::NotConnected,
+            "a probe whose wire is gone measures nothing, whatever the last run held"
+        );
+        statuses.stranded = StrandedProbes::default();
+
+        statuses
+            .by_output_id
+            .insert(output, ProbeVisualStatus::Unavailable);
+        statuses
+            .unavailable_by_output_id
+            .insert(output, "the run has no node out".to_owned());
+        assert_eq!(
+            probe_visual_status(&probe, &statuses),
+            ProbeVisualStatus::Unavailable
+        );
+        assert_eq!(
+            probe_unavailable_reason(&probe, &statuses),
+            Some("the run has no node out")
         );
 
         probe.enabled = false;
