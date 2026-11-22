@@ -476,37 +476,46 @@ impl SchematicSheetFormat {
         let (band_right, band_bottom) = far_corner(band);
         let (area_right, area_bottom) = far_corner(area);
         let width_um = convention.zone_line_um();
-        // The band carries every boundary on all four sides; the standard
-        // decides only where the references are lettered.
+        // A band carries the field boundaries only where it letters the
+        // references: ISO 5457 gives A4 its grid on the top and right alone,
+        // so its left and bottom bands are left undivided.
+        let (top, right, bottom, left) = zones.lettered_edges();
         for x in zones.column_boundaries_um() {
-            artwork.line(
-                DrawingSheetFrameLayer::Zones,
-                (x, band.y_um),
-                (x, area.y_um),
-                width_um,
-            );
-            artwork.line(
-                DrawingSheetFrameLayer::Zones,
-                (x, area_bottom),
-                (x, band_bottom),
-                width_um,
-            );
+            if top {
+                artwork.line(
+                    DrawingSheetFrameLayer::Zones,
+                    (x, band.y_um),
+                    (x, area.y_um),
+                    width_um,
+                );
+            }
+            if bottom {
+                artwork.line(
+                    DrawingSheetFrameLayer::Zones,
+                    (x, area_bottom),
+                    (x, band_bottom),
+                    width_um,
+                );
+            }
         }
         for y in zones.row_boundaries_um() {
-            artwork.line(
-                DrawingSheetFrameLayer::Zones,
-                (band.x_um, y),
-                (area.x_um, y),
-                width_um,
-            );
-            artwork.line(
-                DrawingSheetFrameLayer::Zones,
-                (area_right, y),
-                (band_right, y),
-                width_um,
-            );
+            if left {
+                artwork.line(
+                    DrawingSheetFrameLayer::Zones,
+                    (band.x_um, y),
+                    (area.x_um, y),
+                    width_um,
+                );
+            }
+            if right {
+                artwork.line(
+                    DrawingSheetFrameLayer::Zones,
+                    (area_right, y),
+                    (band_right, y),
+                    width_um,
+                );
+            }
         }
-        let (top, right, bottom, left) = zones.lettered_edges();
         let lettering_um = convention.zone_lettering_um();
         let mid = |a: i64, b: i64| a + (b - a) / 2;
         let mut label = |centre: (i64, i64), text: &str| {
