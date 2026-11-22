@@ -8,16 +8,17 @@ use super::super::stretch::{self, StretchOrthogonalPolicy, StretchSelectionError
 use super::Schematic;
 use rspice_design_model::Point;
 impl Schematic {
-    pub fn move_component_with_wires_resolved(
+    /// See [`movement::move_components_with_wires_resolved`].
+    pub fn move_components_with_wires_resolved(
         &mut self,
-        component_id: u64,
-        delta: Point,
+        selection: MovementSelection<'_>,
+        moves: &[(u64, Point)],
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) -> MovementImpact {
-        let impact = movement::move_component_with_wires_resolved(
+        let impact = movement::move_components_with_wires_resolved(
             &mut self.document,
-            component_id,
-            delta,
+            selection,
+            moves,
             terminal_points_for,
         );
         if impact.topology_changed {

@@ -236,68 +236,54 @@ pub fn live_movable_selection_count(
             .count()
 }
 
-/// Move a component and update attached wire endpoints using caller-supplied terminal geometry.
-pub fn move_component_with_wires_resolved(
+/// Move each part in `moves` by its own step, as Align and Distribute lay
+/// parts out, and keep everything on their pins with them.
+///
+/// The wires on the moved pins are laid again as a drag lays them: square
+/// where they were square, a wire between two parts that moved alike
+/// travelling whole. The labels, probes, taps and dots on the moved pins
+/// and wires follow them. What `selection` holds is left to the caller,
+/// which moves its own objects by their own steps.
+pub fn move_components_with_wires_resolved(
     document: &mut SchematicDocument,
-    component_id: u64,
-    delta: Point,
+    selection: MovementSelection<'_>,
+    moves: &[(u64, Point)],
     mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
 ) -> MovementImpact {
-    if delta == Point::origin() {
+    let steps = moves
+        .iter()
+        .filter(|(_, delta)| *delta != Point::origin())
+        .copied()
+        .collect::<std::collections::HashMap<_, _>>();
+    if !document
+        .components
+        .iter()
+        .any(|component| steps.contains_key(&component.id))
+    {
         return MovementImpact::default();
     }
-    // Get the component's terminal positions BEFORE moving
-    let terminals: Vec<Point> = {
-        if let Some(comp) = document.components.iter().find(|c| c.id == component_id) {
-            terminal_points_for(comp)
-        } else {
-            return MovementImpact::default();
+    let before = DragBaselineRecords::of(document);
+    for component in &mut document.components {
+        if let Some(delta) = steps.get(&component.id) {
+            component.pos = offset_point(component.pos, *delta);
         }
+    }
+    let moved = steps.keys().copied().collect::<HashSet<u64>>();
+    let empty = HashSet::new();
+    let laid = MovementSelection {
+        components: &moved,
+        wires: &empty,
+        buses: &empty,
+        ..selection
     };
-
-    // Find ALL wire points that are at ANY terminal position
-    let mut wire_updates: Vec<(u64, usize, Point)> = Vec::new();
-    let mut moved_wire_points = std::collections::HashSet::new();
-
-    for wire in &document.wires {
-        for (point_idx, point) in wire.points.iter().enumerate() {
-            for term_pos in &terminals {
-                if *point == *term_pos {
-                    let new_pos = offset_point(*term_pos, delta);
-                    wire_updates.push((wire.id, point_idx, new_pos));
-                    moved_wire_points.insert(*point);
-                    break;
-                }
-            }
-        }
-    }
-
-    // Move the component
-    if let Some(comp) = document
-        .components
-        .iter_mut()
-        .find(|c| c.id == component_id)
-    {
-        comp.pos = offset_point(comp.pos, delta);
-    }
-
-    // Apply wire updates
-    for (wire_id, point_idx, new_pos) in wire_updates {
-        if let Some(wire) = document.wires.iter_mut().find(|w| w.id == wire_id)
-            && point_idx < wire.points.len()
-        {
-            wire.points[point_idx] = new_pos;
-        }
-    }
-
-    for tap in &mut document.bus_taps {
-        if tap.target_kind() == BusTargetKind::Wire
-            && moved_wire_points.contains(&tap.connection_point)
-        {
-            tap.connection_point = offset_point(tap.connection_point, delta);
-        }
-    }
-
+    follow_moved_parts(
+        document,
+        before.baseline(),
+        laid,
+        DragRubberBand::Orthogonal,
+        Point::origin(),
+        &mut terminal_points_for,
+    );
     MovementImpact {
         changed: true,
         topology_changed: true,
@@ -939,13 +925,14 @@ fn dragged_wire_points(
 /// Keep the pin-to-pin contacts a move broke, with a wire each.
 ///
 /// Two pins on one point are one node with no wire between them. When a
-/// part in `moved` takes a pin off a pin of a part that stayed, the two
-/// would part silently; a square wire from the pin that stayed to where the
-/// moved pin went keeps them one node. `before` holds the parts where they
-/// stood. Only parts still in `document` count as staying, so a caller that
-/// has another sheet's parts out of reach wires nothing to them. A contact
-/// a wire still covers, as when the moved pin's own wire is laid back
-/// through the old point, needs no new wire. Returns whether any was laid.
+/// part in `moved` takes a pin off a pin of a part that stayed, or off a pin
+/// of another moved part that went another way, as Align moves parts, the
+/// two would part silently; a square wire from the one pin to the other
+/// keeps them one node. `before` holds the parts where they stood. Only
+/// parts still in `document` count, so a caller that has another sheet's
+/// parts out of reach wires nothing to them. A contact a wire still covers,
+/// as when the moved pin's own wire is laid back through the old point,
+/// needs no new wire. Returns whether any was laid.
 pub fn bridge_broken_abutments(
     document: &mut SchematicDocument,
     identity: &mut SchematicIdentity,
@@ -964,8 +951,8 @@ pub fn bridge_broken_abutments(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    // (pin that stayed, where its partner went, the two parts)
-    let mut bridges: Vec<(Point, Point, [u64; 2])> = Vec::new();
+    // (where the pin was, where it went, its part) for every moved pin.
+    let mut moved_pins: Vec<(Point, Point, u64)> = Vec::new();
     for old in before
         .iter()
         .filter(|component| moved.contains(&component.id))
@@ -977,23 +964,39 @@ pub fn bridge_broken_abutments(
         else {
             continue;
         };
-        for (from, to) in terminal_points_for(old)
-            .into_iter()
-            .zip(terminal_points_for(new))
-        {
-            let Some(&(_, stayer)) = staying.iter().find(|(point, _)| *point == from) else {
-                continue;
-            };
-            let still_joined = from == to
+        moved_pins.extend(
+            terminal_points_for(old)
+                .into_iter()
+                .zip(terminal_points_for(new))
+                .map(|(from, to)| (from, to, old.id)),
+        );
+    }
+    // (one pin, where its partner went, the two parts)
+    let mut bridges: Vec<(Point, Point, [u64; 2])> = Vec::new();
+    let joined =
+        |document: &SchematicDocument, bridges: &[(Point, Point, [u64; 2])], a: Point, b: Point| {
+            a == b
                 || document
                     .wires
                     .iter()
-                    .any(|wire| wire.contains_point(from) && wire.contains_point(to))
+                    .any(|wire| wire.contains_point(a) && wire.contains_point(b))
                 || bridges
                     .iter()
-                    .any(|(start, end, _)| *start == from && *end == to);
-            if !still_joined {
-                bridges.push((from, to, [stayer, old.id]));
+                    .any(|(start, end, _)| (*start == a && *end == b) || (*start == b && *end == a))
+        };
+    for &(from, to, part) in &moved_pins {
+        if let Some(&(_, stayer)) = staying.iter().find(|(point, _)| *point == from) {
+            if !joined(document, &bridges, from, to) {
+                bridges.push((from, to, [stayer, part]));
+            }
+            continue;
+        }
+        for &(_, partner_to, partner) in moved_pins
+            .iter()
+            .filter(|(partner_from, _, partner)| *partner_from == from && *partner != part)
+        {
+            if !joined(document, &bridges, partner_to, to) {
+                bridges.push((partner_to, to, [partner, part]));
             }
         }
     }

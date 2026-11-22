@@ -5,7 +5,7 @@ use super::{
     Model, SchematicSymbolContext, WorkbenchSession, model_design_view,
     requests::editor_request_source, sync_active_schematic,
 };
-use crate::state::Point;
+use crate::state::{Component, Point};
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_schematic_editor::view::selection_layout::{
     self, SelectionLayoutObject, SelectionLayoutRequest, SelectionLayoutView,
@@ -80,16 +80,30 @@ fn apply_request(
         &model.workspace,
         &mut model.schematic,
         |schematic, scope| {
+            // The parts move together, each by its own step, as a drag moves
+            // them: their wires are laid again square, what sits on their
+            // pins and wires follows, a pin taken off a pin keeps a wire to
+            // it, and the junction policy tidies the result.
+            let parts = deltas
+                .iter()
+                .filter_map(|edit| match edit.object {
+                    SelectionLayoutObject::Component(id) => Some((id, edit.delta)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if !parts.is_empty() {
+                let terminal_points =
+                    |component: &Component| symbol_context.terminal_points(component);
+                schematic.move_components_with_wires_resolved(&parts, terminal_points, scope);
+                let moved = parts.iter().map(|(id, _)| *id).collect();
+                schematic.connect_moved_pins(&moved, terminal_points, scope);
+                let automatic_junctions = schematic.session.editor.automatic_junctions;
+                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
+            }
             for edit in deltas {
                 let delta = edit.delta;
                 match edit.object {
-                    SelectionLayoutObject::Component(id) => schematic
-                        .move_component_with_wires_resolved(
-                            id,
-                            delta,
-                            |component| symbol_context.terminal_points(component),
-                            scope,
-                        ),
+                    SelectionLayoutObject::Component(_) => {}
                     SelectionLayoutObject::DesignNote(id) => {
                         schematic.translate_layout_design_note(id, delta)
                     }
@@ -114,6 +128,8 @@ mod tests {
     use super::super::schematic_symbol_context;
     use super::*;
     use crate::workbench::design::test_host::DesignTestHost;
+    use rspice_design::connectivity::summary::net_names_by_terminal;
+    use std::collections::{BTreeMap, BTreeSet};
 
     /// [`apply_selection_layout`] over the session's parts.
     fn apply(
@@ -636,5 +652,150 @@ mod tests {
         );
         assert_eq!(state.model.schematic.document().components, before);
         assert!(!state.model.schematic.can_undo());
+    }
+
+    /// R1 carries the label OUT on its right pin, joined by name to the
+    /// label on R3's pin, a typed tap on its left pin, a probe on its output
+    /// wire and a dot where R2's wire tees into it. R5 and R6 touch pin to
+    /// pin, one lying and one standing, so lining up their tops moves them
+    /// by different steps.
+    fn attached_parts() -> DesignTestHost {
+        use crate::state::{
+            Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Junction, NetLabel, Rotation,
+            Wire,
+        };
+        let mut state = DesignTestHost::default();
+        let document = state.model.schematic.document_mut_for_test();
+        let part = |id, x, y, rotation| {
+            let mut part = Component::new(id, ComponentType::Resistor, Point::new(x, y));
+            part.rotation = rotation;
+            part
+        };
+        document.components.extend([
+            part(1, 100, 100, Rotation::R0),
+            part(2, 180, 180, Rotation::R90),
+            part(3, 400, 200, Rotation::R0),
+            part(5, 100, 400, Rotation::R0),
+            part(6, 120, 420, Rotation::R90),
+            part(7, 300, 360, Rotation::R0),
+            part(8, -100, 100, Rotation::R0),
+        ]);
+        document.wires.extend([
+            Wire::segment(10, Point::new(120, 100), Point::new(240, 100)),
+            Wire::segment(11, Point::new(180, 100), Point::new(180, 160)),
+            Wire::segment(12, Point::new(80, 100), Point::new(80, 140)),
+        ]);
+        document
+            .junctions
+            .push(Junction::new(20, Point::new(180, 100)));
+        document.net_labels.extend([
+            NetLabel::new(30, Point::new(120, 100), "OUT"),
+            NetLabel::new(31, Point::new(380, 200), "OUT"),
+        ]);
+        let bus = Bus::segment(
+            40,
+            Point::new(60, 60),
+            Point::new(60, 140),
+            Some(BusDeclaration::parse("D[1:0]").unwrap()),
+        )
+        .unwrap();
+        let tap = BusTap::new(
+            41,
+            &bus,
+            Point::new(60, 100),
+            Point::new(80, 100),
+            BusSlice::parse("D[0]").unwrap(),
+            BusTapOrientation::Right,
+        )
+        .unwrap();
+        document.buses.push(bus);
+        document.bus_taps.push(tap);
+        document.probes.push(
+            SchematicProbe::new(
+                50,
+                Point::new(150, 100),
+                "V(OUT)",
+                Some("V(OUT)".to_owned()),
+            )
+            .unwrap(),
+        );
+        state.model.schematic.init_undo_history();
+        state
+    }
+
+    /// Each net as the pins on it, under its name when the drawing names it.
+    fn nets(state: &DesignTestHost) -> BTreeSet<(String, BTreeSet<(u64, String)>)> {
+        let mut by_name = BTreeMap::<String, BTreeSet<(u64, String)>>::new();
+        for ((id, pin), name) in net_names_by_terminal(state.model.schematic.document()) {
+            by_name.entry(name).or_default().insert((id, pin));
+        }
+        by_name
+            .into_iter()
+            .map(|(name, pins)| {
+                let generated = name
+                    .strip_prefix("net")
+                    .is_some_and(|number| number.chars().all(|c| c.is_ascii_digit()));
+                (if generated { String::new() } else { name }, pins)
+            })
+            .collect()
+    }
+
+    /// Align and Distribute move parts as a drag does: every pin keeps its
+    /// net and name, so the label, tap and probe go with the pins and wires
+    /// they sit on, parts that touched pin to pin stay joined, and every
+    /// wire stays square.
+    #[test]
+    fn align_and_distribute_keep_every_pins_net_and_every_wire_square() {
+        use SelectionLayoutCommand::*;
+        let cases: [(SelectionLayoutCommand, &[u64]); 3] = [
+            (AlignBottom, &[1, 3]),
+            (DistributeHorizontal, &[8, 1, 3]),
+            (AlignTop, &[5, 6, 7]),
+        ];
+        for (command, parts) in cases {
+            let mut state = attached_parts();
+            for id in parts {
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .select_component(*id);
+            }
+            let context = schematic_symbol_context(&state);
+            let before_positions = state.model.schematic.document().components.clone();
+            let before = nets(&state);
+            assert!(apply(&mut state, &context, command).unwrap(), "{command:?}");
+
+            let document = state.model.schematic.document();
+            assert_ne!(
+                document.components, before_positions,
+                "{command:?} moved nothing"
+            );
+            assert_eq!(nets(&state), before, "{command:?} changed the netlist");
+            for wire in &document.wires {
+                assert!(
+                    wire.is_orthogonal(),
+                    "{command:?} left wire {} slanted: {:?}",
+                    wire.id,
+                    wire.points
+                );
+            }
+            let probe = document.probes[0].position;
+            assert!(
+                document.wires.iter().any(|wire| wire.contains_point(probe)),
+                "{command:?} left the probe off its wire at {probe:?}"
+            );
+            let tap = &document.bus_taps[0];
+            assert!(
+                document
+                    .wires
+                    .iter()
+                    .any(|wire| wire.contains_point(tap.connection_point)),
+                "{command:?} left the tap off its wire: {tap:?}"
+            );
+            assert!(state.model.schematic.undo(), "{command:?} is one undo step");
+        }
     }
 }

@@ -33,20 +33,22 @@ impl SchematicState {
         )
     }
 
-    /// Move a component and update attached wire endpoints using caller-supplied terminal geometry.
-    pub fn move_component_with_wires_resolved(
+    /// Move each part in `moves` by its own step, as Align and Distribute
+    /// lay parts out: the wires on their pins are laid again square, and
+    /// the labels, probes, taps and dots on those pins and wires follow.
+    /// The selection's own labels, probes and taps are left to the caller.
+    pub fn move_components_with_wires_resolved(
         &mut self,
-        component_id: u64,
-        delta: Point,
+        moves: &[(u64, Point)],
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         _scope: &ActiveSheetTopology,
     ) {
         if self.session.read_only {
             return;
         }
-        let impact = self.design.move_component_with_wires_resolved(
-            component_id,
-            delta,
+        let impact = self.design.move_components_with_wires_resolved(
+            movement_selection(&self.session.editor.selection),
+            moves,
             terminal_points_for,
         );
         self.apply_movement_impact(impact);

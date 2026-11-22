@@ -67,9 +67,8 @@ impl SchematicState {
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) {
         self.with_single_sheet_topology(|state, scope| {
-            state.move_component_with_wires_resolved(
-                component_id,
-                delta,
+            state.move_components_with_wires_resolved(
+                &[(component_id, delta)],
                 terminal_points_for,
                 scope,
             );
@@ -276,7 +275,9 @@ fn component_rubber_band_and_junction_moves_keep_scalar_tap_attached() {
         .document_mut_for_test()
         .components
         .push(Component::new(4, ComponentType::Resistor, Point::origin()));
-    direct.move_component_on_one_sheet(4, delta, |_| vec![Point::new(0, 10)]);
+    direct.move_component_on_one_sheet(4, delta, |component| {
+        vec![Point::new(component.pos.x, component.pos.y + 10)]
+    });
     assert_eq!(
         direct.design.document().bus_taps[0].connection_point,
         Point::new(3, 14)
