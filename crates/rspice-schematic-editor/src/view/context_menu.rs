@@ -126,6 +126,9 @@ pub enum ContextAction {
     NameNet,
     /// Light the net of the wire or label the menu was opened on.
     HighlightNet,
+    /// Mark the pin whose end the menu was opened on as meant to stay open,
+    /// or clear its mark.
+    NoConnection,
 }
 
 /// The Arrange page's commands, in the Design menu's order: turn and flip,
@@ -261,6 +264,9 @@ pub struct ContextCommand<A = ContextAction> {
     pub shortcut: String,
     pub enabled: bool,
     pub disabled_reason: &'static str,
+    /// Whether the setting the row turns on and off is on; `None` for a row
+    /// that runs a command.
+    pub checked: Option<bool>,
 }
 
 /// Shared row/separator structure for app command bindings and resolved display rows.
@@ -538,9 +544,12 @@ pub fn render_context_contents<B: MenuBinding, A: MenuAction>(
             .push_id("schematic-context-back", |ui| {
                 menu_item(
                     ui,
-                    Some(ContextIcon::Back),
-                    "Back",
-                    "",
+                    MenuItem {
+                        icon: Some(ContextIcon::Back),
+                        label: "Back",
+                        shortcut: "",
+                        checked: None,
+                    },
                     true,
                     "",
                     row_height,
@@ -591,9 +600,12 @@ pub fn render_context_contents<B: MenuBinding, A: MenuAction>(
                     .push_id(("schematic-context-command", command.label), |ui| {
                         menu_item(
                             ui,
-                            command.icon,
-                            command.label,
-                            shortcut,
+                            MenuItem {
+                                icon: command.icon,
+                                label: command.label,
+                                shortcut,
+                                checked: command.checked,
+                            },
                             enabled,
                             reason,
                             row_height,
@@ -699,15 +711,27 @@ fn menu_header(ui: &mut Ui, title: &str, summary: &str) {
     );
 }
 
+/// What one command row shows.
+struct MenuItem<'a> {
+    icon: Option<ContextIcon>,
+    label: &'a str,
+    shortcut: &'a str,
+    checked: Option<bool>,
+}
+
 fn menu_item(
     ui: &mut Ui,
-    icon: Option<ContextIcon>,
-    label: &str,
-    shortcut: &str,
+    item: MenuItem<'_>,
     enabled: bool,
     disabled_reason: &'static str,
     row_height: f32,
 ) -> Response {
+    let MenuItem {
+        icon,
+        label,
+        shortcut,
+        checked,
+    } = item;
     let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width(), row_height),
         if enabled {
@@ -716,9 +740,18 @@ fn menu_item(
             Sense::hover()
         },
     );
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    response.widget_info(|| match checked {
+        Some(on) => WidgetInfo::selected(WidgetType::Checkbox, enabled, on, label),
+        None => WidgetInfo::labeled(WidgetType::Button, enabled, label),
+    });
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::MenuItem);
+        match checked {
+            Some(on) => {
+                node.set_role(egui::accesskit::Role::MenuItemCheckBox);
+                node.set_toggled(on.into());
+            }
+            None => node.set_role(egui::accesskit::Role::MenuItem),
+        }
         node.set_label(label);
         if !enabled {
             node.set_disabled();
@@ -728,7 +761,10 @@ fn menu_item(
             node.set_keyboard_shortcut(shortcut);
         }
     });
-    paint_row(ui, rect, &response, enabled, icon, label, shortcut);
+    // A row that turns a setting on and off leads with its check, as the
+    // menu bar's do, and with nothing while the setting is off.
+    let lead = checked.map_or(icon, |on| on.then_some(ContextIcon::Check));
+    paint_row(ui, rect, &response, enabled, lead, label, shortcut);
 
     if enabled {
         response

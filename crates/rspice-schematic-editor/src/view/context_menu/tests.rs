@@ -32,6 +32,7 @@ fn one_row_view(summary: Option<String>) -> ContextMenuView {
             shortcut: "Delete".to_owned(),
             enabled: true,
             disabled_reason: "",
+            checked: None,
         })],
         choices: Vec::new(),
         arrange: Vec::new(),

@@ -1269,7 +1269,12 @@ fn a_wire_or_a_pin_end_starts_a_wire_or_a_label_where_it_was_clicked() {
     state.design.interaction.context_target = Some((ContextTarget::Pin(part), (pin.x, pin.y)));
     assert_eq!(
         labels_of(&menu_entries(&state, ContextTarget::Pin(part))),
-        vec!["Draw wire from here", "Name this net…", "Probe"]
+        vec![
+            "Draw wire from here",
+            "Name this net…",
+            "No connection",
+            "Probe"
+        ]
     );
     run(&mut state, ContextAction::DrawWireFromHere);
     assert_eq!(

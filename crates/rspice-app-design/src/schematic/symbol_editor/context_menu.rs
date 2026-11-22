@@ -320,6 +320,7 @@ fn resolve_row(
         shortcut,
         enabled,
         disabled_reason,
+        checked: None,
     }
 }
 

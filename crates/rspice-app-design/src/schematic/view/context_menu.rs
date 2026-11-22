@@ -140,9 +140,11 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ),
     ContextEntry::Separator,
     // What starts where the menu was opened on a wire, a junction or a pin
-    // end: the places a wire or a label is started from.
+    // end: the places a wire or a label is started from. A pin end can also
+    // be marked as meant to stay open, and the row is checked while it is.
     named_row(ContextAction::DrawWireFromHere, "Draw wire from here", None),
     named_row(ContextAction::NameNet, "Name this net…", None),
+    named_row(ContextAction::NoConnection, "No connection", None),
     ContextEntry::Separator,
     design_row(
         ContextAction::Properties,
@@ -538,6 +540,7 @@ fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
         ContextAction::DrawWireFromHere | ContextAction::NameNet => {
             matches!(subject, S::Wire | S::Junction | S::Pin)
         }
+        ContextAction::NoConnection => subject == S::Pin,
         ContextAction::Cut | ContextAction::Copy | ContextAction::Delete => {
             !matches!(subject, S::Canvas | S::Pin)
         }
@@ -669,7 +672,7 @@ pub(super) fn handle_context_menu(
         }
         None
     };
-    let Some(view) = context_menu_view(&state.facts(), &response.ctx) else {
+    let Some(view) = context_menu_view(&state.facts(), symbol_context, &response.ctx) else {
         context_surface::close::<ContextMenuBinding>(response);
         return;
     };
@@ -1352,6 +1355,7 @@ fn changes_the_view(action: ContextAction) -> bool {
             | ContextAction::PlaceText
             | ContextAction::DrawWireFromHere
             | ContextAction::NameNet
+            | ContextAction::NoConnection
     )
 }
 
@@ -1714,7 +1718,9 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
         ),
-        ContextAction::DrawWireFromHere | ContextAction::NameNet => (true, ""),
+        ContextAction::DrawWireFromHere | ContextAction::NameNet | ContextAction::NoConnection => {
+            (true, "")
+        }
         ContextAction::HighlightNet => match super::interaction::selected_net(
             state.model,
             state.design.schematic_visibility.net_highlighting,
@@ -1768,6 +1774,25 @@ pub fn execute_context_action(
         // Started by `apply_context_request`, which holds the frame's
         // context a route is bound to.
         ContextAction::DrawWireFromHere => {}
+        ContextAction::NoConnection => {
+            let target = state
+                .design
+                .interaction
+                .context_target
+                .map(|(target, _)| target);
+            let pin = target
+                .and_then(|target| menu_pin(&state.facts(), symbol_context, target, click_pos))
+                .map(|(component, pin)| (component.id, pin));
+            let message = match pin {
+                Some((component, pin)) => super::no_connect::toggle_pin_no_connect(
+                    &mut state.model.schematic,
+                    component,
+                    &pin,
+                ),
+                None => "Right-click the end of a pin to mark it no-connect.".to_owned(),
+            };
+            state.prompt(message);
+        }
         ContextAction::ZoomBox => {
             state.model.schematic.session.editor.zoom_box.arm();
             state.prompt("Drag a box to zoom to it.");
@@ -2131,12 +2156,42 @@ pub fn context_menu_binding(state: &CanvasFacts<'_>) -> Option<ContextMenuBindin
     })
 }
 
-pub fn context_menu_view(state: &CanvasFacts<'_>, ctx: &Context) -> Option<ContextMenuView> {
+/// The pin whose end the menu was opened on, as its part and the pin's
+/// terminal name. A pin end's menu is opened at that end.
+fn menu_pin<'a>(
+    state: &CanvasFacts<'a>,
+    symbol_context: &SchematicSymbolContext,
+    target: ContextTarget,
+    at: Point,
+) -> Option<(&'a crate::state::Component, String)> {
+    let ContextTarget::Pin(id) = target else {
+        return None;
+    };
+    let component = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)?;
+    symbol_context
+        .named_terminal_points(component)
+        .into_iter()
+        .find_map(|(pin, end)| (end == at).then_some((component, pin)))
+}
+
+pub fn context_menu_view(
+    state: &CanvasFacts<'_>,
+    symbol_context: &SchematicSymbolContext,
+    ctx: &Context,
+) -> Option<ContextMenuView> {
     let binding = context_menu_binding(state)?;
+    let pin_marked = menu_pin(state, symbol_context, binding.target, binding.click_pos)
+        .is_some_and(|(component, pin)| component.is_no_connect(&pin));
     let resolve = |entries: &[ContextEntry]| {
         entries
             .iter()
-            .map(|entry| resolve_entry(state, ctx, *entry))
+            .map(|entry| resolve_entry(state, ctx, *entry, pin_marked))
             .collect::<Vec<_>>()
     };
     Some(ContextMenuView {
@@ -2160,11 +2215,13 @@ const fn canvas_key(action: ContextAction) -> Option<egui::Key> {
 }
 
 /// One catalog entry as the menu draws it: available or not and why, with
-/// its key.
+/// its key, and checked when it is the No connection row of a pin that is
+/// marked (`pin_marked`).
 fn resolve_entry(
     state: &CanvasFacts<'_>,
     ctx: &Context,
     entry: ContextEntry,
+    pin_marked: bool,
 ) -> context_surface::ContextEntry {
     let ContextEntry::Command(command) = entry else {
         return context_surface::ContextEntry::Separator;
@@ -2188,6 +2245,7 @@ fn resolve_entry(
         shortcut,
         enabled,
         disabled_reason,
+        checked: (command.action == ContextAction::NoConnection).then_some(pin_marked),
     })
 }
 

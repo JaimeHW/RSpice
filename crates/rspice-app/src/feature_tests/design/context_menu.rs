@@ -71,8 +71,16 @@ fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
     rspice_app_design::schematic::view::context_menu::context_menu_binding(&state.canvas_facts())
 }
 
-fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView> {
-    rspice_app_design::schematic::view::context_menu::context_menu_view(&state.canvas_facts(), ctx)
+fn context_menu_view(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+    ctx: &Context,
+) -> Option<ContextMenuView> {
+    rspice_app_design::schematic::view::context_menu::context_menu_view(
+        &state.canvas_facts(),
+        symbol_context,
+        ctx,
+    )
 }
 
 fn execute_context_action(
@@ -807,7 +815,7 @@ fn render_context_contents(
     row_height: f32,
     focus_first: bool,
 ) {
-    let view = context_menu_view(state, ui.ctx()).expect("context target");
+    let view = context_menu_view(state, symbol_context, ui.ctx()).expect("context target");
     if let Some(request) =
         context_surface::render_context_contents(ui, &view, row_height, focus_first)
     {
@@ -1559,7 +1567,8 @@ fn the_highlight_net_row_lights_the_net_of_the_wire_or_label_clicked() {
     // The wire: the row is there, names the key, and lights the wire's net.
     let target = select_context_target(&mut app.state, Some(PointerTarget::Wire(5)));
     app.state.design.interaction.context_target = Some((target, (100, 0)));
-    let view = context_menu_view(&app.state, &Context::default()).expect("the menu is open");
+    let view = context_menu_view(&app.state, &symbol_context, &Context::default())
+        .expect("the menu is open");
     let highlight = view
         .entries
         .iter()
@@ -1623,4 +1632,102 @@ fn the_highlight_net_row_lights_the_net_of_the_wire_or_label_clicked() {
             .any(|entry| matches!(entry, ContextEntry::Command(command)
                 if command.action == ContextAction::HighlightNet))
     );
+}
+
+/// A pin end's right-click menu marks the pin as meant to stay open, shows
+/// the row checked while it is, and the same row clears the mark. Only the
+/// no-connect tool could mark a pin.
+#[test]
+fn a_pin_ends_no_connection_row_marks_the_pin_and_clears_it() {
+    let ctx = Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = design_app();
+    let document = app.state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document.wires.clear();
+    let part = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(400, 0));
+    app.state.model.schematic.clear_undo_history();
+    app.state.sync_active_schematic_to_workspace();
+    let symbol_context = schematic_symbol_context(&app.state);
+    let component = app.state.model.schematic.document().components[0].clone();
+    let (pin, end) = symbol_context.named_terminal_points(&component)[0].clone();
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(part);
+    app.state.design.interaction.context_target = Some((ContextTarget::Pin(part), (end.x, end.y)));
+
+    // One frame of the open menu: where it drew the row, and whether the
+    // row reads as checked.
+    let frame = |app: &mut crate::workbench::RSpiceApp, events: Vec<egui::Event>| {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0))),
+                events,
+                ..Default::default()
+            },
+            |root| {
+                egui::CentralPanel::default().show(root, |ui| {
+                    render_context_contents(ui, &mut app.state, &symbol_context, 27.0, false);
+                });
+            },
+        );
+        app.after_contribution();
+        output
+            .platform_output
+            .accesskit_update
+            .into_iter()
+            .flat_map(|update| update.nodes)
+            .find(|(_, node)| node.label() == Some("No connection"))
+            .map(|(_, node)| {
+                let bounds = node.bounds().expect("the row is drawn");
+                (
+                    pos2(
+                        ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                        ((bounds.y0 + bounds.y1) * 0.5) as f32,
+                    ),
+                    node.toggled() == Some(egui::accesskit::Toggled::True),
+                )
+            })
+            .expect("the pin's menu has a No connection row")
+    };
+    let click = |at| {
+        [true, false].map(|pressed| {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ]
+        })
+    };
+    let marked = |app: &crate::workbench::RSpiceApp| {
+        app.state.model.schematic.document().components[0].is_no_connect(&pin)
+    };
+
+    let (row, checked) = frame(&mut app, Vec::new());
+    assert!(!checked && !marked(&app), "the pin starts open to wiring");
+    for events in click(row) {
+        frame(&mut app, events);
+    }
+    assert!(marked(&app), "the row marked pin {pin} no-connect");
+    let (row, checked) = frame(&mut app, Vec::new());
+    assert!(checked, "the row reads as checked while the pin is marked");
+
+    for events in click(row) {
+        frame(&mut app, events);
+    }
+    assert!(!marked(&app), "the second use cleared the mark");
+    assert!(!frame(&mut app, Vec::new()).1, "and the row is unchecked");
 }
