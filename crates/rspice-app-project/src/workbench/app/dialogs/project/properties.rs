@@ -11,14 +11,16 @@ use std::path::{Path, PathBuf};
 
 use egui::{Context, Id};
 
-use crate::state::ProjectDescriptor;
 use crate::state::workspace::ProjectProperties;
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, ListWords};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::health;
-use crate::workbench::workflows::project_workflow::project_name_refusal;
+use crate::workbench::project::properties::{
+    PROJECT_READ_ONLY, ProjectPropertiesEdit, apply_project_properties,
+    include_search_path_refusal, missing_include_search_paths, project_name, saved_at,
+};
 
 /// Wide enough for the longest label, "Include search paths".
 const LABEL_COLUMN: f32 = 136.0;
@@ -97,10 +99,8 @@ impl ProjectPropertiesDialogState {
     /// The properties the fields describe, as Apply would write them, or why
     /// the project file could not hold them.
     fn draft(&self) -> Result<ProjectProperties, String> {
-        let name = self.name.trim().to_owned();
-        ProjectDescriptor::validate_name(&name).map_err(project_name_refusal)?;
         Ok(ProjectProperties {
-            name,
+            name: project_name(&self.name)?,
             description: self.description.trim().to_owned(),
             root_library: self.top.0.clone(),
             top_cell: self.top.1.clone(),
@@ -115,8 +115,10 @@ impl ProjectPropertiesDialogState {
     /// Add the path the include field holds to the end of the chain.
     fn add_include_path(&mut self) {
         let path = self.include_draft.trim().to_owned();
-        if self.include_search_paths.contains(&path) {
-            self.include_refusal = Some(format!("{path} is already listed."));
+        if let Some(refusal) =
+            include_search_path_refusal(self.include_search_paths.iter().map(String::as_str), &path)
+        {
+            self.include_refusal = Some(refusal);
             return;
         }
         self.include_search_paths.push(path);
@@ -134,131 +136,14 @@ impl ProjectPropertiesDialogState {
     }
 
     fn read_include_presence(&mut self) {
-        if !rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence() {
-            return;
-        }
         let authored = self
             .include_search_paths
             .iter()
             .map(PathBuf::from)
             .collect::<Vec<_>>();
-        let chain = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-            &authored,
-            self.data_root.as_deref(),
-        );
-        self.missing_include_paths = chain
-            .entries()
-            .iter()
-            .filter(|entry| !entry.exists())
-            .map(|entry| entry.authored().display().to_string())
-            .collect();
+        self.missing_include_paths =
+            missing_include_search_paths(&authored, self.data_root.as_deref());
     }
-}
-
-/// When the project file was last written, on the reader's clock.
-#[cfg(not(target_arch = "wasm32"))]
-fn saved_at(path: &Path) -> Option<String> {
-    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    let unix_ms = modified
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_millis()
-        .try_into()
-        .ok()?;
-    let stamp = crate::time_compat::local_date_time(unix_ms)?;
-    Some(format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        stamp.year(),
-        u8::from(stamp.month()),
-        stamp.day(),
-        stamp.hour(),
-        stamp.minute()
-    ))
-}
-
-/// The browser keeps a project in its own store, which has no file time.
-#[cfg(target_arch = "wasm32")]
-fn saved_at(_: &Path) -> Option<String> {
-    None
-}
-
-/// Which fields a draft changes of the properties the dialog opened on.
-#[derive(Debug, Clone, Copy, Default)]
-struct Changed {
-    name: bool,
-    description: bool,
-    top: bool,
-    include_search_paths: bool,
-}
-
-impl Changed {
-    /// A description is compared as Apply writes it, without the space
-    /// around it, so opening and applying never changes one by itself.
-    fn between(draft: &ProjectProperties, opened: &ProjectProperties) -> Self {
-        Self {
-            name: draft.name != opened.name,
-            description: draft.description != opened.description.trim(),
-            top: (&draft.root_library, &draft.top_cell) != (&opened.root_library, &opened.top_cell),
-            include_search_paths: draft.include_search_paths != opened.include_search_paths,
-        }
-    }
-
-    const fn any(self) -> bool {
-        self.name || self.description || self.top || self.include_search_paths
-    }
-
-    /// The step Undo and Redo name: what changed, when one thing did.
-    fn step(self, draft: &ProjectProperties) -> String {
-        let mut steps = Vec::new();
-        if self.name {
-            steps.push(format!("rename project to {}", draft.name));
-        }
-        if self.description {
-            steps.push("edit project description".to_owned());
-        }
-        if self.top {
-            steps.push(format!(
-                "set project top to {}/{}",
-                draft.root_library, draft.top_cell
-            ));
-        }
-        if self.include_search_paths {
-            steps.push("change include search paths".to_owned());
-        }
-        match steps.as_slice() {
-            [only] => only.clone(),
-            _ => "edit project properties".to_owned(),
-        }
-    }
-}
-
-/// Write the fields the reader changed over the project as it stands, as one
-/// step of Undo named by what changed.
-fn commit(dialog: &ProjectPropertiesDialogState, model: &mut Model) -> Result<(), String> {
-    let Some(opened) = dialog.opened.as_ref() else {
-        return Ok(());
-    };
-    let draft = dialog.draft()?;
-    let changed = Changed::between(&draft, opened);
-    if !changed.any() {
-        return Ok(());
-    }
-    let step = changed.step(&draft);
-    let mut candidate = model.workspace.content.project.properties();
-    if changed.name {
-        candidate.name = draft.name;
-    }
-    if changed.description {
-        candidate.description = draft.description;
-    }
-    if changed.top {
-        candidate.root_library = draft.root_library;
-        candidate.top_cell = draft.top_cell;
-    }
-    if changed.include_search_paths {
-        candidate.include_search_paths = draft.include_search_paths;
-    }
-    model.publish_project_properties(candidate, step)
 }
 
 impl ProjectFeature {
@@ -276,10 +161,10 @@ impl ProjectFeature {
         let draft = dialog.draft();
         let changed = draft
             .as_ref()
-            .is_ok_and(|draft| Changed::between(draft, &opened).any());
+            .is_ok_and(|draft| !ProjectPropertiesEdit::between(draft, &opened).is_empty());
         let refusal = dialog.refusal.clone();
         let status = if read_only {
-            Ok(Some("The project is open read-only."))
+            Ok(Some(PROJECT_READ_ONLY))
         } else {
             refusal.as_deref().map_or(Ok(None), Err)
         };
@@ -378,7 +263,15 @@ impl ProjectFeature {
             });
         match choice {
             DialogChoice::Primary if !read_only && changed => {
-                match commit(&cx.state.project_properties, cx.model) {
+                // The fields the reader changed of those the dialog opened on,
+                // written over the project as it stands.
+                let applied = cx.state.project_properties.draft().and_then(|draft| {
+                    apply_project_properties(
+                        cx.model,
+                        ProjectPropertiesEdit::between(&draft, &opened),
+                    )
+                });
+                match applied {
                     Ok(()) => cx.state.project_properties.close(),
                     Err(refusal) => cx.state.project_properties.refusal = Some(refusal),
                 }
