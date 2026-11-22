@@ -33,6 +33,7 @@ use rspice_app_state::state::{SimulationPage, VerificationPage};
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::requests::SoaCheckRef;
+use rspice_app_workbench::workbench::localization::MessageId;
 
 /// Apply the route a consumer asked for, if one is outstanding.
 ///
@@ -128,10 +129,10 @@ fn open_code_document(
         .project_sources
         .get_bundle(bundle)
         .map(|bundle| bundle.owner().clone());
+    let messages = app.state.workbench.messages();
+    let said = |id| messages.format(id, &[("file", logical_path)]);
     let Some(owner) = owner else {
-        app.state.prompt(format!(
-            "The source bundle that reported {logical_path} is no longer part of this project."
-        ));
+        app.state.prompt(said(MessageId::ProblemRouteSourceGone));
         return;
     };
     match &owner {
@@ -140,9 +141,7 @@ fn open_code_document(
             app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
         }
         ProjectSourceOwner::CodeWorkspace => {
-            app.state.prompt(format!(
-                "{logical_path} was not opened: no editor shows the source that reported it."
-            ));
+            app.state.prompt(said(MessageId::ProblemRouteNoEditor));
             return;
         }
     }
@@ -157,9 +156,7 @@ fn open_code_document(
         .active_source_bundle()
         .map(rspice_app_state::state::ProjectSourceBundle::id);
     if active != Some(bundle) {
-        app.state.prompt(format!(
-            "{logical_path} was not opened: the editor that owns it could not be brought forward."
-        ));
+        app.state.prompt(said(MessageId::ProblemRouteEditorHeld));
         return;
     }
     if code_workspace::select_source_document(
@@ -169,9 +166,8 @@ fn open_code_document(
     )
     .is_none()
     {
-        app.state.prompt(format!(
-            "{logical_path} is no longer the source this editor holds."
-        ));
+        app.state
+            .prompt(said(MessageId::ProblemRouteSourceReplaced));
         return;
     }
     if let Some(line) = line {
@@ -223,9 +219,12 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 if held {
                     app.state.simulate.active_analysis_instance = Some(analysis);
                 } else {
-                    app.state.prompt(
-                        "The analysis this finding names is no longer in the simulation plan.",
-                    );
+                    let refusal = app
+                        .state
+                        .workbench
+                        .messages()
+                        .text(MessageId::ProblemRouteAnalysisGone);
+                    app.state.prompt(refusal);
                 }
             }
             app.execute_command_key(SimulateCommand::Page(SimulationPage::Analyses).key());
@@ -278,9 +277,12 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                     &mut app.state.code.netlist,
                 );
             } else {
-                app.state.prompt(
-                    "No generated netlist is retained yet; the Netlist workspace opens on the source it holds.",
-                );
+                let notice = app
+                    .state
+                    .workbench
+                    .messages()
+                    .text(MessageId::ProblemRouteNoGeneratedNetlist);
+                app.state.prompt(notice);
             }
             // The parser numbers the deck from 1 and the buffer indexes it
             // from 0, so a line that survived from the failure is converted
@@ -344,11 +346,16 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 &location,
             ) {
                 Some(anchor) => app.state.jump_to_log_anchor(anchor),
-                None => app.state.prompt(format!(
-                    "{} no longer draws {}.",
-                    cell_view.display_path(),
-                    object.name()
-                )),
+                None => {
+                    let refusal = app.state.workbench.messages().format(
+                        MessageId::ProblemRouteNoLongerDrawn,
+                        &[
+                            ("view", &cell_view.display_path()),
+                            ("object", &object.name()),
+                        ],
+                    );
+                    app.state.prompt(refusal);
+                }
             }
         }
     }
@@ -368,10 +375,11 @@ fn show_directive_note(app: &mut RSpiceApp, cell_view: CellViewRef, id: u64, lin
         .find(|note| note.id == id)
         .map(|note| note.pos)
     else {
-        app.state.prompt(format!(
-            "{} no longer draws the SPICE directive note.",
-            cell_view.display_path()
-        ));
+        let refusal = app.state.workbench.messages().format(
+            MessageId::ProblemRouteNoDirectiveNote,
+            &[("view", &cell_view.display_path())],
+        );
+        app.state.prompt(refusal);
         return;
     };
     let mut selection = rspice_design::schematic::selection::Selection::default();
@@ -389,9 +397,11 @@ fn show_directive_note(app: &mut RSpiceApp, cell_view: CellViewRef, id: u64, lin
             selection,
         },
     ) {
-        app.state.prompt(format!(
-            "Line {line} of the selected SPICE directive stopped the run."
-        ));
+        let notice = app.state.workbench.messages().format(
+            MessageId::ProblemRouteDirectiveLine,
+            &[("line", &line.to_string())],
+        );
+        app.state.prompt(notice);
     }
 }
 
@@ -439,9 +449,13 @@ pub(crate) fn open_in_verify(
                     .map(|row| row.measurement.clone())
             });
         match row {
-            Some(None) => app.state.prompt(format!(
-                "No specification in the plan measures {measurement}."
-            )),
+            Some(None) => {
+                let refusal = app.state.workbench.messages().format(
+                    MessageId::ProblemRouteNoSpecification,
+                    &[("measurement", &measurement)],
+                );
+                app.state.prompt(refusal);
+            }
             Some(Some(row)) => app.state.simulate.selected_specification = Some(row),
             None => app.state.simulate.selected_specification = Some(measurement),
         }
