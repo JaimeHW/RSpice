@@ -100,13 +100,30 @@ pub fn selection_summary(
             .components
             .iter()
             .find(|component| component.id == id)
-            .map(|component| format!("{} · {}", component.name, component.value))
+            .map(|component| {
+                // A part without a name or a value (a ground, a port) reads
+                // by what it has, with no separator left hanging.
+                let name = if component.name.trim().is_empty() {
+                    component.kind.display_name()
+                } else {
+                    component.name.as_str()
+                };
+                if component.value.trim().is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{name} · {}", component.value)
+                }
+            })
             .unwrap_or_else(|| "Selected object unavailable".to_owned())
     } else if selection.count() > 0 {
-        format!("{} items selected", selection.count())
+        items_selected(selection.count())
     } else {
         "No object selected".to_owned()
     }
+}
+
+fn items_selected(count: usize) -> String {
+    format!("{count} item{} selected", if count == 1 { "" } else { "s" })
 }
 
 /// What the symbol editor has selected: one pin by its name ("PIN1"), one
@@ -115,7 +132,7 @@ pub fn selection_summary(
 fn symbol_selection_summary(symbol: &SymbolUiState, model: &Model) -> String {
     let selection = symbol.editor.effective_selection();
     if selection.len() > 1 {
-        return format!("{} items selected", selection.len());
+        return items_selected(selection.len());
     }
     if let Some(name) = selection.pins.first() {
         return name.clone();
