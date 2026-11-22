@@ -67,6 +67,15 @@ const FITTED_MAX_SHARE: f32 = 0.24;
 /// leave it less give way, the widest first.
 const MESSAGE_MIN_CHARACTERS: f32 = 16.0;
 
+/// The least share of the table's room the message keeps: what a finding
+/// says is what the table is read for. Fitted columns that would leave it
+/// less give way to their floors, and then the producer goes.
+const MESSAGE_LEAST_SHARE: f32 = 0.5;
+
+/// How far a rule, a subject, a producer or a location gives way to the
+/// message's share, in characters: a few, then an ellipsis.
+const FITTED_FLOOR_CHARACTERS: f32 = 8.0;
+
 /// How far a fitted column gives way to let the message print whole, in
 /// characters: as many as the message keeps at least. A short name stays
 /// whole, and past it a rule or a path is cut too far to be read, so the
@@ -159,7 +168,14 @@ impl Columns {
                 0.0
             };
             let content = mark + widest[index] as f32 * advance;
-            floors[index] = heading + 2.0 * CONSOLE_CELL_INSET;
+            // The severity word stays whole; any other cell gives way to a
+            // few characters, none below its heading.
+            let floor = if column == ProblemColumn::Severity {
+                content
+            } else {
+                content.min(FITTED_FLOOR_CHARACTERS * advance)
+            };
+            floors[index] = heading.max(floor) + 2.0 * CONSOLE_CELL_INSET;
             legible[index] = (content.min(mark + FITTED_LEAST_CHARACTERS * advance)
                 + 2.0 * CONSOLE_CELL_INSET)
                 .max(floors[index]);
@@ -177,19 +193,36 @@ impl Columns {
         // severity word, a net's name — keeps its cells whole while a long
         // rule or path is cut; taking from every column in proportion cut
         // "Critical" to "Critic…" to spare a forty-character rule two
-        // characters. A width a reader set is theirs, and stays.
-        let message_least = MESSAGE_MIN_CHARACTERS * advance + 2.0 * CONSOLE_CELL_INSET;
+        // characters. A width a reader set is theirs, and stays. The message
+        // keeps at least half the room; where the columns at their floors
+        // would leave it less, the producer goes, and the others take back
+        // what it held.
+        let message_least = (MESSAGE_MIN_CHARACTERS * advance + 2.0 * CONSOLE_CELL_INSET)
+            .max(room * MESSAGE_LEAST_SHARE);
         let message_whole = message_width(ui, message) + 2.0 * CONSOLE_CELL_INSET;
-        let fitted = &mut widths[..FITTED.len()];
-        give_way(
-            fitted,
-            &legible,
-            &resized,
-            message_whole.max(message_least),
-            room,
-        );
-        give_way(fitted, &floors, &resized, message_least, room);
-        let fitted: f32 = fitted.iter().sum();
+        let natural = widths;
+        let yield_to_message =
+            |widths: &mut [f32; 6], legible: &[f32; FITTED.len()], floors: &[f32; FITTED.len()]| {
+                let fitted = &mut widths[..FITTED.len()];
+                give_way(
+                    fitted,
+                    legible,
+                    &resized,
+                    message_whole.max(message_least),
+                    room,
+                );
+                give_way(fitted, floors, &resized, message_least, room);
+                fitted.iter().sum::<f32>()
+            };
+        let mut fitted = yield_to_message(&mut widths, &legible, &floors);
+        let producer = Self::index(ProblemColumn::Producer);
+        if fitted + message_least > room && resized.0[producer].is_none() {
+            widths = natural;
+            widths[producer] = 0.0;
+            legible[producer] = 0.0;
+            floors[producer] = 0.0;
+            fitted = yield_to_message(&mut widths, &legible, &floors);
+        }
         widths[5] = (room - fitted).max(message_least);
 
         let mut starts = [0.0; 6];
@@ -218,6 +251,12 @@ impl Columns {
             ProblemColumn::Location => 4,
             ProblemColumn::Message => 5,
         }
+    }
+
+    /// Whether the table draws the column: the producer goes where the
+    /// table has too little room for it beside the message.
+    pub(super) fn shown(&self, column: ProblemColumn) -> bool {
+        self.widths[Self::index(column)] > 0.0
     }
 
     /// A column's width, its insets included.
@@ -362,10 +401,15 @@ pub(super) fn header(ui: &mut Ui, columns: &Columns, view: &ProblemsView) -> Opt
     let grab = ui.style().interaction.resize_grab_radius_side;
     let before = Resized::load(ui.ctx());
     let mut resized = before;
-    let mut responses = Vec::with_capacity(ProblemColumn::ALL.len());
+    // A column the table has no room for has no heading and no edge.
+    let shown: Vec<ProblemColumn> = ProblemColumn::ALL
+        .into_iter()
+        .filter(|column| columns.shown(*column))
+        .collect();
+    let mut responses = Vec::with_capacity(shown.len());
     let mut edges = Vec::with_capacity(FITTED.len());
-    for (index, column) in ProblemColumn::ALL.into_iter().enumerate() {
-        let cell = cells[index];
+    for (index, &column) in shown.iter().enumerate() {
+        let cell = cells[Columns::index(column)];
         let fitted = FITTED.contains(&column);
         let left = if index == 0 {
             cell.left()
@@ -378,10 +422,13 @@ pub(super) fn header(ui: &mut Ui, columns: &Columns, view: &ProblemsView) -> Opt
             cell.right()
         };
         let sensed = egui::Rect::from_x_y_ranges(left..=right.max(left), cell.y_range());
-        responses.push(ui.interact(
-            sensed,
-            egui::Id::new(("workbench.problems.header", column.label())),
-            Sense::click(),
+        responses.push((
+            column,
+            ui.interact(
+                sensed,
+                egui::Id::new(("workbench.problems.header", column.label())),
+                Sense::click(),
+            ),
         ));
         if fitted {
             edges.push(edge(ui, columns, column, cell.right(), rect, &mut resized));
@@ -394,17 +441,20 @@ pub(super) fn header(ui: &mut Ui, columns: &Columns, view: &ProblemsView) -> Opt
 
     let hovered = responses
         .iter()
-        .zip(cells)
-        .find(|(response, _)| response.hovered())
-        .map(|(_, cell)| cell);
-    let dividers: Vec<f32> = cells[1..].iter().map(egui::Rect::left).collect();
+        .find(|(_, response)| response.hovered())
+        .map(|(column, _)| cells[Columns::index(*column)]);
+    let dividers: Vec<f32> = shown[1..]
+        .iter()
+        .map(|column| cells[Columns::index(*column)].left())
+        .collect();
     paint_header_band(ui, rect, &dividers, hovered);
     for edge in &edges {
         edge.paint(ui, rect);
     }
 
     let mut activated = None;
-    for (column, response) in ProblemColumn::ALL.into_iter().zip(&responses) {
+    for (column, response) in &responses {
+        let column = *column;
         let cell = cells[Columns::index(column)];
         let sorted = view.sort == column;
         let announcement = header_announcement(column, view);
@@ -791,7 +841,7 @@ pub(super) fn row(
         (ProblemColumn::Location, cells.location, FontWeight::Regular),
         (ProblemColumn::Message, cells.message, FontWeight::Regular),
     ] {
-        if text.is_empty() {
+        if text.is_empty() || !columns.shown(column) {
             continue;
         }
         let room = columns.text_room(column);
