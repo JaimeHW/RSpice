@@ -266,7 +266,7 @@ fn window_statistics_measure_each_branch_between_the_cursors() {
     // Forward y=2x has RMS sqrt(1/3); return y=4-2x has RMS sqrt(37/3).
     // Each integral is over [0, 0.5], including its linear segments.
     assert!(
-        painted.iter().any(|text| text == "577.3503 mV"),
+        painted.iter().any(|text| text == "577.4 mV"),
         "the forward branch RMS is incorrect: {painted:?}"
     );
     assert!(

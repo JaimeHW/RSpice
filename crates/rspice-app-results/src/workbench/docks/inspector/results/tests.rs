@@ -423,8 +423,8 @@ fn trace_statistics_read_to_the_readers_significant_digits() {
         .model
         .preferences
         .scalar(ScalarPreference::DisplayedSignificantDigits);
-    assert_eq!(digits, 7, "the reader's default");
-    assert_eq!(minimum(&mut host), "490.2291 mV");
+    assert_eq!(digits, 4, "the reader's default");
+    assert_eq!(minimum(&mut host), "490.2 mV");
     host.model
         .preferences
         .set_scalar(ScalarPreference::DisplayedSignificantDigits, 5)

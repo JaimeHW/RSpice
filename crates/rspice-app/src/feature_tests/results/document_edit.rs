@@ -1045,9 +1045,9 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
     app.state.workbench.workspace = Workspace::Results;
     show_document(&mut app, document_id);
     let own_digits = shown_digits(&app);
-    assert_ne!(own_digits, 4);
+    assert_ne!(own_digits, 6);
 
-    apply_properties(&mut app, 4, true);
+    apply_properties(&mut app, 6, true);
     reload(&mut app, document_id);
     let presentation = retained(&app, document_id).presentation();
     assert_eq!(
@@ -1055,10 +1055,10 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
             presentation.significant_digits,
             presentation.phase_continuous
         ),
-        (4, true)
+        (6, true)
     );
     show_document(&mut app, document_id);
-    assert_eq!(shown_digits(&app), 4);
+    assert_eq!(shown_digits(&app), 6);
     assert!(
         app.state
             .results

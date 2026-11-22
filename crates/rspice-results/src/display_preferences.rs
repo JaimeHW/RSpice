@@ -18,7 +18,7 @@ pub struct DisplayedSignificantDigits(u8);
 impl DisplayedSignificantDigits {
     pub const MIN: u8 = 3;
     pub const MAX: u8 = 17;
-    pub const DEFAULT: u8 = 7;
+    pub const DEFAULT: u8 = 4;
 
     #[must_use]
     pub const fn get(self) -> u8 {
@@ -155,7 +155,7 @@ mod tests {
         let values = (digits(), INTERPOLATIONS, COMPLEX);
         assert_eq!(
             serde_json::to_string(&values).unwrap(),
-            r#"[[7,3,17],["monotone-cubic-where-valid","linear","nearest-accepted-point"],["magnitude-phase-degrees","real-imaginary"]]"#
+            r#"[[4,3,17],["monotone-cubic-where-valid","linear","nearest-accepted-point"],["magnitude-phase-degrees","real-imaginary"]]"#
         );
         assert_eq!(
             ron::to_string(&values).unwrap(),

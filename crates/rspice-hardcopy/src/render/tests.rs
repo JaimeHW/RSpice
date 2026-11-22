@@ -2980,6 +2980,6 @@ fn a_report_table_number_reads_with_its_prefix() {
         })
     };
     assert_eq!(cell(1.5e-15, Some("F")), "1.5 fF");
-    assert_eq!(cell(1.234_567e9, Some("Hz")), "1.234567 GHz");
+    assert_eq!(cell(1.234_567e9, Some("Hz")), "1.235 GHz");
     assert_eq!(cell(-0.25, None), "\u{2212}0.25");
 }

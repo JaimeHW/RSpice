@@ -2460,8 +2460,9 @@ pub struct VisualizationPresentationPolicy {
     pub phase_continuous: bool,
 }
 
+/// A document that states no digits shows the reader's default.
 const fn default_visualization_significant_digits() -> u8 {
-    7
+    crate::display_preferences::DisplayedSignificantDigits::DEFAULT
 }
 
 impl Default for VisualizationPresentationPolicy {

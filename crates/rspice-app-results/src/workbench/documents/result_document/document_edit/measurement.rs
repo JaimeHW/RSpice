@@ -708,7 +708,7 @@ mod tests {
         // {1, 2, 4, 5}: mean 3, sample sigma sqrt(10 / 3) = 1.826.
         let statistics = family.statistics.unwrap().unwrap();
         assert!(
-            statistics.starts_with("n 4 of 5 (1 not measured) · mean 3 · σ 1.825742"),
+            statistics.starts_with("n 4 of 5 (1 not measured) · mean 3 · σ 1.826"),
             "{statistics}"
         );
         assert_eq!(
