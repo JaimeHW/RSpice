@@ -186,9 +186,15 @@ pub fn handle_tool_interactions(
                 Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
                 None => report_unrepresentable_conductor_attachment(state),
             },
-            ToolPointerAction::Bus(bus_pos) => {
+            ToolPointerAction::Bus {
+                position: bus_pos,
+                joins,
+            } => {
                 if state.model.schematic.session.editor.bus_drawing.active {
                     state.model.schematic.extend_bus(bus_pos);
+                    if let Some(bus_id) = joins {
+                        finish_bus_on(state, bus_id);
+                    }
                 } else {
                     let declaration = state
                         .model
@@ -575,6 +581,34 @@ fn handle_bus_tap_click(state: &mut CanvasParts<'_>, requested: Point, hit_radiu
             state.prompt(message);
         }
         Err(error) => state.prompt(format!("Bus tap not placed: {error}")),
+    }
+}
+
+/// End a live bus route on the bus `bus_id` it reached, as a wire route ends
+/// on the conductor it reaches. A route drawn without a name takes the name
+/// of the bus it joins, since buses drawn touching are one connection.
+fn finish_bus_on(state: &mut CanvasParts<'_>, bus_id: u64) {
+    if state
+        .model
+        .schematic
+        .session
+        .editor
+        .bus_drawing
+        .declaration
+        .is_none()
+    {
+        let joined = state
+            .model
+            .schematic
+            .document()
+            .buses
+            .iter()
+            .find(|bus| bus.id == bus_id)
+            .and_then(|bus| bus.declaration.clone());
+        state.model.schematic.session.editor.bus_drawing.declaration = joined;
+    }
+    if let Err(error) = state.model.schematic.finish_bus() {
+        state.prompt(format!("Bus not committed: {error}"));
     }
 }
 

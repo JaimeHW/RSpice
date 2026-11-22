@@ -3,7 +3,7 @@
 use crate::workbench::app_state::AppState;
 use rspice_app_design::schematic::view::interaction::handle_tool_interactions;
 use rspice_app_design::schematic::view::schematic_symbol_context;
-use rspice_app_state::state::{ComponentType, Point, Tool, Wire};
+use rspice_app_state::state::{BusDeclaration, ComponentType, Point, Tool, Wire};
 use rspice_schematic_editor::view::viewport::Viewport;
 
 /// One frame of the armed tool at `time` seconds with `events`, on a focused
@@ -199,4 +199,47 @@ fn backspace_takes_back_the_last_route_vertex() {
     backspace(&ctx, &mut state, 3.2);
     assert!(!state.model.schematic.session.editor.wire_drawing.active);
     assert!(state.model.schematic.document().wires.is_empty());
+}
+
+/// A click on a bus ends a bus route there, on the bus, as a click on a wire
+/// ends a wire route; a route drawn without a name takes the name of the bus
+/// it joins.
+#[test]
+fn a_click_on_a_bus_ends_the_bus_route_on_it() {
+    let ctx = egui::Context::default();
+    let mut state = AppState::default();
+    state
+        .model
+        .schematic
+        .add_bus(
+            vec![Point::new(100, 200), Point::new(300, 200)],
+            Some(BusDeclaration::parse("D[3:0]").unwrap()),
+        )
+        .unwrap();
+    state.model.schematic.init_undo_history();
+    state.model.schematic.arm_tool(Tool::Bus);
+    canvas_frame(&ctx, &mut state, 0.0, Vec::new());
+    click(&ctx, &mut state, 0.1, Point::new(200, 100));
+    assert!(state.model.schematic.session.editor.bus_drawing.active);
+
+    // A click a few points off the bus lands on it and ends the route.
+    click(&ctx, &mut state, 1.0, Point::new(203, 197));
+
+    let drawing = &state.model.schematic.session.editor.bus_drawing;
+    assert!(!drawing.active, "the route went on: {:?}", drawing.points);
+    let buses = &state.model.schematic.document().buses;
+    assert_eq!(buses.len(), 2, "{buses:?}");
+    let route = buses
+        .iter()
+        .find(|bus| bus.points.first() == Some(&Point::new(200, 100)))
+        .expect("the routed bus");
+    assert_eq!(route.points.last(), Some(&Point::new(200, 200)));
+    assert_eq!(
+        route
+            .declaration
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("D[3:0]")
+    );
 }

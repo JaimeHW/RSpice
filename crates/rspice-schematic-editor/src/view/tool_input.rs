@@ -10,6 +10,7 @@ use rspice_design_model::Point;
 use super::{
     coordinates::screen_to_schematic,
     design_view::DesignView,
+    drawing::nearest_bus_hit,
     pointer_target::{PointerHit, PointerQuery},
     snap_resolution::{
         nearest_active_wire_screen_hit, resolve_grid_pointer, resolve_target_pointer,
@@ -95,7 +96,12 @@ pub enum ToolPointerAction {
         /// route there.
         ends_route: bool,
     },
-    Bus(Point),
+    Bus {
+        position: Point,
+        /// The bus the click lands on, which ends a live route there and
+        /// joins the two.
+        joins: Option<u64>,
+    },
     BusTap {
         position: Point,
         radius: i32,
@@ -181,7 +187,33 @@ impl ToolPointerView<'_> {
                     ends_route: hit.is_some() || on_pin,
                 }
             }
-            Tool::Bus => ToolPointerAction::Bus(grid_position()),
+            Tool::Bus => {
+                // A click on a bus on this sheet lands on it, as a wire click
+                // lands on a conductor: the point is the grid point carried
+                // onto the bus, so the route ends exactly on it.
+                let grid = grid_position();
+                let buses = self
+                    .design
+                    .objects_on_active_sheet(&self.design.document.buses, |bus| bus.id);
+                match nearest_bus_hit(
+                    buses.as_ref(),
+                    screen_to_schematic(viewport, position),
+                    target_acquisition_radius(viewport),
+                ) {
+                    Some(hit) => ToolPointerAction::Bus {
+                        position: rspice_design::schematic::bus::nearest_lattice_point_on_segment(
+                            grid,
+                            hit.segment_start,
+                            hit.segment_end,
+                        ),
+                        joins: Some(hit.bus_id),
+                    },
+                    None => ToolPointerAction::Bus {
+                        position: grid,
+                        joins: None,
+                    },
+                }
+            }
             Tool::BusTap => ToolPointerAction::BusTap {
                 position: screen_to_schematic(viewport, position),
                 radius: target_acquisition_radius(viewport),
