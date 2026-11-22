@@ -84,6 +84,122 @@ fn a_policy_change_keeps_the_repair_ticks() {
     assert_eq!(dialog.selected_actionable_count(), 1, "Apply counts it");
 }
 
+/// The design host with the run controller Apply and Undo drop a prepared
+/// run through.
+struct PolicyHost {
+    state: DesignTestHost,
+    run_controller: SimulationController,
+}
+
+/// What Undo and Redo read and write of [`PolicyHost`], as the design
+/// feature lends them.
+fn policy_history_parts(
+    host: &mut PolicyHost,
+) -> crate::workbench::app::actions::workspace::HistoryStepParts<'_> {
+    let state = &mut host.state;
+    crate::workbench::app::actions::workspace::HistoryStepParts {
+        design: state.design.history_parts(&state.model),
+        model: &mut state.model,
+        wb: &mut state.workbench,
+        runs: &mut state.runs,
+        run_controller: &mut host.run_controller,
+        selected_model: None,
+    }
+}
+
+/// Apply's repairs and its policy change are one step of Undo: one press
+/// puts the renamed label back and the policy back, and one Redo takes both
+/// forward again.
+#[test]
+fn one_undo_takes_back_the_repairs_and_the_policy_together() {
+    use crate::workbench::app::actions::workspace::{HistoryDirection, take_history_step};
+
+    let mut host = PolicyHost {
+        state: aliased_rail(),
+        run_controller: SimulationController::new(),
+    };
+    let contract = (*host.state.model.workspace.content.connectivity).clone();
+    let mut dialog = ConnectivityManagerDialogState {
+        report: build_report(&host.state.model, &contract.policy).unwrap(),
+        policy: contract.policy.clone(),
+        contract_at_open: contract.clone(),
+        ..ConnectivityManagerDialogState::default()
+    };
+    let rename = dialog
+        .report
+        .repairs
+        .iter()
+        .find(|repair| repair_takes_apply(repair))
+        .expect("the alias repair")
+        .id
+        .clone();
+    dialog.selected_repairs.insert(rename);
+    let changed_policy = BundleWidthMismatchPolicy::ALL
+        .into_iter()
+        .find(|policy| *policy != contract.policy.width_mismatch)
+        .unwrap();
+    dialog.policy.width_mismatch = changed_policy;
+    let label_name = |host: &PolicyHost| {
+        host.state
+            .model
+            .schematic
+            .document()
+            .net_labels
+            .iter()
+            .find(|label| label.id == 11)
+            .expect("the local label")
+            .name
+            .clone()
+    };
+    let width_policy = |host: &PolicyHost| {
+        host.state
+            .model
+            .workspace
+            .content
+            .connectivity
+            .policy
+            .width_mismatch
+    };
+
+    apply_selected_connectivity_repairs(
+        &mut dialog,
+        &mut host.state.model,
+        &mut host.state.workbench,
+        &mut host.state.runs,
+        &mut host.run_controller,
+        SchematicReviewMarkerVisibility::default(),
+    )
+    .expect("the repair and the policy apply");
+    assert_eq!(label_name(&host), "VDD!");
+    assert_eq!(width_policy(&host), changed_policy);
+
+    take_history_step(
+        &mut host,
+        policy_history_parts,
+        None,
+        HistoryDirection::Undo,
+    );
+    assert_eq!(label_name(&host), "VDD", "the label is back");
+    assert_eq!(
+        width_policy(&host),
+        contract.policy.width_mismatch,
+        "and the policy with it"
+    );
+    assert_eq!(
+        *host.state.model.workspace.content.connectivity, contract,
+        "the whole contract is the one Apply found"
+    );
+
+    take_history_step(
+        &mut host,
+        policy_history_parts,
+        None,
+        HistoryDirection::Redo,
+    );
+    assert_eq!(label_name(&host), "VDD!");
+    assert_eq!(width_policy(&host), changed_policy);
+}
+
 /// Two resistors, nothing wired: every pin is open.
 fn open_pins() -> DesignTestHost {
     let mut state = DesignTestHost::default();

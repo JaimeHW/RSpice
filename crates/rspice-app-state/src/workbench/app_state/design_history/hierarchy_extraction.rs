@@ -191,7 +191,11 @@ impl HierarchyExtractionRecord {
     }
 }
 
-fn schematic_matches(state: &Model, reference: &CellViewRef, expected: &SchematicSnapshot) -> bool {
+pub(super) fn schematic_matches(
+    state: &Model,
+    reference: &CellViewRef,
+    expected: &SchematicSnapshot,
+) -> bool {
     if state.workspace.content.active_schematic_reference() == *reference {
         expected.is_equal_document(state.schematic.document())
     } else {
@@ -204,7 +208,7 @@ fn schematic_matches(state: &Model, reference: &CellViewRef, expected: &Schemati
     }
 }
 
-fn apply_design_snapshot(
+pub(super) fn apply_design_snapshot(
     state: &mut Model,
     reference: &CellViewRef,
     snapshot: &SchematicSnapshot,

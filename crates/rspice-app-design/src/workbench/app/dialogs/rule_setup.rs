@@ -19,6 +19,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, DialogTransactionTone, select_with_disabled,
 };
+use crate::workbench::app_state::design_history::DesignPolicy;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
@@ -118,10 +119,13 @@ pub fn render_rule_setup_dialog(
     }
     let session = &mut *rule_setup;
     match dialog.show(ctx, |ui| rule_table(ui, session, editable)) {
-        DialogChoice::Primary => {
-            apply_rule_setup(rule_setup, review_markers, model, runs);
-            true
-        }
+        DialogChoice::Primary => match apply_rule_setup(rule_setup, review_markers, model, runs) {
+            Ok(()) => true,
+            Err(refusal) => {
+                rule_setup.refusal = Some(refusal);
+                false
+            }
+        },
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             *rule_setup = RuleSetupDialogState::default();
             false
@@ -130,21 +134,25 @@ pub fn render_rule_setup_dialog(
     }
 }
 
-/// Make the draft the project's deck. The reports produced under the old one
-/// go stale through their digests, and preflight authority is dropped,
-/// because what blocks a run has changed.
+/// Make the draft the project's deck, as one step of Undo. The reports
+/// produced under the old one go stale through their digests, and preflight
+/// authority is dropped, because what blocks a run has changed. Refused, with
+/// the dialog left open, when the project cannot take it.
 pub fn apply_rule_setup(
     rule_setup: &mut RuleSetupDialogState,
     review_markers: SchematicReviewMarkerVisibility,
     model: &mut Model,
     runs: &mut RunsState,
-) {
-    let draft = rule_setup.draft.clone();
-    *model.workspace.content.design_rules = draft;
-    model.workspace.content.project_metadata_dirty = true;
+) -> Result<(), String> {
+    let candidate = DesignPolicy {
+        design_rules: rule_setup.draft.clone(),
+        ..DesignPolicy::of(model)
+    };
+    model.publish_design_policy(candidate, None, "change design rule severities")?;
     runs.preflight.invalidate();
     model.publish_rule_deck_issues(runs.slot_facts(review_markers));
     *rule_setup = RuleSetupDialogState::default();
+    Ok(())
 }
 
 fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {

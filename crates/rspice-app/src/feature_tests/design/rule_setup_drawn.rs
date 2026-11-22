@@ -3,6 +3,7 @@
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_design::workbench::app::dialogs::rule_setup::*;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_design::drc::DeckIssue;
 use rspice_design::drc::DrcSeverity;
 use rspice_design::drc::DrcViolationType;
@@ -15,7 +16,8 @@ fn apply_rule_setup(state: &mut AppState) {
         review_markers,
         &mut state.model,
         &mut state.runs,
-    );
+    )
+    .expect("the draft applies");
 }
 
 #[test]
@@ -59,6 +61,42 @@ fn the_dialog_opens_on_the_projects_deck_and_applies_its_draft() {
             .severity(DrcViolationType::FloatingNode),
         Some(DrcSeverity::Info)
     );
+}
+
+/// Apply is one step of Undo: Edit, Undo brings the deck Apply replaced back,
+/// and Edit, Redo the applied one.
+#[test]
+fn one_undo_takes_back_an_applied_deck() {
+    let mut app = RSpiceApp::test_instance();
+    let severity = |app: &RSpiceApp| {
+        app.state
+            .model
+            .workspace
+            .content
+            .design_rules
+            .severity(DrcViolationType::FloatingNode)
+    };
+    assert_eq!(severity(&app), None, "the rule starts at its default");
+    open_rule_setup(
+        &mut app.state.design.rule_setup,
+        &app.state.model,
+        &mut app.state.workbench,
+        &app.state.platform,
+    );
+    app.state
+        .design
+        .rule_setup
+        .draft
+        .set_severity(DrcViolationType::FloatingNode, DrcSeverity::Info)
+        .expect("a floating node may be demoted");
+    apply_rule_setup(&mut app.state);
+    assert_eq!(severity(&app), Some(DrcSeverity::Info));
+
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(severity(&app), None, "the deck Apply replaced is back");
+
+    app.execute_command_key(ids::REDO);
+    assert_eq!(severity(&app), Some(DrcSeverity::Info));
 }
 
 #[test]

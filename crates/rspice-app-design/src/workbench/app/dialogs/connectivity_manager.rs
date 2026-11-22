@@ -35,6 +35,7 @@ use crate::workbench::app::actions::workspace::NavigationParts;
 use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::schematic::conductor_routes::start_canvas_wire;
+use crate::workbench::app_state::design_history::DesignPolicy;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::simulation::SimulationController;
@@ -1561,25 +1562,31 @@ pub fn apply_selected_connectivity_repairs(
     for repair in &selected {
         apply_repair_to_candidate(&mut candidate, repair)?;
     }
-    if !selected.is_empty() {
+    let drawing = if selected.is_empty() {
+        None
+    } else {
         candidate.recalculate_runtime_state();
         validate_repair_candidate(model, &candidate, &contract_candidate.policy)?;
         let after = SchematicSnapshot::capture(candidate.document());
-        let changed =
-            model
-                .schematic
-                .with_undo("apply reviewed connectivity repairs", move |schematic| {
-                    schematic.apply_snapshot(&after);
-                    schematic.recalculate_runtime_state();
-                });
-        if !changed {
+        if after.is_equal_document(model.schematic.document()) {
             return Err("The selected repairs no longer change the schematic.".to_owned());
         }
+        Some(after)
+    };
+    // The repairs and the policy are one step of Undo: one press takes back
+    // both, rather than putting the wires back and leaving the policy changed.
+    let description = if selected.is_empty() {
+        "change the connectivity policy"
+    } else {
+        "apply connectivity repairs"
+    };
+    let policy_candidate = DesignPolicy {
+        connectivity: contract_candidate,
+        ..DesignPolicy::of(model)
+    };
+    model.publish_design_policy(policy_candidate, drawing, description)?;
+    if !selected.is_empty() {
         sync_active_schematic(model, workbench);
-    }
-    if policy_changed {
-        *model.workspace.content.connectivity = contract_candidate;
-        model.workspace.content.project_metadata_dirty = true;
     }
     rspice_app_runs::workbench::preflight::invalidate(&mut runs.preflight, run_controller);
     model.netlist_artifacts.current_generation_input_digest = None;

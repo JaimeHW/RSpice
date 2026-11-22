@@ -24,6 +24,7 @@ pub(crate) mod annotation;
 mod compensation;
 mod component_rename;
 mod configuration_edit;
+mod design_policy_edit;
 mod hierarchy_extraction;
 mod instance_removal;
 mod library_operation;
@@ -35,6 +36,7 @@ mod simulation_setup;
 mod stimulus_readoption;
 mod veriloga_build;
 
+pub use design_policy_edit::DesignPolicy;
 pub use hierarchy_extraction::validate_hierarchy_target_unreferenced;
 #[cfg(any(test, feature = "test-support"))]
 pub use library_operation::DRAWINGS_TAKEN;
@@ -117,6 +119,7 @@ pub enum ProjectDesignBody {
     ProjectPropertiesEdit(Box<project_properties_edit::ProjectPropertiesEditRecord>),
     PhysicalLayoutEdit(Box<physical_layout_edit::PhysicalLayoutEditRecord>),
     LibraryReferenceEdit(Box<library_reference_edit::LibraryReferenceEditRecord>),
+    DesignPolicyEdit(Box<design_policy_edit::DesignPolicyEditRecord>),
 }
 
 /// Reference-changing history is prepared exactly once before navigation or a
@@ -1392,6 +1395,7 @@ impl ProjectDesignBody {
             Self::ProjectPropertiesEdit(record) => record.after_design_matches(state),
             Self::PhysicalLayoutEdit(record) => record.after_design_matches(state),
             Self::LibraryReferenceEdit(record) => record.after_design_matches(state),
+            Self::DesignPolicyEdit(record) => record.after_design_matches(state),
         }
     }
 
@@ -1410,6 +1414,7 @@ impl ProjectDesignBody {
             Self::ProjectPropertiesEdit(record) => record.before_design_matches(state),
             Self::PhysicalLayoutEdit(record) => record.before_design_matches(state),
             Self::LibraryReferenceEdit(record) => record.before_design_matches(state),
+            Self::DesignPolicyEdit(record) => record.before_design_matches(state),
         }
     }
 
@@ -1428,6 +1433,7 @@ impl ProjectDesignBody {
             Self::ProjectPropertiesEdit(record) => record.validate_mutation(state, operation),
             Self::PhysicalLayoutEdit(record) => record.validate_mutation(state, operation),
             Self::LibraryReferenceEdit(record) => record.validate_mutation(state, operation),
+            Self::DesignPolicyEdit(record) => record.validate_mutation(state, operation),
         }
     }
 
@@ -1446,6 +1452,7 @@ impl ProjectDesignBody {
             Self::ProjectPropertiesEdit(record) => record.description(),
             Self::PhysicalLayoutEdit(record) => record.description(),
             Self::LibraryReferenceEdit(record) => record.description(),
+            Self::DesignPolicyEdit(record) => record.description(),
         }
     }
 
@@ -1470,6 +1477,7 @@ impl ProjectDesignBody {
             Self::ProjectPropertiesEdit(record) => record.apply_before(state),
             Self::PhysicalLayoutEdit(record) => record.apply_before(state),
             Self::LibraryReferenceEdit(record) => record.apply_before(state),
+            Self::DesignPolicyEdit(record) => record.apply_before(state, effects),
         }
     }
 
@@ -1494,6 +1502,7 @@ impl ProjectDesignBody {
             Self::ProjectPropertiesEdit(record) => record.apply_after(state),
             Self::PhysicalLayoutEdit(record) => record.apply_after(state),
             Self::LibraryReferenceEdit(record) => record.apply_after(state),
+            Self::DesignPolicyEdit(record) => record.apply_after(state, effects),
         }
     }
 }
