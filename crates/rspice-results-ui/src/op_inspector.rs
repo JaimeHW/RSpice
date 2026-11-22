@@ -489,21 +489,6 @@ struct PlanSection {
 }
 
 impl PlanSection {
-    /// Value columns on the sheet's grid, counting the region's.
-    fn slots(&self) -> usize {
-        self.columns.len() + usize::from(self.region)
-    }
-    /// The room for this section's prefixes and units, at the mono `advance`.
-    fn unit_slot(&self, advance: f32) -> f32 {
-        UNIT_SLOT_W.max((self.longest_unit as f32 * advance).ceil())
-    }
-    /// One of this section's value columns: the sheet's own width, grown by
-    /// whatever its units need so the mantissas keep their room.
-    fn value_w(&self, advance: f32) -> f32 {
-        let mantissa = (self.longest_mantissa as f32 * advance).ceil();
-        let narrowest = CELL_INSET + mantissa + MANTISSA_GAP + UNIT_SLOT_W;
-        VALUE_W.max(narrowest) + self.unit_slot(advance) - UNIT_SLOT_W
-    }
     fn has_rows(&self) -> bool {
         !self.collapsed && self.note.is_none()
     }
@@ -770,6 +755,19 @@ pub struct OpPlan {
     changed: Option<usize>,
     /// Every retained row, shown or filtered out.
     row_total: usize,
+    /// Whether the sheet's grid has a region column: whether any section
+    /// lists a device with one. A section without regions leaves it blank,
+    /// so its first value stands under every other section's first value.
+    region_slot: bool,
+}
+
+/// The sheet's one value grid: every section's value columns are one width
+/// and keep one room for prefixes and units, so a column lines up from
+/// section to section instead of each table setting its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ValueGrid {
+    width: f32,
+    unit_slot: f32,
 }
 
 impl OpPlan {
@@ -797,6 +795,7 @@ impl OpPlan {
             )
         });
         OpPlan {
+            region_slot: builder.sections.iter().any(|section| section.region),
             offsets: RowOffsets::from_heights(builder.rows.iter().map(|row| row.height())),
             longest_name: builder.longest_name,
             significant_digits: controls.significant_digits,
@@ -875,11 +874,33 @@ impl OpPlan {
         }
     }
 
+    /// The value grid every section shares, at the mono `advance`: the
+    /// sheet's own column width, grown by whatever the widest number and the
+    /// longest prefix and unit on the sheet need.
+    fn value_grid(&self, advance: f32) -> ValueGrid {
+        let longest = |of: fn(&PlanSection) -> usize| {
+            self.sections.iter().map(of).max().unwrap_or(0) as f32 * advance
+        };
+        let unit_slot = UNIT_SLOT_W.max(longest(|section| section.longest_unit).ceil());
+        let mantissa = longest(|section| section.longest_mantissa).ceil();
+        let narrowest = CELL_INSET + mantissa + MANTISSA_GAP + UNIT_SLOT_W;
+        ValueGrid {
+            width: VALUE_W.max(narrowest) + unit_slot - UNIT_SLOT_W,
+            unit_slot,
+        }
+    }
+
+    /// The slots a section's values take on the grid, counting the region
+    /// column, blank or not.
+    fn slots(&self, section: &PlanSection) -> usize {
+        section.columns.len() + usize::from(self.region_slot)
+    }
+
     /// The width of the widest section's whole value grid.
-    fn widest_values(&self, advance: f32) -> f32 {
+    fn widest_values(&self, grid: ValueGrid) -> f32 {
         self.sections
             .iter()
-            .map(|section| section.slots() as f32 * section.value_w(advance))
+            .map(|section| self.slots(section) as f32 * grid.width)
             .fold(0.0, f32::max)
     }
 
@@ -1424,6 +1445,7 @@ struct Grid {
     name_w: f32,
     /// Advance of the mono font names are set in.
     advance: f32,
+    values: ValueGrid,
 }
 
 impl Grid {
@@ -1603,12 +1625,12 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             out,
         );
         let values = self.grid.values_clip().intersect(rect);
-        let width = section.value_w(self.grid.advance);
-        let left = self.grid.values_left(section.slots(), width);
+        let width = self.grid.values.width;
+        let left = self.grid.values_left(self.plan.slots(section), width);
         let mut slot = 0;
-        if section.region {
+        if self.plan.region_slot {
             let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot, width);
-            if self.grid.shows_whole(cell) {
+            if section.region && self.grid.shows_whole(cell) {
                 self.header_cell(section, cell, values, REGION_HEADER, HeaderAlign::Text, out);
             }
             slot += 1;
@@ -1680,7 +1702,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             measured
         };
         let width = galley.size().x;
-        let edge = mantissa_edge(cell, section.unit_slot(self.grid.advance));
+        let edge = mantissa_edge(cell, self.grid.values.unit_slot);
         let left = match align {
             HeaderAlign::Name => cell.left() + NAME_INSET,
             HeaderAlign::Text => cell.left() + CELL_INSET,
@@ -1901,11 +1923,11 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         );
         let values_clip = self.grid.values_clip().intersect(rect);
         let values = self.ui.painter_at(values_clip);
-        let width = section.value_w(self.grid.advance);
-        let unit_slot = section.unit_slot(self.grid.advance);
-        let left = self.grid.values_left(section.slots(), width);
+        let width = self.grid.values.width;
+        let unit_slot = self.grid.values.unit_slot;
+        let left = self.grid.values_left(self.plan.slots(section), width);
         let mut slot = 0;
-        if section.region {
+        if self.plan.region_slot {
             let cell = self.grid.value_cell(left, y, ROW_H, slot, width);
             if let Some(region) = row.region().filter(|_| self.grid.shows_whole(cell)) {
                 // A transistor outside its gain region reads in the warning
@@ -2005,7 +2027,8 @@ fn show_sheet<M: SchematicMapping>(
         .size()
         .x;
     let name_w = name_column_width(advance, plan.longest_name);
-    let content_w = name_w + plan.widest_values(advance);
+    let values = plan.value_grid(advance);
+    let content_w = name_w + plan.widest_values(values);
     let content_h = plan.offsets.total_height() + SHEET_END_PAD;
     let table = egui::ScrollArea::both()
         .id_salt("rspice.results.op.sheet")
@@ -2023,6 +2046,7 @@ fn show_sheet<M: SchematicMapping>(
                 visible: viewport.translate(rect.min.to_vec2()),
                 name_w,
                 advance,
+                values,
             };
             let pinned = plan.pinned_at(viewport.min.y);
             let mut body = grid.visible;
