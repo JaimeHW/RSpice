@@ -119,22 +119,31 @@ pub(crate) fn answer_surface_requests(state: &mut AppState) {
     );
 }
 
-/// Show the generated netlist's source map, at the first line it maps, with
-/// the manager closed. The caller has put the generated netlist in front the
-/// way every jump to it does.
-pub(in crate::workbench) fn open_connectivity_source_map(state: &mut AppState) {
+/// Show the generated netlist at the first card that connects `net`, with
+/// the manager closed; a net no card names lands on the first mapped line.
+/// Nothing is typed into a filter: the jump is the answer. The caller has put
+/// the generated netlist in front the way every jump to it does.
+pub(in crate::workbench) fn open_connectivity_source_map(state: &mut AppState, net: &str) {
     state.design.connectivity_manager.close();
-    state.workbench.navigator_visible = true;
-    state.workbench.drawer =
-        Some(rspice_app_workbench::workbench::state::workbench_session::Drawer::Navigator);
-    state.workbench.set_navigator_filter("source mapping");
-    if let Some(line) = state
+    let source_map = state
         .model
         .netlist_artifacts
         .generated_document
         .as_ref()
         .and_then(|document| document.generated_artifact())
-        .and_then(|artifact| artifact.source_map().first())
+        .map(|artifact| artifact.source_map());
+    if let Some(line) = source_map
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| {
+                    entry
+                        .nets()
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(net))
+                })
+                .or_else(|| entries.first())
+        })
         .map(|entry| entry.generated_line())
     {
         state.code.netlist.cursor_line = line.saturating_sub(1);

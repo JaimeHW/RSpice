@@ -269,7 +269,8 @@ enum ConnectivityBodyAction {
     CreateBus,
     ReviewAliases,
     RouteRepair(String),
-    OpenSourceMap,
+    /// Open the generated netlist at the net's first card.
+    OpenSourceMap(String),
 }
 
 pub fn open_connectivity_manager(
@@ -1312,9 +1313,11 @@ impl ConnectivityManager<'_> {
                     self.dialog.error = Some(error);
                 }
             }
-            ConnectivityBodyAction::OpenSourceMap => {
+            ConnectivityBodyAction::OpenSourceMap(net) => {
                 // The shell opens it straight after this step draws.
-                self.workbench.outbox.push(DesignRequest::OpenSourceMap);
+                self.workbench
+                    .outbox
+                    .push(DesignRequest::OpenSourceMap(net));
             }
         }
     }
@@ -1902,7 +1905,7 @@ fn connectivity_table(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityB
                             "Drive / load / passive",
                             "Discipline",
                             "Issue",
-                            "Repair",
+                            "Show",
                         ],
                     );
                     if report.nets.is_empty() {
@@ -1919,12 +1922,19 @@ fn connectivity_table(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityB
                         ui.monospace(format!("{} / {} / {}", net.drivers, net.loads, net.passive));
                         ui.monospace(&net.discipline);
                         ui.label(&net.issue);
-                        if Button::new("Reveal").show(ui).clicked() {
-                            action = ConnectivityBodyAction::Reveal(RevealTarget::Net {
-                                wire_ids: net.wire_ids.clone(),
-                                component_ids: net.component_ids.clone(),
-                            });
-                        }
+                        // Reveal finds the net on the drawing; Netlist finds
+                        // the first card the deck writes for it.
+                        ui.horizontal(|ui| {
+                            if Button::new("Reveal").show(ui).clicked() {
+                                action = ConnectivityBodyAction::Reveal(RevealTarget::Net {
+                                    wire_ids: net.wire_ids.clone(),
+                                    component_ids: net.component_ids.clone(),
+                                });
+                            }
+                            if Button::new("Netlist").show(ui).clicked() {
+                                action = ConnectivityBodyAction::OpenSourceMap(net.name.clone());
+                            }
+                        });
                         ui.end_row();
                     }
                 });
@@ -2227,9 +2237,6 @@ fn repair_preview_tab(
                         .filter(|repair| repair_takes_apply(repair))
                         .map(|repair| repair.id.clone()),
                 );
-            }
-            if Button::new("Open source map\u{2026}").show(ui).clicked() {
-                action = ConnectivityBodyAction::OpenSourceMap;
             }
         });
     });

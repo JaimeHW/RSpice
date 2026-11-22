@@ -153,23 +153,42 @@ fn open_generated_netlist_replaces_an_include_tab_in_front() {
     assert_generated_in_front(&mut app, ".param rmodel=1k", "over the include");
 }
 
-/// The Connectivity manager's source map lands on the generated netlist at
-/// the first line it maps, even with an include in front.
+/// A net's Netlist button in the Connectivity manager lands on the generated
+/// netlist at the first card that connects that net, even with an include in
+/// front, and types nothing into the navigator's filter.
 #[test]
-fn the_connectivity_source_map_lands_on_the_generated_netlist() {
+fn the_connectivity_source_map_lands_on_the_nets_first_card() {
     let mut app = include_in_front_app();
     app.state.workbench.activate(Workspace::Design);
-    app.answer_design_request(DesignRequest::OpenSourceMap);
-    let first_mapped = app
+    app.answer_design_request(DesignRequest::OpenSourceMap(String::new()));
+    let (net, line) = app
         .state
         .model
         .netlist_artifacts
         .generated_document
         .as_ref()
         .and_then(rspice_app_state::state::NetlistDocument::generated_artifact)
-        .and_then(|artifact| artifact.source_map().first())
-        .map(rspice_app_state::state::GeneratedSourceMapEntry::generated_line);
-    assert!(first_mapped.is_some(), "the generated netlist maps a line");
-    assert_eq!(app.state.code.netlist.requested_line, first_mapped);
+        .and_then(|artifact| {
+            let last = artifact
+                .source_map()
+                .iter()
+                .rev()
+                .find(|entry| !entry.nets().is_empty())?;
+            let net = last.nets().last()?.clone();
+            let first = artifact.source_map().iter().find(|entry| {
+                entry
+                    .nets()
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&net))
+            })?;
+            Some((net, first.generated_line()))
+        })
+        .expect("the generated netlist maps a card to a net");
+
+    app.state.workbench.activate(Workspace::Design);
+    app.answer_design_request(DesignRequest::OpenSourceMap(net.to_ascii_uppercase()));
+
+    assert_eq!(app.state.code.netlist.requested_line, Some(line), "{net}");
+    assert_eq!(app.state.workbench.navigator_filter(), "");
     assert_generated_in_front(&mut app, ".param rmodel=1k", "from the source map");
 }

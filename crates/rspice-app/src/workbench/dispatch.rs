@@ -784,11 +784,11 @@ impl RSpiceApp {
             DesignRequest::RevealConnectivity(target) => {
                 DesignFeature::reveal_connectivity(&mut features::cx(self), target);
             }
-            DesignRequest::OpenSourceMap => {
+            DesignRequest::OpenSourceMap(net) => {
                 rspice_app_code::workbench::surfaces::netlist::generation::show_generated_netlist(
                     &mut features::cx::<CodeFeature>(self),
                 );
-                open_connectivity_source_map(&mut self.state);
+                open_connectivity_source_map(&mut self.state, &net);
             }
             DesignRequest::ApplyConnectivityRepairs => {
                 DesignFeature::apply_connectivity_repairs(&mut features::cx(self));

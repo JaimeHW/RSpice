@@ -17,8 +17,8 @@ pub enum DesignRequest {
     ReopenPropertyEditor(u64),
     /// Reveal one finding of the connectivity report on the canvas.
     RevealConnectivity(RevealTarget),
-    /// Open the generated netlist on its source map.
-    OpenSourceMap,
+    /// Open the generated netlist at the first card that connects the net.
+    OpenSourceMap(String),
     /// Apply the connectivity repairs and policy the manager has under review.
     ApplyConnectivityRepairs,
     /// Extract the selection into the new cell Create hierarchy describes.
