@@ -185,6 +185,9 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                     &mut app,
                     &file,
                     rspice_design::foreign_schematic::ForeignTool::Ltspice,
+                    &mut |_| {
+                        crate::workbench::workflows::foreign_schematic_workflow::PlanAnswer::Replace
+                    },
                 )
                 .expect("the drawing imports");
                 std::fs::remove_dir_all(&folder).ok();

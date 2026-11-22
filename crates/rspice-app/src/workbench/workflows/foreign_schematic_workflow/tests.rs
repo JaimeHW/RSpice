@@ -13,6 +13,12 @@ use super::plan::{ForeignPlan, plan_from_cards};
 use super::*;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
+/// The answer of a reader who lets an imported drawing's analyses replace
+/// the active plan.
+fn replace(_: &PlanQuestion) -> PlanAnswer {
+    PlanAnswer::Replace
+}
+
 fn card(role: ForeignCardRole, text: &str) -> ForeignCard {
     ForeignCard {
         position: Point::new(10, 20),
@@ -503,9 +509,13 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         .library
         .clone();
 
-    let summary =
-        import_foreign_schematic_file(&mut app, &folder.join("filter.asc"), ForeignTool::Ltspice)
-            .expect("the schematic imports");
+    let summary = import_foreign_schematic_file(
+        &mut app,
+        &folder.join("filter.asc"),
+        ForeignTool::Ltspice,
+        &mut replace,
+    )
+    .expect("the schematic imports");
     assert!(summary.contains("LTspice"), "{summary}");
 
     let model = &app.state.model;
@@ -670,15 +680,25 @@ fn a_part_runs_the_model_its_drawing_defines_and_a_repeat_adds_no_provider() {
             .collect::<Vec<_>>()
     };
 
-    import_foreign_schematic_file(&mut app, &folder.join("one.asc"), ForeignTool::Ltspice)
-        .expect("the first schematic imports");
+    import_foreign_schematic_file(
+        &mut app,
+        &folder.join("one.asc"),
+        ForeignTool::Ltspice,
+        &mut replace,
+    )
+    .expect("the first schematic imports");
     assert_eq!(bound(&app), ["one"]);
     controller
         .preflight_run_set(&app.state)
         .expect("the diode finds the model its drawing defines");
 
-    import_foreign_schematic_file(&mut app, &folder.join("two.asc"), ForeignTool::Ltspice)
-        .expect("the second schematic imports");
+    import_foreign_schematic_file(
+        &mut app,
+        &folder.join("two.asc"),
+        ForeignTool::Ltspice,
+        &mut replace,
+    )
+    .expect("the second schematic imports");
     assert_eq!(bound(&app), ["one"]);
     let model = &app.state.model;
     assert!(
@@ -773,8 +793,13 @@ TEXT 32 270 Left 2 !.model MYD D(Is={saturation})
     }
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    import_foreign_schematic_file(&mut app, &folder.join("one.asc"), ForeignTool::Ltspice)
-        .expect("the first schematic imports");
+    import_foreign_schematic_file(
+        &mut app,
+        &folder.join("one.asc"),
+        ForeignTool::Ltspice,
+        &mut replace,
+    )
+    .expect("the first schematic imports");
     let first_plan = app
         .state
         .model
@@ -782,8 +807,13 @@ TEXT 32 270 Left 2 !.model MYD D(Is={saturation})
         .stable_analysis_plan()
         .expect("a plan")
         .id();
-    import_foreign_schematic_file(&mut app, &folder.join("two.asc"), ForeignTool::Ltspice)
-        .expect("the second schematic imports");
+    import_foreign_schematic_file(
+        &mut app,
+        &folder.join("two.asc"),
+        ForeignTool::Ltspice,
+        &mut replace,
+    )
+    .expect("the second schematic imports");
     std::fs::remove_dir_all(&folder).ok();
     let bound = |app: &RSpiceApp| {
         app.state
@@ -856,7 +886,8 @@ fn a_directive_blocks_analysis_goes_to_the_plan_and_the_rest_is_a_spice_directiv
     .expect("schematic");
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice, &mut replace)
+        .expect("imports");
     std::fs::remove_dir_all(&folder).ok();
     let model = &app.state.model;
     let notes = model
@@ -906,7 +937,8 @@ fn an_imported_initial_condition_starts_the_transient_where_it_says() {
     .expect("schematic");
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice, &mut replace)
+        .expect("imports");
     std::fs::remove_dir_all(&folder).ok();
     let notes = app
         .state
@@ -981,7 +1013,7 @@ fn an_import_says_what_came_across_and_problems_lists_what_did_not() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
 
-    let said = import_foreign_schematic_file(&mut app, &clean, ForeignTool::Ltspice)
+    let said = import_foreign_schematic_file(&mut app, &clean, ForeignTool::Ltspice, &mut replace)
         .expect("the clean drawing imports");
     let drawing = app.state.model.workspace.content.active_view.clone();
     assert_eq!(
@@ -997,8 +1029,9 @@ fn an_import_says_what_came_across_and_problems_lists_what_did_not() {
         "nothing to read there"
     );
 
-    let said = import_foreign_schematic_file(&mut app, &partial, ForeignTool::Ltspice)
-        .expect("the partial drawing imports");
+    let said =
+        import_foreign_schematic_file(&mut app, &partial, ForeignTool::Ltspice, &mut replace)
+            .expect("the partial drawing imports");
     std::fs::remove_dir_all(&folder).ok();
     let drawing = app.state.model.workspace.content.active_view.clone();
     assert_eq!(
@@ -1049,6 +1082,110 @@ fn an_import_says_what_came_across_and_problems_lists_what_did_not() {
     );
 }
 
+/// A drawing imported into a project that goes on simulating another design
+/// asks before its analyses replace the active plan, naming both plans'
+/// analyses. Kept, the active plan stays as it was and the drawing's plan
+/// joins the project beside it; replaced, the drawing's plan is the one Run
+/// runs. A drawing the project adopts as its top cell asks nothing.
+#[test]
+fn an_import_asks_before_its_analyses_replace_the_active_plan() {
+    let folder = drawing_folder();
+    for (name, analysis) in [("one", ".op"), ("two", ".tran 1m"), ("three", ".tran 2m")] {
+        std::fs::write(
+            folder.join(format!("{name}.asc")),
+            format!(
+                "Version 4\nSHEET 1 880 680\n\
+                 SYMBOL res 32 64 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+                 TEXT 32 240 Left 2 !{analysis}\n"
+            ),
+        )
+        .expect("schematic");
+    }
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let analyses = |app: &RSpiceApp| {
+        let setup = &app.state.model.sim_setup;
+        let plan = setup.stable_analysis_plan().expect("the active plan");
+        (
+            setup.active_plan_name().to_string(),
+            plan.instances()
+                .iter()
+                .map(|instance| instance.display_name().to_owned())
+                .collect::<Vec<_>>(),
+        )
+    };
+    let others = |app: &RSpiceApp| {
+        app.state
+            .model
+            .sim_setup
+            .inactive_plans()
+            .iter()
+            .map(|plan| plan.name().to_string())
+            .collect::<Vec<_>>()
+    };
+
+    import_foreign_schematic_file(
+        &mut app,
+        &folder.join("one.asc"),
+        ForeignTool::Ltspice,
+        &mut |question| panic!("the project adopts the drawing, so nothing is asked: {question:?}"),
+    )
+    .expect("the first drawing imports");
+    assert_eq!(
+        analyses(&app),
+        ("one".to_owned(), vec!["Operating point".to_owned()])
+    );
+
+    let mut asked = Vec::new();
+    let said = import_foreign_schematic_file(
+        &mut app,
+        &folder.join("two.asc"),
+        ForeignTool::Ltspice,
+        &mut |question| {
+            asked.push(question.clone());
+            PlanAnswer::Keep
+        },
+    )
+    .expect("the second drawing imports");
+    assert_eq!(
+        asked,
+        [PlanQuestion {
+            title: "Import LTspice Schematic".to_owned(),
+            description: "The analyses of two.asc (Transient) would replace the active plan \
+                          \u{201c}one\u{201d} (Operating point), which the project runs. Replace \
+                          it, or keep it and add them as the plan \u{201c}two\u{201d}?"
+                .to_owned(),
+            keep: "Keep \u{201c}one\u{201d}".to_owned(),
+        }]
+    );
+    assert_eq!(
+        analyses(&app),
+        ("one".to_owned(), vec!["Operating point".to_owned()]),
+        "the kept plan is the one Run runs"
+    );
+    assert_eq!(others(&app), ["Default plan", "two"]);
+    assert!(
+        said.ends_with("1 part; its 1 analysis is the plan `two`, and `one` stays active."),
+        "{said}"
+    );
+
+    import_foreign_schematic_file(
+        &mut app,
+        &folder.join("three.asc"),
+        ForeignTool::Ltspice,
+        &mut |_| PlanAnswer::Replace,
+    )
+    .expect("the third drawing imports");
+    std::fs::remove_dir_all(&folder).ok();
+    assert_eq!(
+        analyses(&app),
+        ("three".to_owned(), vec!["Transient".to_owned()])
+    );
+    let mut kept = others(&app);
+    kept.sort();
+    assert_eq!(kept, ["Default plan", "one", "two"]);
+}
+
 /// LTspice 26.1.1 and QSPICE read values past the sixth of an `EXP` source
 /// differently, and both draw `mc()` anew at every `.step` point, so the
 /// source program decides what the imported deck's cards mean.
@@ -1069,7 +1206,8 @@ SYMATTR Value 1k
     .expect("schematic");
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice, &mut replace)
+        .expect("imports");
     std::fs::remove_dir_all(&folder).ok();
     let card = app.state.model.sim_setup.options.to_spice_options();
     assert!(card.contains("RSPICE_EXP_REPEAT=LTSPICE"), "{card}");
@@ -1117,7 +1255,8 @@ SYMATTR Value 1k
     .expect("schematic");
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice, &mut replace)
+        .expect("imports");
     std::fs::remove_dir_all(&folder).ok();
     let plan = app
         .state
@@ -1198,8 +1337,13 @@ fn an_imported_sheet_draws_the_same_with_its_source_gone() {
     .expect("symbol");
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    import_foreign_schematic_file(&mut app, &folder.join("filter.asc"), ForeignTool::Ltspice)
-        .expect("the schematic imports");
+    import_foreign_schematic_file(
+        &mut app,
+        &folder.join("filter.asc"),
+        ForeignTool::Ltspice,
+        &mut replace,
+    )
+    .expect("the schematic imports");
     let resistor = app
         .state
         .model
@@ -1244,7 +1388,8 @@ fn import_onto_sheet(name: &str, drawing: &str) -> (String, bool, bool) {
     std::fs::write(&file, drawing).expect("schematic");
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice, &mut replace)
+        .expect("imports");
     std::fs::remove_dir_all(&folder).ok();
     let model = &mut app.state.model;
     let sheet = model.active_drawing_sheet();

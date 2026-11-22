@@ -64,7 +64,7 @@ pub(crate) fn import_foreign_schematic_with_dialog(app: &mut RSpiceApp, tool: Fo
     else {
         return;
     };
-    if let Err(error) = import_foreign_schematic_file(app, &path, tool) {
+    if let Err(error) = import_foreign_schematic_file(app, &path, tool, &mut ask_natively) {
         app.state.record(
             LogSeverity::Error,
             LogSource::Studio,
@@ -72,6 +72,45 @@ pub(crate) fn import_foreign_schematic_with_dialog(app: &mut RSpiceApp, tool: Fo
         );
         app.state.prompt(error);
     }
+}
+
+/// Asks the plan question in a native dialog. Closing it keeps the plan the
+/// project runs, which changes nothing the reader has not agreed to.
+fn ask_natively(question: &PlanQuestion) -> PlanAnswer {
+    let replace = "Replace";
+    let answer = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Info)
+        .set_title(&question.title)
+        .set_description(&question.description)
+        .set_buttons(rfd::MessageButtons::OkCancelCustom(
+            replace.to_owned(),
+            question.keep.clone(),
+        ))
+        .show();
+    match answer {
+        rfd::MessageDialogResult::Ok => PlanAnswer::Replace,
+        rfd::MessageDialogResult::Custom(label) if label == replace => PlanAnswer::Replace,
+        _ => PlanAnswer::Keep,
+    }
+}
+
+/// What an import asks before the drawing's analyses replace the plan the
+/// project runs: what would be replaced, and the two ways to answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlanQuestion {
+    pub(crate) title: String,
+    pub(crate) description: String,
+    /// The label of the answer that keeps the active plan.
+    pub(crate) keep: String,
+}
+
+/// The answer to a [`PlanQuestion`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanAnswer {
+    /// The drawing's analyses become the active plan.
+    Replace,
+    /// The active plan stays; the drawing's analyses are a plan beside it.
+    Keep,
 }
 
 /// The reason the import cannot run now, if any.
@@ -96,10 +135,14 @@ struct ImportedTree {
 /// saying on the status line what came across and how much did not; when
 /// something did not, the Problems page opens on a row for each. Returns
 /// that sentence.
+///
+/// When the project goes on simulating another design, `ask` is asked
+/// whether the drawing's analyses replace the active plan.
 pub(crate) fn import_foreign_schematic_file(
     app: &mut RSpiceApp,
     path: &Path,
     tool: ForeignTool,
+    ask: &mut dyn FnMut(&PlanQuestion) -> PlanAnswer,
 ) -> Result<String, String> {
     if let Some(refusal) = foreign_import_refusal(&app.state) {
         return Err(format!("The schematic cannot be imported: {refusal}."));
@@ -154,7 +197,7 @@ pub(crate) fn import_foreign_schematic_file(
     own_sheets.extend(top_sheet.map(|sheet| (reference.clone(), sheet)));
     add_added_lines(&mut app.state, &reference, &plan, &mut notices);
     give_own_sheets(&mut app.state, own_sheets, &mut notices);
-    adopt_as_top_cell(&mut app.state, &reference, &mut notices);
+    let adopted = adopt_as_top_cell(&mut app.state, &reference, &mut notices);
     let model_bindings = add_model_libraries(
         &mut app.state,
         &reference.cell,
@@ -162,7 +205,23 @@ pub(crate) fn import_foreign_schematic_file(
         &includes,
         &mut notices,
     );
-    let plan = commit_plan(app, &reference.cell, &plan, model_bindings, &mut notices);
+    let source = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let asking = (!adopted).then(|| Asking {
+        title: format!("Import {} Schematic", tool.label()),
+        source: &source,
+        ask,
+    });
+    let plan = commit_plan(
+        app,
+        &reference.cell,
+        &plan,
+        model_bindings,
+        asking,
+        &mut notices,
+    );
 
     let refusals = notices
         .iter()
@@ -177,10 +236,6 @@ pub(crate) fn import_foreign_schematic_file(
         app.state
             .record(severity, LogSource::Studio, message.clone());
     }
-    let source = path.file_name().map_or_else(
-        || path.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    );
     let facts = app.state.slot_facts();
     app.state
         .model
@@ -762,11 +817,12 @@ fn spice_view(
 
 /// A project whose top cell draws nothing simulates the imported cell; any
 /// other keeps its top cell, and the log says how to simulate the import.
+/// Says whether the project now simulates the imported cell.
 fn adopt_as_top_cell(
     state: &mut AppState,
     reference: &CellViewRef,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
-) {
+) -> bool {
     let content = &state.model.workspace.content;
     let top = content.simulation_root_reference();
     let top_is_empty = state
@@ -778,6 +834,7 @@ fn adopt_as_top_cell(
         let project = &mut state.model.workspace.content.project;
         project.root_library.clone_from(&reference.library);
         project.top_cell.clone_from(&reference.cell);
+        true
     } else {
         notices.push((
             ForeignNoticeSeverity::Notice,
@@ -787,6 +844,7 @@ fn adopt_as_top_cell(
                 reference.display_path()
             ),
         ));
+        false
     }
 }
 
@@ -979,15 +1037,28 @@ fn bind_to_active_plan(
     }
 }
 
+/// Whom an import asks before its analyses replace the active plan, and
+/// what it names in the question.
+struct Asking<'a> {
+    /// The gesture's name, the question's title.
+    title: String,
+    /// The file imported, as the question names it.
+    source: &'a str,
+    ask: &'a mut dyn FnMut(&PlanQuestion) -> PlanAnswer,
+}
+
 /// Activates a simulation plan named after the cell holding the drawing's
 /// analyses, options, temperature, design variables, run-set axes and
 /// measurements. A drawing with no analysis leaves the active plan as it is.
-/// Returns what the import's summary says of the plan, if it made one.
+/// With `asking`, the active plan is replaced only when the answer says so;
+/// otherwise the drawing's plan joins the project beside it. Returns what the
+/// import's summary says of the plan, if it made one.
 fn commit_plan(
     app: &mut RSpiceApp,
     cell: &str,
     plan: &ForeignPlan,
     model_bindings: Vec<SimulationPlanModelBinding>,
+    asking: Option<Asking<'_>>,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
 ) -> Option<String> {
     let mut analyses = rspice_simulation_contract::plan_model::SimulationPlan::empty();
@@ -1012,6 +1083,12 @@ fn commit_plan(
         return None;
     }
     let stated = analyses.instances().len();
+    let name = free_plan_name(app, cell);
+    let active = app.state.model.sim_setup.active_plan_name().to_string();
+    let replace = asking.is_none_or(|asking| {
+        let question = plan_question(app, &asking, &analyses, &name);
+        (asking.ask)(&question) == PlanAnswer::Replace
+    });
     let mut variables = Vec::new();
     for (name, value) in &plan.variables {
         match DesignVariable::new(
@@ -1054,25 +1131,31 @@ fn commit_plan(
     };
     match commit_plan_document(
         app,
-        cell,
+        &name,
         analyses,
         reference_pvt,
         options,
         run_set(plan),
         model_bindings,
         &payload,
+        replace,
     ) {
-        Ok(name) => {
+        Ok(()) => {
+            let (role, stays) = if replace {
+                ("the active plan", String::new())
+            } else {
+                ("the plan", format!(", and `{active}` stays active"))
+            };
             notices.push((
                 ForeignNoticeSeverity::Notice,
                 format!(
-                    "The schematic's analyses are the active simulation plan `{name}`, with {} stepped axis(es) in its run set and {} measurement(s).",
+                    "The schematic's analyses are {role} `{name}`, with {} stepped axis(es) in its run set and {} measurement(s){stays}.",
                     plan.sweeps.len(),
                     plan.measurements.len()
                 ),
             ));
             Some(format!(
-                "its {} {} the active plan `{name}`",
+                "its {} {} {role} `{name}`{stays}",
                 rspice_ui_kit::accessibility::counted(stated, "analysis", "analyses"),
                 if stated == 1 { "is" } else { "are" }
             ))
@@ -1160,31 +1243,76 @@ fn run_set(plan: &ForeignPlan) -> RunSetState {
     run_set
 }
 
-fn commit_plan_document(
-    app: &mut RSpiceApp,
-    cell: &str,
-    analysis_plan: rspice_simulation_contract::plan_model::SimulationPlan,
-    reference_pvt: rspice_app_state::workbench::app_state::sim_setup::ReferencePvtPoint,
-    options: rspice_simulation_contract::options::SimulationOptions,
-    run_set: RunSetState,
-    model_bindings: Vec<SimulationPlanModelBinding>,
-    payload: &rspice_app_state::state::SimulationPlanPayload,
-) -> Result<String, String> {
-    use rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanName;
-    use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
-
+/// The name the drawing's plan takes: the cell's, numbered past any plan of
+/// the project that has it.
+fn free_plan_name(app: &RSpiceApp, cell: &str) -> String {
+    let setup = &app.state.model.sim_setup;
     let taken = |name: &str| {
-        let setup = &app.state.model.sim_setup;
         setup.active_plan_name().as_str().eq_ignore_ascii_case(name)
             || setup
                 .inactive_plans()
                 .iter()
                 .any(|plan| plan.name().as_str().eq_ignore_ascii_case(name))
     };
-    let name = std::iter::once(cell.to_owned())
+    std::iter::once(cell.to_owned())
         .chain((2..).map(|suffix| format!("{cell} {suffix}")))
         .find(|name| !taken(name))
-        .expect("an unbounded suffix range finds a free name");
+        .expect("an unbounded suffix range finds a free name")
+}
+
+/// What the import asks before the drawing's `analyses` replace the active
+/// plan: both plans' analyses, and where the drawing's go when it is kept.
+fn plan_question(
+    app: &RSpiceApp,
+    asking: &Asking<'_>,
+    analyses: &rspice_simulation_contract::plan_model::SimulationPlan,
+    name: &str,
+) -> PlanQuestion {
+    let listed = |plan: &rspice_simulation_contract::plan_model::SimulationPlan| {
+        let names = (0..plan.instances().len())
+            .filter_map(|index| plan.instance_list_label(index))
+            .collect::<Vec<_>>();
+        if names.is_empty() {
+            "no analyses".to_owned()
+        } else {
+            names.join(", ")
+        }
+    };
+    let setup = &app.state.model.sim_setup;
+    let active = setup.active_plan_name().to_string();
+    let theirs = listed(analyses);
+    let ours = setup
+        .stable_analysis_plan()
+        .map_or_else(|_| "its analyses".to_owned(), listed);
+    PlanQuestion {
+        title: asking.title.clone(),
+        description: format!(
+            "The analyses of {} ({theirs}) would replace the active plan \u{201c}{active}\u{201d} \
+             ({ours}), which the project runs. Replace it, or keep it and add them as the plan \
+             \u{201c}{name}\u{201d}?",
+            asking.source
+        ),
+        keep: format!("Keep \u{201c}{active}\u{201d}"),
+    }
+}
+
+/// Imports the drawing's plan under `name`, making it the active plan when
+/// `activate` says so; otherwise it joins the project beside the active
+/// plan, which stays.
+fn commit_plan_document(
+    app: &mut RSpiceApp,
+    name: &str,
+    analysis_plan: rspice_simulation_contract::plan_model::SimulationPlan,
+    reference_pvt: rspice_app_state::workbench::app_state::sim_setup::ReferencePvtPoint,
+    options: rspice_simulation_contract::options::SimulationOptions,
+    run_set: RunSetState,
+    model_bindings: Vec<SimulationPlanModelBinding>,
+    payload: &rspice_app_state::state::SimulationPlanPayload,
+    activate: bool,
+) -> Result<(), String> {
+    use rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanName;
+    use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
+
     let document = SimulationPlanImportDocument {
         source_plan_id: analysis_plan.id(),
         source_revision: analysis_plan.revision(),
@@ -1217,6 +1345,18 @@ fn commit_plan_document(
             &outcome.analysis_identity_map,
         )
         .map_err(|error| error.to_string())?;
+    if !activate {
+        // Opened back as the plan manager opens a plan: the imported plan's
+        // payload moves out with it, and the kept plan's comes back.
+        workspace
+            .content
+            .migrate_active_plan_data(outcome.cloned_plan_id);
+        workspace.content.migrate_inactive_plan_data(current_id);
+        setup
+            .activate_plan(current_id)
+            .map_err(|error| error.to_string())?;
+        workspace.content.sync_legacy_specs_projection(current_id);
+    }
     workspace
         .content
         .validate_simulation_configuration()
@@ -1230,9 +1370,10 @@ fn commit_plan_document(
         .instances()
         .first()
         .map(|instance| instance.id());
-    let name = setup.active_plan_name().to_string();
     app.state.model.sim_setup = setup;
     app.state.model.workspace = workspace;
-    app.state.simulate.active_analysis_instance = first;
-    Ok(name)
+    if activate {
+        app.state.simulate.active_analysis_instance = first;
+    }
+    Ok(())
 }
