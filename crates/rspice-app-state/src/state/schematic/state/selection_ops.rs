@@ -40,6 +40,20 @@ impl SchematicState {
         self.finish_document_edit(edit.committed);
         edit.committed
     }
+
+    /// This schematic without the objects `ids` names, as a candidate a
+    /// project step publishes (a sheet deleted with what it holds); its own
+    /// undo history gains nothing. `None` when none of them is drawn.
+    pub(crate) fn without_objects_candidate(
+        &self,
+        ids: &std::collections::HashSet<u64>,
+    ) -> Option<SchematicState> {
+        let design = self.design.without_objects_candidate(ids)?;
+        let mut candidate = SchematicState::from_parts(design, self.session.clone());
+        candidate.session.is_dirty = true;
+        candidate.session.editor.selection.clear();
+        Some(candidate)
+    }
 }
 
 #[cfg(test)]

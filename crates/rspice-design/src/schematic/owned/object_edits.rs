@@ -17,6 +17,7 @@ use super::super::{
 use super::{DocumentEdit, Schematic};
 use crate::resolved_symbol::ResolvedCellSymbol;
 use rspice_design_model::{Point, port::PortSpec};
+use std::collections::HashSet;
 
 impl Schematic {
     /// Paste `clipboard` at `pos` as one undo step. `hidden` names the cell
@@ -98,6 +99,38 @@ impl Schematic {
             value: (),
             committed: self.end_operation(),
         })
+    }
+
+    /// This schematic without the complete objects `ids` names, and the
+    /// markers that hang on them, as a candidate another step publishes: a
+    /// sheet deleted with what it holds. Nothing goes on this schematic's own
+    /// undo history. `None` when none of them is in the document.
+    pub fn without_objects_candidate(&self, ids: &HashSet<u64>) -> Option<Self> {
+        let junctions = self
+            .document
+            .junctions
+            .iter()
+            .filter(|junction| ids.contains(&junction.id))
+            .map(|junction| junction.pos)
+            .collect::<Vec<_>>();
+        let mut candidate = self.clone();
+        let deletion = ObjectDeletion::prepare(
+            &mut candidate.document,
+            DeletionSelection {
+                components: ids,
+                wires: ids,
+                junctions: junctions.iter().copied(),
+                net_labels: ids,
+                buses: ids,
+                bus_taps: ids,
+                design_notes: ids,
+                documentation_shapes: ids,
+                probes: ids,
+            },
+        )?;
+        deletion.commit();
+        candidate.invalidate_topology();
+        Some(candidate)
     }
 
     pub fn array_selection_resolved(

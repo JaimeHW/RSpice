@@ -29,8 +29,10 @@ pub enum SheetPageNumbering {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SheetDeleteBehavior {
+    /// The sheet goes with everything drawn on it, as one undo step, the way
+    /// KiCad and OrCAD delete a page with its contents.
     #[default]
-    BlockWhileReferenced,
+    DeleteObjects,
     MoveReferencesToReviewedReplacement,
 }
 

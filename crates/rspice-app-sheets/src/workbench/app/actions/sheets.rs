@@ -11,8 +11,6 @@
 //! since other features bring a sheet forward too; this module states their
 //! outcome on the status bar.
 
-use rspice_design_model::design_management::DesignManagementError;
-
 use crate::state::{
     DrawingSheetInheritance, DrawingSheetNewSheetPolicy, MoveSelectionRequest,
     ReorderPageNumbering, SchematicSheetFormat, SheetCatalog, SheetDefinition, SheetDeleteBehavior,
@@ -37,7 +35,8 @@ pub struct SheetEntry {
 pub enum SheetDeletePlan {
     LastSheet,
     Empty,
-    Blocked {
+    /// The sheet goes with the objects drawn on it.
+    DeletesObjects {
         objects: usize,
     },
     MovesObjects {
@@ -209,20 +208,20 @@ pub fn plan_delete(model: &Model, id: SheetId) -> SheetDeletePlan {
     if objects == 0 {
         return SheetDeletePlan::Empty;
     }
-    match catalog.settings().delete_behavior {
-        SheetDeleteBehavior::BlockWhileReferenced => SheetDeletePlan::Blocked { objects },
-        SheetDeleteBehavior::MoveReferencesToReviewedReplacement => {
-            match replacement_sheet(catalog, id) {
-                Some(destination) => SheetDeletePlan::MovesObjects {
-                    objects,
-                    destination,
-                    destination_name: catalog
-                        .find(destination)
-                        .map_or_else(String::new, |sheet| sheet.name().to_owned()),
-                },
-                None => SheetDeletePlan::Blocked { objects },
+    match (
+        catalog.settings().delete_behavior,
+        replacement_sheet(catalog, id),
+    ) {
+        (SheetDeleteBehavior::MoveReferencesToReviewedReplacement, Some(destination)) => {
+            SheetDeletePlan::MovesObjects {
+                objects,
+                destination,
+                destination_name: catalog
+                    .find(destination)
+                    .map_or_else(String::new, |sheet| sheet.name().to_owned()),
             }
         }
+        _ => SheetDeletePlan::DeletesObjects { objects },
     }
 }
 
@@ -278,47 +277,42 @@ fn counted_ports(count: usize) -> String {
 /// Delete a sheet now, under the catalog's own delete policy.
 ///
 /// For a caller that has already shown the outcome (the sheet strip's menu
-/// row names it) or had it confirmed.
+/// row names it) or had it confirmed. A sheet that holds objects goes with
+/// them, as one undo step, unless the policy moves them to the adjacent
+/// sheet; the status line says what went.
 pub(in crate::workbench) fn commit_delete_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     id: SheetId,
 ) -> Result<String, String> {
     let name = model.sheet_name(id);
-    let outcome = model
-        .edit_sheet_catalog("delete sheet", |catalog| {
-            let resolution = match catalog.settings().delete_behavior {
-                SheetDeleteBehavior::BlockWhileReferenced => SheetDeleteResolution::BlockIfNotEmpty,
-                SheetDeleteBehavior::MoveReferencesToReviewedReplacement => {
-                    match replacement_sheet(catalog, id) {
-                        Some(destination) => SheetDeleteResolution::MoveObjectsTo(destination),
-                        None => SheetDeleteResolution::BlockIfNotEmpty,
-                    }
-                }
-            };
-            catalog
-                .delete_sheet(catalog.revision(), id, resolution)
-                // The catalog names the sheet by its identity; the reader knows
-                // it by its name.
-                .map_err(|error| match error {
-                    DesignManagementError::SheetNotEmpty { objects, .. } => format!(
-                        "Sheet `{name}` still holds {}; move {} to another sheet first.",
-                        counted_objects(objects),
-                        if objects == 1 { "it" } else { "them" }
-                    ),
-                    other => other.to_string(),
-                })
-        })
-        .map(|receipt| {
-            if receipt.moved_object_ids.is_empty() {
-                format!("Deleted sheet `{name}`.")
-            } else {
+    let outcome = match plan_delete(model, id) {
+        SheetDeletePlan::MovesObjects { destination, .. } => model
+            .edit_sheet_catalog("delete sheet", |catalog| {
+                catalog
+                    .delete_sheet(
+                        catalog.revision(),
+                        id,
+                        SheetDeleteResolution::MoveObjectsTo(destination),
+                    )
+                    .map_err(|error| error.to_string())
+            })
+            .map(|receipt| {
                 format!(
                     "Deleted sheet `{name}` and moved {} to the adjacent sheet.",
                     counted_objects(receipt.moved_object_ids.len())
                 )
+            }),
+        _ => model.delete_sheet_with_its_objects(id).map(|receipt| {
+            match receipt.deleted_object_ids.len() {
+                0 => format!("Deleted sheet `{name}`."),
+                objects => format!(
+                    "Deleted sheet `{name}` and the {} on it.",
+                    counted_objects(objects)
+                ),
             }
-        });
+        }),
+    };
     let outcome = workbench.report(outcome);
     if outcome.is_ok() {
         // Deleting the active sheet moves activation inside the catalog's own

@@ -506,8 +506,8 @@ fn delete_plan_label(plan: Option<SheetDeletePlan>) -> String {
             "Delete \u{00b7} move {} to `{destination_name}`",
             sheet_actions::counted_objects(objects)
         ),
-        Some(SheetDeletePlan::Blocked { objects }) => format!(
-            "Delete \u{00b7} blocked: sheet holds {}",
+        Some(SheetDeletePlan::DeletesObjects { objects }) => format!(
+            "Delete with its {}",
             sheet_actions::counted_objects(objects)
         ),
         Some(SheetDeletePlan::LastSheet) => "Delete \u{00b7} the last sheet is retained".to_owned(),

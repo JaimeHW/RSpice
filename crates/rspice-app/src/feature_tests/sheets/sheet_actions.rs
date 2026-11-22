@@ -345,30 +345,51 @@ fn renaming_a_sheet_leaves_its_typed_title_on_the_block() {
     assert_eq!(lettered_title(&state).as_deref(), Some("Output"));
 }
 
+/// Delete asks nothing: a sheet that holds objects goes at once with them,
+/// the status line says what went, and one undo gives back the sheet and its
+/// objects together.
 #[test]
-fn a_blocking_delete_policy_refuses_and_states_what_the_sheet_holds() {
-    let (mut state, _, second) = two_sheet_state();
-    delete_behavior(&mut state, SheetDeleteBehavior::BlockWhileReferenced);
-
+fn deleting_a_sheet_takes_its_objects_in_one_undo_step() {
+    let (mut state, first, second) = two_sheet_state();
     assert_eq!(
         plan_delete(&state.model, second),
-        SheetDeletePlan::Blocked { objects: 1 }
+        SheetDeletePlan::DeletesObjects { objects: 1 }
     );
-    let error = delete_sheet(
+
+    let outcome = delete_sheet(
         &mut state.sheets.delete_sheet,
         &mut state.model,
         &mut state.workbench,
         second,
     )
-    .expect_err("the sheet still owns an object");
-    // The sheet is named as the reader knows it, never by its identity.
-    let name = state.model.sheet_name(second);
-    assert_eq!(
-        error,
-        format!("Sheet `{name}` still holds 1 object; move it to another sheet first.")
+    .expect("the sheet goes at once");
+    assert!(
+        state.sheets.delete_sheet.is_none(),
+        "nothing waits to be confirmed"
     );
-    assert!(!error.contains(&second.to_string()), "{error}");
-    assert_eq!(sheet_count(&state), 2);
+    assert_eq!(outcome, "Deleted sheet `Sheet 2` and the 1 object on it.");
+    let catalog = active_sheet_catalog(&state).expect("catalog");
+    assert_eq!(catalog.sheets().len(), 1);
+    assert_eq!(active_sheet_id(&state), Some(first));
+    let ids = |state: &AppState| {
+        state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .map(|component| component.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&state), [10], "the capacitor went with its sheet");
+
+    state
+        .undo_project_design()
+        .expect("one guarded transaction");
+    let catalog = active_sheet_catalog(&state).expect("catalog");
+    assert_eq!(catalog.sheets().len(), 2);
+    assert_eq!(catalog.sheet_for_object(20), Some(second));
+    assert_eq!(ids(&state), [10, 20]);
 }
 
 #[test]

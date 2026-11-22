@@ -11,8 +11,12 @@
 //! followed finding, it is this one operation.
 
 use super::Model;
-use crate::state::{DesignManagementCatalog, Selection, SheetCatalog, SheetId};
+use crate::state::{
+    DesignManagementCatalog, Selection, SheetCatalog, SheetDeleteReceipt, SheetDeleteResolution,
+    SheetId,
+};
 use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
+use std::collections::{BTreeMap, HashSet};
 
 impl Model {
     /// The refusal of a sheet operation where the open cell view has no
@@ -245,6 +249,58 @@ impl Model {
         let outcome = edit(catalog)?;
         self.commit_sheet_catalog(description, before, candidate)?;
         Ok(outcome)
+    }
+
+    /// Delete sheet `id` of the open cell view with every object it holds,
+    /// as one step: the catalog drops the sheet and the drawing drops its
+    /// objects in the same transaction, so one undo gives both back.
+    pub fn delete_sheet_with_its_objects(
+        &mut self,
+        id: SheetId,
+    ) -> Result<SheetDeleteReceipt, String> {
+        let owner = self.workspace.content.active_schematic_reference();
+        let key = owner.key();
+        let before = (*self.workspace.content.design_management).clone();
+        let mut candidate = before.clone();
+        let catalog = candidate
+            .sheet_catalog_mut(&key)
+            .ok_or_else(|| Self::NO_SHEET_CATALOG.to_owned())?;
+        let receipt = catalog
+            .delete_sheet(catalog.revision(), id, SheetDeleteResolution::DeleteObjects)
+            .map_err(|error| error.to_string())?;
+        let doomed = receipt
+            .deleted_object_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        let after_schematic = self.schematic.without_objects_candidate(&doomed);
+        if after_schematic.is_some() && self.schematic.session.read_only {
+            return Err("The schematic is read-only, so its objects stay.".to_owned());
+        }
+        candidate.validate().map_err(|error| error.to_string())?;
+        let before_schematic = self.schematic.clone();
+        let committed_revision = self
+            .workspace
+            .content
+            .replace_design_management(candidate)
+            .map_err(|error| error.to_string())?;
+        if let Some(after_schematic) = after_schematic {
+            self.schematic = after_schematic;
+            self.workspace
+                .insert_schematic_editor(key.clone(), self.schematic.clone());
+        }
+        let after = (*self.workspace.content.design_management).clone();
+        self.record_design_management_transaction(DesignManagementHistoryEntry {
+            description: "delete sheet".to_owned(),
+            owner,
+            before,
+            after,
+            before_schematics: BTreeMap::from([(key.clone(), before_schematic)]),
+            after_schematics: BTreeMap::from([(key, self.schematic.clone())]),
+            references: Default::default(),
+            committed_revision,
+        });
+        Ok(receipt)
     }
 
     /// Publish `candidate` over `before` as one project transaction, with the

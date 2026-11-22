@@ -189,8 +189,8 @@ pub(super) fn sheets_manager_body(
                 "Delete behavior",
                 &[
                     (
-                        SheetDeleteBehavior::BlockWhileReferenced,
-                        "Block while referenced",
+                        SheetDeleteBehavior::DeleteObjects,
+                        "Delete with its objects",
                     ),
                     (
                         SheetDeleteBehavior::MoveReferencesToReviewedReplacement,
