@@ -882,6 +882,16 @@ pub struct PanePlotResponse<'a> {
     pub nearest_trace: Option<&'a StripTrace>,
     /// What a right click on the plot found this frame.
     pub context: Option<PlotContext<'a>>,
+    /// Where the pointer stands over the plot this frame, if it does.
+    pub hover: Option<PlotHover<'a>>,
+}
+
+/// Where the pointer stands over the plot: the X under it, the first axis'
+/// value at its height, and the curve nearest it.
+pub struct PlotHover<'a> {
+    pub x: f64,
+    pub y: f64,
+    pub trace: Option<&'a StripTrace>,
 }
 
 /// Where a right click on the plot landed and what it found there: what the
@@ -1661,11 +1671,40 @@ pub fn show_plot<'a>(
         ),
         values: readout(x),
     });
+    // The keys that act at the pointer read where it stands and the curve
+    // nearest it, found as a click finds one.
+    let hover = response
+        .response
+        .hover_pos()
+        .filter(|at| response.plot_rect.contains(*at))
+        .map(|at| {
+            let frame = super::notes::NoteFrame::of(
+                &response,
+                model,
+                log_y,
+                input.secondary,
+                interpolation,
+            );
+            let x = frame.data_x(at.x);
+            PlotHover {
+                x,
+                y: frame.data_y((frame.y, frame.y_scale), at.y),
+                trace: nearest_on_axes(
+                    &pane_traces,
+                    &secondary_traces,
+                    (x, Some(at.y)),
+                    response.plot_rect,
+                    (y_scale, (y0, y1)),
+                    interpolation,
+                ),
+            }
+        });
     PanePlotResponse {
         response,
         y_labels_width,
         nearest_trace,
         context,
+        hover,
     }
 }
 

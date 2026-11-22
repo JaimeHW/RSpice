@@ -200,6 +200,20 @@ pub struct NoteDraft {
     pub text: String,
 }
 
+/// Where the pointer stands over a waveform strip's plot, as the stack last
+/// drew it: where the keys that act at the pointer act.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlotPointer {
+    pub analysis: AnalysisPresentationKey,
+    /// The pane the pointer is over, by its unit.
+    pub unit: String,
+    pub x: f64,
+    /// The value of the pane's first axis at the pointer's height.
+    pub y: f64,
+    /// The curve nearest the pointer, on whichever axis it is read.
+    pub trace: Option<WaveformPresentationKey>,
+}
+
 /// One marker to draw or list.
 #[derive(Debug, Clone, Copy)]
 pub struct MarkerView<'a>(pub &'a DocumentMarker);
@@ -815,6 +829,9 @@ pub struct ResultViewerState {
     pub document_notes: Vec<DocumentNote>,
     /// The note being written where it stands, if any.
     pub note_draft: Option<NoteDraft>,
+    /// Where the pointer stands over a strip's plot: set as the stack draws
+    /// the plot it hovers, and cleared each time the stack is drawn.
+    pub plot_pointer: Option<PlotPointer>,
     /// The A│B cursor tool.
     pub cursor_tool: CursorTool,
     /// Polar sheet controls: the network term, the radius ruling, the decade

@@ -29,6 +29,7 @@ pub mod navigation;
 pub mod notes;
 pub mod pane;
 mod plot_menu;
+pub mod pointer;
 mod policy;
 mod projection;
 pub mod readout;

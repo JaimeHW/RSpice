@@ -21,7 +21,7 @@ use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::{LibraryCommand, ProjectCommand};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_results::workbench::results::commands::ResultsCommand;
+use rspice_app_results::workbench::results::commands::{AtPointer, ResultsCommand};
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
@@ -638,6 +638,15 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::MarkerAtCursor.key(),
     ResultsCommand::FitYToVisibleX.key(),
     ResultsCommand::ZoomNext.key(),
+    ResultsCommand::AtPointer(AtPointer::CursorA).key(),
+    ResultsCommand::AtPointer(AtPointer::CursorB).key(),
+    ResultsCommand::AtPointer(AtPointer::HorizontalCursor).key(),
+    ResultsCommand::AtPointer(AtPointer::VerticalMarker).key(),
+    ResultsCommand::AtPointer(AtPointer::PointMarker).key(),
+    ResultsCommand::AtPointer(AtPointer::DeltaMarker).key(),
+    ResultsCommand::AtPointer(AtPointer::Note).key(),
+    ResultsCommand::AtPointer(AtPointer::Properties).key(),
+    ResultsCommand::ToggleMinorGrid.key(),
     ResultsCommand::PlotAgainst.key(),
     ResultsCommand::CursorToNextSample.key(),
     ResultsCommand::CursorToPreviousSample.key(),

@@ -792,6 +792,8 @@ pub fn show(
 ) {
     let t = Tokens::get(ui.ctx());
     let pane_chrome = options.pane_chrome;
+    // The plot the pointer hovers says so as it is drawn.
+    host.session_mut().plot_pointer = None;
     // Apply hide/maximize strip state.
     let results = host.session();
     let visible: Vec<&StripModel> = match results.maximized_strip {
@@ -2299,6 +2301,15 @@ fn show_unit_pane(
         super::axes::note_room(ui.ctx(), model.analysis_key, axes_response.room);
     }
     let secondary_views = axes_response.ranges;
+    if let Some(hover) = &drawn.hover {
+        host.session_mut().plot_pointer = Some(crate::session::PlotPointer {
+            analysis: model.analysis_key,
+            unit: pane.unit.to_owned(),
+            x: hover.x,
+            y: hover.y,
+            trace: hover.trace.map(|trace| anchor_key(model, trace)),
+        });
+    }
     super::notes::show(
         ui,
         host,

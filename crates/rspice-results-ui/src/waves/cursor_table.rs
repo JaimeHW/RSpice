@@ -578,7 +578,7 @@ pub fn nearest_sample_x(
 }
 
 /// `x`, or the retained sample nearest it while the page snaps.
-fn snapped(
+pub(super) fn snapped(
     state: &ResultViewerState,
     model: &StripModel,
     anchor: Option<&WaveformPresentationKey>,
@@ -619,7 +619,7 @@ pub fn snap_cursors(state: &mut ResultViewerState, models: &[StripModel]) -> boo
 
 /// The strip a reading added from the page goes on: the one the cursors
 /// stand on, else the first on screen.
-fn followed_model(state: &ResultViewerState, source: ReadoutInput<'_>) -> Option<usize> {
+pub(super) fn followed_model(state: &ResultViewerState, source: ReadoutInput<'_>) -> Option<usize> {
     let models = source.models;
     state
         .cursor_strip
@@ -637,7 +637,7 @@ fn followed_model(state: &ResultViewerState, source: ReadoutInput<'_>) -> Option
 }
 
 /// The X window a strip shows: the reader's zoom, or its whole record.
-fn shown_x_window(state: &ResultViewerState, model: &StripModel) -> Option<(f64, f64)> {
+pub(super) fn shown_x_window(state: &ResultViewerState, model: &StripModel) -> Option<(f64, f64)> {
     super::stack::shared_x_view(state, model.analysis_key).or_else(|| {
         let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
         for trace in readout_traces(model) {
@@ -654,7 +654,7 @@ fn shown_x_window(state: &ResultViewerState, model: &StripModel) -> Option<(f64,
 
 /// The point `fraction` of the way across `window`, evenly on the strip's
 /// own scale.
-fn window_point(model: &StripModel, (low, high): (f64, f64), fraction: f64) -> f64 {
+pub(super) fn window_point(model: &StripModel, (low, high): (f64, f64), fraction: f64) -> f64 {
     match model.x_scale {
         XScale::Log10 if low > 0.0 && high > 0.0 => {
             10f64.powf(low.log10() + (high.log10() - low.log10()) * fraction)

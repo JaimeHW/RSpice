@@ -29,7 +29,7 @@ pub(super) fn on_screen_strips(state: ResultsReads<'_>) -> Vec<AnalysisPresentat
     }
 }
 
-fn with_readout<R>(
+pub(super) fn with_readout<R>(
     state: &mut ResultsParts<'_>,
     tokens: &Tokens,
     need_models: bool,

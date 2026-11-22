@@ -785,6 +785,23 @@ impl CommandSet for ResultsCommand {
                 workbench.workspace == Workspace::Results && zoom_gesture_available(state),
                 "open a waveform sheet in Results",
             ),
+            Self::AtPointer(_) | Self::ToggleMinorGrid
+                if workbench.workspace != Workspace::Results =>
+            {
+                CommandAvailability::Disabled("open a result in Results")
+            }
+            Self::AtPointer(action) => {
+                crate::workbench::documents::result_document::waves::pointer::availability(
+                    state, action,
+                )
+                .map_or_else(CommandAvailability::Disabled, |()| {
+                    CommandAvailability::Available
+                })
+            }
+            Self::ToggleMinorGrid => available_or(
+                zoom_gesture_available(state),
+                "open a waveform sheet in Results",
+            ),
             Self::ZoomNext if workbench.workspace != Workspace::Results => {
                 CommandAvailability::Hidden
             }
@@ -957,6 +974,16 @@ impl CommandSet for ResultsCommand {
             Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
             Self::FitYToVisibleX => fit_y_to_visible_x(&mut results_parts(cx)),
             Self::ZoomNext => zoom_next(&mut results_parts(cx)),
+            Self::AtPointer(action) => {
+                crate::workbench::documents::result_document::waves::pointer::act(
+                    &mut results_parts(cx),
+                    action,
+                );
+            }
+            Self::ToggleMinorGrid => {
+                let session = &mut cx.state.results.session;
+                session.show_minor_grid = !session.show_minor_grid;
+            }
             Self::PlotAgainst => {
                 let session = &mut cx.state.results.session;
                 session.plot_against_request = session.active_wave_pane.clone();
@@ -1012,6 +1039,7 @@ impl CommandSet for ResultsCommand {
             Self::ToggleResultsSplit => Some(reads.wb.split_with_results),
             Self::ToggleLinkedCursors => Some(linked_cursors(results_reads(reads))),
             Self::ToggleCursorTool => Some(reads.state.results.session.cursor_tool.is_armed()),
+            Self::ToggleMinorGrid => Some(reads.state.results.session.show_minor_grid),
             Self::OverlayPrevious(depth) => {
                 Some(reads.model.simulation.view.overlay_previous == usize::from(depth))
             }

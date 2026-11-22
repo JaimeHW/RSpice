@@ -77,7 +77,7 @@ impl<'a> NoteFrame<'a> {
         rect.left() + self.x_scale.normalize(x, self.x.0, self.x.1) as f32 * rect.width()
     }
 
-    fn data_x(&self, screen: f32) -> f64 {
+    pub(crate) fn data_x(&self, screen: f32) -> f64 {
         let rect = self.plot_rect;
         let share = f64::from((screen - rect.left()) / rect.width().max(1.0));
         self.x_scale
@@ -100,7 +100,7 @@ impl<'a> NoteFrame<'a> {
         rect.bottom() - scale.normalize(y, range.0, range.1) as f32 * rect.height()
     }
 
-    fn data_y(&self, (range, scale): ((f64, f64), XScale), screen: f32) -> f64 {
+    pub(crate) fn data_y(&self, (range, scale): ((f64, f64), XScale), screen: f32) -> f64 {
         let rect = self.plot_rect;
         let share = f64::from((rect.bottom() - screen) / rect.height().max(1.0));
         scale.denormalize(share.clamp(0.0, 1.0), range.0, range.1)

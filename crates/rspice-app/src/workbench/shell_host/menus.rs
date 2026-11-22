@@ -14,7 +14,7 @@ use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
-use rspice_app_results::workbench::results::commands::ResultsCommand;
+use rspice_app_results::workbench::results::commands::{AtPointer, ResultsCommand};
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
@@ -693,9 +693,11 @@ const RESULTS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::FamilySlicing).access('F'),
     Separator,
     MenuEntry::submenu("Cursors", CURSORS_MENU).access('U'),
+    MenuEntry::submenu("Markers and notes", MARKERS_MENU).access('K'),
     MenuEntry::submenu("Overlay previous runs", OVERLAY_MENU).access('O'),
     results(ResultsCommand::FitYToVisibleX).access('Y'),
     results(ResultsCommand::PlotAgainst).access('G'),
+    results(ResultsCommand::ToggleMinorGrid).access('I'),
     results(ResultsCommand::VisualizationDocumentProperties).access('P'),
     results(ResultsCommand::WaveformCalculator).access('C'),
     MenuEntry::submenu("Selected trace", TRACE_MENU).access('L'),
@@ -741,7 +743,7 @@ const OVERLAY_MENU: &[MenuEntry] = &[
 ];
 
 /// The A and B cursors: arming them, which one the keys move, where they
-/// go, and what is placed at them.
+/// go, and placing them where the pointer stands.
 const CURSORS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::ToggleCursorTool).access('A'),
     results(ResultsCommand::SwitchSteppingCursor).access('S'),
@@ -758,7 +760,23 @@ const CURSORS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::CursorToNextDifference).access('D'),
     results(ResultsCommand::CursorToPreviousDifference).access('F'),
     Separator,
-    results(ResultsCommand::MarkerAtCursor).access('L'),
+    results(ResultsCommand::AtPointer(AtPointer::CursorA)).access('C'),
+    results(ResultsCommand::AtPointer(AtPointer::CursorB)).access('R'),
+    results(ResultsCommand::AtPointer(AtPointer::HorizontalCursor)).access('H'),
+];
+
+/// What is placed on a curve or the data where the pointer stands, or at
+/// cursor A: a marker of each kind and a note, and the properties of the
+/// marker nearest the pointer.
+const MARKERS_MENU: &[MenuEntry] = &[
+    results(ResultsCommand::AtPointer(AtPointer::VerticalMarker)).access('V'),
+    results(ResultsCommand::AtPointer(AtPointer::PointMarker)).access('P'),
+    results(ResultsCommand::AtPointer(AtPointer::DeltaMarker)).access('D'),
+    results(ResultsCommand::MarkerAtCursor).access('C'),
+    Separator,
+    results(ResultsCommand::AtPointer(AtPointer::Properties)).access('R'),
+    Separator,
+    results(ResultsCommand::AtPointer(AtPointer::Note)).access('N'),
 ];
 
 /// The run shown and the history it is one of: where it came from, and

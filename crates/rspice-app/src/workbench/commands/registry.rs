@@ -524,15 +524,18 @@ mod tests {
 
     #[test]
     fn move_selection_is_unmodified_m_in_the_engineering_canvas() {
+        use rspice_app_results::workbench::results::commands::AtPointer;
         let spec = DesignCommand::MoveSelection.declared_spec();
+        let point_marker = ResultsCommand::AtPointer(AtPointer::PointMarker).declared_spec();
         assert_eq!(spec.context, ShortcutContext::EngineeringCanvas);
         for platform in CommandPlatform::ALL {
             assert_eq!(label(spec.bindings, platform), "M");
             assert_eq!(
                 ordered_binding_owners(spec.bindings[0].chord, platform),
-                vec![spec.key]
+                vec![spec.key, point_marker.key]
             );
         }
+        assert_eq!(point_marker.context, ShortcutContext::ResultsWorkspace);
     }
 
     #[test]

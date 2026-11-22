@@ -330,3 +330,142 @@ fn fit_y_to_visible_x_needs_a_waveform_sheet() {
         CommandAvailability::Disabled("open a waveform sheet in Results")
     );
 }
+
+/// The keys that act at the pointer act where it stands over the plot: A
+/// and B put the cursors there, A on the curve nearest it, H a horizontal
+/// cursor at its height, V a vertical marker, M a point marker and D one
+/// the Cursors table reads against the marker before it, each without its
+/// dialog; Q opens the nearest marker's, and L begins a note on the point
+/// under it. With the pointer off the plot, A goes where the Cursors
+/// page's pair puts it. G turns the minor grid on and off.
+#[test]
+fn the_pointer_keys_act_where_the_pointer_stands() {
+    use crate::workbench::results::commands::AtPointer;
+    use rspice_results::result_presentation::{MarkerKind, WavePanePresentationKey};
+    use rspice_results_ui::session::{MarkerView, NoteAnchor, ReadingColumnId};
+    let mut harness = harness_on(damped_run());
+    let ctx = theme_context();
+    harness_frame(&ctx, &mut harness, Vec::new());
+    harness_frame(
+        &ctx,
+        &mut harness,
+        vec![egui::Event::PointerMoved(egui::pos2(600.0, 200.0))],
+    );
+    let pointer = harness
+        .state
+        .results
+        .session
+        .plot_pointer
+        .clone()
+        .expect("the pointer stands over the plot");
+    assert_eq!(pointer.unit, "V");
+    assert!(pointer.trace.is_some(), "and the curve nearest it is found");
+    let key = |action| ResultsCommand::AtPointer(action).key();
+    for action in [
+        AtPointer::CursorA,
+        AtPointer::CursorB,
+        AtPointer::HorizontalCursor,
+        AtPointer::VerticalMarker,
+        AtPointer::PointMarker,
+        AtPointer::DeltaMarker,
+        AtPointer::Note,
+    ] {
+        assert_eq!(
+            harness.availability(key(action)),
+            CommandAvailability::Available,
+            "{action:?}"
+        );
+    }
+    assert_eq!(
+        harness.availability(key(AtPointer::Properties)),
+        CommandAvailability::Disabled("place a marker first")
+    );
+
+    harness.execute(key(AtPointer::CursorA));
+    harness.execute(key(AtPointer::CursorB));
+    let session = &harness.state.results.session;
+    assert!(session.cursor_tool.is_armed());
+    assert_eq!(session.cursors.a, Some(pointer.x));
+    assert_eq!(session.cursors.b, Some(pointer.x));
+    assert_eq!(session.cursor_a_anchor, pointer.trace);
+
+    harness.execute(key(AtPointer::HorizontalCursor));
+    let pane = WavePanePresentationKey {
+        analysis: pointer.analysis,
+        unit: "V".to_owned(),
+    };
+    assert_eq!(
+        harness.state.results.session.pane_horizontal_cursors(&pane)[0],
+        Some(pointer.y)
+    );
+
+    for action in [
+        AtPointer::VerticalMarker,
+        AtPointer::PointMarker,
+        AtPointer::DeltaMarker,
+    ] {
+        harness.execute(key(action));
+        harness_frame(&ctx, &mut harness, Vec::new());
+    }
+    let session = &harness.state.results.session;
+    let mut markers: Vec<_> = session.document_markers.iter().collect();
+    markers.sort_by_key(|marker| marker.retained_id);
+    assert_eq!(
+        markers.iter().map(|marker| marker.kind).collect::<Vec<_>>(),
+        [MarkerKind::Vertical, MarkerKind::Note, MarkerKind::Note]
+    );
+    assert!(markers.iter().all(|marker| marker.x == pointer.x));
+    assert_eq!(
+        session.readout_base,
+        Some(ReadingColumnId::Marker(MarkerView(markers[1]).selector())),
+        "the delta marker reads against the marker before it"
+    );
+    assert!(session.marker_edit.is_none(), "a key opens no dialog");
+    harness.execute(key(AtPointer::Properties));
+    assert!(
+        harness.state.results.session.marker_edit.is_some(),
+        "Q opens the nearest marker's"
+    );
+    harness.state.results.session.marker_edit = None;
+
+    harness.execute(key(AtPointer::Note));
+    let draft = harness
+        .state
+        .results
+        .session
+        .note_draft
+        .clone()
+        .expect("a note is begun at the pointer");
+    assert_eq!(
+        draft.anchor,
+        NoteAnchor::Data {
+            unit: "V".to_owned(),
+            x: pointer.x,
+            y: pointer.y,
+        }
+    );
+    harness.state.results.session.note_draft = None;
+
+    harness_frame(
+        &ctx,
+        &mut harness,
+        vec![egui::Event::PointerMoved(egui::pos2(600.0, 700.0))],
+    );
+    assert_eq!(harness.state.results.session.plot_pointer, None);
+    harness.execute(key(AtPointer::CursorA));
+    let a = harness
+        .state
+        .results
+        .session
+        .cursors
+        .a
+        .expect("A is placed");
+    assert!(
+        (a - STOP / 3.0).abs() <= 1e-12,
+        "off the plot, A goes a third across the window: {a}"
+    );
+
+    let grid = harness.state.results.session.show_minor_grid;
+    harness.execute(ResultsCommand::ToggleMinorGrid.key());
+    assert_eq!(harness.state.results.session.show_minor_grid, !grid);
+}

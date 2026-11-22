@@ -7,6 +7,7 @@
 
 use egui::Key;
 use rspice_results::result_presentation::ResultViewer;
+pub use rspice_results_ui::waves::pointer::AtPointer;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
@@ -103,6 +104,11 @@ pub enum ResultsCommand {
     SendTraceToCalculator,
     /// Show the spectrum of the selected trace.
     TraceSpectrum,
+    /// Place or open what a key names where the pointer stands over a
+    /// strip's plot; from a menu, where the Cursors page's Add would.
+    AtPointer(AtPointer),
+    /// Draw or leave out the minor grid between the labelled ticks.
+    ToggleMinorGrid,
 }
 
 const NONE: &[ShortcutBinding] = &[];
@@ -145,6 +151,21 @@ const CALCULATOR: &[ShortcutBinding] = &[primary(Key::E, false, false, false, "E
 const ADD_MEASUREMENT: &[ShortcutBinding] = &[primary(Key::E, false, false, true, "Shift+E")];
 const COMPARE: &[ShortcutBinding] = &[primary(Key::B, false, false, true, "Shift+B")];
 const SAVE_VIEW: &[ShortcutBinding] = &[primary(Key::N, false, false, true, "Shift+N")];
+// The keys that act where the pointer stands, ViVA's letters for the same
+// commands; L for a label. Q and G are the shell's Properties and Cycle grid
+// display, whose edit context reaches Results, so the marker's properties
+// and the minor grid take them with Shift.
+const CURSOR_A: &[ShortcutBinding] = &[primary(Key::A, false, false, false, "A")];
+const CURSOR_B: &[ShortcutBinding] = &[primary(Key::B, false, false, false, "B")];
+const HORIZONTAL_CURSOR: &[ShortcutBinding] = &[primary(Key::H, false, false, false, "H")];
+const VERTICAL_MARKER: &[ShortcutBinding] = &[primary(Key::V, false, false, false, "V")];
+const POINT_MARKER: &[ShortcutBinding] = &[primary(Key::M, false, false, false, "M")];
+const DELTA_MARKER: &[ShortcutBinding] = &[primary(Key::D, false, false, false, "D")];
+const NOTE: &[ShortcutBinding] = &[primary(Key::L, false, false, false, "L")];
+const PROPERTIES: &[ShortcutBinding] = &[primary(Key::Q, false, false, true, "Shift+Q")];
+const MINOR_GRID: &[ShortcutBinding] = &[primary(Key::G, false, false, true, "Shift+G")];
+/// Forward again through the views Zoom previous stepped back from.
+const ZOOM_NEXT: &[ShortcutBinding] = &[primary(Key::Z, false, false, true, "Shift+Z")];
 
 /// A command listed in the palette that runs with or without a project.
 const ANYWHERE: CommandFlags = CommandFlags::PALETTE_VISIBLE;
@@ -158,7 +179,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 71] = [
+    pub const ALL: [Self; 80] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -230,6 +251,15 @@ impl ResultsCommand {
         Self::OverlayPrevious(3),
         Self::SendTraceToCalculator,
         Self::TraceSpectrum,
+        Self::AtPointer(AtPointer::CursorA),
+        Self::AtPointer(AtPointer::CursorB),
+        Self::AtPointer(AtPointer::HorizontalCursor),
+        Self::AtPointer(AtPointer::VerticalMarker),
+        Self::AtPointer(AtPointer::PointMarker),
+        Self::AtPointer(AtPointer::DeltaMarker),
+        Self::AtPointer(AtPointer::Note),
+        Self::AtPointer(AtPointer::Properties),
+        Self::ToggleMinorGrid,
     ];
 
     /// The command `key` names, if the feature declares one.
@@ -286,6 +316,19 @@ impl ResultsCommand {
             Self::OverlayPrevious(_) => CommandKey::new("overlay-previous-3-runs"),
             Self::SendTraceToCalculator => CommandKey::new("send-trace-to-calculator"),
             Self::TraceSpectrum => CommandKey::new("trace-spectrum"),
+            Self::AtPointer(AtPointer::CursorA) => CommandKey::new("cursor-a-at-pointer"),
+            Self::AtPointer(AtPointer::CursorB) => CommandKey::new("cursor-b-at-pointer"),
+            Self::AtPointer(AtPointer::HorizontalCursor) => {
+                CommandKey::new("horizontal-cursor-at-pointer")
+            }
+            Self::AtPointer(AtPointer::VerticalMarker) => {
+                CommandKey::new("vertical-marker-at-pointer")
+            }
+            Self::AtPointer(AtPointer::PointMarker) => CommandKey::new("point-marker-at-pointer"),
+            Self::AtPointer(AtPointer::DeltaMarker) => CommandKey::new("delta-marker-at-pointer"),
+            Self::AtPointer(AtPointer::Note) => CommandKey::new("note-at-pointer"),
+            Self::AtPointer(AtPointer::Properties) => CommandKey::new("marker-properties"),
+            Self::ToggleMinorGrid => CommandKey::new("toggle-minor-grid"),
         }
     }
 
@@ -448,6 +491,25 @@ impl ResultsCommand {
             Self::ToggleCursorTool => cursor_command("A and B cursors", CURSOR_TOOL),
             Self::SwitchSteppingCursor => cursor_command("Step the other cursor", SWITCH_CURSOR),
             Self::MarkerAtCursor => cursor_command("Place marker at cursor A", MARKER_AT_CURSOR),
+            Self::AtPointer(AtPointer::CursorA) => cursor_command("Place cursor A", CURSOR_A),
+            Self::AtPointer(AtPointer::CursorB) => cursor_command("Place cursor B", CURSOR_B),
+            Self::AtPointer(AtPointer::HorizontalCursor) => {
+                cursor_command("Add horizontal cursor", HORIZONTAL_CURSOR)
+            }
+            Self::AtPointer(AtPointer::VerticalMarker) => {
+                cursor_command("Add vertical marker", VERTICAL_MARKER)
+            }
+            Self::AtPointer(AtPointer::PointMarker) => {
+                cursor_command("Add point marker", POINT_MARKER)
+            }
+            Self::AtPointer(AtPointer::DeltaMarker) => {
+                cursor_command("Add delta marker", DELTA_MARKER)
+            }
+            Self::AtPointer(AtPointer::Note) => cursor_command("Add note", NOTE),
+            Self::AtPointer(AtPointer::Properties) => {
+                cursor_command("Marker properties\u{2026}", PROPERTIES)
+            }
+            Self::ToggleMinorGrid => cursor_command("Minor grid", MINOR_GRID),
             Self::FitYToVisibleX => (
                 "Fit Y to visible X",
                 "Results",
@@ -460,7 +522,7 @@ impl ResultsCommand {
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,
-                NONE,
+                ZOOM_NEXT,
             ),
             Self::PlotAgainst => (
                 "Plot against\u{2026}",
