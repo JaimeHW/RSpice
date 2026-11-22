@@ -81,6 +81,13 @@ fn written((minimum, maximum): (f64, f64), unit: &str, digits: i32) -> String {
     let high = AxisValue::of(maximum, width, unit, digits);
     let low_text = if low.is_zero || (low.prefix.is_empty() && high.prefix.is_empty()) {
         low.mantissa.clone()
+    } else if unit.is_empty() && low.prefix.is_empty() && !low.mantissa.contains('e') {
+        // A bare minimum reads on the maximum's decade, so one on a decade of
+        // its own states it: `1e2 … 100Meg`, never `100 … 100Meg`, which
+        // reads back as 100Meg to 100Meg.
+        low.mantissa
+            .parse::<f64>()
+            .map_or_else(|_| low.mantissa.clone(), |value| format!("{value:e}"))
     } else {
         low.text(unit)
     };
@@ -450,6 +457,38 @@ mod tests {
         );
         // A bare number keeps SPICE's spelling, where a lone M is milli.
         assert_eq!(format_axis_range((0.0, 2.0e6), ""), "0 \u{2026} 2Meg");
+    }
+
+    /// A noise sheet's field showed its own `100 … 100Meg` in red: the
+    /// parser gives a bare minimum the maximum's decade, so the field read
+    /// its own text back as 100Meg to 100Meg. A minimum on a decade of its
+    /// own is never written bare.
+    #[test]
+    fn a_minimum_on_its_own_decade_is_never_written_bare() {
+        let decades = (100.0, 100.0e6);
+        assert_eq!(format_axis_range(decades, "Hz"), "100 Hz \u{2026} 100 MHz");
+        assert_eq!(
+            parse_axis_range(&format_axis_range(decades, "Hz"), "Hz"),
+            Some(decades)
+        );
+        assert_eq!(format_axis_range(decades, ""), "1e2 \u{2026} 100Meg");
+        assert_eq!(
+            parse_axis_range(&format_axis_range(decades, ""), ""),
+            Some(decades)
+        );
+        // On the maximum's decade it stays bare, and reads on that decade.
+        assert_eq!(format_axis_range((5.0e5, 2.0e6), ""), "0.5 \u{2026} 2Meg");
+        for range in [(1.0, 1.0e3), (2.5, 1.0e9), (-150.0, 2.0e4), (999.0, 1.0e7)] {
+            let text = format_axis_range(range, "");
+            let (low, high) = parse_axis_range(&text, "").unwrap_or_else(|| {
+                panic!("{range:?} was written {text:?}, which reads as nothing")
+            });
+            assert!(
+                (low - range.0).abs() <= 1.0e-3 * range.0.abs()
+                    && (high - range.1).abs() <= 1.0e-3 * range.1.abs(),
+                "{range:?} was written {text:?} and read back as ({low}, {high})"
+            );
+        }
     }
 
     /// An autofit pads the data by a fraction of its span, and the sum is
