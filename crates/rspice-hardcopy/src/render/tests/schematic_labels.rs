@@ -128,6 +128,60 @@ fn a_placed_parts_labels_print_its_own_values() {
     );
 }
 
+/// A name and value moved off their automatic places print where they were
+/// left, at the anchor the canvas letters them at, however the part is
+/// turned. The page and the SVG export publish this one scene.
+#[test]
+fn a_moved_name_and_value_print_where_they_were_left() {
+    use rspice_design::schematic::label_layout::{
+        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, instance_text_placement, text_baselines,
+    };
+    use rspice_design::schematic::label_position::InstanceText;
+
+    let mut resistor =
+        part(1, ComponentType::Resistor, (40, 40), "R1", "1k").with_rotation(Rotation::R90);
+    resistor.name_label_pos = LabelPosition::Placed {
+        offset: SchematicPoint::new(-50, 30),
+        horizontal: TextEdge::End,
+        vertical: TextEdge::Center,
+        upward: false,
+        size_percent: 100,
+    };
+    resistor.value_label_pos = LabelPosition::Placed {
+        offset: SchematicPoint::new(60, -40),
+        horizontal: TextEdge::Center,
+        vertical: TextEdge::End,
+        upward: false,
+        size_percent: 100,
+    };
+    for (text, world) in [
+        (InstanceText::Name, (-10.0, 70.0)),
+        (InstanceText::Value, (100.0, 0.0)),
+    ] {
+        let anchor = instance_text_placement(&resistor, None, text).anchor;
+        assert_eq!(
+            (anchor.x, anchor.y),
+            world,
+            "the canvas letters {text:?} there"
+        );
+    }
+    let printed = compile(&sheet(vec![resistor]));
+    let baseline = |y: f32, edge, size| text_baselines(y, edge, size, 1).next().unwrap();
+
+    let (x, y) = printed.at(
+        -10.0,
+        f64::from(baseline(70.0, TextEdge::Center, INSTANCE_NAME_WORLD)),
+    );
+    let (name_x, name_y, name_anchor, _) = printed.text("R1");
+    assert_eq!((name_x, name_y, name_anchor), (x, y, TextAnchor::End));
+    let (x, y) = printed.at(
+        100.0,
+        f64::from(baseline(0.0, TextEdge::End, INSTANCE_VALUE_WORLD)),
+    );
+    let (value_x, value_y, value_anchor, _) = printed.text("1k");
+    assert_eq!((value_x, value_y, value_anchor), (x, y, TextAnchor::Middle));
+}
+
 /// A print letters what the canvas's label setting shows on every part
 /// that inherits it: names and values, values alone, or nothing at all, on
 /// a catalog part and an authored cell alike.
