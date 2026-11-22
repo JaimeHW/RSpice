@@ -215,6 +215,7 @@ fn draw_parent(
             probe_status: &unannotated_probe,
             selected_trace_expression: &|| None,
             open_pins: &HashMap::new(),
+            variant_marks: &HashMap::new(),
         },
         || session.parent.display_path(),
     );

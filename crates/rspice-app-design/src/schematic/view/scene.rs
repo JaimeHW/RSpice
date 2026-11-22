@@ -195,6 +195,7 @@ pub(super) fn draw_scene(
             probe_status: &probe_status,
             selected_trace_expression: &selected_trace_expression,
             open_pins: &open_pins(painter.ctx(), state, symbol_context),
+            variant_marks: &variant_marks(painter.ctx(), state.model),
         },
         || state.model.workspace.content.active_view.display_path(),
     );
@@ -448,6 +449,73 @@ fn probe_visual_statuses(state: &CanvasFacts<'_>) -> ProbeMaterializationStatuse
 /// do not advance the schematic topology version.
 /// The open-pin set: every terminal nothing meets, by instance. One per
 /// topology, symbol revision and sheet.
+type VariantMarks =
+    std::sync::Arc<HashMap<u64, rspice_schematic_editor::view::drawing::VariantMark>>;
+
+/// The parts of the open drawing the chosen variant changes, and how the
+/// canvas marks each: a part left off, or one replaced or given another
+/// value, which reads the replacement's cell and the value it has there.
+/// Nothing is marked with the base design chosen. Kept while the design
+/// management and the drawing stand still.
+fn variant_marks(ctx: &egui::Context, model: &Model) -> VariantMarks {
+    use rspice_schematic_editor::view::drawing::VariantMark;
+
+    let catalog = &model.workspace.content.design_management;
+    let Some(variant) = catalog.variants().active() else {
+        return VariantMarks::default();
+    };
+    let document = model.workspace.content.active_schematic_reference().key();
+    let key = (
+        catalog.revision(),
+        document.clone(),
+        model.schematic.content_version(),
+    );
+    let id = egui::Id::new("rspice.schematic.variant_marks");
+    if let Some((cached, marks)) =
+        ctx.data(|data| data.get_temp::<((u64, String, u64), VariantMarks)>(id))
+        && cached == key
+    {
+        return marks;
+    }
+    let Ok(resolved) = catalog.variants().resolve(variant.id()) else {
+        return VariantMarks::default();
+    };
+    let marks = model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter_map(|component| {
+            let change = resolved.override_for(&document, component.id).ok()??;
+            let mark = match change {
+                crate::state::VariantObjectOverride::DoNotPopulate { .. } => {
+                    VariantMark::DoNotPopulate
+                }
+                crate::state::VariantObjectOverride::Substitute { replacement } => {
+                    let value = replacement
+                        .value_override
+                        .as_deref()
+                        .unwrap_or(&component.value);
+                    VariantMark::Changed {
+                        value: format!("{} {value}", replacement.cell)
+                            .trim_end()
+                            .to_owned(),
+                    }
+                }
+                crate::state::VariantObjectOverride::Fitted { value_override } => {
+                    VariantMark::Changed {
+                        value: value_override.clone()?,
+                    }
+                }
+            };
+            Some((component.id, mark))
+        })
+        .collect::<HashMap<_, _>>();
+    let marks = VariantMarks::new(marks);
+    ctx.data_mut(|data| data.insert_temp(id, (key, VariantMarks::clone(&marks))));
+    marks
+}
+
 type OpenPins = std::sync::Arc<std::collections::HashMap<u64, Vec<Point>>>;
 
 /// What an open-pin set was extracted from.

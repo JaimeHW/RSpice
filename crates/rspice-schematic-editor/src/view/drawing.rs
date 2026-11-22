@@ -1030,6 +1030,93 @@ pub fn draw_component(
     }
 }
 
+/// How a part the chosen assembly variant changes is drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VariantMark {
+    /// Left off the board: drawn desaturated, with a thin cross over its
+    /// body.
+    DoNotPopulate,
+    /// Replaced, or given another value: its value label reads `value`, and
+    /// the symbol and that label are drawn in the accent.
+    Changed { value: String },
+}
+
+/// [`draw_component`] for a part the chosen variant changes, marked as
+/// `mark` says. `bounds` is the part's body, in world coordinates, which the
+/// cross of a part left off spans. A selected part keeps the selection's
+/// colour.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_varied_component(
+    painter: &Painter,
+    viewport: &Viewport,
+    component: &Component,
+    selected: bool,
+    symbol_library: Option<&SymbolLibrary>,
+    symbol_context: &SchematicSymbolContext,
+    parameter_labels: SchematicParameterLabelVisibility,
+    palette: &Palette,
+    mark: &VariantMark,
+    bounds: (Point, Point),
+) {
+    match mark {
+        VariantMark::DoNotPopulate => {
+            let faded = |colour: egui::Color32| colour.gamma_multiply(0.4);
+            let desaturated = Palette {
+                symbol: faded(palette.symbol),
+                text: faded(palette.text),
+                text_dim: faded(palette.text_dim),
+                text_faint: faded(palette.text_faint),
+                net_label: faded(palette.net_label),
+                ..*palette
+            };
+            draw_component(
+                painter,
+                viewport,
+                component,
+                selected,
+                symbol_library,
+                symbol_context,
+                parameter_labels,
+                &desaturated,
+            );
+            let corners = Rect::from_two_pos(
+                viewport.schematic_to_screen(bounds.0),
+                viewport.schematic_to_screen(bounds.1),
+            );
+            let stroke = Stroke::new(
+                lod::stroke_pt(
+                    StrokeRole::Symbol,
+                    viewport.zoom,
+                    painter.pixels_per_point(),
+                    Emphasis::Plain,
+                ),
+                palette.err,
+            );
+            painter.line_segment([corners.left_top(), corners.right_bottom()], stroke);
+            painter.line_segment([corners.right_top(), corners.left_bottom()], stroke);
+        }
+        VariantMark::Changed { value } => {
+            let accented = Palette {
+                symbol: palette.accent,
+                text_dim: palette.accent,
+                ..*palette
+            };
+            let mut shown = component.clone();
+            shown.value.clone_from(value);
+            draw_component(
+                painter,
+                viewport,
+                &shown,
+                selected,
+                symbol_library,
+                symbol_context,
+                parameter_labels,
+                &accented,
+            );
+        }
+    }
+}
+
 pub fn port_symbol_stroke(
     symbol_stroke: Stroke,
     zoom: f32,

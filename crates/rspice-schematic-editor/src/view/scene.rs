@@ -5,10 +5,11 @@ use super::{
     design_view::{DesignView, design_note_visible},
     documentation_shapes::{draw_documentation_shape, world_bounds as documentation_shape_bounds},
     drawing::{
-        ConductorInk, JunctionPaint, ProbeEmphasis, ProbeVisualStatus, bus_band_width_pt,
-        bus_tap_width_pt, chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor,
-        draw_hover_halo, draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe,
-        draw_wire_bridge, probe_world_bounds,
+        ConductorInk, JunctionPaint, ProbeEmphasis, ProbeVisualStatus, VariantMark,
+        bus_band_width_pt, bus_tap_width_pt, chain_conductors, draw_bus, draw_bus_tap,
+        draw_component, draw_conductor, draw_hover_halo, draw_hover_outline, draw_junction,
+        draw_open_pin_marks, draw_probe, draw_varied_component, draw_wire_bridge,
+        probe_world_bounds,
     },
     net_labels::{NetLabelPaint, draw_net_label_attached, world_bounds as net_label_world_bounds},
     pointer_target::PointerTarget,
@@ -71,6 +72,9 @@ pub struct SceneOverlays<'a> {
     /// Each instance's open terminals (nothing meets them), which take the
     /// open-pin mark.
     pub open_pins: &'a HashMap<u64, Vec<Point>>,
+    /// The parts the chosen assembly variant changes, and how each is
+    /// marked; empty with the base design chosen.
+    pub variant_marks: &'a HashMap<u64, VariantMark>,
 }
 
 pub struct SceneSymbols<'a> {
@@ -269,16 +273,31 @@ pub fn draw_content(
         let is_selected = view.editor.selection.components.contains(&component.id)
             || band_instances.is_some_and(|band| band.takes_bounds(min, max));
 
-        draw_component(
-            painter,
-            viewport,
-            component,
-            is_selected,
-            symbol_library,
-            symbol_context,
-            view.parameter_labels,
-            palette,
-        );
+        if let Some(mark) = overlays.variant_marks.get(&component.id) {
+            draw_varied_component(
+                painter,
+                viewport,
+                component,
+                is_selected,
+                symbol_library,
+                symbol_context,
+                view.parameter_labels,
+                palette,
+                mark,
+                (min, max),
+            );
+        } else {
+            draw_component(
+                painter,
+                viewport,
+                component,
+                is_selected,
+                symbol_library,
+                symbol_context,
+                view.parameter_labels,
+                palette,
+            );
+        }
         if let Some(open) = overlays.open_pins.get(&component.id) {
             draw_open_pin_marks(
                 painter,
@@ -660,6 +679,7 @@ mod band_tests {
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
                 open_pins: &HashMap::new(),
+                variant_marks: &HashMap::new(),
             },
             String::new,
         );
@@ -787,6 +807,7 @@ mod hover_tests {
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
                 open_pins,
+                variant_marks: &HashMap::new(),
             },
             String::new,
         );
