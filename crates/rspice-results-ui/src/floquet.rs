@@ -11,7 +11,7 @@ use rspice_results::floquet::{
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable, SortKey, Tone};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights, SortKey, Tone};
 use rspice_vocabulary::quantity::{AngleDisplay, QuantityPresentationPolicy};
 
 /// One Floquet mode of the orbit.
@@ -169,8 +169,9 @@ pub struct FloquetResponse {
 /// The table goes beside the plane when the sheet leaves this much width
 /// past a square plane.
 const TABLE_BESIDE_MIN_WIDTH: f32 = 560.0;
-/// The plane's share of the height when the table goes under it.
-const PLANE_SHARE_ABOVE_TABLE: f32 = 0.58;
+/// The most of the height the table takes when it goes under the plane;
+/// a spectrum with fewer modes takes only the rows it lists.
+const TABLE_SHARE_UNDER_PLANE: f32 = 0.42;
 
 /// Draw the multipliers on the plane with the unit circle, and the table
 /// beside it. A mode selected in the table or clicked on the plane is
@@ -217,14 +218,10 @@ pub fn show(
         },
     ];
     let drawing_view = *view;
+    // The sheet bar already names the analysis.
     let header = strip::StripHeader::new(
         "FLOQUET",
-        &format!(
-            "{} · {} · {} multipliers",
-            data.kind,
-            data.label,
-            data.modes.len()
-        ),
+        &format!("{} multipliers", data.modes.len()),
         &legend,
     )
     .zoomed(drawing_view.is_zoomed())
@@ -244,14 +241,20 @@ pub fn show(
         * 1.15;
     let (x0, x1) = drawing_view.x.unwrap_or((-extent, extent));
     let (y0, y1) = drawing_view.y.unwrap_or((-extent, extent));
-    let detail = format!("{} multipliers; {}", data.modes.len(), verdict_text(data));
+    let detail = format!(
+        "{} · {} multipliers; {}",
+        data.kind,
+        data.modes.len(),
+        verdict_text(data)
+    );
     let mut spec = PlotSpec::new(
-        Axis::linear(x0, x1, "Re μ"),
+        real_axis((x0, x1)),
         XScale::Linear,
-        Axis::linear(y0, y1, "Im μ"),
+        imaginary_axis((y0, y1)),
     )
     .accessible_name("Floquet multipliers on the unit circle")
     .pinch_zooms_both_axes()
+    .with_y_without_unit("IM")
     .accessible_detail(&detail);
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
 
@@ -317,25 +320,42 @@ pub fn show(
             egui::Rect::from_min_max(egui::pos2(plane.right(), avail.top()), avail.max),
         )
     } else {
-        let split = avail.top() + (avail.height() * PLANE_SHARE_ABOVE_TABLE).round();
+        let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
+        // The head, every row and the frame's two rules.
+        let rows = lines.head + lines.row * data.modes.len() as f32 + 2.0;
+        let table = rows.min(avail.height() * TABLE_SHARE_UNDER_PLANE).round();
+        let split = avail.bottom() - table;
         (
             egui::Rect::from_min_max(avail.min, egui::pos2(avail.right(), split)),
             egui::Rect::from_min_max(egui::pos2(avail.left(), split), avail.max),
         )
     };
-    let rect = plot::square_outer_rect(plane_area, &spec);
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect)
+            .max_rect(plane_area)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    // The plane fills its area with one unit as long on both axes, so the
+    // circle stays round. Twice: the Y gutter is as wide as the labels of
+    // the range it shows.
+    let mut ranges = ((x0, x1), (y0, y1));
+    for _ in 0..2 {
+        let plot = plot::plot_rect(&plot_ui, &spec).size();
+        ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
+        spec.x = real_axis(ranges.0);
+        spec.y = imaginary_axis(ranges.1);
+    }
     let response = plot::show(&mut plot_ui, &spec, cache, None, None);
     if response.view.any() {
-        let change = crate::presentation::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        let change = crate::presentation::equal_scale_view_change(
+            ranges.0,
+            ranges.1,
+            response.view,
+            response.plot_rect.size(),
+        );
         view.apply(&change);
     }
 
-    let ranges = ((x0, x1), (y0, y1));
     let mut hovered = None;
     if let Some(pointer) = response.response.hover_pos()
         && response.plot_rect.contains(pointer)
@@ -385,10 +405,7 @@ pub fn show(
             ),
         ];
         if let Some(margin) = mode.margin_db() {
-            rows.push((
-                "Margin".to_owned(),
-                fmt_si_significant(margin, "dB", digits),
-            ));
+            rows.push(("Margin".to_owned(), format!("{} dB", hundredths(margin))));
         }
         let title = format!("μ{}", index + 1);
         crate::presentation::point_card(&plot_ui, response.plot_rect, pos, &title, color, &rows);
@@ -405,6 +422,27 @@ pub fn show(
         fit_clicked: header.fit_clicked,
         pin_changed,
     })
+}
+
+/// A multiplier's real part: dimensionless, named in the X row.
+fn real_axis(range: (f64, f64)) -> Axis {
+    Axis::linear(range.0, range.1, "").with_label("Re")
+}
+
+/// A multiplier's imaginary part: dimensionless, named at the head of the
+/// Y column.
+fn imaginary_axis(range: (f64, f64)) -> Axis {
+    Axis::linear(range.0, range.1, "").with_label("Im")
+}
+
+/// A margin to the hundredth of a decibel, as every decibel column of the
+/// Results details reads, with a true minus sign.
+fn hundredths(decibels: f64) -> String {
+    let text = format!("{decibels:.2}");
+    if text == "-0.00" {
+        return "0.00".to_owned();
+    }
+    text.replace('-', "\u{2212}")
 }
 
 /// A cell holding a number whose column head carries its unit.
@@ -433,11 +471,13 @@ fn mode_table(
         Column::number("Re λ (1/s)", 86.0),
         Column::number("Im λ (rad/s)", 86.0),
         Column::number("Margin (dB)", 84.0),
-        Column::name("Verdict", 110.0).align(Align::Left),
     ];
     if measured {
         columns.push(Column::number("Participation", 92.0));
     }
+    // Last, so the spare width falls after its words and the numbers read
+    // as one group.
+    columns.push(Column::words("Verdict", 110.0));
     let revision = egui::Id::new(("floquet-modes", &data.label, data.modes.len(), digits)).value();
     with_table_state(ui, "floquet-modes", |ui, state| {
         let pinned = pin
@@ -483,9 +523,9 @@ fn mode_table(
                     figure(angle, angle_unit, digits),
                     figure(mode.exponent.0, "1/s", digits),
                     figure(mode.exponent.1, "rad/s", digits),
-                    mode.margin_db()
-                        .map_or_else(Cell::absent, |margin| figure(margin, "dB", digits)),
-                    verdict_cell,
+                    mode.margin_db().map_or_else(Cell::absent, |margin| {
+                        Cell::number(hundredths(margin)).sort_by(SortKey::Number(margin))
+                    }),
                 ];
                 if measured {
                     cells.push(
@@ -493,6 +533,7 @@ fn mode_table(
                             .map_or_else(Cell::absent, |share| figure(share, "", digits)),
                     );
                 }
+                cells.push(verdict_cell);
                 cells
             });
         if response.selection_changed {
@@ -520,7 +561,7 @@ pub fn right_panel(ui: &mut Ui, data: Option<&FloquetData>, digits: usize) {
             "Min margin",
             data.min_margin_db().map_or_else(
                 || "—".to_owned(),
-                |margin| fmt_si_significant(margin, "dB", digits),
+                |margin| format!("{} dB", hundredths(margin)),
             ),
             false,
         ),
@@ -569,6 +610,7 @@ mod tests {
         // μ = −1.25: 1.938 dB outside the circle, λ = (ln 1.25 + jπ)/T.
         let unstable = mode(-1.25, 0.0);
         assert!((unstable.margin_db().unwrap() + 20.0 * 1.25_f64.log10()).abs() < 1e-12);
+        assert_eq!(hundredths(unstable.margin_db().unwrap()), "\u{2212}1.94");
         assert!((unstable.exponent.0 - 1.25_f64.ln() / 1.0e-6).abs() < 1e-3);
         assert!((unstable.exponent.1 - std::f64::consts::PI / 1.0e-6).abs() < 1e-3);
         assert_eq!(unstable.verdict(0.0), ModeVerdict::Unstable);

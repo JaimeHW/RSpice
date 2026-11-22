@@ -1075,6 +1075,37 @@ pub fn square_outer_rect(avail: Rect, spec: &PlotSpec<'_>) -> Rect {
     Rect::from_center_size(avail.center(), vec2(inner + h_margins, inner + v_margins))
 }
 
+/// The ranges about the centres of `x` and `y` that put one data unit on
+/// the same number of points along both axes of a plot area `plot` points
+/// across: the axis with room to spare widens about its centre, and neither
+/// narrows, so all that was asked for stays in view. A plane drawn this way
+/// fills its rect and keeps a circle round, as MATLAB's `axis equal` with
+/// adjustable limits does, where [`square_outer_rect`] would letterbox it.
+///
+/// A degenerate size or range is returned as it came.
+#[must_use]
+pub fn equal_scale_ranges(
+    plot: egui::Vec2,
+    x: (f64, f64),
+    y: (f64, f64),
+) -> ((f64, f64), (f64, f64)) {
+    let (width, height) = (f64::from(plot.x), f64::from(plot.y));
+    let (x_span, y_span) = ((x.1 - x.0).abs(), (y.1 - y.0).abs());
+    if !(width > 0.0 && height > 0.0 && x_span.is_finite() && y_span.is_finite()) {
+        return (x, y);
+    }
+    let per_point = (x_span / width).max(y_span / height);
+    if !(per_point > 0.0) {
+        return (x, y);
+    }
+    let about = |(low, high): (f64, f64), points: f64| {
+        let centre = (low + high) * 0.5;
+        let half = per_point * points * 0.5;
+        (centre - half, centre + half)
+    };
+    (about(x, width), about(y, height))
+}
+
 /// Render a plot filling the remaining space of `ui`.
 ///
 /// `cursors` draws the A/B verticals when placed (in this plot's X domain).
@@ -2724,6 +2755,30 @@ mod tests {
     use super::*;
     use crate::plot::format::tick_label;
     use crate::plot::{Axis, Marker, Trace, XScale};
+
+    /// One unit spans the same points on both axes of a wide plane and of a
+    /// tall one, each range keeps its centre, and the unit square asked for
+    /// stays in view.
+    #[test]
+    fn an_equal_scale_plane_keeps_one_unit_the_same_length_on_both_axes() {
+        for (size, wider) in [(vec2(800.0, 400.0), true), (vec2(300.0, 600.0), false)] {
+            let (x, y) = equal_scale_ranges(size, (-1.0, 1.0), (-0.5, 1.5));
+            let along_x = f64::from(size.x) / (x.1 - x.0);
+            let along_y = f64::from(size.y) / (y.1 - y.0);
+            assert!((along_x / along_y - 1.0).abs() < 1e-12, "{size:?}");
+            assert!(((x.0 + x.1) * 0.5).abs() < 1e-12);
+            assert!(((y.0 + y.1) * 0.5 - 0.5).abs() < 1e-12);
+            assert!(x.0 <= -1.0 && x.1 >= 1.0 && y.0 <= -0.5 && y.1 >= 1.5);
+            // The axis with room to spare is the one that widened.
+            if wider {
+                assert_eq!(y, (-0.5, 1.5));
+                assert_eq!(x, (-2.0, 2.0));
+            } else {
+                assert_eq!(x, (-1.0, 1.0));
+                assert_eq!(y, (-1.5, 2.5));
+            }
+        }
+    }
 
     #[test]
     fn an_ordinary_curve_stays_a_single_unbroken_run() {

@@ -440,8 +440,8 @@ pub fn show(
         }
     }));
 
-    // The map's region sized so the INNER plot area is square — σ and jω on
-    // one scale — and the table beside it, or under it on a narrow sheet.
+    // The map's region, and the table beside it, or under it on a narrow
+    // sheet.
     let avail = ui.available_rect_before_wrap();
     let (map_area, table_area) = if avail.width() - avail.height() >= TABLE_BESIDE_MIN_WIDTH {
         let map = egui::Rect::from_min_size(avail.min, egui::vec2(avail.height(), avail.height()));
@@ -456,22 +456,38 @@ pub fn show(
             egui::Rect::from_min_max(egui::pos2(avail.left(), split), avail.max),
         )
     };
-    let rect = plot::square_outer_rect(map_area, &spec);
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect)
+            .max_rect(map_area)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    // The map fills its region with σ and jω on one scale. Twice: the Y
+    // gutter is as wide as the labels of the range it shows.
+    let mut ranges = ((x0, x1), (y0, y1));
+    for _ in 0..2 {
+        let plot = plot::plot_rect(&plot_ui, &spec).size();
+        ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
+        spec.x = plane.axis(ranges.0.0, ranges.0.1, "σ");
+        spec.y = plane.axis(ranges.1.0, ranges.1.1, "jω");
+    }
+    spec.bands = vec![plot::Band {
+        x0: ranges.0.0,
+        x1: 0.0_f64.clamp(ranges.0.0, ranges.0.1),
+    }];
 
     let response = plot::show(&mut plot_ui, &spec, cache, None, None);
     if response.view.any() {
-        let change = crate::presentation::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        let change = crate::presentation::equal_scale_view_change(
+            ranges.0,
+            ranges.1,
+            response.view,
+            response.plot_rect.size(),
+        );
         view.apply(&change);
     }
 
     // Nearest root on hover, click to pin: σ, jω, natural frequency, and Q
     // turn the s-plane picture into numbers.
-    let ranges = ((x0, x1), (y0, y1));
     let mut hovered: Option<(usize, usize)> = None;
     if let Some(pointer) = response.response.hover_pos()
         && response.plot_rect.contains(pointer)

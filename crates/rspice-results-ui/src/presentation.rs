@@ -62,25 +62,39 @@ pub fn square_xy_view_change(
     current_y: (f64, f64),
     change: rspice_ui_kit::plot::ViewChange,
 ) -> rspice_ui_kit::plot::ViewChange {
+    equal_scale_view_change(current_x, current_y, change, egui::Vec2::splat(1.0))
+}
+
+/// [`square_xy_view_change`] for a plane `plot` points across that is not
+/// square: a zoom or pan along one axis carries the other with it at the
+/// same points per unit, and a zoom box keeps all it took in.
+pub fn equal_scale_view_change(
+    current_x: (f64, f64),
+    current_y: (f64, f64),
+    change: rspice_ui_kit::plot::ViewChange,
+    plot: egui::Vec2,
+) -> rspice_ui_kit::plot::ViewChange {
     if change.reset || (change.x.is_none() && change.y.is_none()) {
         return change;
     }
     let next_x = change.x.unwrap_or(current_x);
     let next_y = change.y.unwrap_or(current_y);
-    let x_span = (next_x.1 - next_x.0).abs();
-    let y_span = (next_y.1 - next_y.0).abs();
-    let span = match (change.x, change.y) {
-        (Some(_), None) => x_span,
-        (None, Some(_)) => y_span,
-        (Some(_), Some(_)) => x_span.max(y_span),
+    let (width, height) = (f64::from(plot.x.max(1.0)), f64::from(plot.y.max(1.0)));
+    let along_x = (next_x.1 - next_x.0).abs() / width;
+    let along_y = (next_y.1 - next_y.0).abs() / height;
+    let per_point = match (change.x, change.y) {
+        (Some(_), None) => along_x,
+        (None, Some(_)) => along_y,
+        (Some(_), Some(_)) => along_x.max(along_y),
         (None, None) => unreachable!("empty view changes return above"),
     }
     .max(f64::EPSILON);
     let x_center = (next_x.0 + next_x.1) * 0.5;
     let y_center = (next_y.0 + next_y.1) * 0.5;
+    let (x_half, y_half) = (per_point * width * 0.5, per_point * height * 0.5);
     rspice_ui_kit::plot::ViewChange {
-        x: Some((x_center - span * 0.5, x_center + span * 0.5)),
-        y: Some((y_center - span * 0.5, y_center + span * 0.5)),
+        x: Some((x_center - x_half, x_center + x_half)),
+        y: Some((y_center - y_half, y_center + y_half)),
         reset: false,
     }
 }
