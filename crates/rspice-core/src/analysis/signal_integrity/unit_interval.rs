@@ -10,8 +10,10 @@
 //! edges — measures the pattern's repetition period, not its bit period. On a
 //! 1010 clock every rising gap is two unit intervals, so it reports 2 UI and
 //! the viewer folds two bits into one window. The estimator here reads
-//! crossings of both polarities, clusters the intervals between them, and
-//! resolves which small multiple of the true unit interval each cluster is.
+//! crossings of both polarities, clusters the intervals between them to
+//! propose candidate periods, and resolves each interval as a whole number of
+//! a candidate, the way a constant-frequency clock recovery assigns every
+//! edge its bit index before fitting one period through all of them.
 //!
 //! # What it refuses
 //!
@@ -31,8 +33,8 @@ use std::f64::consts::TAU;
 /// Relative gap that separates two interval clusters: a jump of more than
 /// this fraction of the running cluster median starts a new cluster.
 const REL_CLUSTER_GAP: f64 = 0.25;
-/// Largest residual, in unit intervals, that still counts as a cluster
-/// sitting on an integer multiple of the candidate period.
+/// Largest residual, in unit intervals, that still counts as the intervals
+/// read as one multiple sitting on that multiple of the candidate period.
 const RESIDUAL_TOL_UI: f64 = 0.25;
 /// Deepest subdivision of the smallest cluster considered as a candidate.
 const MAX_SUBDIVISION: u32 = 4;
@@ -40,8 +42,9 @@ const MAX_SUBDIVISION: u32 = 4;
 const MIN_CROSSINGS: usize = 4;
 /// Below this many crossings the estimate is labelled low-confidence.
 const LOW_CONFIDENCE_BELOW: usize = 8;
-/// Iterations of the weighted least-squares refit.
-const MAX_REFIT_ITERS: usize = 3;
+/// Most rounds of assigning each interval its multiple and refitting the
+/// period; the assignment normally settles in two or three.
+const MAX_REFIT_ITERS: usize = 8;
 /// Relative slack on the pair-mean ratio gate. Duty-cycle distortion of
 /// exactly 60/40 puts the two clusters at a ratio of exactly 1.5, so the gate
 /// has to be inclusive of its own boundary in floating point.
@@ -132,13 +135,12 @@ pub fn estimate_unit_interval(
     let rejected = UiEstimateRejection::NoConsistentFundamental {
         clusters: clusters.len(),
     };
-    let base = candidate_periods(&clusters)
+    let resolved = candidate_periods(&clusters)
         .into_iter()
-        .find(|period| is_consistent(&clusters, *period))
+        .find_map(|candidate| resolve_period(&intervals, candidate))
         .ok_or(rejected)?;
 
-    let refined = refit_period(&clusters, base);
-    let fit = grid_fit(&crossings, refined).ok_or(rejected)?;
+    let fit = grid_fit(&crossings, resolved).ok_or(rejected)?;
     if fit.rms_residual_ui > RESIDUAL_TOL_UI {
         return Err(rejected);
     }
@@ -239,6 +241,12 @@ struct IntervalCluster {
 }
 
 /// Single-linkage clustering of sorted intervals with a relative gap rule.
+///
+/// The clusters only propose candidate periods, from the shortest one or two.
+/// They cannot judge one: the allowance grows with each cluster's length while
+/// neighbouring multiples stay one unit interval apart, and under random
+/// jitter the tails of neighbouring run lengths touch, so a cluster can span
+/// several multiples and centre on none of them.
 fn cluster_intervals(sorted: &[f64]) -> Vec<IntervalCluster> {
     let mut clusters = Vec::new();
     let mut start = 0usize;
@@ -305,47 +313,51 @@ fn candidate_periods(clusters: &[IntervalCluster]) -> Vec<f64> {
     candidates
 }
 
-/// Every cluster sits within tolerance of an integer multiple of `period`.
-fn is_consistent(clusters: &[IntervalCluster], period: f64) -> bool {
-    clusters.iter().all(|cluster| {
-        let multiple = (cluster.centroid / period).round();
-        multiple >= 1.0 && (cluster.centroid - multiple * period).abs() <= RESIDUAL_TOL_UI * period
-    })
-}
-
-/// Weighted least-squares refit through the origin over the resolved cluster
-/// multiples, so a period picked from one cluster is corrected by all of them.
-fn refit_period(clusters: &[IntervalCluster], mut period: f64) -> f64 {
-    let mut previous: Option<Vec<f64>> = None;
+/// The period `candidate` resolves to when every interval is read as a whole
+/// number of periods, or `None` when the intervals do not sit on its
+/// multiples.
+///
+/// Each interval takes its nearest multiple of the period, and the period is
+/// refitted by least squares through the origin over all of them, until the
+/// multiples settle. The intervals read as each multiple must then average to
+/// within [`RESIDUAL_TOL_UI`] of it. Reading intervals one by one keeps a
+/// jittered record's run lengths apart however far their tails reach, and a
+/// candidate a few per cent off still settles on the period, since only an
+/// interval more than half a period off its multiple is misread.
+fn resolve_period(intervals: &[f64], candidate: f64) -> Option<f64> {
+    let multiple = |gap: f64, period: f64| (gap / period).round().max(1.0);
+    let mut period = candidate;
     for _ in 0..MAX_REFIT_ITERS {
-        let multiples: Vec<f64> = clusters
+        let (weighted, squares) = intervals
             .iter()
-            .map(|cluster| (cluster.centroid / period).round().max(1.0))
-            .collect();
-        if previous.as_deref() == Some(multiples.as_slice()) {
-            break;
-        }
-        let numerator: f64 = clusters
-            .iter()
-            .zip(&multiples)
-            .map(|(cluster, &k)| cluster.weight * k * cluster.centroid)
-            .sum();
-        let denominator: f64 = clusters
-            .iter()
-            .zip(&multiples)
-            .map(|(cluster, &k)| cluster.weight * k * k)
-            .sum();
-        if denominator <= 0.0 {
-            break;
-        }
-        let next = numerator / denominator;
+            .fold((0.0, 0.0), |(weighted, squares), &gap| {
+                let k = multiple(gap, period);
+                (weighted + k * gap, squares + k * k)
+            });
+        let next = weighted / squares;
         if !(next.is_finite() && next > 0.0) {
+            return None;
+        }
+        let settled = intervals
+            .iter()
+            .all(|&gap| multiple(gap, next) == multiple(gap, period));
+        period = next;
+        if settled {
             break;
         }
-        period = next;
-        previous = Some(multiples);
     }
-    period
+
+    let mut sums: std::collections::BTreeMap<u64, (f64, f64)> = std::collections::BTreeMap::new();
+    for &gap in intervals {
+        let entry = sums.entry(multiple(gap, period) as u64).or_default();
+        entry.0 += gap;
+        entry.1 += 1.0;
+    }
+    sums.iter()
+        .all(|(&k, &(sum, count))| {
+            (sum / count - k as f64 * period).abs() <= RESIDUAL_TOL_UI * period
+        })
+        .then_some(period)
 }
 
 struct GridFit {
@@ -411,8 +423,8 @@ fn grid_fit(crossings: &[f64], period: f64) -> Option<GridFit> {
 mod tests {
     use super::*;
     use crate::analysis::signal_integrity::eye_test_signals::{
-        DT, RISE_2080, UI, beating_toggle_events, clock_events, dcd_clock_events, nrz_events,
-        prbs7_bits, trapezoid,
+        DT, RISE_2080, UI, beating_toggle_events, clock_events, dcd_clock_events, gaussian_draws,
+        nrz_events, prbs7_bits, trapezoid, uniform_draws,
     };
 
     /// The shipping estimator this module replaces: the median gap between
@@ -516,6 +528,91 @@ mod tests {
             estimate.unit_interval
         );
         assert!(!estimate.low_confidence);
+    }
+
+    /// PRBS7 at `ui` whose every crossing is displaced by Gaussian random
+    /// jitter of `sigma_ui` unit intervals rms.
+    fn jittered_prbs7(bits: usize, ui: f64, sigma_ui: f64) -> (Vec<f64>, Vec<f64>) {
+        let (initial, mut events) = nrz_events(&prbs7_bits(bits), 0.137 * ui, ui, 0.0, 1.0);
+        let mut draw = gaussian_draws(0x9e37_79b9_7f4a_7c15);
+        for event in &mut events {
+            event.0 += sigma_ui * ui * draw();
+        }
+        trapezoid(
+            initial,
+            &events,
+            (bits as f64 + 2.0) * ui,
+            ui / 100.0,
+            0.05 * ui,
+        )
+    }
+
+    /// Random jitter is on every measured eye, and it spreads each run length
+    /// until neighbouring ones touch. Judged by clusters of nearby intervals, a
+    /// 5 % record's 3 to 7 UI runs merged into one cluster centred at 3.5 UI
+    /// and the record was refused; at 8 % the 1 and 2 UI runs merged as well.
+    /// The recovered period is the bit period, and what is left over is the
+    /// jitter itself.
+    #[test]
+    fn random_jitter_recovers_the_bit_period() {
+        let ui = 4e-9;
+        for sigma in [0.0, 0.02, 0.05, 0.08] {
+            let (time, signal) = jittered_prbs7(10_000, ui, sigma);
+            let estimate = estimate_unit_interval(&time, &signal)
+                .unwrap_or_else(|rejection| panic!("{sigma} UI rms refused: {rejection:?}"));
+            assert!(
+                (estimate.unit_interval - ui).abs() <= 5e-3 * ui,
+                "{sigma} UI rms: unit interval {:e}",
+                estimate.unit_interval
+            );
+            assert!(
+                (estimate.rms_residual_ui - sigma).abs() <= 0.1 * sigma + 1e-3,
+                "{sigma} UI rms: residual {} UI",
+                estimate.rms_residual_ui
+            );
+        }
+    }
+
+    /// A 125 MHz sine crosses zero every 4 ns, whether the run kept a point a
+    /// nanosecond or the default step's 61.5 ps.
+    #[test]
+    fn a_sampled_sine_recovers_its_half_period() {
+        let stop: f64 = 63e-9;
+        for dt in [1e-9, stop / 1024.0] {
+            let count = (stop / dt).round() as usize;
+            let time: Vec<f64> = (0..=count).map(|index| index as f64 * dt).collect();
+            let signal: Vec<f64> = time.iter().map(|&t| (TAU * 125e6 * t).sin()).collect();
+            let estimate = estimate_unit_interval(&time, &signal).expect("the sine has a period");
+            assert!(
+                (estimate.unit_interval - 4e-9).abs() <= 5e-3 * 4e-9,
+                "at {dt:e} s: unit interval {:e}",
+                estimate.unit_interval
+            );
+        }
+    }
+
+    /// Runs of random length, anywhere between one and three unit intervals,
+    /// share no period. Reading intervals one at a time must not make one up.
+    #[test]
+    fn runs_of_random_length_are_refused() {
+        let mut draw = uniform_draws(0x2545_f491_4f6c_dd1d);
+        let mut events = Vec::new();
+        let mut t = 0.137e-9;
+        let mut level = 0.0;
+        for _ in 0..400 {
+            t += UI * (1.0 + 2.0 * draw());
+            level = 1.0 - level;
+            events.push((t, level));
+        }
+        let (time, signal) = trapezoid(0.0, &events, t + 2.0 * UI, DT, RISE_2080);
+        assert!(
+            matches!(
+                estimate_unit_interval(&time, &signal),
+                Err(UiEstimateRejection::NoConsistentFundamental { .. })
+            ),
+            "random runs produced {:?}",
+            estimate_unit_interval(&time, &signal)
+        );
     }
 
     /// 60/40 duty-cycle distortion puts the interval clusters at 0.8 and

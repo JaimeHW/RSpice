@@ -160,6 +160,26 @@ pub(super) fn dcd_clock_events(
     (low, events)
 }
 
+/// Deterministic uniform draws in (0, 1): xorshift64 from `seed`.
+pub(super) fn uniform_draws(seed: u64) -> impl FnMut() -> f64 {
+    let mut state = seed.max(1);
+    move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        ((state >> 11) as f64 + 0.5) / (1u64 << 53) as f64
+    }
+}
+
+/// Deterministic standard-normal draws (Box–Muller over [`uniform_draws`]).
+pub(super) fn gaussian_draws(seed: u64) -> impl FnMut() -> f64 {
+    let mut uniform = uniform_draws(seed);
+    move || {
+        let radius = (-2.0 * uniform().ln()).sqrt();
+        radius * (std::f64::consts::TAU * uniform()).cos()
+    }
+}
+
 /// PRBS-7 (`x^7 + x^6 + 1`) bit sequence, seeded to the all-ones state.
 pub(super) fn prbs7_bits(count: usize) -> Vec<bool> {
     let mut state: u8 = 0x7f;
