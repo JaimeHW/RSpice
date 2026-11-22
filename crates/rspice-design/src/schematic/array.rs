@@ -214,9 +214,6 @@ pub enum SchematicArrayNameAtom {
     Suffixed { stem: String, number: u64 },
 }
 
-/// What two endpoints must share to count through one sequence.
-pub(super) type NameSequenceKey = (u8, String, String, Option<usize>);
-
 impl SchematicArrayNameAtom {
     pub fn parse(input: &str) -> Result<Self, SchematicArrayError> {
         if input.is_empty()
@@ -309,25 +306,6 @@ impl SchematicArrayNameAtom {
             }
         }
         Self::parse(input)
-    }
-
-    /// What every name counted through the same sequence as this one shares.
-    pub(super) fn sequence_key(&self) -> NameSequenceKey {
-        match self {
-            Self::Reference {
-                prefix,
-                suffix,
-                minimum_width,
-                ..
-            } => (0, prefix.clone(), suffix.clone(), *minimum_width),
-            Self::Indexed {
-                stem,
-                minimum_width,
-                notation,
-                ..
-            } => (1, stem.clone(), format!("{notation:?}"), *minimum_width),
-            Self::Suffixed { stem, .. } => (2, stem.clone(), String::new(), None),
-        }
     }
 
     pub const fn numeric_value(&self) -> u64 {
@@ -454,6 +432,10 @@ impl fmt::Display for SchematicArrayNameAtom {
 }
 
 /// Inclusive, typed name range associated with one selected source name.
+///
+/// `R5…R8` names the source R5 and its copies straight on from it. Where
+/// those names are taken, the copies take the next free run and the range
+/// reads `R5, R21…R23`: the source, then the copies.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SchematicArrayNameRange {
     start: SchematicArrayNameAtom,
@@ -461,11 +443,18 @@ pub struct SchematicArrayNameRange {
     length: usize,
     #[serde(default = "unit_naming_stride")]
     stride: u64,
+    /// The first copy's name, when the copies do not follow on from the
+    /// source; they count up from it to `end`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    copies: Option<SchematicArrayNameAtom>,
     source: String,
 }
 
 impl SchematicArrayNameRange {
     pub fn parse(clause: &str) -> Result<Self, SchematicArrayError> {
+        if let Some((source, copies)) = clause.trim().split_once(", ") {
+            return Self::parse_with_copies(clause, source, copies);
+        }
         let mut endpoints = clause.trim().split('…');
         let Some(start_text) = endpoints.next() else {
             return Err(invalid_naming_clause(clause, "missing range start"));
@@ -501,6 +490,50 @@ impl SchematicArrayNameRange {
             end,
             length,
             stride: 1,
+            copies: None,
+            source,
+        })
+    }
+
+    /// `R5, R21…R23` or `R5, R21`: a source, then copies that count up from
+    /// a run of their own.
+    fn parse_with_copies(
+        clause: &str,
+        source: &str,
+        copies: &str,
+    ) -> Result<Self, SchematicArrayError> {
+        let start = SchematicArrayNameAtom::parse(source.trim())?;
+        // Each copy is read as a name in the source's sequence, so Rload's
+        // copies Rload_2…Rload_4 count through Rload's suffix.
+        let (first, end) = match copies.split_once('…') {
+            Some((first, end)) => (
+                start.parse_range_end(first.trim())?,
+                start.parse_range_end(end.trim())?,
+            ),
+            None => {
+                let first = start.parse_range_end(copies.trim())?;
+                (first.clone(), first)
+            }
+        };
+        if !start.pattern_matches(&first) || !first.pattern_matches(&end) {
+            return Err(SchematicArrayError::MismatchedNamingEndpoints {
+                clause: clause.trim().to_owned(),
+            });
+        }
+        let Some(span) = end.numeric_value().checked_sub(first.numeric_value()) else {
+            return Err(invalid_naming_clause(clause, "copies count upward"));
+        };
+        let length = span
+            .checked_add(2)
+            .and_then(|length| usize::try_from(length).ok())
+            .ok_or(SchematicArrayError::NamingRangeLengthOverflow)?;
+        let source = start.to_string();
+        Ok(Self {
+            start,
+            end,
+            length,
+            stride: 1,
+            copies: Some(first),
             source,
         })
     }
@@ -530,6 +563,15 @@ impl SchematicArrayNameRange {
         if member_index >= self.length {
             return None;
         }
+        if let Some(first) = &self.copies {
+            let Some(copy) = member_index.checked_sub(1) else {
+                return Some(self.start.to_string());
+            };
+            let value = first
+                .numeric_value()
+                .checked_add(u64::try_from(copy).ok()?)?;
+            return Some(first.with_numeric_value(value).to_string());
+        }
         let start = self.start.numeric_value();
         let offset = u64::try_from(member_index).ok()?.checked_mul(self.stride)?;
         let value = if self.end.numeric_value() >= start {
@@ -543,7 +585,11 @@ impl SchematicArrayNameRange {
 
 impl fmt::Display for SchematicArrayNameRange {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}…{}", self.start, self.end)
+        match &self.copies {
+            Some(first) if *first == self.end => write!(formatter, "{}, {first}", self.start),
+            Some(first) => write!(formatter, "{}, {first}…{}", self.start, self.end),
+            None => write!(formatter, "{}…{}", self.start, self.end),
+        }
     }
 }
 
@@ -619,6 +665,17 @@ impl SchematicArrayNaming {
             return Err(SchematicArrayError::AtLeastTwoMembersRequired);
         }
         for range in &mut self.ranges {
+            if range.copies.is_some() {
+                // The copies' run is exactly as long as it reads.
+                if range.length != members {
+                    return Err(SchematicArrayError::NamingRangeLengthMismatch {
+                        source: range.source_name().to_owned(),
+                        actual: range.len(),
+                        expected: members,
+                    });
+                }
+                continue;
+            }
             let distance = range
                 .start
                 .numeric_value()
@@ -1327,6 +1384,27 @@ mod tests {
             Some("A[00]")
         );
         assert_eq!(naming.to_string(), "R011…R004 · A[07]…A[00]");
+    }
+
+    /// Copies numbered on from a free run read as the source, then the run,
+    /// and name each member in turn; the run must be as long as the count.
+    #[test]
+    fn naming_reads_a_source_then_its_copies_run() {
+        let naming = SchematicArrayNaming::parse("R5, R21…R23 · C1, C9").unwrap();
+        assert_eq!(naming.to_string(), "R5, R21…R23 · C1, C9");
+        assert_eq!(naming.value_for_source("R5", 0).as_deref(), Some("R5"));
+        assert_eq!(naming.value_for_source("R5", 1).as_deref(), Some("R21"));
+        assert_eq!(naming.value_for_source("R5", 3).as_deref(), Some("R23"));
+        assert_eq!(naming.value_for_source("R5", 4), None);
+        assert_eq!(naming.value_for_source("C1", 1).as_deref(), Some("C9"));
+        let four = SchematicArrayNaming::parse("R5, R21…R23").unwrap();
+        assert!(four.clone().normalized_for_members(4).is_ok());
+        assert!(matches!(
+            four.normalized_for_members(5),
+            Err(SchematicArrayError::NamingRangeLengthMismatch { .. })
+        ));
+        assert!(SchematicArrayNaming::parse("R5, R23…R21").is_err());
+        assert!(SchematicArrayNaming::parse("R5, C21…C23").is_err());
     }
 
     #[test]

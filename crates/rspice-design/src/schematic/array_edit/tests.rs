@@ -265,8 +265,8 @@ fn a_name_without_one_numeric_run_is_arrayed_with_a_numbered_suffix() {
     assert_eq!(names("M1_2"), ["M1_2", "M1_2_1", "M1_2_2", "M1_2_3"]);
     assert_eq!(
         names("Rload"),
-        ["Rload", "Rload_2", "Rload_4", "Rload_6"],
-        "the generated names step over the existing Rload_1"
+        ["Rload", "Rload_2", "Rload_3", "Rload_4"],
+        "the copies take the free run after the existing Rload_1"
     );
     let shown = naming.to_string();
     assert_eq!(
@@ -296,10 +296,10 @@ fn a_name_without_one_numeric_run_is_arrayed_with_a_numbered_suffix() {
         .iter()
         .map(|component| component.name.as_str())
         .collect();
-    assert!(created.contains("Rload_2") && created.contains("Vdd_3"));
+    assert!(created.contains("Rload_4") && created.contains("Vdd_3"));
 
     // A typed range that would reuse an existing name is refused.
-    let typed = shown.replace("Rload…Rload_6", "Rload…Rload_3");
+    let typed = shown.replace("Rload, Rload_2…Rload_4", "Rload…Rload_3");
     let plan =
         SchematicArrayPlan::parse(SchematicArrayKind::Linear, "4 × 1", &typed, placement).unwrap();
     assert_eq!(

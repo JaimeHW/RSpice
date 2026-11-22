@@ -7,9 +7,9 @@
 
 use super::{
     array::{
-        ArrayObjectIds, NameSequenceKey, SchematicArrayCount, SchematicArrayError,
-        SchematicArrayImpact, SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNaming,
-        SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
+        ArrayObjectIds, SchematicArrayCount, SchematicArrayError, SchematicArrayImpact,
+        SchematicArrayKind, SchematicArrayNameAtom, SchematicArrayNaming, SchematicArrayPlacement,
+        SchematicArrayPlan, SchematicArrayPreview,
     },
     bus::{Bus, BusNotation, BusSlice, BusTap, MAX_BUS_MEMBER_INDEX, point_on_segment},
     clipboard::ClipboardData,
@@ -272,53 +272,39 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
             .filter(|item| self.selection.objects.components.contains(&item.id))
             .collect();
         selected_components.sort_by_key(|item| item.id);
-        // Every part name counts through a sequence: its one numeric run, an
-        // indexed bit, or a numbered suffix when the name has no single run.
-        let mut reference_groups = HashMap::<NameSequenceKey, Vec<SchematicArrayNameAtom>>::new();
-        for component in &selected_components {
-            if component.name.is_empty() {
-                continue;
-            }
-            let atom = SchematicArrayNameAtom::parse(&component.name)?;
-            reference_groups
-                .entry(atom.sequence_key())
-                .or_default()
-                .push(atom);
-        }
-        let selected_ids = &self.selection.objects.components;
-        let occupied_names: HashSet<String> = self
+        // Each part keeps its name as member zero and its copies take the
+        // first run of free names after it, so R5 among R1 to R20 copies to
+        // R21, R22, R23, as KiCad and Altium annotate pasted copies; a run
+        // one source takes is taken for the next.
+        let mut taken: HashSet<String> = self
             .document
             .components
             .iter()
-            .filter(|component| !selected_ids.contains(&component.id))
+            .filter(|component| !component.name.is_empty())
             .map(|component| component.name.to_ascii_lowercase())
             .collect();
-        let mut reference_strides = HashMap::new();
-        for (key, atoms) in &reference_groups {
-            reference_strides.insert(
-                key.clone(),
-                find_collision_free_reference_stride(atoms, member_count, &occupied_names)?,
-            );
+        let copies = u64::try_from(member_count.saturating_sub(1))
+            .map_err(|_| SchematicArrayError::CountOverflow)?;
+        if copies == 0 {
+            return Err(SchematicArrayError::AtLeastTwoMembersRequired);
         }
         for component in selected_components {
             if component.name.is_empty() {
                 continue;
             }
             let atom = SchematicArrayNameAtom::parse(&component.name)?;
-            let stride = reference_strides
-                .get(&atom.sequence_key())
-                .copied()
-                .unwrap_or(1);
-            let end = atom
-                .numeric_value()
-                .checked_add(
-                    u64::try_from(member_count.saturating_sub(1))
-                        .map_err(|_| SchematicArrayError::CountOverflow)?
-                        .checked_mul(stride)
-                        .ok_or(SchematicArrayError::CountOverflow)?,
-                )
-                .ok_or(SchematicArrayError::CountOverflow)?;
-            clauses.push(format!("{}…{}", atom, atom.with_numeric_value(end)));
+            let first = next_free_copy_run(&atom, copies, &mut taken)?;
+            let last = atom.with_numeric_value(first + copies - 1);
+            let first = atom.with_numeric_value(first);
+            clauses.push(
+                if Some(first.numeric_value()) == atom.numeric_value().checked_add(1) {
+                    format!("{atom}…{last}")
+                } else if copies == 1 {
+                    format!("{atom}, {first}")
+                } else {
+                    format!("{atom}, {first}…{last}")
+                },
+            );
         }
 
         let mut indexed_sources = Vec::<(String, u32, BusNotation)>::new();
@@ -2252,50 +2238,36 @@ fn segment_contact_point(
         })
 }
 
-fn find_collision_free_reference_stride(
-    atoms: &[SchematicArrayNameAtom],
-    members: usize,
-    occupied: &HashSet<String>,
+/// The number the first of `copies` consecutive free names after `atom`
+/// starts at; the run is marked taken. A clash anywhere in a run moves the
+/// search past it, so the search ends within one pass of what is taken.
+fn next_free_copy_run(
+    atom: &SchematicArrayNameAtom,
+    copies: u64,
+    taken: &mut HashSet<String>,
 ) -> Result<u64, SchematicArrayError> {
-    let search_limit = occupied
-        .len()
-        .saturating_add(atoms.len())
-        .saturating_add(1)
-        .saturating_mul(members.max(2))
-        .max(1);
-    for stride in 1..=u64::try_from(search_limit).unwrap_or(u64::MAX) {
-        let mut generated = HashSet::with_capacity(atoms.len().saturating_mul(members));
-        let mut valid = true;
-        'sources: for atom in atoms {
-            for member in 0..members {
-                let Some(offset) = u64::try_from(member)
-                    .ok()
-                    .and_then(|member| member.checked_mul(stride))
-                else {
-                    valid = false;
-                    break 'sources;
-                };
-                let Some(number) = atom.numeric_value().checked_add(offset) else {
-                    valid = false;
-                    break 'sources;
-                };
-                let name = atom
-                    .with_numeric_value(number)
-                    .to_string()
-                    .to_ascii_lowercase();
-                if occupied.contains(&name) || !generated.insert(name) {
-                    valid = false;
-                    break 'sources;
-                }
+    let overflow = || SchematicArrayError::InvalidSourceName {
+        name: atom.to_string(),
+    };
+    let name = |number| {
+        atom.with_numeric_value(number)
+            .to_string()
+            .to_ascii_lowercase()
+    };
+    let mut first = atom.numeric_value().checked_add(1).ok_or_else(overflow)?;
+    'runs: loop {
+        first.checked_add(copies).ok_or_else(overflow)?;
+        for offset in 0..copies {
+            if taken.contains(&name(first + offset)) {
+                first = first + offset + 1;
+                continue 'runs;
             }
         }
-        if valid {
-            return Ok(stride);
+        for offset in 0..copies {
+            taken.insert(name(first + offset));
         }
+        return Ok(first);
     }
-    Err(SchematicArrayError::InvalidSourceName {
-        name: atoms.first().map_or_else(String::new, ToString::to_string),
-    })
 }
 
 fn checked_bus_sequence_end(

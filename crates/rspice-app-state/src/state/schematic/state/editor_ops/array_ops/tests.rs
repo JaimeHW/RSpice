@@ -475,8 +475,39 @@ fn strict_source_eligibility_rejects_mixed_stale_and_malformed_objects() {
     ));
 }
 
+/// Copies take the first free run of names after their source: R5 among R1
+/// to R20 copies to R21, R22 and R23, not to names spread by a stride.
 #[test]
-fn default_group_naming_interleaves_same_prefix_without_collisions() {
+fn copies_take_the_next_free_run_of_names() {
+    let mut state = SchematicState::default();
+    let parts: Vec<u64> = (1..=20)
+        .map(|n| state.add_component(ComponentType::Resistor, Point::new(n * 100, 0)))
+        .collect();
+    state
+        .session
+        .editor
+        .selection
+        .select_only_component(parts[4]);
+    let count = SchematicArrayCount::parse("4 × 1").unwrap();
+    let naming = state.default_array_naming(count).unwrap();
+    assert_eq!(naming.to_string(), "R5, R21…R23");
+    let plan = SchematicArrayPlan::new(
+        SchematicArrayKind::Linear,
+        count,
+        naming,
+        SchematicArrayPlacement::Pitch(Point::new(0, 100)),
+    )
+    .unwrap();
+    state.array_selection(&plan).unwrap();
+    let copies: Vec<_> = state.design.document().components[20..]
+        .iter()
+        .map(|component| component.name.as_str())
+        .collect();
+    assert_eq!(copies, ["R21", "R22", "R23"]);
+}
+
+#[test]
+fn default_group_naming_gives_each_same_prefix_source_its_own_free_run() {
     let mut state = SchematicState::default();
     let first = state.add_component(ComponentType::Resistor, Point::new(0, 0));
     let second = state.add_component(ComponentType::Resistor, Point::new(0, 30));
@@ -484,7 +515,9 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
     state.session.editor.selection.select_component(second);
     let count = SchematicArrayCount::parse("8 × 1").unwrap();
     let naming = state.default_array_naming(count).unwrap();
-    assert_eq!(naming.to_string(), "R1…R15 · R2…R16");
+    // R2 is the other source, so R1's copies start after it, and R2's
+    // copies take the run after R1's.
+    assert_eq!(naming.to_string(), "R1, R3…R9 · R2, R10…R16");
     let plan = SchematicArrayPlan::new(
         SchematicArrayKind::Linear,
         count,
@@ -499,7 +532,7 @@ fn default_group_naming_interleaves_same_prefix_without_collisions() {
         .map(|component| component.name.as_str())
         .collect();
     assert_eq!(names.len(), 14);
-    assert!(names.contains("R15"));
+    assert!(names.contains("R3"));
     assert!(names.contains("R16"));
 
     let mut sparse = SchematicState::default();
