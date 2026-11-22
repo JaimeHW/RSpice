@@ -74,10 +74,6 @@ impl NetLabelPlacementDialogState {
 const TITLE: &str = "Net label";
 const CONNECTOR_TITLE: &str = "Off-sheet connector";
 
-/// The most names one entry may ask for, so a mistyped range cannot arm a
-/// sequence no one will click through.
-const MAX_NAMES: usize = 1024;
-
 #[derive(Debug, Clone)]
 pub struct NetLabelPlacementCommit {
     authority: SchematicEditAuthority,
@@ -243,9 +239,6 @@ fn validate_draft(draft: &NetLabelPlacementDialogState, model: &Model) -> DraftV
     let Some(first) = names.first() else {
         return DraftValidation::Incomplete("Enter the electrical net name.");
     };
-    if names.len() > MAX_NAMES {
-        return DraftValidation::Invalid(format!("Name at most {MAX_NAMES} nets at once."));
-    }
     let policy = model.schematic.document().document_policy.net_naming;
     for name in &names {
         if let Err(reason) = NetLabel::validate_name(name, policy) {
