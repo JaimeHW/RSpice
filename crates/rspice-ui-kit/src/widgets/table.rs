@@ -227,11 +227,17 @@ impl Column {
     }
 }
 
-/// The least width `columns` take side by side, each at its least: a table
-/// narrower than this scrolls sideways. A page that lays a table beside
-/// something else gives it this much before it shares out the rest.
+/// The least width a table of `columns` shows whole in: every column at its
+/// least, in the page's own order. Narrower, it scrolls sideways, and a
+/// table that pins a column moves it beside the first. A page that lays a
+/// table beside something else gives it this much before it shares out the
+/// rest.
 pub fn least_width(columns: &[Column]) -> f32 {
-    columns.iter().map(|column| column.width).sum()
+    columns
+        .iter()
+        .map(|column| column.width)
+        .sum::<f32>()
+        .max(NARROW_W + 1.0)
 }
 
 /// The widths `columns` take across `available` points: fixed columns at their
