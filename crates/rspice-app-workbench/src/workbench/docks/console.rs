@@ -593,6 +593,9 @@ fn paint_row_mark(ui: &Ui, left: f32, top: f32, problem: Option<Problem>) {
 }
 
 fn measurements(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+    if app.session_mut().measurements_page(ui) {
+        return;
+    }
     let rows = active_measurement_rows(app);
     let run_label = app
         .model()

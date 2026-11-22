@@ -45,6 +45,7 @@ use expression_evaluation::{Places, evaluate_expression_reading};
 pub(crate) use expressions::*;
 pub use expressions::{toggle_visibility, waveform_plotted};
 pub(crate) use readout::*;
+pub use super::document_edit::measurement_table::measurements_page;
 pub use readout::{cursors_page, offers_cursors};
 pub(crate) use viewport::*;
 

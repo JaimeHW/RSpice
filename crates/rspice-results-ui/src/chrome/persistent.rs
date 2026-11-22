@@ -171,10 +171,7 @@ pub fn evidence_bar(
                             );
                         }
                         for measurement in measurements {
-                            let name = measurement
-                                .expression
-                                .as_deref()
-                                .unwrap_or(&measurement.label);
+                            let name = measurement.label.as_str();
                             let name = measurement.family.as_ref().map_or_else(
                                 || name.to_owned(),
                                 |family| format!("{name} {}", family.statistic.label()),

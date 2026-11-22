@@ -4,9 +4,9 @@
 //! kept with the document as `AddScalarMeasurement`. Like `.MEASURE` and the
 //! calculator in ViVA or ADS, it is bound to the result: it names the run's
 //! signals, analog or digital `D(name)`, in its expression, and never depends
-//! on a trace the pane plots. Over a quick view, Add creates the result
-//! document that keeps it, one pane reading the analysis the quick view
-//! shows, with no detour through Create.
+//! on a trace the pane plots. Over a quick view the run's working view keeps
+//! it, on the pane of the analysis shown, so every run of the plan reads it
+//! and it is saved with the project, with no detour through Create.
 //!
 //! When the pane shows a family — a sweep, corners, Monte Carlo trials, or
 //! points of one analysis solved one by one — the expression is evaluated
@@ -261,9 +261,9 @@ fn x_unit(state: ResultsReads<'_>, run: &SimulationRun, analysis: &AnalysisResul
         )
 }
 
-/// Keep the draft's measurement on the selected pane. Over a quick view the
-/// document that keeps it is created first, reading the analysis the quick
-/// view shows. The form closes once it lands.
+/// Keep the draft's measurement on the selected pane: over a quick view, the
+/// pane of the run's working view that reads the analysis shown. The form
+/// closes once it lands.
 pub(super) fn commit(
     state: &mut ResultsParts<'_>,
     draft: &MeasurementDraft,
@@ -286,23 +286,35 @@ pub(super) fn commit(
             .ok_or_else(|| "The family has no value for that statistic.".to_owned())?,
         None => evaluate(analysis, &expression)?,
     };
-    let document_id = match active_document_id(state.results_reads()) {
-        Some(document_id) => document_id,
+    // Over a quick view the run's working view keeps it, on the pane of the
+    // analysis shown, so it is read on every run of the plan.
+    let (document_id, pane_id) = match active_document_id(state.results_reads()) {
+        Some(document_id) => {
+            let (_, pane_id) = super::super::persistent_document::reading_position(
+                state.results_reads(),
+                document_id,
+            )
+            .ok_or_else(|| "The result document has no pane.".to_owned())?;
+            (document_id, pane_id)
+        }
         None => {
-            let (dataset_id, analysis_index) = (
-                run.dataset_id,
-                run.analyses
-                    .iter()
-                    .position(|candidate| std::ptr::eq(candidate, analysis))
-                    .ok_or_else(|| "The selected result holds no analysis.".to_owned())?,
-            );
-            super::super::create_document::create_over_quick_view(state, dataset_id, analysis_index)
-                .map_err(|error| error.to_string())?
+            let identity = super::super::create_document::source_analysis_identity(run, analysis);
+            let dataset_id = run.dataset_id;
+            // The window draws the run through its view before Add can be
+            // pressed; asked from anywhere else, the view is made first.
+            if super::super::working_view::view_of_run(state.results_reads(), dataset_id).is_none()
+            {
+                super::super::working_view::sync(state);
+            }
+            let view = super::super::working_view::view_of_run(state.results_reads(), dataset_id)
+                .ok_or_else(|| "The shown result has no view to keep it.".to_owned())?;
+            let pane_id = project_document(state.results_reads(), view)?
+                .pane_of_analysis(identity)
+                .map(|pane| pane.id)
+                .ok_or_else(|| "The view draws no pane of this analysis.".to_owned())?;
+            (view, pane_id)
         }
     };
-    let (_, pane_id) =
-        super::super::persistent_document::reading_position(state.results_reads(), document_id)
-            .ok_or_else(|| "The result document has no pane.".to_owned())?;
     let edit = match family {
         Some(family) => DocumentEdit::AddFamilyMeasurement {
             pane_id,
@@ -517,7 +529,7 @@ fn kept_line(summary: &FamilyMeasurementSummary, format: impl Fn(f64) -> String)
 }
 
 /// Reduce `expression` to one finite number over the analysis's waveforms.
-fn evaluate(analysis: &AnalysisResult, expression: &str) -> Result<f64, String> {
+pub(super) fn evaluate(analysis: &AnalysisResult, expression: &str) -> Result<f64, String> {
     let parsed = calculator::parser::try_parse(expression)
         .map_err(|error| format!("Parse error: {error}"))?;
     let context = MeasuredOperands {

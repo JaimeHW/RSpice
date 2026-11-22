@@ -1032,6 +1032,13 @@ impl ConsoleHost for AppState {
             &mut self.results_parts(),
         );
     }
+
+    fn measurements_page(&mut self, ui: &mut egui::Ui) -> bool {
+        rspice_app_results::workbench::documents::result_document::waves::measurements_page(
+            ui,
+            &mut self.results_parts(),
+        )
+    }
 }
 
 impl WorkbenchHost for RSpiceApp {

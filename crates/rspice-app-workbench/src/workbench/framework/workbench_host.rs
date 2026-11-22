@@ -129,4 +129,10 @@ pub trait ConsoleHost: ProblemsHost + ListingSource {
 
     /// Draw the Cursors page.
     fn cursors_page(&mut self, _ui: &mut egui::Ui) {}
+
+    /// Draw the Measurements page over the shown result; `false` when it
+    /// draws none, for the console's own page to stand.
+    fn measurements_page(&mut self, _ui: &mut egui::Ui) -> bool {
+        false
+    }
 }

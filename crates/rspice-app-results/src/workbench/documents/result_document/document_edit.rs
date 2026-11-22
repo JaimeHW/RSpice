@@ -597,6 +597,7 @@ pub mod compare;
 pub mod family;
 pub mod links;
 pub mod measurement;
+pub mod measurement_table;
 mod properties;
 mod trace_pick;
 

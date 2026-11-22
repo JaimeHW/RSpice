@@ -655,8 +655,8 @@ fn mixed_run(id: u64) -> SimulationRun {
 }
 
 /// A measurement over a fresh result just works, as in ViVA or ADS. Add over
-/// the quick view creates the result document that keeps it, with no detour
-/// through Create, and each measurement names the nets it reads, analog or
+/// the quick view keeps it on the run's working view, with no document to
+/// create first, and each measurement names the nets it reads, analog or
 /// digital, as `.MEASURE` does, with no trace plotted. Both come back from a
 /// saved project reopened by a fresh application. The form refused Add over
 /// a quick view, and over a document refused any signal its pane did not
@@ -682,10 +682,20 @@ fn measurements_over_a_fresh_result_name_their_nets_and_reopen() {
         app.state.results.result_document_dialog.is_none(),
         "a kept measurement closes its form"
     );
-    let document_id = match app.state.workbench.documents.active(Workspace::Results) {
-        Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => *document_id,
-        shown => panic!("Add over a quick view opens the document it keeps: {shown:?}"),
-    };
+    assert!(
+        app.state
+            .workbench
+            .documents
+            .active(Workspace::Results)
+            .is_none(),
+        "the quick view stays shown"
+    );
+    let document_id =
+        rspice_app_results::workbench::documents::result_document::working_view::view_of_run(
+            app.state.results_reads(),
+            app.state.model.simulation.retained.runs[0].dataset_id,
+        )
+        .expect("the run's working view keeps it");
 
     let digital = r#"delay(D(clk), D(q), 0.5, "rising", 1, 0.5, "rising", 1)"#;
     let preview = measurement_preview(&mut app, digital);
@@ -700,7 +710,7 @@ fn measurements_over_a_fresh_result_name_their_nets_and_reopen() {
             .visualization_documents
             .len(),
         1,
-        "the second Add keeps to the document the first created"
+        "the second Add keeps to the same view"
     );
 
     let path = std::env::temp_dir().join(format!(

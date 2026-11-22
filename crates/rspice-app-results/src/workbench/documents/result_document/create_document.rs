@@ -768,59 +768,6 @@ pub(super) fn view_pane_viewer(
         .or_else(|| VIEWER_DOCUMENTS.iter().find(draws))
 }
 
-/// Create, with no dialog, the document a quick view's measurement is kept
-/// in: one pane reading the analysis at `analysis_index` of the run
-/// `dataset_id`, as the quick view shows it, in the first viewer that draws
-/// it. The quick view's expressions and scales come with it, as Create
-/// keeps them.
-pub(super) fn create_over_quick_view(
-    state: &mut ResultsParts<'_>,
-    dataset_id: DatasetId,
-    analysis_index: usize,
-) -> Result<ResultDocumentId, CreateResultDocumentError> {
-    let reads = state.results_reads();
-    let analysis = retained_run(reads, dataset_id)
-        .and_then(|run| Some((run, run.analyses.get(analysis_index)?)))
-        .ok_or_else(|| {
-            CreateResultDocumentError::InvalidDraft(
-                "The selected result is no longer retained.".to_owned(),
-            )
-        })?
-        .1;
-    let (family, viewer) = ResultDocumentFamily::ALL
-        .into_iter()
-        .find_map(|family| {
-            VIEWER_DOCUMENTS
-                .iter()
-                .find(|viewer| {
-                    family.includes(viewer)
-                        && viewer.release == ViewerReleaseClass::ReleaseTarget
-                        && analysis_matches_viewer(viewer, analysis.analysis_type)
-                        && super::persistent_document::renderer_supports_analysis(
-                            viewer.id, analysis,
-                        )
-                })
-                .map(|viewer| (family, viewer))
-        })
-        .ok_or_else(|| {
-            CreateResultDocumentError::InvalidDraft(format!(
-                "No result document draws {}.",
-                analysis.label
-            ))
-        })?;
-    let draft = CreateResultDocumentDialogState {
-        open: false,
-        name: next_document_name(reads, family),
-        name_touched: false,
-        dataset_id: Some(dataset_id),
-        family_id: family.id().to_owned(),
-        viewer_id: viewer.id.to_owned(),
-        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
-        validation_error: None,
-    };
-    insert(state, &draft, Some(analysis_index))
-}
-
 /// Resolve `draft` and insert the document it describes into the project,
 /// shown in Results.
 fn insert(

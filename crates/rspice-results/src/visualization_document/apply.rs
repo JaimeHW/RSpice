@@ -581,12 +581,19 @@ impl VisualizationDocument {
             family.validate(Some(value))?;
         }
         let id = MeasurementId::allocate(self.allocate_serial()?)?;
+        // Named by what it measures until the reader names it, as ADE's
+        // outputs are; an expression too long for a name is numbered.
+        let label = if validate_label("measurement.label", &expression).is_ok() {
+            expression.trim().to_owned()
+        } else {
+            format!("Measurement {}", id.get())
+        };
         self.measurements.push(Measurement {
             id,
             pane_id,
             trace_ids: Vec::new(),
             kind: MeasurementKind::Point,
-            label: format!("Measurement {}", id.get()),
+            label,
             expression: Some(expression),
             value: Some(value),
             family,
