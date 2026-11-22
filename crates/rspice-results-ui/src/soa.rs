@@ -17,7 +17,9 @@ use rspice_results::{
 use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights, SortKey, Tone};
 use rspice_ui_kit::{
     panels::section_header,
-    plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_significant},
+    plot::{
+        self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_signed, fmt_si_significant,
+    },
     tokens::Tokens,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -786,8 +788,19 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
     // The limit's own warning and critical fractions are rule settings and
     // live on the verdict's hover; the sample count and the clipped and
     // unqualified excursion counts are bookkeeping.
+    //
+    // The margin's percentage goes through the formatter, as the margin
+    // does, so both spell a negative with U+2212 and read at the reader's
+    // digits.
     let margin_percent = if evaluation.limit_value.abs() > 0.0 {
-        format!(" ({:+.1} %)", 100.0 * margin / evaluation.limit_value.abs())
+        format!(
+            " ({})",
+            fmt_si_signed(
+                100.0 * margin / evaluation.limit_value.abs(),
+                "%",
+                numbers.significant_digits
+            )
+        )
     } else {
         String::new()
     };
