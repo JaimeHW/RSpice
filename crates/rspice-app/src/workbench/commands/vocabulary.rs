@@ -497,6 +497,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::PlaceBus.key(),
     DesignCommand::PlaceBusTap.key(),
     DesignCommand::PlaceJunction.key(),
+    DesignCommand::PlaceNoConnect.key(),
     DesignCommand::PlaceLabel.key(),
     DesignCommand::PlaceOffSheetConnector.key(),
     DesignCommand::PlaceProbe.key(),

@@ -415,6 +415,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Off-sheet connector | place-off-sheet-connector |  | on",
             "  Pins… | place-pin | Shift+P | on",
             "  Junction | place-junction | J | on",
+            "  No-connect | place-no-connect | X | on",
             "  Text or note… | place-text | Shift+T | on",
             "  Shape >",
             "    Rectangle | place-rectangle |  | on",

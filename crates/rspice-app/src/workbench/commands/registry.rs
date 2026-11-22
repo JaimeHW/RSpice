@@ -473,6 +473,7 @@ mod tests {
             DesignCommand::PlaceBus,
             DesignCommand::PlaceBusTap,
             DesignCommand::PlaceJunction,
+            DesignCommand::PlaceNoConnect,
         ] {
             assert_eq!(
                 command.declared_spec().context,
@@ -485,6 +486,7 @@ mod tests {
                 (DesignCommand::PlaceBus, "B"),
                 (DesignCommand::PlaceBusTap, "T"),
                 (DesignCommand::PlaceJunction, "J"),
+                (DesignCommand::PlaceNoConnect, "X"),
             ] {
                 assert_eq!(label(command.declared_spec().bindings, platform), chord);
             }

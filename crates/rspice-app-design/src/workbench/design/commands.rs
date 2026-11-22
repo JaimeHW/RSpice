@@ -80,6 +80,9 @@ pub enum DesignCommand {
     PlaceBusTap,
     /// Arm the junction tool.
     PlaceJunction,
+    /// Arm the no-connect tool, which marks a clicked pin as meant to stay
+    /// open or clears its mark.
+    PlaceNoConnect,
     /// Arm the net label tool.
     PlaceLabel,
     /// Arm the off-sheet connector tool.
@@ -329,6 +332,9 @@ const PLACE_BUS_TAP: &[ShortcutBinding] =
     &[primary(chord(Key::T, false, false, false, "T"), EVERYWHERE)];
 const PLACE_JUNCTION: &[ShortcutBinding] =
     &[primary(chord(Key::J, false, false, false, "J"), EVERYWHERE)];
+// KiCad's no-connect key, Q, is Properties here; X is free and is the mark.
+const PLACE_NO_CONNECT: &[ShortcutBinding] =
+    &[primary(chord(Key::X, false, false, false, "X"), EVERYWHERE)];
 const PLACE_LABEL: &[ShortcutBinding] =
     &[primary(chord(Key::N, false, false, false, "N"), EVERYWHERE)];
 const PLACE_PROBE: &[ShortcutBinding] =
@@ -446,7 +452,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 110] = [
+    pub const ALL: [Self; 111] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -474,6 +480,7 @@ impl DesignCommand {
         Self::PlaceBus,
         Self::PlaceBusTap,
         Self::PlaceJunction,
+        Self::PlaceNoConnect,
         Self::PlaceLabel,
         Self::PlaceOffSheetConnector,
         Self::PlaceProbe,
@@ -589,6 +596,7 @@ impl DesignCommand {
             Self::PlaceBus => CommandKey::new("place-bus"),
             Self::PlaceBusTap => CommandKey::new("place-bus-tap"),
             Self::PlaceJunction => CommandKey::new("place-junction"),
+            Self::PlaceNoConnect => CommandKey::new("place-no-connect"),
             Self::PlaceLabel => CommandKey::new("place-label"),
             Self::PlaceOffSheetConnector => CommandKey::new("place-off-sheet-connector"),
             Self::PlaceProbe => CommandKey::new("place-probe"),
@@ -703,6 +711,7 @@ impl DesignCommand {
                 | Self::PlaceBus
                 | Self::PlaceBusTap
                 | Self::PlaceJunction
+                | Self::PlaceNoConnect
                 | Self::PlaceLabel
                 | Self::PlaceOffSheetConnector
                 | Self::PlaceProbe
@@ -877,6 +886,13 @@ impl DesignCommand {
             Self::PlaceBus => ("Draw bus", "Design", place, canvas, PLACE_BUS),
             Self::PlaceBusTap => ("Place bus tap", "Design", place, canvas, PLACE_BUS_TAP),
             Self::PlaceJunction => ("Place junction", "Design", place, canvas, PLACE_JUNCTION),
+            Self::PlaceNoConnect => (
+                "Place no-connect",
+                "Design",
+                place,
+                canvas,
+                PLACE_NO_CONNECT,
+            ),
             Self::PlaceLabel => ("Place net label", "Design", place, canvas, PLACE_LABEL),
             // Every plausible mnemonic in the placement family is taken; the
             // toolbar and the palette are its routes.

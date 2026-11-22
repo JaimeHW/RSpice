@@ -76,6 +76,8 @@ pub enum WorkbenchIcon {
     Bus,
     BusTap,
     Junction,
+    /// A pin's lead ending in a cross: a pin marked as meant to stay open.
+    NoConnect,
     Label,
     Pin,
     Text,
@@ -437,6 +439,11 @@ impl WorkbenchIcon {
                 line(&[(3.0, 12.0), (21.0, 12.0)]);
                 line(&[(12.0, 3.0), (12.0, 21.0)]);
                 painter.circle_filled(p(12.0, 12.0), 2.6 * scale, color);
+            }
+            Self::NoConnect => {
+                line(&[(3.0, 12.0), (15.0, 12.0)]);
+                line(&[(10.0, 7.0), (20.0, 17.0)]);
+                line(&[(20.0, 7.0), (10.0, 17.0)]);
             }
             Self::Label => {
                 line(&[(5.0, 5.0), (19.0, 5.0)]);

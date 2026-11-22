@@ -637,6 +637,7 @@ impl CommandSet for DesignCommand {
             | Self::PlaceBus
             | Self::PlaceBusTap
             | Self::PlaceJunction
+            | Self::PlaceNoConnect
             | Self::PlaceLabel
             | Self::PlaceOffSheetConnector
             | Self::PlaceProbe
@@ -858,6 +859,7 @@ impl CommandSet for DesignCommand {
                 open_bus_tap(&mut cx.state.bus_tap, cx.model);
             }
             Self::PlaceJunction => arm_tool(cx, Tool::Junction),
+            Self::PlaceNoConnect => arm_tool(cx, Tool::NoConnect),
             Self::PlaceLabel => arm_tool(cx, Tool::Label),
             Self::PlaceOffSheetConnector => arm_tool(cx, Tool::OffSheetConnector),
             Self::PlaceProbe => arm_tool(cx, Tool::Probe),

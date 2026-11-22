@@ -26,6 +26,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
         DesignCommand::PlaceBus.key(),
         DesignCommand::PlaceBusTap.key(),
         DesignCommand::PlaceJunction.key(),
+        DesignCommand::PlaceNoConnect.key(),
         DesignCommand::PlaceLabel.key(),
         DesignCommand::PlacePin.key(),
         DesignCommand::PlaceText.key(),
@@ -36,6 +37,28 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
     assert!(app.command_key_enabled(DesignCommand::GridSnapRouting.key()));
 
     app.execute_command_key(DesignCommand::PlaceWire.key());
+    assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
+}
+
+/// Place no-connect arms the tool that marks a clicked pin, touching
+/// nothing until a pin is clicked, and Escape puts the tool down.
+#[test]
+fn place_no_connect_arms_its_tool_and_escape_puts_it_down() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Design;
+    let before = app.state.model.schematic.document().components.clone();
+
+    app.execute_command_key(DesignCommand::PlaceNoConnect.key());
+    assert_eq!(
+        app.state.model.schematic.session.editor.tool,
+        Tool::NoConnect
+    );
+    assert_eq!(app.state.model.schematic.document().components, before);
+
+    app.execute_command_key(
+        rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand::Cancel
+            .key(),
+    );
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
 }
 

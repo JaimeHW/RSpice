@@ -157,6 +157,7 @@ pub fn schematic_accessibility_shortcuts(
             DesignCommand::PlaceBus.key(),
             DesignCommand::PlaceBusTap.key(),
             DesignCommand::PlaceJunction.key(),
+            DesignCommand::PlaceNoConnect.key(),
             DesignCommand::PlaceProbe.key(),
             DesignCommand::PlacePin.key(),
             DesignCommand::PlaceText.key(),
