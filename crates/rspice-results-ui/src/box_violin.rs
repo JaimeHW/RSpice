@@ -438,9 +438,11 @@ pub fn show(
             whisker_note(sheet.whiskers)
         ),
     };
+    // The box in the first trace hue, so the error ink is the only red on
+    // the sheet and a failing trial is the only thing that reads as one.
     let mut legend = vec![LegendChip {
         name: "quartile box",
-        color: c.traces[1],
+        color: c.traces[0],
         on: true,
     }];
     if sheet.violin {
@@ -513,10 +515,10 @@ pub fn show(
         limits: show_limits,
         colors: ColumnColors {
             body: c.traces[4 % c.traces.len()].gamma_multiply(0.35),
-            box_fill: c.traces[1].gamma_multiply(0.30),
-            box_stroke: c.traces[1],
+            box_fill: c.traces[0].gamma_multiply(0.30),
+            box_stroke: c.traces[0],
             median: c.text,
-            mean: c.traces[0],
+            mean: c.text,
             whisker: c.text_dim,
             outlier: c.text_faint,
             failing: c.err,
@@ -830,9 +832,9 @@ impl PaintedColumns {
             if !mapper.rect.y_range().contains(y) {
                 continue;
             }
-            // Spread the marks across the slot deterministically, so a stack
-            // of equal values is countable instead of one dot.
-            let offset = slot_width * 0.30 * (((row % 7) as f32 / 6.0) - 0.5);
+            // Spread the marks across the slot, so a stack of equal values
+            // is countable instead of one dot.
+            let offset = slot_width * 0.30 * jitter(row);
             let at = egui::pos2(centre + offset, y);
             if failing {
                 let arm = 3.0;
@@ -850,6 +852,19 @@ impl PaintedColumns {
             }
         }
     }
+}
+
+/// Where across its slot a trial's mark sits, from -0.5 to 0.5 of the
+/// spread: a hash of the trial, so the marks scatter with no pattern to
+/// read, where a stride through the trial index draws diagonal stripes,
+/// and each mark stays where it is from frame to frame.
+fn jitter(row: usize) -> f32 {
+    // SplitMix64's finaliser: every bit of the index reaches the top bits.
+    let mut z = (row as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^= z >> 31;
+    (z >> 40) as f32 / (1_u32 << 24) as f32 - 0.5
 }
 
 // ---------------------------------------------------------------------------
