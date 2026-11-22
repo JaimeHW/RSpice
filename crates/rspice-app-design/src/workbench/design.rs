@@ -500,12 +500,9 @@ impl CommandSet for DesignCommand {
             }
             Self::MoveSelection => (!reads.model.schematic.has_live_movable_selection())
                 .then_some("select an editable object"),
-            Self::StretchSelection => reads
-                .model
-                .schematic
-                .default_stretch_target()
-                .is_none()
-                .then_some("select an editable object"),
+            Self::StretchSelection => {
+                crate::workbench::app::dialogs::selection::stretch::stretch_refusal(reads.model)
+            }
             Self::ArraySelection => {
                 crate::workbench::app::dialogs::selection::array::array_source_refusal(reads.model)
             }

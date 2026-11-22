@@ -76,6 +76,27 @@ fn policy_for_sheet(wire_routing: SchematicWireRoutingStyle) -> StretchOrthogona
     }
 }
 
+/// Why Stretch is greyed for the selection, or `None` when it resolves to
+/// the one segment or shape corner Stretch moves. A block of parts and wires
+/// belongs to Move, whose Connected mode keeps the wires attached, so the
+/// reason says so rather than leaving the row greyed without a word.
+pub(crate) fn stretch_refusal(model: &Model) -> Option<&'static str> {
+    let selection = &model.schematic.session.editor.selection;
+    if selection.is_empty() {
+        return Some("select an editable object");
+    }
+    if !selection.probes.is_empty() {
+        return Some("probes are not stretched; leave them out of the selection");
+    }
+    model
+        .schematic
+        .default_stretch_target()
+        .is_none()
+        .then_some(
+            "select one wire segment or shape corner; Move (Connected move) carries a block with its wires",
+        )
+}
+
 /// Arm Stretch over the three canvas tools' drafts, the sheet's wire
 /// routing, the model and the session: arming Stretch stops an armed Move
 /// or Create array.
