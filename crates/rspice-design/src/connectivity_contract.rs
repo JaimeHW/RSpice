@@ -68,17 +68,19 @@ impl GlobalNetPromotionPolicy {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GlobalAliasComparisonPolicy {
+    /// The same name in any case, as net identity compares names: the deck
+    /// joins `Vdd` and `VDD`, so a local `Vdd` shadows a global `VDD!`.
     #[default]
-    CaseSensitiveExact,
+    SameName,
     DialectCompatibility,
 }
 
 impl GlobalAliasComparisonPolicy {
-    pub const ALL: [Self; 2] = [Self::CaseSensitiveExact, Self::DialectCompatibility];
+    pub const ALL: [Self; 2] = [Self::SameName, Self::DialectCompatibility];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::CaseSensitiveExact => "Case-sensitive exact",
+            Self::SameName => "Same name, any case",
             Self::DialectCompatibility => "Dialect compatibility",
         }
     }
@@ -385,7 +387,7 @@ impl ConnectivityContract {
         let left = left.trim_end_matches('!');
         let right = right.trim_end_matches('!');
         match comparison {
-            GlobalAliasComparisonPolicy::CaseSensitiveExact => left == right,
+            GlobalAliasComparisonPolicy::SameName => left.eq_ignore_ascii_case(right),
             GlobalAliasComparisonPolicy::DialectCompatibility => self
                 .dialect_aliases
                 .as_ref()
@@ -503,7 +505,7 @@ mod tests {
                 "index_order": "msb_first",
                 "width_mismatch": "explicit_slice_or_extend",
                 "global_promotion": "explicit_reviewed_declaration",
-                "alias_comparison": "case_sensitive_exact",
+                "alias_comparison": "same_name",
                 "local_shadowing": "allow_explicit_local_net"
             },
             "named_bundles": [
@@ -631,6 +633,10 @@ mod tests {
             "GND!",
             GlobalAliasComparisonPolicy::DialectCompatibility
         ));
+        // Net identity folds case, so the default comparison does too: a
+        // local `Vdd` beside a global `VDD!` is one name to the deck.
+        assert!(contract.aliases_match("Vdd", "VDD!", GlobalAliasComparisonPolicy::SameName));
+        assert!(!contract.aliases_match("VDDA", "VDD!", GlobalAliasComparisonPolicy::SameName));
         assert!(!contract.aliases_match(
             "0",
             "gnd",
