@@ -73,15 +73,17 @@ pub(super) fn capture_groups(
         )
     } else if selection_mode == OutputSelectionMode::SaveAll {
         format!("{} Save All ceiling", format_bytes(total))
-    } else if automatic_fallback {
-        format!("{} automatic forecast", format_bytes(total))
-    } else if indeterminate == 0 {
-        format!("{} explicit forecast", format_bytes(total))
-    } else {
+    } else if indeterminate > 0 {
+        // The plan's own outputs sit beside the automatic set, so one whose
+        // size only the run decides leaves the total a minimum either way.
         format!(
             "{} minimum · {indeterminate} indeterminate",
             format_bytes(total)
         )
+    } else if automatic_fallback {
+        format!("{} automatic forecast", format_bytes(total))
+    } else {
+        format!("{} explicit forecast", format_bytes(total))
     };
     let groups = plan_capture_groups(cx.model);
     let selected = cx.state.selected_capture_group;

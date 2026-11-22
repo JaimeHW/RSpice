@@ -37,6 +37,7 @@ use crate::project_veriloga::preparation::{
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_simulation_contract::saved_output::SavedOutputOrigin;
 use rspice_vocabulary::canonical::content_digest;
 use rspice_vocabulary::product::ProcessCorner;
 use std::path::Path;
@@ -590,15 +591,26 @@ where
 
     let mut advisories = generated.warnings;
     if used_automatic_outputs {
+        // The plan's own outputs and its probes are saved beside the automatic
+        // set, so only the automatic ones are counted as its.
+        let automatic = effective_saved_outputs
+            .iter()
+            .filter(|output| output.origin == SavedOutputOrigin::Automatic)
+            .count();
+        let asked = effective_saved_outputs.len() - automatic;
         advisories.push(if effective_saved_outputs.is_empty() {
-        "Automatic output selection found no eligible node voltage; analyses without selected outputs retain their native results.".to_owned()
-    } else {
-        format!(
-            "Automatic output selection retained {} bounded node voltage{} for circuit waveforms. Other analyses retain their native results.",
-            effective_saved_outputs.len(),
-            if effective_saved_outputs.len() == 1 { "" } else { "s" }
-        )
-    });
+            "Automatic output selection found no eligible node voltage; analyses without selected outputs retain their native results.".to_owned()
+        } else {
+            format!(
+                "Automatic output selection retained {automatic} bounded node voltage{}{} for circuit waveforms. Other analyses retain their native results.",
+                if automatic == 1 { "" } else { "s" },
+                match asked {
+                    0 => String::new(),
+                    1 => " beside the plan's 1 output and probe".to_owned(),
+                    asked => format!(" beside the plan's {asked} outputs and probes"),
+                }
+            )
+        });
     }
     advisories.extend(
         drc.warnings()

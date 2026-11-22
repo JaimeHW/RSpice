@@ -699,20 +699,24 @@ pub(super) fn empty_registry_text(
 /// `schematic_probes` is how many outputs the sheet's enabled probes alone would
 /// mint — see
 /// [`rspice_simulation::output_contract::selection::enabled_probe_output_count`].
-/// It is not decoration. Once the probes mint an output the effective set is
-/// non-empty, and a non-empty set is what the preparation returns in *every*
-/// selection mode: a plan with no authored output and one enabled probe saves
-/// that probe, which is neither the bounded automatic set nor the whole dataset
-/// — and those two were the only things this row could say.
+/// It is not decoration. Once the probes mint an output the preparation saves
+/// them in *every* selection mode: under `Automatic` beside the bounded
+/// automatic set, otherwise in place of the whole dataset — and those two
+/// alone were the only things this row could say.
 pub fn empty_registry_outcome(
     mode: crate::state::OutputSelectionMode,
     schematic_probes: usize,
 ) -> String {
     if schematic_probes > 0 {
-        return format!(
-            "{schematic_probes} schematic probe{} saved",
+        let probes = format!(
+            "{schematic_probes} schematic probe{}",
             if schematic_probes == 1 { "" } else { "s" }
         );
+        return if mode == crate::state::OutputSelectionMode::Automatic {
+            format!("{probes} and the bounded automatic set")
+        } else {
+            format!("{probes} saved")
+        };
     }
     match mode {
         crate::state::OutputSelectionMode::Automatic => "bounded automatic set".to_owned(),
@@ -1762,7 +1766,15 @@ mod tests {
             super::empty_registry_outcome(OutputSelectionMode::SaveAll, 0),
             "full dataset retained"
         );
-        for mode in OutputSelectionMode::ALL {
+        assert_eq!(
+            super::empty_registry_outcome(OutputSelectionMode::Automatic, 1),
+            "1 schematic probe and the bounded automatic set",
+            "a probe joins the automatic set rather than replacing it"
+        );
+        for mode in [
+            OutputSelectionMode::ExplicitOnly,
+            OutputSelectionMode::SaveAll,
+        ] {
             assert_eq!(
                 super::empty_registry_outcome(mode, 1),
                 "1 schematic probe saved",
@@ -1773,6 +1785,8 @@ mod tests {
                 "3 schematic probes saved",
                 "{mode:?}"
             );
+        }
+        for mode in OutputSelectionMode::ALL {
             let row = super::empty_registry_text(mode, 2);
             assert!(
                 row.starts_with("No saved outputs")

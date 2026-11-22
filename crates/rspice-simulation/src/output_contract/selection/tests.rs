@@ -132,6 +132,58 @@ fn explicit_output_modes_do_not_invent_quantities() {
     }
 }
 
+/// A probe joins the bounded automatic set rather than replacing it, so a
+/// net probed after a run does not take the other nets out of the next one.
+/// A net asked for both ways is saved once, as the probe asked for it; an
+/// explicit-only plan still saves just what it asks for.
+#[test]
+fn a_probe_joins_the_automatic_set_rather_than_replacing_it() {
+    let plan_id = SimulationPlanId::new();
+    let occurrences = root_occurrence(vec![
+        output_test_net("out", true, NetClass::Signal, None),
+        output_test_net("mid", true, NetClass::Signal, None),
+    ]);
+    let probe = SchematicProbe::new(
+        1,
+        rspice_design_model::primitives::Point::origin(),
+        "V(out)",
+        Some("V(out)".to_owned()),
+    )
+    .expect("probe marker");
+
+    let (outputs, used_automatic) = effective_plan_saved_outputs(
+        OutputSelectionMode::Automatic,
+        &[],
+        std::slice::from_ref(&probe),
+        &occurrences,
+        plan_id,
+    )
+    .expect("automatic selection");
+    assert!(used_automatic);
+    assert_eq!(
+        outputs
+            .iter()
+            .map(|output| (output.source_expression.as_str(), output.origin))
+            .collect::<Vec<_>>(),
+        vec![
+            ("V(out)", SavedOutputOrigin::SchematicProbe),
+            ("V(mid)", SavedOutputOrigin::Automatic),
+        ]
+    );
+
+    let (outputs, used_automatic) = effective_plan_saved_outputs(
+        OutputSelectionMode::ExplicitOnly,
+        &[],
+        std::slice::from_ref(&probe),
+        &occurrences,
+        plan_id,
+    )
+    .expect("explicit selection");
+    assert!(!used_automatic);
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].source_expression, "V(out)");
+}
+
 #[test]
 fn automatic_outputs_cover_every_occurrence_exactly_once() {
     let plan_id = SimulationPlanId::new();

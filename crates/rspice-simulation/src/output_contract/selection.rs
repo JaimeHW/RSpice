@@ -235,9 +235,9 @@ fn enabled_probe_expressions(
 /// A plan whose own registry is empty is not therefore a plan that saves
 /// nothing: an enabled probe mints an output here, and once the set is
 /// non-empty [`effective_plan_saved_outputs`] returns it in every selection
-/// mode — so the run saves the probe set rather than the bounded automatic set
-/// or the whole dataset. The studio's Outputs row and its preflight cell both
-/// stated one of those two instead, on a plan that would do neither.
+/// mode — under `Automatic` beside the bounded automatic set, otherwise in
+/// place of the whole dataset. The studio's Outputs row and its preflight cell
+/// both stated one of those two alone, on a plan that would do neither.
 #[must_use]
 pub fn enabled_probe_output_count(probes: &[SchematicProbe]) -> usize {
     enabled_probe_expressions(probes).len()
@@ -350,17 +350,24 @@ fn effective_plan_saved_outputs(
         output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
         explicit.push(output);
     }
-    if selection_mode == OutputSelectionMode::SaveAll {
+    if selection_mode != OutputSelectionMode::Automatic {
         return Ok((explicit, false));
     }
-    if !explicit.is_empty() {
-        return Ok((explicit, false));
+    // What the plan and its probes ask for joins the bounded automatic set
+    // rather than replacing it, as LTspice and QSPICE keep every node however
+    // many are probed: a probe placed after a run must not take the other
+    // nets out of the next one. A net asked for both ways is the plan's.
+    for output in automatic_outputs(occurrences, plan_id)? {
+        let name_taken = explicit
+            .iter()
+            .any(|asked| asked.name.eq_ignore_ascii_case(&output.name));
+        if !name_taken
+            && present_expressions.insert(prepared_output_expression_key(&output.source_expression))
+        {
+            explicit.push(output);
+        }
     }
-    if selection_mode == OutputSelectionMode::ExplicitOnly {
-        return Ok((Vec::new(), false));
-    }
-
-    Ok((automatic_outputs(occurrences, plan_id)?, true))
+    Ok((explicit, true))
 }
 
 /// The bounded node-voltage set a plan with no outputs of its own falls back
