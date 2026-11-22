@@ -339,7 +339,7 @@ fn the_verify_inspector_states_the_monte_carlo_run_without_its_dataset_identity(
         &[
             "Monte Carlo",
             "40 / 40",
-            "0x1A2B",
+            "6699",
             "Pseudo-random",
             "12.4 s",
         ],

@@ -390,9 +390,10 @@ fn trial_number(trial: &Trial) -> String {
         .map_or_else(|| "\u{2014}".to_owned(), |index| format!("{}", index + 1))
 }
 
-/// A seed as the run records it.
+/// A seed in decimal, as the Monte Carlo setup takes it and Results spells
+/// it, so a seed read here can be typed back into the setup.
 fn seed_text(seed: u64) -> String {
-    format!("0x{seed:X}")
+    seed.to_string()
 }
 
 /// What the inspector states of the selected failing trial.
@@ -508,7 +509,7 @@ pub(crate) fn campaign_facts(model: &Model, duration: Option<&str>) -> Vec<FactS
                         provenance.runs_completed, provenance.runs_requested
                     ),
                 ),
-                ("Seed".to_owned(), format!("0x{:X}", provenance.seed)),
+                ("Seed".to_owned(), seed_text(provenance.seed)),
                 (
                     "Sampling".to_owned(),
                     provenance.sampling_mode.display_name().to_owned(),

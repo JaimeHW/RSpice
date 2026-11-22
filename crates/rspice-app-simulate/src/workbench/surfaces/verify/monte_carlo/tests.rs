@@ -295,7 +295,7 @@ fn the_campaigns_behind_the_statistics_are_named_by_their_points() {
         campaigns[0].rows,
         [
             ("Samples", "40 / 40"),
-            ("Seed", "0x1A2B"),
+            ("Seed", "6699"),
             ("Sampling", "Pseudo-random"),
             ("Duration", "12.4 s"),
         ]
