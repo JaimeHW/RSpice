@@ -541,6 +541,64 @@ fn the_digits_preference_sets_the_sheet_values() {
     );
 }
 
+/// A column is one quantity: its head names the unit, and each cell is a
+/// bare SI value, the prefix after the mantissa; a change keeps its sign.
+#[test]
+fn a_column_head_names_the_unit_and_its_cells_are_bare_si() {
+    let dc = DcOpResult {
+        node_voltages: vec![node("out", -0.1)],
+        ..DcOpResult::default()
+    };
+    let report = DeviceOpReport {
+        entries: vec![device(
+            "M1",
+            "MOSFET",
+            Some("saturation"),
+            vec![("id", 41.7e-6), ("power", 2.5e-3)],
+        )],
+    };
+    let plan = plan_of(Some(&dc), Some(&report));
+    let voltage = &plan.sections[0].columns[0];
+    assert_eq!(voltage.head(), "Voltage (V)");
+    let number = |cell: CellValue| match cell {
+        CellValue::Number { mantissa, unit, .. } => (mantissa, unit),
+        _ => panic!("a number"),
+    };
+    assert_eq!(
+        number(RowSource::Scalar(&dc.node_voltages[0]).cell(voltage, 4)),
+        ("\u{2212}100".to_owned(), "m".to_owned())
+    );
+    let devices = plan
+        .sections
+        .iter()
+        .find(|section| section.kind == OpRowKind::Device)
+        .expect("a device section");
+    let heads: Vec<String> = devices.columns.iter().map(PlanColumn::head).collect();
+    assert_eq!(heads, ["id (A)", "power (W)"]);
+    assert_eq!(
+        number(RowSource::Device(&report.entries[0]).cell(&devices.columns[0], 4)),
+        ("41.7".to_owned(), "\u{b5}".to_owned())
+    );
+
+    let baseline = OpBaseline::new(Some(&dc), Some(&report));
+    let mut moved = dc.clone();
+    moved.node_voltages[0].value = -0.05;
+    let compared = plan_of(Some(&moved), Some(&report)).with_baseline(
+        baseline,
+        true,
+        Some(&moved),
+        Some(&report),
+    );
+    assert_eq!(
+        number(compared.cell(
+            RowSource::Scalar(&moved.node_voltages[0]),
+            OpRowKind::Node,
+            voltage
+        )),
+        ("+50".to_owned(), "m".to_owned())
+    );
+}
+
 #[test]
 fn a_non_finite_value_stays_a_row_and_is_refused_in_its_cell() {
     let failed = node("V(failed)", f64::NAN);

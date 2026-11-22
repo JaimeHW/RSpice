@@ -48,8 +48,9 @@ const VALUE_W: f32 = 104.0;
 /// Rounding room when a column's edge meets the sheet's.
 const WHOLE_COLUMN_TOLERANCE: f32 = 0.5;
 const CELL_INSET: f32 = 8.0;
-/// The slot the prefix and unit start in; every mantissa ends just before it.
-const UNIT_SLOT_W: f32 = 34.0;
+/// The slot a value's SI prefix takes after its mantissa, the unit being its
+/// column's head's; every mantissa ends just before it.
+const UNIT_SLOT_W: f32 = 12.0;
 const MANTISSA_GAP: f32 = 4.0;
 const CHEVRON_CENTER: f32 = 11.0;
 const CHEVRON_SIDE: f32 = 11.0;
@@ -462,6 +463,28 @@ struct PlanColumn {
     unit: String,
 }
 
+impl PlanColumn {
+    /// The column's head: a column is one quantity, so it names the unit
+    /// every cell under it is in (`Voltage (V)`, `id (A)`).
+    fn head(&self) -> String {
+        if self.unit.is_empty() {
+            self.label.clone()
+        } else {
+            format!("{} ({})", self.label, self.unit)
+        }
+    }
+
+    /// A cell's mantissa and what follows it: the prefix alone where the
+    /// head names the unit (`−100` and `m` under `Voltage (V)`), the prefix
+    /// and unit where it does not.
+    fn bare(&self, (mantissa, suffix): (String, String)) -> (String, String) {
+        match suffix.strip_suffix(self.unit.as_str()) {
+            Some(prefix) if !self.unit.is_empty() => (mantissa, prefix.to_owned()),
+            _ => (mantissa, suffix),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PlanSection {
     kind: OpRowKind,
@@ -565,12 +588,8 @@ impl PlanBuilder<'_> {
         name_header: &str,
         columns: Vec<PlanColumn>,
     ) -> PlanSection {
-        // A value's prefix goes in front of its unit.
-        let longest_unit = columns
-            .iter()
-            .map(|column| column.unit.chars().count() + 1)
-            .max()
-            .unwrap_or(0);
+        // A cell carries its value's prefix; its column's head, the unit.
+        let longest_unit = usize::from(!columns.is_empty());
         PlanSection {
             kind,
             key: key.to_owned(),
@@ -645,17 +664,32 @@ impl PlanBuilder<'_> {
         if shown.is_empty() {
             return 0;
         }
+        // The column's unit is the one every row is in, as every retained
+        // node is in volts and every branch in amperes; rows that differed
+        // would each keep their own.
+        let unit = values
+            .first()
+            .map(|row| row.unit.clone())
+            .filter(|unit| values.iter().all(|row| row.unit == *unit))
+            .unwrap_or_default();
         let column = PlanColumn {
             label: spec.value_header.to_owned(),
-            unit: String::new(),
+            unit,
         };
-        let section = self.section(
+        let mut section = self.section(
             spec.kind,
             spec.title,
             spec.title,
             spec.name_header,
             vec![column],
         );
+        if section.columns[0].unit.is_empty() {
+            section.longest_unit = values
+                .iter()
+                .map(|row| row.unit.chars().count() + 1)
+                .max()
+                .unwrap_or(0);
+        }
         order_rows(
             &mut shown,
             section.sort.as_ref(),
@@ -839,14 +873,15 @@ impl OpPlan {
             (Some((value, unit)), Some(base)) if value.is_finite() && base.is_finite() => {
                 let changed = differs(value, base);
                 if !*delta {
-                    let (mantissa, unit) = value_parts(value, &unit, digits);
+                    let (mantissa, unit) = column.bare(value_parts(value, &unit, digits));
                     CellValue::Number {
                         mantissa,
                         unit,
                         changed,
                     }
                 } else if changed {
-                    let (mantissa, unit) = split_value(fmt_si_signed(value - base, &unit, digits));
+                    let (mantissa, unit) =
+                        column.bare(split_value(fmt_si_signed(value - base, &unit, digits)));
                     CellValue::Number {
                         mantissa,
                         unit,
@@ -1328,7 +1363,7 @@ impl<'a> RowSource<'a> {
     fn cell(self, column: &PlanColumn, significant_digits: usize) -> CellValue {
         match self.quantity(column) {
             Some((value, unit)) if value.is_finite() => {
-                let (mantissa, unit) = value_parts(value, &unit, significant_digits);
+                let (mantissa, unit) = column.bare(value_parts(value, &unit, significant_digits));
                 CellValue::Number {
                     mantissa,
                     unit,
@@ -1620,7 +1655,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             section,
             name,
             rect,
-            &section.name_header,
+            (&section.name_header, &section.name_header),
             HeaderAlign::Name,
             out,
         );
@@ -1631,7 +1666,14 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         if self.plan.region_slot {
             let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot, width);
             if section.region && self.grid.shows_whole(cell) {
-                self.header_cell(section, cell, values, REGION_HEADER, HeaderAlign::Text, out);
+                self.header_cell(
+                    section,
+                    cell,
+                    values,
+                    (REGION_HEADER, REGION_HEADER),
+                    HeaderAlign::Text,
+                    out,
+                );
             }
             slot += 1;
         }
@@ -1643,7 +1685,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
                     section,
                     cell,
                     values,
-                    &column.label,
+                    (&column.label, &column.head()),
                     HeaderAlign::Number,
                     out,
                 );
@@ -1651,12 +1693,14 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         }
     }
 
+    /// A column's head: `key` is what its sort is held under, `label` what
+    /// it reads.
     fn header_cell(
         &self,
         section: &PlanSection,
         cell: egui::Rect,
         clip: egui::Rect,
-        label: &str,
+        (key, label): (&str, &str),
         align: HeaderAlign,
         out: &mut OpResponse,
     ) {
@@ -1666,13 +1710,13 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         }
         let response = self.ui.interact(
             shown,
-            self.ui.id().with(("op-sort", &section.key, label)),
+            self.ui.id().with(("op-sort", &section.key, key)),
             egui::Sense::click(),
         );
         let sorted = section
             .sort
             .as_ref()
-            .filter(|(column, _)| column.eq_ignore_ascii_case(label));
+            .filter(|(column, _)| column.eq_ignore_ascii_case(key));
         let ascending = sorted.is_some_and(|(_, ascending)| *ascending);
         let painter = self.ui.painter_at(shown);
         if response.hovered() {
@@ -1751,7 +1795,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         );
         theme::paint_focus_ring(self.ui, &response, shown.shrink(1.0));
         if response.clicked() {
-            out.clicked_sort = Some((section.key.clone(), label.to_owned()));
+            out.clicked_sort = Some((section.key.clone(), key.to_owned()));
         }
         if elided {
             response.on_hover_text(label);
