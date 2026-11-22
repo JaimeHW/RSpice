@@ -433,61 +433,20 @@ pub fn finish_wire_on_active_sheet(model: &mut Model) -> Option<u64> {
         .finish_wire(off_active_sheet(&model.workspace))
 }
 
-pub(super) fn active_sheet_has_objects(model: &Model) -> bool {
-    model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .wires
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .buses
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .bus_taps
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .junctions
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .net_labels
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .design_notes
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .documentation_shapes
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
-        || model
-            .schematic
-            .document()
-            .probes
-            .iter()
-            .any(|object| object_is_on_active_sheet(model, object.id))
+/// Whether the drawing holds anything at all, on any of its sheets. The
+/// first-use hint is for an empty drawing: a design's blank next sheet shows
+/// only its paper.
+pub(super) fn drawing_has_objects(model: &Model) -> bool {
+    let document = model.schematic.document();
+    !(document.components.is_empty()
+        && document.wires.is_empty()
+        && document.buses.is_empty()
+        && document.bus_taps.is_empty()
+        && document.junctions.is_empty()
+        && document.net_labels.is_empty()
+        && document.design_notes.is_empty()
+        && document.documentation_shapes.is_empty()
+        && document.probes.is_empty())
 }
 
 /// A cell view with two sheets ([`seed_two_sheets`]) on a new design test

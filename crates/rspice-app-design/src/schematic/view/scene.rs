@@ -6,7 +6,7 @@ use super::{
     drawing::ProbeVisualStatus,
     drawing_sheet::ActiveDrawingSheet,
     parts::{CanvasFacts, CanvasParts},
-    sheet_visibility::{active_sheet_has_objects, object_is_on_active_sheet},
+    sheet_visibility::{drawing_has_objects, object_is_on_active_sheet},
     viewport::Viewport,
 };
 use crate::state::bus_notations;
@@ -103,9 +103,9 @@ pub(super) fn draw_scene(
 ) {
     super::drawing_sheet::draw_base(painter, available, viewport, state, drawing_sheet);
 
-    // First-run guidance: an empty sheet says what to do next instead of
+    // First-run guidance: an empty drawing says what to do next instead of
     // presenting a silent dot field.
-    if !active_sheet_has_objects(state.model) {
+    if !drawing_has_objects(state.model) {
         let drawing_area = drawing_sheet
             .geometry
             .drawing_area

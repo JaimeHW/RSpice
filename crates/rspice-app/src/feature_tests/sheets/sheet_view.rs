@@ -246,3 +246,24 @@ fn zoom_previous_steps_back_through_its_own_sheet() {
         "Sheet 1 goes back to where it was left"
     );
 }
+
+/// The first-use hint is for an empty drawing: a design's blank next sheet
+/// shows only its paper, while a new drawing with nothing on it says what to
+/// do first.
+#[test]
+fn a_blank_second_sheet_shows_no_first_use_hint() {
+    let (mut app, _, _) = two_sheet_app(&[]);
+    let texts = draw_canvas(&mut app.state, 0.0);
+    assert!(
+        !texts.iter().any(|text| text == "Empty schematic"),
+        "{texts:?}"
+    );
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let texts = draw_canvas(&mut app.state, 0.0);
+    assert!(
+        texts.iter().any(|text| text == "Empty schematic"),
+        "{texts:?}"
+    );
+}
