@@ -5,19 +5,21 @@
 //! right-click in a column offers its menu. A difference column follows
 //! for each other column against the base, and a pair adds its slope. Every
 //! strip on screen that shares the columns' X has a band of rows, one per
-//! trace with its swatch. Cursors and markers on strips with another X make
-//! a table of their own below, as a difference across two domains is not a
-//! measurement.
+//! trace with its swatch. A marker that rides a trace also reads that
+//! trace's Y in a row of its own, so the difference of two markers on any
+//! traces reads dx, dy, the slope and 1/dx, as a delta marker does in ADS.
+//! Cursors and markers on strips with another X make a table of their own
+//! below, as a difference across two domains is not a measurement.
 //!
 //! The horizontal cursors follow in a table of their own: a group per pane
 //! naming its levels, and where each of its traces crosses them.
 
-use super::cursor_values::{marker_position, x_delta, x_reciprocal};
+use super::cursor_values::{marker_position, slope_text, x_delta, x_reciprocal};
 use super::dock::{MarkerActions, MarkerMove, ReadoutInput, marker_color, visible_markers};
 use super::readout::{
     READOUT_ABSENT, ReadingLayout, TableRow, readout_branch_note, readout_traces, trace_table_rows,
 };
-use super::{StripModel, anchor_key};
+use super::{StripModel, StripTrace, anchor_key};
 use crate::session::{HorizontalCursors, ReadingColumnId, ResultViewerState};
 use egui::Ui;
 use rspice_results::result_presentation::{
@@ -55,6 +57,9 @@ pub struct ReadingColumn {
     pub x: Result<f64, String>,
     /// The trace it rides, whose samples it snaps to.
     pub anchor: Option<WaveformPresentationKey>,
+    /// Whether it is a point on that trace, which reads the trace's Y where
+    /// it stands; a cursor or a vertical marker reads every trace instead.
+    pub point: bool,
 }
 
 /// One strip's rows, under the band that names the strip.
@@ -181,6 +186,7 @@ pub fn reading_columns(
                 model,
                 x: Ok(x),
                 anchor,
+                point: false,
             });
         }
     }
@@ -214,6 +220,7 @@ pub fn reading_columns(
             model,
             x,
             anchor: Some(marker.anchor().clone()),
+            point: kind.rides_a_trace(),
         });
     }
     columns
@@ -295,7 +302,13 @@ fn build_table(
         .iter()
         .find(|column| matches!(column.id, ReadingColumnId::Cursor(_)))
         .map(|column| column.model);
-    let mut bands = Vec::new();
+    let mut bands: Vec<TableBand> = point_row(source, &columns, &layout)
+        .map(|row| TableBand {
+            title: "Markers".to_owned(),
+            rows: vec![row],
+        })
+        .into_iter()
+        .collect();
     for (index, model) in models.iter().enumerate() {
         let shown =
             source.on_screen_strips.contains(&model.analysis_key) || cursor_model == Some(index);
@@ -346,6 +359,86 @@ fn build_table(
         x_cells,
         bands,
     }
+}
+
+/// The row that reads each point marker's Y on the trace it rides, with
+/// each difference against the base taken across traces and, for a pair,
+/// its slope: what a delta marker reads. `None` when no column is a point.
+fn point_row(
+    source: ReadoutInput<'_>,
+    columns: &[ReadingColumn],
+    layout: &ReadingLayout<'_>,
+) -> Option<TableRow> {
+    let models = source.models;
+    let digits = usize::from(source.presentation.displayed_significant_digits().get());
+    let interpolation = super::cursor_interpolation(source.presentation.cursor_interpolation());
+    let points: Vec<Option<(&StripModel, &StripTrace, f64)>> = columns
+        .iter()
+        .zip(layout.positions)
+        .map(|(column, x)| {
+            let anchor = column.anchor.as_ref().filter(|_| column.point)?;
+            let model = &models[column.model];
+            let trace = model
+                .traces
+                .iter()
+                .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)?;
+            Some((model, trace, model.trace_value(trace, (*x)?, interpolation)))
+        })
+        .collect();
+    if points.iter().all(Option::is_none) {
+        return None;
+    }
+    let absent = || READOUT_ABSENT.to_owned();
+    let format = |(model, trace, value): (&StripModel, &StripTrace, f64)| {
+        model.format_trace_value(trace, value, digits, source.quantity_policy)
+    };
+    let mut cells: Vec<String> = points
+        .iter()
+        .map(|point| point.map_or_else(absent, format))
+        .collect();
+    let base = points[layout.base];
+    let mut first = None;
+    for (order, &column) in layout.deltas.iter().enumerate() {
+        // Volts less amps is not a difference.
+        let difference = match (base, points[column]) {
+            (Some(from), Some(to)) if from.0.trace_unit(from.1) == to.0.trace_unit(to.1) => {
+                Some((from.0, from.1, to.2 - from.2))
+            }
+            _ => None,
+        };
+        if order == 0 {
+            first = difference;
+        }
+        cells.push(difference.map_or_else(absent, format));
+    }
+    if layout.pair {
+        let run = match (
+            layout.positions[layout.base],
+            layout.positions[layout.deltas[0]],
+        ) {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => None,
+        };
+        let slope = first.zip(run).and_then(|((model, trace, dy), (a, b))| {
+            let (dx, x_unit) = match model.x_scale {
+                XScale::Log10 if a > 0.0 && b > 0.0 => (b.log10() - a.log10(), "dec"),
+                XScale::Log10 => return None,
+                XScale::Linear if model.x_unit.is_empty() => (b - a, "x"),
+                XScale::Linear => (b - a, model.x_unit.as_str()),
+            };
+            let slope = dy / dx;
+            slope
+                .is_finite()
+                .then(|| slope_text(slope, model.trace_unit(trace), x_unit, digits))
+        });
+        cells.push(slope.unwrap_or_else(absent));
+    }
+    Some(TableRow {
+        name: "Y on its trace".to_owned(),
+        swatch: egui::Color32::TRANSPARENT,
+        swatch_style: None,
+        cells,
+    })
 }
 
 /// The table's rows for a strip's logic, bus and `E()` lanes: what each

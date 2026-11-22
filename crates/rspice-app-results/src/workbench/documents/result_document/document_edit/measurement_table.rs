@@ -282,6 +282,36 @@ enum Asked {
     Delete(MeasurementId),
 }
 
+/// How many rows the page draws over the shown result: the view's kept
+/// measurements and the netlist's, for the tab's badge. `None` when no run
+/// is shown.
+pub fn measurements_count(state: ResultsReads<'_>) -> Option<usize> {
+    let runs = shown_runs(&state.model.simulation);
+    if runs.is_empty() {
+        return None;
+    }
+    let kept = shown_view(state)
+        .and_then(|view| state.model.workspace.content.visualization_document(view))
+        .map_or(0, |document| {
+            document
+                .measurements()
+                .iter()
+                .filter(|measurement| measurement.expression.is_some())
+                .count()
+        });
+    let mut names: Vec<&str> = Vec::new();
+    for measured in runs
+        .iter()
+        .flat_map(|run| &run.analyses)
+        .flat_map(|analysis| &analysis.measurements)
+    {
+        if !names.contains(&measured.name.as_str()) {
+            names.push(&measured.name);
+        }
+    }
+    Some(kept + names.len())
+}
+
 /// Draw the Measurements page over the shown result. `false` when no run is
 /// shown, for the console's own page to stand instead.
 pub fn measurements_page(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
@@ -442,24 +472,36 @@ const EXPRESSION: usize = 1;
 const WINDOW: usize = 2;
 
 fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
-    let expression_width = page
+    // A measurement is named by what it reads until the reader names it,
+    // as ADE's outputs are, so only a name of its own fills the column.
+    let named = |row: &Row| -> Option<String> {
+        match &row.definition {
+            Some((expression, _)) if row.name == *expression => None,
+            _ => Some(row.name.clone()),
+        }
+    };
+    let name_width = page
         .rows
         .iter()
-        .filter_map(|row| row.definition.as_ref())
-        .map(|(expression, _)| text_width(ui, expression))
-        .fold(text_width(ui, "Expression"), f32::max);
+        .filter_map(named)
+        .map(|name| text_width(ui, &name))
+        .fold(text_width(ui, "Name"), f32::max);
     let window_width = MeasurementWindow::ALL
         .into_iter()
         .map(|window| text_width(ui, window.label()))
         .fold(0.0, f32::max);
     let mut columns = vec![
-        Column::name("Measurement", 140.0).unsortable(),
-        Column::words("Expression", (expression_width + CELL_PAD * 2.0).min(320.0))
+        Column::words("Name", (name_width + CELL_PAD * 2.0).clamp(96.0, 220.0))
+            .unsortable()
+            .tooltip("The name a kept measurement was given; click to name it"),
+        Column::name("Expression", 160.0)
             .unsortable()
             .tooltip("What a kept measurement reads; click to edit it"),
         Column::words("Window", window_width + CELL_PAD * 2.0)
             .unsortable()
-            .tooltip("The part of the record it reads: all of it, the visible range, or between the cursors"),
+            .tooltip(
+                "The part of the record it reads: all of it, the visible range, or between the cursors",
+            ),
     ];
     for (index, run) in page.runs.iter().enumerate() {
         let width = page
@@ -486,9 +528,9 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
         .map(|row| {
             let mut cells = match &row.definition {
                 Some((expression, window)) => vec![
-                    Cell::text(&row.name)
+                    Cell::text(named(row).unwrap_or_default())
                         .editable()
-                        .hint("Click to rename; right-click for its menu"),
+                        .hint("Click to name it; right-click for its menu"),
                     Cell::text(expression)
                         .editable()
                         .hint("Click to edit what it reads"),

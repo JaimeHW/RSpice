@@ -39,13 +39,13 @@ pub(super) use model_cache::cached_models;
 mod readout;
 mod viewport;
 
+pub use super::document_edit::measurement_table::{measurements_count, measurements_page};
 #[cfg(test)]
 use expression_evaluation::evaluate_expression;
 use expression_evaluation::{Places, evaluate_expression_reading};
 pub(crate) use expressions::*;
 pub use expressions::{toggle_visibility, waveform_plotted};
 pub(crate) use readout::*;
-pub use super::document_edit::measurement_table::measurements_page;
 pub use readout::{cursors_page, offers_cursors};
 pub(crate) use viewport::*;
 

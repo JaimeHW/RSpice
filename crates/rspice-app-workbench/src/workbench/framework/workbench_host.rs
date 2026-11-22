@@ -135,4 +135,10 @@ pub trait ConsoleHost: ProblemsHost + ListingSource {
     fn measurements_page(&mut self, _ui: &mut egui::Ui) -> bool {
         false
     }
+
+    /// How many rows the Measurements page draws over the shown result, for
+    /// its tab's badge; `None` when it draws none.
+    fn measurements_count(&self) -> Option<usize> {
+        None
+    }
 }

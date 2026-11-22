@@ -1039,6 +1039,12 @@ impl ConsoleHost for AppState {
             &mut self.results_parts(),
         )
     }
+
+    fn measurements_count(&self) -> Option<usize> {
+        rspice_app_results::workbench::documents::result_document::waves::measurements_count(
+            self.results_reads(),
+        )
+    }
 }
 
 impl WorkbenchHost for RSpiceApp {

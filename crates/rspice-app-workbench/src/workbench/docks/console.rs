@@ -313,7 +313,10 @@ pub fn console_tabs(
         for (index, page) in pages.iter().copied().enumerate() {
             let count = match page {
                 ConsolePage::Problems => problems.total(),
-                ConsolePage::Measurements => active_measurement_count(&app.model().simulation),
+                ConsolePage::Measurements => app
+                    .session()
+                    .measurements_count()
+                    .unwrap_or_else(|| active_measurement_count(&app.model().simulation)),
                 ConsolePage::TaskLog => app.model().simulation.retained.runs.len(),
                 ConsolePage::Console | ConsolePage::Cursors => 0,
                 ConsolePage::References => app

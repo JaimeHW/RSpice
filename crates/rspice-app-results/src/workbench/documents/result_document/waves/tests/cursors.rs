@@ -317,6 +317,58 @@ fn a_base_marker_reads_the_analytic_differences() {
     }
 }
 
+/// Two markers on different traces read across them, as a delta marker
+/// does: the X row's Δx and 1/Δx, and the marker row's Δy and slope.
+#[test]
+fn a_delta_marker_between_two_traces_reads_dx_dy_and_slope() {
+    let time = time();
+    let line =
+        |offset: f64, slope: f64| -> Vec<f64> { time.iter().map(|t| offset + slope * t).collect() };
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = rspice_results::run::SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(in)", time.clone(), line(1.0, 100.0), "#00aaff").with_unit("V"),
+            RetainedTrace::new("V(out)", time.clone(), line(3.0, -200.0), "#ffaa00").with_unit("V"),
+        ]),
+    );
+    let mut state = host_on(run);
+    strip(&mut state);
+    state.quick_frame();
+    let first = state
+        .place_marker("V(in)", time[1000])
+        .expect("a marker on V(in)");
+    let second = state
+        .place_marker("V(out)", time[3000])
+        .expect("a marker on V(out)");
+    state.results.results.session.readout_base =
+        Some(rspice_results_ui::session::ReadingColumnId::Marker(first));
+
+    let tables = super::super::readout::cursor_tables(&mut state.results_parts());
+    let table = &tables[0];
+    let (m1, m2) = (
+        format!("M{}", first.marker_id.get()),
+        format!("M{}", second.marker_id.get()),
+    );
+    assert_eq!(
+        table.heads(),
+        [
+            m1.clone(),
+            m2.clone(),
+            format!("{m2}-{m1}"),
+            "Slope".to_owned()
+        ]
+    );
+    // 1.25 ms to 3.75 ms: V(in) reads 1.125 V, V(out) 2.25 V.
+    assert_eq!(table.x_cells[2..], ["2.5 ms", "1/\u{394}x 400 Hz"]);
+    let band = &table.bands[0];
+    assert_eq!(band.title, "Markers");
+    assert_eq!(
+        band.rows[0].cells,
+        ["1.125 V", "2.25 V", "1.125 V", "450 V/s"]
+    );
+}
+
 /// A cursor's X is typed in place: a click on it in the Cursors table opens
 /// it, and the typed value is where the cursor then stands.
 #[test]
