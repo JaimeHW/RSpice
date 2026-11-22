@@ -24,7 +24,7 @@ use crate::schematic::view::selection_layout::{
     SelectionLayoutCommand, apply_selection_layout, selection_layout_availability,
 };
 use crate::schematic::view::selection_transform::{
-    SelectionTransform, transform_selection_on_active_sheet,
+    SelectionTransform, something_floats, turn_what_floats_or_selection,
 };
 use crate::schematic::view::sheet_visibility::objects_of_kind_on_active_sheet;
 use crate::schematic::view::standard_value_snap::{run_snap_to_standard_value, snap_block_reason};
@@ -83,7 +83,7 @@ use crate::workbench::app::dialogs::{
 use crate::workbench::app::{
     arm_move_selection_in, arm_schematic_tool, arm_stretch_selection_in,
     join_collinear_wires_on_active_sheet, open_array_selection_dialog_in,
-    schematic_editor_request_source, turn_floating_paste,
+    schematic_editor_request_source,
 };
 use crate::workbench::app_state::SlotFacts;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
@@ -407,7 +407,7 @@ impl CommandSet for DesignCommand {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
                 (!schematic_selection_has_live_object(&reads.model.schematic)
-                    && reads.state.floating_paste.is_none())
+                    && !something_floats(reads.state, &reads.model.schematic))
                 .then_some("select an editable object")
             }
             Self::SnapSelectionToGrid => reads
@@ -915,16 +915,16 @@ impl CommandSet for DesignCommand {
                     SymbolEditAction::Transform(symbol_transform(self)),
                 );
             }
-            // A copy floating under the pointer is what these act on.
+            // What floats under the pointer is what these act on: a copy, the
+            // selection Move carries, or the part being placed.
             Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
-                let transform = selection_transform(self);
-                if !turn_floating_paste(&mut cx.state.floating_paste, transform) {
-                    let symbols = cx.model.schematic_symbol_context();
-                    transform_selection_on_active_sheet(cx.model, cx.wb, &symbols, transform);
-                }
+                turn_what_floats_or_selection(
+                    &mut crate::schematic::view::canvas_parts_in(cx),
+                    selection_transform(self),
+                );
             }
             Self::JoinCollinearWires => {
                 join_collinear_wires_on_active_sheet(cx.model, cx.wb);

@@ -218,9 +218,7 @@ fn apply_placement_transform(
 /// floating paste or duplicate, a selection Move is carrying, or the
 /// placement ghost.
 pub(super) fn something_floats(state: &CanvasFacts<'_>) -> bool {
-    state.design.floating_paste.is_some()
-        || state.design.move_selection.armed
-        || state.model.schematic.session.editor.tool.is_place_tool()
+    super::selection_transform::something_floats(state.design, &state.model.schematic)
 }
 
 /// Turn what floats under the pointer. R and M take this path, and so do

@@ -2,12 +2,16 @@
 //!
 //! The Rotate and Mirror commands and the canvas context menu share this one
 //! route, so the pivot, the sheet scope and the undo step cannot differ by
-//! how the edit was asked for. The turns the Move tool carries land about
-//! the same pivot, inside the Move's own undo step.
+//! how the edit was asked for. While something floats under the pointer the
+//! commands turn that instead, as R and M do, and the turns the Move tool
+//! carries land about the same pivot, inside the Move's own undo step.
 
+use super::parts::CanvasParts;
 use super::sheet_visibility::with_active_wire_topology_in;
+use super::shelf_drag::PlacementTransform;
 use super::{Model, SchematicSymbolContext, WorkbenchSession, sync_active_schematic};
 use crate::state::{ActiveSheetTopology, Point, SchematicState};
+use crate::workbench::slots::DesignState;
 pub use rspice_design::schematic::component_edit::SelectionTransform;
 
 /// The middle of `bounds`, snapped to the nearest point of a `grid` pitch.
@@ -82,6 +86,36 @@ pub fn transform_selection_on_active_sheet(
         sync_active_schematic(model, wb);
     }
     recorded
+}
+
+/// Whether something floats under the pointer for a turn to act on: a
+/// floating paste or duplicate, the selection Move carries, or the part an
+/// armed placement tool holds.
+pub fn something_floats(design: &DesignState, schematic: &SchematicState) -> bool {
+    design.floating_paste.is_some()
+        || design.move_selection.armed
+        || schematic.session.editor.tool.is_place_tool()
+}
+
+/// The Rotate and Mirror commands: turn what floats under the pointer as R
+/// and M turn it, else the selection on the active sheet in one undo step.
+/// The toolbar, the menus, the palette and the chords all dispatch these
+/// commands, so a part on the cursor and what Move carries turn however the
+/// turn is asked for.
+pub fn turn_what_floats_or_selection(state: &mut CanvasParts<'_>, transform: SelectionTransform) {
+    if !super::shelf_drag::turn_what_floats(state, placement_transform(transform)) {
+        let symbols = state.model.schematic_symbol_context();
+        transform_selection_on_active_sheet(state.model, state.workbench, &symbols, transform);
+    }
+}
+
+const fn placement_transform(transform: SelectionTransform) -> PlacementTransform {
+    match transform {
+        SelectionTransform::RotateClockwise => PlacementTransform::RotateClockwise,
+        SelectionTransform::RotateCounterClockwise => PlacementTransform::RotateCounterClockwise,
+        SelectionTransform::MirrorHorizontal => PlacementTransform::ToggleHorizontalMirror,
+        SelectionTransform::MirrorVertical => PlacementTransform::ToggleVerticalMirror,
+    }
 }
 
 #[cfg(test)]

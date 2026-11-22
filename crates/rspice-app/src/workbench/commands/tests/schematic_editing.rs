@@ -402,6 +402,77 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
     assert!(app.state.design.move_selection.armed, "the move carries on");
 }
 
+/// Rotate and Mirror, from the toolbar, the menus or Ctrl+R, turned the
+/// selection in place while Move carried it, and the next frame cancelled
+/// the Move because the drawing had changed under it. They turn what Move
+/// carries, as R does, and the Move carries on.
+#[test]
+fn rotate_command_turns_what_move_carries_and_the_move_carries_on() {
+    use rspice_app_design::schematic::view::selection_transform::SelectionTransform;
+    use rspice_app_design::workbench::app::dialogs::selection::move_selection::armed_move_selection_authority;
+
+    let (mut app, _) = app_with_selected_resistor_pair();
+    arm_move(&mut app);
+    let before = app.state.model.schematic.document().clone();
+
+    for command in [
+        DesignCommand::RotateSelection,
+        DesignCommand::MirrorSelectionVertical,
+    ] {
+        assert!(app.command_key_enabled(command.key()), "{command:?}");
+        app.execute_command_key(command.key());
+    }
+
+    assert_eq!(
+        app.state.design.move_selection.turns,
+        vec![
+            SelectionTransform::RotateClockwise,
+            SelectionTransform::MirrorVertical
+        ]
+    );
+    let after = app.state.model.schematic.document();
+    assert_eq!(
+        (&after.components, &after.wires),
+        (&before.components, &before.wires),
+        "the sheet is untouched while the turn floats"
+    );
+    assert!(app.state.design.move_selection.armed);
+    assert!(
+        armed_move_selection_authority(&app.state.design.move_selection, &app.state.model).is_ok(),
+        "the Move stands"
+    );
+}
+
+/// With a part on the cursor and nothing selected, Rotate and Mirror were
+/// greyed and only the bare R and M keys turned the part. The commands turn
+/// the part being placed, whichever route asks.
+#[test]
+fn rotate_and_mirror_turn_the_part_being_placed() {
+    use rspice_app_state::state::{ComponentType, Rotation, Tool};
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.model.schematic.session.editor.selection.clear();
+    app.state
+        .model
+        .schematic
+        .arm_tool(Tool::Place(ComponentType::Resistor));
+
+    for command in [
+        DesignCommand::RotateSelection,
+        DesignCommand::MirrorSelectionHorizontal,
+    ] {
+        assert!(app.command_key_enabled(command.key()), "{command:?}");
+        app.execute_command_key(command.key());
+    }
+
+    let editor = &app.state.model.schematic.session.editor;
+    assert_eq!(editor.preview_rotation, Rotation::R90);
+    assert!(editor.preview_mirror_h);
+    assert_eq!(editor.tool, Tool::Place(ComponentType::Resistor));
+    assert!(app.state.model.schematic.document().components.is_empty());
+}
+
 fn arm_move(app: &mut RSpiceApp) {
     rspice_app_design::workbench::app::dialogs::selection::move_selection::arm_move_selection_in(
         &mut app.state.design.move_selection,
