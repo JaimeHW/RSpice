@@ -65,6 +65,25 @@ fn prepared_contract() -> PreparedPreflightContract {
     }
 }
 
+/// The plan as a reader who has set it up leaves it: its one-millisecond
+/// transient committed as an edit, so a Run press checks the design instead
+/// of first choosing the analysis from the drawing's sources.
+fn as_the_reader_left_the_plan(state: &mut AppState) {
+    let plan = state
+        .model
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("a default state owns a stable plan");
+    let transient = plan.instances()[0].id();
+    plan.edit(transient, |draft| {
+        if let rspice_simulation_contract::analysis_draft::AnalysisDraft::Transient(setup) = draft {
+            "1m".clone_into(&mut setup.stop);
+        }
+    })
+    .expect("the transient takes its stop time");
+    state.model.sim_setup.refresh_legacy_analysis_projections();
+}
+
 fn disable_global_process_axis(state: &mut AppState) {
     for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind
@@ -726,6 +745,7 @@ fn app_with_an_open_root(
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     disable_global_process_axis(&mut app.state);
+    as_the_reader_left_the_plan(&mut app.state);
     let root = app
         .state
         .model

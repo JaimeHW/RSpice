@@ -12,6 +12,7 @@ use rspice_simulation::execution::PreparationStage;
 fn runnable_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     disable_global_process_axis(&mut app.state);
+    as_the_reader_left_the_plan(&mut app.state);
     rspice_app_state::workbench::examples::load_example(
         "Voltage Divider",
         &mut app.state.model.schematic,
