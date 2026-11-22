@@ -20,7 +20,6 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         DesignCommand::PlaceBusTap,
         DesignCommand::PlaceJunction,
         DesignCommand::PlaceLabel,
-        DesignCommand::PlaceProbe,
         DesignCommand::PlacePin,
         DesignCommand::PlaceText,
         DesignCommand::PlaceShape,
@@ -50,6 +49,10 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         app.command_availability(ProjectCommand::CheckAndSave.key()),
         CommandAvailability::Disabled("open an editable schematic, testbench or symbol")
     );
+    assert_eq!(
+        app.command_availability(DesignCommand::PlaceProbe.key()),
+        CommandAvailability::Disabled("open an editable schematic or testbench")
+    );
 
     app.state.workbench.activate(Workspace::Design);
     app.state.model.schematic.session.read_only = true;
@@ -63,6 +66,11 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     assert_eq!(
         app.command_availability(ProjectCommand::CheckAndSave.key()),
         CommandAvailability::Disabled("the active schematic is read-only")
+    );
+    // Probing changes no design, so it stays available on a read-only view.
+    assert_eq!(
+        app.command_availability(DesignCommand::PlaceProbe.key()),
+        CommandAvailability::Available
     );
 
     app.state.close_project_session();
