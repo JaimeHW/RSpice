@@ -1526,3 +1526,101 @@ fn the_reset_label_row_puts_a_moved_name_and_value_back_as_one_undo_step() {
         "the reset was one step"
     );
 }
+
+/// A wire's and a net label's right-click menus light their net, as
+/// Design ▸ Highlight net does, and name its key. A part's pins are on
+/// several nets, so its menu has no such row. Highlight net was a Design
+/// menu row alone, with no key.
+#[test]
+fn the_highlight_net_row_lights_the_net_of_the_wire_or_label_clicked() {
+    let mut app = design_app();
+    let document = app.state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document.wires.clear();
+    document
+        .wires
+        .push(Wire::new(5, vec![Point::new(0, 0), Point::new(200, 0)]));
+    document
+        .wires
+        .push(Wire::new(6, vec![Point::new(0, 100), Point::new(200, 100)]));
+    document
+        .net_labels
+        .push(NetLabel::new(73, Point::new(200, 100), "out"));
+    document.components.push(Component::new(
+        41,
+        ComponentType::Resistor,
+        Point::new(400, 0),
+    ));
+    app.state.model.schematic.recalculate_runtime_state();
+    app.state.model.schematic.bump_topology_version();
+    app.state.sync_active_schematic_to_workspace();
+    let symbol_context = schematic_symbol_context(&app.state);
+
+    // The wire: the row is there, names the key, and lights the wire's net.
+    let target = select_context_target(&mut app.state, Some(PointerTarget::Wire(5)));
+    app.state.design.interaction.context_target = Some((target, (100, 0)));
+    let view = context_menu_view(&app.state, &Context::default()).expect("the menu is open");
+    let highlight = view
+        .entries
+        .iter()
+        .find_map(|entry| match entry {
+            context_surface::ContextEntry::Command(command)
+                if command.action == ContextAction::HighlightNet =>
+            {
+                Some(command.clone())
+            }
+            _ => None,
+        })
+        .expect("a wire's menu lights its net");
+    assert_eq!(highlight.label, "Highlight net");
+    assert_eq!(highlight.shortcut, "`");
+    assert!(highlight.enabled, "{}", highlight.disabled_reason);
+    run_context_action(
+        &mut app,
+        ContextAction::HighlightNet,
+        Point::new(100, 0),
+        &symbol_context,
+    );
+    let lit = |app: &crate::workbench::RSpiceApp, wire| {
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .net_highlight
+            .is_wire_highlighted(wire)
+    };
+    assert!(lit(&app, 5) && !lit(&app, 6));
+
+    // The label: its net is the other wire's.
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_net_label(73);
+    app.state.design.interaction.context_target = Some((ContextTarget::Canvas, (200, 100)));
+    assert!(
+        menu_entries(&app.state, ContextTarget::Canvas)
+            .iter()
+            .any(|entry| matches!(entry, ContextEntry::Command(command)
+                if command.action == ContextAction::HighlightNet))
+    );
+    run_context_action(
+        &mut app,
+        ContextAction::HighlightNet,
+        Point::new(200, 100),
+        &symbol_context,
+    );
+    assert!(lit(&app, 6) && !lit(&app, 5));
+
+    // A part: no row.
+    let target = select_context_target(&mut app.state, Some(PointerTarget::Component(41)));
+    assert!(
+        !menu_entries(&app.state, target)
+            .iter()
+            .any(|entry| matches!(entry, ContextEntry::Command(command)
+                if command.action == ContextAction::HighlightNet))
+    );
+}

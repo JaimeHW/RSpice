@@ -285,6 +285,11 @@ const fn chord(
 }
 
 const NONE: &[ShortcutBinding] = &[];
+// KiCad's key for lighting a net.
+const HIGHLIGHT_NET: &[ShortcutBinding] = &[primary(
+    chord(Key::Backtick, false, false, false, "`"),
+    EVERYWHERE,
+)];
 const STIMULUS: &str = "Stimulus";
 /// Publishing the draft the library instrument is editing.
 ///
@@ -1090,7 +1095,7 @@ impl DesignCommand {
             Self::UpdateAllInstanceInterfaces => {
                 ("Update all instances", "Design", edits, canvas, NONE)
             }
-            Self::HighlightNet => ("Highlight net", "Design", palette, design, NONE),
+            Self::HighlightNet => ("Highlight net", "Design", palette, canvas, HIGHLIGHT_NET),
             Self::SymbolPinTool => (
                 "Place symbol pin",
                 "Design",

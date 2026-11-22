@@ -354,6 +354,7 @@ fn each_target_gets_the_catalog_its_kind_calls_for() {
             ("Copy", Some(ids::COPY)),
             ("Duplicate", Some(ids::DUPLICATE)),
             ("Delete", Some(ids::DELETE)),
+            ("Highlight net", Some(DesignCommand::HighlightNet.key())),
             ("Probe", Some(DesignCommand::PlaceProbe.key())),
         ],
     );
@@ -439,7 +440,8 @@ fn an_annotation_menu_holds_only_what_applies_to_it() {
         .chain(turns)
         .chain(clipboard)
         .collect();
-    assert_eq!(label, expected);
+    assert_eq!(label[..label.len() - 1], expected);
+    assert_eq!(label.last(), Some(&"Highlight net"));
 
     let note = menu(&mut state, &|selection| {
         selection.select_only_design_note(74)

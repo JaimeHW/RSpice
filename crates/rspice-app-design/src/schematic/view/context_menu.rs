@@ -298,6 +298,11 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         Some(ids::SHOW_IN_NETLIST),
     ),
     design_row(
+        ContextAction::HighlightNet,
+        DesignCommand::HighlightNet,
+        None,
+    ),
+    design_row(
         ContextAction::Probe,
         DesignCommand::PlaceProbe,
         Some(ContextIcon::Probe),
@@ -548,6 +553,8 @@ fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
         ContextAction::UpdateAllInstanceInterfaces => instance || subject == S::Canvas,
         ContextAction::CreateHierarchy => part || subject == S::Selection,
         ContextAction::ShowInNetlist => part,
+        // A wire or a label names one net; a part's pins are on several.
+        ContextAction::HighlightNet => matches!(subject, S::Wire | S::NetLabel),
         // A probe goes on a part or a wire; the canvas's own probe is the tool.
         ContextAction::Probe => part || matches!(subject, S::Wire | S::Pin),
         ContextAction::OperatingPoint => part || subject == S::Canvas,
@@ -1708,6 +1715,13 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             "Run a DC operating-point analysis with device OP reporting first",
         ),
         ContextAction::DrawWireFromHere | ContextAction::NameNet => (true, ""),
+        ContextAction::HighlightNet => match super::interaction::selected_net(
+            state.model,
+            state.design.schematic_visibility.net_highlighting,
+        ) {
+            Ok(_) => (true, ""),
+            Err(reason) => (false, reason),
+        },
         ContextAction::FinishRoute => (
             route_points(state) >= 2,
             "Click a second point to finish the route",
@@ -1863,6 +1877,7 @@ pub fn execute_context_action(
         | ContextAction::ReplaceInstance
         | ContextAction::CreateHierarchy
         | ContextAction::FitContent
+        | ContextAction::HighlightNet
         | ContextAction::Choose(_) => {}
     }
 }
@@ -1894,6 +1909,7 @@ const fn row_command(action: ContextAction) -> Option<CommandKey> {
         ContextAction::ReplaceInstance => DesignCommand::ReplaceInstance.key(),
         ContextAction::CreateHierarchy => DesignCommand::CreateHierarchy.key(),
         ContextAction::FitContent => DesignCommand::FitSchematicContent.key(),
+        ContextAction::HighlightNet => DesignCommand::HighlightNet.key(),
         _ => return None,
     })
 }

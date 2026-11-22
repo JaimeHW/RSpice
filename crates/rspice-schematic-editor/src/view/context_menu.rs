@@ -124,6 +124,8 @@ pub enum ContextAction {
     DrawWireFromHere,
     /// Name the net where the menu was opened, with a label there.
     NameNet,
+    /// Light the net of the wire or label the menu was opened on.
+    HighlightNet,
 }
 
 /// The Arrange page's commands, in the Design menu's order: turn and flip,
