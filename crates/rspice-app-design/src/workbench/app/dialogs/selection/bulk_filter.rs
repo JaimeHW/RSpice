@@ -9,25 +9,16 @@ use serde::{Deserialize, Serialize};
 pub enum SelectionBulkObjectKind {
     #[default]
     InstancesAndParameters,
-    NetsAndLabels,
     PortsAndPins,
-    GraphicsAndNotes,
 }
 
 impl SelectionBulkObjectKind {
-    pub const ALL: [Self; 4] = [
-        Self::InstancesAndParameters,
-        Self::NetsAndLabels,
-        Self::PortsAndPins,
-        Self::GraphicsAndNotes,
-    ];
+    pub const ALL: [Self; 2] = [Self::InstancesAndParameters, Self::PortsAndPins];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::InstancesAndParameters => "Instances + parameters",
-            Self::NetsAndLabels => "Nets and labels",
             Self::PortsAndPins => "Ports and pins",
-            Self::GraphicsAndNotes => "Graphics and notes",
         }
     }
 }

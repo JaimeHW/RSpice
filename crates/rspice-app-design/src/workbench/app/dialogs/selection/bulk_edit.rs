@@ -90,13 +90,6 @@ enum SelectionBulkRowKind {
     Instance,
     Port,
     Pin,
-    Wire,
-    Bus,
-    BusTap,
-    Junction,
-    NetLabel,
-    DesignNote,
-    DocumentationShape,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -679,9 +672,7 @@ fn selection_bulk_body(
                     let response = text_field(
                         ui,
                         TextEdit::singleline(&mut dialog.filter.query)
-                            .hint_text(
-                                "Find instance, property, model, net, expression or path\u{2026}",
-                            )
+                            .hint_text("Find instance, property, model, expression or path\u{2026}")
                             .margin(egui::Margin {
                                 left: 29,
                                 right: 8,
@@ -1504,164 +1495,54 @@ fn append_buffer_rows(
             design_management.sheet_for_object_or_active(view_key, id) == Some(sheet)
         })
     };
-    match filter.object_kind {
-        SelectionBulkObjectKind::InstancesAndParameters | SelectionBulkObjectKind::PortsAndPins => {
-            for component in &schematic.components {
-                let is_port = component.kind == ComponentType::Port;
-                if (filter.object_kind == SelectionBulkObjectKind::InstancesAndParameters
-                    && is_port)
-                    || (filter.object_kind == SelectionBulkObjectKind::PortsAndPins && !is_port)
-                    || !on_current_sheet(component.id)
-                    || !component_matches_model_cell(component, &filter.model_cell)
-                    || !component_matches_current_property(component, &filter.current_property)
-                {
-                    continue;
-                }
-                let kind = if is_port {
-                    SelectionBulkRowKind::Port
-                } else {
-                    SelectionBulkRowKind::Instance
-                };
-                rows.push(component_row(
-                    view_key,
-                    display_path,
-                    component,
-                    kind,
-                    active_owner,
-                    property,
-                ));
-                if filter.object_kind == SelectionBulkObjectKind::PortsAndPins {
-                    for (index, (terminal, _)) in component.terminal_positions().iter().enumerate()
-                    {
-                        rows.push(SelectionBulkRow {
-                            key: SelectionBulkRowKey {
-                                view_key: view_key.to_owned(),
-                                kind: SelectionBulkRowKind::Pin,
-                                object_id: component.id,
-                                member: index as u32,
-                            },
-                            object: format!("Pin {terminal}"),
-                            path: format!(
-                                "{display_path}/{}:{terminal}",
-                                if component.name.is_empty() {
-                                    component.id.to_string()
-                                } else {
-                                    component.name.clone()
-                                }
-                            ),
-                            value: "terminal contract".to_owned(),
-                            search_text: format!(
-                                "{terminal} {} {} terminal pin port",
-                                component.name, component.params
-                            ),
-                            lock: Some("Master-owned".to_owned()),
-                        });
-                    }
-                }
-            }
+    for component in &schematic.components {
+        let is_port = component.kind == ComponentType::Port;
+        if (filter.object_kind == SelectionBulkObjectKind::InstancesAndParameters && is_port)
+            || (filter.object_kind == SelectionBulkObjectKind::PortsAndPins && !is_port)
+            || !on_current_sheet(component.id)
+            || !component_matches_model_cell(component, &filter.model_cell)
+            || !component_matches_current_property(component, &filter.current_property)
+        {
+            continue;
         }
-        SelectionBulkObjectKind::NetsAndLabels => {
-            if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
-                return;
-            }
-            for wire in &schematic.wires {
-                if on_current_sheet(wire.id) {
-                    rows.push(non_editable_row(
-                        view_key,
-                        display_path,
-                        SelectionBulkRowKind::Wire,
-                        wire.id,
-                        "Wire",
-                        format!("{} vertices", wire.points.len()),
-                        active_owner,
-                    ));
-                }
-            }
-            for bus in &schematic.buses {
-                if on_current_sheet(bus.id) {
-                    rows.push(non_editable_row(
-                        view_key,
-                        display_path,
-                        SelectionBulkRowKind::Bus,
-                        bus.id,
-                        "Bus",
-                        bus.declaration
-                            .as_ref()
-                            .map(ToString::to_string)
-                            .unwrap_or_else(|| "untyped".to_owned()),
-                        active_owner,
-                    ));
-                }
-            }
-            for tap in &schematic.bus_taps {
-                if on_current_sheet(tap.id) {
-                    rows.push(non_editable_row(
-                        view_key,
-                        display_path,
-                        SelectionBulkRowKind::BusTap,
-                        tap.id,
-                        "Bus tap",
-                        tap.slice.to_string(),
-                        active_owner,
-                    ));
-                }
-            }
-            for junction in &schematic.junctions {
-                if on_current_sheet(junction.id) {
-                    rows.push(non_editable_row(
-                        view_key,
-                        display_path,
-                        SelectionBulkRowKind::Junction,
-                        junction.id,
-                        "Junction",
-                        format!("{}, {}", junction.pos.x, junction.pos.y),
-                        active_owner,
-                    ));
-                }
-            }
-            for label in &schematic.net_labels {
-                if on_current_sheet(label.id) {
-                    rows.push(non_editable_row(
-                        view_key,
-                        display_path,
-                        SelectionBulkRowKind::NetLabel,
-                        label.id,
-                        &label.name,
-                        "net label".to_owned(),
-                        active_owner,
-                    ));
-                }
-            }
-        }
-        SelectionBulkObjectKind::GraphicsAndNotes => {
-            if !filter.model_cell.trim().is_empty() || !filter.current_property.trim().is_empty() {
-                return;
-            }
-            for note in &schematic.design_notes {
-                if on_current_sheet(note.id) {
-                    rows.push(non_editable_row(
-                        view_key,
-                        display_path,
-                        SelectionBulkRowKind::DesignNote,
-                        note.id,
-                        "Design note",
-                        note.text.clone(),
-                        active_owner,
-                    ));
-                }
-            }
-            for shape in &schematic.documentation_shapes {
-                if on_current_sheet(shape.id) {
-                    rows.push(non_editable_row(
-                        view_key,
-                        display_path,
-                        SelectionBulkRowKind::DocumentationShape,
-                        shape.id,
-                        "Documentation shape",
-                        shape.kind().label().to_owned(),
-                        active_owner,
-                    ));
-                }
+        let kind = if is_port {
+            SelectionBulkRowKind::Port
+        } else {
+            SelectionBulkRowKind::Instance
+        };
+        rows.push(component_row(
+            view_key,
+            display_path,
+            component,
+            kind,
+            active_owner,
+            property,
+        ));
+        if filter.object_kind == SelectionBulkObjectKind::PortsAndPins {
+            for (index, (terminal, _)) in component.terminal_positions().iter().enumerate() {
+                rows.push(SelectionBulkRow {
+                    key: SelectionBulkRowKey {
+                        view_key: view_key.to_owned(),
+                        kind: SelectionBulkRowKind::Pin,
+                        object_id: component.id,
+                        member: index as u32,
+                    },
+                    object: format!("Pin {terminal}"),
+                    path: format!(
+                        "{display_path}/{}:{terminal}",
+                        if component.name.is_empty() {
+                            component.id.to_string()
+                        } else {
+                            component.name.clone()
+                        }
+                    ),
+                    value: "terminal contract".to_owned(),
+                    search_text: format!(
+                        "{terminal} {} {} terminal pin port",
+                        component.name, component.params
+                    ),
+                    lock: Some("Master-owned".to_owned()),
+                });
             }
         }
     }
@@ -1754,34 +1635,6 @@ fn component_row(
             component.bom.description
         ),
         lock,
-    }
-}
-
-fn non_editable_row(
-    view_key: &str,
-    display_path: &str,
-    kind: SelectionBulkRowKind,
-    object_id: u64,
-    object: &str,
-    value: String,
-    active_owner: bool,
-) -> SelectionBulkRow {
-    SelectionBulkRow {
-        key: SelectionBulkRowKey {
-            view_key: view_key.to_owned(),
-            kind,
-            object_id,
-            member: 0,
-        },
-        object: object.to_owned(),
-        path: format!("{display_path}/{object_id}"),
-        search_text: format!("{object} {value}"),
-        value,
-        lock: Some(if active_owner {
-            "Not applicable".to_owned()
-        } else {
-            "Other owner".to_owned()
-        }),
     }
 }
 

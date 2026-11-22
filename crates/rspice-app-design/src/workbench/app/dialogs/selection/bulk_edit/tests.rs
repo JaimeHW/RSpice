@@ -823,3 +823,33 @@ fn port_rows_only_accept_the_display_property() {
     let display_rows = build_rows(&state.model, &filter, SelectionBulkProperty::Display);
     assert!(display_rows[0].editable());
 }
+
+/// Nets, labels, notes and shapes were offered as object kinds though no
+/// property reached them: every row was locked and Apply never acted on
+/// one. Every kind the filter offers now lists something a property edits.
+#[test]
+fn every_object_kind_offered_lists_rows_a_property_edits() {
+    let mut state = DesignTestHost::default();
+    let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(0, 0));
+    resistor.name = "R1".to_owned();
+    resistor.value = "1k".to_owned();
+    state.model.schematic.document_mut_for_test().components = vec![
+        resistor,
+        Component::new(2, ComponentType::Port, Point::new(200, 0)).with_name_value("VIN", ""),
+    ];
+    for kind in SelectionBulkObjectKind::ALL {
+        let filter = SelectionBulkFilter {
+            object_kind: kind,
+            ..SelectionBulkFilter::default()
+        };
+        assert!(
+            BULK_PROPERTIES.into_iter().any(|property| {
+                build_rows(&state.model, &filter, property)
+                    .iter()
+                    .any(SelectionBulkRow::editable)
+            }),
+            "{} lists nothing any property can edit",
+            kind.label()
+        );
+    }
+}
