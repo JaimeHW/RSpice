@@ -300,20 +300,21 @@ pub fn render_schematic_view(
         drawing_sheet::FIT_SCREEN_INSET,
     );
 
-    if canvas
-        .model
-        .schematic
-        .session
-        .editor
-        .needs_drawing_sheet_fit
-    {
+    // A content fit (a file just opened, Fit content) outranks the sheet fit
+    // a new session starts with. Either way an empty drawing is framed on
+    // its sheet, never left at 100 % on a corner of the paper.
+    let editor = &mut canvas.model.schematic.session.editor;
+    let fit_content = std::mem::take(&mut editor.needs_fit);
+    let fit_sheet = std::mem::take(&mut editor.needs_drawing_sheet_fit);
+    let content_bounds = fit_content
+        .then(|| symbol_context.content_bounds(canvas.model.schematic.document()))
+        .flatten();
+    if let Some(bounds) = content_bounds {
         canvas
             .model
             .schematic
-            .session
-            .editor
-            .needs_drawing_sheet_fit = false;
-        canvas.model.schematic.session.editor.needs_fit = false;
+            .zoom_to_fit_bounds(bounds, canvas_width, canvas_height, min_zoom);
+    } else if fit_content || fit_sheet {
         canvas.model.schematic.zoom_to_fit_world_rect(
             drawing_sheet.geometry.paper.as_tuple(),
             canvas_width,
@@ -321,13 +322,6 @@ pub fn render_schematic_view(
             drawing_sheet::FIT_SCREEN_INSET,
             min_zoom,
         );
-    } else if canvas.model.schematic.session.editor.needs_fit {
-        canvas.model.schematic.session.editor.needs_fit = false;
-        let bounds = symbol_context.content_bounds(canvas.model.schematic.document());
-        canvas
-            .model
-            .schematic
-            .zoom_to_fit_bounds(bounds, canvas_width, canvas_height, min_zoom);
     }
     if let Some(target) = canvas.model.schematic.session.editor.center_request.take() {
         canvas

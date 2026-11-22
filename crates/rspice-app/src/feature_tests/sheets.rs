@@ -16,6 +16,7 @@ mod sheet_edit;
 #[cfg(not(target_arch = "wasm32"))]
 mod sheet_inspector;
 mod sheet_strip;
+mod sheet_view;
 
 use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::drawing_sheet_edit::{

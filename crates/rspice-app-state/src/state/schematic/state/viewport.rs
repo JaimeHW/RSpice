@@ -58,18 +58,11 @@ impl SchematicState {
 
     pub fn zoom_to_fit_bounds(
         &mut self,
-        bounds: Option<(i32, i32, i32, i32)>,
+        (min_x, min_y, max_x, max_y): (i32, i32, i32, i32),
         viewport_width: f64,
         viewport_height: f64,
         min_zoom: f64,
     ) {
-        let Some((min_x, min_y, max_x, max_y)) = bounds else {
-            // No content - reset to default view
-            self.session.editor.zoom = 1.0;
-            self.session.editor.pan = (0.0, 0.0);
-            return;
-        };
-
         // content_bounds returns schematic pixel coordinates, not grid cell indices
         // So we use them directly without multiplying by grid_size
         let min_px = min_x as f64;

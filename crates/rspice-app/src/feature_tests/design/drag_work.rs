@@ -89,7 +89,7 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
         .expect("the part is on the sheet");
     let grid = state.model.schematic.document().grid_size;
     let editor = &mut state.model.schematic.session.editor;
-    editor.needs_fit = false;
+    (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
     editor.zoom = 1.0;
     editor.pan = (
         f64::from(SCREEN.x) * 0.5 - f64::from(at.x),

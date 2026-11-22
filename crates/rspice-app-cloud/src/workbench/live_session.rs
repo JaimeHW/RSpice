@@ -1767,6 +1767,7 @@ fn install_schematic_buffer(
     remote_is_unsaved: bool,
 ) {
     prepared.session.editor.needs_fit = false;
+    prepared.session.editor.needs_drawing_sheet_fit = false;
     prepared.session.is_dirty = remote_is_unsaved;
     prepared.session.needs_history_reset = true;
     if state.model.workspace.content.active_key() == cell_key {

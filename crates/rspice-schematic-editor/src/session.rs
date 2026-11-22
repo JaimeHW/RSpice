@@ -120,6 +120,8 @@ pub struct EditorSession {
     pub needs_fit: bool,
 
     /// One-shot request to frame the authored drawing-sheet paper boundary.
+    /// A new session starts with it, so a schematic first shows framed on its
+    /// sheet, as KiCad and Altium open one fitted to the page.
     ///
     /// This is deliberately distinct from [`Self::needs_fit`], which frames
     /// schematic objects and may include content parked off the paper.
@@ -190,7 +192,7 @@ impl Default for EditorSession {
             pending_documentation_shape: Default::default(),
             documentation_shape_drawing: Default::default(),
             needs_fit: Default::default(),
-            needs_drawing_sheet_fit: Default::default(),
+            needs_drawing_sheet_fit: true,
             center_request: Default::default(),
             zoom_request: Default::default(),
             zoom_box: Default::default(),

@@ -401,7 +401,7 @@ fn a_design_that_does_not_resolve_is_projected_at_the_drop_not_on_each_move() {
 fn drag_a_part(mut replay: Replay, folder: std::path::PathBuf, resolves: bool) {
     replay.app.state.workbench.activate(Workspace::Design);
     let editor = &mut replay.app.state.model.schematic.session.editor;
-    editor.needs_fit = false;
+    (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
     editor.zoom = 1.0;
     // A live check stands on the drawing, as one does once any edit has
     // settled, and whether its findings are current is asked every frame.
