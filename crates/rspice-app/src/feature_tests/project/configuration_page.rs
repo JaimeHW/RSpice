@@ -422,7 +422,7 @@ fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
         "1,082,401 instances",
     ] {
         assert!(
-            shown.says(&fact),
+            shown.says(fact),
             "the page must state {fact:?}: {:#?}",
             shown.every_word().collect::<Vec<_>>()
         );
