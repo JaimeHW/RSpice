@@ -2603,7 +2603,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
     "rspice-app-workbench/src/workbench/tools/notification_center.rs::foot",
-    "rspice-app-project/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
     "rspice-app-design/src/workbench/app/dialogs/design_review_comments.rs::review_message",
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
     "rspice-app-design/src/workbench/design/navigator.rs::tabs",

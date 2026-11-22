@@ -596,12 +596,12 @@ impl RSpiceApp {
         } else if !self.state.shell.exit_reviewed
             && ctx.input(|input| input.viewport().close_requested())
         {
-            // The title bar's close asks about unsaved work as File > Exit
-            // does; the close that exit sends once answered goes through.
+            // The title bar's close is File > Exit, raised through the one
+            // dispatcher, so it asks about unsaved work as the menu row does;
+            // the close that exit sends once answered goes through.
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            crate::workbench::commands::file_action(
-                self,
-                crate::workbench::menu_bar::FileMenuAction::Exit,
+            self.execute_command_key(
+                crate::workbench::commands::vocabulary::ShellCommand::Exit.key(),
             );
         } else if should_persist_application_state(&self.state)
             && ctx.input(|input| input.viewport().close_requested())
