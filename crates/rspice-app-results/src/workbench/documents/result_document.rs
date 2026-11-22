@@ -2546,6 +2546,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         ResultViewer::PoleZero => return pz::domain_bar(ui, state),
         ResultViewer::Hist => return hist::domain_bar(ui, state),
         ResultViewer::Op => return op_inspector::domain_bar(ui, state),
+        ResultViewer::PhaseNoise => return phase_noise::domain_bar(ui, state),
         _ => {}
     }
     let mut context = SheetContext::of(state);

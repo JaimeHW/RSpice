@@ -2739,6 +2739,9 @@ fn validate_sheet_setting(setting: &SheetSetting) -> Result<(), VisualizationErr
             return Ok(());
         }
         SheetSettingValue::Histogram(reading) => return validate_histogram_reading(reading),
+        SheetSettingValue::PhaseNoise { spots, band, .. } => {
+            return validate_phase_noise_setting(spots, *band);
+        }
     };
     ensure_maximum_len(
         "sheet-setting.markers",
@@ -2790,6 +2793,37 @@ fn validate_histogram_reading(reading: &HistogramReading) -> Result<(), Visualiz
                 "a histogram cannot judge against {:?} to {:?}",
                 reading.lower_limit, reading.upper_limit
             ),
+        });
+    }
+    Ok(())
+}
+
+/// Phase-noise spots are finite positive offsets, and the band runs from a
+/// finite positive offset up to a higher one.
+fn validate_phase_noise_setting(
+    spots: &[f64],
+    band: Option<[f64; 2]>,
+) -> Result<(), VisualizationError> {
+    ensure_maximum_len(
+        "sheet-setting.spots",
+        spots.len(),
+        MAX_VISUALIZATION_MARKERS,
+    )?;
+    if let Some(spot) = spots
+        .iter()
+        .find(|spot| !(spot.is_finite() && **spot > 0.0))
+    {
+        return Err(VisualizationError::InvalidValue {
+            field: "sheet-setting.spots",
+            message: format!("L(f) cannot be read at {spot} Hz"),
+        });
+    }
+    if let Some([low, high]) = band
+        && !(low.is_finite() && high.is_finite() && low > 0.0 && low < high)
+    {
+        return Err(VisualizationError::InvalidValue {
+            field: "sheet-setting.band",
+            message: format!("{low} Hz to {high} Hz is not a band of offsets"),
         });
     }
     Ok(())

@@ -1970,6 +1970,15 @@ pub enum SheetSettingValue {
     },
     /// Whether the pole-zero map is drawn on a logarithmic plane.
     PoleZero { logarithmic: bool },
+    /// The offsets the phase-noise sheet reads L(f) at, in hertz, the band
+    /// of offsets it integrates (the whole sweep when `None`), and whether
+    /// it draws slope guides.
+    PhaseNoise {
+        #[serde(deserialize_with = "deserialize_spot_offsets")]
+        spots: Vec<f64>,
+        band: Option<[f64; 2]>,
+        slopes: bool,
+    },
     /// How the histogram reads one measurement of a population.
     Histogram(HistogramReading),
 }
@@ -2012,8 +2021,16 @@ impl SheetSettingValue {
             Self::Bode { .. } => crate::result_presentation::ResultViewer::Bode,
             Self::PoleZero { .. } => crate::result_presentation::ResultViewer::PoleZero,
             Self::Histogram(_) => crate::result_presentation::ResultViewer::Hist,
+            Self::PhaseNoise { .. } => crate::result_presentation::ResultViewer::PhaseNoise,
         }
     }
+}
+
+fn deserialize_spot_offsets<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_MARKERS>(deserializer)
 }
 
 /// A Smith marker: the locus it sits on, by name, and the frequency it sits
