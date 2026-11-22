@@ -21,6 +21,7 @@
 //! the verdict stale rather than racing it.
 
 mod engine_refusals;
+mod first_run;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::simulation::controller::{PreflightOutcome, PreflightVerdict};
@@ -136,6 +137,19 @@ pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, qu
         let execution = &state.model().simulation.execution;
         if execution.has_active_execution() || execution.trigger_simulation {
             state.prompt("A simulation is already running or waiting to start.");
+            return;
+        }
+        // The first Run of a plan nobody has edited picks its analysis from
+        // the drawing's sources. The choice is a plan edit, and the frame that
+        // makes an edit drops every check started in it, so the run is asked
+        // for again and starts on the next frame, against the plan as chosen.
+        if let Some(choice) = first_run::choose_first_analysis(state.model_mut()) {
+            invalidate(&mut state.runs_mut().preflight, controller);
+            state
+                .model_mut()
+                .record(LogSeverity::Info, LogSource::Plan, choice.clone());
+            state.prompt(choice);
+            state.runs_mut().preflight.request_run_and_queue();
             return;
         }
 

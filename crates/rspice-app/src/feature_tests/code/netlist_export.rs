@@ -65,6 +65,28 @@ pub(crate) fn export_spice(app: &mut crate::RSpiceApp, path: &std::path::Path) {
 #[test]
 fn a_spice_export_moved_whole_runs_as_the_application_runs_the_design() {
     let (mut user, device) = wired_device();
+    // The deck is held to Run plan point for point over a transient. A first
+    // Run of a drawing whose only source is DC would choose an operating
+    // point, so the plan is given its transient before that Run.
+    let plan = user
+        .app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("the plan resolves");
+    let transient = plan.instances()[0].id();
+    plan.edit(transient, |draft| {
+        if let rspice_simulation_contract::analysis_draft::AnalysisDraft::Transient(setup) = draft {
+            "1m".clone_into(&mut setup.stop);
+        }
+    })
+    .expect("the transient takes its stop time");
+    user.app
+        .state
+        .model
+        .sim_setup
+        .refresh_legacy_analysis_projections();
     let outcome = run_plan(&mut user, &device);
     let folder = std::env::temp_dir().join(format!("rspice_spice_export_{}", std::process::id()));
     let moved = folder.with_extension("moved");

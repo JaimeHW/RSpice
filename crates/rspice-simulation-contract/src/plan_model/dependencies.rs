@@ -201,8 +201,9 @@ impl SimulationPlan {
     ///
     /// The complete repair commits as one revision and one lifecycle receipt.
     /// Any identity, lifecycle, revision, or graph failure leaves the original
-    /// plan unchanged.
-    #[cfg(test)]
+    /// plan unchanged. No circuit context is consulted, which is all a
+    /// prerequisite the circuit names nothing for needs, such as the
+    /// operating point an AC sweep linearizes about.
     pub fn repair_dependencies(
         &mut self,
         dependent: AnalysisInstanceId,

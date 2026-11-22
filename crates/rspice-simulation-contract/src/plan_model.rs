@@ -563,6 +563,13 @@ pub struct SimulationPlan {
     #[serde(default)]
     configuration_receipts: Vec<SimulationPlanConfigurationReceipt>,
     next_receipt_sequence: u64,
+    /// Nobody has edited this plan: it is the one a new project starts with.
+    /// Every committed edit clears it, which the revision alone cannot say,
+    /// because a plan built from parts starts at the initial revision too.
+    /// Written only while it holds, so an edited plan's stored form and
+    /// digest are what they were before the flag existed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    untouched: bool,
 }
 
 impl Default for SimulationPlan {
@@ -587,10 +594,12 @@ impl SimulationPlan {
             receipts: Vec::new(),
             configuration_receipts: Vec::new(),
             next_receipt_sequence: 1,
+            untouched: false,
         }
     }
 
-    /// Fresh plans contain one enabled transient instance.
+    /// Fresh plans contain one enabled transient instance, and nobody has
+    /// edited them yet.
     #[must_use]
     pub fn new() -> Self {
         let revision = ObjectRevision::INITIAL;
@@ -613,6 +622,7 @@ impl SimulationPlan {
             receipts: Vec::new(),
             configuration_receipts: Vec::new(),
             next_receipt_sequence: 1,
+            untouched: true,
         }
     }
 
@@ -713,6 +723,7 @@ impl SimulationPlan {
             receipts: Vec::new(),
             configuration_receipts: Vec::new(),
             next_receipt_sequence: 1,
+            untouched: false,
         };
         cloned.ensure_structurally_valid()?;
         Ok(cloned)
@@ -774,6 +785,7 @@ impl SimulationPlan {
             receipts,
             configuration_receipts,
             next_receipt_sequence,
+            untouched: false,
         };
         plan.ensure_structurally_valid()?;
         Ok(plan)
@@ -782,6 +794,13 @@ impl SimulationPlan {
     #[must_use]
     pub const fn id(&self) -> SimulationPlanId {
         self.id
+    }
+
+    /// Whether nobody has edited this plan since a new project made it: the
+    /// first Run then chooses its analysis from the drawing's sources.
+    #[must_use]
+    pub const fn is_untouched(&self) -> bool {
+        self.untouched
     }
 
     #[must_use]
@@ -963,6 +982,7 @@ impl SimulationPlan {
         let sequence = candidate.next_receipt_sequence;
         candidate.revision = committed_revision;
         candidate.next_receipt_sequence = next_sequence;
+        candidate.untouched = false;
         change(&mut candidate, committed_revision);
         // The digest states the plan as adopted, so it is taken after the
         // revision advances and before the receipt that carries it is
@@ -1669,6 +1689,7 @@ impl SimulationPlan {
         let committed_revision = source_revision.next()?;
         let result = mutation(&mut candidate, committed_revision)?;
         candidate.revision = committed_revision;
+        candidate.untouched = false;
         let next_sequence = candidate
             .next_receipt_sequence
             .checked_add(1)

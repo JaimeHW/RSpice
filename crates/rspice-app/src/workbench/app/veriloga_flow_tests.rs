@@ -239,7 +239,7 @@ impl User {
 
     /// Place `kind` with its first terminal on `terminal`, as a placement
     /// click on the canvas does.
-    fn place(&mut self, kind: ComponentType, terminal: Point) -> u64 {
+    pub(crate) fn place(&mut self, kind: ComponentType, terminal: Point) -> u64 {
         let anchor = Component::new(0, kind, Point::origin())
             .terminal_positions_resolved(None)
             .first()
@@ -256,7 +256,7 @@ impl User {
     }
 
     /// Draw a wire through `points` with the canvas's wire tool.
-    fn wire(&mut self, points: &[Point]) {
+    pub(crate) fn wire(&mut self, points: &[Point]) {
         let schematic = &mut self.app.state.model.schematic;
         schematic.start_wire(points[0]);
         for point in &points[1..] {
@@ -269,7 +269,7 @@ impl User {
     }
 
     /// The other terminal of a two-terminal device placed by [`Self::place`].
-    fn second_terminal(&self, id: u64) -> Point {
+    pub(crate) fn second_terminal(&self, id: u64) -> Point {
         self.component(id)
             .terminal_positions_resolved(None)
             .get(1)
@@ -708,8 +708,9 @@ pub(crate) fn run_plan_of_instance(
     }
     let out_node = line[3].to_owned();
 
-    // A new project's plan is one transient: the DC operating point is the
-    // one it starts from, its first sample, and a static circuit holds it.
+    // A new project's first Run of a drawing with only a DC source runs an
+    // operating point; a plan that runs a transient starts from that point,
+    // its first sample, and a static circuit holds it.
     let name = format!("V({out_node})");
     let out_volts = match run
         .analyses

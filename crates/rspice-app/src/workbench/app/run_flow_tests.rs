@@ -868,3 +868,142 @@ fn the_net_inspector_plot_button_reads_and_toggles_the_plot() {
     assert!(plotted(&user, name), "and a second puts it back");
     assert!(user.find("Plotted: V(out)").is_some());
 }
+
+/// A source and a 1 kΩ load to ground on a new project's top sheet: `kind`
+/// with `params` across the load.
+fn new_project_driven_by(kind: rspice_app_state::state::ComponentType, params: &str) -> User {
+    use rspice_app_state::state::{ComponentType, Point};
+    let (mut user, _) = super::veriloga_flow_tests::new_project();
+    let plus = Point::new(200, 200);
+    let source = user.place(kind, plus);
+    if !params.is_empty() {
+        let placed = user.component(source);
+        let mut set = placed.clone();
+        params.clone_into(&mut set.params);
+        assert_eq!(
+            user.app
+                .state
+                .model
+                .edit_component_transaction(&placed, set, "edit source"),
+            Ok(true)
+        );
+    }
+    let minus = user.second_terminal(source);
+    user.wire(&[minus, minus + Point::new(0, 20)]);
+    user.place(ComponentType::Ground, minus + Point::new(0, 20));
+    let out = plus + Point::new(100, 0);
+    user.wire(&[plus, out]);
+    let load = user.place(ComponentType::Resistor, out);
+    let load_minus = user.second_terminal(load);
+    user.wire(&[load_minus, load_minus + Point::new(0, 20)]);
+    user.place(ComponentType::Ground, load_minus + Point::new(0, 20));
+    user.settle();
+    user
+}
+
+/// The enabled analyses of the active plan, as drafts.
+fn planned(user: &User) -> Vec<rspice_simulation_contract::analysis_draft::AnalysisDraft> {
+    user.app
+        .state
+        .model
+        .sim_setup
+        .enabled_analysis_instances()
+        .map(|instance| instance.draft().clone())
+        .collect()
+}
+
+/// The first Run of a new project's plan runs what its drawing asks for,
+/// once: a 1 kHz sine gives a transient over five of its periods, which the
+/// plan keeps and the Console states, and the next Run runs the plan as it
+/// stands.
+#[test]
+fn a_new_projects_first_run_shows_five_periods_of_its_sine() {
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    let mut user = new_project_driven_by(
+        rspice_app_state::state::ComponentType::VoltageSourceSin,
+        "freq=1k",
+    );
+    let untouched = |user: &User| {
+        user.app
+            .state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .is_ok_and(|plan| plan.is_untouched())
+    };
+    assert!(untouched(&user), "drawing edits no plan");
+
+    run_to_its_end(&mut user);
+    let analyses = planned(&user);
+    let [AnalysisDraft::Transient(setup)] = analyses.as_slice() else {
+        panic!("one transient: {analyses:?}");
+    };
+    assert_eq!(setup.stop, "5m");
+    assert!(!untouched(&user));
+    assert!(
+        user.app.state.model.log_buffer.entries().any(|entry| entry
+            .message
+            .contains("Run chose Transient, 5 ms: five periods of V1")),
+        "the choice is stated"
+    );
+    let run = &user.app.state.model.simulation.retained.runs[0];
+    let end = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.waveforms)
+        .find_map(|wave| wave.x.samples(..).last())
+        .expect("the run holds a waveform");
+    assert!((end - 5e-3).abs() < 1e-6, "the run ends at {end} s");
+
+    let revision = user
+        .app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.revision())
+        .unwrap();
+    run_to_its_end(&mut user);
+    assert_eq!(
+        user.app
+            .state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .map(|plan| plan.revision())
+            .unwrap(),
+        revision,
+        "a second Run leaves the plan as it stands"
+    );
+}
+
+/// A drawing with only a DC source settles to an operating point, and one
+/// whose source carries only an AC magnitude sweeps it.
+#[test]
+fn a_new_projects_first_run_settles_a_dc_drawing_and_sweeps_an_ac_one() {
+    use rspice_app_state::state::ComponentType;
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    let mut user = new_project_driven_by(ComponentType::VoltageSource, "");
+    run_to_its_end(&mut user);
+    assert!(
+        matches!(
+            planned(&user).as_slice(),
+            [AnalysisDraft::OperatingPoint(_)]
+        ),
+        "{:?}",
+        planned(&user)
+    );
+
+    // The sweep linearizes about an operating point the plan runs first.
+    let mut user = new_project_driven_by(ComponentType::VoltageSourceAc, "");
+    run_to_its_end(&mut user);
+    assert!(
+        matches!(
+            planned(&user).as_slice(),
+            [AnalysisDraft::OperatingPoint(_), AnalysisDraft::Ac(_)]
+        ),
+        "{:?}",
+        planned(&user)
+    );
+}
+
