@@ -4,6 +4,7 @@
 
 use super::Model;
 use crate::state::{DesignSheet, DrawingSheetTitleFieldId, SchematicSheetFormat, SheetId};
+use rspice_design::schematic::off_sheet_references::off_sheet_partner_references;
 use rspice_design_model::design_management::{SheetTextVariables, drawing_sheet_page_label};
 use rspice_schematic_editor::view::drawing_sheet::{
     ActiveDrawingSheet, DrawingSheetGeometry, zone_on_format,
@@ -106,58 +107,23 @@ impl Model {
         let Some(active) = catalog.active_sheet_id() else {
             return HashMap::new();
         };
-        // Two connectors are partners when the netlister would join them,
-        // and it folds ASCII case.
-        let mut by_name: HashMap<String, Vec<(SheetId, &crate::state::NetLabel)>> = HashMap::new();
-        for connector in &self.schematic.document().net_labels {
-            if connector.kind.off_sheet_direction().is_some() {
-                let sheet = catalog.sheet_for_object(connector.id).unwrap_or(active);
-                by_name
-                    .entry(connector.name.trim().to_ascii_lowercase())
-                    .or_default()
-                    .push((sheet, connector));
-            }
-        }
         let mut formats: HashMap<SheetId, Option<SchematicSheetFormat>> = HashMap::new();
-        let mut references = HashMap::new();
-        for connectors in by_name.values() {
-            for &(sheet, connector) in connectors {
-                if sheet != active {
-                    continue;
-                }
-                let mut partners = connectors
-                    .iter()
-                    .filter(|(elsewhere, _)| *elsewhere != active)
-                    .filter_map(|&(elsewhere, partner)| {
-                        let (page, _) = catalog.page_number_and_count(elsewhere)?;
-                        let format = formats.entry(elsewhere).or_insert_with(|| {
-                            catalog
-                                .find(elsewhere)
-                                .map(|sheet| self.sheet_print_format(sheet))
-                        });
-                        let zone = format
-                            .as_ref()
-                            .and_then(|format| zone_on_format(format, partner.pos));
-                        Some((page, zone))
+        off_sheet_partner_references(
+            &self.schematic.document().net_labels,
+            catalog,
+            active,
+            |sheet, point| {
+                formats
+                    .entry(sheet)
+                    .or_insert_with(|| {
+                        catalog
+                            .find(sheet)
+                            .map(|sheet| self.sheet_print_format(sheet))
                     })
-                    .collect::<Vec<_>>();
-                if partners.is_empty() {
-                    continue;
-                }
-                partners.sort();
-                partners.dedup();
-                let partners = partners
-                    .into_iter()
-                    .map(|(page, zone)| match zone {
-                        Some(zone) => format!("p{page} {zone}"),
-                        None => format!("p{page}"),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                references.insert(connector.id, format!("[{partners}]"));
-            }
-        }
-        references
+                    .as_ref()
+                    .and_then(|format| zone_on_format(format, point))
+            },
+        )
     }
 
     /// The ISO 639 code of the language the project's documents are written

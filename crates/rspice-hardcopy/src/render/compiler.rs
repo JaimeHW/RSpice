@@ -465,6 +465,14 @@ impl<'a> SemanticSceneCompiler<'a> {
         }
         for label in &schematic.net_labels {
             self.schematic_net_label(label)?;
+            // Where an off-sheet connector's partners stand, after its tab.
+            if let Some(text) = schematic
+                .off_sheet_references
+                .get(&label.id)
+                .and_then(|partners| crate::sources::partner_reference_text(label, partners))
+            {
+                self.schematic_text(&text)?;
+            }
         }
 
         let library = SymbolLibrary::load_embedded()

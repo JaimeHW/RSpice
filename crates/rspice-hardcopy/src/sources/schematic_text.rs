@@ -32,6 +32,9 @@ pub enum SchematicTextClass {
     /// A net label's, an off-sheet connector's or a port's name: Plex Mono
     /// Medium, 11 wu.
     NetName,
+    /// Where an off-sheet connector's partners stand, lettered after its
+    /// tab: Plex Mono, 11 wu, in the dimmer ink of derived text.
+    PartnerReference,
 }
 
 impl SchematicTextClass {
@@ -41,7 +44,7 @@ impl SchematicTextClass {
             Self::Name => label_layout::INSTANCE_NAME_WORLD,
             Self::Value => label_layout::INSTANCE_VALUE_WORLD,
             Self::Slice => label_layout::SMALL_TEXT_WORLD,
-            Self::NetName => label_layout::NET_LABEL_FONT_WORLD,
+            Self::NetName | Self::PartnerReference => label_layout::NET_LABEL_FONT_WORLD,
         }
     }
 }
@@ -212,6 +215,32 @@ pub fn net_label_text(label: &NetLabel) -> SchematicText {
         size_percent: (layout.font_size / label_layout::NET_LABEL_FONT_WORLD * 100.0).round()
             as u16,
     }
+}
+
+/// Where an off-sheet connector's partners stand, `partners` such as
+/// `[p2 B3]`, lettered as the canvas letters it: a tab's gap after its tab,
+/// centred on it, at the connector's name size. `None` for a label with no
+/// tab.
+pub fn partner_reference_text(label: &NetLabel, partners: &str) -> Option<SchematicText> {
+    let layout = label_layout::net_label_layout(label);
+    let (tab, _) = layout.tab?;
+    Some(SchematicText {
+        class: SchematicTextClass::PartnerReference,
+        placed: PlacedText {
+            anchor: LayoutPoint::new(
+                tab.max.x + label_layout::CONNECTOR_TAB_GAP_WORLD,
+                (tab.min.y + tab.max.y) * 0.5,
+            ),
+            horizontal: TextEdge::Start,
+            vertical: TextEdge::Center,
+            upward: false,
+        },
+        text: partners.to_owned(),
+        size_percent: (label_layout::net_label_font_world(label)
+            / label_layout::NET_LABEL_FONT_WORLD
+            * 100.0)
+            .round() as u16,
+    })
 }
 
 /// Everything a net label draws, in world units: its attachment diamond,

@@ -159,6 +159,11 @@ pub struct SemanticSchematic {
     /// seats in the cell that names the legal owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawing_sheet_owner_logo: Option<DrawingSheetOwnerLogo>,
+    /// Where each off-sheet connector's partners stand, such as `[p2 B3]`,
+    /// by the connector's id, frozen with the page, which letters it after
+    /// the connector's tab as the canvas does.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub off_sheet_references: BTreeMap<u64, String>,
     /// Frozen authored snap-grid pitch in schematic world units. One world
     /// unit is exactly [`super::SCHEMATIC_UNIT_UM`] micrometres.
     #[serde(default = "default_schematic_grid_pitch_units")]

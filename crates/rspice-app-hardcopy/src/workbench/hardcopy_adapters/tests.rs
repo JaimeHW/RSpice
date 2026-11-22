@@ -223,6 +223,7 @@ fn the_canvas_and_the_plot_letter_a_title_in_any_script_alike() {
         drawing_sheet_title_values: title_values,
         drawing_sheet_page_numbering: None,
         drawing_sheet_owner_logo: None,
+        off_sheet_references: Default::default(),
         grid_pitch_units: 10,
         components: Vec::new(),
         wires: Vec::new(),

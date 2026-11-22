@@ -212,6 +212,13 @@ pub fn schematic_bounds(
         for rect in super::net_label_bounds(label).into_iter().flatten() {
             bounds.include_layout_rect(rect);
         }
+        if let Some(text) = schematic
+            .off_sheet_references
+            .get(&label.id)
+            .and_then(|partners| super::partner_reference_text(label, partners))
+        {
+            bounds.include_layout_rect(text.bounds());
+        }
     }
     let variables = schematic.sheet_text_variables(None);
     let note_context = schematic.note_render_context(&variables);
@@ -825,6 +832,7 @@ mod drawing_sheet_geometry_tests {
             drawing_sheet_title_values: std::collections::BTreeMap::new(),
             drawing_sheet_page_numbering: None,
             drawing_sheet_owner_logo: None,
+            off_sheet_references: Default::default(),
             grid_pitch_units: 10,
             components: Vec::new(),
             wires: Vec::new(),

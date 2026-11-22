@@ -34,6 +34,7 @@ pub(crate) fn resolve_blank_schematic_sheet_with_format(
         }),
         drawing_sheet_page_numbering: None,
         drawing_sheet_owner_logo: None,
+        off_sheet_references: Default::default(),
         grid_pitch_units: 10,
         components: Vec::new(),
         wires: Vec::new(),

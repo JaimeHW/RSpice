@@ -390,6 +390,7 @@ pub(super) fn sheet(components: Vec<Component>) -> SemanticSchematic {
         drawing_sheet_title_values: BTreeMap::new(),
         drawing_sheet_page_numbering: None,
         drawing_sheet_owner_logo: None,
+        off_sheet_references: Default::default(),
         grid_pitch_units: 10,
         components: components.into_iter().map(semantic).collect(),
         wires: Vec::new(),
@@ -1564,4 +1565,136 @@ fn a_printed_sheet_draws_in_the_export_inks_and_weights() {
         })
         .collect::<Vec<_>>();
     assert_eq!(dots, [(375, SceneFill::solid(wire))]);
+}
+
+#[test]
+fn each_printed_page_letters_where_its_connectors_partners_stand() {
+    use crate::sources::{SchematicHardcopySource, resolve_schematic_source};
+    use rspice_design::schematic::label_layout;
+    use rspice_design::schematic::{document::SchematicDocument, owned::Schematic};
+    use rspice_design_model::design_management::{
+        DrawingSheetInheritance, DrawingSheetProjectSettings, SheetCatalog, SheetDefinition,
+        SheetPortPolicy,
+    };
+
+    // CLK leaves the first sheet and arrives twice on the second; DATA has
+    // no partner anywhere.
+    let connector = |id, (x, y), name: &str, direction| {
+        NetLabel::off_sheet(id, SchematicPoint::new(x, y), name, direction)
+    };
+    let schematic = Schematic::from_document(SchematicDocument {
+        net_labels: vec![
+            connector(1, (100, 120), "CLK", CrossSheetPortDirection::Output),
+            connector(2, (100, 400), "DATA", CrossSheetPortDirection::Output),
+            connector(3, (60, 80), "clk", CrossSheetPortDirection::Input),
+            connector(4, (900, 600), "CLK", CrossSheetPortDirection::Input),
+        ],
+        ..SchematicDocument::default()
+    });
+    let definition = |name: &str| SheetDefinition {
+        name: name.to_owned(),
+        port_policy: SheetPortPolicy::TypedOffSheetPorts,
+        explicit_page_number: None,
+    };
+    let mut catalog = SheetCatalog::default();
+    let first = catalog.create_sheet(definition("Input"), None).unwrap();
+    let second = catalog
+        .create_sheet(definition("Output"), Some(first))
+        .unwrap();
+    catalog
+        .assign_objects(catalog.revision(), first, [1, 2])
+        .unwrap();
+    catalog
+        .assign_objects(catalog.revision(), second, [3, 4])
+        .unwrap();
+    let project_default = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    )
+    .try_update(|draft| draft.inheritance = DrawingSheetInheritance::ProjectDefault)
+    .unwrap();
+    let values = DrawingSheetProjectSettings::default().title_block_field_values;
+
+    let printed = |sheet_id| {
+        let source = resolve_schematic_source(SchematicHardcopySource {
+            identity: HardcopySourceIdentity::try_new(
+                "linked-connectors",
+                HardcopyDocumentId::try_from_uuid(Uuid::from_u128(0xc1c)).unwrap(),
+                ObjectRevision::INITIAL,
+                "Linked connectors",
+            )
+            .unwrap(),
+            schematic: &schematic,
+            selection: None,
+            expected_topology_version: schematic.topology_version(),
+            symbol_resolver: None,
+            sheet_catalog: Some(&catalog),
+            sheet_id: Some(sheet_id),
+            project_default_drawing_sheet: Some(&project_default),
+            project_title_block_field_values: Some(&values),
+            project_owner_logo: None,
+            scope: HardcopyScope::CurrentSheet,
+            parameter_labels: Default::default(),
+        })
+        .unwrap();
+        super::title_lettering::title_block_scene(&source)
+    };
+    // Each reference stands a tab's gap after its connector's tab, centred
+    // on it, in the dimmer value ink at the name's size.
+    let lettered = |scene: &HardcopyScene, id: u64| {
+        let label = schematic
+            .document()
+            .net_labels
+            .iter()
+            .find(|label| label.id == id)
+            .unwrap();
+        let (tab, _) = label_layout::net_label_layout(label).tab.unwrap();
+        let scene_x = |x: f32| {
+            ((f64::from(x) - SCHEMATIC_SHEET_ORIGIN_X_UNITS as f64) * UM as f64).round() as i64
+        };
+        let scene_y = |y: f32| {
+            ((f64::from(y) - SCHEMATIC_SHEET_ORIGIN_Y_UNITS as f64) * UM as f64).round() as i64
+        };
+        let (right, top, bottom) = (scene_x(tab.max.x), scene_y(tab.min.y), scene_y(tab.max.y));
+        let found = scene
+            .primitives()
+            .iter()
+            .filter_map(|primitive| match primitive {
+                ScenePrimitive::Text {
+                    origin,
+                    text,
+                    font,
+                    color,
+                    anchor,
+                    ..
+                } if text.starts_with('[')
+                    && *font == SceneFont::Monospace
+                    // The value ink, which the canvas's dimmer derived text prints in.
+                    && *color == SemanticColor::Exact(Rgb8::new(0x53, 0x59, 0x5D))
+                    && *anchor == TextAnchor::Start
+                    && (origin.x.micrometres() as i64) > right
+                    && (origin.x.micrometres() as i64)
+                        < right + (2.0 * label_layout::CONNECTOR_TAB_GAP_WORLD) as i64 * UM
+                    && (top..=bottom).contains(&(origin.y.micrometres() as i64)) =>
+                {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(found.len() <= 1, "{found:?}");
+        found.into_iter().next()
+    };
+    let first_page = printed(first);
+    let second_page = printed(second);
+    assert_eq!(
+        lettered(&first_page, 1).as_deref(),
+        Some("[p2 A2, p2 D6]"),
+        "the first page's CLK names both of its partners on page 2"
+    );
+    assert_eq!(lettered(&first_page, 2), None, "DATA has no partner");
+    // ISO 5457's A4 fields are 50 mm, centred on the sheet's middle: both
+    // partners stand 50 to 60 mm in from the left and 30 to 40 mm down.
+    assert_eq!(lettered(&second_page, 3).as_deref(), Some("[p1 A2]"));
+    assert_eq!(lettered(&second_page, 4).as_deref(), Some("[p1 A2]"));
 }

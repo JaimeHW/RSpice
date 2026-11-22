@@ -31,13 +31,14 @@ impl SchematicTextClass {
             Self::Name => SceneFont::SansSemibold,
             Self::Value => SceneFont::Sans,
             Self::Slice | Self::NetName => SceneFont::MonospaceMedium,
+            Self::PartnerReference => SceneFont::Monospace,
         }
     }
 
     const fn ink(self) -> Rgb8 {
         match self {
             Self::Name => NAME_INK,
-            Self::Value => VALUE_INK,
+            Self::Value | Self::PartnerReference => VALUE_INK,
             Self::Slice | Self::NetName => NET_INK,
         }
     }

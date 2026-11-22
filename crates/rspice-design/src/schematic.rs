@@ -38,6 +38,7 @@ pub mod label_layout;
 pub mod label_position;
 pub mod movement;
 pub mod net_label;
+pub mod off_sheet_references;
 pub mod owned;
 pub mod port;
 pub mod port_overlay;

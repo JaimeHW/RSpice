@@ -5,6 +5,7 @@ use rspice_design::resolved_symbol::{
     ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolPin, ResolvedSymbolSource,
 };
 use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
+use rspice_design::schematic::off_sheet_references::off_sheet_partner_references;
 use rspice_design::schematic::{component_type::ComponentType, owned::Schematic};
 use rspice_design::symbol_resolver::SymbolResolver;
 use rspice_design_model::design_management::{
@@ -12,7 +13,7 @@ use rspice_design_model::design_management::{
     SheetCatalog, SheetId, validate_project_drawing_sheet_title_field_values,
 };
 use rspice_vocabulary::product::ObjectRevision;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
 /// Durable objects selected for publication. Wire handles name their parent
@@ -315,6 +316,7 @@ pub fn resolve_schematic_source(
             .as_ref()
             .and(source.project_owner_logo)
             .cloned(),
+        off_sheet_references: BTreeMap::new(),
         drawing_sheet,
         grid_pitch_units: source.schematic.document().grid_size.max(1),
         components: Vec::new(),
@@ -329,6 +331,38 @@ pub fn resolve_schematic_source(
         no_connect_terminals: Vec::new(),
         parameter_labels: source.parameter_labels,
     };
+    // A governed sheet letters where each of its off-sheet connectors'
+    // partners stand on the other sheets, as the canvas does, from the zones
+    // of the format each of those sheets prints on.
+    if let Some((catalog, sheet_id)) = governed_sheet {
+        let mut formats: HashMap<SheetId, Option<SchematicSheetFormat>> = HashMap::new();
+        semantic.off_sheet_references = off_sheet_partner_references(
+            &source.schematic.document().net_labels,
+            catalog,
+            sheet_id,
+            |sheet, point| {
+                formats
+                    .entry(sheet)
+                    .or_insert_with(|| {
+                        catalog.find(sheet).map(|sheet| {
+                            source.project_default_drawing_sheet.map_or_else(
+                                || sheet.page_format().clone(),
+                                |project_default| {
+                                    effective_governed_sheet_format(
+                                        sheet.page_format(),
+                                        project_default,
+                                    )
+                                },
+                            )
+                        })
+                    })
+                    .as_ref()
+                    .and_then(|format| zone_on_sheet(format, point))
+            },
+        )
+        .into_iter()
+        .collect();
+    }
     let open_terminals = sheet_open_terminals(&source, &object_is_in_scope);
     for component in &source.schematic.document().components {
         if !object_is_in_scope(component.id) {
@@ -546,6 +580,17 @@ fn sheet_open_terminals(
                 .and_then(|resolver| resolver.resolve_binding(binding))
         },
         |_| None,
+    )
+}
+
+/// The zone `point`, in world units, stands in on a sheet printed on
+/// `format`, such as `B3`; `None` where the format draws no zones or the
+/// point is outside its frame.
+fn zone_on_sheet(format: &SchematicSheetFormat, point: Point) -> Option<String> {
+    let geometry = format.geometry().ok()?;
+    format.zone_layout(&geometry)?.reference_at(
+        (i64::from(point.x) - SCHEMATIC_SHEET_ORIGIN_X_UNITS) * SCHEMATIC_UNIT_UM,
+        (i64::from(point.y) - SCHEMATIC_SHEET_ORIGIN_Y_UNITS) * SCHEMATIC_UNIT_UM,
     )
 }
 

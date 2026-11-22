@@ -472,6 +472,7 @@ fn resolved_blank_schematic_with_identity(
         drawing_sheet_title_values: drawing_sheet_title_values(&identity, format, None, None),
         drawing_sheet_page_numbering: None,
         drawing_sheet_owner_logo: None,
+        off_sheet_references: Default::default(),
         grid_pitch_units: 10,
         components: Vec::new(),
         wires: Vec::new(),
