@@ -16,9 +16,29 @@ use super::super::library_catalog::WorkspacePruned;
 #[cfg(not(target_arch = "wasm32"))]
 use super::LibraryReference;
 use super::folders::{self, FolderReading};
-use super::{Model, OnDisk, ReboundViews, ReferenceLoad, RelinkOutcome};
+use super::{FolderPreview, Model, OnDisk, ReboundViews, ReferenceLoad, RelinkOutcome};
 
 impl Model {
+    /// What `folder` holds, read for Attach library to name before it acts,
+    /// or why it cannot be taken as a library.
+    pub fn library_folder_preview(&self, folder: &Path) -> Result<FolderPreview, String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = folder;
+            Err("A browser reads no folder by path.".to_owned())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let read =
+                read_library_folder(folder).map_err(|problem| folder_refusal(folder, problem))?;
+            Ok(FolderPreview {
+                library: read.manifest.record.name.clone(),
+                cells: read.cells.len(),
+                technology: read.manifest.record.technology.trim().to_owned(),
+            })
+        }
+    }
+
     /// Attach the library in `folder`, read-only, written as `path`.
     /// Refused for a name already in the project, or a folder already
     /// attached. Returns the library's name.

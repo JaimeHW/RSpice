@@ -239,6 +239,16 @@ impl ReferenceLoad {
     }
 }
 
+/// What a library folder holds, as Attach library names it before it acts:
+/// the library, how many cells, and the technology it was drawn for (empty
+/// when it names none).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderPreview {
+    pub library: String,
+    pub cells: usize,
+    pub technology: String,
+}
+
 /// What every place that finds a cell of a library this session could not
 /// read says in place of a missing view: that the library is what is
 /// missing, and where it is repaired.

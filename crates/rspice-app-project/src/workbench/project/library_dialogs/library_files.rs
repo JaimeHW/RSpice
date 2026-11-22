@@ -19,8 +19,8 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::{
-    LibraryFile, LibraryFileLock, LibraryMode, LibraryPath, RefreshRow, RelinkOutcome,
-    WorkspacePruned,
+    FolderPreview, LibraryFile, LibraryFileLock, LibraryMode, LibraryPath, RefreshRow,
+    RelinkOutcome, WorkspacePruned,
 };
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
@@ -63,10 +63,14 @@ pub enum LibraryFileIntent {
 pub enum LibraryFilesDialog {
     /// The folder picked, and the paths that name it: the one Attach stores
     /// first, the others that also work after it.
+    ///
+    /// What the folder holds is read once, when the dialog opens, for it to
+    /// name the library it will attach.
     Attach {
         folder: PathBuf,
         forms: Vec<LibraryPath>,
         chosen: usize,
+        preview: Result<FolderPreview, String>,
     },
     Refresh,
     ChangedOnDisk,
@@ -360,10 +364,12 @@ pub fn open_attach(cx: &mut Cx<'_, ProjectFeature>, folder: &Path) {
         Ok(choice) => {
             let mut forms = vec![choice.stored];
             forms.extend(choice.others);
+            let preview = cx.model.library_folder_preview(folder);
             cx.state.library_files.show(LibraryFilesDialog::Attach {
                 folder: folder.to_path_buf(),
                 forms,
                 chosen: 0,
+                preview,
             });
         }
         Err(refusal) => cx.wb.prompt(format!("Library not attached: {refusal}")),
@@ -726,7 +732,8 @@ impl ProjectFeature {
                 folder,
                 forms,
                 chosen,
-            } => attach_dialog(cx, ctx, &folder, &forms, chosen),
+                preview,
+            } => attach_dialog(cx, ctx, &folder, &forms, chosen, &preview),
             LibraryFilesDialog::Refresh => refresh_dialog(cx, ctx),
             LibraryFilesDialog::ChangedOnDisk => changed_on_disk_dialog(cx, ctx),
             LibraryFilesDialog::Detach { library, drawings } => {
@@ -751,19 +758,29 @@ fn attach_dialog(
     folder: &Path,
     forms: &[LibraryPath],
     chosen: usize,
+    preview: &Result<FolderPreview, String>,
 ) {
     let host = rspice_design::library::folder::HostPlatform::current();
+    // The choice names each form in words; the path the picked one stores
+    // is the row under it, cut from the middle to the dialog's width, so a
+    // long absolute path never runs past the dialog's edge.
     let options = forms
         .iter()
-        .map(|path| format!("{} \u{00b7} {}", path.shown(host), path.form().label()))
+        .map(|path| form_words(path, host))
         .collect::<Vec<_>>();
     let options = options.iter().map(String::as_str).collect::<Vec<_>>();
     let mut picked = chosen.min(forms.len().saturating_sub(1));
-    let error = cx.state.library_files.error.clone();
+    let error = cx
+        .state
+        .library_files
+        .error
+        .clone()
+        .or_else(|| preview.as_ref().err().cloned());
     let shown_folder = folder.display().to_string();
     let choice = CommandForm::new("Attach library", "Attach")
         .describe("Attach a library kept in a folder of its own, read-only.")
         .reading_column()
+        .primary_enabled(preview.is_ok())
         .status(error.as_deref().map_or(
             Ok(Some(
                 "It opens read-only; make it editable from Library actions.",
@@ -771,8 +788,27 @@ fn attach_dialog(
             Err,
         ))
         .show(ctx, |rows| {
+            if let Ok(preview) = preview {
+                rows.value_mono("Library", &preview.library);
+                rows.value(
+                    "Cells",
+                    &format!(
+                        "{} cell{}",
+                        preview.cells,
+                        if preview.cells == 1 { "" } else { "s" }
+                    ),
+                );
+                if preview.technology.is_empty() {
+                    rows.value("Technology", "None named");
+                } else {
+                    rows.value_mono("Technology", &preview.technology);
+                }
+            }
             rows.value_mono("Folder", &shown_folder);
             rows.choice("Stored as", &options, &mut picked);
+            if let Some(path) = forms.get(picked) {
+                rows.value_mono("Path", &path.shown(host));
+            }
             None
         });
     if let Some(LibraryFilesDialog::Attach { chosen, .. }) = &mut cx.state.library_files.open {
@@ -801,6 +837,19 @@ fn attach_dialog(
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => cx.state.library_files.close(),
         DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
+
+/// A stored form in words: under a named root, which root.
+fn form_words(path: &LibraryPath, host: rspice_design::library::folder::HostPlatform) -> String {
+    use rspice_design::library::folder::LibraryPathForm;
+    match path.form() {
+        LibraryPathForm::Root => {
+            let shown = path.shown(host);
+            let root = shown.split(['/', '\\']).next().unwrap_or_default();
+            format!("Under {root}")
+        }
+        form => form.label().to_owned(),
     }
 }
 
