@@ -192,6 +192,12 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.array_selection")),
     },
     DialogSpec {
+        key: DialogKey("design.subcircuit_source"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.subcircuit_source"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.subcircuit_source")),
+    },
+    DialogSpec {
         key: DialogKey("design.replace_instance"),
         modality: Modality::Dialog,
         is_open: Some(|state| features::dialog_open(state, DialogKey("design.replace_instance"))),
