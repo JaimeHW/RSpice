@@ -318,6 +318,10 @@ pub struct DesignManagementDialogState {
     owner_key: String,
     pub original: Option<DesignManagementCatalog>,
     pub draft: Option<DesignManagementCatalog>,
+    /// The draft as it opened: the project's catalog with this cell view's
+    /// sheets brought up to date with its parts, which the reader did not
+    /// ask for and loses nothing by leaving.
+    opened: Option<DesignManagementCatalog>,
     pub inputs: SubflowInputs,
     input_baseline: Option<SubflowInputs>,
     /// The Renumber page's list as last worked out.
@@ -347,6 +351,7 @@ impl Default for DesignManagementDialogState {
             owner_key: String::new(),
             original: None,
             draft: None,
+            opened: None,
             inputs: SubflowInputs::default(),
             input_baseline: None,
             renumber_table: None,
@@ -394,6 +399,7 @@ impl DesignManagementDialogState {
             open: true,
             owner_key,
             original: Some(catalog.clone()),
+            opened: Some(draft.clone()),
             draft: Some(draft),
             selection_object_ids,
             all_object_ids,
@@ -407,6 +413,11 @@ impl DesignManagementDialogState {
 
     pub(crate) fn close_and_discard(&mut self) {
         *self = Self::default();
+    }
+
+    /// Whether the reader has changed the draft since the dialog opened.
+    fn edited(&self) -> bool {
+        self.draft != self.opened
     }
 
     pub fn dirty(&self) -> bool {

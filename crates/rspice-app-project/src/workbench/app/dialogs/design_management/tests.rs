@@ -723,17 +723,33 @@ fn the_substitution_matrix_reads_each_variants_changes_and_only_closes() {
 fn compare_lists_each_difference_and_a_double_click_shows_the_part() {
     let ctx = themed_context();
     let (mut harness, _, automotive) = two_variants_over_three_parts();
-    // What Compare reads is what the project has, so nothing is pending
-    // and the part can be shown.
-    let draft = harness.state.design_management.draft.clone().unwrap();
+    // The project has the variants and no sheets yet, so opening brings its
+    // sheets up to date in the draft, which the reader did not change: the
+    // part can still be shown.
+    let variants = harness
+        .state
+        .design_management
+        .draft
+        .as_ref()
+        .unwrap()
+        .variants()
+        .clone();
+    let mut live = (*harness.model.workspace.content.design_management).clone();
+    *live.variants_mut() = variants;
     harness
         .model
         .workspace
         .content
-        .replace_design_management(draft.clone())
+        .replace_design_management(live)
         .unwrap();
+    open_design_management_dialog(
+        &mut harness.state.design_management,
+        &mut harness.model,
+        &harness.platform,
+        &mut harness.wb,
+    );
     let dialog = &mut harness.state.design_management;
-    dialog.original = Some(draft);
+    assert!(dialog.dirty(), "opening brought no sheets up to date");
     dialog.active_tab = DesignManagementTab::Variants;
     dialog.reset_inputs_for_page(DesignManagementPage::CompareVariants, None, None);
     assert_eq!(

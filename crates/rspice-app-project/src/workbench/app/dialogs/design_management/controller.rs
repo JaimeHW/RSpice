@@ -243,7 +243,10 @@ fn handle_design_management_body_action(
                 crate::workbench::project::configuration_state::ConfigurationTab::Instances;
         }
         DesignManagementBodyAction::ShowPart(object) => {
-            if parts.dialog.dirty() {
+            // Only what the reader changed is lost by leaving: the sheets
+            // brought up to date as the dialog opened are brought up to date
+            // again the next time it does.
+            if parts.dialog.edited() {
                 parts.dialog.error = Some(
                     "Apply or discard this Design Management draft before going to a part."
                         .to_owned(),
