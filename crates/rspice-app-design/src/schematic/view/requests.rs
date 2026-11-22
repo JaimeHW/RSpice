@@ -112,14 +112,30 @@ impl Request for DesignSurfaceRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// The trace a probe selected, for the results workspace to select. It is
-/// a request of its own, so no surface request raised later in the frame
-/// replaces it. While it waits, the canvas's facts read it before the
-/// results workspace's selection, so the frame of the click paints the
-/// probe it selected.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SelectProbedTrace(pub SelectedResultTrace);
+/// What a probe asks of the plot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbePlot {
+    /// Put the trace on the plot; one already there stays.
+    Show,
+    /// Put the trace on the plot, or take it off when it is there.
+    Toggle,
+}
 
-impl Request for SelectProbedTrace {
+/// A trace of the last run a probe named, for the results workspace to plot
+/// through the tick its Data Browser uses, and to select. The workspace
+/// says what it did, because only it knows whether the trace was already
+/// on the plot. It is a request of its own, so no surface request raised
+/// later in the frame replaces it. While it waits, the canvas's facts read
+/// it before the results workspace's selection, so the frame of the click
+/// paints the probe it selected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlotProbedTrace {
+    pub trace: SelectedResultTrace,
+    pub plot: ProbePlot,
+    /// The signal as the status line names it: the design's spelling.
+    pub display: String,
+}
+
+impl Request for PlotProbedTrace {
     const DRAIN: Drain = Drain::AfterContribution;
 }

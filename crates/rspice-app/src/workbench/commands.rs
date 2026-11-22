@@ -283,7 +283,7 @@ mod design_requests;
 #[cfg(test)]
 pub(crate) use design_requests::answer_surface_requests;
 pub(in crate::workbench) use design_requests::{
-    answer_surface_request, open_connectivity_source_map, select_probed_trace,
+    answer_surface_request, open_connectivity_source_map, plot_probed_trace,
 };
 
 #[cfg(test)]

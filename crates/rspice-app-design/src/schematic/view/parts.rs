@@ -55,7 +55,7 @@ use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
 use rspice_schematic_editor::view::design_view::DesignView;
 use rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag;
 
-use super::requests::{DesignSurfaceRequest, SelectProbedTrace};
+use super::requests::{DesignSurfaceRequest, PlotProbedTrace};
 
 /// The design slot, the model, the session and the runs the canvas reads
 /// and writes, beside the results workspace and the two modal facts it
@@ -334,8 +334,8 @@ pub fn canvas_facts_lent<'a>(
 fn probed_trace(workbench: &WorkbenchSession) -> Option<&SelectedResultTrace> {
     workbench
         .outbox
-        .peek::<SelectProbedTrace>()
-        .map(|SelectProbedTrace(trace)| trace)
+        .peek::<PlotProbedTrace>()
+        .map(|probed| &probed.trace)
 }
 
 impl AsRef<Model> for CanvasFacts<'_> {

@@ -24,7 +24,7 @@ use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_
 use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::parts::CanvasParts;
-use super::requests::{DesignSurfaceRequest, SelectProbedTrace};
+use super::requests::{DesignSurfaceRequest, PlotProbedTrace, ProbePlot};
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{finish_wire_on_active_sheet, with_active_wire_topology_in};
 use super::snap_resolution::resolve_grid_pointer;
@@ -1048,47 +1048,20 @@ fn handle_select_click(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ProbeSignalOutcome {
-    WaveformShown,
-    WaveformHidden,
-    WaveformAlreadyVisible,
+    /// The last run holds the signal, and the results workspace was asked to
+    /// plot it; it says what it did.
+    PlotRequested,
     GroundReference,
-    SavedOutputCreated { plan_name: String },
-    SavedOutputAlreadyPresent { plan_name: String },
+    SavedOutputCreated {
+        plan_name: String,
+    },
+    SavedOutputAlreadyPresent {
+        plan_name: String,
+    },
     NotInLastRun,
-    Rejected { reason: String },
-}
-
-/// Toggle an already-materialized trace and return its resulting visibility.
-///
-/// Comparing visibility before and after the simulation state's canonical
-/// resolver keeps this path correct for every supported waveform alias,
-/// including bare net names and generated numeric node names.
-fn toggle_materialized_waveform(state: &mut CanvasParts<'_>, probe_name: &str) -> Option<bool> {
-    let before = state
-        .model
-        .simulation
-        .view
-        .waveforms
-        .iter()
-        .map(|waveform| waveform.visible)
-        .collect::<Vec<_>>();
-    if !state
-        .model
-        .simulation
-        .toggle_waveform_visibility(probe_name)
-    {
-        return None;
-    }
-    state
-        .model
-        .simulation
-        .view
-        .waveforms
-        .iter()
-        .zip(before)
-        .find_map(|(waveform, was_visible)| {
-            (waveform.visible != was_visible).then_some(waveform.visible)
-        })
+    Rejected {
+        reason: String,
+    },
 }
 
 fn is_ground_voltage_expression(expression: &str) -> bool {
@@ -1116,30 +1089,43 @@ fn unique_probe_output_name(outputs: &[SavedOutput], preferred: &str) -> String 
     unreachable!("one more generated name than existing outputs must be available")
 }
 
-fn select_materialized_probe_trace(state: &mut CanvasParts<'_>, probe_name: &str) {
-    let selected = {
-        let run = state.model.simulation.active_run();
-        let analysis = state.model.simulation.active_analysis();
-        run.zip(analysis).and_then(|(run, analysis)| {
-            let analysis_index = run
-                .analyses
-                .iter()
-                .position(|candidate| std::ptr::eq(candidate, analysis))?;
-            let waveform_index = analysis.waveforms.iter().position(|waveform| {
-                normalized_probe_expression(&waveform.name)
-                    == normalized_probe_expression(probe_name)
-                    || waveform.name.eq_ignore_ascii_case(probe_name)
-            })?;
-            rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
-                run,
-                analysis_index,
-                waveform_index,
-            )
-        })
-    };
-    if let Some(selected) = selected {
-        state.workbench.outbox.push(SelectProbedTrace(selected));
-    }
+/// The active analysis's trace of `probe_name`, when the last run holds it.
+fn materialized_probe_trace(
+    state: &CanvasParts<'_>,
+    probe_name: &str,
+) -> Option<rspice_results_ui::selection::SelectedResultTrace> {
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
+    let analysis_index = run
+        .analyses
+        .iter()
+        .position(|candidate| std::ptr::eq(candidate, analysis))?;
+    let waveform_index = analysis.waveforms.iter().position(|waveform| {
+        normalized_probe_expression(&waveform.name) == normalized_probe_expression(probe_name)
+            || waveform.name.eq_ignore_ascii_case(probe_name)
+    })?;
+    rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
+        run,
+        analysis_index,
+        waveform_index,
+    )
+}
+
+/// Ask the results workspace to plot the last run's trace of `spelling`, as
+/// a tick in its Data Browser does, and to select it. `None` when the last
+/// run does not hold the signal.
+fn plot_materialized_trace(
+    state: &mut CanvasParts<'_>,
+    spelling: &OccurrenceProbeSpelling,
+    plot: ProbePlot,
+) -> Option<ProbeSignalOutcome> {
+    let trace = materialized_probe_trace(state, spelling.engine())?;
+    state.workbench.outbox.push(PlotProbedTrace {
+        trace,
+        plot,
+        display: spelling.display().to_owned(),
+    });
+    Some(ProbeSignalOutcome::PlotRequested)
 }
 
 #[derive(Debug, Clone)]
@@ -1244,25 +1230,39 @@ fn ensure_plan_probe_output(
 /// making repeated probes idempotent even if an output was named elsewhere.
 /// That expression is the engine's, never the reader's: two instances of one
 /// master show the same `V(n1)` and request two different nodes.
+///
+/// A probe puts its signal on the plot and never takes one off, as
+/// Virtuoso's direct plot and KiCad's simulator probe do: a net the run
+/// already plots stays plotted.
 fn request_probe_signal(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
-    let engine = spelling.engine();
-    if is_ground_voltage_expression(engine) {
+    request_probe_plot(state, spelling, ProbePlot::Show)
+}
+
+/// The inspector's Plot button: on the plot, or off it when it is there.
+fn request_probe_signal_toggle(
+    state: &mut CanvasParts<'_>,
+    spelling: &OccurrenceProbeSpelling,
+) -> ProbeSignalOutcome {
+    request_probe_plot(state, spelling, ProbePlot::Toggle)
+}
+
+fn request_probe_plot(
+    state: &mut CanvasParts<'_>,
+    spelling: &OccurrenceProbeSpelling,
+    plot: ProbePlot,
+) -> ProbeSignalOutcome {
+    if is_ground_voltage_expression(spelling.engine()) {
         return ProbeSignalOutcome::GroundReference;
     }
     let binding = match ensure_plan_probe_output(state, spelling) {
         Ok(binding) => binding,
         Err(reason) => return ProbeSignalOutcome::Rejected { reason },
     };
-    if let Some(visible) = toggle_materialized_waveform(state, engine) {
-        select_materialized_probe_trace(state, engine);
-        return if visible {
-            ProbeSignalOutcome::WaveformShown
-        } else {
-            ProbeSignalOutcome::WaveformHidden
-        };
+    if let Some(outcome) = plot_materialized_trace(state, spelling, plot) {
+        return outcome;
     }
     if binding.created {
         ProbeSignalOutcome::SavedOutputCreated {
@@ -1281,51 +1281,11 @@ fn request_retained_probe_signal(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
-    let engine = spelling.engine();
-    if is_ground_voltage_expression(engine) {
+    if is_ground_voltage_expression(spelling.engine()) {
         return ProbeSignalOutcome::GroundReference;
     }
-    match toggle_materialized_waveform(state, engine) {
-        Some(visible) => {
-            select_materialized_probe_trace(state, engine);
-            if visible {
-                ProbeSignalOutcome::WaveformShown
-            } else {
-                ProbeSignalOutcome::WaveformHidden
-            }
-        }
-        None => ProbeSignalOutcome::NotInLastRun,
-    }
-}
-
-fn request_probe_signal_visible(
-    state: &mut CanvasParts<'_>,
-    spelling: &OccurrenceProbeSpelling,
-) -> ProbeSignalOutcome {
-    let engine = spelling.engine();
-    if is_ground_voltage_expression(engine) {
-        return ProbeSignalOutcome::GroundReference;
-    }
-    let binding = match ensure_plan_probe_output(state, spelling) {
-        Ok(binding) => binding,
-        Err(reason) => return ProbeSignalOutcome::Rejected { reason },
-    };
-    match state.model.simulation.ensure_waveform_visible(engine) {
-        Some(true) => {
-            select_materialized_probe_trace(state, engine);
-            ProbeSignalOutcome::WaveformShown
-        }
-        Some(false) => {
-            select_materialized_probe_trace(state, engine);
-            ProbeSignalOutcome::WaveformAlreadyVisible
-        }
-        None if binding.created => ProbeSignalOutcome::SavedOutputCreated {
-            plan_name: binding.plan_name,
-        },
-        None => ProbeSignalOutcome::SavedOutputAlreadyPresent {
-            plan_name: binding.plan_name,
-        },
-    }
+    plot_materialized_trace(state, spelling, ProbePlot::Show)
+        .unwrap_or(ProbeSignalOutcome::NotInLastRun)
 }
 
 /// Re-spell a probe request at the occurrence the active tab is editing.
@@ -1413,7 +1373,8 @@ pub(crate) fn toggle_probe_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let (spelling, outcome) = commit_probe_request(state, name, display, request_probe_signal);
+    let (spelling, outcome) =
+        commit_probe_request(state, name, display, request_probe_signal_toggle);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(state, spelling.display(), outcome);
     configuration_changed
@@ -1426,8 +1387,7 @@ pub(crate) fn ensure_probe_visible_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let (spelling, outcome) =
-        commit_probe_request(state, name, display, request_probe_signal_visible);
+    let (spelling, outcome) = commit_probe_request(state, name, display, request_probe_signal);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(state, spelling.display(), outcome);
     configuration_changed
@@ -1448,40 +1408,25 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
             return false;
         }
     };
-    let engine = spelling.engine().to_owned();
-    let outcome = if is_ground_voltage_expression(&engine) {
+    let outcome = if is_ground_voltage_expression(spelling.engine()) {
         ProbeSignalOutcome::GroundReference
     } else {
-        match state.model.simulation.ensure_waveform_visible(&engine) {
-            Some(true) => {
-                select_materialized_probe_trace(state, &engine);
-                ProbeSignalOutcome::WaveformShown
-            }
-            Some(false) => {
-                select_materialized_probe_trace(state, &engine);
-                ProbeSignalOutcome::WaveformAlreadyVisible
-            }
-            None => ProbeSignalOutcome::Rejected {
+        plot_materialized_trace(state, &spelling, ProbePlot::Show).unwrap_or_else(|| {
+            ProbeSignalOutcome::Rejected {
                 reason: "no retained compatible waveform is available in this read-only view"
                     .to_owned(),
-            },
-        }
+            }
+        })
     };
-    let shown = matches!(
-        &outcome,
-        ProbeSignalOutcome::WaveformShown | ProbeSignalOutcome::WaveformAlreadyVisible
-    );
+    let shown = matches!(&outcome, ProbeSignalOutcome::PlotRequested);
     report_probe_outcome(state, spelling.display(), outcome);
     shown
 }
 
 fn report_probe_outcome(state: &mut CanvasParts<'_>, display: &str, outcome: ProbeSignalOutcome) {
     state.prompt(match outcome {
-        ProbeSignalOutcome::WaveformShown => format!("{display} added to the plot."),
-        ProbeSignalOutcome::WaveformHidden => format!("{display} removed from the plot."),
-        ProbeSignalOutcome::WaveformAlreadyVisible => {
-            format!("{display} is already in the plot.")
-        }
+        // The results workspace says what it did when it plots.
+        ProbeSignalOutcome::PlotRequested => return,
         ProbeSignalOutcome::GroundReference => "Node 0 is the 0 V reference.".to_owned(),
         ProbeSignalOutcome::SavedOutputCreated { plan_name } => format!(
             "{display} added to the saved outputs of {plan_name}; it is plotted after the next run."

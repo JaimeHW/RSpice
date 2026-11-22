@@ -509,3 +509,77 @@ fn a_click_selects_a_signal_and_a_double_click_plots_and_inspects_it() {
     assert!(plotted(&user, &name), "and puts it back");
     assert_eq!(user.ticked(&tick), Some(true));
 }
+
+/// The example's wire that carries `out`, and the point its label names.
+fn out_wire(user: &User) -> (u64, rspice_app_state::state::Point) {
+    let document = user.app.state.model.schematic.document();
+    let at = document
+        .net_labels
+        .iter()
+        .find(|label| label.name == "out")
+        .expect("the example names its output")
+        .pos;
+    let wire = document
+        .wires
+        .iter()
+        .find(|wire| wire.contains_point(at))
+        .expect("a wire carries the label")
+        .id;
+    (wire, at)
+}
+
+/// The Probe row of the menu opened on the wire that carries `out`.
+fn probe_out_wire(user: &mut User) {
+    use rspice_app_design::schematic::view::context_menu::execute_context_action;
+    use rspice_app_design::schematic::view::schematic_symbol_context;
+    use rspice_app_design::workbench::app_state::interaction_state::ContextTarget;
+    use rspice_schematic_editor::view::context_menu::ContextAction;
+
+    let (wire, at) = out_wire(user);
+    let state = &mut user.app.state;
+    state.design.interaction.context_target = Some((ContextTarget::Wire(wire), (at.x, at.y)));
+    let symbol_context = schematic_symbol_context(state);
+    execute_context_action(
+        ContextAction::Probe,
+        &mut state.canvas_parts(),
+        at,
+        &symbol_context,
+    );
+    user.settle();
+}
+
+/// A probe of a net the last run holds plots that run's trace at once,
+/// through the tick the Data Browser uses, so the row, the legend and the
+/// strip all show it, and selects it. A second probe leaves it plotted.
+#[test]
+fn probing_a_net_the_run_holds_plots_its_trace() {
+    use rspice_app_results::workbench::docks::navigator::results_actions::set_result_quantity_ticked;
+    use rspice_results_ui::selection::ResultBrowserSelectionKey;
+
+    let mut user = results_after_a_run();
+    let name = "V(out)";
+    let (key, _) = signal(&user, name);
+    set_result_quantity_ticked(
+        &mut user.app.state.results_parts(),
+        &ResultBrowserSelectionKey::Waveform(key),
+        false,
+    );
+    user.settle();
+    assert!(!plotted(&user, name));
+
+    probe_out_wire(&mut user);
+    assert!(plotted(&user, name), "the probe plots the run's trace");
+    assert_eq!(user.ticked(&format!("Plot {name}")), Some(true));
+    assert_eq!(selected_signal(&user).as_deref(), Some(name));
+    assert_eq!(
+        user.app.state.prompt_text(),
+        Some("V(out) added to the plot.")
+    );
+
+    probe_out_wire(&mut user);
+    assert!(plotted(&user, name), "a second probe leaves it plotted");
+    assert_eq!(
+        user.app.state.prompt_text(),
+        Some("V(out) is already in the plot.")
+    );
+}

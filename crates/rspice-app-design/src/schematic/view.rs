@@ -75,7 +75,7 @@ pub use self::parts::{
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use self::parts::{asked_dialog_waits, canvas_facts_lent, canvas_frame_lent};
-pub use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
+pub use self::requests::{DesignSurfaceRequest, PlotProbedTrace, ProbePlot};
 pub use self::shelf_drag::{SchematicShelfDragPayload, handle_pre_render_placement_transform};
 
 /// Whether the typed component-shelf payload is currently over the schematic

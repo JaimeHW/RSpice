@@ -10,7 +10,7 @@
 
 use crate::workbench::AppState;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
-use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
+use rspice_app_design::schematic::view::{DesignSurfaceRequest, PlotProbedTrace, ProbePlot};
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -55,10 +55,46 @@ pub(in crate::workbench) fn answer_surface_request(
     }
 }
 
-/// Select the trace a probe selected.
-pub(in crate::workbench) fn select_probed_trace(state: &mut AppState, probed: SelectProbedTrace) {
-    let SelectProbedTrace(trace) = probed;
+/// Plot the trace a probe named through the tick the results workspace's
+/// Data Browser uses, so the row, the legend and the strip all show it,
+/// select it, and say what changed.
+pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: PlotProbedTrace) {
+    use rspice_app_results::workbench::docks::navigator::results_actions::set_result_quantity_ticked;
+    use rspice_app_results::workbench::documents::result_document::waveform_plotted;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    use rspice_results_ui::selection::ResultBrowserSelectionKey;
+
+    let PlotProbedTrace {
+        trace,
+        plot,
+        display,
+    } = probed;
+    let key = SourceWaveformPresentationKey::new(trace.analysis_key(), trace.source_name());
+    let Some((.., waveform)) = key.resolve(&state.model.simulation.retained.runs) else {
+        return;
+    };
+    let plotted = waveform_plotted(
+        &state.model,
+        &state.results.results,
+        &key,
+        trace.source_name(),
+        waveform.visible,
+    );
+    let tick = match plot {
+        ProbePlot::Show => true,
+        ProbePlot::Toggle => !plotted,
+    };
+    set_result_quantity_ticked(
+        &mut state.results_parts(),
+        &ResultBrowserSelectionKey::Waveform(key),
+        tick,
+    );
     state.results.select_probed_trace(trace);
+    state.prompt(match (plotted, tick) {
+        (false, _) => format!("{display} added to the plot."),
+        (true, true) => format!("{display} is already in the plot."),
+        (true, false) => format!("{display} removed from the plot."),
+    });
 }
 
 /// Answer what the design surface raised, as the shell does once the
@@ -69,7 +105,7 @@ pub(crate) fn answer_surface_requests(state: &mut AppState) {
     drain(
         state,
         |state| &mut state.workbench.outbox,
-        select_probed_trace,
+        plot_probed_trace,
     );
     drain(
         state,

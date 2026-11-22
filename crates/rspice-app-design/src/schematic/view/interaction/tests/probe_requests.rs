@@ -5,76 +5,76 @@
 use super::*;
 use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 
-#[test]
-fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
-    let mut state = DesignTestHost::default();
-    state
-        .model
-        .simulation
-        .view
-        .waveforms
-        .push(RetainedTrace::new(
-            "V(OUT)",
-            vec![0.0, 1.0],
-            vec![0.0, 1.0],
-            "#ffffff",
-        ));
-
-    assert_eq!(
-        request_probe_signal(
-            &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
-        ),
-        ProbeSignalOutcome::WaveformHidden
+/// A transient run whose active analysis holds `V(OUT)`.
+fn hold_out_in_the_last_run(state: &mut DesignTestHost) {
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![RetainedTrace::new(
+                "V(OUT)",
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                "#ffffff",
+            )]),
     );
-    assert!(!state.model.simulation.view.waveforms[0].visible);
-    assert_eq!(saved_outputs(&state).len(), 1);
-
-    assert_eq!(
-        request_probe_signal(
-            &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
-        ),
-        ProbeSignalOutcome::WaveformShown
-    );
-    assert!(state.model.simulation.view.waveforms[0].visible);
-    assert_eq!(saved_outputs(&state).len(), 1);
+    state.model.simulation.retained.runs.insert(0, run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 }
 
-#[test]
-fn ensure_visible_probe_action_never_hides_an_existing_trace() {
-    let mut state = DesignTestHost::default();
+/// What the probe asked the results workspace to plot, if anything.
+fn plot_request(state: &DesignTestHost) -> Option<(String, ProbePlot, String)> {
     state
-        .model
-        .simulation
-        .view
-        .waveforms
-        .push(RetainedTrace::new(
-            "V(OUT)",
-            vec![0.0, 1.0],
-            vec![0.0, 1.0],
-            "#ffffff",
-        ));
+        .workbench
+        .outbox
+        .peek::<PlotProbedTrace>()
+        .map(|probed| {
+            (
+                probed.trace.source_name().to_owned(),
+                probed.plot,
+                probed.display.clone(),
+            )
+        })
+}
+
+/// A probe of a signal the last run holds asks the results workspace to
+/// plot that run's trace, through its Data Browser's tick, and never to take
+/// one off; the signal stays a saved output of the plan for the next run.
+#[test]
+fn a_probe_of_a_signal_the_run_holds_asks_the_results_to_plot_it() {
+    let mut state = DesignTestHost::default();
+    hold_out_in_the_last_run(&mut state);
+
+    for _ in 0..2 {
+        assert_eq!(
+            request_probe_signal(
+                &mut canvas_parts(&mut state),
+                &OccurrenceProbeSpelling::verbatim("V(OUT)")
+            ),
+            ProbeSignalOutcome::PlotRequested
+        );
+        assert_eq!(
+            plot_request(&state),
+            Some(("V(OUT)".to_owned(), ProbePlot::Show, "V(OUT)".to_owned()))
+        );
+        assert_eq!(saved_outputs(&state).len(), 1);
+        state.workbench.outbox = Default::default();
+    }
+}
+
+/// The inspector's Plot button asks for its trace to be put on the plot or
+/// taken off; the results workspace knows which.
+#[test]
+fn the_inspector_plot_button_asks_for_a_toggle() {
+    let mut state = DesignTestHost::default();
+    hold_out_in_the_last_run(&mut state);
+
+    toggle_probe_with_feedback(&mut canvas_parts(&mut state), "OUT", "V(OUT)");
 
     assert_eq!(
-        request_probe_signal_visible(
-            &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
-        ),
-        ProbeSignalOutcome::WaveformAlreadyVisible
+        plot_request(&state),
+        Some(("V(OUT)".to_owned(), ProbePlot::Toggle, "V(OUT)".to_owned()))
     );
-    assert!(state.model.simulation.view.waveforms[0].visible);
-    assert_eq!(saved_outputs(&state).len(), 1);
-
-    state.model.simulation.view.waveforms[0].visible = false;
-    assert_eq!(
-        request_probe_signal_visible(
-            &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
-        ),
-        ProbeSignalOutcome::WaveformShown
-    );
-    assert!(state.model.simulation.view.waveforms[0].visible);
     assert_eq!(saved_outputs(&state).len(), 1);
 }
 
@@ -444,18 +444,7 @@ fn a_read_only_view_probes_without_a_marker_or_a_plan_output() {
     let click = Point::new(40, 20);
     let mut state = wire_menu_host(click);
     state.model.schematic.session.read_only = true;
-    state
-        .model
-        .simulation
-        .view
-        .waveforms
-        .push(RetainedTrace::new(
-            "V(OUT)",
-            vec![0.0, 1.0],
-            vec![0.0, 1.0],
-            "#ffffff",
-        ));
-    state.model.simulation.view.waveforms[0].visible = false;
+    hold_out_in_the_last_run(&mut state);
     let payloads_before = state
         .model
         .workspace
@@ -476,8 +465,10 @@ fn a_read_only_view_probes_without_a_marker_or_a_plan_output() {
     };
     handle_probe_click(&mut canvas_parts(&mut state), position, &symbol_context);
 
-    assert!(state.model.simulation.view.waveforms[0].visible);
-    assert_eq!(state.prompt_text(), Some("V(OUT) added to the plot."));
+    assert_eq!(
+        plot_request(&state),
+        Some(("V(OUT)".to_owned(), ProbePlot::Show, "V(OUT)".to_owned()))
+    );
     assert!(state.model.schematic.document().probes.is_empty());
     assert!(!state.model.schematic.can_undo());
     assert_eq!(
