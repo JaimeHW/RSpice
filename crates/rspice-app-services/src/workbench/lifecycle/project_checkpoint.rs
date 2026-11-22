@@ -2703,6 +2703,7 @@ mod tests {
             snapshot_byte_len: 128,
             snapshot_name: "wrong.rspiceproj".to_owned(),
             saved_generation: None,
+            technology: None,
         };
         let (manifest_key, snapshot_key) = browser_keys(&manifest);
         assert_eq!(

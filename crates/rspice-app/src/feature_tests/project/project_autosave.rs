@@ -207,10 +207,8 @@ fn after_a_crash_keep_then_save_leaves_nothing_unsaved() {
         ("autosave-crash-keep-save", false),
         ("autosave-crash-keep-save-cell", true),
     ] {
-        let (folder, _) = crashed_session_making(
-            label,
-            if new_cell { &[CRASH_NEW_CELL] } else { &[] },
-        );
+        let (folder, _) =
+            crashed_session_making(label, if new_cell { &[CRASH_NEW_CELL] } else { &[] });
         let (mut app, ctx, asked) = open_after_crash(&folder);
         app_frame(
             &ctx,
