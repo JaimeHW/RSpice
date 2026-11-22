@@ -77,11 +77,17 @@ impl Model {
         let mut after_schematic = self.schematic.clone_with_design(after_design);
         after_schematic.session.is_dirty = true;
         let before = self.schematic.clone();
+        let key = document.key();
         self.publish_component_renames(
             document,
-            before,
-            after_schematic,
-            &[(expected.id, expected.name.clone(), candidate.name.clone())],
+            BTreeMap::from([(key.clone(), before)]),
+            BTreeMap::from([(key.clone(), after_schematic)]),
+            &[(
+                key,
+                expected.id,
+                expected.name.clone(),
+                candidate.name.clone(),
+            )],
             description,
         )
     }
@@ -95,59 +101,95 @@ impl Model {
         document: &CellViewRef,
         matches: &[rspice_design::schematic::find_replace::FindMatch],
     ) -> Result<usize, String> {
-        let key = document.key();
+        self.replace_text_across_cell_views(&[(document.clone(), matches.to_vec())])
+    }
+
+    /// [`Self::replace_text_carrying_references`] over several cell views
+    /// at once, as one project step: one Undo takes back a replacement that
+    /// reached every cell view below the design, as it does one that stayed
+    /// in the cell view in front.
+    pub fn replace_text_across_cell_views(
+        &mut self,
+        edits: &[(
+            CellViewRef,
+            Vec<rspice_design::schematic::find_replace::FindMatch>,
+        )],
+    ) -> Result<usize, String> {
+        let Some((first, _)) = edits.first() else {
+            return Ok(0);
+        };
+        let active = self.workspace.content.active_schematic_reference();
+        let document = edits
+            .iter()
+            .map(|(document, _)| document)
+            .find(|document| document.key().eq_ignore_ascii_case(&active.key()))
+            .unwrap_or(first)
+            .clone();
         let sources = self.schematic_reference_sources();
-        let (key, source) = sources
-            .iter()
-            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
-            .map(|(key, source)| (key.clone(), *source))
-            .ok_or_else(|| format!("{} is no longer open.", document.display_path()))?;
-        validate_reference_document(self, &key, source)?;
-        let (design, changed) = source.design.replaced_text_reference_candidate(matches)?;
-        let renames: Vec<(u64, String, String)> = matches
-            .iter()
-            .filter(|found| {
-                found.field == rspice_design::schematic::find_replace::FindField::InstanceName
-            })
-            .map(|found| (found.object_id, found.before.clone(), found.after.clone()))
-            .collect();
-        let before = source.clone_editor();
-        let mut after = source.with_design(design);
-        after.session.is_dirty = true;
+        let mut before = BTreeMap::new();
+        let mut after = BTreeMap::new();
+        let mut renames = Vec::new();
+        let mut changed = 0;
+        for (reference, matches) in edits {
+            let (key, source) = sources
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&reference.key()))
+                .map(|(key, source)| (key.clone(), *source))
+                .ok_or_else(|| format!("{} is no longer open.", reference.display_path()))?;
+            validate_reference_document(self, &key, source)?;
+            let (design, count) = source.design.replaced_text_reference_candidate(matches)?;
+            changed += count;
+            renames.extend(
+                matches
+                    .iter()
+                    .filter(|found| {
+                        found.field
+                            == rspice_design::schematic::find_replace::FindField::InstanceName
+                    })
+                    .map(|found| {
+                        (
+                            key.clone(),
+                            found.object_id,
+                            found.before.clone(),
+                            found.after.clone(),
+                        )
+                    }),
+            );
+            let mut edited = source.with_design(design);
+            edited.session.is_dirty = true;
+            before.insert(key.clone(), source.clone_editor());
+            after.insert(key, edited);
+        }
         drop(sources);
-        self.publish_component_renames(
-            reference_from_key(&key)?,
-            before,
-            after,
-            &renames,
-            "replace",
-        )?;
+        // The step is named for the cell view as the workspace spells it.
+        let document = before
+            .keys()
+            .find(|key| key.eq_ignore_ascii_case(&document.key()))
+            .map_or_else(|| Ok(document.clone()), |key| reference_from_key(key))?;
+        self.publish_component_renames(document, before, after, &renames, "replace")?;
         Ok(changed)
     }
 
-    /// Publish `after` over `before` for `document` as one project step,
-    /// with every reference that names a renamed instance carried along and
-    /// each rename recorded as a manual reference edit.
+    /// Publish `after` over `before`, cell view by cell view, as one project
+    /// step named for `document`, with every reference that names a renamed
+    /// instance carried along and each rename, keyed by its cell view,
+    /// recorded as a manual reference edit.
     fn publish_component_renames(
         &mut self,
         document: CellViewRef,
-        before: SchematicState,
-        after: SchematicState,
-        renames: &[(u64, String, String)],
+        before: BTreeMap<String, SchematicState>,
+        after: BTreeMap<String, SchematicState>,
+        renames: &[(String, u64, String, String)],
         description: &str,
     ) -> Result<bool, String> {
-        let transaction = self.prepare_schematic_reference_transaction(
-            BTreeMap::from([(document.key(), before)]),
-            BTreeMap::from([(document.key(), after)]),
-        )?;
+        let transaction = self.prepare_schematic_reference_transaction(before, after)?;
         let annotation_before = self.workspace.content.design_management.annotation();
         let mut annotation_after = annotation_before.clone();
         let mut annotated = false;
-        for (id, old, new) in renames {
+        for (key, id, old, new) in renames {
             annotated |= annotation_after
                 .commit_manual_reference_edit(
-                    SchematicObjectKey::new(&document.key(), *id)
-                        .map_err(|error| error.to_string())?,
+                    SchematicObjectKey::new(key, *id).map_err(|error| error.to_string())?,
                     old,
                     new,
                 )
