@@ -398,10 +398,7 @@ pub fn commit_create_hierarchy(
         })
         .collect::<Vec<_>>();
     let mut target_cell = Cell::new(&cell_name);
-    target_cell.description = format!(
-        "Hierarchical cell extracted transactionally from {}",
-        parent_ref.display_path()
-    );
+    target_cell.description = format!("Made from a selection in {}", parent_ref.display_path());
     let mut schematic_view = View::new("schematic", ViewType::Schematic);
     schematic_view.modified = true;
     target_cell.add_view(schematic_view);
