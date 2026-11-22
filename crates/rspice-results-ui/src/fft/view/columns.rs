@@ -7,7 +7,9 @@ use egui::Ui;
 use rspice_results::number_format::unit_takes_prefix;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens;
-use rspice_ui_kit::widgets::table::{Align, CELL_PAD, Column, SORT_MARK_ROOM, TABLE_EDGE_INSET};
+use rspice_ui_kit::widgets::table::{
+    Align, CELL_PAD, Cell, Column, SORT_MARK_ROOM, TABLE_EDGE_INSET,
+};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// A level in a details table to the hundredth of a decibel, an analyser's
@@ -178,6 +180,28 @@ pub(crate) fn fitted(ui: &Ui, columns: Vec<Fitting>) -> Vec<Column> {
             }
         })
         .collect()
+}
+
+/// The columns `heads` name, fitted to the words of `rows`: each head with
+/// where its words sit and whether they are set in mono.
+pub(crate) fn fitted_to(ui: &Ui, heads: &[(&str, Align, bool)], rows: &[Vec<Cell>]) -> Vec<Column> {
+    fitted(
+        ui,
+        heads
+            .iter()
+            .enumerate()
+            .map(|(column, &(head, align, mono))| Fitting {
+                head: head.to_owned(),
+                tooltip: None,
+                align,
+                cells: rows
+                    .iter()
+                    .filter_map(|cells| cells.get(column))
+                    .map(|cell| (cell.text.clone(), mono))
+                    .collect(),
+            })
+            .collect(),
+    )
 }
 
 /// How wide each of `columns` is fitted: its head with room for a sort mark

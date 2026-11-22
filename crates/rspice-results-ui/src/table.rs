@@ -9,9 +9,15 @@
 //! Three controls shape the row set — a stride, an optional window centred
 //! on cursor A, and the column selection — and the footer always states the
 //! resulting count against the retained total, so "showing 200" can never
-//! be mistaken for "there are 200".
+//! be mistaken for "there are 200". Any number of signals are columns; a
+//! head sorts by its column, a search keeps the rows that contain what was
+//! typed, and Go to selects the row nearest an X value.
 
-use crate::{presentation::well_hint, waves::StripModel};
+use crate::{
+    fft::view::columns::{Fitting, fitted, fitted_to},
+    presentation::{table_row_menu, well_hint, with_table_state},
+    waves::StripModel,
+};
 use egui::Ui;
 use rspice_results::{
     analysis_payload::AnalysisResultPayload,
@@ -21,7 +27,10 @@ use rspice_results::{
 use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::chip,
+    widgets::{
+        chip,
+        table::{Align, Cell, DataTable, Selection, SortKey},
+    },
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::borrow::Cow;
@@ -47,17 +56,9 @@ pub struct TableControls<'a> {
     pub status: Option<&'a str>,
 }
 
-/// Width of the leading row-index column.
-const INDEX_W: f32 = 68.0;
-/// Width of the X column.
-const X_W: f32 = 128.0;
-/// Width of one value column.
-const VALUE_W: f32 = 118.0;
-/// Most value columns the table will lay out.
-pub const TABLE_MAX_COLUMNS: usize = 8;
-const HEADER_H: f32 = 26.0;
-const ROW_H: f32 = 22.0;
-const CELL_INSET: f32 = 10.0;
+/// Rows read from each end of the selection to size the columns: a value
+/// column is as wide as the widest of them and its head.
+const SIZING_ROWS: usize = 32;
 
 struct TypedOpRow {
     source: String,
@@ -65,29 +66,6 @@ struct TypedOpRow {
     value: String,
     unit: String,
     status: String,
-}
-
-/// One column heading of a `sense(click)` table.
-///
-/// `egui_extras` builds every cell as a child `Ui` carrying the table's sense,
-/// so it is the cell — not the label inside it — that takes keyboard focus and
-/// that AccessKit publishes, and what it publishes is an unnamed
-/// `GenericContainer` with a `Focus` action. Tab therefore lands on a target
-/// that announces nothing and draws nothing. The cell is named and outlined
-/// here; the body cells below carry the same two calls for the same reason.
-fn header_cell(ui: &mut Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_faint),
-    );
-    let cell = ui.response();
-    let name = format!("{label} column");
-    cell.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), name.clone())
-    });
-    theme::paint_focus_ring(ui, &cell, ui.max_rect());
 }
 
 fn dc_op_row_count(analysis: &AnalysisResult) -> usize {
@@ -328,60 +306,60 @@ pub fn show_operating_point_table(
     row_count: usize,
     quantity_policy: &QuantityPresentationPolicy,
 ) {
-    let t = Tokens::get(ui.ctx());
-    egui_extras::TableBuilder::new(ui)
-        .striped(true)
-        .resizable(true)
-        .sense(egui::Sense::click())
-        .column(egui_extras::Column::initial(120.0).at_least(72.0))
-        .column(egui_extras::Column::remainder().at_least(180.0))
-        .column(egui_extras::Column::initial(160.0).at_least(100.0))
-        .column(egui_extras::Column::initial(72.0).at_least(52.0))
-        .column(egui_extras::Column::initial(150.0).at_least(96.0))
-        .header(HEADER_H, |mut header| {
-            for label in ["Source", "Quantity", "Exact value", "Unit", "Status"] {
-                header.col(|ui| header_cell(ui, label));
-            }
-        })
-        .body(|body| {
-            body.rows(ROW_H, row_count, |mut row| {
-                let Some(value) = operating_point_row_at(analysis, row.index()) else {
-                    return;
-                };
-                let exact_row = copied_operating_point_row(&value, quantity_policy);
-                for (heading, text) in [
-                    ("Source", value.source),
-                    ("Quantity", value.quantity),
-                    ("Exact value", value.value),
-                    ("Unit", value.unit),
-                    ("Status", value.status),
-                ] {
-                    row.col(|ui| {
-                        ui.label(
-                            egui::RichText::new(text.as_str())
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text),
-                        );
-                        let cell = ui.response();
-                        let name = format!("{heading}: {text}");
-                        cell.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Label,
-                                ui.is_enabled(),
-                                name.clone(),
-                            )
-                        });
-                        theme::paint_focus_ring(ui, &cell, ui.max_rect());
-                    });
+    let rows: Vec<Vec<Cell>> = (0..row_count)
+        .map(|row| {
+            let Some(value) = operating_point_row_at(analysis, row) else {
+                return vec![Cell::absent(); 5];
+            };
+            let exact = match value.value.parse::<f64>() {
+                Ok(number) if number.is_finite() => {
+                    Cell::number(value.value).sort_by(SortKey::Number(number))
                 }
-                row.response().context_menu(|ui| {
-                    if ui.button("Copy exact row").clicked() {
-                        ui.ctx().copy_text(exact_row.clone());
-                        ui.close();
-                    }
-                });
-            });
-        });
+                _ => Cell::number(value.value),
+            };
+            vec![
+                Cell::number(value.source),
+                Cell::number(value.quantity),
+                exact,
+                Cell::number(value.unit),
+                Cell::number(value.status),
+            ]
+        })
+        .collect();
+    let columns = fitted_to(
+        ui,
+        &[
+            ("Source", Align::Left, true),
+            ("Quantity", Align::Left, true),
+            ("Exact value", Align::Right, true),
+            ("Unit", Align::Left, true),
+            ("Status", Align::Left, true),
+        ],
+        &rows,
+    );
+    let revision = egui::Id::new((
+        "rspice.results.table.operating-point",
+        analysis.id,
+        row_count,
+    ))
+    .value();
+    let response = with_table_state(ui, "operating-point", |ui, state| {
+        DataTable::new("rspice.results.table.operating-point", &columns, row_count)
+            .state(state)
+            .freeze(1)
+            .revision(revision)
+            .max_height(ui.available_height())
+            .show(ui, |row| rows[row].clone())
+    });
+    table_row_menu(ui, "operating-point", response.context_menu, |ui, row| {
+        if ui.button("Copy exact row").clicked() {
+            if let Some(value) = operating_point_row_at(analysis, row) {
+                ui.ctx()
+                    .copy_text(copied_operating_point_row(&value, quantity_policy));
+            }
+            ui.close();
+        }
+    });
 }
 
 pub fn show_artifact(
@@ -407,56 +385,53 @@ pub fn show_artifact(
         chip(ui, &format!("{} exact records", lines.len()), false);
     });
     ui.add_space(6.0);
-    egui_extras::TableBuilder::new(ui)
-        .striped(true)
-        .resizable(true)
-        .sense(egui::Sense::click())
-        .column(egui_extras::Column::initial(INDEX_W).at_least(52.0))
-        .column(egui_extras::Column::remainder().at_least(240.0))
-        .header(HEADER_H, |mut header| {
-            for label in ["Line", "Evidence"] {
-                header.col(|ui| header_cell(ui, label));
+    let row_cells = |row: usize| -> Vec<Cell> {
+        let (start, end) = lines[row];
+        #[allow(clippy::cast_precision_loss)]
+        let number = Cell::number((row + 1).to_string()).sort_by(SortKey::Number((row + 1) as f64));
+        vec![number, Cell::number(&exact[start..end])]
+    };
+    // The evidence is in mono, so its longest line is its widest: the
+    // column is sized from it and from the lines at either end.
+    let longest = lines
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, (start, end))| end - start)
+        .map(|(row, _)| row);
+    let sizing: Vec<Vec<Cell>> = (0..lines.len().min(SIZING_ROWS))
+        .chain(lines.len().saturating_sub(SIZING_ROWS)..lines.len())
+        .chain(longest)
+        .map(row_cells)
+        .collect();
+    let columns = fitted_to(
+        ui,
+        &[
+            ("Line", Align::Right, true),
+            ("Evidence", Align::Left, true),
+        ],
+        &sizing,
+    );
+    let revision = egui::Id::new(("rspice.results.table.artifact", title, lines.len())).value();
+    let response = with_table_state(ui, "artifact", |ui, state| {
+        DataTable::new("rspice.results.table.artifact", &columns, lines.len())
+            .state(state)
+            .freeze(1)
+            .revision(revision)
+            .max_height(ui.available_height())
+            .show(ui, row_cells)
+    });
+    table_row_menu(ui, "artifact", response.context_menu, |ui, row| {
+        if ui.button("Copy exact line").clicked() {
+            if let Some(&(start, end)) = lines.get(row) {
+                ui.ctx().copy_text(exact[start..end].to_owned());
             }
-        })
-        .body(|body| {
-            body.rows(ROW_H, lines.len(), |mut row| {
-                let line_number = row.index() + 1;
-                let (start, end) = lines[row.index()];
-                let line = &exact[start..end];
-                for (heading, text, color) in [
-                    ("Line", line_number.to_string(), t.color.text_faint),
-                    ("Exact retained evidence", line.to_owned(), t.color.text),
-                ] {
-                    row.col(|ui| {
-                        ui.label(
-                            egui::RichText::new(text.as_str())
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(color),
-                        );
-                        let cell = ui.response();
-                        let name = format!("{heading}: {text}");
-                        cell.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Label,
-                                ui.is_enabled(),
-                                name.clone(),
-                            )
-                        });
-                        theme::paint_focus_ring(ui, &cell, ui.max_rect());
-                    });
-                }
-                row.response().context_menu(|ui| {
-                    if ui.button("Copy exact line").clicked() {
-                        ui.ctx().copy_text(line.to_owned());
-                        ui.close();
-                    }
-                    if ui.button("Copy all exact evidence").clicked() {
-                        ui.ctx().copy_text(exact.clone());
-                        ui.close();
-                    }
-                });
-            });
-        });
+            ui.close();
+        }
+        if ui.button("Copy all exact evidence").clicked() {
+            ui.ctx().copy_text(exact.clone());
+            ui.close();
+        }
+    });
 }
 
 /// Rows kept either side of cursor A in around-cursor mode.
@@ -478,7 +453,7 @@ pub struct TableView {
     /// Show every `stride`-th retained row.
     pub stride: usize,
     /// Selected trace indices (into the model's active-run prefix). Empty
-    /// means "every visible signal", capped at [`TABLE_MAX_COLUMNS`].
+    /// means every visible signal.
     pub columns: Vec<TracePresentationKey>,
     /// Restrict the rows to a window centred on cursor A.
     pub around_cursor: bool,
@@ -517,7 +492,7 @@ impl TableView {
         }
         if let Some(at) = self.columns.iter().position(|key| *key == trace) {
             self.columns.remove(at);
-        } else if self.columns.len() < TABLE_MAX_COLUMNS {
+        } else {
             self.columns.push(trace);
         }
         if self.columns.is_empty() {
@@ -527,12 +502,11 @@ impl TableView {
 }
 
 /// Trace indices the table shows when the user has chosen none: every
-/// visible signal in the active run, up to the column cap.
+/// visible signal in the active run.
 fn automatic_columns(model: &StripModel) -> Vec<TracePresentationKey> {
     model
         .visible_signal_indices()
         .filter_map(|index| model.trace_presentation_key(index))
-        .take(TABLE_MAX_COLUMNS)
         .collect()
 }
 
@@ -684,33 +658,26 @@ fn nearest_sample_index(
     }
 }
 
-const fn table_width(column_count: usize) -> f32 {
-    INDEX_W + X_W + column_count as f32 * VALUE_W
+/// Where the bar keeps what the reader searched the table for.
+fn search_id() -> egui::Id {
+    egui::Id::new("rspice.results.table.search")
 }
 
-fn table_body_height(viewport_height: f32, scrollbar_gutter: f32) -> f32 {
-    (viewport_height - HEADER_H - scrollbar_gutter).max(ROW_H)
+/// Where the bar leaves the X value the reader asked to go to, until the
+/// table takes it.
+fn go_to_id() -> egui::Id {
+    egui::Id::new("rspice.results.table.go-to")
 }
 
-fn accessible_row_label(
-    sample: usize,
-    cursor_flag: &str,
-    x_heading: &str,
-    x_value: &str,
-    values: &[(String, String)],
-) -> String {
-    let mut label = format!("Retained sample {sample}; {x_heading}: {x_value}");
-    for (heading, value) in values {
-        label.push_str("; ");
-        label.push_str(heading);
-        label.push_str(": ");
-        label.push_str(value);
+/// The visible row that shows `sample`, or the nearest one the stride
+/// keeps.
+fn row_of_sample(rows: RowSelection, sample: usize) -> Option<usize> {
+    if rows.is_empty() {
+        return None;
     }
-    if !cursor_flag.is_empty() {
-        label.push_str("; cursor ");
-        label.push_str(cursor_flag);
-    }
-    label
+    let offset = sample.clamp(rows.start, rows.end.saturating_sub(1)) - rows.start;
+    let stride = rows.stride.max(1);
+    Some(((offset + stride / 2) / stride).min(rows.len() - 1))
 }
 
 pub fn show_samples(
@@ -720,8 +687,7 @@ pub fn show_samples(
     display_name: impl for<'a> Fn(&'a str) -> Cow<'a, str>,
     mut on_scan: impl FnMut(),
 ) -> Option<TableResponse> {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
+    let c = Tokens::get(ui.ctx()).color;
     let model = source.model;
     let cursor = source.cursor_a;
     let significant_digits = source.significant_digits;
@@ -739,207 +705,140 @@ pub fn show_samples(
         return None;
     }
 
-    let table_w = table_width(columns.len());
-    let viewport_width = ui.available_width().max(1.0);
-    let viewport_height = ui.available_height().max(HEADER_H + ROW_H);
     let grid = model.sample_grid().unwrap_or_default();
     let ascending = model.grid_is_ascending();
     let cursor_a_row = cursor.and_then(|x| nearest_sample_index(&grid, x, ascending, &mut on_scan));
     let cursor_b_row = source
         .cursor_b
         .and_then(|x| nearest_sample_index(&grid, x, ascending, &mut on_scan));
-    let cell =
-        |ui: &Ui, rect: egui::Rect, text: &str, color: egui::Color32, align: egui::Align2| {
-            let inset = rect.shrink2(egui::vec2(CELL_INSET * 0.5, 0.0));
-            let pos = match align {
-                egui::Align2::RIGHT_CENTER => egui::pos2(inset.right(), inset.center().y),
-                _ => egui::pos2(inset.left(), inset.center().y),
-            };
-            ui.painter().with_clip_rect(inset).text(
-                pos,
-                align,
-                text,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                color,
-            );
-        };
-    let column_rect = |row: egui::Rect, index: usize| {
-        let left = row.left() + INDEX_W + X_W + index as f32 * VALUE_W;
-        egui::Rect::from_min_max(
-            egui::pos2(left, row.top()),
-            egui::pos2(left + VALUE_W, row.bottom()),
-        )
-    };
 
     // A column heading names the conductor the design drew; the trace keeps
     // the engine's own name as its identity and as the key it is exported
     // under, exactly as the waveform legend does.
-
-    let width = viewport_width.max(table_w);
-    let scrollbar_gutter = ui.spacing().scroll.bar_width + ui.spacing().item_spacing.y;
-    let mut clicked_sample = None;
-    egui::ScrollArea::horizontal()
-        .id_salt("rspice.results.table.horizontal")
-        .auto_shrink([false, false])
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-        .max_height(viewport_height)
-        .show(ui, |ui| {
-            ui.set_width(width);
-
-            // The header deliberately lives outside the vertical ScrollArea.
-            // It remains visible while rows are virtualized, but shares this
-            // horizontal owner so headings and cells cannot drift apart.
-            let (header, _) =
-                ui.allocate_exact_size(egui::vec2(width, HEADER_H), egui::Sense::hover());
-            ui.painter().rect_filled(header, 0.0, c.bg_panel_2);
-            ui.painter().hline(
-                header.x_range(),
-                header.bottom() - 0.5,
-                egui::Stroke::new(1.0, c.border_strong),
-            );
-            cell(
-                ui,
-                egui::Rect::from_min_max(
-                    header.min,
-                    egui::pos2(header.left() + INDEX_W, header.bottom()),
-                ),
-                "Row",
-                c.text_faint,
-                egui::Align2::LEFT_CENTER,
-            );
-            cell(
-                ui,
-                egui::Rect::from_min_max(
-                    egui::pos2(header.left() + INDEX_W, header.top()),
-                    egui::pos2(header.left() + INDEX_W + X_W, header.bottom()),
-                ),
-                &model.x_axis_heading(),
-                c.text_faint,
-                egui::Align2::LEFT_CENTER,
-            );
-            for (position, &trace_index) in columns.iter().enumerate() {
-                let Some((name, color)) = model.trace_heading(trace_index) else {
-                    continue;
-                };
-                cell(
-                    ui,
-                    column_rect(header, position),
-                    &display_name(name),
-                    color,
-                    egui::Align2::RIGHT_CENTER,
-                );
-            }
-
-            let body_height = table_body_height(viewport_height, scrollbar_gutter);
-            egui::ScrollArea::vertical()
-                .id_salt("rspice.results.table.rows")
-                .auto_shrink([false, false])
-                .max_height(body_height)
-                .show_rows(ui, ROW_H, rows.len(), |ui, visible| {
-                    ui.set_width(width);
-                    for row_position in visible {
-                        let Some(sample) = rows.sample_at(row_position) else {
-                            continue;
-                        };
-                        let (row, response) =
-                            ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::click());
-                        let at_a = cursor_a_row == Some(sample);
-                        let at_b = cursor_b_row == Some(sample);
-                        if at_a || at_b {
-                            ui.painter().rect_filled(row, 0.0, c.accent_dim);
-                            ui.painter().vline(
-                                row.left() + 1.0,
-                                row.y_range(),
-                                egui::Stroke::new(2.0, c.accent),
-                            );
-                        } else if row_position % 2 == 1 {
-                            ui.painter().rect_filled(row, 0.0, c.bg_panel);
-                        }
-                        let cursor_flag = match (at_a, at_b) {
-                            (true, true) => "A/B",
-                            (true, false) => "A",
-                            (false, true) => "B",
-                            (false, false) => "",
-                        };
-                        let index_text = if cursor_flag.is_empty() {
-                            format!("{sample}")
-                        } else {
-                            format!("{cursor_flag}  {sample}")
-                        };
-                        let x_text = model.format_x_at(sample, significant_digits, quantity_policy);
-                        cell(
-                            ui,
-                            egui::Rect::from_min_max(
-                                row.min,
-                                egui::pos2(row.left() + INDEX_W, row.bottom()),
-                            ),
-                            &index_text,
-                            if cursor_flag.is_empty() {
-                                c.text_faint
-                            } else {
-                                c.accent
-                            },
-                            egui::Align2::LEFT_CENTER,
-                        );
-                        cell(
-                            ui,
-                            egui::Rect::from_min_max(
-                                egui::pos2(row.left() + INDEX_W, row.top()),
-                                egui::pos2(row.left() + INDEX_W + X_W, row.bottom()),
-                            ),
-                            &x_text,
-                            c.text_dim,
-                            egui::Align2::LEFT_CENTER,
-                        );
-                        let mut accessible_values = Vec::with_capacity(columns.len());
-                        for (position, &trace_index) in columns.iter().enumerate() {
-                            // A trace shorter than the grid says so rather
-                            // than borrowing a neighbouring sample's value.
-                            let text = model
-                                .format_sample(
-                                    trace_index,
-                                    sample,
-                                    significant_digits,
-                                    quantity_policy,
-                                )
-                                .unwrap_or_else(|| "—".to_owned());
-                            cell(
-                                ui,
-                                column_rect(row, position),
-                                &text,
-                                c.text,
-                                egui::Align2::RIGHT_CENTER,
-                            );
-                            let heading = model.trace_heading(trace_index).map_or_else(
-                                || "Signal".to_owned(),
-                                |(name, _)| display_name(name).into_owned(),
-                            );
-                            accessible_values.push((heading, text));
-                        }
-                        let response = response.on_hover_text(
-                            "Place the next A/B cursor on this exact retained sample",
-                        );
-                        response.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::Button,
-                                true,
-                                at_a || at_b,
-                                accessible_row_label(
-                                    sample,
-                                    cursor_flag,
-                                    &model.x_axis_heading(),
-                                    &x_text,
-                                    &accessible_values,
-                                ),
-                            )
-                        });
-                        theme::paint_focus_ring(ui, &response, row);
-                        if response.clicked() {
-                            clicked_sample = Some(sample);
-                        }
+    let x_heading = model.x_axis_heading();
+    let value_heads: Vec<String> = columns
+        .iter()
+        .map(|&trace| {
+            model.trace_heading(trace).map_or_else(
+                || "Signal".to_owned(),
+                |(name, _)| display_name(name).into_owned(),
+            )
+        })
+        .collect();
+    let row_cells = |row_position: usize| -> Vec<Cell> {
+        let Some(sample) = rows.sample_at(row_position) else {
+            return vec![Cell::absent(); columns.len() + 2];
+        };
+        let at_a = cursor_a_row == Some(sample);
+        let at_b = cursor_b_row == Some(sample);
+        let flag = match (at_a, at_b) {
+            (true, true) => "A/B  ",
+            (true, false) => "A  ",
+            (false, true) => "B  ",
+            (false, false) => "",
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let mut cells = vec![
+            Cell::number(format!("{flag}{sample}")).sort_by(SortKey::Number(sample as f64)),
+            {
+                let x =
+                    Cell::number(model.format_x_at(sample, significant_digits, quantity_policy));
+                match grid.get(sample) {
+                    Some(&x_value) => x.sort_by(SortKey::Number(x_value)),
+                    None => x,
+                }
+            },
+        ];
+        for &trace in &columns {
+            // A trace shorter than the grid says so rather than borrowing a
+            // neighbouring sample's value.
+            let cell = match model.format_sample(trace, sample, significant_digits, quantity_policy)
+            {
+                Some(text) => {
+                    let cell = Cell::number(text);
+                    match model.sample_value(trace, sample) {
+                        Some(value) => cell.sort_by(SortKey::Number(value)),
+                        None => cell,
                     }
-                });
-        });
+                }
+                None => Cell::absent(),
+            };
+            cells.push(cell);
+        }
+        if at_a || at_b {
+            cells = cells
+                .into_iter()
+                .map(|cell| cell.wash(c.accent_dim))
+                .collect();
+        }
+        cells
+    };
+
+    // Each column is as wide as its head and the widest of the rows at
+    // either end of the selection, and the columns share what the pane
+    // leaves, so the table runs the pane's width.
+    let sizing: Vec<usize> = (0..rows.len().min(SIZING_ROWS))
+        .chain(rows.len().saturating_sub(SIZING_ROWS)..rows.len())
+        .collect();
+    let sized: Vec<Vec<Cell>> = sizing.iter().map(|&row| row_cells(row)).collect();
+    let fitting: Vec<Fitting> = std::iter::once("Row".to_owned())
+        .chain(std::iter::once(x_heading.clone()))
+        .chain(value_heads.iter().cloned())
+        .enumerate()
+        .map(|(column, head)| Fitting {
+            head,
+            tooltip: None,
+            align: Align::Right,
+            cells: sized
+                .iter()
+                .map(|cells| (cells[column].text.clone(), true))
+                .collect(),
+        })
+        .collect();
+    let table_columns = fitted(ui, fitting);
+
+    // The rows' words change with the analysis, the row set, the columns,
+    // the digits and the cursors.
+    let revision = egui::Id::new((
+        "rspice.results.table.rows",
+        model.analysis_key(),
+        (rows.start, rows.end, rows.stride),
+        &columns,
+        significant_digits,
+        cursor_a_row,
+        cursor_b_row,
+    ))
+    .value();
+    let search = ui
+        .data(|data| data.get_temp::<String>(search_id()))
+        .unwrap_or_default();
+    let go_to = ui.data_mut(|data| data.remove_temp::<f64>(go_to_id()));
+    let mut clicked_sample = None;
+    with_table_state(ui, "samples", |ui, state| {
+        state.filter = search;
+        let mut reveal = false;
+        if let Some(x) = go_to
+            && let Some(sample) = nearest_sample_index(&grid, x, ascending, &mut on_scan)
+            && let Some(row) = row_of_sample(rows, sample)
+        {
+            state.selection = Some(Selection {
+                row,
+                key: None,
+                column: None,
+            });
+            reveal = true;
+        }
+        let response = DataTable::new("rspice.results.table.samples", &table_columns, rows.len())
+            .state(state)
+            .freeze(2)
+            .revision(revision)
+            .reveal_selection(reveal)
+            .max_height(ui.available_height())
+            .show(ui, row_cells);
+        if response.clicked.is_some() {
+            clicked_sample = response.clicked.and_then(|row| rows.sample_at(row));
+        }
+    });
 
     Some(TableResponse {
         clicked_sample: clicked_sample.and_then(|index| grid.get(index).copied()),
@@ -1034,15 +933,10 @@ pub fn inline_actions(
                     view.toggle_column(key, &automatic);
                 }
             }
-            if effective.len() >= TABLE_MAX_COLUMNS {
-                ui.label(
-                    egui::RichText::new(format!("{TABLE_MAX_COLUMNS} column maximum"))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-            }
         });
     }
+
+    search_and_go_to(ui);
 
     if let Some(status) = source.status {
         ui.label(
@@ -1051,6 +945,42 @@ pub fn inline_actions(
                 .color(t.color.text_faint),
         );
     }
+}
+
+/// The bar's search, which keeps the rows that contain what was typed, and
+/// Go to, which selects the row nearest the X value typed.
+fn search_and_go_to(ui: &mut Ui) {
+    let mut search = ui
+        .data(|data| data.get_temp::<String>(search_id()))
+        .unwrap_or_default();
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut search)
+            .desired_width(120.0)
+            .font(theme::field_mono())
+            .hint_text("Search…"),
+    );
+    if field.changed() {
+        ui.data_mut(|data| data.insert_temp(search_id(), search));
+    }
+
+    let draft = ui.id().with("rspice.results.table.go-to-draft");
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(draft))
+        .unwrap_or_default();
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .desired_width(96.0)
+            .font(theme::field_mono())
+            .hint_text("Go to X…"),
+    );
+    let committed = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if committed
+        && let Ok(x) = rspice_vocabulary::quantity::parse_engineering_value(text.trim())
+        && x.is_finite()
+    {
+        ui.data_mut(|data| data.insert_temp(go_to_id(), x));
+    }
+    ui.data_mut(|data| data.insert_temp(draft, text));
 }
 
 pub fn operating_point_controls(ui: &mut Ui) {
@@ -1428,34 +1358,111 @@ mod tests {
         assert_eq!(view.columns, automatic);
     }
 
-    #[test]
-    fn the_column_chooser_stops_at_the_layout_cap() {
-        let mut view = TableView {
-            columns: (0..TABLE_MAX_COLUMNS)
-                .map(|index| TracePresentationKey {
-                    source_name: format!("V({index})"),
-                    kind: 0,
-                    family_group: 0,
-                })
-                .collect(),
-            ..TableView::default()
-        };
-        view.toggle_column(
-            TracePresentationKey {
-                source_name: "V(extra)".to_owned(),
-                kind: 0,
-                family_group: 0,
-            },
-            &[TracePresentationKey {
-                source_name: "V(0)".to_owned(),
-                kind: 0,
-                family_group: 0,
-            }],
+    /// `signals` traces V(s0)… over `samples` microsecond-spaced samples,
+    /// trace k holding k·1000 + i at sample i.
+    fn wide_fixture(signals: usize, samples: usize) -> Fixture {
+        let x: Vec<f64> = (0..samples).map(|i| i as f64 * 1.0e-6).collect();
+        let traces = (0..signals)
+            .map(|k| {
+                let y: Vec<f64> = (0..samples).map(|i| (k * 1000 + i) as f64).collect();
+                RetainedTrace::new(&format!("V(s{k})"), x.clone(), y, "#fff")
+            })
+            .collect();
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "Tran", 0.0).with_waveforms(traces);
+        let mut run = rspice_results::run::SimulationRun::new(
+            1,
+            0.0,
+            rspice_results::run::ExecutionTarget::LocalDesktop,
         );
+        run.add_analysis(analysis);
+        let model = crate::waves::build_models(
+            &[&run],
+            &Default::default(),
+            &mut Default::default(),
+            &Tokens::default(),
+            crate::waves::ProjectionOptions {
+                phase_continuous: false,
+                complex_display: Default::default(),
+                ac: Default::default(),
+                selection: None,
+                hidden_family_traces: &Default::default(),
+            },
+            |_| None,
+        )
+        .remove(0);
+        Fixture {
+            model,
+            view: TableView::default(),
+        }
+    }
+
+    /// Sixty signals are sixty columns, each sorting by its numbers; Go to
+    /// selects the row nearest the X typed, or the nearest the stride keeps;
+    /// and the table draws, its heads in view, on a 1,000-point pane.
+    #[test]
+    fn a_sixty_signal_table_sorts_finds_and_draws_every_column() {
+        let mut fixture = wide_fixture(60, 500);
+        let automatic = automatic_columns(&fixture.model);
+        let columns = resolved_columns(&fixture.model, &[], &automatic);
+        assert_eq!(columns.len(), 60, "every signal is a column");
+        let last = *columns.last().expect("sixty columns");
+        assert_eq!(fixture.model.sample_value(last, 123), Some(59_123.0));
+
+        let grid = fixture.model.sample_grid().expect("a retained grid");
+        let sample = nearest_sample_index(&grid, 123.4e-6, true, &mut || {}).expect("in range");
+        let rows = selected_rows(&fixture.model, &fixture.view, None, &mut || {});
+        assert_eq!(row_of_sample(rows, sample), Some(123));
+        fixture.view.stride = 10;
+        let rows = selected_rows(&fixture.model, &fixture.view, None, &mut || {});
         assert_eq!(
-            view.columns.len(),
-            TABLE_MAX_COLUMNS,
-            "a column past the cap has nowhere to be laid out"
+            row_of_sample(rows, sample),
+            Some(12),
+            "row 12 is sample 120"
+        );
+
+        fixture.view.stride = 1;
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let labels: Vec<String> = ctx
+            .run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1_000.0, 700.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        show_samples(
+                            ui,
+                            SampleTable {
+                                model: &fixture.model,
+                                cursor_a: None,
+                                cursor_b: None,
+                                significant_digits: 4,
+                                quantity_policy: QuantityPresentationPolicy::default(),
+                            },
+                            &fixture.view,
+                            |name| Cow::Borrowed(name),
+                            || {},
+                        )
+                        .expect("rows to show");
+                    });
+                },
+            )
+            .platform_output
+            .accesskit_update
+            .expect("an accessibility tree")
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
+            .collect();
+        assert!(
+            labels.iter().any(|label| label.contains("V(s0)")),
+            "{labels:?}"
         );
     }
 
@@ -1505,20 +1512,5 @@ mod tests {
             resolved_columns(&state.model, &[stale], &automatic),
             vec![0]
         );
-    }
-
-    #[test]
-    fn accessible_rows_name_axes_values_and_cursor_ownership() {
-        let label = accessible_row_label(
-            42,
-            "A",
-            "Time",
-            "1.000 us",
-            &[("V(out)".to_owned(), "1.250 V".to_owned())],
-        );
-        assert!(label.contains("Retained sample 42"), "{label}");
-        assert!(label.contains("Time: 1.000 us"), "{label}");
-        assert!(label.contains("V(out): 1.250 V"), "{label}");
-        assert!(label.contains("cursor A"), "{label}");
     }
 }

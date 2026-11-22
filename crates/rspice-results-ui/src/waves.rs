@@ -1128,6 +1128,13 @@ impl StripModel {
         Some(self.format_trace_value(trace, value, significant_digits, quantity_policy))
     }
 
+    /// One trace's retained value at a grid index, unformatted, for a table
+    /// that sorts by it; `None` where [`Self::format_sample`] is.
+    pub fn sample_value(&self, trace_index: usize, sample: usize) -> Option<f64> {
+        let trace = self.traces.get(trace_index)?;
+        trace.y.fetch_whole().ready()?.get(sample).copied()
+    }
+
     /// Display name of one trace, for a column heading.
     pub fn trace_heading(&self, index: usize) -> Option<(&str, egui::Color32)> {
         self.traces
