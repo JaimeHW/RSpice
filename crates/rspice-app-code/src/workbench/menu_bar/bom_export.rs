@@ -1,7 +1,9 @@
 //! File ▸ Export ▸ Bill of materials: the purchased parts of the design
 //! below the open cellview, as CSV, one line per value and part number. A
 //! part inside a cell is counted once per occurrence, under its
-//! hierarchical reference (`X1/R3`). A refusal is prompted on the
+//! hierarchical reference (`X1/R3`). The parts are those of the variant the
+//! design is seen as: a part it leaves off is not bought, and a substitute or
+//! a value it gives is what is bought. A refusal is prompted on the
 //! session's status bar; a failure is the model's to report.
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -32,7 +34,19 @@ pub fn action_export_bill_of_materials_with_io(
         };
     let hierarchy =
         HierarchySource::from_design_projection(model.library_manager.catalog(), &projection);
-    let parts = hierarchy.bill_of_materials_parts(model.schematic.document(), &active);
+    // The open drawing as the projection has it, as every cell below it
+    // already is: the chosen variant's do-not-populate parts left out and
+    // its substitutes and values in place. The drawing the editor holds is
+    // the base design.
+    let top = projection
+        .schematic_buffers()
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&active.key()))
+        .map_or_else(
+            || model.schematic.document(),
+            |(_, drawing)| drawing.document(),
+        );
+    let parts = hierarchy.bill_of_materials_parts(top, &active);
     let lines = bom_lines(
         parts
             .iter()
@@ -43,7 +57,11 @@ pub fn action_export_bill_of_materials_with_io(
         return;
     }
     let csv = bom_csv(&lines);
-    let default_name = format!("{}-bom.csv", model.export_file_stem("circuit"));
+    let stem = model.export_file_stem("circuit");
+    let default_name = match model.chosen_assembly_variant() {
+        Some(variant) => format!("{stem}-{}-bom.csv", file_name_part(variant.name())),
+        None => format!("{stem}-bom.csv"),
+    };
     match io.show_save_dialog(SaveDialogConfig {
         title: "Export Bill of Materials",
         default_name: &default_name,
@@ -76,6 +94,17 @@ pub fn action_export_bill_of_materials_with_io(
     }
 }
 
+/// `name` as a part of a file name: lower case, each run of anything but a
+/// letter or a digit one hyphen, as "Automotive 85C" becomes
+/// "automotive-85c".
+fn file_name_part(name: &str) -> String {
+    name.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,13 +117,15 @@ mod tests {
     #[derive(Debug, Default)]
     struct CaptureIo {
         csv: RefCell<String>,
+        default_name: RefCell<String>,
     }
 
     impl ExportWorkflowIo for CaptureIo {
         fn show_save_dialog(
             &self,
-            _config: SaveDialogConfig<'_>,
+            config: SaveDialogConfig<'_>,
         ) -> Result<Option<PathBuf>, String> {
+            self.default_name.replace(config.default_name.to_owned());
             Ok(Some(PathBuf::from("design-bom.csv")))
         }
 
@@ -141,6 +172,73 @@ mod tests {
             csv.split("\r\n").skip(1).collect::<Vec<_>>(),
             ["R1,1,1k,,,,,,,", ""],
             "{csv}"
+        );
+    }
+
+    /// With a variant chosen the export buys the parts that variant fits: a
+    /// part it leaves off is not listed, and the file is named for it.
+    #[test]
+    fn the_export_of_a_variant_leaves_out_its_do_not_populate_parts() {
+        use crate::state::{
+            AssemblyVariantDraft, SchematicObjectKey, VariantInheritance, VariantObjectOverride,
+            VariantQualificationPlan,
+        };
+        let mut model = Model::session_start(
+            PdkConfig::default(),
+            None,
+            rspice_app_state::workbench::workspace::restore_model_library_manager,
+        );
+        let mut wb = WorkbenchSession::default();
+        model
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        let left_off = model
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(200, 0));
+        let key = SchematicObjectKey::new(
+            &model.workspace.content.active_schematic_reference().key(),
+            left_off,
+        )
+        .unwrap();
+        let mut catalog = (*model.workspace.content.design_management).clone();
+        catalog
+            .variants_mut()
+            .create(AssemblyVariantDraft {
+                name: "Automotive 85C".to_owned(),
+                parent_id: None,
+                inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: [(
+                    key,
+                    VariantObjectOverride::DoNotPopulate {
+                        approval_reference: String::new(),
+                    },
+                )]
+                .into(),
+            })
+            .unwrap();
+        model
+            .workspace
+            .content
+            .replace_design_management(catalog)
+            .unwrap();
+        assert!(model.chosen_assembly_variant().is_some());
+        let io = CaptureIo::default();
+
+        action_export_bill_of_materials_with_io(&mut model, &mut wb, &io);
+
+        let csv = io.csv.borrow();
+        assert_eq!(
+            csv.split("\r\n").skip(1).collect::<Vec<_>>(),
+            ["R1,1,1k,,,,,,,", ""],
+            "{csv}"
+        );
+        assert!(
+            io.default_name
+                .borrow()
+                .ends_with("-automotive-85c-bom.csv"),
+            "{}",
+            io.default_name.borrow()
         );
     }
 }
