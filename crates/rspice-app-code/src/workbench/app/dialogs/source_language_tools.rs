@@ -232,7 +232,13 @@ pub(in crate::workbench) fn render_rename_symbol_form(
     } else {
         tools
             .index
-            .rename_preview_at(&tools.active_path, tools.caret, &tools.query, new_name)
+            .rename_preview_at(
+                messages,
+                &tools.active_path,
+                tools.caret,
+                &tools.query,
+                new_name,
+            )
             .err()
     };
     let unchanged = new_name.is_empty() || new_name == tools.query;

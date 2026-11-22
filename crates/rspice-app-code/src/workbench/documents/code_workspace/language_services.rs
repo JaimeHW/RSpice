@@ -12,6 +12,7 @@ use std::ops::Range;
 use super::CodeWorkspaceParts;
 use crate::product::{ContentDigest, ProjectId};
 use crate::state::{ProjectSourceBundle, ProjectSourceId};
+use crate::workbench::{MessageCatalog, MessageId};
 
 use super::veriloga_catalog::VerilogACatalog;
 use super::veriloga_symbols::{VerilogASymbolKind, VerilogASymbols};
@@ -96,10 +97,9 @@ pub fn open_language_tools_in_bundle(
     active_path: &str,
     caret_char_index: usize,
 ) -> Result<(), String> {
+    let messages = parts.wb.messages();
     if !super::source_bundle_contains_document(parts, bundle_id, active_path) {
-        return Err(format!(
-            "The active source file '{active_path}' no longer belongs to this project source bundle."
-        ));
+        return Err(messages.format(MessageId::SourceNotInProject, &[("file", active_path)]));
     }
     let bundle = parts
         .model
@@ -107,16 +107,13 @@ pub fn open_language_tools_in_bundle(
         .content
         .project_sources
         .get_bundle(bundle_id)
-        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
     let active_path = bundle
         .retained_logical_path(active_path)
-        .ok_or_else(|| {
-            format!(
-                "The active source file '{active_path}' no longer belongs to this project source bundle."
-            )
-        })?
+        .ok_or_else(|| messages.format(MessageId::SourceNotInProject, &[("file", active_path)]))?
         .to_owned();
-    let index = LanguageServiceIndex::build(parts.model.workspace.content.project.id(), bundle)?;
+    let index = LanguageServiceIndex::build(parts.model.workspace.content.project.id(), bundle)
+        .map_err(|limit| limit.words(messages))?;
     let query = index
         .symbol_at(&active_path, caret_char_index)
         .unwrap_or_default()
@@ -133,8 +130,10 @@ pub fn open_language_tools_in_bundle(
 }
 
 pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+    let messages = parts.wb.messages();
     let state = current_language_transaction(parts)?;
     let replacements = state.index.rename_preview_at(
+        messages,
         &state.active_path,
         state.caret,
         &state.query,
@@ -149,9 +148,7 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
             logical_path,
         )
     }) {
-        return Err(format!(
-            "Rename would change read-only source '{logical_path}'. No project source was changed."
-        ));
+        return Err(messages.format(MessageId::SourceRenameReadOnly, &[("file", logical_path)]));
     }
     let (occurrences, _) =
         state
@@ -169,9 +166,8 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
         parts.code,
         state.index.bundle_id,
     );
-    let messages = parts.wb.messages();
     let message = messages.format(
-        crate::workbench::MessageId::SourceRenamed,
+        MessageId::SourceRenamed,
         &[
             ("old", &state.query),
             ("new", &state.replacement),
@@ -188,12 +184,7 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
 }
 
 /// "3 occurrences in 2 files", for the rename form and its receipt.
-pub fn extent_words(
-    messages: crate::workbench::MessageCatalog,
-    occurrences: usize,
-    files: usize,
-) -> String {
-    use crate::workbench::MessageId;
+pub fn extent_words(messages: MessageCatalog, occurrences: usize, files: usize) -> String {
     messages.format(
         MessageId::SourceExtent,
         &[
@@ -216,11 +207,12 @@ pub fn extent_words(
 fn current_language_transaction(
     parts: &CodeWorkspaceParts<'_>,
 ) -> Result<CodeLanguageToolsState, String> {
+    let messages = parts.wb.messages();
     let state = parts
         .code
         .language_tools
         .clone()
-        .ok_or_else(|| "No source-language transaction is open.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::SourceRenameClosed))?;
     if let Some(reason) = super::source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
@@ -231,9 +223,9 @@ fn current_language_transaction(
         state.index.bundle_id,
         &state.active_path,
     ) {
-        return Err(format!(
-            "'{}' is read-only, so no source change was applied.",
-            state.active_path
+        return Err(messages.format(
+            MessageId::SourceRenameReadOnly,
+            &[("file", &state.active_path)],
         ));
     }
     let bundle = parts
@@ -242,15 +234,12 @@ fn current_language_transaction(
         .content
         .project_sources
         .get_bundle(state.index.bundle_id)
-        .ok_or_else(|| "The indexed source bundle no longer exists.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
     if !state
         .index
         .is_current(parts.model.workspace.content.project.id(), bundle)
     {
-        return Err(
-            "The source bundle changed after the language transaction was opened. Reindex the current revision."
-                .to_owned(),
-        );
+        return Err(messages.text(MessageId::SourceRenameSourceChanged));
     }
     Ok(state)
 }
@@ -267,6 +256,7 @@ pub fn format_language_document(
     bundle_id: ProjectSourceId,
     logical_path: &str,
 ) -> Result<String, String> {
+    let messages = parts.wb.messages();
     if let Some(reason) = super::source_file_mutation_block_reason(parts) {
         return Err(reason.to_owned());
     }
@@ -277,9 +267,7 @@ pub fn format_language_document(
         bundle_id,
         logical_path,
     ) {
-        return Err(format!(
-            "{logical_path} is read-only, so it was not formatted."
-        ));
+        return Err(messages.format(MessageId::SourceFormatReadOnly, &[("file", logical_path)]));
     }
     let source = parts
         .model
@@ -292,13 +280,13 @@ pub fn format_language_document(
                 .find(|(path, _)| crate::state::project_source_paths_equal(path, logical_path))
                 .map(|(_, source)| source.to_owned())
         })
-        .ok_or_else(|| format!("{logical_path} is no longer part of this project."))?;
-    let formatted = formatted_source(logical_path, &source)?;
+        .ok_or_else(|| messages.format(MessageId::SourceNotInProject, &[("file", logical_path)]))?;
+    let formatted = formatted_source(messages, logical_path, &source)?;
     let message = if formatted == source {
-        format!("{logical_path} is already formatted.")
+        messages.format(MessageId::SourceAlreadyFormatted, &[("file", logical_path)])
     } else {
         write_language_document(parts, bundle_id, logical_path, formatted)?;
-        format!("Formatted {logical_path}.")
+        messages.format(MessageId::SourceFormatted, &[("file", logical_path)])
     };
     parts.wb.prompt(message.clone());
     Ok(message)
@@ -307,8 +295,12 @@ pub fn format_language_document(
 /// The formatter's whole-document edit, or why the source is refused:
 /// trailing blanks removed outside string literals, one final line break,
 /// and the Verilog-A laid out by its block structure.
-fn formatted_source(logical_path: &str, source: &str) -> Result<String, String> {
-    validate_source_for_formatting(logical_path, source)?;
+fn formatted_source(
+    messages: MessageCatalog,
+    logical_path: &str,
+    source: &str,
+) -> Result<String, String> {
+    validate_source_for_formatting(messages, logical_path, source)?;
     let protected = protected_string_lines(source);
     let normalized = normalize_source_whitespace(source, &protected).0;
     Ok(super::veriloga_format::format_source(&normalized))
@@ -316,7 +308,11 @@ fn formatted_source(logical_path: &str, source: &str) -> Result<String, String> 
 
 #[cfg(test)]
 pub(super) fn formatted_verilog_a(logical_path: &str, source: &str) -> Result<String, String> {
-    formatted_source(logical_path, source)
+    formatted_source(
+        MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        logical_path,
+        source,
+    )
 }
 
 fn write_language_document(
@@ -334,20 +330,46 @@ fn write_language_document(
     Ok(())
 }
 
+/// Why a source is too large to index: its files come to more than
+/// [`MAX_INDEX_BYTES`], or write more than [`MAX_INDEX_TOKENS`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IndexLimit {
+    /// The files' size, in bytes.
+    Bytes(usize),
+    Names,
+}
+
+impl IndexLimit {
+    /// What the limit refuses, in the reader's words.
+    pub(crate) fn words(self, messages: MessageCatalog) -> String {
+        match self {
+            Self::Bytes(bytes) => messages.format(
+                MessageId::SourceIndexTooLarge,
+                &[
+                    ("bytes", &bytes.to_string()),
+                    ("limit", &MAX_INDEX_BYTES.to_string()),
+                ],
+            ),
+            Self::Names => messages.format(
+                MessageId::SourceIndexTooManyNames,
+                &[("limit", &MAX_INDEX_TOKENS.to_string())],
+            ),
+        }
+    }
+}
+
 impl LanguageServiceIndex {
     pub(crate) fn build(
         project_id: ProjectId,
         bundle: &ProjectSourceBundle,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, IndexLimit> {
         let documents = bundle_documents(bundle).collect::<Vec<_>>();
         let total_bytes = documents
             .iter()
             .map(|(_, source)| source.len())
             .sum::<usize>();
         if total_bytes > MAX_INDEX_BYTES {
-            return Err(format!(
-                "The source closure is {total_bytes} bytes; language navigation is bounded to {MAX_INDEX_BYTES} bytes."
-            ));
+            return Err(IndexLimit::Bytes(total_bytes));
         }
         let mut symbols = Vec::new();
         let mut tokens = Vec::new();
@@ -376,9 +398,7 @@ impl LanguageServiceIndex {
                 source.to_owned(),
             );
             if tokens.len() > MAX_INDEX_TOKENS {
-                return Err(format!(
-                    "The source closure contains more than {MAX_INDEX_TOKENS} identifier tokens. Narrow the source closure before indexing."
-                ));
+                return Err(IndexLimit::Names);
             }
         }
         symbols.sort_by(|left, right| {
@@ -469,25 +489,21 @@ impl LanguageServiceIndex {
 
     pub(crate) fn rename_preview(
         &self,
+        messages: MessageCatalog,
         name: &str,
         replacement: &str,
     ) -> Result<Vec<(String, String)>, String> {
         if !valid_identifier(replacement) || language_keyword(replacement) {
-            return Err(format!(
-                "'{replacement}' is not a valid non-keyword identifier."
-            ));
+            return Err(messages.format(MessageId::SourceRenameNotAName, &[("name", replacement)]));
         }
         let definitions = self.definitions(name);
         if definitions.is_empty() {
-            return Err(format!(
-                "No project-owned definition of '{name}' is indexed."
-            ));
+            return Err(messages.format(MessageId::SourceNoDefinition, &[("name", name)]));
         }
         if definitions.len() != 1 {
-            return Err(format!(
-                "Rename is ambiguous because '{}' has {} project-owned definitions. Find references and rename a narrower scope instead.",
-                name,
-                definitions.len()
+            return Err(messages.format(
+                MessageId::SourceRenameDefinedTwice,
+                &[("name", name), ("count", &definitions.len().to_string())],
             ));
         }
         let occurrences = self
@@ -496,12 +512,10 @@ impl LanguageServiceIndex {
             .filter(|token| token.name == name && token.renamable)
             .collect::<Vec<_>>();
         if occurrences.is_empty() {
-            return Err(format!("No editable references to '{name}' are indexed."));
+            return Err(messages.format(MessageId::SourceRenameNothingToChange, &[("name", name)]));
         }
         if occurrences.len() > MAX_RENAME_EDITS {
-            return Err(format!(
-                "Rename would create more than {MAX_RENAME_EDITS} edits. Narrow the source closure first."
-            ));
+            return Err(too_many_edits(messages));
         }
         let mut by_path = BTreeMap::<&str, Vec<&IndexedToken>>::new();
         for occurrence in occurrences {
@@ -514,9 +528,7 @@ impl LanguageServiceIndex {
         for (path, mut edits) in by_path {
             let mut source = self
                 .source_for_path(path)
-                .ok_or_else(|| {
-                    format!("The indexed source document '{path}' is no longer available.")
-                })?
+                .ok_or_else(|| messages.format(MessageId::SourceNotInProject, &[("file", path)]))?
                 .clone();
             edits.sort_by_key(|token| std::cmp::Reverse(token.byte_range.start));
             for edit in edits {
@@ -614,54 +626,46 @@ impl LanguageServiceIndex {
     /// `logical_path` changes, or why it is refused.
     pub(crate) fn rename_preview_at(
         &self,
+        messages: MessageCatalog,
         logical_path: &str,
         char_index: usize,
         name: &str,
         replacement: &str,
     ) -> Result<Vec<(String, String)>, String> {
+        let refused = |id, name: &str| messages.format(id, &[("name", name)]);
         if !valid_identifier(replacement) {
-            return Err(format!("'{replacement}' is not a valid name."));
+            return Err(refused(MessageId::SourceRenameNotAName, replacement));
         }
         let catalog = VerilogACatalog::get();
         if rspice_veriloga::language_catalog::is_reserved_word(replacement) {
-            return Err(format!(
-                "'{replacement}' is a reserved word of Verilog-A, so it cannot be a name."
-            ));
+            return Err(refused(MessageId::SourceRenameReservedWord, replacement));
         }
         if catalog.reserves(replacement) {
-            return Err(format!(
-                "'{replacement}' already means something in Verilog-A, so it cannot be a name."
-            ));
+            return Err(refused(MessageId::SourceRenameBuiltIn, replacement));
         }
         if catalog.reserves(name)
             && self
                 .veriloga_target(logical_path, char_index, name)
                 .is_none()
         {
-            return Err(format!(
-                "'{name}' is part of Verilog-A and cannot be renamed."
-            ));
+            return Err(refused(MessageId::SourceRenamePartOfLanguage, name));
         }
         let symbols = self.veriloga_symbols(logical_path).ok_or_else(|| {
-            format!("The indexed source document '{logical_path}' is no longer available.")
+            messages.format(MessageId::SourceNotInProject, &[("file", logical_path)])
         })?;
         let Some(target) = self.veriloga_target(logical_path, char_index, name) else {
-            return self.rename_unresolved(logical_path, symbols, name, replacement);
+            return self.rename_unresolved(messages, logical_path, symbols, name, replacement);
         };
-        self.veriloga_rename_refusal(&target, name, replacement)?;
+        self.veriloga_rename_refusal(messages, &target, name, replacement)?;
         let sites = self.veriloga_sites(&target, name);
         if sites.iter().map(|(_, ranges)| ranges.len()).sum::<usize>() > MAX_RENAME_EDITS {
-            return Err(format!(
-                "Rename would create more than {MAX_RENAME_EDITS} edits. Narrow the source closure first."
-            ));
+            return Err(too_many_edits(messages));
         }
         let mut replacements = Vec::with_capacity(sites.len());
         for (path, ranges) in sites {
             let mut source = self
                 .source_for_path(&path)
-                .ok_or_else(|| {
-                    format!("The indexed source document '{path}' is no longer available.")
-                })?
+                .ok_or_else(|| messages.format(MessageId::SourceNotInProject, &[("file", &path)]))?
                 .clone();
             for range in ranges.into_iter().rev() {
                 source.replace_range(range, replacement);
@@ -678,6 +682,7 @@ impl LanguageServiceIndex {
     /// its scopes begin and end is unknown.
     fn rename_unresolved(
         &self,
+        messages: MessageCatalog,
         logical_path: &str,
         symbols: &VerilogASymbols,
         name: &str,
@@ -686,11 +691,12 @@ impl LanguageServiceIndex {
         if let Some((line, reason)) = symbols.unreadable()
             && self.has_a_module(logical_path)
         {
-            return Err(format!(
-                "Rename needs to read the whole file, and line {line} does not read: {reason}"
+            return Err(messages.format(
+                MessageId::SourceRenameUnreadable,
+                &[("line", &line.to_string()), ("reason", &reason.to_string())],
             ));
         }
-        self.rename_preview(name, replacement)
+        self.rename_preview(messages, name, replacement)
     }
 
     fn has_a_module(&self, logical_path: &str) -> bool {
@@ -782,6 +788,7 @@ impl LanguageServiceIndex {
     /// means, when it would.
     fn veriloga_rename_refusal(
         &self,
+        messages: MessageCatalog,
         target: &VerilogATarget,
         name: &str,
         replacement: &str,
@@ -796,8 +803,9 @@ impl LanguageServiceIndex {
             .declared_in(declaration.scope, replacement)
             .is_some()
         {
-            return Err(format!(
-                "'{replacement}' is already declared beside '{name}'."
+            return Err(messages.format(
+                MessageId::SourceRenameDeclaredBeside,
+                &[("new", replacement), ("name", name)],
             ));
         }
         // A use of the name that an inner declaration of the new name would
@@ -808,9 +816,13 @@ impl LanguageServiceIndex {
                 .take_while(|scope| *scope != declaration.scope)
                 .any(|scope| symbols.declared_in(scope, replacement).is_some());
             if shadowed {
-                return Err(format!(
-                    "'{replacement}' is declared in an inner scope that uses '{name}' at line {}, and would hide it there.",
-                    written.line
+                return Err(messages.format(
+                    MessageId::SourceRenameWouldHide,
+                    &[
+                        ("new", replacement),
+                        ("name", name),
+                        ("line", &written.line.to_string()),
+                    ],
                 ));
             }
         }
@@ -825,9 +837,13 @@ impl LanguageServiceIndex {
                 .take_while(|scope| symbols.declared_in(*scope, replacement).is_none())
                 .any(|scope| scope == declaration.scope);
             if captured {
-                return Err(format!(
-                    "Line {} already uses '{replacement}', which would then mean the renamed '{name}'.",
-                    written.line
+                return Err(messages.format(
+                    MessageId::SourceRenameWouldCapture,
+                    &[
+                        ("line", &written.line.to_string()),
+                        ("new", replacement),
+                        ("name", name),
+                    ],
                 ));
             }
         }
@@ -839,9 +855,13 @@ impl LanguageServiceIndex {
         ) {
             for (path, other) in self.veriloga_documents() {
                 if let Some(member) = other.member_named(name) {
-                    return Err(format!(
-                        "'{name}' is connected by name at {path}:{}, which Rename cannot follow.",
-                        member.line
+                    return Err(messages.format(
+                        MessageId::SourceRenameConnectedByName,
+                        &[
+                            ("name", name),
+                            ("file", path),
+                            ("line", &member.line.to_string()),
+                        ],
                     ));
                 }
             }
@@ -866,8 +886,9 @@ impl LanguageServiceIndex {
                 })
                 .count();
             if candidates > 1 {
-                return Err(format!(
-                    "Another file uses '{name}' without declaring it, and {candidates} declarations could be the one it means."
+                return Err(messages.format(
+                    MessageId::SourceRenameUndeclaredUse,
+                    &[("name", name), ("count", &candidates.to_string())],
                 ));
             }
         }
@@ -909,13 +930,30 @@ fn place_of(source: &str, offset: usize) -> (usize, usize) {
 /// from the tokens and keeps them all, so it needs no more than that they
 /// read: a header of macros is no module, and a module's directives are not
 /// yet expanded here.
-fn validate_source_for_formatting(logical_path: &str, source: &str) -> Result<(), String> {
+fn validate_source_for_formatting(
+    messages: MessageCatalog,
+    logical_path: &str,
+    source: &str,
+) -> Result<(), String> {
     let mut source_map = rspice_veriloga::SourceMap::new();
     let source_id = source_map.add_source_mut(logical_path, source);
     rspice_veriloga::Lexer::new(source, source_id)
         .collect_tokens()
         .map(|_| ())
-        .map_err(|error| format!("Formatting is blocked by Verilog-A lexing: {error}"))
+        .map_err(|error| {
+            messages.format(
+                MessageId::SourceFormatStopped,
+                &[("file", logical_path), ("error", &error.to_string())],
+            )
+        })
+}
+
+/// Why Rename refuses a change of more than [`MAX_RENAME_EDITS`] places.
+fn too_many_edits(messages: MessageCatalog) -> String {
+    messages.format(
+        MessageId::SourceRenameTooManyEdits,
+        &[("limit", &MAX_RENAME_EDITS.to_string())],
+    )
 }
 
 fn protected_string_lines(source: &str) -> BTreeSet<usize> {
@@ -1236,6 +1274,10 @@ pub(super) fn source_line_preview(source: &str, one_based_line: usize) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn english() -> MessageCatalog {
+        MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
+    }
     use crate::state::{ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner};
 
     fn bundle(root_path: &str, root: &str, files: Vec<ProjectSourceFile>) -> ProjectSourceBundle {
@@ -1276,7 +1318,13 @@ mod tests {
             (3, 2)
         );
         let changed = index
-            .rename_preview_at("models/resistor.va", caret, "resistance", "r_value")
+            .rename_preview_at(
+                english(),
+                "models/resistor.va",
+                caret,
+                "resistance",
+                "r_value",
+            )
             .unwrap();
         assert_eq!(changed.len(), 2);
         let root = changed
@@ -1309,12 +1357,12 @@ mod tests {
         assert!(index.references("ns").is_empty());
         assert!(index.references("s").is_empty());
 
-        let changed = index.rename_preview("p", "capacitance").unwrap();
+        let changed = index.rename_preview(english(), "p", "capacitance").unwrap();
         assert_eq!(changed.len(), 1);
         assert!(changed[0].1.contains("parameter real capacitance = 10p;"));
         assert!(changed[0].1.contains("<+ capacitance * ddt"));
 
-        let changed = index.rename_preview("e", "leakage").unwrap();
+        let changed = index.rename_preview(english(), "e", "leakage").unwrap();
         assert!(changed[0].1.contains("parameter real leakage = 2.5e-3;"));
         assert!(changed[0].1.contains("+ leakage * 1e-3 *"));
     }
@@ -1332,7 +1380,7 @@ mod tests {
         assert_eq!(index.definitions("gain").len(), 1);
         assert_eq!(index.references("gain").len(), 2);
         assert_eq!(index.references("mask").len(), 2);
-        let changed = index.rename_preview("gain", "scale").unwrap();
+        let changed = index.rename_preview(english(), "gain", "scale").unwrap();
         assert!(changed[0].1.contains("<+ scale * mask;"));
     }
 
@@ -1389,7 +1437,7 @@ mod tests {
         let index = two_scopes();
         let caret = char_of(TWO_SCOPES, "b;\n  analog V(a");
         let changed = index
-            .rename_preview_at("two.va", caret, "b", "bottom")
+            .rename_preview_at(english(), "two.va", caret, "b", "bottom")
             .unwrap();
         assert_eq!(changed.len(), 1);
         assert_eq!(
@@ -1417,7 +1465,7 @@ mod tests {
         let caret = char_of(TWO_SCOPES, "b;\n  analog V(a");
         let refusal = |replacement: &str| {
             index
-                .rename_preview_at("two.va", caret, "b", replacement)
+                .rename_preview_at(english(), "two.va", caret, "b", replacement)
                 .unwrap_err()
         };
         assert_eq!(
@@ -1442,7 +1490,13 @@ mod tests {
         let bundle = bundle("m.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let rename = |written: &str, name: &str, replacement: &str| {
-            index.rename_preview_at("m.va", char_of(source, written), name, replacement)
+            index.rename_preview_at(
+                english(),
+                "m.va",
+                char_of(source, written),
+                name,
+                replacement,
+            )
         };
         assert_eq!(
             rename("a, b;", "a", "b").unwrap_err(),
@@ -1474,7 +1528,7 @@ mod tests {
         let bundle = bundle("m.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let refusal = index
-            .rename_preview_at("m.va", char_of(source, "g = ;"), "g", "gain")
+            .rename_preview_at(english(), "m.va", char_of(source, "g = ;"), "g", "gain")
             .unwrap_err();
         assert!(
             refusal.starts_with("Rename needs to read the whole file, and line 4"),
@@ -1489,7 +1543,7 @@ mod tests {
         let bundle = bundle("m.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let refusal = index
-            .rename_preview_at("m.va", char_of(source, "g = 1"), "g", "gain")
+            .rename_preview_at(english(), "m.va", char_of(source, "g = 1"), "g", "gain")
             .unwrap_err();
         assert_eq!(
             refusal,

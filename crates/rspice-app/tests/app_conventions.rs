@@ -2131,6 +2131,7 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         "rspice-app-code/src/workbench/documents/netlist_document/completion.rs",
         "rspice-app-code/src/workbench/documents/netlist_document/references.rs",
         "rspice-app-code/src/workbench/app/dialogs/source_language_tools.rs",
+        "rspice-app-code/src/workbench/documents/code_workspace/language_services.rs",
         "rspice-app-code/src/workbench/app/dialogs/source_document.rs",
         "rspice-app-code/src/workbench/code/deck_run.rs",
         "rspice-app-code/src/workbench/code/netlist_first.rs",
