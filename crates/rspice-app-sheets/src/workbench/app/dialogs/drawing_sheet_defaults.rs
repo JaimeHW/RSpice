@@ -143,6 +143,14 @@ pub(crate) fn render_drawing_sheet_defaults_dialog(
     }
     refresh_untouched_baselines(defaults, model);
     let following_sheets = DefaultReach::of(model);
+    // The preview seats the project's logo, as every sheet's block does.
+    let owner_logo = model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .owner_logo
+        .clone();
     let transaction = &*defaults;
     let project_changed = transaction.draft_project != transaction.baseline_project;
     let personal_changed = transaction.draft_personal != transaction.baseline_personal;
@@ -178,6 +186,7 @@ pub(crate) fn render_drawing_sheet_defaults_dialog(
                 project_authority.as_deref(),
                 project_editable,
                 following_sheets.as_ref(),
+                owner_logo.as_ref(),
                 &mut open_presets,
             );
         });
@@ -318,6 +327,7 @@ fn drawing_sheet_defaults_body(
     project_authority_error: Option<&str>,
     project_editable: bool,
     following_sheets: Option<&DefaultReach>,
+    owner_logo: Option<&crate::state::DrawingSheetOwnerLogo>,
     open_presets: &mut bool,
 ) {
     let t = Tokens::get(ui.ctx());
@@ -403,7 +413,7 @@ fn drawing_sheet_defaults_body(
         }
         y += catalog_h + 1.0;
         let rect = Rect::from_min_size(pos2(x0, y), vec2(inner_w, preview_h));
-        preview_region(ui, rect, &record, target, following_sheets);
+        preview_region(ui, rect, &record, target, following_sheets, owner_logo);
         y += preview_h + 1.0;
         let rect = Rect::from_min_size(pos2(x0, y), vec2(inner_w, frame_h));
         frame_row(
@@ -463,7 +473,14 @@ fn drawing_sheet_defaults_body(
             pos2(x0 + left_w + 1.0, y0),
             vec2(preview_w, row1_h + 1.0 + catalog_h),
         );
-        preview_region(ui, preview_rect, &record, target, following_sheets);
+        preview_region(
+            ui,
+            preview_rect,
+            &record,
+            target,
+            following_sheets,
+            owner_logo,
+        );
 
         let frame_rect = Rect::from_min_size(
             pos2(x0, y0 + row1_h + 1.0 + catalog_h + 1.0),
@@ -1148,6 +1165,7 @@ fn preview_region(
     record: &SchematicSheetFormat,
     target: DrawingSheetDefaultsTarget,
     following_sheets: Option<&DefaultReach>,
+    owner_logo: Option<&crate::state::DrawingSheetOwnerLogo>,
 ) {
     let t = Tokens::get(ui.ctx());
     ui.painter()
@@ -1205,7 +1223,13 @@ fn preview_region(
             .max_rect(preview_rect)
             .layout(Layout::top_down(Align::Min)),
         |ui| {
-            drawing_sheet_preview(ui, record, preview_h, &default_record_summary(record));
+            drawing_sheet_preview(
+                ui,
+                record,
+                preview_h,
+                &default_record_summary(record),
+                owner_logo,
+            );
         },
     );
 

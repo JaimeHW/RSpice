@@ -310,6 +310,15 @@ impl PresetDialogs<'_> {
 
     fn render_drawing_sheet_preset_editor(&mut self, ctx: &Context) {
         let personal = self.model.preferences.drawing_sheet_personal_preferences();
+        // The preview seats the project's logo, as every sheet's block does.
+        let owner_logo = self
+            .model
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .owner_logo
+            .clone();
         let visible =
             all_visible_presets(&self.model.workspace.content.design_management, &personal);
         let project_error = validate_project_authority(self.model, self.dialogs).err();
@@ -363,6 +372,7 @@ impl PresetDialogs<'_> {
                     validation.as_ref().err().map(String::as_str),
                     project_error.as_deref(),
                     personal_stale,
+                    owner_logo.as_ref(),
                 );
             });
         if matches!(action, Some(EditorBodyAction::RefreshPreview))

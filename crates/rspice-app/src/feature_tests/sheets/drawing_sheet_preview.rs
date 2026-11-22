@@ -34,7 +34,7 @@ fn the_preview_letters_the_zones_the_sheet_model_letters() {
         ..Default::default()
     };
     let output = egui::Context::default().run_ui(input, |ui| {
-        drawing_sheet_preview(ui, &format, 4_000.0, "");
+        drawing_sheet_preview(ui, &format, 4_000.0, "", None);
     });
     let lettered = output
         .shapes
@@ -127,5 +127,61 @@ fn preview_covers_every_hardcopy_printable_class_but_not_probe_flags() {
             DrawingSheetPrintablePreviewKind::DesignNote,
             DrawingSheetPrintablePreviewKind::DocumentationShape,
         ]
+    );
+}
+
+/// A sheet-format preview seats the project's logo in its title block, as
+/// the canvas and the printed page do, and a project without one shows none.
+#[test]
+fn the_preview_seats_the_projects_logo_in_its_title_block() {
+    use rspice_schematic_editor::view::drawing_sheet::DrawingSheetPalette;
+    use rspice_ui_kit::tokens::Tokens;
+
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, 6, 2);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[0x40; 6 * 2 * 4]).unwrap();
+    writer.finish().unwrap();
+    let logo = rspice_app_state::state::DrawingSheetOwnerLogo::from_png(png, "Acme logo").unwrap();
+    let format = SchematicSheetFormat::default();
+    let painted = |logo: Option<&rspice_app_state::state::DrawingSheetOwnerLogo>| {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input, |ui| {
+            drawing_sheet_preview(ui, &format, 560.0, "", logo);
+        });
+        let block_fill = DrawingSheetPalette::resolve(&Tokens::get(&ctx)).block;
+        let mut block = None;
+        let mut pictures = Vec::new();
+        for clipped in &output.shapes {
+            match &clipped.shape {
+                Shape::Path(path) if path.fill == block_fill => {
+                    block = Some(Rect::from_points(&path.points));
+                }
+                Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                    pictures.push(mesh.calc_bounds());
+                }
+                _ => {}
+            }
+        }
+        (block.expect("the preview draws the title block"), pictures)
+    };
+    assert!(painted(None).1.is_empty(), "no logo, no picture");
+    let (block, pictures) = painted(Some(&logo));
+    let [picture] = pictures[..] else {
+        panic!("the preview paints {} pictures", pictures.len());
+    };
+    assert!(
+        block.contains_rect(picture),
+        "{picture:?} outside {block:?}"
+    );
+    assert!(
+        (picture.width() - 3.0 * picture.height()).abs() < 0.1,
+        "the logo keeps its proportions: {picture:?}"
     );
 }

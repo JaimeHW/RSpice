@@ -4,11 +4,12 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, 
 
 use rspice_schematic_editor::view::drawing_sheet::{
     DRAWING_SHEET_ORIGIN, DRAWING_SHEET_UNITS_PER_MM, DrawingSheetPalette,
-    DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind,
+    DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind, owner_logo_texture,
 };
 
 use crate::state::{
-    DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetRect, SchematicSheetFormat,
+    DrawingSheetFrameLayer, DrawingSheetFrameMark, DrawingSheetOwnerLogo, DrawingSheetRect,
+    SchematicSheetFormat,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -65,8 +66,16 @@ impl DrawingSheetPreviewContent {
     }
 }
 
-pub fn drawing_sheet_preview(ui: &mut Ui, format: &SchematicSheetFormat, height: f32, label: &str) {
-    drawing_sheet_preview_impl(ui, format, height, label, None, None);
+/// `format` drawn as the sheet it prints, its title block seating the
+/// project's `owner_logo` where the form has room for one.
+pub fn drawing_sheet_preview(
+    ui: &mut Ui,
+    format: &SchematicSheetFormat,
+    height: f32,
+    label: &str,
+    owner_logo: Option<&DrawingSheetOwnerLogo>,
+) {
+    drawing_sheet_preview_impl(ui, format, height, label, None, None, owner_logo);
 }
 
 /// The desk (backdrop) color the preview paints behind the paper, exposed so
@@ -89,8 +98,17 @@ pub(super) fn drawing_sheet_preview_at_common_scale(
     label: &str,
     content: Option<&DrawingSheetPreviewContent>,
     common_extent_um: (u64, u64),
+    owner_logo: Option<&DrawingSheetOwnerLogo>,
 ) {
-    drawing_sheet_preview_impl(ui, format, height, label, content, Some(common_extent_um));
+    drawing_sheet_preview_impl(
+        ui,
+        format,
+        height,
+        label,
+        content,
+        Some(common_extent_um),
+        owner_logo,
+    );
 }
 
 /// The share of the ruler kept clear around the drawn page, matching the 6 %
@@ -104,6 +122,7 @@ fn drawing_sheet_preview_impl(
     label: &str,
     content: Option<&DrawingSheetPreviewContent>,
     common_extent_um: Option<(u64, u64)>,
+    owner_logo: Option<&DrawingSheetOwnerLogo>,
 ) {
     let t = Tokens::get(ui.ctx());
     let palette = DrawingSheetPalette::resolve(&t);
@@ -207,7 +226,14 @@ fn drawing_sheet_preview_impl(
     }
 
     if let Some(title_block) = geometry.title_block {
-        paint_title_block(ui, map_rect(title_block), format, &geometry, palette);
+        paint_title_block(
+            ui,
+            map_rect(title_block),
+            format,
+            &geometry,
+            palette,
+            owner_logo,
+        );
     }
     // The same-revision note the canvas and the plot letter, as the value
     // lines are drawn: a stroke on its line, over its length.
@@ -419,9 +445,13 @@ fn paint_title_block(
     format: &SchematicSheetFormat,
     geometry: &crate::state::DrawingSheetGeometry,
     palette: DrawingSheetPalette,
+    owner_logo: Option<&DrawingSheetOwnerLogo>,
 ) {
-    // The cells the canvas and the plot draw, scaled to the preview.
-    let Some(layout) = crate::state::drawing_sheet_title_layout(format, geometry) else {
+    // The cells the canvas and the plot draw, scaled to the preview, the
+    // owner's cell seating the project's logo as they do.
+    let Some((layout, logo_seat)) =
+        crate::state::drawing_sheet_title_layout_with_owner_logo(format, geometry, owner_logo)
+    else {
         return;
     };
     let template = geometry.effective_title_block_template;
@@ -503,6 +533,29 @@ fn paint_title_block(
         }
     }
 
+    // The owner's logo where the form seats it, on its plate of paper in
+    // the dark, as the canvas draws it.
+    let logo_picture = logo_seat.zip(owner_logo).and_then(|(seat, logo)| {
+        let texture = owner_logo_texture(ui.ctx(), logo)?;
+        let picture = Rect::from_min_max(
+            pos2(x_at(seat.x_um), y_at(seat.y_um)),
+            pos2(
+                x_at(seat.x_um + seat.width_um),
+                y_at(seat.y_um + seat.height_um),
+            ),
+        );
+        if let Some(plate) = palette.logo_plate {
+            ui.painter().rect_filled(picture, 0.0, plate);
+        }
+        ui.painter().image(
+            texture.id(),
+            picture,
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+        Some(picture)
+    });
+
     for rule in &layout.rules {
         ui.painter().line_segment(
             [
@@ -527,12 +580,27 @@ fn paint_title_block(
         if cell_width >= 7.0 && cell_height >= 4.0 {
             let inset = (cell_width * 0.12).clamp(1.0, 4.0);
             let width_ratio = 0.42 + (value_index % 3) as f32 * 0.12;
-            let end_x = (cell_left + cell_width * width_ratio).min(cell_right - inset);
             let y = y_at(value.seat_um);
-            ui.painter().line_segment(
-                [pos2(cell_left + inset, y), pos2(end_x, y)],
-                Stroke::new(0.65, palette.block_ink),
-            );
+            // A value beside the logo starts after it, as its lettering does,
+            // and runs over as much of the room left.
+            let (start_x, end_x) = match logo_picture.filter(|picture| {
+                picture.y_range().contains(y)
+                    && picture.left() >= cell_left
+                    && picture.right() <= cell_right
+            }) {
+                Some(picture) => {
+                    let start_x = picture.right() + inset;
+                    (start_x, start_x + (cell_right - start_x) * width_ratio)
+                }
+                None => (cell_left + inset, cell_left + cell_width * width_ratio),
+            };
+            let end_x = end_x.min(cell_right - inset);
+            if start_x < end_x {
+                ui.painter().line_segment(
+                    [pos2(start_x, y), pos2(end_x, y)],
+                    Stroke::new(0.65, palette.block_ink),
+                );
+            }
         }
     }
 }

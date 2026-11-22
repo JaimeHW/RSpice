@@ -164,6 +164,14 @@ pub(crate) fn render_drawing_sheet_support_dialogs(
         return;
     }
     let authority_error = validate_manager_authority(model, &support.manager).err();
+    // Each card seats the project's logo, as every sheet's block does.
+    let owner_logo = model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .owner_logo
+        .clone();
     let selected = support.manager.rows.iter().any(|row| row.selected);
     let enabled = authority_error.is_none() && selected;
     let choice = Dialog::new(
@@ -179,6 +187,7 @@ pub(crate) fn render_drawing_sheet_support_dialogs(
             ui,
             &mut support.manager,
             authority_error.as_deref(),
+            owner_logo.as_ref(),
         );
     });
     match choice {
@@ -210,9 +219,10 @@ fn sheet_format_manager_body(
     ui: &mut Ui,
     state: &mut SheetFormatManagerState,
     authority_error: Option<&str>,
+    owner_logo: Option<&crate::state::DrawingSheetOwnerLogo>,
 ) {
     let t = Tokens::get(ui.ctx());
-    if manager_thumbnails(ui, &state.rows, &state.preview_content) {
+    if manager_thumbnails(ui, &state.rows, &state.preview_content, owner_logo) {
         ui.add_space(11.0);
     }
     manager_format_table(ui, &mut state.rows, &t);
@@ -725,6 +735,7 @@ fn manager_thumbnails(
     ui: &mut Ui,
     rows: &[SheetFormatManagerRow],
     preview_content: &DrawingSheetPreviewContent,
+    owner_logo: Option<&crate::state::DrawingSheetOwnerLogo>,
 ) -> bool {
     if rows.len() < 2 {
         return false;
@@ -792,6 +803,7 @@ fn manager_thumbnails(
                                         &format!("{} \u{00b7} {}", row.page, row.name),
                                         row.active.then_some(preview_content),
                                         ruler,
+                                        owner_logo,
                                     );
                                 });
                         },

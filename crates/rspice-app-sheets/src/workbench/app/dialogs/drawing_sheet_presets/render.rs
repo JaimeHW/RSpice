@@ -593,6 +593,7 @@ pub(super) fn editor_body(
     validation_error: Option<&str>,
     project_error: Option<&str>,
     personal_stale: bool,
+    owner_logo: Option<&crate::state::DrawingSheetOwnerLogo>,
 ) -> Option<EditorBodyAction> {
     let t = Tokens::get(ui.ctx());
     let editing_name_only = draft.mode == PresetEditorMode::Edit;
@@ -622,7 +623,7 @@ pub(super) fn editor_body(
             );
             // Stacked, the preview's own band is what separates it from the
             // form; a hairline directly above a band is noise.
-            preset_editor_preview(ui, draft);
+            preset_editor_preview(ui, draft, owner_logo);
         })
         .response
         .rect
@@ -648,7 +649,7 @@ pub(super) fn editor_body(
             ui.allocate_ui_with_layout(
                 vec2(preview_width, 0.0),
                 egui::Layout::top_down(egui::Align::Min),
-                |ui| preset_editor_preview(ui, draft),
+                |ui| preset_editor_preview(ui, draft, owner_logo),
             );
         })
         .response
@@ -900,7 +901,11 @@ fn preset_editor_form(
     changed
 }
 
-fn preset_editor_preview(ui: &mut Ui, draft: &PresetEditorDraft) {
+fn preset_editor_preview(
+    ui: &mut Ui,
+    draft: &PresetEditorDraft,
+    owner_logo: Option<&crate::state::DrawingSheetOwnerLogo>,
+) {
     // Both columns open on a band at the same line, so the page reads as two
     // columns of one sheet rather than as two stacks that happen to adjoin.
     editor_section(ui, "Preview", |preview| {
@@ -910,6 +915,7 @@ fn preset_editor_preview(ui: &mut Ui, draft: &PresetEditorDraft) {
             &draft.last_valid_preview,
             230.0,
             &preview_caption,
+            owner_logo,
         );
         preview.add_space(8.0);
         preview.weak(
