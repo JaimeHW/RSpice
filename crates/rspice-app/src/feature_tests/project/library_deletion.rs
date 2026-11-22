@@ -830,7 +830,7 @@ fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_manageme
         .expect("live variant");
     let renumber_request = rspice_app_state::state::RenumberRequest {
         scope: rspice_app_state::state::RenumberScope::WholeProject,
-        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        order: rspice_app_state::state::RenumberOrder::AcrossThenDown,
         protected_references:
             rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
@@ -841,7 +841,6 @@ fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_manageme
             sheet_id: Some(sheet_id),
             hierarchy_path: "/top".to_owned(),
             position: rspice_app_state::state::AnnotationPosition::default(),
-            connectivity_order: Some(1),
             locked: false,
             external: false,
             imported: false,
@@ -994,7 +993,7 @@ fn deleting_cell_publishes_annotation_tombstones_without_a_sheet_catalog() {
         .expect("scoped schematic object");
     let renumber_request = rspice_app_state::state::RenumberRequest {
         scope: rspice_app_state::state::RenumberScope::WholeProject,
-        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        order: rspice_app_state::state::RenumberOrder::AcrossThenDown,
         protected_references:
             rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
@@ -1005,7 +1004,6 @@ fn deleting_cell_publishes_annotation_tombstones_without_a_sheet_catalog() {
             sheet_id: None,
             hierarchy_path: "/top".to_owned(),
             position: rspice_app_state::state::AnnotationPosition::default(),
-            connectivity_order: Some(1),
             locked: false,
             external: false,
             imported: false,

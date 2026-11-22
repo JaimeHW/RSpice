@@ -148,7 +148,7 @@ fn pending_annotation() -> PendingAnnotation {
     (project.file.workspace, project.workspace_session) = workspace.into_parts();
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: [
@@ -162,8 +162,7 @@ fn pending_annotation() -> PendingAnnotation {
             device_family: family.to_owned(),
             sheet_id: None,
             hierarchy_path: path.to_owned(),
-            position: AnnotationPosition { x: 0, y: 0 },
-            connectivity_order: Some(id),
+            position: AnnotationPosition::default(),
             locked: false,
             external: false,
             imported: false,

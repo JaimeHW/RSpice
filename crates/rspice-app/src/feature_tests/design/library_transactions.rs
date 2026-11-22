@@ -504,7 +504,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
         .expect("source variant");
     let renumber_request = rspice_app_state::state::RenumberRequest {
         scope: rspice_app_state::state::RenumberScope::WholeProject,
-        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        order: rspice_app_state::state::RenumberOrder::AcrossThenDown,
         protected_references:
             rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
@@ -515,7 +515,6 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
             sheet_id: Some(sheet_id),
             hierarchy_path: "/top".to_owned(),
             position: rspice_app_state::state::AnnotationPosition::default(),
-            connectivity_order: Some(1),
             locked: false,
             external: false,
             imported: false,
@@ -637,7 +636,7 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
         .expect("source variant");
     let renumber_request = rspice_app_state::state::RenumberRequest {
         scope: rspice_app_state::state::RenumberScope::WholeProject,
-        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        order: rspice_app_state::state::RenumberOrder::AcrossThenDown,
         protected_references:
             rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
@@ -648,7 +647,6 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
             sheet_id: None,
             hierarchy_path: "/top".to_owned(),
             position: rspice_app_state::state::AnnotationPosition::default(),
-            connectivity_order: Some(1),
             locked: false,
             external: false,
             imported: false,

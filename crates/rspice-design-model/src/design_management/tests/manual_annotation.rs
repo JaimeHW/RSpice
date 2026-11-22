@@ -6,7 +6,7 @@ fn annotated() -> (AnnotationState, RenumberRequest) {
     let mut state = AnnotationState::default();
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![annotation_object(1, "R10", 10)],

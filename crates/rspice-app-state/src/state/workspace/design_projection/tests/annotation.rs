@@ -14,7 +14,7 @@ fn retain_annotation(
 ) {
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: ids
@@ -35,8 +35,8 @@ fn retain_annotation(
                     position: AnnotationPosition {
                         x: component.pos.x.into(),
                         y: component.pos.y.into(),
+                        ..AnnotationPosition::default()
                     },
-                    connectivity_order: Some(*id),
                     locked: false,
                     external: false,
                     imported: false,

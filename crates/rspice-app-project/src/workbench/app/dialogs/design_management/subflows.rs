@@ -391,15 +391,8 @@ pub(super) fn subflow_fields(
                 ui,
                 "Order",
                 &[
-                    (
-                        RenumberOrder::HierarchyThenCoordinates,
-                        "Hierarchy then coordinates",
-                    ),
-                    (
-                        RenumberOrder::SheetThenCoordinates,
-                        "Sheet then coordinates",
-                    ),
-                    (RenumberOrder::ConnectivityOrder, "Connectivity order"),
+                    (RenumberOrder::AcrossThenDown, "Across then down"),
+                    (RenumberOrder::DownThenAcross, "Down then across"),
                 ],
                 &mut dialog.inputs.renumber_order,
                 write_allowed,

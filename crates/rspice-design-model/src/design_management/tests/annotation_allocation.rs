@@ -5,7 +5,7 @@ use super::*;
 fn request(objects: Vec<AnnotationObject>) -> RenumberRequest {
     RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects,
@@ -14,11 +14,7 @@ fn request(objects: Vec<AnnotationObject>) -> RenumberRequest {
 
 #[test]
 fn preserved_names_are_reserved_before_any_editable_object_is_allocated() {
-    for order in [
-        RenumberOrder::HierarchyThenCoordinates,
-        RenumberOrder::SheetThenCoordinates,
-        RenumberOrder::ConnectivityOrder,
-    ] {
+    for order in [RenumberOrder::AcrossThenDown, RenumberOrder::DownThenAcross] {
         for protection in ["locked", "external", "imported"] {
             let mut state = AnnotationState::default();
             let mut retained = annotation_object(2, "r1", 20);
@@ -211,4 +207,98 @@ fn a_nested_hierarchy_range_precedes_ancestor_ranges() {
         assert_eq!(preview.mappings[&object_key(id)].new_reference, reference);
     }
     state.commit_renumbering(&preview, &request).unwrap();
+}
+
+/// The new name each part gets under `order`, in the order the parts were
+/// listed.
+fn renumbered(objects: Vec<AnnotationObject>, order: RenumberOrder) -> Vec<String> {
+    let keys = objects
+        .iter()
+        .map(|object| object.object.clone())
+        .collect::<Vec<_>>();
+    let mut request = request(objects);
+    request.order = order;
+    let preview = AnnotationState::default()
+        .preview_renumbering(&request)
+        .unwrap();
+    keys.iter()
+        .map(|key| preview.mappings[key].new_reference.clone())
+        .collect()
+}
+
+fn placed(id: u64, page: u32, zone: Option<(u32, u32)>, x: i64, y: i64) -> AnnotationObject {
+    let mut object = annotation_object(id, &format!("R{}", 100 + id), x);
+    object.position = AnnotationPosition { page, zone, x, y };
+    object
+}
+
+/// A part a little higher at the far right of a zone row is numbered after
+/// the parts to its left in that row, not before them: across then down
+/// reads the sheet's zone rows, down then across its zone columns.
+#[test]
+fn the_two_orders_read_a_zoned_sheet_by_its_rows_or_its_columns() {
+    let parts = || {
+        vec![
+            // Zone row 0: low at the left, a step higher at the far right.
+            placed(1, 0, Some((0, 0)), 10, 40),
+            placed(2, 0, Some((0, 2)), 400, 30),
+            // Zone row 1, columns 0 and 1.
+            placed(3, 0, Some((1, 0)), 10, 240),
+            placed(4, 0, Some((1, 1)), 200, 230),
+        ]
+    };
+    assert_eq!(
+        renumbered(parts(), RenumberOrder::AcrossThenDown),
+        ["R1", "R2", "R3", "R4"]
+    );
+    assert_eq!(
+        renumbered(parts(), RenumberOrder::DownThenAcross),
+        ["R1", "R4", "R2", "R3"]
+    );
+}
+
+/// Without zones the coordinate itself is the band: across then down is
+/// top to bottom, then left to right; down then across the other way.
+#[test]
+fn a_sheet_without_zones_is_ordered_by_coordinate() {
+    let parts = || {
+        vec![
+            placed(1, 0, None, 10, 40),
+            placed(2, 0, None, 400, 30),
+            placed(3, 0, None, 200, 40),
+        ]
+    };
+    assert_eq!(
+        renumbered(parts(), RenumberOrder::AcrossThenDown),
+        ["R2", "R1", "R3"]
+    );
+    assert_eq!(
+        renumbered(parts(), RenumberOrder::DownThenAcross),
+        ["R1", "R3", "R2"]
+    );
+}
+
+/// Sheets are numbered in page order, whatever their identities sort as:
+/// the top of the second page comes after the bottom of the first.
+#[test]
+fn sheets_are_numbered_in_page_order() {
+    let [first, second] = [SheetId::new(), SheetId::new()];
+    let on = |id, sheet, page, y| {
+        let mut object = placed(id, page, None, 10, y);
+        object.sheet_id = Some(sheet);
+        object
+    };
+    for order in [RenumberOrder::AcrossThenDown, RenumberOrder::DownThenAcross] {
+        assert_eq!(
+            renumbered(
+                vec![
+                    on(1, second, 1, 0),
+                    on(2, first, 0, 900),
+                    on(3, first, 0, 10)
+                ],
+                order
+            ),
+            ["R3", "R2", "R1"]
+        );
+    }
 }

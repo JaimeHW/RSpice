@@ -104,8 +104,10 @@ fn fixture(names: &[&str]) -> Fixture {
             device_family: "V".to_owned(),
             sheet_id: None,
             hierarchy_path: "/top".to_owned(),
-            position: AnnotationPosition { x: x.into(), y: 0 },
-            connectivity_order: Some(index as u64),
+            position: AnnotationPosition {
+                x: x.into(),
+                ..AnnotationPosition::default()
+            },
             locked: false,
             external: false,
             imported: false,
@@ -150,7 +152,7 @@ fn annotation_candidate(
 ) -> DesignManagementCatalog {
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects,
@@ -573,8 +575,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         device_family: "V".to_owned(),
         sheet_id: None,
         hierarchy_path: format!("/{}", original_names[0]),
-        position: AnnotationPosition { x: 0, y: 0 },
-        connectivity_order: Some(1),
+        position: AnnotationPosition::default(),
         locked: false,
         external: false,
         imported: false,
@@ -594,9 +595,8 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
                 hierarchy_path: "/top".to_owned(),
                 position: AnnotationPosition {
                     x: component.pos.x.into(),
-                    y: 0,
+                    ..AnnotationPosition::default()
                 },
-                connectivity_order: Some(component.id),
                 locked: false,
                 external: false,
                 imported: false,

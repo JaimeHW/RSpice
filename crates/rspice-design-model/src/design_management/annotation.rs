@@ -139,12 +139,17 @@ impl AnnotationPolicy {
     }
 }
 
+/// The order Renumber gives numbers in across a sheet. Either way parts are
+/// numbered hierarchy by hierarchy and, within one, sheet by sheet in page
+/// order; a sheet with zones is read by its zone rows or columns, so parts
+/// the eye reads as one row are numbered as one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RenumberOrder {
-    HierarchyThenCoordinates,
-    SheetThenCoordinates,
-    ConnectivityOrder,
+    /// Row by row from the top, each row left to right.
+    AcrossThenDown,
+    /// Column by column from the left, each column top to bottom.
+    DownThenAcross,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,9 +167,16 @@ pub enum RenumberScope {
     CurrentSheet { sheet_id: SheetId },
 }
 
+/// Where a part lies, as Renumber orders it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnnotationPosition {
+    /// The part's sheet among its cell view's sheets in page order, from 0.
+    pub page: u32,
+    /// The zone of the sheet's frame the origin lies in, as its row counted
+    /// from the top and its column counted from the left, from 0; `None` on
+    /// a sheet without zones, where each height is a row of its own.
+    pub zone: Option<(u32, u32)>,
     pub x: i64,
     pub y: i64,
 }
@@ -178,7 +190,6 @@ pub struct AnnotationObject {
     pub sheet_id: Option<SheetId>,
     pub hierarchy_path: String,
     pub position: AnnotationPosition,
-    pub connectivity_order: Option<u64>,
     pub locked: bool,
     pub external: bool,
     pub imported: bool,
@@ -192,6 +203,21 @@ pub struct RenumberRequest {
     pub protected_references: ProtectedReferencePolicy,
     pub protected_reviewed: bool,
     pub objects: Vec<AnnotationObject>,
+}
+
+impl RenumberRequest {
+    /// The parts in scope, in the order Renumber numbers them, kept parts
+    /// among them.
+    #[must_use]
+    pub fn sequence(&self) -> Vec<&AnnotationObject> {
+        let mut selected = self
+            .objects
+            .iter()
+            .filter(|object| object_in_scope(object, &self.scope))
+            .collect::<Vec<_>>();
+        sort_annotation_objects(&mut selected, self.order);
+        selected
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -752,16 +778,10 @@ impl AnnotationState {
             ));
         }
         let request_digest = digest("rspice-renumber-request-semantic/v1", request)?;
-        let mut selected = request
-            .objects
-            .iter()
-            .filter(|object| object_in_scope(object, &request.scope))
-            .cloned()
-            .collect::<Vec<_>>();
+        let selected = request.sequence();
         if selected.is_empty() {
             return Err(DesignManagementError::EmptyRenumberScope);
         }
-        sort_annotation_objects(&mut selected, request.order);
 
         let selected_ids = selected
             .iter()
@@ -794,21 +814,21 @@ impl AnnotationState {
                     object.object.clone(),
                 ));
             }
-            if retains_reference(&object) {
+            if retains_reference(object) {
                 continue;
             }
-            let prefix = annotation_prefix(&object, self.policy.definition.prefix_allocation)?;
+            let prefix = annotation_prefix(object, self.policy.definition.prefix_allocation)?;
             let ranges = matching_annotation_ranges(
                 &self.policy.definition.reserved_ranges,
-                &object,
+                object,
                 &prefix,
             );
             let new_reference = allocate_reference(&prefix, &ranges, &occupied)?;
             occupied.insert(case_fold(&new_reference));
             mappings.insert(
-                object.object,
+                object.object.clone(),
                 AnnotationMapping {
-                    old_reference: object.current_reference,
+                    old_reference: object.current_reference.clone(),
                     new_reference,
                 },
             );

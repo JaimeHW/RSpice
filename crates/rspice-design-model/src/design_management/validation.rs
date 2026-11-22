@@ -378,25 +378,38 @@ pub(super) fn object_in_scope(object: &AnnotationObject, scope: &RenumberScope) 
     }
 }
 
-pub(super) fn sort_annotation_objects(objects: &mut [AnnotationObject], order: RenumberOrder) {
-    objects.sort_by(|left, right| match order {
-        RenumberOrder::HierarchyThenCoordinates => left
+pub(super) fn sort_annotation_objects(objects: &mut [&AnnotationObject], order: RenumberOrder) {
+    // A zone row or column is one band; a sheet without zones bands by the
+    // origin itself, so the order there is strictly by coordinate.
+    let row = |object: &AnnotationObject| {
+        object
+            .position
+            .zone
+            .map_or(object.position.y, |(row, _)| i64::from(row))
+    };
+    let column = |object: &AnnotationObject| {
+        object
+            .position
+            .zone
+            .map_or(object.position.x, |(_, column)| i64::from(column))
+    };
+    objects.sort_by(|left, right| {
+        let page = left
             .hierarchy_path
             .cmp(&right.hierarchy_path)
-            .then_with(|| left.position.y.cmp(&right.position.y))
-            .then_with(|| left.position.x.cmp(&right.position.x))
-            .then_with(|| left.object.cmp(&right.object)),
-        RenumberOrder::SheetThenCoordinates => left
-            .sheet_id
-            .cmp(&right.sheet_id)
-            .then_with(|| left.position.y.cmp(&right.position.y))
-            .then_with(|| left.position.x.cmp(&right.position.x))
-            .then_with(|| left.object.cmp(&right.object)),
-        RenumberOrder::ConnectivityOrder => left
-            .connectivity_order
-            .unwrap_or(u64::MAX)
-            .cmp(&right.connectivity_order.unwrap_or(u64::MAX))
-            .then_with(|| left.object.cmp(&right.object)),
+            .then_with(|| left.position.page.cmp(&right.position.page));
+        let within = match order {
+            RenumberOrder::AcrossThenDown => row(left)
+                .cmp(&row(right))
+                .then_with(|| left.position.x.cmp(&right.position.x))
+                .then_with(|| left.position.y.cmp(&right.position.y)),
+            RenumberOrder::DownThenAcross => column(left)
+                .cmp(&column(right))
+                .then_with(|| left.position.y.cmp(&right.position.y))
+                .then_with(|| left.position.x.cmp(&right.position.x)),
+        };
+        page.then(within)
+            .then_with(|| left.object.cmp(&right.object))
     });
 }
 

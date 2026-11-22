@@ -7,6 +7,10 @@
 use super::controller::validate_design_management_page;
 use super::widgets::parse_reserved_ranges;
 use super::*;
+use crate::schematic::view::drawing_sheet::{
+    DRAWING_SHEET_ORIGIN, DRAWING_SHEET_WORLD_UNIT_UM, DrawingSheetGeometry,
+};
+use crate::state::DrawingSheetZoneLayout;
 use crate::workbench::project::commands::ProjectRequest;
 
 pub(super) fn commit_design_management_subflow(
@@ -472,7 +476,7 @@ pub(super) fn renumber_request(
         .schematic_buffers
         .iter()
         .map(|(key, schematic)| (key.clone(), schematic))
-        .collect::<std::collections::HashMap<_, _>>();
+        .collect::<BTreeMap<_, _>>();
     documents.insert(owner_key.to_owned(), active_schematic.editor_ref().design);
     let occurrence = workspace.content.occurrence_path().to_string();
     let mut objects = Vec::new();
@@ -482,6 +486,7 @@ pub(super) fn renumber_request(
         } else {
             format!("/{}", cell_view_key.replace(['/', '\\'], "_"))
         };
+        let sheets = sheet_layouts(design_management, cell_view_key);
         for component in &schematic.document().components {
             let prefix = component.kind.spice_prefix();
             if prefix.is_empty() || component.name.trim().is_empty() {
@@ -491,6 +496,9 @@ pub(super) fn renumber_request(
                 .map_err(|error| error.to_string())?;
             let sheet_id =
                 design_management.sheet_for_object_or_active(cell_view_key, component.id);
+            let (page, zones) = sheet_id
+                .and_then(|id| sheets.get(&id))
+                .map_or((0, None), |(page, zones)| (*page, zones.as_ref()));
             objects.push(AnnotationObject {
                 object,
                 current_reference: component.name.clone(),
@@ -498,10 +506,11 @@ pub(super) fn renumber_request(
                 sheet_id,
                 hierarchy_path: hierarchy_path.clone(),
                 position: AnnotationPosition {
+                    page,
+                    zone: zones.map(|zones| zone_of(zones, component.pos)),
                     x: i64::from(component.pos.x),
                     y: i64::from(component.pos.y),
                 },
-                connectivity_order: None,
                 locked: false,
                 external: false,
                 imported: false,
@@ -529,6 +538,49 @@ pub(super) fn renumber_request(
             == ProtectedReferencePolicy::IncludeAfterReview,
         objects,
     })
+}
+
+/// Each sheet of `cell_view_key` with its place in page order, from 0, and
+/// the zones of the frame it prints on, if that frame has any.
+fn sheet_layouts(
+    design_management: &DesignManagementCatalog,
+    cell_view_key: &str,
+) -> BTreeMap<SheetId, (u32, Option<DrawingSheetZoneLayout>)> {
+    let Some(catalog) = design_management.sheet_catalog(cell_view_key) else {
+        return BTreeMap::new();
+    };
+    let default_format = &design_management.drawing_sheet_settings().default_format;
+    catalog
+        .sheets()
+        .iter()
+        .enumerate()
+        .map(|(page, sheet)| {
+            let format = match sheet.page_format().inheritance {
+                DrawingSheetInheritance::ProjectDefault => default_format,
+                DrawingSheetInheritance::Explicit | DrawingSheetInheritance::UserDefault => {
+                    sheet.page_format()
+                }
+            };
+            let zones = DrawingSheetGeometry::from_format(format).zones;
+            (sheet.id(), (u32::try_from(page).unwrap_or(u32::MAX), zones))
+        })
+        .collect()
+}
+
+/// The zone `point` lies in, as its row from the top and its column from
+/// the left. A point off the frame takes the nearest zone, so every part of
+/// a zoned sheet is read by the same bands.
+fn zone_of(zones: &DrawingSheetZoneLayout, point: crate::state::Point) -> (u32, u32) {
+    let unit_um = DRAWING_SHEET_WORLD_UNIT_UM as f64;
+    let x_um = ((f64::from(point.x) - DRAWING_SHEET_ORIGIN.0) * unit_um).round() as i64;
+    let y_um = ((f64::from(point.y) - DRAWING_SHEET_ORIGIN.1) * unit_um).round() as i64;
+    let index = |boundaries: &mut dyn Iterator<Item = i64>, at: i64| {
+        u32::try_from(boundaries.filter(|boundary| at >= *boundary).count()).unwrap_or(u32::MAX)
+    };
+    (
+        index(&mut zones.row_boundaries_um(), y_um),
+        index(&mut zones.column_boundaries_um(), x_um),
+    )
 }
 
 pub fn variant_connectivity_difference_count(

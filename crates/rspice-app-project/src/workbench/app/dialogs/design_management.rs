@@ -231,7 +231,7 @@ impl Default for SubflowInputs {
             missing_replacement: MissingReplacementPolicy::Block,
             model_equivalence: ModelEquivalencePolicy::RequireQualifiedReplacement,
             renumber_scope: RenumberScopeChoice::WholeProject,
-            renumber_order: RenumberOrder::HierarchyThenCoordinates,
+            renumber_order: RenumberOrder::AcrossThenDown,
             protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
             prefix_allocation: AnnotationPrefixAllocation::ByDeviceFamily,
             reserved_ranges: String::new(),

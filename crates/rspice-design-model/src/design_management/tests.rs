@@ -1492,8 +1492,10 @@ fn annotation_object(id: u64, reference: &str, x: i64) -> AnnotationObject {
         device_family: "R".to_owned(),
         sheet_id: None,
         hierarchy_path: "/top".to_owned(),
-        position: AnnotationPosition { x, y: 0 },
-        connectivity_order: Some(id),
+        position: AnnotationPosition {
+            x,
+            ..AnnotationPosition::default()
+        },
         locked: false,
         external: false,
         imported: false,
@@ -1789,7 +1791,7 @@ fn renumber_preview_is_deterministic_and_commit_retains_immutable_mapping() {
     let mut state = AnnotationState::default();
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![
@@ -1829,7 +1831,7 @@ fn the_design_root_scope_encloses_every_occurrence() {
         scope: RenumberScope::CurrentHierarchy {
             path: "/".to_owned(),
         },
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![nested, deeper],
@@ -1894,7 +1896,7 @@ fn effective_annotation_folds_partial_journal_entries_in_sequence_order() {
         scope: RenumberScope::CurrentSheet {
             sheet_id: first_sheet,
         },
-        order: RenumberOrder::SheetThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![first_object.clone(), second_object.clone()],
@@ -1909,7 +1911,7 @@ fn effective_annotation_folds_partial_journal_entries_in_sequence_order() {
         scope: RenumberScope::CurrentSheet {
             sheet_id: second_sheet,
         },
-        order: RenumberOrder::SheetThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![first_object, second_object],
@@ -1930,7 +1932,7 @@ fn annotation_authority_rejects_cycles_and_unrelated_object_conflation() {
     let mut state = AnnotationState::default();
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![
@@ -2149,7 +2151,7 @@ fn cell_rename_remaps_live_variant_and_annotation_object_owners() {
         .unwrap();
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![AnnotationObject {
@@ -2162,7 +2164,6 @@ fn cell_rename_remaps_live_variant_and_annotation_object_owners() {
                 .active_sheet_id(),
             hierarchy_path: "/top".to_owned(),
             position: AnnotationPosition::default(),
-            connectivity_order: Some(1),
             locked: false,
             external: false,
             imported: false,
@@ -2229,7 +2230,7 @@ fn cell_delete_blocks_live_variant_then_tombstones_annotation_without_rewriting_
         .unwrap();
     let request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![AnnotationObject {
@@ -2239,7 +2240,6 @@ fn cell_delete_blocks_live_variant_then_tombstones_annotation_without_rewriting_
             sheet_id: None,
             hierarchy_path: "/top".to_owned(),
             position: AnnotationPosition::default(),
-            connectivity_order: Some(1),
             locked: false,
             external: false,
             imported: false,
@@ -2339,7 +2339,7 @@ fn cell_copy_regenerates_sheet_port_identity_and_clones_sheet_annotation_policy(
         .unwrap();
     let annotation_request = RenumberRequest {
         scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
+        order: RenumberOrder::AcrossThenDown,
         protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
         objects: vec![AnnotationObject {
@@ -2349,7 +2349,6 @@ fn cell_copy_regenerates_sheet_port_identity_and_clones_sheet_annotation_policy(
             sheet_id: Some(main),
             hierarchy_path: "/top".to_owned(),
             position: AnnotationPosition::default(),
-            connectivity_order: Some(1),
             locked: false,
             external: false,
             imported: false,
