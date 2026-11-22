@@ -81,11 +81,13 @@ pub(crate) fn contributor_table(
         .collect();
     let (head, unit) = figure;
     let columns = [
+        // Sized to the inspector: the figures keep their width and the two
+        // names share what is left, so every column shows without a scroll.
         Column::number("#", 30.0),
-        Column::name("Device", 84.0),
-        Column::words("Mechanism", 70.0),
-        Column::number(format!("{head} ({unit})"), 82.0),
-        Column::number("Share (%)", 64.0),
+        Column::name("Device", 52.0),
+        Column::name("Noise", 56.0),
+        Column::number(format!("{head} ({unit})"), 72.0),
+        Column::number("Share (%)", 76.0),
     ];
     let revision = {
         use std::hash::{Hash, Hasher};
@@ -126,7 +128,13 @@ pub(crate) fn contributor_table(
                         Cell::text(line.mechanism).sort_by(SortKey::Text(line.mechanism.to_owned()))
                     },
                     figure,
-                    number(line.share_pct, "%"),
+                    line.share_pct.map_or_else(Cell::absent, |share| {
+                        Cell::number(crate::presentation::fixed_places(
+                            share,
+                            crate::presentation::SHARE_PLACES,
+                        ))
+                        .sort_by(SortKey::Number(share))
+                    }),
                 ]
             })
     });

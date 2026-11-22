@@ -394,9 +394,9 @@ pub fn show(
                         level,
                         colors.accent,
                         format!(
-                            "{} {}",
+                            "{} {} dBc/Hz",
                             frequency_readout(quantities, spot, digits),
-                            fmt_si_significant(level, "dBc/Hz", digits)
+                            decibels(level)
                         ),
                     )
                 });
@@ -417,10 +417,13 @@ pub fn show(
                 } else {
                     "L(f)".to_owned()
                 },
-                fmt_si_significant(
-                    presentation.cursor_sample(trace.offset_hz, trace.level_dbc_per_hz, offset),
-                    "dBc/Hz",
-                    digits,
+                format!(
+                    "{} dBc/Hz",
+                    decibels(presentation.cursor_sample(
+                        trace.offset_hz,
+                        trace.level_dbc_per_hz,
+                        offset
+                    ))
                 ),
             ));
         }
@@ -440,6 +443,11 @@ pub struct PhaseNoiseInspector<'a> {
     pub traces: &'a [PhaseNoiseTrace<'a>],
     pub settings: &'a PhaseNoiseSettings,
     pub device_shares: Vec<(&'a str, f64)>,
+}
+
+/// A level in dBc or dBc/Hz, to the hundredth of a decibel.
+fn decibels(level: f64) -> String {
+    crate::presentation::fixed_places(level, crate::presentation::DECIBEL_PLACES)
 }
 
 /// A number for a table cell whose column head carries the unit: the
@@ -535,7 +543,10 @@ pub fn right_panel(
     crate::presentation::stat_table(ui, &rows);
 
     if !settings.spots.is_empty() {
-        section_header(ui, "Spots", None);
+        // Several traces each head a column by name, so the unit they share
+        // is stated once over the table.
+        let unit = (traces.len() > 1).then_some("L(f) in dBc/Hz");
+        section_header(ui, "Spots", unit);
         spot_table(ui, traces, &settings.spots, quantities, digits);
     }
 
@@ -565,12 +576,17 @@ pub fn right_panel(
         let (device, share) = device_shares[index];
         vec![
             Cell::text(device).sort_by(SortKey::Text(device.to_owned())),
-            Cell::number(plain(share, "%", digits)).sort_by(SortKey::Number(share)),
+            Cell::number(crate::presentation::fixed_places(
+                share,
+                crate::presentation::SHARE_PLACES,
+            ))
+            .sort_by(SortKey::Number(share)),
         ]
     });
 }
 
-/// One row per spot: the offset, then L(f) of each trace there.
+/// One row per spot: the offset, then L(f) of each trace there. The traces'
+/// columns share the inspector's width, so two read side by side.
 fn spot_table(
     ui: &mut Ui,
     traces: &[PhaseNoiseTrace<'_>],
@@ -578,37 +594,40 @@ fn spot_table(
     quantities: &QuantityPresentationPolicy,
     digits: usize,
 ) {
-    let mut columns = vec![Column::name("Offset", 90.0).align(Align::Right)];
+    let mut columns = vec![Column::number("Offset", 70.0)];
     columns.extend(traces.iter().map(|trace| {
-        Column::number(
+        Column::name(
             if traces.len() > 1 {
-                format!("{} (dBc/Hz)", trace.label)
+                trace.label.to_owned()
             } else {
                 "L(f) (dBc/Hz)".to_owned()
             },
-            110.0,
+            72.0,
         )
+        .align(Align::Right)
     }));
-    DataTable::new("rspice.results.phase-noise.spots", &columns, spots.len()).show(ui, |index| {
-        let spot = spots[index];
-        let mut cells = vec![
-            Cell::number(frequency_readout(quantities, spot, digits))
-                .sort_by(SortKey::Number(spot)),
-        ];
-        cells.extend(traces.iter().map(|trace| {
-            spot_level_at(trace.offset_hz, trace.level_dbc_per_hz, spot).map_or_else(
-                Cell::absent,
-                |level| {
-                    Cell::number(plain(level, "dBc/Hz", digits)).sort_by(SortKey::Number(level))
-                },
-            )
-        }));
-        cells
-    });
+    DataTable::new("rspice.results.phase-noise.spots", &columns, spots.len())
+        .freeze(1)
+        .show(ui, |index| {
+            let spot = spots[index];
+            let mut cells = vec![
+                Cell::number(frequency_readout(quantities, spot, digits))
+                    .sort_by(SortKey::Number(spot)),
+            ];
+            cells.extend(traces.iter().map(|trace| {
+                spot_level_at(trace.offset_hz, trace.level_dbc_per_hz, spot)
+                    .map_or_else(Cell::absent, |level| {
+                        Cell::number(decibels(level)).sort_by(SortKey::Number(level))
+                    })
+            }));
+            cells
+        });
 }
 
-/// One row per trace: integrated L(f), rms phase error and jitter over the
-/// band, and Jc and Jcc where the sweep reaches half the carrier.
+/// One row per figure over the band, one column per trace: integrated L(f),
+/// rms phase error and jitter, and Jc and Jcc where the sweep reaches half
+/// the carrier. A figure's unit heads its row, and the traces' columns share
+/// the inspector's width, so every figure shows without a sideways scroll.
 fn band_table(
     ui: &mut Ui,
     traces: &[PhaseNoiseTrace<'_>],
@@ -624,42 +643,54 @@ fn band_table(
         AngleDisplay::Degrees => (180.0 / std::f64::consts::PI, "°"),
         AngleDisplay::Radians => (1.0, "rad"),
     };
-    let mut columns = vec![
-        Column::name("Trace", 90.0),
-        Column::number("L(f) (dBc)", 90.0),
-        Column::number(format!("Phase ({angle_unit} rms)"), 100.0),
-        Column::number("Jitter (s rms)", 100.0),
+    type Read = fn(&BandFigures, f64) -> Option<f64>;
+    // A level in dBc prints to its hundredth; the rest at the reader's digits.
+    let mut rows: Vec<(String, &str, Read)> = vec![
+        ("L(f) (dBc)".to_owned(), "dBc", |figure, _| {
+            Some(figure.integrated.integrated_dbc())
+        }),
+        (
+            format!("Phase ({angle_unit} rms)"),
+            angle_unit,
+            |figure, scale| Some(figure.integrated.phase_error_rms_rad() * scale),
+        ),
+        ("Jitter (s rms)".to_owned(), "s", |figure, _| {
+            Some(figure.jitter_s)
+        }),
     ];
     if cycles {
-        columns.push(Column::number("Jc (s rms)", 90.0));
-        columns.push(Column::number("Jcc (s rms)", 90.0));
+        rows.push(("Jc (s rms)".to_owned(), "s", |figure, _| {
+            figure.cycle.map(|cycle| cycle.cycle_s)
+        }));
+        rows.push(("Jcc (s rms)".to_owned(), "s", |figure, _| {
+            figure.cycle.map(|cycle| cycle.cycle_to_cycle_s)
+        }));
     }
-    let width = columns.len();
-    DataTable::new("rspice.results.phase-noise.band", &columns, traces.len()).show(ui, |index| {
-        let mut cells = vec![Cell::text(traces[index].label)];
-        let Some(figure) = &figures[index] else {
-            cells.extend((1..width).map(|_| Cell::absent()));
-            return cells;
-        };
-        let dbc = figure.integrated.integrated_dbc();
-        let angle = figure.integrated.phase_error_rms_rad() * angle_scale;
-        cells.push(Cell::number(plain(dbc, "dBc", digits)).sort_by(SortKey::Number(dbc)));
-        cells.push(Cell::number(plain(angle, angle_unit, digits)).sort_by(SortKey::Number(angle)));
-        cells.push(
-            Cell::number(plain(figure.jitter_s, "s", digits))
-                .sort_by(SortKey::Number(figure.jitter_s)),
-        );
-        if cycles {
-            match figure.cycle {
-                Some(cycle) => {
-                    cells.push(Cell::number(plain(cycle.cycle_s, "s", digits)));
-                    cells.push(Cell::number(plain(cycle.cycle_to_cycle_s, "s", digits)));
-                }
-                None => cells.extend([Cell::absent(), Cell::absent()]),
-            }
-        }
-        cells
-    });
+    let mut columns = vec![Column::words("Figure", 80.0).unsortable()];
+    columns.extend(traces.iter().map(|trace| {
+        Column::name(trace.label.to_owned(), 72.0)
+            .align(Align::Right)
+            .unsortable()
+    }));
+    DataTable::new("rspice.results.phase-noise.band", &columns, rows.len())
+        .freeze(1)
+        .show(ui, |index| {
+            let (head, unit, read) = &rows[index];
+            let mut cells = vec![Cell::text(head.clone())];
+            cells.extend(figures.iter().map(|figure| {
+                figure
+                    .as_ref()
+                    .and_then(|figure| read(figure, angle_scale))
+                    .map_or_else(Cell::absent, |value| {
+                        Cell::number(if *unit == "dBc" {
+                            decibels(value)
+                        } else {
+                            plain(value, unit, digits)
+                        })
+                    })
+            }));
+            cells
+        });
 }
 
 #[cfg(test)]
