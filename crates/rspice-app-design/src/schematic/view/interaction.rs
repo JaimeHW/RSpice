@@ -524,7 +524,7 @@ fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut CanvasParts<'_>, ancho
 /// connected there: the wire splits so the pin owns a vertex and the wire
 /// follows the part. The dots any join earns, inside a wire, at a wire's
 /// end or on another pin, are placed under the document's junction policy.
-fn connect_pins_inside_wires(
+pub(super) fn connect_pins_inside_wires(
     workspace: &crate::state::ProjectWorkspace,
     schematic: &mut crate::state::SchematicState,
     component: u64,

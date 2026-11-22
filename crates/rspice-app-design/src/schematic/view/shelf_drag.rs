@@ -7,6 +7,7 @@
 
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
+use super::interaction::connect_pins_inside_wires;
 use super::parts::{CanvasFacts, CanvasParts};
 use crate::state::{
     ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point, functional_part,
@@ -119,12 +120,18 @@ pub(super) fn commit_shelf_drop(
     }
 
     let label = payload.placement_label();
+    // A drop is a placement: a pin that lands inside a wire is connected
+    // there exactly as a click with the armed tool connects it, so a part
+    // dropped across a wire sits in series instead of shorting both pins.
+    let symbols = state.model.schematic_symbol_context();
+    let workspace = &state.model.workspace;
     let changed =
         match payload {
             SchematicShelfDragPayload::Primitive(kind) => state.model.schematic.with_undo(
                 format!("drop {}", kind.display_name()),
                 |schematic| {
-                    schematic.add_component(*kind, grid_pos);
+                    let id = schematic.add_component(*kind, grid_pos);
+                    connect_pins_inside_wires(workspace, schematic, id, &symbols);
                 },
             ),
             SchematicShelfDragPayload::LibraryCell(binding) => {
@@ -133,7 +140,8 @@ pub(super) fn commit_shelf_drop(
                     .model
                     .schematic
                     .with_undo("drop library cell", |schematic| {
-                        schematic.add_library_cell_component(grid_pos, binding);
+                        let id = schematic.add_library_cell_component(grid_pos, binding);
+                        connect_pins_inside_wires(workspace, schematic, id, &symbols);
                     })
             }
             SchematicShelfDragPayload::Stimulus(placement) => {
@@ -141,7 +149,8 @@ pub(super) fn commit_shelf_drop(
                 state.model.schematic.with_undo(
                     format!("drop {}", placement.definition()),
                     |schematic| {
-                        schematic.add_stimulus_component(&placement, grid_pos);
+                        let id = schematic.add_stimulus_component(&placement, grid_pos);
+                        connect_pins_inside_wires(workspace, schematic, id, &symbols);
                     },
                 )
             }
@@ -333,9 +342,10 @@ pub(super) fn handle_placement_transform_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Rotation, SchematicState, Tool};
+    use crate::state::{Component, Rotation, SchematicState, Tool, Wire};
     use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
     use egui::{Context, Event, Id, RawInput, Rect, Sense, pos2, vec2};
+    use rspice_design::connectivity::extract_with_hierarchy;
 
     fn placement_key_input(key: Key, modifiers: Modifiers) -> RawInput {
         RawInput {
@@ -435,6 +445,75 @@ mod tests {
         assert!(state.model.schematic.can_undo());
         state.model.schematic.undo();
         assert!(state.model.schematic.document().components.is_empty());
+    }
+
+    /// A resistor dropped across a wire is inserted into it: the wire splits
+    /// at each pin, the piece under the body goes, and the two pins sit on
+    /// two nets, as they do when the armed tool places the part by click.
+    #[test]
+    fn a_resistor_dropped_across_a_wire_sits_in_series_with_it() {
+        let mut state = DesignTestHost::default();
+        let pins = Component::new(0, ComponentType::Resistor, Point::origin()).terminal_positions();
+        let (first, second) = (pins[0].1, pins[1].1);
+        // A wire along the line through both pins, running on past each.
+        let (start, end) = if first.y == second.y {
+            (
+                Point::new(first.x.min(second.x) - 100, first.y),
+                Point::new(first.x.max(second.x) + 100, first.y),
+            )
+        } else {
+            assert_eq!(first.x, second.x, "the pins share a row or a column");
+            (
+                Point::new(first.x, first.y.min(second.y) - 100),
+                Point::new(first.x, first.y.max(second.y) + 100),
+            )
+        };
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(Wire::segment(1, start, end));
+        state.model.schematic.init_undo_history();
+        let payload =
+            SchematicShelfDragPayload::primitive(ComponentType::Resistor).expect("placeable");
+
+        assert_eq!(
+            commit_shelf_drop(&mut canvas_parts(&mut state), &payload, Point::origin()),
+            ShelfDropOutcome::Placed
+        );
+
+        let resistor = state.model.schematic.document().components[0].id;
+        let connectivity = extract_with_hierarchy(&state.model.schematic, None);
+        let nets: Vec<&str> = connectivity
+            .terminals
+            .iter()
+            .filter(|terminal| terminal.component_id == resistor)
+            .map(|terminal| {
+                assert!(terminal.attached, "pin {} meets the wire", terminal.pin);
+                terminal.net_name.as_str()
+            })
+            .collect();
+        assert_eq!(nets.len(), 2);
+        assert_ne!(nets[0], nets[1], "the resistor is not shorted by the wire");
+        assert!(
+            state
+                .model
+                .schematic
+                .document()
+                .wires
+                .iter()
+                .all(|wire| !wire.points.contains(&first) || !wire.points.contains(&second)),
+            "no wire runs on under the body"
+        );
+
+        assert!(state.model.schematic.undo());
+        assert!(state.model.schematic.document().components.is_empty());
+        assert_eq!(
+            state.model.schematic.document().wires.len(),
+            1,
+            "the drop and the split are one undo step"
+        );
     }
 
     #[test]
