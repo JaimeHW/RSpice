@@ -69,6 +69,8 @@ pub use engine_check::{PreflightOutcome, PreflightStage, PreflightVerdict};
 #[cfg(test)]
 pub(crate) mod dc_history_tests;
 #[cfg(test)]
+mod directive_note_tests;
+#[cfg(test)]
 mod directive_parse_ratchet;
 #[cfg(not(target_arch = "wasm32"))]
 mod live_segment;

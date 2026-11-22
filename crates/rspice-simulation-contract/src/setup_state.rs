@@ -126,6 +126,16 @@ impl SimulationSetup {
         self.document.stamp()
     }
 
+    /// Whether the plan sets a temperature of its own: a reference other
+    /// than the default, or a run set that steps temperature. A design whose
+    /// plan sets none takes the temperature its netlist states.
+    pub fn plan_states_temperature(&self) -> bool {
+        self.reference_pvt.temperature_celsius != ReferencePvtPoint::default().temperature_celsius
+            || self.run_set.dimensions.iter().any(|dimension| {
+                dimension.enabled && dimension.kind == RunSetDimensionKind::Temperature
+            })
+    }
+
     /// Fresh setup with the conventional default run set — a transient —
     /// so a new project's Run button works out of the box (the engine no
     /// longer falls back to the selected row on an empty set).

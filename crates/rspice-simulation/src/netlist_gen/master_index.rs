@@ -76,6 +76,12 @@ pub enum NetlistDefect {
         occurrence: InstancePath,
         detail: String,
     },
+    /// A line of a SPICE directive note that cannot join the deck where the
+    /// note is drawn.
+    DirectiveLine {
+        place: super::DirectiveNoteLine,
+        message: String,
+    },
 }
 
 impl NetlistDefect {
@@ -93,6 +99,7 @@ impl NetlistDefect {
             Self::PortTiedToGround { .. } => "port-tied-to-ground",
             Self::WidthMismatch { .. } => "vector-width-mismatch",
             Self::UnresolvedOccurrence { .. } => "unresolved-occurrence",
+            Self::DirectiveLine { .. } => "directive-line",
         }
     }
 }
@@ -148,6 +155,15 @@ impl fmt::Display for NetlistDefect {
             Self::UnresolvedOccurrence { occurrence, detail } => {
                 write!(formatter, "at {occurrence}: {detail}")
             }
+            Self::DirectiveLine { place, message } => match &place.cell_view {
+                Some(cell_view) => write!(
+                    formatter,
+                    "SPICE directive on {}, line {}: {message}",
+                    cell_view.display_path(),
+                    place.line
+                ),
+                None => write!(formatter, "SPICE directive, line {}: {message}", place.line),
+            },
         }
     }
 }
@@ -338,7 +354,8 @@ impl<'a> MasterIndex<'a> {
         for key in &index.order {
             let draft = &index.drafts[key];
             let name = &index.names[key];
-            let parameters = index.declared_parameters(hierarchy, draft, &mut emission);
+            let (parameters, parameter_names) =
+                index.declared_parameters(hierarchy, draft, &mut emission);
 
             let mut nested = NetlistGenerator::with_master_index(
                 draft.schematic,
@@ -378,6 +395,9 @@ impl<'a> MasterIndex<'a> {
                     });
                 }
             }
+            nested.generate_directive_notes(super::DirectiveScope::Block {
+                parameters: &parameter_names,
+            });
             nested.generate_library_view_includes();
             nested.generate_instances();
             nested.generate_models();
@@ -412,7 +432,8 @@ impl<'a> MasterIndex<'a> {
         emission
     }
 
-    /// The formal parameters the header declares, in contract order.
+    /// The formal parameters the header declares, in contract order, and
+    /// the name of every parameter the cell declares.
     ///
     /// Only a declared default can become a formal: a `.subckt` header has no
     /// syntax for a parameter with no value, so a required one without a
@@ -422,9 +443,9 @@ impl<'a> MasterIndex<'a> {
         hierarchy: &HierarchySource<'_>,
         draft: &MasterDraft<'_>,
         emission: &mut MasterEmission,
-    ) -> String {
+    ) -> (String, Vec<String>) {
         let Some((cell, view)) = hierarchy.cell_declaration(&draft.reference) else {
-            return String::new();
+            return (String::new(), Vec::new());
         };
         let contract = match rspice_design::library::metadata::cell_parameter_contract(cell, view) {
             Ok(contract) => contract,
@@ -433,9 +454,13 @@ impl<'a> MasterIndex<'a> {
                     "cell {} has an invalid parameter contract: {error}",
                     draft.reference.display_path()
                 ));
-                return String::new();
+                return (String::new(), Vec::new());
             }
         };
+        let names = contract
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect();
         let mut formals = Vec::new();
         for parameter in &contract {
             match parameter.default_value.as_deref() {
@@ -451,11 +476,12 @@ impl<'a> MasterIndex<'a> {
                 None => {}
             }
         }
-        if formals.is_empty() {
+        let formals = if formals.is_empty() {
             String::new()
         } else {
             format!(" params: {}", formals.join(" "))
-        }
+        };
+        (formals, names)
     }
 }
 

@@ -242,12 +242,26 @@ fn checks_the_design_as_it_stands(
 }
 
 /// The blocker a preparation failure stands as.
-fn preparation_issue(error: &PreparationError) -> PreflightIssue {
+pub(crate) fn preparation_issue(error: &PreparationError) -> PreflightIssue {
     PreflightIssue {
         check: preparation_check_label(error.stage()).to_owned(),
         observed: error.message().to_owned(),
         required: preparation_requirement(error.stage()).to_owned(),
-        remediation: preparation_remediation(error.stage(), error.line()),
+        remediation: match error.directive_note() {
+            // A card a SPICE directive note wrote is repaired on the note.
+            Some(rspice_simulation::netlist_gen::DirectiveNoteLine {
+                cell_view: Some(cell_view),
+                note,
+                line,
+            }) => PreflightRemediation::Drawing {
+                cell_view: cell_view.clone(),
+                object: crate::state::DrawnObject::Note {
+                    id: *note,
+                    line: *line,
+                },
+            },
+            _ => preparation_remediation(error.stage(), error.line()),
+        },
     }
 }
 

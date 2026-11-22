@@ -19,7 +19,6 @@ use rspice_results::specification::{
 };
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
-use rspice_simulation_contract::config::NoiseSweepType;
 use rspice_simulation_contract::options::{IntegrationMethod, SimulationOptions, format_si_value};
 use rspice_simulation_contract::run_set::{
     DESIGN_VARIABLE_SOURCE_PREFIX, NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimension,
@@ -714,7 +713,6 @@ fn analysis_draft(
     };
     let mut ignored = Vec::new();
     let draft = match card.keyword().as_str() {
-        ".op" => AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
         ".tran" => {
             let mut uic = false;
             let mut values = Vec::new();
@@ -763,93 +761,7 @@ fn analysis_draft(
             }
             draft
         }
-        ".ac" => {
-            let [mode, points, start, stop] = words else {
-                return Err("only a dec, oct or lin frequency sweep is a plan AC analysis".into());
-            };
-            let mut draft = AnalysisDraft::for_kind(AnalysisKind::Ac);
-            if let AnalysisDraft::Ac(ac) = &mut draft {
-                ac.sweep = sweep_index(mode)?;
-                ac.points = points.clone();
-                ac.fstart = start.clone();
-                ac.fstop = stop.clone();
-            }
-            draft
-        }
-        ".dc" => {
-            let (mode, axes) = match words.first().map(|word| word.to_ascii_lowercase()) {
-                Some(word) if word == "lin" => (0, &words[1..]),
-                Some(word) if word == "dec" => (2, &words[1..]),
-                Some(word) if word == "oct" => (3, &words[1..]),
-                _ => (0, words),
-            };
-            let mut draft = AnalysisDraft::for_kind(AnalysisKind::DcSweep);
-            if let AnalysisDraft::DcSweep(dc) = &mut draft {
-                dc.mode = mode;
-                match axes {
-                    [source, start, stop, step, rest @ ..] => {
-                        dc.source = source.clone();
-                        dc.start = start.clone();
-                        dc.stop = stop.clone();
-                        dc.step = step.clone();
-                        dc.points = step.clone();
-                        match rest {
-                            [] => dc.nested = false,
-                            [source2, start2, stop2, step2] => {
-                                dc.nested = true;
-                                dc.source2 = source2.clone();
-                                dc.start2 = start2.clone();
-                                dc.stop2 = stop2.clone();
-                                dc.step2 = step2.clone();
-                            }
-                            _ => return Err("a DC sweep card has one or two sweeps".into()),
-                        }
-                    }
-                    _ => return Err("a DC sweep card names a source, start, stop and step".into()),
-                }
-            }
-            draft
-        }
-        ".noise" => {
-            let [output, input, mode, points, start, stop] = words else {
-                return Err("a noise card names an output, a source and a frequency sweep".into());
-            };
-            let mut draft = AnalysisDraft::for_kind(AnalysisKind::Noise);
-            if let AnalysisDraft::Noise(noise) = &mut draft {
-                noise.output = output.clone();
-                noise.input = input.clone();
-                noise.sweep = match sweep_index(mode)? {
-                    0 => NoiseSweepType::Decade,
-                    1 => NoiseSweepType::Octave,
-                    _ => NoiseSweepType::Linear,
-                };
-                noise.points = points.clone();
-                noise.fstart = start.clone();
-                noise.fstop = stop.clone();
-            }
-            draft
-        }
-        ".tf" => {
-            let [output, input] = words else {
-                return Err("a transfer-function card names an output and a source".into());
-            };
-            let mut draft = AnalysisDraft::for_kind(AnalysisKind::TransferFunction);
-            if let AnalysisDraft::TransferFunction(xf) = &mut draft {
-                xf.output_expression = output.clone();
-                xf.input_source = input.clone();
-            }
-            draft
-        }
-        other => return Err(format!("`{other}` is not a plan analysis")),
+        other => rspice_simulation_contract::analysis_card::analysis_words_draft(other, words)?,
     };
     Ok((draft, ignored))
-}
-
-fn sweep_index(mode: &str) -> Result<usize, String> {
-    match mode.to_ascii_lowercase().as_str() {
-        "dec" => Ok(0),
-        "oct" => Ok(1),
-        "lin" => Ok(2),
-        _ => Err(format!("`{mode}` is not a dec, oct or lin sweep")),
-    }
 }

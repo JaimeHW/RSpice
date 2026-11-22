@@ -130,8 +130,8 @@ pub(crate) fn validated_executable_hierarchy_with_limits_and_abort(
     limits: rspice_core::ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<(rspice_core::Netlist, rspice_core::netlist::FlattenedNetlist), PreparationError> {
-    let parsed =
-        parse_executable(executable_netlist, limits, abort).map_err(unparsed_executable_source)?;
+    let parsed = parse_executable(executable_netlist, limits, abort)
+        .map_err(|error| unparsed_executable_source(error).located_in(executable_netlist))?;
     let flattened = validated_parsed_hierarchy_with_limits_and_abort(&parsed, limits, abort)?;
     Ok((parsed, flattened))
 }

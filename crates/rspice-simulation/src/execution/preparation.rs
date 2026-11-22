@@ -101,7 +101,7 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
     ) -> Result<ExecutableHierarchy, PreparationError> {
         let limits = self.execution_limits();
         let parsed = parse_executable(executable_netlist, limits, abort)
-            .map_err(unparsed_executable_source)?;
+            .map_err(|error| unparsed_executable_source(error).located_in(executable_netlist))?;
         self.flattened(parsed, abort)
     }
 
@@ -457,11 +457,19 @@ where
         },
         &source_data,
     );
-    if !generated.errors.is_empty() {
-        return Err(PreparationError::new(
-            PreparationStage::Netlist,
-            generated.errors.join("; "),
-        ));
+    let sim_setup = inputs.analysis.sim_setup;
+    let mut defects = generated.defects.clone();
+    defects.extend(crate::netlist_gen::plan_clashes(
+        root_schematic.document(),
+        &root_reference,
+        crate::netlist_gen::PlanStatements {
+            design_variables: &plan_payload.design_variables,
+            options_block: &sim_setup.options.to_spice_options(),
+            temperature: sim_setup.plan_states_temperature(),
+        },
+    ));
+    if let Some(error) = crate::netlist_gen::refusal_of(&generated.errors, &defects) {
+        return Err(error);
     }
     let generated_netlist = crate::netlist_gen::append_added_lines(
         generated.netlist,

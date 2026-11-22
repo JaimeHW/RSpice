@@ -71,6 +71,7 @@ const fn sample(kind: DesignNoteKind) -> &'static str {
         | DesignNoteKind::ReviewNote
         | DesignNoteKind::PropertyDisplay => "",
         DesignNoteKind::RequirementLink => "Requirement ID",
+        DesignNoteKind::SpiceDirective => ".param, .model, .ic, .include ...",
     }
 }
 

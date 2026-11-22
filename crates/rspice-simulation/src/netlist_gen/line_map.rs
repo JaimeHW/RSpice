@@ -19,6 +19,8 @@ pub struct WrittenLine {
     pub instance: Option<InstancePath>,
     /// The nets the card connects, as the deck names them, in pin order.
     pub nets: Vec<String>,
+    /// The SPICE directive note in that cell view the line was written from.
+    pub note: Option<u64>,
 }
 
 /// The lines a generator writes, each with what it was written for.

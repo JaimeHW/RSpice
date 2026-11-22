@@ -136,6 +136,11 @@ pub enum DrawnObject {
         wire: Option<u64>,
         component: Option<u64>,
     },
+    /// One line, counted from 1, of a SPICE directive note.
+    Note {
+        id: u64,
+        line: usize,
+    },
 }
 
 impl DrawnObject {
@@ -143,6 +148,7 @@ impl DrawnObject {
     pub fn name(&self) -> &str {
         match self {
             Self::Component { name, .. } | Self::Net { name, .. } => name,
+            Self::Note { .. } => "the SPICE directive note",
         }
     }
 }

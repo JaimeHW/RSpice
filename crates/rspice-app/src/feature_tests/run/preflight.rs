@@ -20,6 +20,7 @@ use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
 mod block_cross_probe;
 mod connect_rules;
+mod directive_note;
 mod engine;
 mod pipeline;
 mod rule_deck;

@@ -14,7 +14,8 @@
 //! The netlist generator works in phases:
 //! 1. **Connectivity**: Adopt the design's extraction (nets, ports, labels,
 //!    bus members and ground)
-//! 2. **Header**: Title line and directives, then the design variables
+//! 2. **Header**: Title line and directives, then the design variables and
+//!    the design's SPICE directive notes
 //! 3. **Definitions**: Library includes, then project-cell `.SUBCKT`
 //!    definitions, so each precedes its first use
 //! 4. **Instances and models**: Instance cards, then model cards; Verilog-A
@@ -41,6 +42,7 @@ use rspice_vocabulary::product::AnalysisInstanceId;
 
 mod added_lines;
 mod connectivity;
+mod directive_notes;
 mod formatting;
 #[cfg(test)]
 mod functional_tests;
@@ -59,6 +61,11 @@ mod xspice;
 
 pub use added_lines::{
     AddedLineRefusal, AddedLinesRefused, added_lines_refusals, append_added_lines,
+};
+use directive_notes::DirectiveScope;
+pub use directive_notes::{
+    DirectiveNoteLine, PlanStatements, defined_parameters, directive_cards,
+    directive_note_at_deck_line, plan_clashes, refusal_of,
 };
 pub use instances::independent_source_card;
 pub use line_map::WrittenLine;
@@ -463,6 +470,7 @@ impl<'a> NetlistGenerator<'a> {
             element: Some(component.written_element_name()),
             instance: self.child_hierarchy_path(component).ok(),
             nets,
+            note: None,
         }
     }
 
@@ -531,6 +539,10 @@ impl<'a> NetlistGenerator<'a> {
             self.lines.extend(parameter_lines.iter().cloned());
             self.lines.push(String::new());
         }
+
+        // Phase 3c: The design's SPICE directive notes, after the design
+        // variables their cards may read and before anything uses them.
+        self.generate_directive_notes(DirectiveScope::Deck);
 
         // Phase 4: Generate include directives for library-bound instances
         self.generate_library_view_includes();

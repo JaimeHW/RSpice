@@ -23,6 +23,9 @@ pub struct DesignNoteDialogState {
     /// The note's size, in percent of the standard size.
     pub text_size_percent: u16,
     pub align: rspice_design::schematic::design_note::SymbolTextAlign,
+    /// What "Add to the plan" last said, and the text it left: the receipt,
+    /// or why the plan would not take the card. Typing drops it.
+    pub(crate) plan_outcome: Option<(Result<String, String>, String)>,
 }
 
 impl DesignNoteDialogState {
@@ -34,6 +37,7 @@ impl DesignNoteDialogState {
             source: Some(source),
             text_size_percent: 100,
             align: Default::default(),
+            plan_outcome: None,
         };
     }
 
@@ -44,6 +48,7 @@ impl DesignNoteDialogState {
 
 const TITLE: &str = "Place text or design note";
 const PRIMARY: &str = "Place";
+const ADD_TO_PLAN: &str = "Add to the plan";
 const DESCRIPTION: &str = "Write the note, then click to place it.";
 
 pub(in crate::workbench) fn render_design_note_dialog(
@@ -55,27 +60,38 @@ pub(in crate::workbench) fn render_design_note_dialog(
         return;
     }
     recapture(dialog, model);
+    if dialog
+        .plan_outcome
+        .as_ref()
+        .is_some_and(|(_, text)| *text != dialog.text)
+    {
+        dialog.plan_outcome = None;
+    }
     let validation = validate_draft(dialog, model);
-    let status = design_note_status(&dialog.text, &validation);
+    let to_plan = card_for_the_plan(dialog);
+    let status = design_note_status(&dialog.text, &validation, dialog.plan_outcome.as_ref());
     let draft = &mut *dialog;
-    let choice = CommandForm::new(TITLE, PRIMARY)
+    let mut form = CommandForm::new(TITLE, PRIMARY)
         .describe(DESCRIPTION)
         .primary_enabled(validation.is_ok())
         // Enter types a line of the note; the primary places it.
         .primary_on_enter(false)
         .status(match &status {
-            Ok(fact) => Ok(*fact),
+            Ok(fact) => Ok(fact.as_deref()),
             Err(refusal) => Err(refusal.as_str()),
-        })
-        .show(ctx, |rows| {
-            note_placement::show(
-                rows,
-                &mut draft.kind,
-                &mut draft.text,
-                &mut draft.text_size_percent,
-                &mut draft.align,
-            )
         });
+    if to_plan.is_some() {
+        form = form.secondary(ADD_TO_PLAN);
+    }
+    let choice = form.show(ctx, |rows| {
+        note_placement::show(
+            rows,
+            &mut draft.kind,
+            &mut draft.text,
+            &mut draft.text_size_percent,
+            &mut draft.align,
+        )
+    });
 
     match choice {
         DialogChoice::Primary => {
@@ -85,11 +101,44 @@ pub(in crate::workbench) fn render_design_note_dialog(
                 dialog.close();
             }
         }
+        DialogChoice::Secondary => {
+            if let Some(refused) = to_plan {
+                add_to_the_plan(dialog, model, &refused);
+            }
+        }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             dialog.close();
         }
-        DialogChoice::None | DialogChoice::Secondary => {}
+        DialogChoice::None => {}
     }
+}
+
+/// The analysis card a SPICE directive note's text holds that "Add to the
+/// plan" can write into the plan: the first line the note refuses, when the
+/// plan has a draft for it.
+fn card_for_the_plan(
+    dialog: &DesignNoteDialogState,
+) -> Option<rspice_design::schematic::spice_directive::RefusedDirectiveLine> {
+    (dialog.kind == crate::state::DesignNoteKind::SpiceDirective)
+        .then(|| rspice_design::schematic::spice_directive::refused_directive_lines(&dialog.text))?
+        .into_iter()
+        .next()
+        .filter(rspice_design::schematic::spice_directive::RefusedDirectiveLine::adds_to_plan)
+}
+
+/// Write `refused` into the active plan and take its line off the note, so
+/// what is left is what the netlist takes.
+pub(crate) fn add_to_the_plan(
+    dialog: &mut DesignNoteDialogState,
+    model: &mut Model,
+    refused: &rspice_design::schematic::spice_directive::RefusedDirectiveLine,
+) {
+    let outcome = model.add_analysis_card_to_plan(&refused.card);
+    if outcome.is_ok() {
+        dialog.text =
+            rspice_design::schematic::spice_directive::without_line(&dialog.text, refused.line);
+    }
+    dialog.plan_outcome = Some((outcome, dialog.text.clone()));
 }
 
 /// A form left open while the drawing changes, another sheet is opened, or
@@ -112,9 +161,19 @@ fn recapture(dialog: &mut DesignNoteDialogState, model: &Model) {
 fn design_note_status(
     text: &str,
     validation: &Result<PendingDesignNotePlacement, String>,
-) -> Result<Option<&'static str>, String> {
+    plan_outcome: Option<&(Result<String, String>, String)>,
+) -> Result<Option<String>, String> {
+    // What the plan said answers the press that asked it, until the text
+    // changes again.
+    match plan_outcome {
+        Some((Err(refusal), _)) => return Err(refusal.clone()),
+        Some((Ok(receipt), _)) if validation.is_ok() || text.trim().is_empty() => {
+            return Ok(Some(receipt.clone()));
+        }
+        _ => {}
+    }
     if text.trim().is_empty() {
-        return Ok(Some("Type the text to place."));
+        return Ok(Some("Type the text to place.".to_owned()));
     }
     match validation {
         Ok(_) => Ok(None),
@@ -178,10 +237,114 @@ pub mod tests {
         assert!(validation.is_err());
         // It refused nothing, but it says why Place is off.
         assert_eq!(
-            design_note_status("", &validation),
-            Ok(Some("Type the text to place."))
+            design_note_status("", &validation, None),
+            Ok(Some("Type the text to place.".to_owned()))
         );
         assert!(state.model.schematic.document().design_notes.is_empty());
+    }
+
+    /// A `.tran` typed on a SPICE directive note is refused on its line, and
+    /// the form's "Add to the plan" writes it into the plan as the Analyses
+    /// page would, leaving the note the cards the netlist takes.
+    #[test]
+    fn an_analysis_typed_on_a_directive_note_goes_to_the_plan_from_the_form() {
+        use crate::simulation::plan::AnalysisKind;
+
+        let mut state = DesignTestHost::default();
+        let source = schematic_editor_request_source(&state);
+        state.design.design_note.open(source);
+        state.design.design_note.kind = crate::state::DesignNoteKind::SpiceDirective;
+        state.design.design_note.text = ".param r=1k\n.tran 1n 1u".to_owned();
+        assert_eq!(
+            validate_draft(&state).unwrap_err(),
+            "Line 2: .tran is an analysis, and the plan owns analyses."
+        );
+        let transients = |state: &DesignTestHost| {
+            state
+                .model
+                .sim_setup
+                .stable_analysis_plan()
+                .expect("a plan")
+                .instances()
+                .iter()
+                .filter(|instance| instance.kind() == AnalysisKind::Transient)
+                .map(|instance| match instance.draft() {
+                    crate::simulation::plan::AnalysisDraft::Transient(tran) => {
+                        (tran.step.clone(), tran.stop.clone())
+                    }
+                    _ => unreachable!("a transient's draft"),
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = transients(&state);
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let frame = |state: &mut DesignTestHost, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| render(&mut state.design.design_note, &mut state.model, ctx),
+            )
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default()
+        };
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            nodes = frame(&mut state, Vec::new());
+        }
+        let add = nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(ADD_TO_PLAN))
+            .map(|(id, _)| *id)
+            .expect("the form offers Add to the plan");
+        let _ = frame(
+            &mut state,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Click,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: add,
+                    data: None,
+                },
+            )],
+        );
+
+        let mut after = transients(&state);
+        assert_eq!(after.len(), before.len() + 1, "{after:?}");
+        after.retain(|transient| !before.contains(transient));
+        assert_eq!(after, [("1n".to_owned(), "1u".to_owned())]);
+        let note = &state.design.design_note;
+        assert!(note.open, "the rest of the note is still to place");
+        assert_eq!(note.text, ".param r=1k");
+        let validation = validate_draft(&state);
+        assert!(validation.is_ok(), "{validation:?}");
+        let status = design_note_status(
+            &state.design.design_note.text,
+            &validation,
+            state.design.design_note.plan_outcome.as_ref(),
+        );
+        let receipt = status.expect("a receipt").expect("said on the form");
+        assert!(
+            receipt.starts_with("Added .tran 1n 1u to the plan "),
+            "{receipt}"
+        );
+        let nodes = frame(&mut state, Vec::new());
+        assert!(
+            !nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(ADD_TO_PLAN)),
+            "nothing left for the plan"
+        );
     }
 
     /// A note pasted decomposed is placed composed: the "é" it reads is the

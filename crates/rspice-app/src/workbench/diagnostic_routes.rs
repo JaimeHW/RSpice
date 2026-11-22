@@ -28,7 +28,7 @@ use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
-use rspice_app_state::state::{DrawnObject, PreflightRemediation};
+use rspice_app_state::state::{CellViewRef, DrawnObject, PreflightRemediation};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -311,6 +311,10 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
         // The object an engine refusal named, in the view that draws it. The
         // view opens first so the object is looked up in its own drawing, and
         // one that drawing no longer holds is said rather than selected.
+        PreflightRemediation::Drawing {
+            cell_view,
+            object: DrawnObject::Note { id, line },
+        } => show_directive_note(app, cell_view, id, line),
         PreflightRemediation::Drawing { cell_view, object } => {
             use rspice_design::drc::DrcLocation;
 
@@ -330,6 +334,7 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                     net_name: name.clone(),
                     terminals: Vec::new(),
                 },
+                DrawnObject::Note { .. } => return,
             };
             app.state.open_workspace_view(cell_view.clone());
             match rspice_app_state::workbench::app_state::design_checks::model_location_anchor(
@@ -346,6 +351,47 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 )),
             }
         }
+    }
+}
+
+/// Show the SPICE directive note `id` of `cell_view` selected and centred,
+/// and say which of its lines the finding is on.
+fn show_directive_note(app: &mut RSpiceApp, cell_view: CellViewRef, id: u64, line: usize) {
+    app.state.open_workspace_view(cell_view.clone());
+    let Some(point) = app
+        .state
+        .model
+        .schematic
+        .document()
+        .design_notes
+        .iter()
+        .find(|note| note.id == id)
+        .map(|note| note.pos)
+    else {
+        app.state.prompt(format!(
+            "{} no longer draws the SPICE directive note.",
+            cell_view.display_path()
+        ));
+        return;
+    };
+    let mut selection = rspice_design::schematic::selection::Selection::default();
+    selection.select_design_note(id);
+    let sheet = app
+        .state
+        .model
+        .multi_sheet_catalog()
+        .and_then(|catalog| catalog.sheet_for_object(id));
+    if app.state.navigation().show_on_schematic(
+        rspice_app_workbench::workbench::framework::requests::ShowOnSchematic {
+            cell_view,
+            sheet,
+            point,
+            selection,
+        },
+    ) {
+        app.state.prompt(format!(
+            "Line {line} of the selected SPICE directive stopped the run."
+        ));
     }
 }
 

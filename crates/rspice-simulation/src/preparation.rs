@@ -42,6 +42,9 @@ pub struct PreparationError {
     finding_from: u32,
     interruption: Option<PreparationInterruption>,
     refusal: Option<PreparationRefusal>,
+    /// The SPICE directive note line the failure is on, where a note wrote
+    /// the card that failed.
+    directive_note: Option<Box<crate::netlist_gen::DirectiveNoteLine>>,
 }
 
 /// What a failure that refuses a deck, rather than finding it wrong, says
@@ -68,7 +71,38 @@ impl PreparationError {
             finding_from: 0,
             interruption: None,
             refusal: None,
+            directive_note: None,
         }
+    }
+
+    /// The same failure, on a line of a SPICE directive note.
+    pub fn on_directive_note(mut self, place: crate::netlist_gen::DirectiveNoteLine) -> Self {
+        self.directive_note = Some(Box::new(place));
+        self
+    }
+
+    /// The same failure, on the directive note line `deck` wrote at the deck
+    /// line the failure names, when a note wrote that line, and said there:
+    /// the note's line, not the deck's, is the one its reader can find.
+    pub fn located_in(self, deck: &str) -> Self {
+        let Some(place) = self
+            .line
+            .and_then(|line| crate::netlist_gen::directive_note_at_deck_line(deck, line))
+        else {
+            return self;
+        };
+        let at = match &place.cell_view {
+            Some(cell_view) => format!("SPICE directive on {}", cell_view.display_path()),
+            None => "SPICE directive".to_owned(),
+        };
+        let message = format!("{at}, line {}: {}", place.line, self.finding());
+        self.said_as(message).on_directive_note(place)
+    }
+
+    /// The SPICE directive note line the failure is on, if a note wrote the
+    /// card that failed.
+    pub fn directive_note(&self) -> Option<&crate::netlist_gen::DirectiveNoteLine> {
+        self.directive_note.as_deref()
     }
 
     /// The same failure, as a refusal: the host lacks `capability`, which

@@ -150,6 +150,9 @@ fn lettered_screen_layout(
 fn note_color(kind: DesignNoteKind, palette: &Palette) -> Color32 {
     match kind {
         DesignNoteKind::PlainText => palette.text_dim,
+        // Cards the netlist reads letter at full strength, apart from the
+        // dimmed prose of a plain note.
+        DesignNoteKind::SpiceDirective => palette.text,
         DesignNoteKind::PropertyDisplay => palette.net_label,
         DesignNoteKind::RequirementLink => palette.accent,
         DesignNoteKind::ReviewNote => palette.warn,
@@ -192,6 +195,13 @@ pub fn draw_design_note(
         _ if note.anchor_mark_hidden => {}
         DesignNoteKind::PlainText => {
             painter.circle_filled(layout.anchor, marker_radius, color);
+        }
+        DesignNoteKind::SpiceDirective => {
+            painter.rect_filled(
+                Rect::from_center_size(layout.anchor, egui::Vec2::splat(marker_radius * 2.0)),
+                0.0,
+                color,
+            );
         }
         DesignNoteKind::PropertyDisplay => {
             painter.rect_stroke(
@@ -304,7 +314,9 @@ pub fn conservative_world_bounds(note: &DesignNote) -> (Point, Point) {
             .into_owned()
         }
         DesignNoteKind::RequirementLink => format!("REQ · {}", note.text),
-        DesignNoteKind::PlainText | DesignNoteKind::ReviewNote => note.text.clone(),
+        DesignNoteKind::PlainText | DesignNoteKind::SpiceDirective | DesignNoteKind::ReviewNote => {
+            note.text.clone()
+        }
     };
     world_bounds(note, &source)
 }

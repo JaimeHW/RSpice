@@ -140,3 +140,45 @@ impl Model {
         Some(message)
     }
 }
+
+impl Model {
+    /// Write the analysis card `card` into the active plan, as the Analyses
+    /// page adds an analysis: one step of the plan's history, with the
+    /// operating point it needs bound. Returns the receipt, which the plan's
+    /// record keeps too, or why the card cannot join the plan.
+    pub fn add_analysis_card_to_plan(&mut self, card: &str) -> Result<String, String> {
+        use crate::workbench::app_state::design_history::SetupParts;
+
+        let (draft, _) = rspice_simulation_contract::analysis_card::analysis_card_draft(card)?;
+        if let Some(error) = self.sim_setup.analysis_draft_validation_error(&draft) {
+            return Err(error);
+        }
+        let step = self.setup_snapshot(SetupParts::ANALYSES);
+        let plan = self.sim_setup.stable_analysis_plan_mut()?;
+        let mut candidate = plan.clone();
+        let position = candidate.instances().len();
+        let (inserted, _) = candidate
+            .insert_draft_with_id(
+                rspice_vocabulary::product::AnalysisInstanceId::new(),
+                draft,
+                true,
+                position,
+            )
+            .map_err(|error| error.to_string())?;
+        if !candidate.required_prerequisite_roles(inserted).is_empty() {
+            candidate
+                .repair_dependencies(inserted)
+                .map_err(|error| error.to_string())?;
+        }
+        *plan = candidate;
+        self.sim_setup.refresh_legacy_analysis_projections();
+        self.record_setup_change(crate::state::SimulationPage::Analyses.label(), step);
+        let receipt = format!(
+            "Added {} to the plan {}.",
+            card.trim(),
+            self.sim_setup.active_plan_name()
+        );
+        self.record_plan_receipt(receipt.clone());
+        Ok(receipt)
+    }
+}

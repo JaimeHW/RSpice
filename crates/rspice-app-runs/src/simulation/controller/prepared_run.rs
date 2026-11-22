@@ -711,11 +711,19 @@ impl SimulationController {
                 },
                 &source_data,
             );
-        if !generated.errors.is_empty() {
-            return Err(PreparationError::new(
-                PreparationStage::Netlist,
-                generated.errors.join("; "),
-            ));
+        let mut defects = generated.defects.clone();
+        defects.extend(rspice_simulation::netlist_gen::plan_clashes(
+            root_schematic.document(),
+            &root_reference,
+            rspice_simulation::netlist_gen::PlanStatements {
+                design_variables: &payload.design_variables,
+                options_block: &options.to_spice_options(),
+                temperature: model.sim_setup.plan_states_temperature(),
+            },
+        ));
+        if let Some(error) = rspice_simulation::netlist_gen::refusal_of(&generated.errors, &defects)
+        {
+            return Err(error);
         }
         let generated_netlist = rspice_simulation::netlist_gen::append_added_lines(
             generated.netlist,

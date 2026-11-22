@@ -1,8 +1,10 @@
-//! Durable, non-electrical schematic documentation objects.
+//! Durable schematic documentation objects, and SPICE directive notes.
 //!
-//! Design notes deliberately live outside electrical components and the
-//! conductor collections.  They therefore participate in document editing
-//! and export without ever changing connectivity or generated SPICE.
+//! Design notes live outside electrical components and the conductor
+//! collections, so no note ever changes connectivity. Every kind but one is
+//! documentation and never reaches generated SPICE: a SPICE directive note
+//! holds cards (`.param`, `.model`, `.ic`, ...) that join every deck
+//! generated for the design it is drawn in.
 
 use serde::{Deserialize, Serialize};
 
@@ -61,21 +63,24 @@ pub fn design_note_size_label(percent: u16) -> String {
     format!("{percent}%")
 }
 
-/// The four documentation semantics exposed by the mockup-owned placement
-/// transaction.
+/// What a note is: documentation of four kinds, or SPICE directives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DesignNoteKind {
     #[default]
     PlainText,
+    /// SPICE cards that join the netlist of the design the note is drawn in,
+    /// line for line, as KiCad's and ADS's directive text on the sheet does.
+    SpiceDirective,
     PropertyDisplay,
     RequirementLink,
     ReviewNote,
 }
 
 impl DesignNoteKind {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::PlainText,
+        Self::SpiceDirective,
         Self::PropertyDisplay,
         Self::RequirementLink,
         Self::ReviewNote,
@@ -84,6 +89,7 @@ impl DesignNoteKind {
     pub const fn label(self) -> &'static str {
         match self {
             Self::PlainText => "Plain text",
+            Self::SpiceDirective => "SPICE directive",
             Self::PropertyDisplay => "Property display",
             Self::RequirementLink => "Requirement link",
             Self::ReviewNote => "Review note",
@@ -856,7 +862,9 @@ impl<'a> DesignNoteRenderContext<'a> {
 impl DesignNote {
     pub fn rendered_text(&self, context: &DesignNoteRenderContext<'_>) -> String {
         match self.kind {
-            DesignNoteKind::PlainText | DesignNoteKind::ReviewNote => self.text.clone(),
+            DesignNoteKind::PlainText
+            | DesignNoteKind::SpiceDirective
+            | DesignNoteKind::ReviewNote => self.text.clone(),
             DesignNoteKind::RequirementLink => format!("REQ · {}", self.text),
             DesignNoteKind::PropertyDisplay => render_property_template(&self.text, context),
         }
@@ -889,6 +897,8 @@ pub enum DesignNoteError {
     InvalidLayer,
     ReadOnly,
     StaleDocument,
+    /// A line of a SPICE directive note the netlist cannot take.
+    RefusedDirective(super::spice_directive::RefusedDirectiveLine),
 }
 
 impl std::fmt::Display for DesignNoteError {
@@ -965,6 +975,7 @@ impl std::fmt::Display for DesignNoteError {
             Self::ReadOnly => formatter.write_str("The active schematic is read-only."),
             Self::StaleDocument => formatter
                 .write_str("The schematic changed after the design-note contract was prepared."),
+            Self::RefusedDirective(refused) => write!(formatter, "{refused}."),
         }
     }
 }
@@ -1079,6 +1090,15 @@ pub fn validate_kind_text(kind: DesignNoteKind, text: &str) -> Result<(), Design
                 Ok(())
             } else {
                 Err(DesignNoteError::InvalidRequirementReference)
+            }
+        }
+        DesignNoteKind::SpiceDirective => {
+            match super::spice_directive::refused_directive_lines(text)
+                .into_iter()
+                .next()
+            {
+                Some(refused) => Err(DesignNoteError::RefusedDirective(refused)),
+                None => Ok(()),
             }
         }
         DesignNoteKind::PlainText | DesignNoteKind::ReviewNote => Ok(()),

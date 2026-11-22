@@ -377,6 +377,9 @@ fn remediation_key(remediation: &PreflightRemediation) -> String {
                 cell_view.key(),
                 name.to_ascii_lowercase()
             ),
+            DrawnObject::Note { id, line } => {
+                format!("drawing:{}:note:{id}:{line}", cell_view.key())
+            }
         },
     }
 }
@@ -437,7 +440,11 @@ const fn remediation_producer(remediation: &PreflightRemediation) -> (&'static s
     match remediation {
         PreflightRemediation::Models { .. } => (MODEL_BINDING_PRODUCER, "MODEL"),
         PreflightRemediation::ProjectTechnology => (MODEL_BINDING_PRODUCER, "TECH"),
-        PreflightRemediation::NetlistSource { .. } => (NETLIST_PRODUCER, "NETLIST"),
+        PreflightRemediation::NetlistSource { .. }
+        | PreflightRemediation::Drawing {
+            object: DrawnObject::Note { .. },
+            ..
+        } => (NETLIST_PRODUCER, "NETLIST"),
         // The engine's refusal, whose remedy is one of the plan's options.
         PreflightRemediation::Drawing { .. } | PreflightRemediation::ConnectRules => {
             (ENGINE_PRODUCER, "ENGINE")
@@ -476,6 +483,10 @@ fn remediation_subject(remediation: &PreflightRemediation) -> String {
         }
         PreflightRemediation::NetlistSource { line: None } => "Generated netlist".to_owned(),
         PreflightRemediation::RuleSetup => "Rule deck".to_owned(),
+        PreflightRemediation::Drawing {
+            object: DrawnObject::Note { line, .. },
+            ..
+        } => format!("SPICE directive · line {line}"),
         PreflightRemediation::Drawing { object, .. } => object.name().to_owned(),
         PreflightRemediation::Specification {
             measurement: Some(measurement),
