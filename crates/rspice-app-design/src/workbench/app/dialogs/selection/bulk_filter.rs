@@ -27,22 +27,24 @@ impl SelectionBulkObjectKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SelectionBulkHierarchyScope {
+    /// The cell view in front and every block placed below it, as KiCad's
+    /// "current sheet and below" reaches the sheets under the one shown.
     #[default]
-    ActiveHierarchyPath,
+    CellAndBlocksBelow,
     CurrentSheet,
     CompleteProject,
 }
 
 impl SelectionBulkHierarchyScope {
     pub const ALL: [Self; 3] = [
-        Self::ActiveHierarchyPath,
+        Self::CellAndBlocksBelow,
         Self::CurrentSheet,
         Self::CompleteProject,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::ActiveHierarchyPath => "Active hierarchy path",
+            Self::CellAndBlocksBelow => "This cell and blocks below",
             Self::CurrentSheet => "Current sheet",
             Self::CompleteProject => "Complete project",
         }
@@ -65,7 +67,7 @@ impl Default for SelectionBulkFilter {
         Self {
             query: String::new(),
             object_kind: SelectionBulkObjectKind::InstancesAndParameters,
-            hierarchy_scope: SelectionBulkHierarchyScope::ActiveHierarchyPath,
+            hierarchy_scope: SelectionBulkHierarchyScope::CellAndBlocksBelow,
             model_cell: String::new(),
             current_property: String::new(),
         }

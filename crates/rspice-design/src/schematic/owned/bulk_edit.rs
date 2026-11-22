@@ -25,6 +25,52 @@ pub fn replace_components(
     edits: Vec<(Component, Component)>,
     description: &str,
 ) -> Result<DocumentEdit<usize>, String> {
+    let replacements = planned_replacements(schematic, edits)?;
+    if replacements.is_empty() {
+        return Ok(DocumentEdit {
+            value: 0,
+            committed: false,
+        });
+    }
+    schematic.begin_operation(description);
+    let changed = replacements.len();
+    for (index, component) in replacements {
+        schematic.document.components[index] = component;
+    }
+    let committed = schematic.end_operation();
+    Ok(DocumentEdit {
+        value: changed,
+        committed,
+    })
+}
+
+impl Schematic {
+    /// The document `edits` leave, as the candidate of a step that spans
+    /// several cell views: each expected instance replaced by its
+    /// candidate, checked as [`replace_components`] checks them. Returns the
+    /// candidate and how many instances changed.
+    pub fn replaced_components_candidate(
+        &self,
+        edits: Vec<(Component, Component)>,
+    ) -> Result<(Self, usize), String> {
+        let replacements = planned_replacements(self, edits)?;
+        let changed = replacements.len();
+        let mut candidate = self.clone();
+        for (index, component) in replacements {
+            candidate.document.components[index] = component;
+        }
+        candidate.invalidate_topology();
+        Ok((candidate, changed))
+    }
+}
+
+/// Where each candidate of `edits` goes in `schematic`, once every expected
+/// instance is proved unchanged and every candidate the same instance under
+/// the same name. A candidate equal to its instance is left out.
+fn planned_replacements(
+    schematic: &Schematic,
+    edits: Vec<(Component, Component)>,
+) -> Result<Vec<(usize, Component)>, String> {
     let mut replacements = Vec::new();
     for (expected, candidate) in edits {
         let index = schematic
@@ -52,22 +98,7 @@ pub fn replace_components(
             replacements.push((index, candidate));
         }
     }
-    if replacements.is_empty() {
-        return Ok(DocumentEdit {
-            value: 0,
-            committed: false,
-        });
-    }
-    schematic.begin_operation(description);
-    let changed = replacements.len();
-    for (index, component) in replacements {
-        schematic.document.components[index] = component;
-    }
-    let committed = schematic.end_operation();
-    Ok(DocumentEdit {
-        value: changed,
-        committed,
-    })
+    Ok(replacements)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

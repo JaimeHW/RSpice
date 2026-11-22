@@ -1,11 +1,13 @@
 //! Filtered selection and atomic schematic bulk editing.
 //!
-//! Queries may inspect the active hierarchy or complete project, but edits are
-//! deliberately limited to the active schematic owner. A commit preflights
-//! every selected target, validates its frozen document authority, and
-//! publishes all component changes through one schematic undo boundary.
+//! Queries reach the cell view in front, the blocks below it, one sheet or
+//! the whole project, and an edit reaches every writable cell view its ticked
+//! rows are in. A commit preflights every selected target, validates its
+//! frozen document authority, and publishes all component changes as one
+//! undo step: the cell view's own step when the edit stays in front, one
+//! project step when it reaches other cell views.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use egui::{Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 use rspice_design::schematic::bom::BomField;
@@ -20,7 +22,7 @@ use crate::state::bulk_edit::{
     apply_bulk_edit, mutate_component, parameter_key_from_filter, validate_bulk_value,
 };
 use crate::state::{
-    Component, ComponentDisplayMode, ComponentType, SchematicSnapshot, SchematicState,
+    Component, ComponentDisplayMode, ComponentType, SchematicSnapshot,
     parse_replacement_parameters_strict,
 };
 use crate::ui::theme::{self, FontWeight};
@@ -349,7 +351,7 @@ pub fn render_selection_bulk_edit_dialog(
     let property = bulk_edit.property;
     let rows = build_rows(model, &filter, property);
     let impact = preview_impact(
-        &model.schematic,
+        model,
         &rows,
         &bulk_edit.selected,
         property,
@@ -408,18 +410,9 @@ pub fn render_selection_bulk_edit_dialog(
         .map(|entry| entry.name.clone())
         .collect::<Vec<_>>();
     let analyses = model.sim_setup.enabled_analysis_instance_count();
-    let hierarchy_path = active_hierarchy_path(model);
     let mut action = SelectionBulkBodyAction::None;
     let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-        action = selection_bulk_body(
-            ui,
-            &mut *bulk_edit,
-            &rows,
-            &impact,
-            analyses,
-            &saved,
-            &hierarchy_path,
-        );
+        action = selection_bulk_body(ui, &mut *bulk_edit, &rows, &impact, analyses, &saved);
         None
     });
     bulk_edit.body_scroll_offset = body_scroll_offset;
@@ -508,17 +501,7 @@ fn first_ticked_display(
     rows.iter()
         .filter(|row| row.key.kind != SelectionBulkRowKind::Pin && selected.contains(&row.key))
         .find_map(|row| {
-            let document = if row.key.view_key.eq_ignore_ascii_case(&active) {
-                Some(model.schematic.document())
-            } else {
-                model
-                    .workspace
-                    .content
-                    .schematic_buffers
-                    .get(&row.key.view_key)
-                    .map(|buffer| buffer.document())
-            };
-            document?
+            row_document(model, &active, &row.key.view_key)?
                 .components
                 .iter()
                 .find(|component| component.id == row.key.object_id)
@@ -567,34 +550,60 @@ fn commit_selection_bulk_edit(
             "Section {section} is not defined by every ticked part's library."
         ));
     }
-    let selected_active_ids = rows
-        .iter()
-        .filter(|row| row.editable() && dialog.selected.contains(&row.key))
-        .filter(|row| row.key.view_key.eq_ignore_ascii_case(&authority.active_key))
-        .filter_map(|row| {
-            matches!(
-                row.key.kind,
-                SelectionBulkRowKind::Instance | SelectionBulkRowKind::Port
-            )
-            .then_some(row.key.object_id)
-        })
-        .collect::<BTreeSet<_>>();
-    let receipt = apply_bulk_edit(
-        &mut model.schematic,
-        &selected_active_ids,
+    let edits = planned_edits(
+        model,
+        &rows,
+        &dialog.selected,
         dialog.property,
         &dialog.new_value,
         dialog.unset_behavior,
-        Some(&dialog.filter.current_property),
+        &dialog.filter.current_property,
     )?;
-    if receipt.changed == 0 {
+    let in_front_alone = edits
+        .iter()
+        .all(|(key, _)| key.eq_ignore_ascii_case(&authority.active_key));
+    let changed = if in_front_alone {
+        // The cell view's own step, with what changed left selected.
+        let selected_active_ids = rows
+            .iter()
+            .filter(|row| row.editable() && dialog.selected.contains(&row.key))
+            .filter(|row| row.key.view_key.eq_ignore_ascii_case(&authority.active_key))
+            .filter_map(|row| {
+                matches!(
+                    row.key.kind,
+                    SelectionBulkRowKind::Instance | SelectionBulkRowKind::Port
+                )
+                .then_some(row.key.object_id)
+            })
+            .collect::<BTreeSet<_>>();
+        apply_bulk_edit(
+            &mut model.schematic,
+            &selected_active_ids,
+            dialog.property,
+            &dialog.new_value,
+            dialog.unset_behavior,
+            Some(&dialog.filter.current_property),
+        )?
+        .changed
+    } else {
+        let edits = edits
+            .into_iter()
+            .map(|(key, pairs)| {
+                cell_view_of(&key)
+                    .map(|reference| (reference, pairs))
+                    .ok_or_else(|| format!("{key} is not a cell view."))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        model.replace_components_across_cell_views(&edits, "Bulk edit schematic properties")?
+    };
+    if changed == 0 {
         return Err("The selected objects already satisfy the requested value.".to_owned());
     }
     sync_active_schematic(model, workbench);
     let changed = format!(
         "Bulk edit changed {} object{}",
-        receipt.changed,
-        if receipt.changed == 1 { "" } else { "s" },
+        changed,
+        if changed == 1 { "" } else { "s" },
     );
     let analyses = model.sim_setup.enabled_analysis_instance_count();
     workbench.prompt(if changes_the_circuit(dialog.property) && analyses > 0 {
@@ -616,8 +625,61 @@ struct SelectionBulkImpact {
     error: Option<String>,
 }
 
+/// The edit each ticked row's instance takes, by the cell view it is in:
+/// what Apply writes and what the preview counts. An instance the edit
+/// would leave as it is has no entry.
+fn planned_edits(
+    model: &Model,
+    rows: &[SelectionBulkRow],
+    selected: &BTreeSet<SelectionBulkRowKey>,
+    property: SelectionBulkProperty,
+    value: &str,
+    unset: SelectionBulkUnsetBehavior,
+    current_property: &str,
+) -> Result<BTreeMap<String, Vec<(Component, Component)>>, String> {
+    let normalized = validate_bulk_value(property, value, unset, Some(current_property))?;
+    let parameter_key = if property == SelectionBulkProperty::ParameterOverride {
+        parameter_key_from_filter(value, None).ok()
+    } else {
+        None
+    };
+    let active = model.workspace.content.active_schematic_reference().key();
+    let mut edits = BTreeMap::<String, Vec<(Component, Component)>>::new();
+    for row in rows.iter().filter(|row| {
+        row.editable()
+            && selected.contains(&row.key)
+            && matches!(
+                row.key.kind,
+                SelectionBulkRowKind::Instance | SelectionBulkRowKind::Port
+            )
+    }) {
+        let component = row_document(model, &active, &row.key.view_key)
+            .and_then(|document| {
+                document
+                    .components
+                    .iter()
+                    .find(|component| component.id == row.key.object_id)
+            })
+            .ok_or("At least one selected component is no longer present.")?;
+        let mut candidate = component.clone();
+        if mutate_component(
+            &mut candidate,
+            property,
+            &normalized,
+            unset,
+            parameter_key.as_deref(),
+        )? {
+            edits
+                .entry(row.key.view_key.clone())
+                .or_default()
+                .push((component.clone(), candidate));
+        }
+    }
+    Ok(edits)
+}
+
 fn preview_impact(
-    schematic: &SchematicState,
+    model: &Model,
     rows: &[SelectionBulkRow],
     selected: &BTreeSet<SelectionBulkRowKey>,
     property: SelectionBulkProperty,
@@ -625,49 +687,22 @@ fn preview_impact(
     unset: SelectionBulkUnsetBehavior,
     current_property: &str,
 ) -> SelectionBulkImpact {
-    let editable_ids = rows
-        .iter()
-        .filter(|row| row.editable() && selected.contains(&row.key))
-        .filter_map(|row| {
-            matches!(
-                row.key.kind,
-                SelectionBulkRowKind::Instance | SelectionBulkRowKind::Port
-            )
-            .then_some(row.key.object_id)
-        })
-        .collect::<BTreeSet<_>>();
     let locked_or_excluded = rows.iter().filter(|row| !row.editable()).count()
         + rows
             .iter()
             .filter(|row| row.editable() && !selected.contains(&row.key))
             .count();
     let preview = || -> Result<usize, String> {
-        let normalized = validate_bulk_value(property, value, unset, Some(current_property))?;
-        let parameter_key = if property == SelectionBulkProperty::ParameterOverride {
-            parameter_key_from_filter(value, None).ok()
-        } else {
-            None
-        };
-        let mut found = HashSet::new();
-        let mut changed = 0;
-        for component in &schematic.document().components {
-            if !editable_ids.contains(&component.id) {
-                continue;
-            }
-            found.insert(component.id);
-            let mut candidate = component.clone();
-            changed += usize::from(mutate_component(
-                &mut candidate,
-                property,
-                &normalized,
-                unset,
-                parameter_key.as_deref(),
-            )?);
-        }
-        if found.len() != editable_ids.len() {
-            return Err("At least one selected component is no longer present.".to_owned());
-        }
-        Ok(changed)
+        let edits = planned_edits(
+            model,
+            rows,
+            selected,
+            property,
+            value,
+            unset,
+            current_property,
+        )?;
+        Ok(edits.values().map(Vec::len).sum())
     };
     match preview() {
         Ok(changed) => SelectionBulkImpact {
@@ -690,7 +725,6 @@ fn selection_bulk_body(
     impact: &SelectionBulkImpact,
     affected_analyses: usize,
     saved_filters: &[String],
-    hierarchy_path: &str,
 ) -> SelectionBulkBodyAction {
     let mut action = SelectionBulkBodyAction::None;
     let tokens = Tokens::get(ui.ctx());
@@ -758,7 +792,7 @@ fn selection_bulk_body(
                 Vec2::new(full_w - filter_w, f32::INFINITY),
             );
             let filter_bottom = pane(ui, "selection-bulk-filter-pane", filter, |ui| {
-                selection_filter_panel(ui, dialog, rows, hierarchy_path, &mut action);
+                selection_filter_panel(ui, dialog, rows, &mut action);
             });
             let edit_bottom = pane(ui, "selection-bulk-edit-pane", edit, |ui| {
                 bulk_edit_panel(ui, dialog, impact, affected_analyses, &mut action);
@@ -895,7 +929,6 @@ fn saved_filter_controls(
 fn selection_filter_fields(
     ui: &mut Ui,
     dialog: &mut SelectionBulkEditDialogState,
-    hierarchy_path: &str,
     action: &mut SelectionBulkBodyAction,
 ) {
     ui.spacing_mut().item_spacing.x = 12.0;
@@ -919,14 +952,7 @@ fn selection_filter_fields(
             "selection-bulk-hierarchy-scope",
             "Hierarchy scope",
             &mut dialog.filter.hierarchy_scope,
-            &SelectionBulkHierarchyScope::ALL.map(|scope| {
-                let label = if scope == SelectionBulkHierarchyScope::ActiveHierarchyPath {
-                    hierarchy_path
-                } else {
-                    scope.label()
-                };
-                (scope, label)
-            }),
+            &SelectionBulkHierarchyScope::ALL.map(|scope| (scope, scope.label())),
             width,
         ) {
             *action = SelectionBulkBodyAction::FilterChanged;
@@ -963,7 +989,6 @@ fn selection_filter_panel(
     ui: &mut Ui,
     dialog: &mut SelectionBulkEditDialogState,
     rows: &[SelectionBulkRow],
-    hierarchy_path: &str,
     action: &mut SelectionBulkBodyAction,
 ) {
     band_header(
@@ -972,7 +997,7 @@ fn selection_filter_panel(
         Some(&format!("{} matched", rows.len())),
     );
     pane_content(ui, |ui| {
-        selection_filter_fields(ui, dialog, hierarchy_path, action);
+        selection_filter_fields(ui, dialog, action);
         ui.add_space(12.0);
         selection_results(ui, dialog, rows, action);
     });
@@ -1462,6 +1487,78 @@ fn schematic_display_path(cell_view_key: &str) -> String {
     segments.join("/")
 }
 
+/// The cell views placed below the one in front, each once, nearest first:
+/// the blocks its instances descend into, then theirs. Only cell views the
+/// project holds are reached; a block that places itself is not reached
+/// twice.
+fn blocks_below(model: &Model, active_key: &str) -> Vec<String> {
+    let buffers = &model.workspace.content.schematic_buffers;
+    let mut seen = HashSet::from([active_key.to_ascii_lowercase()]);
+    let mut below = Vec::new();
+    let mut document = Some(model.schematic.document());
+    let mut next = 0;
+    while let Some(current) = document {
+        for binding in current
+            .components
+            .iter()
+            .filter_map(|component| component.library_cell.as_ref())
+        {
+            let key =
+                crate::state::CellViewRef::new(&binding.library, &binding.cell, &binding.view)
+                    .key();
+            if buffers.contains_key(&key) && seen.insert(key.to_ascii_lowercase()) {
+                below.push(key);
+            }
+        }
+        document = below
+            .get(next)
+            .and_then(|key| buffers.get(key))
+            .map(|buffer| buffer.document());
+        next += 1;
+    }
+    below
+}
+
+/// Whether an edit may reach the cell view held under `key`: the project is
+/// open for writing and the cell's library is not read-only, as Find
+/// decides for a replacement.
+fn cell_view_writable(model: &Model, key: &str) -> bool {
+    let library = key.split('/').next().unwrap_or_default();
+    !model.safe_mode.project_read_only()
+        && !model
+            .library_manager
+            .get_library(library)
+            .is_some_and(|library| library.read_only)
+}
+
+/// The cell view a row key names, as `library/cell/view`.
+fn cell_view_of(key: &str) -> Option<crate::state::CellViewRef> {
+    let mut parts = key.rsplitn(3, '/');
+    let view = parts.next()?;
+    let cell = parts.next()?;
+    let library = parts.next()?;
+    Some(crate::state::CellViewRef::new(library, cell, view))
+}
+
+/// The document a row of `view_key` is read from: the canvas's own for the
+/// cell view in front, its held buffer otherwise.
+fn row_document<'a>(
+    model: &'a Model,
+    active_key: &str,
+    view_key: &str,
+) -> Option<&'a rspice_design::schematic::document::SchematicDocument> {
+    if view_key.eq_ignore_ascii_case(active_key) {
+        Some(model.schematic.document())
+    } else {
+        model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(view_key)
+            .map(|buffer| buffer.document())
+    }
+}
+
 fn build_rows(
     model: &Model,
     filter: &SelectionBulkFilter,
@@ -1475,38 +1572,26 @@ fn build_rows(
         model.schematic.document(),
         true,
     ));
-    match filter.hierarchy_scope {
-        SelectionBulkHierarchyScope::ActiveHierarchyPath => {
-            let hierarchy_keys = model
-                .workspace
-                .content
-                .hierarchy_stack
-                .iter()
-                .map(|reference| reference.key())
-                .collect::<HashSet<_>>();
-            for (key, schematic) in &model.workspace.content.schematic_buffers {
-                if !key.eq_ignore_ascii_case(&active_key) && hierarchy_keys.contains(key) {
-                    buffers.push((
-                        key.clone(),
-                        schematic_display_path(key),
-                        schematic.document(),
-                        false,
-                    ));
-                }
-            }
-        }
-        SelectionBulkHierarchyScope::CurrentSheet => {}
-        SelectionBulkHierarchyScope::CompleteProject => {
-            for (key, schematic) in &model.workspace.content.schematic_buffers {
-                if !key.eq_ignore_ascii_case(&active_key) {
-                    buffers.push((
-                        key.clone(),
-                        schematic_display_path(key),
-                        schematic.document(),
-                        false,
-                    ));
-                }
-            }
+    let others = match filter.hierarchy_scope {
+        SelectionBulkHierarchyScope::CellAndBlocksBelow => blocks_below(model, &active_key),
+        SelectionBulkHierarchyScope::CurrentSheet => Vec::new(),
+        SelectionBulkHierarchyScope::CompleteProject => model
+            .workspace
+            .content
+            .schematic_buffers
+            .keys()
+            .filter(|key| !key.eq_ignore_ascii_case(&active_key))
+            .cloned()
+            .collect(),
+    };
+    for key in others {
+        if let Some(schematic) = model.workspace.content.schematic_buffers.get(&key) {
+            buffers.push((
+                key.clone(),
+                schematic_display_path(&key),
+                schematic.document(),
+                cell_view_writable(model, &key),
+            ));
         }
     }
     buffers.sort_by(|(left, _, _, _), (right, _, _, _)| left.cmp(right));
@@ -1517,13 +1602,13 @@ fn build_rows(
         .sheet_catalog(&active_key)
         .and_then(|catalog| catalog.active_sheet_id());
     let mut rows = Vec::new();
-    for (view_key, display_path, schematic, active_owner) in buffers {
+    for (view_key, display_path, schematic, writable) in buffers {
         append_buffer_rows(
             &mut rows,
             &view_key,
             &display_path,
             schematic,
-            active_owner,
+            writable,
             filter,
             property,
             if filter.hierarchy_scope == SelectionBulkHierarchyScope::CurrentSheet {
@@ -1549,7 +1634,7 @@ fn append_buffer_rows(
     view_key: &str,
     display_path: &str,
     schematic: &rspice_design::schematic::document::SchematicDocument,
-    active_owner: bool,
+    writable: bool,
     filter: &SelectionBulkFilter,
     property: SelectionBulkProperty,
     active_sheet: Option<crate::state::SheetId>,
@@ -1580,7 +1665,7 @@ fn append_buffer_rows(
             display_path,
             component,
             kind,
-            active_owner,
+            writable,
             property,
         ));
         if filter.object_kind == SelectionBulkObjectKind::PortsAndPins {
@@ -1618,7 +1703,7 @@ fn component_row(
     display_path: &str,
     component: &Component,
     kind: SelectionBulkRowKind,
-    active_owner: bool,
+    writable: bool,
     property: SelectionBulkProperty,
 ) -> SelectionBulkRow {
     let displayed_value = if !component.value.trim().is_empty() {
@@ -1628,8 +1713,8 @@ fn component_row(
     } else {
         component.kind.display_name().to_owned()
     };
-    let lock = if !active_owner {
-        Some("Other owner".to_owned())
+    let lock = if !writable {
+        Some("Read only".to_owned())
     } else if (kind == SelectionBulkRowKind::Port && property != SelectionBulkProperty::Display)
         || (property == SelectionBulkProperty::Value && component.kind == ComponentType::Ground)
         || (property == SelectionBulkProperty::Temperature

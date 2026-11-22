@@ -170,6 +170,54 @@ impl Model {
         Ok(changed)
     }
 
+    /// Replace instances in several cell views at once, each by its edited
+    /// candidate, as one project step named for the cell view in front: one
+    /// Undo takes back an edit that reached the blocks below as it does one
+    /// that stayed in front. A candidate keeps its instance's name; a rename
+    /// goes through [`Self::edit_component_transaction`]. Every cell view is
+    /// checked before anything changes. Returns how many instances changed.
+    pub fn replace_components_across_cell_views(
+        &mut self,
+        edits: &[(CellViewRef, Vec<(Component, Component)>)],
+        description: &str,
+    ) -> Result<usize, String> {
+        let active = self.workspace.content.active_schematic_reference();
+        let sources = self.schematic_reference_sources();
+        let mut before = BTreeMap::new();
+        let mut after = BTreeMap::new();
+        let mut changed = 0;
+        for (reference, pairs) in edits {
+            let (key, source) = sources
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&reference.key()))
+                .map(|(key, source)| (key.clone(), *source))
+                .ok_or_else(|| format!("{} is no longer open.", reference.display_path()))?;
+            validate_reference_document(self, &key, source)?;
+            let (design, count) = source.design.replaced_components_candidate(pairs.clone())?;
+            if count == 0 {
+                continue;
+            }
+            changed += count;
+            let mut edited = source.with_design(design);
+            edited.session.is_dirty = true;
+            before.insert(key.clone(), source.clone_editor());
+            after.insert(key, edited);
+        }
+        drop(sources);
+        if changed == 0 {
+            return Ok(0);
+        }
+        let document = before
+            .keys()
+            .find(|key| key.eq_ignore_ascii_case(&active.key()))
+            .or_else(|| before.keys().next())
+            .map(|key| reference_from_key(key))
+            .transpose()?
+            .unwrap_or(active);
+        self.publish_component_renames(document, before, after, &[], description)?;
+        Ok(changed)
+    }
+
     /// Publish `after` over `before`, cell view by cell view, as one project
     /// step named for `document`, with every reference that names a renamed
     /// instance carried along and each rename, keyed by its cell view,

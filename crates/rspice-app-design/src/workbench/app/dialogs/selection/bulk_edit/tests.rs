@@ -5,7 +5,7 @@
 //! another owner holds are shown but locked.
 
 use super::*;
-use crate::state::{LibraryCellInstance, Point};
+use crate::state::{LibraryCellInstance, Point, SchematicState};
 #[cfg(test)]
 use crate::workbench::design::test_host::DesignTestHost;
 
@@ -726,7 +726,7 @@ fn impact_preview_is_exact_without_cloning_an_undo_transaction() {
     let selected = rows.iter().map(|row| row.key.clone()).collect();
 
     let impact = preview_impact(
-        &state.model.schematic,
+        &state.model,
         &rows,
         &selected,
         SelectionBulkProperty::ModelSection,
@@ -794,8 +794,10 @@ fn authority_rejects_active_selection_and_external_buffer_drift() {
     assert!(authority.stale_reason(&state.model).is_some());
 }
 
+/// The whole project lists every cell view's parts, and each can be ticked
+/// unless its cell view is read-only.
 #[test]
-fn complete_project_rows_are_visible_but_other_owners_are_locked() {
+fn complete_project_rows_are_editable_unless_their_cell_view_is_read_only() {
     let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", Some("tt"))];
     let mut external = SchematicState::default();
@@ -804,18 +806,131 @@ fn complete_project_rows_are_visible_but_other_owners_are_locked() {
         .model
         .workspace
         .insert_schematic_editor("user/child/schematic".to_owned(), external);
+    let mut vendor = SchematicState::default();
+    vendor.document_mut_for_test().components = vec![component(3, "X3", Some("ss"))];
+    state
+        .model
+        .workspace
+        .insert_schematic_editor("vendor/ref/schematic".to_owned(), vendor);
+    let mut library = crate::state::Library::new("vendor");
+    library.read_only = true;
+    state.model.library_manager.add_library(library);
     let filter = SelectionBulkFilter {
         hierarchy_scope: SelectionBulkHierarchyScope::CompleteProject,
         ..SelectionBulkFilter::default()
     };
     let rows = build_rows(&state.model, &filter, SelectionBulkProperty::ModelSection);
 
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows.iter().filter(|row| row.editable()).count(), 1);
-    assert!(
-        rows.iter()
-            .any(|row| row.lock.as_deref() == Some("Other owner"))
+    assert_eq!(rows.len(), 3);
+    let locks = rows
+        .iter()
+        .map(|row| (row.object.as_str(), row.lock.as_deref()))
+        .collect::<Vec<_>>();
+    assert!(locks.contains(&("X1", None)));
+    assert!(locks.contains(&("X2", None)));
+    assert!(locks.contains(&("X3", Some("Read only"))));
+}
+
+/// The default scope reaches the blocks the cell view in front places, and
+/// the blocks those place, never the cell views above; an Apply that changes
+/// parts in front and in a block is one undo step. It reached the parent
+/// cells, every row locked, and never the blocks below.
+#[test]
+fn the_default_scope_edits_the_blocks_below_as_one_undo_step() {
+    let mut state = DesignTestHost::default();
+    state.model.project_open.set_from_lifecycle(true);
+    let top = state.model.workspace.content.active_schematic_reference();
+    let resistor = |id: u64, name: &str| {
+        let mut part = Component::new(id, ComponentType::Resistor, Point::new(id as i32, 0));
+        part.name = name.to_owned();
+        part.value = "1k".to_owned();
+        part
+    };
+    let block = |id: u64, cell: &str| {
+        let mut part = Component::new(id, ComponentType::CellInstance, Point::new(id as i32, 0));
+        part.name = format!("X{id}");
+        part.library_cell = Some(LibraryCellInstance::new(&top.library, cell, "schematic"));
+        part
+    };
+    let held = |state: &mut DesignTestHost, cell: &str, parts: Vec<Component>| {
+        let mut buffer = SchematicState::default();
+        buffer.document_mut_for_test().components = parts;
+        buffer.init_undo_history();
+        state.model.workspace.insert_schematic_editor(
+            crate::state::CellViewRef::new(&top.library, cell, "schematic").key(),
+            buffer,
+        );
+    };
+    held(
+        &mut state,
+        "amp",
+        vec![resistor(1, "R10"), block(2, "bias")],
     );
+    held(&mut state, "bias", vec![resistor(1, "R20")]);
+    held(&mut state, "parent", vec![resistor(1, "R30")]);
+    state.model.schematic.document_mut_for_test().components =
+        vec![resistor(1, "R1"), block(2, "amp")];
+    state.model.schematic.init_undo_history();
+
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
+    assert_eq!(
+        state.design.selection_bulk_edit.filter.hierarchy_scope,
+        SelectionBulkHierarchyScope::CellAndBlocksBelow
+    );
+    state.design.selection_bulk_edit.filter.query = "1k".to_owned();
+    act(&mut state, SelectionBulkBodyAction::FilterChanged);
+    let rows = build_rows(
+        &state.model,
+        &state.design.selection_bulk_edit.filter,
+        SelectionBulkProperty::Value,
+    );
+    let mut listed = rows
+        .iter()
+        .map(|row| (row.object.as_str(), row.editable()))
+        .collect::<Vec<_>>();
+    listed.sort_unstable();
+    assert_eq!(
+        listed,
+        [("R1", true), ("R10", true), ("R20", true)],
+        "the cell in front and both blocks below, not the parent"
+    );
+
+    state.design.selection_bulk_edit.new_value = "2k".to_owned();
+    commit_selection_bulk_edit(
+        &mut state.design.selection_bulk_edit,
+        &mut state.model,
+        &mut state.workbench,
+    )
+    .expect("the edit reaches every ticked part");
+    let value_in = |state: &DesignTestHost, cell: &str| {
+        state.model.workspace.content.schematic_buffers
+            [&crate::state::CellViewRef::new(&top.library, cell, "schematic").key()]
+            .document()
+            .components[0]
+            .value
+            .clone()
+    };
+    assert_eq!(state.model.schematic.document().components[0].value, "2k");
+    assert_eq!(value_in(&state, "amp"), "2k");
+    assert_eq!(value_in(&state, "bias"), "2k");
+    assert_eq!(value_in(&state, "parent"), "1k");
+
+    let undone = crate::workbench::app::actions::workspace::history::undo_project_design(
+        state.design.schematic_restore_parts(),
+        &mut state.model,
+        &mut state.workbench,
+        &state.runs,
+        None,
+    )
+    .expect("the step undoes");
+    assert!(undone.is_some());
+    assert_eq!(state.model.schematic.document().components[0].value, "1k");
+    assert_eq!(value_in(&state, "amp"), "1k");
+    assert_eq!(value_in(&state, "bias"), "1k");
 }
 
 #[test]
