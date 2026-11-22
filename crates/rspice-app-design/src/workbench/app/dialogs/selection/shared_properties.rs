@@ -13,8 +13,8 @@ use egui::{Context, Id};
 
 use crate::properties::PropertyEditorSchema;
 use crate::properties::property_bridge::{
-    apply_properties_to_component, collect_properties_from_component, property_value_to_string,
-    validate_component_properties,
+    apply_properties_to_component, collect_properties_from_component, get_primary_property_name,
+    property_value_to_string, validate_component_properties,
 };
 use crate::state::{Component, ComponentType, PropertyValue};
 use crate::ui::widgets::{CommandForm, DialogChoice};
@@ -124,8 +124,15 @@ fn instances<'a>(model: &'a Model, ids: &[u64]) -> Vec<&'a Component> {
         .collect()
 }
 
-/// The properties every instance in `ids` owns, in the first one's sheet
-/// order, each with the value they agree on if they do.
+/// The properties every instance in `ids` owns with the same meaning, in the
+/// first one's sheet order, each with the value they agree on if they do.
+///
+/// One key means different things on different kinds: `l` is a resistor's
+/// Length and an inductor's inductance, `ic` a capacitor's initial voltage
+/// and an inductor's initial current. A field is shared only where every
+/// instance's sheet gives the key the same name, unit and type, and it is
+/// the primary value on all of them or on none, as KiCad and Altium share
+/// only fields of the same name and meaning.
 fn shared_fields(registry: &PropertyEditorSchema, model: &Model, ids: &[u64]) -> Vec<SharedField> {
     let components = instances(model, ids);
     let Some(sheet) = components
@@ -142,10 +149,18 @@ fn shared_fields(registry: &PropertyEditorSchema, model: &Model, ids: &[u64]) ->
         .iter()
         .filter(|definition| definition.name != "name" && definition.name != "symbol")
         .filter(|definition| {
+            let primary = |kind| get_primary_property_name(kind) == definition.name;
+            let first_primary = components.first().is_some_and(|first| primary(first.kind));
             components.iter().all(|component| {
                 registry
                     .get(component.kind)
-                    .is_some_and(|sheet| sheet.get(&definition.name).is_some())
+                    .and_then(|sheet| sheet.get(&definition.name))
+                    .is_some_and(|other| {
+                        other.display_name == definition.display_name
+                            && other.unit == definition.unit
+                            && other.prop_type == definition.prop_type
+                    })
+                    && primary(component.kind) == first_primary
             })
         })
         .map(|definition| {
@@ -348,6 +363,49 @@ pub mod tests {
         selection.select_component(1);
         selection.select_component(2);
         state
+    }
+
+    /// The keys the form offers for the parts with these ids, selected.
+    #[cfg(test)]
+    fn offered_keys(parts: Vec<Component>) -> Vec<String> {
+        let mut state = DesignTestHost::default();
+        let ids: Vec<u64> = parts.iter().map(|part| part.id).collect();
+        state.model.schematic.document_mut_for_test().components = parts;
+        super::shared_fields(&state.design.property_registry, &state.model, &ids)
+            .into_iter()
+            .map(|field| field.key)
+            .collect()
+    }
+
+    /// A key that means something different on each kind is not one field:
+    /// a resistor's Length is not an inductor's inductance, a capacitor's
+    /// initial voltage is not an inductor's initial current, and a
+    /// resistor's AC resistance is not a source's AC magnitude.
+    #[test]
+    fn a_key_shared_in_name_only_is_not_offered() {
+        let part = |id: u64, kind: ComponentType| Component::new(id, kind, Point::new(0, 0));
+        let resistor_and_inductor = offered_keys(vec![
+            part(1, ComponentType::Resistor),
+            part(2, ComponentType::Inductor),
+        ]);
+        assert!(!resistor_and_inductor.contains(&"l".to_owned()));
+        let capacitor_and_inductor = offered_keys(vec![
+            part(1, ComponentType::Capacitor),
+            part(2, ComponentType::Inductor),
+        ]);
+        assert!(!capacitor_and_inductor.contains(&"ic".to_owned()));
+        let resistor_and_source = offered_keys(vec![
+            part(1, ComponentType::Resistor),
+            part(2, ComponentType::VoltageSource),
+        ]);
+        assert!(!resistor_and_source.contains(&"ac".to_owned()));
+
+        let two_resistors = offered_keys(vec![
+            part(1, ComponentType::Resistor),
+            part(2, ComponentType::Resistor),
+        ]);
+        assert!(two_resistors.contains(&"r".to_owned()));
+        assert!(two_resistors.contains(&"l".to_owned()));
     }
 
     /// One instance is not this form's: Q there opens the single form.
