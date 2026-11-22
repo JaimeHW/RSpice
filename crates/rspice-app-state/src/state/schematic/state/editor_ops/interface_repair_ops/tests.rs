@@ -317,3 +317,104 @@ fn an_instance_of_a_verilog_a_master_is_repaired_to_the_views_interface() {
     );
     assert!(!top.selected_instance_interface_is_stale(&libraries, &masters));
 }
+
+#[test]
+fn update_all_repairs_every_stale_instance_in_one_undo_step() {
+    let mut fixture = placed_instance(&["IN", "OUT"]);
+    wire_terminal(&mut fixture, "OUT");
+    let binding = fixture.top.design.document().components[0]
+        .library_cell
+        .clone()
+        .expect("the fixture places a bound cell instance");
+    let second = fixture
+        .top
+        .add_library_cell_component(Point::new(600, 200), binding);
+    fixture
+        .top
+        .design
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == second)
+        .expect("the second instance is retained")
+        .name = "X2".to_owned();
+    fixture.top.recalculate_runtime_state();
+    fixture.top.clear_undo_history();
+    rename_master_port(&mut fixture, "IN", "INP");
+    assert_eq!(
+        fixture
+            .top
+            .stale_instance_interfaces(&fixture.libraries, &fixture.masters),
+        ["X1", "X2"]
+    );
+
+    let summary = fixture
+        .top
+        .update_all_instance_interfaces(&fixture.libraries, &fixture.masters)
+        .expect("both repairs apply");
+
+    assert_eq!(
+        summary,
+        "Updated 2 instances to their masters' current interfaces: X1, X2."
+    );
+    let interfaces = |fixture: &Fixture| {
+        fixture
+            .top
+            .design
+            .document()
+            .components
+            .iter()
+            .map(|component| {
+                component
+                    .library_cell
+                    .as_ref()
+                    .expect("the instances stay bound")
+                    .terminal_order
+                    .clone()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(interfaces(&fixture), [["INP", "OUT"], ["INP", "OUT"]]);
+    assert!(
+        fixture
+            .top
+            .stale_instance_interfaces(&fixture.libraries, &fixture.masters)
+            .is_empty()
+    );
+    assert_eq!(
+        fixture
+            .top
+            .design
+            .document()
+            .connections
+            .iter()
+            .map(|connection| connection.terminal_name.clone())
+            .collect::<Vec<_>>(),
+        ["OUT"],
+        "the wiring of a surviving pin is carried across"
+    );
+    assert_eq!(
+        fixture.top.undo_description(),
+        Some("update all instance interfaces")
+    );
+    assert!(fixture.top.undo());
+    assert_eq!(interfaces(&fixture), [["IN", "OUT"], ["IN", "OUT"]]);
+    assert!(
+        !fixture.top.can_undo(),
+        "every repair is one undo entry together"
+    );
+    assert_eq!(
+        fixture
+            .top
+            .update_all_instance_interfaces(&fixture.libraries, &fixture.masters)
+            .map(|_| ()),
+        Ok(()),
+        "undone, the instances are stale again"
+    );
+    assert_eq!(
+        fixture
+            .top
+            .update_all_instance_interfaces(&fixture.libraries, &fixture.masters),
+        Err("Every instance already presents its master's current interface.".to_owned())
+    );
+}

@@ -16,7 +16,7 @@
 //! its materialization refuses on.
 
 use super::super::super::{
-    ComponentType, LibraryCellInstance, PortSpec, SchematicReplacementError,
+    Component, ComponentType, LibraryCellInstance, PortSpec, SchematicReplacementError,
 };
 use super::super::*;
 use crate::state::{LibraryManager, SymbolResolver};
@@ -53,26 +53,53 @@ impl SchematicState {
     /// Every placed instance whose master's interface moved on since it was
     /// placed, by the reference designator the author reads on the canvas.
     ///
-    /// A review surface lists these; the repair itself still acts on the
-    /// selection, so the two never answer the staleness question differently.
+    /// A review surface lists these, and Update all instances repairs
+    /// exactly these, so the two never answer the staleness question
+    /// differently.
     pub fn stale_instance_interfaces<S: AsRef<SchematicDocument>>(
         &self,
         libraries: &LibraryManager,
         masters: &HashMap<String, S>,
     ) -> Vec<String> {
-        self.design
-            .document()
-            .components
-            .iter()
-            .filter(|component| component.kind == ComponentType::CellInstance)
-            .filter(|component| {
-                component.library_cell.as_ref().is_some_and(|binding| {
-                    master_interface(binding, libraries, masters)
-                        .is_some_and(|ports| interface_is_stale(binding, &ports))
-                })
-            })
-            .map(|component| component.name.clone())
+        stale_instances(self, libraries, masters)
+            .map(|(component, _)| component.name.clone())
             .collect()
+    }
+
+    /// Re-bind every stale instance of this drawing to the interface its
+    /// master presents now, as one undo step: the repair
+    /// [`Self::update_selected_instance_interface`] makes, for each instance
+    /// [`Self::stale_instance_interfaces`] lists. The answer is what the
+    /// status line says either way.
+    pub fn update_all_instance_interfaces<S: AsRef<SchematicDocument>>(
+        &mut self,
+        libraries: &LibraryManager,
+        masters: &HashMap<String, S>,
+    ) -> Result<String, String> {
+        if self.session.read_only {
+            return Err(SchematicReplacementError::ReadOnly.to_string());
+        }
+        let repairs = stale_instances(self, libraries, masters)
+            .map(|(component, ports)| (component.id, ports))
+            .collect::<Vec<_>>();
+        if repairs.is_empty() {
+            return Err(
+                "Every instance already presents its master's current interface.".to_owned(),
+            );
+        }
+        let resolver = SymbolResolver::new(libraries, masters);
+        let edit = self
+            .design
+            .update_instance_interfaces(&repairs, |binding| resolver.resolve_binding(binding));
+        let summary = edit.value.summary();
+        if edit.value.repaired.is_empty() {
+            return Err(summary);
+        }
+        self.finish_document_edit(edit.committed);
+        if !edit.committed {
+            return Err(SchematicReplacementError::CommitFailed.to_string());
+        }
+        Ok(summary)
     }
 
     /// Rebind the selected instance with validation completed before history begins.
@@ -102,6 +129,26 @@ impl SchematicState {
         }
         Ok(edit.value.summary())
     }
+}
+
+/// Every cell instance of the drawing whose master's interface moved on
+/// since it was placed, with the interface that master presents now.
+fn stale_instances<'a, S: AsRef<SchematicDocument>>(
+    schematic: &'a SchematicState,
+    libraries: &'a LibraryManager,
+    masters: &'a HashMap<String, S>,
+) -> impl Iterator<Item = (&'a Component, Vec<PortSpec>)> + 'a {
+    schematic
+        .design
+        .document()
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::CellInstance)
+        .filter_map(move |component| {
+            let binding = component.library_cell.as_ref()?;
+            let ports = master_interface(binding, libraries, masters)?;
+            interface_is_stale(binding, &ports).then_some((component, ports))
+        })
 }
 
 /// The selected instance and the interface its master presents now, when the

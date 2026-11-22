@@ -7,7 +7,7 @@ use super::super::{
     component::{Component, LibraryCellInstance},
     deletion::{DeletionSelection, ObjectDeletion},
     find_replace::{self, FindField, FindMatch},
-    interface_repair::{InstanceInterfaceRepair, RepairedInterface},
+    interface_repair::{InstanceInterfaceRepair, InterfaceRepairs, RepairedInterface},
     replacement::{
         SchematicReplacementAuthority, SchematicReplacementError, SchematicReplacementImpact,
         SchematicReplacementTargetSpec,
@@ -245,5 +245,54 @@ impl Schematic {
             value: repaired,
             committed: self.end_operation(),
         })
+    }
+
+    /// Re-bind every instance `repairs` names to the interface its master
+    /// presents now, as one undo step. Each repair is validated against what
+    /// the ones before it left, exactly as one repair is. An instance whose
+    /// repair is refused is reported by name, with why, and left as it was;
+    /// the rest still land. Nothing repaired leaves the history untouched.
+    pub fn update_instance_interfaces<'ports>(
+        &mut self,
+        repairs: &'ports [(u64, Vec<PortSpec>)],
+        mut resolve_binding: impl FnMut(&LibraryCellInstance) -> Option<ResolvedCellSymbol>,
+    ) -> DocumentEdit<InterfaceRepairs<'ports>> {
+        let mut candidate = self.document.clone();
+        let mut outcome = InterfaceRepairs::default();
+        for (component_id, master_ports) in repairs {
+            let name = candidate
+                .components
+                .iter()
+                .find(|component| component.id == *component_id)
+                .map(|component| component.name.clone())
+                .unwrap_or_default();
+            match InstanceInterfaceRepair::prepare(
+                &mut candidate,
+                *component_id,
+                master_ports,
+                &mut resolve_binding,
+            ) {
+                Ok(repair) => outcome.repaired.push(repair.commit()),
+                Err(error) => outcome.refused.push((name, error)),
+            }
+        }
+        if outcome.repaired.is_empty() {
+            return DocumentEdit {
+                value: outcome,
+                committed: false,
+            };
+        }
+        let state = self.name_current();
+        self.history.begin(
+            &self.document,
+            Some(state),
+            "update all instance interfaces",
+        );
+        self.document = candidate;
+        self.invalidate_topology();
+        DocumentEdit {
+            value: outcome,
+            committed: self.end_operation(),
+        }
     }
 }

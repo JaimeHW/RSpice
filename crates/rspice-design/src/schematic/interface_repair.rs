@@ -53,6 +53,51 @@ impl RepairedInterface<'_> {
     }
 }
 
+/// What repairing several instances in one step did: the account of each
+/// instance repaired, and each instance whose repair was refused, by name,
+/// with why.
+#[derive(Debug, Default)]
+pub struct InterfaceRepairs<'ports> {
+    pub repaired: Vec<RepairedInterface<'ports>>,
+    pub refused: Vec<(String, SchematicReplacementError)>,
+}
+
+impl InterfaceRepairs<'_> {
+    /// What the step did, in a sentence or two: how many instances now
+    /// present their master's interface and which, any terminal a master
+    /// dropped, and any instance left as it was.
+    pub fn summary(&self) -> String {
+        let names = self
+            .repaired
+            .iter()
+            .map(|repaired| repaired.source.name.as_str())
+            .collect::<Vec<_>>();
+        let mut summary = match names.as_slice() {
+            [] => "No instance was updated".to_owned(),
+            [one] => format!("Updated {one} to its master's current interface"),
+            many => format!(
+                "Updated {} instances to their masters' current interfaces: {}",
+                many.len(),
+                many.join(", ")
+            ),
+        };
+        for repaired in &self.repaired {
+            if !repaired.disconnected.is_empty() {
+                summary.push_str(&format!(
+                    "; {}'s master no longer names {}, so that wiring was left in place and disconnected",
+                    repaired.source.name,
+                    repaired.disconnected.join(", ")
+                ));
+            }
+        }
+        summary.push('.');
+        for (name, error) in &self.refused {
+            summary.push_str(&format!(" {name} was left as it was: {error}"));
+        }
+        summary
+    }
+}
+
 impl<'document, 'ports> InstanceInterfaceRepair<'document, 'ports> {
     pub fn prepare(
         document: &'document mut SchematicDocument,
