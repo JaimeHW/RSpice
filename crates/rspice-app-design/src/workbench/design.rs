@@ -339,9 +339,7 @@ impl CommandSet for DesignCommand {
                 && selected_instance_veriloga_source(reads.model).is_none())
             .then_some("select one hierarchical or Verilog-A instance"),
             Self::ClearChecks => (!check_results_stand(reads)).then_some("no check has run"),
-            Self::NextViolation | Self::PreviousViolation => {
-                (!findings_to_visit(reads)).then_some("the last check found no violations")
-            }
+            Self::NextViolation | Self::PreviousViolation => violation_tour_refusal(reads),
             Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
                 (!schematic).then_some("open a schematic or testbench")
             }
@@ -1155,20 +1153,28 @@ fn check_results_stand(reads: &Reads<'_, DesignFeature>) -> bool {
     }
 }
 
-/// Whether the finding tour has somewhere to go: a pin finding against the
-/// symbol in front, or a violation in the schematic's current receipt.
-fn findings_to_visit(reads: &Reads<'_, DesignFeature>) -> bool {
+/// Why the finding tour has nowhere to go, or `None` when it has: a pin
+/// finding against the symbol in front, or a finding the drawing shows.
+fn violation_tour_refusal(reads: &Reads<'_, DesignFeature>) -> Option<&'static str> {
     if routed::symbol_editor(reads.wb.workspace, reads.model) {
-        return active_symbol_pin_finding_count(reads.model).is_some_and(|findings| findings > 0);
+        return active_symbol_pin_finding_count(reads.model)
+            .is_none_or(|findings| findings == 0)
+            .then_some("the last check found no violations");
     }
-    let facts = reads
-        .runs
-        .slot_facts(reads.state.schematic_visibility.review_markers);
-    reads
-        .model
-        .active_design_check_status(facts)
-        .current_receipt()
-        .is_some_and(|receipt| !receipt.result.violations().is_empty())
+    // The tour walks the findings the drawing shows, which the live pass
+    // states again after each edit as well as an explicit check, so it keeps
+    // going after a fix as KiCad's and Virtuoso's marker tours do.
+    let checks = &reads.model.design_checks;
+    let Some(result) = &checks.drc_results else {
+        return Some("no check has run");
+    };
+    if checks.drc_checked_version != reads.model.schematic.topology_version() {
+        return Some("check again: the drawing changed");
+    }
+    result
+        .violations()
+        .is_empty()
+        .then_some("the last check found no violations")
 }
 
 /// Turn the annotation `layer` on, remembering the layer it replaces, or off,
