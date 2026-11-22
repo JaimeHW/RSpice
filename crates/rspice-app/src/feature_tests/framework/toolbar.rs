@@ -386,26 +386,30 @@ impl Desk {
     fn assert_chips_paint_the_model(&self) {
         let model = &self.app.state.model;
         let reference = model.sim_setup.reference_pvt;
-        for chip in [
-            format!(
-                "Simulation plan {}; manage and switch simulation plans",
-                model.sim_setup.active_plan_name().as_str()
-            ),
-            format!(
-                "{} \u{00b7} {}",
-                reference.process.short_name(),
-                pvt_temperature_label(
-                    reference.temperature_celsius,
-                    model.preferences.quantity_presentation_policy()
-                )
-            ),
-        ] {
-            assert!(
-                self.named.iter().any(|(name, _)| *name == chip),
-                "the frame names {chip:?}: {:?}",
-                self.named
-            );
-        }
+        let plan_chip = format!(
+            ", plan {}; change the analysis or manage simulation plans",
+            model.sim_setup.active_plan_name().as_str()
+        );
+        assert!(
+            self.named
+                .iter()
+                .any(|(name, _)| name.starts_with("Analysis ") && name.ends_with(&plan_chip)),
+            "the frame names the run chip over {plan_chip:?}: {:?}",
+            self.named
+        );
+        let chip = format!(
+            "{} \u{00b7} {}",
+            reference.process.short_name(),
+            pvt_temperature_label(
+                reference.temperature_celsius,
+                model.preferences.quantity_presentation_policy()
+            )
+        );
+        assert!(
+            self.named.iter().any(|(name, _)| *name == chip),
+            "the frame names {chip:?}: {:?}",
+            self.named
+        );
     }
 }
 

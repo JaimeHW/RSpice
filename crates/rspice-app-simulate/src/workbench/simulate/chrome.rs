@@ -8,7 +8,9 @@
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::run_preflight;
-use crate::workbench::chrome::toolbar::run_config_chip::{deck_chip, run_config_selector};
+use crate::workbench::chrome::toolbar::run_config_chip::{
+    RunChipRequest, deck_chip, run_config_selector,
+};
 use crate::workbench::chrome::toolbar::simulate::{
     RunControls, RunEntry, pvt_selector, run_controls,
 };
@@ -50,14 +52,14 @@ pub fn show_trailing(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui, layout
     }
     let manage = SimulateCommand::ManagePlans.key();
     if names_target
-        && run_config_selector(
+        && let Some(request) = run_config_selector(
             ui,
             cx.model,
             cx.foreign_availability(manage),
             layout.run_control_height,
         )
     {
-        cx.execute(manage);
+        apply_run_chip_request(cx, request);
     }
     if layout.show_pvt_selector
         && let Some(choice) = pvt_selector(ui, cx.model, layout.toolbar_control_height)
@@ -71,6 +73,28 @@ pub fn show_trailing(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui, layout
                 .wb
                 .prompt(format!("Reference PVT was not changed: {error}")),
         }
+    }
+}
+
+/// Do what the reader asked of the run chip: open the plan manager, or change
+/// the analysis it names, as the Analyses page changes it.
+fn apply_run_chip_request(cx: &mut Cx<'_, SimulateFeature>, request: RunChipRequest) {
+    let lead = crate::workbench::chrome::toolbar::run_config_chip::lead_analysis(cx.model)
+        .map(|lead| (lead.id(), lead.kind()));
+    match (request, lead) {
+        (RunChipRequest::ManagePlans, _) => cx.execute(SimulateCommand::ManagePlans.key()),
+        (RunChipRequest::Refused(words), _) => cx.wb.prompt(words),
+        (RunChipRequest::Kind(kind), Some((id, current))) if kind != current => {
+            crate::workbench::surfaces::simulate::lifecycle::replace_analysis_kind(cx, id, kind);
+        }
+        (RunChipRequest::Draft(draft), Some((id, current))) if draft.kind() == current => {
+            crate::workbench::surfaces::simulate::lifecycle::commit_draft(cx, id, *draft);
+        }
+        // A plan with nothing enabled gains the kind chosen.
+        (RunChipRequest::Kind(kind), None) => {
+            crate::workbench::surfaces::simulate::lifecycle::insert_analysis_instance(cx, kind);
+        }
+        (RunChipRequest::Kind(_) | RunChipRequest::Draft(_), _) => {}
     }
 }
 

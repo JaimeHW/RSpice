@@ -1007,3 +1007,88 @@ fn a_new_projects_first_run_settles_a_dc_drawing_and_sweeps_an_ac_one() {
     );
 }
 
+/// The run chip names the analysis Run runs and changes it where the reader
+/// is: a press opens its popover, AC takes the transient's place, and a stop
+/// frequency typed into its row is the plan's.
+#[test]
+fn the_run_chip_names_the_analysis_and_changes_it_in_place() {
+    use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+    let mut user = User::new(RSpiceApp::test_instance());
+    user.settle();
+    let chip = |user: &User| {
+        user.named
+            .iter()
+            .find(|(name, _)| name.starts_with("Analysis "))
+            .map(|(name, rect)| (name.clone(), *rect))
+            .expect("the toolbar draws the run chip")
+    };
+    let (name, at) = chip(&user);
+    assert!(
+        name.starts_with("Analysis Transient \u{b7} 1 ms, plan "),
+        "{name}"
+    );
+
+    user.press(at.center(), egui::PointerButton::Primary);
+    user.settle();
+    user.click("AC");
+    assert!(
+        matches!(
+            planned(&user).as_slice(),
+            [AnalysisDraft::OperatingPoint(_), AnalysisDraft::Ac(_)]
+        ),
+        "the sweep brings the operating point it linearizes about: {:?}",
+        planned(&user)
+    );
+    assert!(
+        chip(&user)
+            .0
+            .starts_with("Analysis AC \u{b7} 1 Hz to 1 GHz, plan "),
+        "{}",
+        chip(&user).0
+    );
+
+    user.focus_on("Stop, Hz");
+    user.frame(vec![
+        egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: Some(egui::Key::A),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        },
+        egui::Event::Text("10Meg".to_owned()),
+    ]);
+    user.frame(vec![egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: Some(egui::Key::Enter),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    user.settle();
+    let analyses = planned(&user);
+    let [AnalysisDraft::OperatingPoint(_), AnalysisDraft::Ac(setup)] = analyses.as_slice() else {
+        panic!("one AC sweep: {analyses:?}");
+    };
+    assert_eq!(setup.fstop, "10Meg");
+    assert!(
+        chip(&user)
+            .0
+            .starts_with("Analysis AC \u{b7} 1 Hz to 10 MHz, plan "),
+        "{}",
+        chip(&user).0
+    );
+
+    // Back to a transient: the sweep's operating point goes with it.
+    let (_, at) = chip(&user);
+    if user.find("Transient").is_none() {
+        user.press(at.center(), egui::PointerButton::Primary);
+        user.settle();
+    }
+    user.click("Transient");
+    assert!(
+        matches!(planned(&user).as_slice(), [AnalysisDraft::Transient(_)]),
+        "{:?}",
+        planned(&user)
+    );
+}
