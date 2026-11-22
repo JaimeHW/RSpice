@@ -42,13 +42,13 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 const TITLE: &str = "Connectivity, buses and global nets";
-const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
-pub const PRIMARY: &str = "Apply reviewed connectivity repairs";
-/// Why "Begin bus placement" is disabled while the declaration is empty.
-const BUS_DECLARATION_MISSING: &str = "Enter a bus declaration to begin placement";
+const DESCRIPTION: &str = "Every net, bus and global net in the schematic, and the repairs their problems need. Nothing changes until you apply a repair.";
+pub const PRIMARY: &str = "Apply repairs";
+/// Why "Draw bus" is disabled while the name is empty.
+const BUS_DECLARATION_MISSING: &str = "Name the bus with its bits to draw it";
 /// Why the manager's Apply is disabled while nothing is chosen to apply.
 const NOTHING_TO_APPLY: &str = "Select a repair or change a policy to apply.";
-/// Why "Begin bus placement" is disabled on a read-only schematic.
+/// Why "Draw bus" is disabled on a read-only schematic.
 const READ_ONLY_STATUS: &str = "The active schematic or project is read-only.";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -73,7 +73,7 @@ impl ConnectivityManagerTab {
             Self::Connectivity => "Connectivity",
             Self::Buses => "Buses",
             Self::Globals => "Global nets",
-            Self::RepairPreview => "Repair preview",
+            Self::RepairPreview => "Repairs",
         }
     }
 }
@@ -287,7 +287,7 @@ pub fn open_connectivity_manager(
         model.workspace.content.active_view_type(),
         Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
     ) {
-        workbench.prompt("Connectivity and bus manager needs a schematic or testbench view.");
+        workbench.prompt("Open a schematic or testbench to see its connectivity.");
         return;
     }
     model.retain_selection_on_active_sheet();
@@ -443,7 +443,11 @@ fn build_report(model: &Model, policy: &ConnectivityPolicy) -> Result<Connectivi
                     .iter()
                     .filter(|tap| tap.target_kind() == BusTargetKind::Wire)
                     .count();
-                format!("{scalar} scalar \u{00b7} {} vector", taps.len() - scalar)
+                format!(
+                    "{} \u{00b7} {}",
+                    counted(scalar, "wire", "wires"),
+                    counted(taps.len() - scalar, "bus", "buses")
+                )
             };
             let (declaration, members, direction) = bus.declaration.as_ref().map_or_else(
                 || ("Undeclared".to_owned(), 0, "\u{2014}".to_owned()),
@@ -780,24 +784,29 @@ fn build_global_rows(
             pins,
             scope: if technology_only {
                 contract.technology_global_nets.as_ref().map_or_else(
-                    || "technology catalog unavailable".to_owned(),
+                    || "the technology lists no global nets".to_owned(),
                     |catalog| format!("technology · {}", catalog.authority),
                 )
             } else {
                 "project".to_owned()
             },
             state: if technology_only && !technology_authorized {
-                "authored declaration is absent from the technology catalog".to_owned()
+                "not among the technology's global nets".to_owned()
             } else if local_aliases.is_empty() {
                 "resolved".to_owned()
             } else {
-                "local shadow requires review".to_owned()
+                "local labels shadow it".to_owned()
             },
             declarations: vec![declaration],
             local_aliases,
         });
     }
     rows
+}
+
+/// "1 wire", "3 wires".
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 fn alias_matches(
@@ -843,9 +852,9 @@ fn build_global_repairs(
                     .map(|(_, name)| name.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
-                proposed: format!("Rename reviewed aliases to {}", global.canonical),
-                identity_effect: "Merge labels into one explicit global identity".to_owned(),
-                validation: "Candidate DRC and bus graph recheck".to_owned(),
+                proposed: format!("Rename to {}", global.canonical),
+                identity_effect: "Joins them into one global net".to_owned(),
+                validation: "DRC and the bus check run before it applies".to_owned(),
                 action: Some(ConnectivityRepairAction::RenameLabels {
                     canonical: global.canonical.clone(),
                     labels: active_aliases,
@@ -868,9 +877,9 @@ fn build_global_repairs(
                     .map(|alias| format!("{} ({})", alias.name, alias.view_key))
                     .collect::<Vec<_>>()
                     .join(", "),
-                proposed: "Open each source view and review its local name".to_owned(),
-                identity_effect: "No cross-document rewrite is inferred".to_owned(),
-                validation: "Requires the source view's own undo transaction".to_owned(),
+                proposed: "Open each view and rename its local name there".to_owned(),
+                identity_effect: "Other views are not renamed from here".to_owned(),
+                validation: "Renamed in its own view, with its own undo".to_owned(),
                 action: None,
                 endpoint_choices: Vec::new(),
                 reveal: RevealTarget::Label {
@@ -923,8 +932,8 @@ fn build_manual_repairs(
             object: violation.location.display(),
             before: violation.message.clone(),
             proposed: violation.violation_type.suggested_fix().to_owned(),
-            identity_effect: "No automatic identity rewrite".to_owned(),
-            validation: "Manual endpoint choice required".to_owned(),
+            identity_effect: "No net is renamed".to_owned(),
+            validation: "Choose what to route to".to_owned(),
             action: None,
             endpoint_choices: endpoint_choices_for_violation(model, nets, violation),
             reveal: RevealTarget::Violation(violation.location.clone()),
@@ -961,11 +970,13 @@ fn build_manual_repairs(
             ),
             object: diagnostic
                 .tap_id
-                .map_or_else(|| "Bus".to_owned(), |id| format!("Bus tap #{id}")),
+                .or(diagnostic.bus_id)
+                .and_then(|id| model.schematic.document().object_name(id))
+                .unwrap_or_else(|| "A bus".to_owned()),
             before: diagnostic.message.clone(),
-            proposed: "Review the bus declaration, selector, and destination".to_owned(),
-            identity_effect: "Preserve typed member identities".to_owned(),
-            validation: "Manual endpoint choice required".to_owned(),
+            proposed: "Check the bus name, the tap's bits and what the tap joins".to_owned(),
+            identity_effect: "Bit names stay as they are".to_owned(),
+            validation: "Fixed by hand on the sheet".to_owned(),
             action: None,
             endpoint_choices: Vec::new(),
             reveal,
@@ -1204,13 +1215,13 @@ impl ConnectivityManager<'_> {
         if !write_allowed {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
-                "Inspection only",
-                "The active schematic or project is read-only. Reports and reveal actions remain available; mutations are disabled.",
+                "Read-only",
+                "The schematic or project is read-only: you can inspect and reveal, not repair.",
             );
         } else if let Some(error) = error.as_deref() {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
-                "Connectivity transaction cannot continue",
+                "Nothing was applied",
                 error,
             );
         } else if !primary_enabled {
@@ -1338,8 +1349,9 @@ impl ConnectivityManager<'_> {
         self.model.schematic.session.editor.bus_drawing.name = declaration.to_string();
         self.model.schematic.session.editor.tool = Tool::Bus;
         self.dialog.close();
-        self.workbench
-            .prompt("Bus placement armed. Click the first point, route the bus, then finish it.");
+        self.workbench.prompt(
+            "Click where the bus starts and at each corner; double-click or press Enter to end it.",
+        );
         Ok(())
     }
 
@@ -1539,7 +1551,7 @@ pub fn apply_selected_connectivity_repairs(
         .collect::<Vec<_>>();
     let policy_changed = dialog.policy_changed();
     if selected.is_empty() && !policy_changed {
-        return Err("Select at least one validated repair or change a policy.".to_owned());
+        return Err(NOTHING_TO_APPLY.to_owned());
     }
     let mut contract_candidate = (*model.workspace.content.connectivity).clone();
     contract_candidate.policy = dialog.policy.clone();
@@ -1561,7 +1573,7 @@ pub fn apply_selected_connectivity_repairs(
                     schematic.recalculate_runtime_state();
                 });
         if !changed {
-            return Err("The reviewed repairs no longer change the active schematic.".to_owned());
+            return Err("The selected repairs no longer change the schematic.".to_owned());
         }
         sync_active_schematic(model, workbench);
     }
@@ -1612,7 +1624,7 @@ fn connectivity_authority_error(
             .is_equal_document(model.schematic.document())
         || dialog.contract_at_open != *model.workspace.content.connectivity;
     stale.then(|| {
-        "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bus.".to_owned()
+        "The design changed after this report was made. Refresh it, then apply repairs or create the bus.".to_owned()
     })
 }
 
@@ -1623,15 +1635,13 @@ fn validate_policy_authority(
     contract.validate()?;
     if policy.global_promotion == GlobalNetPromotionPolicy::TechnologyDefinedOnly {
         let catalog = contract.technology_global_nets.as_ref().ok_or_else(|| {
-            "Technology-defined global promotion requires a project-owned technology global-net catalog."
-                .to_owned()
+            "Technology-defined only needs the project's list of technology global nets.".to_owned()
         })?;
         catalog.validate()?;
     }
     if policy.alias_comparison == GlobalAliasComparisonPolicy::DialectCompatibility {
         let catalog = contract.dialect_aliases.as_ref().ok_or_else(|| {
-            "Dialect-compatible alias comparison requires the project's own simulator dialect alias table."
-                .to_owned()
+            "Dialect compatibility needs the project's table of simulator aliases.".to_owned()
         })?;
         catalog.validate()?;
     }
@@ -1646,7 +1656,7 @@ fn apply_repair_to_candidate(
         Some(ConnectivityRepairAction::RenameLabels { canonical, labels }) => {
             candidate.repair_candidate_net_labels(canonical, labels)
         }
-        None => Err("The selected finding requires a manual endpoint decision.".to_owned()),
+        None => Err("Choose what this repair routes to.".to_owned()),
     }
 }
 
@@ -1683,16 +1693,13 @@ fn validate_repair_candidate(
     for (kind, count) in severe_drc_counts(&after) {
         if count > before.get(&kind).copied().unwrap_or_default() {
             return Err(format!(
-                "Candidate validation introduced a new {} finding; no changes were applied.",
+                "The repairs would add a new {} problem, so nothing was applied.",
                 kind.description()
             ));
         }
     }
     if after_bus > before_bus {
-        return Err(
-            "Candidate validation introduced a new typed-bus diagnostic; no changes were applied."
-                .to_owned(),
-        );
+        return Err("The repairs would add a new bus problem, so nothing was applied.".to_owned());
     }
     Ok(())
 }
@@ -1909,7 +1916,7 @@ fn connectivity_table(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityB
                         ],
                     );
                     if report.nets.is_empty() {
-                        ui.label("No extracted scalar nets");
+                        ui.label("No nets in the active schematic");
                         for _ in 1..7 {
                             ui.label("\u{2014}");
                         }
@@ -1948,7 +1955,7 @@ fn buses_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    band_header(ui, "Typed buses", None);
+    band_header(ui, "Buses", None);
     let old_policy = dialog.policy.clone();
     let mut action = ConnectivityBodyAction::None;
     inset_block(ui, 10, |ui| {
@@ -1997,14 +2004,14 @@ fn bus_table(
                             "Bus",
                             "Members",
                             "Taps",
-                            "Mapping",
+                            "Taps to",
                             "Direction",
                             "Status",
                             "Action",
                         ],
                     );
                     if dialog.report.buses.is_empty() {
-                        ui.label("No typed buses in the active schematic");
+                        ui.label("No buses in the active schematic");
                         for _ in 1..7 {
                             ui.label("\u{2014}");
                         }
@@ -2032,7 +2039,7 @@ fn globals_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    band_header(ui, "Explicit global nets", None);
+    band_header(ui, "Global nets", None);
     let mut action = ConnectivityBodyAction::None;
     inset_block(ui, 10, |ui| global_table(ui, dialog, &mut action));
     band_header(ui, "Global-net policy", None);
@@ -2094,7 +2101,7 @@ fn global_table(
                         &["Global net", "Aliases", "Pins", "Scope", "State", "Action"],
                     );
                     if dialog.report.globals.is_empty() {
-                        ui.label("No explicit global labels in the active schematic");
+                        ui.label("No global labels in the active schematic");
                         for _ in 1..6 {
                             ui.label("\u{2014}");
                         }
@@ -2130,7 +2137,7 @@ fn repair_preview_tab(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    band_header(ui, "Ordered corrective action", None);
+    band_header(ui, "Repairs", None);
     let mut action = ConnectivityBodyAction::None;
     inset_block(ui, 10, |ui| {
         ScrollArea::horizontal()
@@ -2146,16 +2153,16 @@ fn repair_preview_tab(
                             &[
                                 "Apply",
                                 "Object",
-                                "Before",
-                                "Proposed repair",
-                                "Identity effect",
-                                "Validation",
+                                "Now",
+                                "Repair",
+                                "Effect on nets",
+                                "Check",
                                 "Action",
                             ],
                         );
                         if dialog.report.repairs.is_empty() {
                             ui.label("\u{2014}");
-                            ui.label("No connectivity repairs are currently required");
+                            ui.label("No repairs needed");
                             for _ in 2..7 {
                                 ui.label("\u{2014}");
                             }
@@ -2224,7 +2231,7 @@ fn repair_preview_tab(
                     });
             });
         ui.horizontal(|ui| {
-            if Button::new("Select validated repairs")
+            if Button::new("Select all repairs")
                 .enabled(write_allowed && current)
                 .show(ui)
                 .clicked()
@@ -2255,18 +2262,16 @@ fn create_bus_form(
 ) -> DialogChoice {
     let declaration_id = egui::Id::new("connectivity-create-bus-declaration");
     CommandForm::new(CREATE_BUS_TITLE, CREATE_BUS_PRIMARY)
-        .describe(
-            "Validate one indexed bus declaration, then place its vector geometry with the schematic bus router.",
-        )
+        .describe("Name the bus with its bits, such as DATA[7:0], then draw it on the sheet.")
         .primary_enabled(primary_enabled)
         .fields_enabled(write_allowed)
         // A refusal of the declaration stands under it; the footer states
         // only what belongs to no field.
         .status(status)
         .show(ctx, |rows| {
-            rows.value("Width policy", dialog.policy.width_mismatch.label());
+            rows.value("Width mismatch", dialog.policy.width_mismatch.label());
             rows.text(
-                "Declaration",
+                "Name",
                 declaration_id,
                 &mut dialog.bus_declaration,
                 "NAME[msb:lsb]",
@@ -2283,8 +2288,8 @@ fn create_bus_form(
         })
 }
 
-const CREATE_BUS_TITLE: &str = "Create indexed bus";
-pub const CREATE_BUS_PRIMARY: &str = "Begin bus placement";
+const CREATE_BUS_TITLE: &str = "Create bus";
+pub const CREATE_BUS_PRIMARY: &str = "Draw bus";
 
 /// The line under the declaration: what it declares, why it is refused, or,
 /// while it is empty, what placement waits for.
