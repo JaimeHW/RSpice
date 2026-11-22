@@ -382,6 +382,13 @@ pub(crate) fn table_row_menu(
 /// aligned values carry the reading, as the property rows above them do, and
 /// a section's own rule is the only line that marks a group.
 pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
+    stat_table_responses(ui, rows);
+}
+
+/// [`stat_table`], returning each row's response in order, for a row to
+/// carry a hover of its own.
+pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<egui::Response> {
+    let mut responses = Vec::with_capacity(rows.len());
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
@@ -424,7 +431,9 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
             .painter()
             .layout(value.clone(), value_font, c.text, value_width);
         let row_height = PANEL_ROW_H.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
+        responses.push(response);
         if !ui.is_rect_visible(rect) {
             continue;
         }
@@ -454,6 +463,7 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
         )
         .add(egui::Label::new(value_galley).selectable(true));
     }
+    responses
 }
 
 /// The table's two columns inside the panel inset on both sides.

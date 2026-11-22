@@ -98,7 +98,7 @@ struct Column {
 impl Column {
     /// One value on this column's ordinate at the reader's digits. A
     /// normalized ordinate is a count of standard deviations or a percentage,
-    /// which the formatter never prefixes: 0.4266 sigma, not 426.6 msigma.
+    /// which the formatter never prefixes: 0.4266 σ, not 426.6 mσ.
     fn format(&self, value: f64, significant_digits: usize) -> String {
         fmt_si_significant(value, &self.unit, significant_digits)
     }
@@ -243,11 +243,10 @@ fn normalized_column(
         // Every normalized column is bounded below at zero, and keeps the
         // spelling of the requirement it was normalized to.
         limit: Some(limit.normalized()),
-        // Spelled out rather than as σ: the bundled mono face — which every
-        // exact value on this sheet is set in — has no sigma glyph, and a
-        // unit that paints as a missing-glyph box is worse than a word.
+        // The mono face letters σ from Plex Sans, as it does every Greek
+        // letter, so the unit is the symbol a datasheet prints.
         unit: match scale {
-            MarginScale::Sigma => "sigma".to_owned(),
+            MarginScale::Sigma => "\u{3c3}".to_owned(),
             MarginScale::Percent => "%".to_owned(),
         },
         normalized: true,
@@ -935,7 +934,17 @@ pub fn right_panel(
 
     let column = &columns[chosen.min(columns.len() - 1)];
     let rows = statistics_rows(column, plan, significant_digits);
-    crate::presentation::stat_table(ui, &rows);
+    let responses = crate::presentation::stat_table_responses(ui, &rows);
+    // The worst trial's row names it short; the seed that reproduces it is
+    // on the row's hover.
+    if let Some((response, reproduced)) = rows
+        .iter()
+        .position(|row| row.0 == WORST_TRIAL)
+        .and_then(|index| responses.into_iter().nth(index))
+        .zip(worst_trial_reproduced(column, plan))
+    {
+        response.on_hover_text(reproduced);
+    }
 }
 
 fn statistics_rows(
@@ -969,8 +978,10 @@ fn statistics_rows(
     let capability = column.capability;
     let worst = worst_trial(column, plan, significant_digits);
 
+    // The seed in decimal, as the Monte Carlo setup takes it and as every
+    // trial's name spells its own.
     let mut run = format!(
-        "{} of {} completed \u{b7} seed 0x{:X}",
+        "{} of {} completed \u{b7} seed {}",
         plan.runs_completed, plan.runs_requested, plan.seed
     );
     if plan.failures > 0 {
@@ -1029,7 +1040,7 @@ fn statistics_rows(
             false,
         ),
         (
-            "Worst trial",
+            WORST_TRIAL,
             worst.unwrap_or_else(|| "\u{2014}".to_owned()),
             false,
         ),
@@ -1037,13 +1048,42 @@ fn statistics_rows(
     rows
 }
 
-/// The trial furthest into the violating side, named the way it is reproduced.
+/// The details row naming the trial furthest into the violating side.
+const WORST_TRIAL: &str = "Worst trial";
+
+/// The trial furthest into the violating side and its value, named short
+/// (`Trial 0 · −1.280 σ`) so the row keeps one line in the pane.
 fn worst_trial(
     column: &Column,
     plan: &PopulationData,
     significant_digits: usize,
 ) -> Option<String> {
-    let (row, value) = column
+    let (row, value) = worst_row(column)?;
+    let name = match plan.trials.get(row) {
+        // A seeded trial's full name carries its seed, which the hover holds.
+        Some(trial) if trial.seed.is_some() => format!("Trial {}", trial.index),
+        Some(trial) => trial.label.clone(),
+        None => format!("Trial {row}"),
+    };
+    Some(format!(
+        "{name} \u{b7} {}",
+        column.format(value, significant_digits)
+    ))
+}
+
+/// The worst trial named the way it is reproduced, seed and all, when its
+/// short name leaves the seed out.
+fn worst_trial_reproduced(column: &Column, plan: &PopulationData) -> Option<String> {
+    let (row, _) = worst_row(column)?;
+    plan.trials
+        .get(row)
+        .filter(|trial| trial.seed.is_some())
+        .map(|trial| trial.label.clone())
+}
+
+/// The row and value of the trial furthest into the violating side.
+fn worst_row(column: &Column) -> Option<(usize, f64)> {
+    column
         .values
         .iter()
         .enumerate()
@@ -1058,15 +1098,7 @@ fn worst_trial(
                 )
             };
             score(left.1).total_cmp(&score(right.1))
-        })?;
-    let label = plan
-        .trials
-        .get(row)
-        .map_or_else(|| format!("Trial {row}"), |trial| trial.label.clone());
-    Some(format!(
-        "{label} \u{b7} {}",
-        column.format(value, significant_digits)
-    ))
+        })
 }
 
 #[cfg(test)]
@@ -1236,7 +1268,7 @@ mod tests {
                 .iter()
                 .all(|column| column.bounds() == [(0.0, true)])
         );
-        assert_eq!(columns[0].unit, "sigma");
+        assert_eq!(columns[0].unit, "\u{3c3}");
     }
     #[test]
     fn three_sigma_of_margin_lands_at_three_on_the_normalized_ordinate() {
@@ -1358,10 +1390,16 @@ mod tests {
             by_name("95 % CI (Wilson)")
         );
         assert!(
-            by_name("Worst trial").starts_with("Trial 0 \u{b7} seed 29604"),
+            by_name("Worst trial").starts_with("Trial 0 \u{b7} "),
             "{}",
             by_name("Worst trial")
         );
+        assert!(!by_name("Worst trial").contains("seed"));
+        assert_eq!(
+            worst_trial_reproduced(&columns[0], &plan).as_deref(),
+            Some("Trial 0 \u{b7} seed 29604")
+        );
+        assert!(by_name("Run").ends_with("seed 29604"), "{}", by_name("Run"));
         assert_eq!(by_name("Requirement"), "\u{2265} 39.5 dB");
         assert_eq!(by_name("Trials"), "101 measured of 101");
     }

@@ -1154,7 +1154,8 @@ pub fn right_panel(
             ),
             false,
         ));
-        run_rows.push(("Seed", format!("0x{:X}", authority.seed), false));
+        // In decimal, as the Monte Carlo setup takes it.
+        run_rows.push(("Seed", authority.seed.to_string(), false));
     }
     run_rows.push(("Binning", binning_label(histogram), false));
     crate::presentation::stat_table(ui, &run_rows);
