@@ -110,6 +110,27 @@ fn open_operating_point(state: &mut AppState) {
     answer_surface_requests(state);
 }
 
+/// A project open on the Design workspace, where a row that raises its
+/// command has it carried out.
+fn design_app() -> crate::workbench::RSpiceApp {
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.workbench.activate(Workspace::Design);
+    app
+}
+
+/// A row clicked, and then the command it raised, as the frame carries it
+/// out.
+fn run_context_action(
+    app: &mut crate::workbench::RSpiceApp,
+    action: ContextAction,
+    click_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
+    execute_context_action(action, &mut app.state, click_pos, symbol_context);
+    app.after_contribution();
+}
+
 fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
     rspice_app_design::schematic::view::context_menu::select_context_target(
         &mut state.canvas_parts(),
@@ -312,7 +333,8 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
     for key in [Key::Enter, Key::Space] {
         let ctx = Context::default();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
-        let mut state = AppState::default();
+        let mut app = design_app();
+        let state = &mut app.state;
         state
             .model
             .schematic
@@ -333,26 +355,27 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
             .selection
             .select_only_component(7);
         state.design.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
-        let symbol_context = schematic_symbol_context(&state);
+        let symbol_context = schematic_symbol_context(&*state);
 
         let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_context_contents(ui, &mut state, &symbol_context, 27.0, true);
+                render_context_contents(ui, state, &symbol_context, 27.0, true);
             });
         });
 
         let mut key_still_available = true;
         let _ = ctx.run_ui(context_key_input(key), |root| {
             egui::CentralPanel::default().show(root, |ui| {
-                render_context_contents(ui, &mut state, &symbol_context, 27.0, false);
+                render_context_contents(ui, state, &symbol_context, 27.0, false);
                 key_still_available = ui
                     .ctx()
                     .input_mut(|input| input.consume_key(Modifiers::NONE, key));
             });
         });
 
+        app.after_contribution();
         assert!(
-            state.design.tabbed_property_dialog.open || state.design.object_properties.open,
+            app.state.design.tabbed_property_dialog.open || app.state.design.object_properties.open,
             "{key:?} should activate the focused Object properties row"
         );
         assert!(
@@ -364,15 +387,15 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
 
 #[test]
 fn net_label_context_exposes_the_complete_object_lifecycle() {
-    let mut state = AppState::default();
+    let mut app = design_app();
     let label = NetLabel::new(73, Point::new(40, 40), "afe_out");
-    state
+    app.state
         .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(label.clone());
-    state
+    app.state
         .model
         .schematic
         .session
@@ -380,23 +403,23 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
         .selection
         .select_only_net_label(label.id);
 
-    assert!(action_availability(ContextAction::Properties, &state).0);
-    assert!(action_availability(ContextAction::Copy, &state).0);
-    assert!(action_availability(ContextAction::Duplicate, &state).0);
-    assert!(action_availability(ContextAction::Delete, &state).0);
-    assert!(selection_summary(&state, ContextTarget::Canvas).contains("net label · afe_out"));
+    assert!(action_availability(ContextAction::Properties, &app.state).0);
+    assert!(action_availability(ContextAction::Copy, &app.state).0);
+    assert!(action_availability(ContextAction::Duplicate, &app.state).0);
+    assert!(action_availability(ContextAction::Delete, &app.state).0);
+    assert!(selection_summary(&app.state, ContextTarget::Canvas).contains("net label · afe_out"));
 
-    let symbol_context = schematic_symbol_context(&state);
-    execute_context_action(
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
         ContextAction::Properties,
-        &mut state,
         label.pos,
         &symbol_context,
     );
-    assert!(state.design.object_properties.open);
-    assert!(!state.design.rename_selection.open);
+    assert!(app.state.design.object_properties.open);
+    assert!(!app.state.design.rename_selection.open);
     assert!(matches!(
-        state.design.object_properties.draft,
+        app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
             if draft.original == label
     ));
@@ -404,7 +427,7 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
 
 #[test]
 fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
-    let mut state = AppState::default();
+    let mut app = design_app();
     let note = DesignNote::new(
         74,
         Point::new(40, 40),
@@ -412,13 +435,13 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
         "Review bias path",
     )
     .unwrap();
-    state
+    app.state
         .model
         .schematic
         .document_mut_for_test()
         .design_notes
         .push(note.clone());
-    state
+    app.state
         .model
         .schematic
         .session
@@ -426,26 +449,26 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
         .selection
         .select_only_design_note(note.id);
 
-    assert!(action_availability(ContextAction::Properties, &state).0);
-    assert!(action_availability(ContextAction::Copy, &state).0);
-    assert!(action_availability(ContextAction::Duplicate, &state).0);
-    assert!(action_availability(ContextAction::Delete, &state).0);
+    assert!(action_availability(ContextAction::Properties, &app.state).0);
+    assert!(action_availability(ContextAction::Copy, &app.state).0);
+    assert!(action_availability(ContextAction::Duplicate, &app.state).0);
+    assert!(action_availability(ContextAction::Delete, &app.state).0);
     // A note turns and flips with the rest of the drawing (audit E-2).
-    assert!(action_availability(ContextAction::Rotate, &state).0);
-    assert!(action_availability(ContextAction::Mirror, &state).0);
-    let summary = selection_summary(&state, ContextTarget::Canvas);
+    assert!(action_availability(ContextAction::Rotate, &app.state).0);
+    assert!(action_availability(ContextAction::Mirror, &app.state).0);
+    let summary = selection_summary(&app.state, ContextTarget::Canvas);
     assert!(summary.contains("Review note"));
     assert!(summary.contains("Review bias path"));
 
-    let symbol_context = schematic_symbol_context(&state);
-    execute_context_action(
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
         ContextAction::Properties,
-        &mut state,
         note.pos,
         &symbol_context,
     );
     assert!(matches!(
-        state.design.object_properties.draft,
+        app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DesignNote(ref draft))
             if draft.original == note
     ));
@@ -453,7 +476,7 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
 
 #[test]
 fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
-    let mut state = AppState::default();
+    let mut app = design_app();
     let shape = DocumentationShape::new(
         75,
         DocumentationShapeGeometry::Callout {
@@ -463,13 +486,13 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
         },
     )
     .unwrap();
-    state
+    app.state
         .model
         .schematic
         .document_mut_for_test()
         .documentation_shapes
         .push(shape.clone());
-    state
+    app.state
         .model
         .schematic
         .session
@@ -477,24 +500,24 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
         .selection
         .select_only_documentation_shape(shape.id);
 
-    assert!(action_availability(ContextAction::Properties, &state).0);
-    assert!(action_availability(ContextAction::Copy, &state).0);
-    assert!(action_availability(ContextAction::Duplicate, &state).0);
-    assert!(action_availability(ContextAction::Delete, &state).0);
+    assert!(action_availability(ContextAction::Properties, &app.state).0);
+    assert!(action_availability(ContextAction::Copy, &app.state).0);
+    assert!(action_availability(ContextAction::Duplicate, &app.state).0);
+    assert!(action_availability(ContextAction::Delete, &app.state).0);
     // A shape turns and flips with the rest of the drawing (audit E-2).
-    assert!(action_availability(ContextAction::Rotate, &state).0);
-    assert!(action_availability(ContextAction::Mirror, &state).0);
-    assert!(selection_summary(&state, ContextTarget::Canvas).contains("Callout"));
+    assert!(action_availability(ContextAction::Rotate, &app.state).0);
+    assert!(action_availability(ContextAction::Mirror, &app.state).0);
+    assert!(selection_summary(&app.state, ContextTarget::Canvas).contains("Callout"));
 
-    let symbol_context = schematic_symbol_context(&state);
-    execute_context_action(
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
         ContextAction::Properties,
-        &mut state,
         Point::new(30, 20),
         &symbol_context,
     );
     assert!(matches!(
-        state.design.object_properties.draft,
+        app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DocumentationShape(ref draft))
             if draft.original == shape
     ));
@@ -1346,4 +1369,40 @@ fn align_and_distribute_name_what_the_selection_lacks_on_both_routes() {
         ),
         (false, conductor)
     );
+}
+
+/// Right-click > Properties on two selected parts opens the form for what
+/// they share, as Q and Edit > Properties do. The row was greyed, asking for
+/// one object, while Q on the same selection opened the form.
+#[test]
+fn the_properties_row_opens_the_shared_form_for_several_parts() {
+    let mut app = design_app();
+    let document = app.state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    for (id, x) in [(41, 0), (42, 120)] {
+        document.components.push(Component::new(
+            id,
+            ComponentType::Resistor,
+            Point::new(x, 0),
+        ));
+    }
+    app.state.sync_active_schematic_to_workspace();
+    let selection = &mut app.state.model.schematic.session.editor.selection;
+    selection.select_only_component(41);
+    selection.select_component(42);
+    let target = select_context_target(&mut app.state, Some(PointerTarget::Component(42)));
+    assert_eq!(target, ContextTarget::Component(42));
+    assert!(app.command_key_enabled(DesignCommand::ObjectProperties.key()));
+    assert!(action_availability(ContextAction::Properties, &app.state).0);
+
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
+        ContextAction::Properties,
+        Point::new(120, 0),
+        &symbol_context,
+    );
+
+    assert!(app.state.design.shared_properties.open);
+    assert!(!app.state.design.object_properties.open);
 }

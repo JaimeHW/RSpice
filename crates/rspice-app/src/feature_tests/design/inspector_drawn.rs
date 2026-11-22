@@ -122,3 +122,36 @@ fn model_choices_stay_inside_the_bound_library_and_device_family() {
         Some(("vendor_analog".to_owned(), "OPA189_A".to_owned()))
     );
 }
+
+/// Two parts selected: the "Properties…" on the inspector's set opens the
+/// form for what they share, through the command Q runs.
+#[test]
+fn the_set_properties_action_opens_the_shared_form() {
+    use crate::feature_tests::replay::Replay;
+    use egui::accesskit::Role;
+    use rspice_app_state::state::{Component, ComponentType};
+    use rspice_app_state::workbench::workspace::Workspace;
+
+    let mut replay = Replay::new();
+    let state = &mut replay.app.state;
+    state.workbench.activate(Workspace::Design);
+    state.workbench.inspector_visible = true;
+    let document = state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    for (id, x) in [(41, 0), (42, 120)] {
+        document.components.push(Component::new(
+            id,
+            ComponentType::Resistor,
+            Point::new(x, 0),
+        ));
+    }
+    state.sync_active_schematic_to_workspace();
+    let selection = &mut state.model.schematic.session.editor.selection;
+    selection.select_only_component(41);
+    selection.select_component(42);
+
+    replay.click("Properties\u{2026}", Role::Button);
+    replay.app.after_contribution();
+
+    assert!(replay.app.state.design.shared_properties.open);
+}

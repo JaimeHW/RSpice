@@ -11,6 +11,7 @@ use egui::{Context, Response};
 use crate::state::command_catalog::CommandKey;
 use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app::dialogs::hierarchy::subcircuit_source;
+use crate::workbench::app::dialogs::selection::shared_properties;
 use crate::workbench::app_state::ContextTarget;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
@@ -22,6 +23,7 @@ use crate::workbench::{
     },
     design::commands::DesignCommand,
     framework::command_registry::ids,
+    framework::feature::Execute,
     framework::requests::RevealSheetSection,
 };
 
@@ -1438,12 +1440,17 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
         return (false, READ_ONLY_VIEW);
     }
     match action {
+        // The command's own test: one object opens its form, several parts
+        // the form for what they share.
         ContextAction::Properties => (
             crate::workbench::app::selected_object_properties_available_in(
                 &state.design.property_registry,
                 state.model,
+            ) || shared_properties::shared_properties_available(
+                &state.design.property_registry,
+                state.model,
             ),
-            "Select one editable component, bus, bus tap, net label, design note, or documentation shape to open its properties",
+            "Select one editable component, bus, bus tap, net label, design note, or documentation shape, or several parts, to open their properties",
         ),
         // While a part is being placed, or Move carries the selection, these
         // turn what floats, as R and M do (G-12: a finger has no R or M).
@@ -1627,11 +1634,10 @@ pub fn execute_context_action(
     state.model.retain_selection_on_active_sheet();
     match action {
         ContextAction::Properties => {
-            crate::workbench::app::open_selected_object_properties_in(
-                &mut state.design.property_form_parts(),
-                state.model,
-                state.workbench,
-            );
+            state
+                .workbench
+                .outbox
+                .push(Execute(DesignCommand::ObjectProperties.key()));
         }
         ContextAction::Rotate => {
             turn(state, symbol_context, ArrangeAction::RotateClockwise);
