@@ -306,11 +306,52 @@ fn render_at_pointer(
     };
     let mut run = || ctx.run_ui(input(), |ui| pass(ui, background));
 
+    let mut images = Images::default();
     for _ in 0..2 {
-        let _ = run();
+        images.take(&run());
     }
     let output = run();
-    rasterize_onto(&ctx, size, background, &output)
+    images.take(&output);
+    rasterize_onto(&ctx, size, background, &output, &images)
+}
+
+/// The images a context's frames uploaded, by texture, so a mesh drawn with
+/// one is filled from it rather than from the font atlas.
+#[derive(Default)]
+struct Images {
+    by_id: std::collections::HashMap<egui::TextureId, egui::ColorImage>,
+}
+
+impl Images {
+    fn take(&mut self, output: &egui::FullOutput) {
+        for (id, delta) in &output.textures_delta.set {
+            if *id == egui::TextureId::Managed(0) {
+                continue;
+            }
+            let egui::ImageData::Color(image) = &delta.image;
+            match delta.pos {
+                None => {
+                    self.by_id.insert(*id, (**image).clone());
+                }
+                Some([x0, y0]) => {
+                    if let Some(whole) = self.by_id.get_mut(id) {
+                        for y in 0..image.size[1] {
+                            for x in 0..image.size[0] {
+                                let (tx, ty) = (x0 + x, y0 + y);
+                                if tx < whole.size[0] && ty < whole.size[1] {
+                                    whole.pixels[ty * whole.size[0] + tx] =
+                                        image.pixels[y * image.size[0] + x];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for id in &output.textures_delta.free {
+            self.by_id.remove(id);
+        }
+    }
 }
 
 /// Rasterize the last pass of a context the caller drove itself.
@@ -326,7 +367,9 @@ fn render_at_pointer(
 /// shows: twice the pixels, with the glyphs from a 2x atlas.
 pub fn rasterize(ctx: &egui::Context, size: Vec2, output: &egui::FullOutput) -> Canvas {
     let background = super::tokens::Tokens::get(ctx).color.bg_app;
-    rasterize_onto(ctx, size, background, output)
+    let mut images = Images::default();
+    images.take(output);
+    rasterize_onto(ctx, size, background, output, &images)
 }
 
 /// One run of text a frame painted, and how far its ink stands off what was
@@ -385,7 +428,9 @@ pub fn text_contrasts(
         clipped.shape = strip_text(&clipped.shape);
     }
     let background = super::tokens::Tokens::get(ctx).color.bg_app;
-    let ground = rasterize_onto(ctx, size, background, &bare);
+    let mut images = Images::default();
+    images.take(output);
+    let ground = rasterize_onto(ctx, size, background, &bare, &images);
     let pixels_per_point = ctx.pixels_per_point();
     let mut texts = Vec::new();
     for clipped in &output.shapes {
@@ -486,6 +531,7 @@ fn rasterize_onto(
     size: Vec2,
     background: Color32,
     output: &egui::FullOutput,
+    images: &Images,
 ) -> Canvas {
     let atlas = ctx.fonts(|fonts| fonts.image());
     let pixels_per_point = ctx.pixels_per_point();
@@ -499,6 +545,14 @@ fn rasterize_onto(
         let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else {
             continue;
         };
+        // A mesh drawn with an uploaded image is filled from that image. One
+        // whose upload this render never saw (a caller-driven context hands
+        // over only its last frame) is left unfilled: the font atlas is never
+        // the right picture of it.
+        let image = images.by_id.get(&mesh.texture_id);
+        if mesh.texture_id != egui::TextureId::Managed(0) && image.is_none() {
+            continue;
+        }
         let clip = Rect::from_min_max(
             to_device(primitive.clip_rect.min),
             to_device(primitive.clip_rect.max),
@@ -517,7 +571,7 @@ fn rasterize_onto(
                 && vertices
                     .iter()
                     .any(|vertex| vertex.uv != egui::epaint::WHITE_UV);
-            fill_triangle(&mut canvas, &atlas, &vertices, clip, glyph_triangle);
+            fill_triangle(&mut canvas, &atlas, image, &vertices, clip, glyph_triangle);
         }
     }
     // Glyph texture coordinates encode the exact characters and therefore
@@ -574,6 +628,7 @@ fn paint_text_regression_shape(
 fn fill_triangle(
     canvas: &mut Canvas,
     atlas: &egui::ColorImage,
+    image: Option<&egui::ColorImage>,
     vertices: &[egui::epaint::Vertex; 3],
     clip: Rect,
     glyph_triangle: bool,
@@ -646,11 +701,19 @@ fn fill_triangle(
                 }
                 uv += vertex.uv.to_vec2() * weight;
             }
-            // Geometry is either untextured or glyph coverage from the font
-            // atlas; icons are vector strokes, which arrive as geometry.
-            let coverage = atlas_coverage(atlas, uv);
-            for channel in &mut color {
-                *channel *= coverage;
+            // Geometry is untextured, glyph coverage from the font atlas, or
+            // an image the frame uploaded; icons are vector strokes, which
+            // arrive as geometry.
+            if let Some(image) = image {
+                let texel = image_texel(image, uv).to_array();
+                for channel in 0..4 {
+                    color[channel] *= f32::from(texel[channel]) / 255.0;
+                }
+            } else {
+                let coverage = atlas_coverage(atlas, uv);
+                for channel in &mut color {
+                    *channel *= coverage;
+                }
             }
             if color[3] <= 0.5 {
                 continue;
@@ -700,6 +763,17 @@ fn atlas_coverage(atlas: &egui::ColorImage, uv: egui::Vec2) -> f32 {
     let x = ((uv.x * width as f32).floor() as isize).clamp(0, width as isize - 1) as usize;
     let y = ((uv.y * height as f32).floor() as isize).clamp(0, height as isize - 1) as usize;
     f32::from(atlas.pixels[y * width + x].a()) / 255.0
+}
+
+/// The texel of an uploaded image under `uv`, nearest-neighbour.
+fn image_texel(image: &egui::ColorImage, uv: egui::Vec2) -> Color32 {
+    let [width, height] = image.size;
+    if width == 0 || height == 0 {
+        return Color32::TRANSPARENT;
+    }
+    let x = ((uv.x * width as f32).floor() as isize).clamp(0, width as isize - 1) as usize;
+    let y = ((uv.y * height as f32).floor() as isize).clamp(0, height as isize - 1) as usize;
+    image.pixels[y * width + x]
 }
 
 fn crc32(bytes: &[u8]) -> u32 {
@@ -779,6 +853,56 @@ fn a_painted_rect_covers_its_own_pixels_and_nothing_else() {
     assert!(
         outside.iter().all(|pixel| *pixel == canvas.background()),
         "something painted below the rect"
+    );
+}
+
+/// An image a surface uploads is what fills the mesh drawn with it. Filled from
+/// the font atlas instead, a density plot rendered as a block of white glyph
+/// hash, and the render read as a broken eye diagram.
+#[test]
+fn an_uploaded_image_fills_its_mesh_from_its_own_texels() {
+    let painted = Rect::from_min_size(egui::pos2(20.0, 16.0), egui::vec2(64.0, 32.0));
+    let top = Color32::from_rgb(40, 200, 90);
+    let bottom = Color32::from_rgba_unmultiplied(220, 40, 120, 128);
+    let mut texture: Option<egui::TextureHandle> = None;
+    let canvas = render(egui::vec2(120.0, 80.0), |ui, background| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(background))
+            .show(ui, |ui| {
+                let handle = texture.get_or_insert_with(|| {
+                    let image = egui::ColorImage::new([2, 2], vec![top, top, bottom, bottom]);
+                    ui.ctx()
+                        .load_texture("raster.test", image, egui::TextureOptions::NEAREST)
+                });
+                ui.painter().image(
+                    handle.id(),
+                    painted,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            });
+    });
+
+    let upper = Rect::from_min_max(
+        painted.min + egui::vec2(2.0, 2.0),
+        painted.center() - egui::vec2(0.0, 2.0),
+    );
+    assert!(
+        canvas.pixels_in(upper).all(|pixel| pixel == top),
+        "the image's top row is not what fills the top of its rect"
+    );
+    let lower = Rect::from_min_max(
+        painted.center() + egui::vec2(0.0, 2.0),
+        painted.max - egui::vec2(2.0, 2.0),
+    );
+    let expected = {
+        let mut ground = canvas.background();
+        blend_pixel(&mut ground, bottom.to_array().map(f32::from));
+        ground
+    };
+    assert!(
+        canvas.pixels_in(lower).all(|pixel| pixel == expected),
+        "the image's translucent bottom row is not composited over the ground"
     );
 }
 
