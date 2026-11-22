@@ -270,7 +270,7 @@ fn window_statistics_measure_each_branch_between_the_cursors() {
         "the forward branch RMS is incorrect: {painted:?}"
     );
     assert!(
-        painted.iter().any(|text| text == "3.511885 V"),
+        painted.iter().any(|text| text == "3.512 V"),
         "the return branch RMS is incorrect: {painted:?}"
     );
 }

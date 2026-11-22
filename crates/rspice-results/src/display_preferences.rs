@@ -159,7 +159,7 @@ mod tests {
         );
         assert_eq!(
             ron::to_string(&values).unwrap(),
-            "((7,3,17),(r#monotone-cubic-where-valid,linear,r#nearest-accepted-point),\
+            "((4,3,17),(r#monotone-cubic-where-valid,linear,r#nearest-accepted-point),\
              (r#magnitude-phase-degrees,r#real-imaginary))"
         );
         assert_eq!(

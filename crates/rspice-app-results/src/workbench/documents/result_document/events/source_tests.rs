@@ -987,9 +987,9 @@ fn the_event_tables_state_their_numbers_at_the_readers_digits() {
         "\u{2212}2.5 fC",
         "40 ns",
         "3.3 pC",
-        "1.234568 ns",
+        "1.235 ns",
         "7.5 ns",
-        "0.1234568",
+        "0.1235",
         "Time",
         "Signed charge",
     ] {
@@ -1014,7 +1014,7 @@ fn the_event_tables_state_their_numbers_at_the_readers_digits() {
     // Right-click the clock edge's row and copy it exactly.
     let row = texts
         .iter()
-        .find(|(text, _)| text == "1.234568 ns")
+        .find(|(text, _)| text == "1.235 ns")
         .map(|(_, rect)| rect.center())
         .expect("the clock edge's time is drawn");
     let press = |at, button, pressed| egui::Event::PointerButton {
