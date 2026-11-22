@@ -307,3 +307,50 @@ fn findings_at_one_place_share_a_badge_coloured_by_the_worst() {
     );
     assert_eq!(groups[1].worst(), DrcSeverity::Info);
 }
+
+/// A finding's site digest moves when its part is edited or a wire meets
+/// its pin, and holds through an edit anywhere else.
+#[test]
+fn a_findings_site_changes_only_when_its_objects_do() {
+    let mut document = SchematicDocument::default();
+    document.components.push(
+        Component::new(7, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k"),
+    );
+    let pin = document.components[0].terminal_positions()[0].1;
+    let floating = DrcLocation::Terminal {
+        component_id: 7,
+        component_name: "R1".to_owned(),
+        pin_name: "1".to_owned(),
+        point: pin,
+    };
+    let part = DrcLocation::Component {
+        id: 7,
+        name: "R1".to_owned(),
+    };
+    let sites = |document: &SchematicDocument| {
+        (
+            site_fingerprint(document, &floating),
+            site_fingerprint(document, &part),
+        )
+    };
+    let before = sites(&document);
+
+    document.wires.push(Wire::new(
+        9,
+        vec![Point::new(500, 500), Point::new(600, 500)],
+    ));
+    assert_eq!(
+        sites(&document),
+        before,
+        "an edit elsewhere touches neither"
+    );
+
+    document
+        .wires
+        .push(Wire::new(10, vec![pin, Point::new(pin.x, pin.y - 100)]));
+    assert_ne!(sites(&document).0, before.0, "a wire now meets the pin");
+    assert_eq!(sites(&document).1, before.1);
+
+    document.components[0].value = "2k".to_owned();
+    assert_ne!(sites(&document).1, before.1, "the part itself was edited");
+}

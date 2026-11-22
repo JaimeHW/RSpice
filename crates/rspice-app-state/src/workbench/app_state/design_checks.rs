@@ -215,9 +215,20 @@ pub struct DesignCheckRuntime {
     pub published: u64,
     /// DRC results (cached from last run; surfaced by the schematic view)
     pub drc_results: Option<rspice_design::drc::DrcResult>,
-    /// `topology_version` when the last check ran — canvas markers hide and
-    /// the ERC pill reads "stale" once the design changes underneath them.
+    /// `topology_version` when the last check ran — the ERC pill reads
+    /// "stale" once the design changes underneath them.
     pub drc_checked_version: u64,
+    /// Where each of `drc_results`' findings sat while they were current, in
+    /// their order ([`site_fingerprint`]): once the drawing changes, the
+    /// canvas keeps the markers of the findings whose sites the edit left
+    /// alone.
+    ///
+    /// [`site_fingerprint`]: rspice_schematic_editor::view::violations::site_fingerprint
+    pub drc_sites: Vec<u64>,
+    /// The same for the active drawing's cellview check, taken while it was
+    /// current, under the receipt's sequence: what keeps its untouched
+    /// findings on the canvas beside a live pass once the drawing changes.
+    check_sites: Option<(u64, Vec<u64>)>,
 }
 
 impl DesignCheckRuntime {
@@ -727,13 +738,44 @@ impl Model {
         ) {
             self.design_checks.drc_checked_version = 0;
             self.design_checks.drc_results = None;
+            self.design_checks.drc_sites.clear();
             return;
         }
-        let current = self
-            .current_drawing_findings(&self.workspace.content.active_schematic_reference(), facts);
+        let subject = self.workspace.content.active_schematic_reference();
+        let document = self.schematic.document();
+        let sites = |result: &DrcResult| -> Vec<u64> {
+            result
+                .violations()
+                .iter()
+                .map(|violation| {
+                    rspice_schematic_editor::view::violations::site_fingerprint(
+                        document,
+                        &violation.location,
+                    )
+                })
+                .collect()
+        };
+        let check_sites = match self.design_check_status(&subject, facts) {
+            DesignCheckStatus::Current(receipt)
+                if self
+                    .design_checks
+                    .check_sites
+                    .as_ref()
+                    .map(|(sequence, _)| *sequence)
+                    != Some(receipt.sequence) =>
+            {
+                Some((receipt.sequence, sites(&receipt.result)))
+            }
+            _ => None,
+        };
+        if let Some(check_sites) = check_sites {
+            self.design_checks.check_sites = Some(check_sites);
+        }
+        let current = self.current_drawing_findings(&subject, facts);
         self.design_checks.drc_checked_version = current
             .as_ref()
             .map_or(0, |_| self.schematic.topology_version());
+        self.design_checks.drc_sites = current.as_ref().map_or_else(Vec::new, sites);
         self.design_checks.drc_results = current;
     }
 
@@ -743,24 +785,31 @@ impl Model {
     ///
     /// A finding fixed while drawing therefore leaves the canvas with its
     /// row, and one a live pass restated is marked once, where the live pass
-    /// found it. A pass the drawing has moved away from marks nothing.
+    /// found it. A check the drawing has moved away from keeps only the
+    /// findings whose sites the edits left alone, until the next check.
     fn current_drawing_findings(
         &self,
         subject: &CellViewRef,
         facts: SlotFacts,
     ) -> Option<DrcResult> {
         let explicit = match self.design_check_status(subject, facts) {
-            DesignCheckStatus::Current(receipt) => Some(receipt),
-            DesignCheckStatus::NotRun
-            | DesignCheckStatus::Stale(_)
-            | DesignCheckStatus::Unavailable { .. } => None,
+            DesignCheckStatus::Current(receipt) => Some((
+                receipt.sequence,
+                std::borrow::Cow::Borrowed(&receipt.result),
+            )),
+            DesignCheckStatus::Stale(receipt) => self
+                .untouched_findings(receipt)
+                .map(|kept| (receipt.sequence, std::borrow::Cow::Owned(kept))),
+            DesignCheckStatus::NotRun | DesignCheckStatus::Unavailable { .. } => None,
         };
-        let (explicit, live) = match (explicit, self.current_live_receipt(subject, facts)) {
+        let live = self.current_live_receipt(subject, facts);
+        let ((_, explicit), live) = match (explicit, live) {
             (None, None) => return None,
-            (Some(only), None) | (None, Some(only)) => return Some(only.result.clone()),
+            (Some((_, only)), None) => return Some(only.into_owned()),
+            (None, Some(only)) => return Some(only.result.clone()),
             // A check of the cellview states every rule a live pass does.
-            (Some(explicit), Some(live)) if explicit.sequence > live.sequence => {
-                return Some(explicit.result.clone());
+            (Some((sequence, explicit)), Some(live)) if sequence > live.sequence => {
+                return Some(explicit.into_owned());
             }
             (Some(explicit), Some(live)) => (explicit, live),
         };
@@ -770,7 +819,7 @@ impl Model {
         coverage.state(subject, RuleScope::Live);
         coverage.restate(subject, &live.result);
         let mut composed = DrcResult::new();
-        for violation in explicit.result.violations() {
+        for violation in explicit.violations() {
             let (drawn_in, object) = rspice_design::drc::waiver_site(&violation.location);
             let taken_over = coverage.takes_over(
                 violation.violation_type.rule_code(),
@@ -787,6 +836,29 @@ impl Model {
         composed.completed = true;
         composed.duration_ms = live.result.duration_ms;
         Some(composed)
+    }
+
+    /// The findings of the active drawing's stale cellview check whose sites
+    /// the edits since left alone, as they were while it was current; `None`
+    /// when no finding is left or the check was never seen current here.
+    fn untouched_findings(&self, receipt: &CellViewCheckReceipt) -> Option<DrcResult> {
+        let (sequence, sites) = self.design_checks.check_sites.as_ref()?;
+        if *sequence != receipt.sequence {
+            return None;
+        }
+        let document = self.schematic.document();
+        let mut kept = DrcResult::new();
+        for (violation, site) in receipt.result.violations().iter().zip(sites) {
+            if rspice_schematic_editor::view::violations::site_fingerprint(
+                document,
+                &violation.location,
+            ) == *site
+            {
+                kept.add_violation(violation.clone());
+            }
+        }
+        kept.completed = true;
+        (!kept.violations().is_empty()).then_some(kept)
     }
 }
 

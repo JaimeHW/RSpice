@@ -4,6 +4,7 @@
 use super::{design_view::DesignView, viewport::Viewport};
 use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
+use rspice_design::schematic::document::SchematicDocument;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{SheetCatalog, SheetId};
 use rspice_ui_kit::palette::Palette;
@@ -410,6 +411,94 @@ fn draw_hover_card(
         painter.galley(pos2(origin.x + pad_x, y), galley, palette.text);
         y += galley_height + gap;
     }
+}
+
+/// A digest of the drawing where a finding sits: the parts, wires and pins
+/// its location names and whatever is joined to them there.
+///
+/// Taken while a check is current and taken again after an edit, it tells a
+/// finding the edit did not touch, which keeps its marker as KiCad and
+/// Virtuoso keep markers until the next check, from one whose objects the
+/// edit moved, rewired, renamed or removed, which the edit may have fixed.
+pub fn site_fingerprint(document: &SchematicDocument, location: &DrcLocation) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let part = |hasher: &mut std::collections::hash_map::DefaultHasher, id: u64| {
+        let component = document
+            .components
+            .iter()
+            .find(|component| component.id == id);
+        component
+            .map(|component| {
+                (
+                    &component.name,
+                    &component.value,
+                    component.terminal_positions(),
+                )
+            })
+            .hash(hasher);
+    };
+    // What meets at `point`: the wires through it, the pins on it, its
+    // junctions and labels.
+    let joined_at = |hasher: &mut std::collections::hash_map::DefaultHasher, point: Point| {
+        for wire in document
+            .wires
+            .iter()
+            .filter(|wire| wire.contains_point(point))
+        {
+            wire.id.hash(hasher);
+        }
+        for component in &document.components {
+            if component
+                .terminal_positions()
+                .iter()
+                .any(|(_, terminal)| *terminal == point)
+            {
+                component.id.hash(hasher);
+            }
+        }
+        for junction in document
+            .junctions
+            .iter()
+            .filter(|junction| junction.pos == point)
+        {
+            junction.id.hash(hasher);
+        }
+        for label in document
+            .net_labels
+            .iter()
+            .filter(|label| label.pos == point)
+        {
+            (label.id, &label.name).hash(hasher);
+        }
+    };
+    match location {
+        DrcLocation::Component { id, .. } => part(&mut hasher, *id),
+        DrcLocation::Terminal {
+            component_id,
+            point,
+            ..
+        } => {
+            part(&mut hasher, *component_id);
+            joined_at(&mut hasher, *point);
+        }
+        DrcLocation::Wire { id } => {
+            let wire = document.wires.iter().find(|wire| wire.id == *id);
+            wire.map(|wire| &wire.points).hash(&mut hasher);
+            for point in wire
+                .iter()
+                .flat_map(|wire| [wire.points.first(), wire.points.last()])
+                .flatten()
+            {
+                joined_at(&mut hasher, *point);
+            }
+        }
+        DrcLocation::Point { x, y } => joined_at(&mut hasher, Point::new(*x as i32, *y as i32)),
+        // Nothing of this drawing marks the rest on the canvas.
+        _ => {}
+    }
+    hasher.finish()
 }
 
 #[cfg(test)]

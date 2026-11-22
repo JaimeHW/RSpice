@@ -631,3 +631,66 @@ fn a_findings_identity_is_unmoved_by_the_objects_it_involves() {
         assert_eq!(finding_keys(&subject, &involved), key);
     }
 }
+
+/// Wiring one of two open pins after a check takes that pin's marker off
+/// the canvas, since the edit may have fixed it, and keeps the other pin's,
+/// which the edit left alone, until the next check.
+#[test]
+fn an_edit_keeps_the_markers_of_the_findings_it_did_not_touch() {
+    use rspice_app_state::state::{Component, ComponentType, Point};
+    let mut state = AppState::default();
+    let document = state.model.schematic.document_mut_for_test();
+    for (id, name, x) in [(4, "R1", 0), (7, "R2", 400)] {
+        document.components.push(
+            Component::new(id, ComponentType::Resistor, Point::new(x, 0))
+                .with_name_value(name, "1k"),
+        );
+    }
+    let pin = |state: &AppState, index: usize| {
+        state.model.schematic.document().components[index].terminal_positions()[0].1
+    };
+    let (r1_pin, r2_pin) = (pin(&state, 0), pin(&state, 1));
+    let at = |id, name: &str, point| DrcLocation::Terminal {
+        component_id: id,
+        component_name: name.to_owned(),
+        pin_name: "1".to_owned(),
+        point,
+    };
+    publish_pass(
+        &mut state,
+        &[
+            (at(4, "R1", r1_pin), "Pin R1.1 is not connected"),
+            (at(7, "R2", r2_pin), "Pin R2.1 is not connected"),
+        ],
+    );
+    state.refresh_active_design_check_projection();
+    let marked = |state: &AppState| {
+        state
+            .model
+            .design_checks
+            .drc_results
+            .as_ref()
+            .map(|result| {
+                result
+                    .violations()
+                    .iter()
+                    .map(|violation| violation.message.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(marked(&state).len(), 2);
+
+    state
+        .model
+        .schematic
+        .add_wire(vec![r1_pin, Point::new(r1_pin.x, r1_pin.y - 100)]);
+    state.refresh_active_design_check_projection();
+
+    assert_eq!(marked(&state), ["Pin R2.1 is not connected"]);
+    assert_eq!(
+        state.model.design_checks.drc_checked_version,
+        state.model.schematic.topology_version(),
+        "the kept marker is drawn on the drawing as it now stands"
+    );
+}

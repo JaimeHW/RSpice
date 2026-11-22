@@ -3,8 +3,9 @@
 //! After a check runs, every violation with a resolvable location gets a
 //! screen-constant badge at the offending spot — a severity-colored
 //! triangle with an exclamation tick. Hovering a badge shows the message
-//! and the suggested fix. Markers hide as soon as the topology changes
-//! (stale markers lie); the docbar pill flips to "ERC stale" instead.
+//! and the suggested fix. Once the topology changes the docbar pill flips
+//! to "ERC stale", and only the markers of findings the edit did not touch
+//! stay until the next check.
 
 use egui::Painter;
 
@@ -66,19 +67,39 @@ pub(super) fn draw_violation_markers(
     if let Some((severity, points)) = related_marks(state) {
         markers::draw_related_marks(painter, viewport, &points, severity);
     }
-    let Some(result) = &state.model.design_checks.drc_results else {
+    let checks = &state.model.design_checks;
+    let Some(result) = &checks.drc_results else {
         return;
     };
-    // Stale results stay in the dialog/console but vanish from the canvas.
-    if state.model.design_checks.drc_checked_version != state.model.schematic.topology_version() {
+    let view = state.design_view();
+    if checks.drc_checked_version == state.model.schematic.topology_version() {
+        markers::draw_violation_markers(
+            painter,
+            viewport,
+            &view,
+            result.violations(),
+            state.design.canvas_hover,
+        );
         return;
     }
-
+    // Once the drawing changed, a finding whose site the edit left alone
+    // keeps its marker until the next check; one whose part, pin or wire the
+    // edit touched leaves the canvas, since the edit may have fixed it. Its
+    // row stays in the console and the dialog either way.
+    let untouched = result
+        .violations()
+        .iter()
+        .zip(&checks.drc_sites)
+        .filter(|(violation, site)| {
+            markers::site_fingerprint(view.document, &violation.location) == **site
+        })
+        .map(|(violation, _)| violation.clone())
+        .collect::<Vec<_>>();
     markers::draw_violation_markers(
         painter,
         viewport,
-        &state.design_view(),
-        result.violations(),
+        &view,
+        &untouched,
         state.design.canvas_hover,
     );
 }
