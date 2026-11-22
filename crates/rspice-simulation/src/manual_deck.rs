@@ -108,9 +108,7 @@ fn queue_manual_deck_analyses(
     periodic_tasks: Vec<QueuedAnalysis>,
 ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
     if parsed.analyses.is_empty() && periodic_tasks.is_empty() {
-        return Err(vec![
-            NO_ANALYSIS.to_owned(),
-        ]);
+        return Err(vec![NO_ANALYSIS.to_owned()]);
     }
 
     let step_count = parsed
@@ -309,9 +307,7 @@ fn queue_manual_deck_analyses(
     }
 
     if errors.is_empty() && queue.is_empty() {
-        Err(vec![
-            NO_ANALYSIS.to_owned(),
-        ])
+        Err(vec![NO_ANALYSIS.to_owned()])
     } else if errors.is_empty() {
         match finalize_manual_fourier_contracts(&mut queue) {
             Ok(()) => Ok(queue),
