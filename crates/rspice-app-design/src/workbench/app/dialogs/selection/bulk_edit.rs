@@ -270,10 +270,35 @@ impl SelectionBulkEditDialogState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SelectionBulkBodyAction {
     None,
+    /// The filter changed: what it now finds is ticked.
     FilterChanged,
+    /// The property changed: the ticks stand, less the rows it cannot reach.
+    PropertyChanged,
     SaveFilter,
     LoadFilter,
     DeleteFilter,
+}
+
+/// The rows Bulk edit opens with ticked: the parts and ports selected on the
+/// canvas, and nothing when nothing is selected, as Virtuoso's Edit
+/// Properties and KiCad's "selected only" scope start from the selection.
+/// The filter lists what else could be ticked; it ticks nothing by itself
+/// until it is changed. A selected row the property cannot reach stays
+/// chosen, so the next property that can reach it finds it ticked.
+fn selected_rows(model: &Model, rows: &[SelectionBulkRow]) -> BTreeSet<SelectionBulkRowKey> {
+    let active_key = model.workspace.content.active_schematic_reference().key();
+    let selection = &model.schematic.session.editor.selection;
+    rows.iter()
+        .filter(|row| {
+            row.key.view_key.eq_ignore_ascii_case(&active_key)
+                && matches!(
+                    row.key.kind,
+                    SelectionBulkRowKind::Instance | SelectionBulkRowKind::Port
+                )
+                && selection.components.contains(&row.key.object_id)
+        })
+        .map(|row| row.key.clone())
+        .collect()
 }
 
 pub fn open_selection_bulk_edit_dialog(
@@ -285,11 +310,7 @@ pub fn open_selection_bulk_edit_dialog(
     let authority = SelectionBulkEditAuthority::capture(model);
     let property = SelectionBulkProperty::default();
     let rows = build_rows(model, &filter, property);
-    let selected = rows
-        .iter()
-        .filter(|row| row.editable())
-        .map(|row| row.key.clone())
-        .collect();
+    let selected = selected_rows(model, &rows);
     let bound_sections = bound_library_sections(model, &rows);
     // Nothing is proposed: the value is the user's to choose, and Apply
     // waits for it.
@@ -434,6 +455,11 @@ fn handle_selection_bulk_body_action(
                 .collect();
             bulk_edit.error = None;
             bulk_edit.authority = Some(SelectionBulkEditAuthority::capture(model));
+        }
+        SelectionBulkBodyAction::PropertyChanged => {
+            let rows = build_rows(model, &bulk_edit.filter, bulk_edit.property);
+            bulk_edit.bound_sections = bound_library_sections(model, &rows);
+            bulk_edit.error = None;
         }
         SelectionBulkBodyAction::SaveFilter => {
             let name = bulk_edit.save_filter_name.clone();
@@ -934,7 +960,9 @@ fn selection_results(
                 .spacing(Vec2::new(RESULT_COLUMN_GAP, 4.0))
                 .show(ui, |ui| {
                     for row in &rows[range] {
-                        let mut selected = dialog.selected.contains(&row.key);
+                        // A row the property cannot reach reads unticked,
+                        // though it stays chosen for the next property.
+                        let mut selected = row.editable() && dialog.selected.contains(&row.key);
                         // In a cell as wide as the header's, so the columns
                         // after it start where their headings do.
                         let response = ui
@@ -1053,7 +1081,7 @@ fn bulk_edit_fields(
             width,
         ) {
             dialog.new_value.clear();
-            *action = SelectionBulkBodyAction::FilterChanged;
+            *action = SelectionBulkBodyAction::PropertyChanged;
         }
         columns[1].label("New value");
         if new_value_control(&mut columns[1], dialog) {

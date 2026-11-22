@@ -149,6 +149,69 @@ fn bulk_edit_opens_with_no_value_and_apply_waits_for_one() {
     assert!(missing_value_reason(dialog).is_some());
 }
 
+/// Bulk edit opened on three selected resistors ticks those three and no
+/// other part the filter lists; a different property keeps the ticks; with
+/// nothing selected nothing is ticked, so an Apply cannot reach parts the
+/// reader never chose.
+#[test]
+fn bulk_edit_starts_from_the_selection() {
+    let mut state = DesignTestHost::default();
+    let mut parts = Vec::new();
+    for id in 1..=5 {
+        let mut part = Component::new(id, ComponentType::Resistor, Point::new(id as i32 * 100, 0));
+        part.name = format!("R{id}");
+        part.value = "1k".to_owned();
+        parts.push(part);
+    }
+    state.model.schematic.document_mut_for_test().components = parts;
+    for id in 1..=3 {
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
+    }
+    let ticked = |state: &DesignTestHost| -> Vec<u64> {
+        state
+            .design
+            .selection_bulk_edit
+            .selected
+            .iter()
+            .map(|key| key.object_id)
+            .collect()
+    };
+
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
+    assert_eq!(ticked(&state), vec![1, 2, 3]);
+
+    state.design.selection_bulk_edit.property = SelectionBulkProperty::Tolerance;
+    handle_selection_bulk_body_action(
+        &mut state.design.selection_bulk_edit,
+        &mut state.design.schematic_bulk_edit_filters,
+        &state.model,
+        SelectionBulkBodyAction::PropertyChanged,
+    );
+    assert_eq!(
+        ticked(&state),
+        vec![1, 2, 3],
+        "a new property keeps the ticks"
+    );
+
+    state.model.schematic.session.editor.selection.clear();
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
+    assert!(ticked(&state).is_empty());
+}
+
 /// The sections offered are the bound library's own, not a fixed list,
 /// and a library that defines none says so.
 #[test]

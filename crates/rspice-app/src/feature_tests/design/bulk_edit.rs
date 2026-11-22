@@ -25,6 +25,13 @@ fn accessibility_tree_exposes_only_the_mockup_bulk_edit_surface_actions() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.schematic.document_mut_for_test().components =
         vec![component(1, "X1", Some("tt"))];
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(1);
     open_selection_bulk_edit_dialog(
         &mut app.state.design.selection_bulk_edit,
         &app.state.design.schematic_bulk_edit_filters,
