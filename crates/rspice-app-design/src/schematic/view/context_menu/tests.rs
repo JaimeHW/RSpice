@@ -274,10 +274,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             Some(DesignCommand::FitSchematicContent.key()),
         ),
         ("Show in netlist", Some(ids::SHOW_IN_NETLIST)),
-        (
-            "Add voltage or current probe…",
-            Some(DesignCommand::PlaceProbe.key()),
-        ),
+        ("Probe", Some(DesignCommand::PlaceProbe.key())),
         ("Open operating point", Some(ids::RESULT_OPERATING_POINT)),
     ];
     let menu = |slot: &[(&'static str, Option<CommandKey>)]| {
@@ -329,10 +326,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
                 Some(DesignCommand::FitSchematicContent.key())
             ),
             ("Zoom box", Some(ids::ZOOM_BOX)),
-            (
-                "Add voltage or current probe…",
-                Some(DesignCommand::PlaceProbe.key())
-            ),
+            ("Probe", Some(DesignCommand::PlaceProbe.key())),
             ("Open operating point", Some(ids::RESULT_OPERATING_POINT)),
         ],
     );

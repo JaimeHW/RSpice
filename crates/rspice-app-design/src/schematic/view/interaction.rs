@@ -1840,9 +1840,76 @@ fn component_probe_expression(
     })
 }
 
+/// What a probe measures: the wire or the part a click or a menu named.
+#[derive(Debug, Clone, Copy)]
+enum ProbeSubject {
+    Wire(u64),
+    Part(u64),
+}
+
 fn handle_probe_click(
     state: &mut CanvasParts<'_>,
     grid_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
+    let subject = probe_subject_at(state, grid_pos, symbol_context);
+    probe_subject(state, grid_pos, subject, symbol_context);
+}
+
+/// The context menu's Probe row. On a wire or a part it probes that object
+/// where the menu was opened, as a Probe-tool click there does, so the trace
+/// comes with no second click; on the bare canvas it arms the Probe tool.
+pub(super) fn probe_context_target(
+    state: &mut CanvasParts<'_>,
+    target: crate::workbench::app_state::ContextTarget,
+    click_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
+    use crate::workbench::app_state::ContextTarget;
+    let (position, subject) = match target {
+        ContextTarget::Canvas => {
+            state.model.schematic.arm_tool(Tool::Probe);
+            return;
+        }
+        // The menu opens within a few pixels of the wire; the marker goes on
+        // the wire itself so it binds to what was probed.
+        ContextTarget::Wire(wire_id) => {
+            let on_wire = state
+                .model
+                .schematic
+                .document()
+                .wires
+                .iter()
+                .find(|wire| wire.id == wire_id)
+                .and_then(|wire| wire.closest_point(click_pos))
+                .map_or(click_pos, |(point, _)| point);
+            (on_wire, ProbeSubject::Wire(wire_id))
+        }
+        ContextTarget::Component(part) => (click_pos, ProbeSubject::Part(part)),
+    };
+    probe_subject(state, position, Some(subject), symbol_context);
+}
+
+fn probe_subject_at(
+    state: &CanvasParts<'_>,
+    grid_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) -> Option<ProbeSubject> {
+    if let Some(wire_id) = state.design_view().active_wire_at(grid_pos) {
+        return Some(ProbeSubject::Wire(wire_id));
+    }
+    let components = state
+        .design_view()
+        .objects_on_active_sheet(&state.model.schematic.document().components, |item| item.id);
+    symbol_context
+        .component_at_resolved_symbol(components.as_ref(), grid_pos)
+        .map(ProbeSubject::Part)
+}
+
+fn probe_subject(
+    state: &mut CanvasParts<'_>,
+    grid_pos: Point,
+    subject: Option<ProbeSubject>,
     symbol_context: &SchematicSymbolContext,
 ) {
     if let Err(reason) = probe_edit_identity_is_current(state) {
@@ -1854,7 +1921,7 @@ fn handle_probe_click(
         return;
     }
 
-    if let Some(wire_id) = state.design_view().active_wire_at(grid_pos) {
+    if let Some(ProbeSubject::Wire(wire_id)) = subject {
         if let Some(net_name) = live_wire_probe_net_name(state, wire_id)
             .or_else(|| retained_probe_net_name(state, grid_pos))
         {
@@ -1890,12 +1957,7 @@ fn handle_probe_click(
             state.prompt("Nothing probed: this wire does not resolve to one net.");
         }
     } else {
-        let components = state
-            .design_view()
-            .objects_on_active_sheet(&state.model.schematic.document().components, |item| item.id);
-        let Some(comp_id) =
-            symbol_context.component_at_resolved_symbol(components.as_ref(), grid_pos)
-        else {
+        let Some(ProbeSubject::Part(comp_id)) = subject else {
             state.model.schematic.session.editor.net_highlight.clear();
             match retain_probe_flag(state, grid_pos, None, None) {
                 Ok(id) => state.prompt(format!(

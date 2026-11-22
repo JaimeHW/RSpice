@@ -273,7 +273,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
         icon: ContextIcon::Probe,
-        label: "Add voltage or current probe…",
+        label: "Probe",
         shortcut_command: Some(DesignCommand::PlaceProbe.key()),
     }),
     ContextEntry::Command(ContextCommand {
@@ -1696,7 +1696,14 @@ pub fn execute_context_action(
             state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
         }
         ContextAction::ShowInNetlist => show_in_netlist(state),
-        ContextAction::Probe => state.model.schematic.arm_tool(Tool::Probe),
+        ContextAction::Probe => {
+            let target = state
+                .design
+                .interaction
+                .context_target
+                .map_or(ContextTarget::Canvas, |(target, _)| target);
+            super::interaction::probe_context_target(state, target, click_pos, symbol_context);
+        }
         ContextAction::OperatingPoint => open_operating_point(state),
         ContextAction::SnapToStandardValue => {
             super::standard_value_snap::run_snap_to_standard_value(state.model, state.workbench);

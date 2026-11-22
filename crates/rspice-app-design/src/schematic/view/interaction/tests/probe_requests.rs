@@ -368,3 +368,69 @@ fn probe_without_stable_plan_fails_closed() {
     );
     assert!(state.model.sim_setup.analysis_plan.is_none());
 }
+
+/// A wire labelled OUT on an otherwise empty sheet, whose menu was opened at
+/// `click`.
+fn wire_menu_host(click: Point) -> DesignTestHost {
+    use crate::workbench::app_state::ContextTarget;
+    let mut state = DesignTestHost::default();
+    let document = state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document.wires.clear();
+    document
+        .wires
+        .push(Wire::new(91, vec![Point::new(0, 20), Point::new(80, 20)]));
+    document
+        .net_labels
+        .push(NetLabel::new(92, Point::new(70, 20), "OUT"));
+    state.sync_active_schematic_to_workspace();
+    state.model.schematic.init_undo_history();
+    state.design.interaction.context_target = Some((ContextTarget::Wire(91), (click.x, click.y)));
+    state
+}
+
+#[test]
+fn the_probe_row_on_a_wire_probes_it_with_no_second_click() {
+    use crate::schematic::view::context_menu::execute_context_action;
+    use crate::workbench::app_state::ContextTarget;
+    use rspice_schematic_editor::view::context_menu::ContextAction;
+    // The menu opened a couple of units off the wire, where a right-click
+    // still lands on it.
+    let click = Point::new(40, 22);
+    let mut state = wire_menu_host(click);
+    let tool_before = state.model.schematic.session.editor.tool;
+    let symbol_context = schematic_symbol_context(&state);
+
+    execute_context_action(
+        ContextAction::Probe,
+        &mut canvas_parts(&mut state),
+        click,
+        &symbol_context,
+    );
+
+    let outputs = saved_outputs(&state);
+    assert_eq!(outputs.len(), 1, "the wire's signal is asked of the run");
+    assert_eq!(
+        normalized_probe_expression(&outputs[0].source_expression),
+        "v(out)"
+    );
+    let probes = &state.model.schematic.document().probes;
+    assert_eq!(probes.len(), 1, "the probe's marker stays on the wire");
+    assert_eq!(probes[0].position, Point::new(40, 20));
+    assert_eq!(probes[0].reference, "V(OUT)");
+    assert_eq!(
+        state.model.schematic.session.editor.tool, tool_before,
+        "nothing is left armed for a second click"
+    );
+
+    // On the bare canvas there is nothing to probe: the row arms the tool.
+    state.design.interaction.context_target = Some((ContextTarget::Canvas, (200, 200)));
+    execute_context_action(
+        ContextAction::Probe,
+        &mut canvas_parts(&mut state),
+        Point::new(200, 200),
+        &symbol_context,
+    );
+    assert_eq!(state.model.schematic.session.editor.tool, Tool::Probe);
+    assert_eq!(state.model.schematic.document().probes.len(), 1);
+}
