@@ -48,6 +48,61 @@ pub struct AnnotationPolicyDefinition {
     pub imported_ids: ImportedReferencePolicy,
 }
 
+/// What one reserved range holds in a design.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReservedRangeUse {
+    /// How many of its names parts it applies to hold.
+    pub used: usize,
+    /// Its names that parts it does not apply to hold, in name order: the
+    /// names a renumbering in its scope cannot give out.
+    pub foreign: Vec<String>,
+    /// The other ranges that reserve some of the same names, by their place
+    /// in the policy.
+    pub overlapping: Vec<usize>,
+}
+
+impl AnnotationPolicyDefinition {
+    /// What each reserved range holds among `objects`, each holding the name
+    /// its current reference gives, in the policy's order.
+    #[must_use]
+    pub fn reserved_range_use(&self, objects: &[AnnotationObject]) -> Vec<ReservedRangeUse> {
+        self.reserved_ranges
+            .iter()
+            .enumerate()
+            .map(|(index, range)| {
+                let mut used = 0;
+                let mut foreign = Vec::new();
+                for object in objects
+                    .iter()
+                    .filter(|object| annotation_range_holds(range, &object.current_reference))
+                {
+                    if annotation_range_applies(range, object) {
+                        used += 1;
+                    } else {
+                        foreign.push(object.current_reference.clone());
+                    }
+                }
+                foreign.sort();
+                foreign.dedup();
+                let overlapping = self
+                    .reserved_ranges
+                    .iter()
+                    .enumerate()
+                    .filter(|(other, candidate)| {
+                        *other != index && annotation_ranges_overlap(range, candidate)
+                    })
+                    .map(|(other, _)| other)
+                    .collect();
+                ReservedRangeUse {
+                    used,
+                    foreign,
+                    overlapping,
+                }
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnnotationPolicy {

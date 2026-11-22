@@ -193,6 +193,12 @@ pub(super) fn paint_table_cells(
     let height = if header { 27.0 } else { 29.0 };
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    // A row reads as its cells, for whoever cannot see them.
+    if !header {
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, values.join(", "))
+        });
+    }
     ui.painter().rect_filled(
         rect,
         0.0,

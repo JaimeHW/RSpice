@@ -302,3 +302,59 @@ fn sheets_are_numbered_in_page_order() {
         );
     }
 }
+
+/// A reserved range counts the names in it that parts in its scope hold,
+/// names in it that parts outside its scope hold, and the ranges that
+/// reserve some of the same names.
+#[test]
+fn a_reserved_range_reports_the_names_it_holds_and_what_collides_with_it() {
+    let [power, output] = [SheetId::new(), SheetId::new()];
+    let range = |scope, first, last| AnnotationReservedRange {
+        scope,
+        prefixes: vec!["R".to_owned(), "C".to_owned()],
+        first,
+        last,
+    };
+    let policy = AnnotationPolicyDefinition {
+        reserved_ranges: vec![
+            range(AnnotationRangeScope::Project, 1, 99),
+            range(AnnotationRangeScope::Sheet { sheet_id: power }, 100, 199),
+            range(AnnotationRangeScope::Sheet { sheet_id: output }, 200, 299),
+        ],
+        ..AnnotationPolicyDefinition::default()
+    };
+    let on = |id, name: &str, sheet| {
+        let mut object = annotation_object(id, name, 0);
+        object.sheet_id = Some(sheet);
+        object
+    };
+    let uses = policy.reserved_range_use(&[
+        on(1, "R1", power),
+        on(2, "c7", output),
+        on(3, "R150", power),
+        on(4, "R151", output),
+        on(5, "R250", output),
+        on(6, "U150", output),
+        on(7, "R1500", power),
+    ]);
+    // The project range applies everywhere and overlaps no sheet range.
+    assert_eq!(uses[0].used, 2);
+    assert!(uses[0].foreign.is_empty());
+    assert!(uses[0].overlapping.is_empty());
+    // Power's range holds R150; R151 on Output collides with it.
+    assert_eq!(uses[1].used, 1);
+    assert_eq!(uses[1].foreign, ["R151"]);
+    assert_eq!(uses[2].used, 1);
+    assert!(uses[2].foreign.is_empty());
+
+    let overlapping = AnnotationPolicyDefinition {
+        reserved_ranges: vec![
+            range(AnnotationRangeScope::Project, 1, 399),
+            range(AnnotationRangeScope::Sheet { sheet_id: power }, 100, 199),
+        ],
+        ..AnnotationPolicyDefinition::default()
+    };
+    let uses = overlapping.reserved_range_use(&[]);
+    assert_eq!(uses[0].overlapping, [1]);
+    assert_eq!(uses[1].overlapping, [0]);
+}

@@ -246,6 +246,11 @@ impl Default for SubflowInputs {
     }
 }
 
+/// What the annotation read-outs depend on in the draft: its revision, the
+/// annotation policy's revision, how many renumberings and edits the
+/// annotation journal holds, and the open cell view's sheet revision.
+type DraftBasis = (u64, u64, usize, u64);
+
 /// What the Renumber list was worked out from; a change to any of it works
 /// the list out again.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,7 +258,7 @@ struct RenumberBasis {
     scope: RenumberScopeChoice,
     order: RenumberOrder,
     keep: BTreeSet<SchematicObjectKey>,
-    revision: u64,
+    draft: DraftBasis,
 }
 
 /// One part on the Renumber list.
@@ -302,6 +307,8 @@ pub struct DesignManagementDialogState {
     input_baseline: Option<SubflowInputs>,
     /// The Renumber page's list as last worked out.
     renumber_table: Option<RenumberTable>,
+    /// What each reserved range holds, as last worked out, and from what.
+    range_use: Option<(DraftBasis, Vec<crate::state::ReservedRangeUse>)>,
     selection_object_ids: Vec<u64>,
     all_object_ids: Vec<u64>,
     selection_summary: String,
@@ -326,6 +333,7 @@ impl Default for DesignManagementDialogState {
             inputs: SubflowInputs::default(),
             input_baseline: None,
             renumber_table: None,
+            range_use: None,
             selection_object_ids: Vec::new(),
             all_object_ids: Vec::new(),
             selection_summary: "No complete schematic objects selected".to_owned(),
@@ -388,6 +396,19 @@ impl DesignManagementDialogState {
             .as_ref()
             .zip(self.draft.as_ref())
             .is_some_and(|(original, draft)| original != draft)
+    }
+
+    /// What the annotation read-outs depend on in the draft, if it has one.
+    fn draft_basis(&self) -> Option<DraftBasis> {
+        let draft = self.draft.as_ref()?;
+        Some((
+            draft.revision(),
+            draft.annotation().policy().revision(),
+            draft.annotation().journal().len(),
+            draft
+                .sheet_catalog(&self.owner_key)
+                .map_or(0, |catalog| catalog.revision()),
+        ))
     }
 
     pub fn subflow_dirty(&self) -> bool {

@@ -444,6 +444,52 @@ pub(super) fn annotation_prefix(
     Ok(prefix)
 }
 
+/// Whether `range` reserves its names for `object`: the whole project, the
+/// object's sheet, or a hierarchy that holds it.
+pub(super) fn annotation_range_applies(
+    range: &AnnotationReservedRange,
+    object: &AnnotationObject,
+) -> bool {
+    match &range.scope {
+        AnnotationRangeScope::Project => true,
+        AnnotationRangeScope::Sheet { sheet_id } => object.sheet_id == Some(*sheet_id),
+        AnnotationRangeScope::Hierarchy { path } => {
+            hierarchy_contains(path, &object.hierarchy_path)
+        }
+    }
+}
+
+/// Whether `reference`, such as `R150`, is one of the names `range`
+/// reserves: one of its prefixes, then a number within it.
+pub(super) fn annotation_range_holds(range: &AnnotationReservedRange, reference: &str) -> bool {
+    let split = reference
+        .find(|character: char| !character.is_ascii_alphabetic())
+        .unwrap_or(reference.len());
+    let (prefix, number) = reference.split_at(split);
+    range
+        .prefixes
+        .iter()
+        .any(|entry| entry.eq_ignore_ascii_case(prefix))
+        && number
+            .parse::<u32>()
+            .is_ok_and(|number| (range.first..=range.last).contains(&number))
+}
+
+/// Whether two ranges reserve some of the same names.
+pub(super) fn annotation_ranges_overlap(
+    left: &AnnotationReservedRange,
+    right: &AnnotationReservedRange,
+) -> bool {
+    left.first <= right.last
+        && right.first <= left.last
+        && left.prefixes.iter().any(|prefix| {
+            right
+                .prefixes
+                .iter()
+                .any(|other| other.eq_ignore_ascii_case(prefix))
+        })
+}
+
 pub(super) fn matching_annotation_ranges<'a>(
     ranges: &'a [AnnotationReservedRange],
     object: &AnnotationObject,
@@ -453,13 +499,7 @@ pub(super) fn matching_annotation_ranges<'a>(
         .iter()
         .filter(|range| {
             range.prefixes.iter().any(|entry| entry == prefix)
-                && match &range.scope {
-                    AnnotationRangeScope::Project => true,
-                    AnnotationRangeScope::Sheet { sheet_id } => object.sheet_id == Some(*sheet_id),
-                    AnnotationRangeScope::Hierarchy { path } => {
-                        hierarchy_contains(path, &object.hierarchy_path)
-                    }
-                }
+                && annotation_range_applies(range, object)
         })
         .collect::<Vec<_>>();
     matches.sort_by(|left, right| {

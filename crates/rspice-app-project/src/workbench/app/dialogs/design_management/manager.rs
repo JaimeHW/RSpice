@@ -16,7 +16,10 @@ pub(super) fn design_management_manager_body(
     let action = match dialog.active_tab {
         DesignManagementTab::Sheets => sheets_manager_body(ui, dialog, write_allowed),
         DesignManagementTab::Variants => variants_manager_body(ui, dialog, write_allowed),
-        DesignManagementTab::Annotation => annotation_manager_body(ui, dialog, write_allowed),
+        DesignManagementTab::Annotation => {
+            super::operations::refresh_range_use(dialog, workspace, schematic);
+            annotation_manager_body(ui, dialog, write_allowed)
+        }
         DesignManagementTab::Hierarchy => {
             hierarchy_manager_body(ui, dialog, workspace, libraries, schematic, write_allowed)
         }
@@ -454,31 +457,69 @@ pub(super) fn annotation_manager_body(
         let policy = draft.annotation().policy().clone();
         let ranges = policy.definition().reserved_ranges.clone();
         section_header(left, "Reserved ranges", None);
+        const COLUMNS: [f32; 5] = [0.17, 0.13, 0.19, 0.1, 0.41];
         paint_table_header(
             left,
-            &[0.24, 0.19, 0.23, 0.13, 0.21],
+            &COLUMNS,
             &["Scope", "Prefix", "Reserved range", "Used", "Collision"],
         );
         if ranges.is_empty() {
             empty_table_row(left, "No reserved ranges: every prefix numbers from 1.");
         } else {
-            for range in &ranges {
-                let scope = match &range.scope {
-                    AnnotationRangeScope::Project => crate::state::InstancePath::root().to_string(),
-                    AnnotationRangeScope::Sheet { sheet_id } => draft
-                        .sheet_catalog(&dialog.owner_key)
-                        .and_then(|catalog| catalog.find(*sheet_id))
-                        .map_or_else(|| sheet_id.to_string(), |sheet| sheet.name().to_owned()),
-                    AnnotationRangeScope::Hierarchy { path } => path.clone(),
-                };
+            let scope = |range: &AnnotationReservedRange| match &range.scope {
+                AnnotationRangeScope::Project => crate::state::InstancePath::root().to_string(),
+                AnnotationRangeScope::Sheet { sheet_id } => draft
+                    .sheet_catalog(&dialog.owner_key)
+                    .and_then(|catalog| catalog.find(*sheet_id))
+                    .map_or_else(|| sheet_id.to_string(), |sheet| sheet.name().to_owned()),
+                AnnotationRangeScope::Hierarchy { path } => path.clone(),
+            };
+            let uses = dialog.range_use.as_ref().map(|(_, uses)| uses.as_slice());
+            for (index, range) in ranges.iter().enumerate() {
+                let range_use = uses.and_then(|uses| uses.get(index));
+                // A collision is a name in the range that a part outside its
+                // scope holds, or another range reserving the same names.
+                let mut collisions = Vec::new();
+                if let Some(range_use) = range_use {
+                    let foreign = &range_use.foreign;
+                    if !foreign.is_empty() {
+                        let shown = foreign
+                            .iter()
+                            .take(3)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        collisions.push(if foreign.len() > 3 {
+                            format!("{shown} and {} more", foreign.len() - 3)
+                        } else {
+                            shown
+                        });
+                    }
+                    for other in range_use
+                        .overlapping
+                        .iter()
+                        .filter_map(|other| ranges.get(*other))
+                    {
+                        collisions.push(format!(
+                            "overlaps {} {}\u{2026}{}",
+                            scope(other),
+                            other.first,
+                            other.last
+                        ));
+                    }
+                }
                 let values = [
-                    scope,
+                    scope(range),
                     range.prefixes.join(", "),
                     format!("{}\u{2026}{}", range.first, range.last),
-                    annotation_range_used(draft, range).to_string(),
-                    "none".to_owned(),
+                    range_use.map_or_else(String::new, |range_use| range_use.used.to_string()),
+                    if collisions.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        collisions.join("; ")
+                    },
                 ];
-                paint_table_row(left, &[0.24, 0.19, 0.23, 0.13, 0.21], &values, None);
+                paint_table_row(left, &COLUMNS, &values, None);
             }
         }
         toolbar(left, |ui| {
@@ -697,24 +738,4 @@ pub(super) fn hierarchy_manager_body(
         property_row(right, "Configuration digest", &digest);
     });
     action
-}
-
-pub(super) fn annotation_range_used(
-    catalog: &DesignManagementCatalog,
-    range: &AnnotationReservedRange,
-) -> usize {
-    catalog
-        .annotation()
-        .journal()
-        .iter()
-        .flat_map(|entry| entry.mappings().values())
-        .filter(|mapping| {
-            range.prefixes.iter().any(|prefix| {
-                mapping.new_reference.starts_with(prefix)
-                    && mapping.new_reference[prefix.len()..]
-                        .parse::<u32>()
-                        .is_ok_and(|number| number >= range.first && number <= range.last)
-            })
-        })
-        .count()
 }

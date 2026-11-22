@@ -553,7 +553,7 @@ pub(super) fn refresh_renumber_table(
     workspace: &crate::state::ProjectWorkspace,
     schematic: &crate::state::SchematicState,
 ) {
-    let Some(draft) = dialog.draft.as_ref() else {
+    let (Some(draft), Some(draft_basis)) = (dialog.draft.as_ref(), dialog.draft_basis()) else {
         dialog.renumber_table = None;
         return;
     };
@@ -561,7 +561,7 @@ pub(super) fn refresh_renumber_table(
         scope: dialog.inputs.renumber_scope,
         order: dialog.inputs.renumber_order,
         keep: dialog.inputs.renumber_keep.clone(),
-        revision: draft.revision(),
+        draft: draft_basis,
     };
     if dialog
         .renumber_table
@@ -611,6 +611,54 @@ pub(super) fn refresh_renumber_table(
         }
     };
     dialog.renumber_table = Some(table);
+}
+
+/// Work out again what each reserved range holds, if the draft has changed
+/// since: the names the design's parts hold once the draft's renumberings
+/// are applied.
+pub(super) fn refresh_range_use(
+    dialog: &mut DesignManagementDialogState,
+    workspace: &crate::state::ProjectWorkspace,
+    schematic: &crate::state::SchematicState,
+) {
+    let (Some(draft), Some(basis)) = (dialog.draft.as_ref(), dialog.draft_basis()) else {
+        dialog.range_use = None;
+        return;
+    };
+    if dialog
+        .range_use
+        .as_ref()
+        .is_some_and(|(current, _)| *current == basis)
+    {
+        return;
+    }
+    let annotation = draft.annotation();
+    let uses = renumber_request(
+        workspace,
+        schematic,
+        draft,
+        &dialog.owner_key,
+        &SubflowInputs::default(),
+    )
+    .map(|request| {
+        let effective = annotation.effective_mappings();
+        let objects = request
+            .objects
+            .into_iter()
+            .map(|mut object| {
+                if let Some(mapping) = effective.get(&object.object) {
+                    object.current_reference.clone_from(&mapping.new_reference);
+                }
+                object
+            })
+            .collect::<Vec<_>>();
+        annotation
+            .policy()
+            .definition()
+            .reserved_range_use(&objects)
+    })
+    .unwrap_or_default();
+    dialog.range_use = Some((basis, uses));
 }
 
 /// Why the parts cannot be renumbered, in the reader's words where the

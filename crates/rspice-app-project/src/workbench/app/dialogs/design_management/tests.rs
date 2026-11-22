@@ -534,3 +534,62 @@ fn a_part_that_keeps_its_name_is_not_counted_as_a_change() {
         "a part that keeps its name is counted"
     );
 }
+
+/// The Annotation tab's Collision column names what collides with each
+/// reserved range: names in it that parts outside its scope hold, and the
+/// ranges that reserve the same names. Used counts the names in it that
+/// parts in its scope hold.
+#[test]
+fn the_reserved_ranges_table_shows_real_collisions() {
+    let ctx = themed_context();
+    let mut harness = forty_parts_on_two_sheets();
+    let dialog = &mut harness.state.design_management;
+    dialog.reset_inputs_for_page(DesignManagementPage::Manager, None, None);
+    dialog.active_tab = DesignManagementTab::Annotation;
+    let owner = dialog.owner_key.clone();
+    let draft = dialog.draft.as_mut().unwrap();
+    let output = draft
+        .sheet_catalog(&owner)
+        .unwrap()
+        .sheets()
+        .iter()
+        .find(|sheet| sheet.name() == "Output")
+        .unwrap()
+        .id();
+    let range = |scope, first, last| AnnotationReservedRange {
+        scope,
+        prefixes: vec!["R".to_owned()],
+        first,
+        last,
+    };
+    let revision = draft.annotation().policy().revision();
+    let mut definition = draft.annotation().policy().definition().clone();
+    definition.reserved_ranges = vec![
+        range(AnnotationRangeScope::Project, 1, 150),
+        range(AnnotationRangeScope::Sheet { sheet_id: output }, 100, 199),
+    ];
+    draft
+        .annotation_mut()
+        .update_policy(revision, definition)
+        .unwrap();
+
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = frame(&ctx, &mut harness, Vec::new());
+    }
+    // R101 to R120 sit on the first sheet, inside the range Output keeps.
+    assert!(
+        says(
+            &nodes,
+            "Output, R, 100\u{2026}199, 20, R101, R102, R103 and 17 more; overlaps / 1\u{2026}150"
+        ),
+        "the Output range's row does not show its collisions"
+    );
+    assert!(
+        says(
+            &nodes,
+            "/, R, 1\u{2026}150, 40, overlaps Output 100\u{2026}199"
+        ),
+        "the project range's row does not show its overlap"
+    );
+}
