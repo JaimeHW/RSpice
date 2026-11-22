@@ -178,6 +178,7 @@ impl EngineBridge {
             let _ = std::fs::remove_file(&path);
             return Err(SimulationError::Aborted);
         }
+        abort.observe_phase(rspice_core::EnginePhase::Finishing);
         let reader = match inner.into_io() {
             Some(io) => SegmentReader::open(Box::new(io.into_inner().into_file()) as SegmentBytes),
             None => FileIo::open(&path)

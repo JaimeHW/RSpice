@@ -796,6 +796,23 @@ struct RunnerSignal {
     progress: Arc<Mutex<SimulationProgress>>,
     progress_observer: Option<ProgressObserver>,
     live_transient: LiveTransientPublisher,
+    /// What the analysis itself reports under: the status the run returns to once its circuit
+    /// stands, and again once its operating point does.
+    analysis_status: SimulationStatus,
+}
+
+impl RunnerSignal {
+    /// The status that says what the run is doing in `phase`.
+    fn phase_status(&self, phase: rspice_core::EnginePhase) -> SimulationStatus {
+        use rspice_core::EnginePhase;
+        match phase {
+            EnginePhase::Flattening => SimulationStatus::Flattening,
+            EnginePhase::Preparing { devices } => SimulationStatus::Preparing { devices },
+            EnginePhase::OperatingPoint => SimulationStatus::DcOperatingPoint,
+            EnginePhase::Analysis => self.analysis_status.clone(),
+            EnginePhase::Finishing => SimulationStatus::Finishing,
+        }
+    }
 }
 
 impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
@@ -805,7 +822,25 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
 
     fn observe_progress(&self, fraction: f64) {
         let mut p = lock_progress(&self.progress, "observe_progress");
+        // Progress is the analysis's: a run still named by an earlier stage when the analysis
+        // reports some has moved on to the analysis.
+        if fraction > 0.0
+            && matches!(
+                p.status,
+                SimulationStatus::Parsing
+                    | SimulationStatus::Flattening
+                    | SimulationStatus::Preparing { .. }
+            )
+        {
+            p.update_status(self.analysis_status.clone());
+        }
         p.observe_engine_fraction(fraction);
+        notify_progress(&p, self.progress_observer);
+    }
+
+    fn observe_phase(&self, phase: rspice_core::EnginePhase) {
+        let mut p = lock_progress(&self.progress, "observe_phase");
+        p.update_status(self.phase_status(phase));
         notify_progress(&p, self.progress_observer);
     }
 
@@ -1199,27 +1234,9 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         .with_run_log()
         .with_measurement_references(input.measurement_references.clone());
 
-    // Update status: building
-    {
-        let mut p = lock_progress(&progress, "run_simulation_thread(build)");
-        p.update_status(SimulationStatus::Building);
-        notify_progress(&p, progress_observer);
-    }
-
-    // Check for abort
-    if abort_flag.load(Ordering::SeqCst) {
-        let mut p = lock_progress(&progress, "run_simulation_thread(abort-after-build)");
-        p.abort();
-        notify_progress(&p, progress_observer);
-        return Err(SimulationError::Aborted);
-    }
-
-    // Update status based on analysis type.
-    {
-        let mut p = lock_progress(&progress, "run_simulation_thread(status-by-analysis)");
-        p.update_status(initial_status_for_request(&request));
-        notify_progress(&p, progress_observer);
-    }
+    // The run reads its deck until the engine names the stage it has reached: flattening,
+    // preparing its devices, an operating point, then the analysis, whose status it keeps here.
+    let analysis_status = initial_status_for_request(&request);
 
     // Check for abort
     if abort_flag.load(Ordering::SeqCst) {
@@ -1234,6 +1251,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         progress: progress.clone(),
         progress_observer,
         live_transient: LiveTransientPublisher::new(transient_samples, transient_sample_observer),
+        analysis_status,
     };
 
     let publish_checkpoint = |bytes: &[u8]| {

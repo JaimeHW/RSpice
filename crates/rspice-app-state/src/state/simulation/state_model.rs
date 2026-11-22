@@ -46,6 +46,10 @@ pub struct SimulationExecutionState {
     /// The fraction of the running task the engine reports done, while it reports one.
     pub reported_progress: Option<f64>,
 
+    /// What the running task is doing, in the reader's words, while the engine names its stage:
+    /// "Preparing 1,048,576 devices", "DC operating point", "Transient t = 5.2 ns of 10 ns · 52%".
+    pub phase: Option<String>,
+
     /// The span of time the running transient fills, from where its result starts to its stop
     /// time: the X frame an unzoomed strip of it shows while it runs.
     pub live_window: Option<(f64, f64)>,

@@ -558,6 +558,10 @@ pub struct RunStripProjection {
     /// refused.
     pub point_index: usize,
     pub tasks: usize,
+    /// While the run is in flight, the file of the deck it runs, when the deck is a file.
+    pub deck: Option<String>,
+    /// While the run is in flight, the stage the engine has reached, in its own words.
+    pub activity: Option<String>,
     /// What the deck on screen was checked to be, when there is one. Absent
     /// while the strip is describing the manual baseline, which is the deck
     /// somebody typed and was never sealed on a receipt.
@@ -647,6 +651,7 @@ pub fn run_strip_projection(
             .executed_deck_view
             .map(|selection| selection.verification)
     });
+    let running = phase == RunStripPhase::Running;
     Some(RunStripProjection {
         run_id,
         revision: receipt.project_revision().get(),
@@ -656,6 +661,12 @@ pub fn run_strip_projection(
             .executed_deck_view
             .map_or(0, |selection| selection.point),
         tasks,
+        deck: netlist
+            .open_deck
+            .as_ref()
+            .filter(|_| running && active == NetlistRoot::Deck)
+            .map(|deck| deck.root.name()),
+        activity: model.simulation.execution.phase.clone().filter(|_| running),
         verification,
     })
 }
@@ -815,7 +826,7 @@ fn run_strip_statement(
             MessageId::NetlistRunStripEditedTooltip,
         ),
         RunStripPhase::Running => (
-            messages.format(MessageId::NetlistRunStripRunning, &[("id", &run_id)]),
+            messages.format(MessageId::NetlistRunStripRun, &[("id", &run_id)]),
             MessageId::NetlistRunStripRunningTooltip,
         ),
         RunStripPhase::Snapshot => (
@@ -824,15 +835,33 @@ fn run_strip_statement(
         ),
     };
     let revision = projection.revision.to_string();
-    let detail = match projection.point.as_deref() {
-        Some(point) => messages.format(
-            MessageId::NetlistRunStripExecutedPoint,
-            &[("point", point), ("revision", &revision)],
-        ),
-        None => messages.format(
-            MessageId::NetlistRunStripIdentity,
-            &[("revision", &revision)],
-        ),
+    // A run in flight is named by the deck it runs and the stage it has reached, "Run 4 ·
+    // amp.sp · DC operating point": what it is doing, not the bookkeeping it will be filed under.
+    let activity = (projection.phase == RunStripPhase::Running).then(|| {
+        projection
+            .activity
+            .clone()
+            .unwrap_or_else(|| messages.text(MessageId::NetlistRunStripRunning))
+    });
+    let detail = if let Some(activity) = activity {
+        match projection.deck.as_deref() {
+            Some(deck) => messages.format(
+                MessageId::NetlistRunStripRunningDeck,
+                &[("deck", deck), ("activity", &activity)],
+            ),
+            None => activity,
+        }
+    } else {
+        match projection.point.as_deref() {
+            Some(point) => messages.format(
+                MessageId::NetlistRunStripExecutedPoint,
+                &[("point", point), ("revision", &revision)],
+            ),
+            None => messages.format(
+                MessageId::NetlistRunStripIdentity,
+                &[("revision", &revision)],
+            ),
+        }
     };
     (
         messages.format(

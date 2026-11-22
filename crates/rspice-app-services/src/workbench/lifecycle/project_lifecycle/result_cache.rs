@@ -85,6 +85,7 @@ impl CachedResults {
                     progress: _,
                     status: _,
                     reported_progress: _,
+                    phase: _,
                     live_window: _,
                     live_preview_note: _,
                 },

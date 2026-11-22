@@ -17,6 +17,12 @@ pub enum SimulationStatus {
     /// Building circuit matrix
     Building,
 
+    /// Expanding the deck's subcircuit instances into the devices they hold
+    Flattening,
+
+    /// Building the circuit of `devices` flattened devices
+    Preparing { devices: usize },
+
     /// DC operating point calculation
     DcOperatingPoint,
 
@@ -41,6 +47,10 @@ pub enum SimulationStatus {
     /// Post-processing results
     PostProcessing,
 
+    /// Gathering the results once the analysis has run to its end: reading back what the run
+    /// stored, its measurements and its spectra
+    Finishing,
+
     /// Simulation completed successfully
     Completed { elapsed: Duration },
 
@@ -55,6 +65,8 @@ impl SimulationStatus {
             SimulationStatus::Idle => "Idle",
             SimulationStatus::Parsing => "Parsing Netlist",
             SimulationStatus::Building => "Building Circuit",
+            SimulationStatus::Flattening => "Flattening",
+            SimulationStatus::Preparing { .. } => "Preparing",
             SimulationStatus::DcOperatingPoint => "DC Operating Point",
             SimulationStatus::DcSweep { .. } => "DC Sweep",
             SimulationStatus::Transient { .. } => "Transient Analysis",
@@ -63,6 +75,7 @@ impl SimulationStatus {
             SimulationStatus::PoleZero => "Pole-Zero Analysis",
             SimulationStatus::Sensitivity => "Sensitivity Analysis",
             SimulationStatus::PostProcessing => "Post-Processing",
+            SimulationStatus::Finishing => "Finishing",
             SimulationStatus::Completed { .. } => "Completed",
             SimulationStatus::Aborted { .. } => "Aborted",
         }
@@ -96,7 +109,8 @@ impl SimulationStatus {
                     None
                 }
             }
-            SimulationStatus::Completed { .. } => Some(1.0),
+            // The analysis has run to its end; what is left is gathering its results.
+            SimulationStatus::Finishing | SimulationStatus::Completed { .. } => Some(1.0),
             _ => None,
         }
     }
@@ -107,6 +121,8 @@ pub enum WorkerProgressStatus {
     Idle,
     Parsing,
     Building,
+    Flattening,
+    Preparing { devices: usize },
     DcOperatingPoint,
     DcSweep { source: String, progress: f32 },
     Transient { time: f64, stop_time: f64 },
@@ -115,6 +131,7 @@ pub enum WorkerProgressStatus {
     PoleZero,
     Sensitivity,
     PostProcessing,
+    Finishing,
     Completed,
     Aborted,
 }
@@ -125,6 +142,8 @@ impl From<&SimulationStatus> for WorkerProgressStatus {
             SimulationStatus::Idle => Self::Idle,
             SimulationStatus::Parsing => Self::Parsing,
             SimulationStatus::Building => Self::Building,
+            SimulationStatus::Flattening => Self::Flattening,
+            SimulationStatus::Preparing { devices } => Self::Preparing { devices: *devices },
             SimulationStatus::DcOperatingPoint => Self::DcOperatingPoint,
             SimulationStatus::DcSweep { source, progress } => Self::DcSweep {
                 source: source.clone(),
@@ -145,6 +164,7 @@ impl From<&SimulationStatus> for WorkerProgressStatus {
             SimulationStatus::PoleZero => Self::PoleZero,
             SimulationStatus::Sensitivity => Self::Sensitivity,
             SimulationStatus::PostProcessing => Self::PostProcessing,
+            SimulationStatus::Finishing => Self::Finishing,
             SimulationStatus::Completed { .. } => Self::Completed,
             SimulationStatus::Aborted { .. } => Self::Aborted,
         }
@@ -157,6 +177,8 @@ impl From<WorkerProgressStatus> for SimulationStatus {
             WorkerProgressStatus::Idle => Self::Idle,
             WorkerProgressStatus::Parsing => Self::Parsing,
             WorkerProgressStatus::Building => Self::Building,
+            WorkerProgressStatus::Flattening => Self::Flattening,
+            WorkerProgressStatus::Preparing { devices } => Self::Preparing { devices },
             WorkerProgressStatus::DcOperatingPoint => Self::DcOperatingPoint,
             WorkerProgressStatus::DcSweep { source, progress } => {
                 Self::DcSweep { source, progress }
@@ -173,6 +195,7 @@ impl From<WorkerProgressStatus> for SimulationStatus {
             WorkerProgressStatus::PoleZero => Self::PoleZero,
             WorkerProgressStatus::Sensitivity => Self::Sensitivity,
             WorkerProgressStatus::PostProcessing => Self::PostProcessing,
+            WorkerProgressStatus::Finishing => Self::Finishing,
             WorkerProgressStatus::Completed => Self::Completed {
                 elapsed: std::time::Duration::ZERO,
             },

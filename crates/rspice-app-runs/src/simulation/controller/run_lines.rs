@@ -292,6 +292,61 @@ fn platform(target: crate::state::ExecutionTarget) -> &'static str {
     }
 }
 
+/// What the running task is doing, in the reader's words, as the engine names the stage it has
+/// reached: "Flattening", "Preparing 1,048,576 devices", "DC operating point", "Transient
+/// t = 5.2 ns of 10 ns · 52%". `None` once the task has ended, and before it has begun.
+pub(super) fn phase_words(status: &SimulationStatus) -> Option<String> {
+    // "5.2 ns": the digits, a space, then the prefix and the unit.
+    let seconds = |value: f64| {
+        let text = rspice_vocabulary::quantity::engineering::format_engineering_display_with(
+            value,
+            rspice_vocabulary::quantity::engineering::EngineeringPrecision::Adaptive,
+        );
+        let prefix = text.find(char::is_alphabetic).unwrap_or(text.len());
+        format!("{} {}s", &text[..prefix], &text[prefix..])
+    };
+    let percent =
+        |fraction: f32| crate::simulation::status::simulation_progress_percent(f64::from(fraction));
+    Some(match status {
+        SimulationStatus::Idle
+        | SimulationStatus::Completed { .. }
+        | SimulationStatus::Aborted { .. } => return None,
+        SimulationStatus::Parsing => "Reading the deck".to_owned(),
+        SimulationStatus::Building => "Building the circuit".to_owned(),
+        SimulationStatus::Flattening => "Flattening".to_owned(),
+        SimulationStatus::Preparing { devices } => format!(
+            "Preparing {} device{}",
+            grouped(*devices as u64),
+            if *devices == 1 { "" } else { "s" }
+        ),
+        SimulationStatus::DcOperatingPoint => "DC operating point".to_owned(),
+        SimulationStatus::DcSweep { source, progress } => {
+            let sweep = match source.as_str() {
+                "STEP" => "Parametric sweep".to_owned(),
+                "TEMP" => "Temperature sweep".to_owned(),
+                "CORNER" => "Corners".to_owned(),
+                source => format!("DC sweep of {source}"),
+            };
+            format!("{sweep} · {}%", percent(*progress))
+        }
+        SimulationStatus::Transient { time, stop_time } => match status.progress() {
+            Some(fraction) => format!(
+                "Transient t = {} of {} · {}%",
+                seconds(*time),
+                seconds(*stop_time),
+                percent(fraction)
+            ),
+            None => "Transient".to_owned(),
+        },
+        SimulationStatus::AcAnalysis { .. } => "AC analysis".to_owned(),
+        SimulationStatus::NoiseAnalysis { .. } => "Noise analysis".to_owned(),
+        SimulationStatus::PoleZero => "Pole-zero analysis".to_owned(),
+        SimulationStatus::Sensitivity => "Sensitivity analysis".to_owned(),
+        SimulationStatus::PostProcessing => "Post-processing".to_owned(),
+        SimulationStatus::Finishing => "Gathering results".to_owned(),
+    })
+}
+
 /// A count with its thousands grouped: `5,512`.
 pub(super) fn grouped(count: u64) -> String {
     let digits = count.to_string();
@@ -309,6 +364,23 @@ pub(super) fn grouped(count: u64) -> String {
 mod tests {
     use super::*;
     use crate::simulation::controller::test_host::RunTestHost;
+
+    #[test]
+    fn a_run_names_its_stage_with_its_device_count_grouped_and_its_time() {
+        assert_eq!(
+            phase_words(&SimulationStatus::Preparing { devices: 1_048_576 }).as_deref(),
+            Some("Preparing 1,048,576 devices")
+        );
+        assert_eq!(
+            phase_words(&SimulationStatus::Transient {
+                time: 5.2e-9,
+                stop_time: 10e-9
+            })
+            .as_deref(),
+            Some("Transient t = 5.2 ns of 10 ns · 52%")
+        );
+        assert_eq!(phase_words(&SimulationStatus::Idle), None);
+    }
 
     #[test]
     fn counts_group_their_thousands() {

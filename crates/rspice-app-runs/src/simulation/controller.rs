@@ -407,6 +407,11 @@ impl SimulationController {
             .progress_fraction()
             .filter(|_| is_running)
             .map(|fraction| f64::from(fraction).clamp(0.0, 1.0));
+        execution.phase = if is_running {
+            run_lines::phase_words(&self.runner.status())
+        } else {
+            None
+        };
         execution.live_window = live_window;
         if !is_running {
             execution.live_preview_note = None;
@@ -2135,15 +2140,15 @@ impl SimulationController {
             && !matches!(status, SimulationStatus::Completed { .. })
         {
             // Show progress-aware status
+            let phase =
+                run_lines::phase_words(&status).unwrap_or_else(|| status.display_name().to_owned());
             if self.total_analyses > 1 {
                 model.simulation.execution.status = format!(
-                    "Analysis {}/{}: {}",
-                    self.current_analysis_idx,
-                    self.total_analyses,
-                    status.display_name()
+                    "Analysis {}/{}: {phase}",
+                    self.current_analysis_idx, self.total_analyses,
                 );
             } else {
-                model.simulation.execution.status = status.display_name().to_string();
+                model.simulation.execution.status = phase;
             }
         }
 

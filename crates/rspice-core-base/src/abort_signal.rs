@@ -291,9 +291,13 @@ pub enum EnginePhase {
     Preparing { devices: usize },
     /// Solving the DC operating point.
     OperatingPoint,
-    /// The requested analysis itself, once its operating point stands: a transient's stepping,
-    /// whose progress the engine then reports.
+    /// The requested analysis itself: entered once the circuit is built, and again once an
+    /// analysis that solves an operating point first has solved it (a transient's stepping, whose
+    /// progress the engine then reports).
     Analysis,
+    /// Gathering the results once the analysis has run to its end: what a host reads back of
+    /// what the run stored, its measurements and its spectra.
+    Finishing,
 }
 
 //=============================================================================

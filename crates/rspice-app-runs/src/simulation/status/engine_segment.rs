@@ -40,6 +40,13 @@ pub fn simulation_engine_status(
     } else {
         phase
     };
+    // A running task says the stage the engine has reached, in its own words, which carry its
+    // progress where the stage has one.
+    if phase == "running"
+        && let Some(words) = &simulation.execution.phase
+    {
+        return Some(words.clone());
+    }
     Some(format!(
         "Engine {phase} · {}%",
         simulation_progress_percent(simulation.execution.progress)

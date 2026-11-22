@@ -6638,17 +6638,22 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(Box<BuiltRfCircuit>, Option<String>), SimulationError> {
         let mut instance_cards = HashMap::new();
-        self.elaborate_circuit_unlocated(
-            netlist,
-            default_ports,
-            transient_stop_time,
-            reference,
-            leaves_built,
-            flattened,
-            &mut instance_cards,
-            abort,
-        )
-        .map_err(|error| at_instance_card(error, &instance_cards))
+        let built = self
+            .elaborate_circuit_unlocated(
+                netlist,
+                default_ports,
+                transient_stop_time,
+                reference,
+                leaves_built,
+                flattened,
+                &mut instance_cards,
+                abort,
+            )
+            .map_err(|error| at_instance_card(error, &instance_cards))?;
+        // The circuit stands: what runs from here is the analysis, whose own stages (an operating
+        // point first, where it solves one) report themselves.
+        abort.observe_phase(crate::abort_signal::EnginePhase::Analysis);
+        Ok(built)
     }
 
     /// [`Self::elaborate_circuit`] without locating its instance refusals.
