@@ -1,21 +1,21 @@
 //! Bus-tap fields and validation over the canonical bus contract.
 //!
 //! The form asks two questions — which bus, and which of its bits — and shows
-//! the conductors the answer resolves to. It draws no preview: the canvas
+//! the bits the answer resolves to. It draws no preview: the canvas
 //! already draws the real tap under the pointer once the tool is armed, from
 //! the same contract this form publishes.
 
 use crate::session::bus::PendingBusTap;
-use crate::vector_preview::deck_bits;
-use rspice_design::schematic::bus::{BusDeclaration, BusSlice, BusTapOrientation};
+use rspice_design::schematic::bus::{BusDeclaration, BusTapOrientation};
 use rspice_ui_kit::widgets::FormRows;
 
 #[cfg(test)]
 const BUS_EXAMPLE: &str = "DATA[15:0]";
 /// The fields' placeholders: the shape of an answer, never one. A sample
 /// name in the field read as a bus already chosen.
-const BUS_SHAPE: &str = "name[msb:lsb]";
-const SLICE_SHAPE: &str = "name[bit] or name[msb:lsb]";
+pub const BUS_SHAPE: &str = "NAME[msb:lsb]";
+/// The bits are typed bare: the Bus field already names the bus.
+pub const BITS_SHAPE: &str = "bit or msb:lsb";
 const ORIENTATION_LABELS: [&str; 5] = ["Automatic", "Left", "Right", "Up", "Down"];
 
 /// Editable bus-tap form fields, separate from the host modal and document
@@ -62,27 +62,27 @@ impl DraftValidation {
         }
     }
 
-    /// The conductors the drafted tap resolves to, spelled as the deck will
-    /// spell them.
+    /// Every bit the drafted tap takes, in the bus's own notation and in
+    /// the order the tap takes them.
     ///
     /// Only a complete tap resolves, so a draft in progress never shows a
-    /// conductor list the next keystroke invalidates. A tapped bit is named by
-    /// the declaration's base and the member's own index, which is why a tap
-    /// reads the same under either index order: `DATA[7:0]` and `DATA[0:7]`
-    /// both resolve member 3 to `DATA#3`. The names come from the same speller
-    /// the projection uses rather than being assembled again here.
+    /// list the next keystroke invalidates. A tapped bit is named by the
+    /// bus's name and the member's own index, which is why a tap reads the
+    /// same under either index order: `DATA[7:0]` and `DATA[0:7]` both
+    /// resolve member 3 to `DATA[3]`. Every bit is listed, however many: the
+    /// line wraps, and a list with its middle elided has not said which bits
+    /// the tap takes.
     pub fn resolved_bits(&self) -> Option<String> {
         let Self::Valid(pending) = self else {
             return None;
         };
-        Some(deck_bits(
-            &pending.bus_declaration.name,
-            pending
-                .slice
-                .members()
-                .into_iter()
-                .map(|member| member.index),
-        ))
+        let bits: Vec<String> = pending
+            .slice
+            .members()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        Some(bits.join(" "))
     }
 }
 
@@ -93,9 +93,7 @@ pub fn show(
     draft: &mut BusTapFields,
 ) -> Option<egui::Id> {
     let bus = rows.text("Bus", bus_field_id(), &mut draft.bus, BUS_SHAPE);
-    rows.text("Slice", field_id("Slice"), &mut draft.slice, SLICE_SHAPE);
-    // The conductors wrap rather than eliding: a tap on sixteen bits whose
-    // middle is an ellipsis has not said which bits it takes.
+    rows.text("Bits", field_id("Bits"), &mut draft.slice, BITS_SHAPE);
     if let Some(bits) = validation.resolved_bits() {
         rows.derived_mono(&bits);
     }
@@ -115,25 +113,25 @@ fn validate_draft(draft: &BusTapFields) -> DraftValidation {
     let bus = draft.bus.trim();
     let slice = draft.slice.trim();
     if bus.is_empty() && slice.is_empty() {
-        return DraftValidation::Incomplete("Enter the bus and the slice to tap.");
+        return DraftValidation::Incomplete("Enter the bus and the bits to tap.");
     }
     if bus.is_empty() {
-        return DraftValidation::Incomplete("Enter the declared bus, for example DATA[15:0].");
+        return DraftValidation::Incomplete("Enter the bus, for example DATA[15:0].");
     }
     if slice.is_empty() {
-        return DraftValidation::Incomplete("Enter the tap slice, for example DATA[7:0].");
+        return DraftValidation::Incomplete("Enter the bits to tap: one bit, or msb:lsb.");
     }
 
     let declaration = match BusDeclaration::parse(bus) {
         Ok(declaration) => declaration,
-        Err(error) => return DraftValidation::Invalid(format!("Bus: {error}")),
+        Err(error) => return DraftValidation::Invalid(format!("Bus: {error}.")),
     };
-    let slice = match BusSlice::parse(slice) {
+    let slice = match declaration.slice(slice) {
         Ok(slice) => slice,
-        Err(error) => return DraftValidation::Invalid(format!("Slice: {error}")),
+        Err(error) => return DraftValidation::Invalid(format!("Bits: {error}.")),
     };
     if let Err(error) = declaration.validate_slice(&slice) {
-        return DraftValidation::Invalid(error.to_string());
+        return DraftValidation::Invalid(format!("Bits: {error}."));
     }
     match PendingBusTap::new(declaration, slice, draft.orientation) {
         Ok(pending) => DraftValidation::Valid(pending),
@@ -168,6 +166,7 @@ const fn orientation_at(index: usize) -> BusTapOrientation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_design::schematic::bus::BusSlice;
 
     #[test]
     fn incomplete_drafts_never_publish_a_pending_configuration() {
@@ -182,7 +181,9 @@ mod tests {
     #[test]
     fn the_placeholders_are_shapes_not_answers() {
         assert!(BusDeclaration::parse(BUS_SHAPE).is_err());
-        assert!(BusSlice::parse(SLICE_SHAPE).is_err());
+        assert!(BusSlice::parse(BITS_SHAPE).is_err());
+        let bus = BusDeclaration::parse(BUS_EXAMPLE).unwrap();
+        assert!(bus.slice(BITS_SHAPE).is_err());
     }
 
     /// An untouched form has not been refused, but it says why Place is off;
@@ -192,12 +193,12 @@ mod tests {
         let mut draft = BusTapFields::default();
         assert_eq!(
             validate_draft(&draft).status(),
-            Ok(Some("Enter the bus and the slice to tap."))
+            Ok(Some("Enter the bus and the bits to tap."))
         );
         draft.bus = BUS_EXAMPLE.to_owned();
         assert_eq!(
             validate_draft(&draft).status(),
-            Ok(Some("Enter the tap slice, for example DATA[7:0]."))
+            Ok(Some("Enter the bits to tap: one bit, or msb:lsb."))
         );
         draft.slice = "ADDR[7:0]".to_owned();
         assert!(validate_draft(&draft).status().is_err());
@@ -205,7 +206,7 @@ mod tests {
 
     #[test]
     fn valid_scalar_and_slice_targets_are_accepted() {
-        for slice in ["DATA[7]", "DATA[7:0]"] {
+        for slice in ["DATA[7]", "DATA[7:0]", "7", "7:0", " 15 : 8 "] {
             let draft = BusTapFields {
                 bus: BUS_EXAMPLE.to_owned(),
                 slice: slice.to_owned(),
@@ -238,7 +239,7 @@ mod tests {
     /// writing the same bus agree bit for bit — which is the property the deck
     /// depends on, because both drawings must reach the engine as one node.
     ///
-    /// The line states the conductors and nothing else: the bus and the slice
+    /// The line states the bits and nothing else: the bus and the bits typed
     /// are in the two fields directly above it.
     #[test]
     fn a_tap_resolves_to_the_same_deck_bit_under_either_index_order() {
@@ -250,7 +251,7 @@ mod tests {
             };
             assert_eq!(
                 validate_draft(&draft).resolved_bits().as_deref(),
-                Some("DATA#3")
+                Some("DATA[3]")
             );
         }
 
@@ -262,8 +263,21 @@ mod tests {
         };
         assert_eq!(
             validate_draft(&draft).resolved_bits().as_deref(),
-            Some("DATA#3 DATA#2 DATA#1 DATA#0")
+            Some("DATA[3] DATA[2] DATA[1] DATA[0]")
         );
+
+        // A bare range reads the same, in the bus's own brackets, and a wide
+        // tap names every bit it takes rather than eliding the middle.
+        let draft = BusTapFields {
+            bus: "ADDR<0:15>".to_owned(),
+            slice: "0:15".to_owned(),
+            orientation: BusTapOrientation::Automatic,
+        };
+        let bits = validate_draft(&draft).resolved_bits().unwrap();
+        assert!(bits.starts_with("ADDR<0> ADDR<1> "), "{bits}");
+        assert!(bits.contains(" ADDR<8> "), "{bits}");
+        assert!(bits.ends_with(" ADDR<15>"), "{bits}");
+        assert!(!bits.contains('\u{2026}'), "{bits}");
 
         // Nothing resolves until the whole tap does: a selector outside the
         // declared range names no conductor rather than a plausible one.

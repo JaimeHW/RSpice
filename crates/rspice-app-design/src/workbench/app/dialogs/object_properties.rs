@@ -893,29 +893,35 @@ fn validate_tap_draft(
     if current != &draft.original {
         return stale_validation("The selected bus tap changed while properties were open.");
     }
-    if !schematic
+    let Some(source) = schematic
         .document()
         .buses
         .iter()
-        .any(|bus| bus.id == draft.source_bus_id)
-    {
+        .find(|bus| bus.id == draft.source_bus_id)
+    else {
         return DraftValidation::Invalid {
             field: Some(TAP_SOURCE_FIELD),
-            message: "Select a source bus that still exists in this schematic.".to_owned(),
+            message: "Select a bus that still exists in this schematic.".to_owned(),
         };
-    }
+    };
     if draft.slice.trim().is_empty() {
         return DraftValidation::Incomplete {
             field: TAP_SLICE_FIELD,
-            message: "Enter one scalar member or contiguous bus slice.".to_owned(),
+            message: "Enter the bits to tap: one bit, or msb:lsb.".to_owned(),
         };
     }
-    let slice = match BusSlice::parse(draft.slice.trim()) {
+    // Bare bits borrow the chosen bus's name and brackets, as the placement
+    // form reads them.
+    let (name, notation) = source.declaration.as_ref().map_or(
+        (&draft.original.slice.name, draft.original.slice.notation),
+        |declaration| (&declaration.name, declaration.notation),
+    );
+    let slice = match BusSlice::parse_bits(&draft.slice, name, notation) {
         Ok(slice) => slice,
         Err(error) => {
             return DraftValidation::Invalid {
                 field: Some(TAP_SLICE_FIELD),
-                message: format!("Bus tap selector: {error}."),
+                message: format!("Bits: {error}."),
             };
         }
     };

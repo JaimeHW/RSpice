@@ -271,7 +271,12 @@ impl ObjectPropertiesDraft {
                 )
             }
             Self::BusTap(draft) => {
-                let selector_changed = BusSlice::parse(draft.slice.trim()).map_or_else(
+                let selector_changed = BusSlice::parse_bits(
+                    &draft.slice,
+                    &draft.original.slice.name,
+                    draft.original.slice.notation,
+                )
+                .map_or_else(
                     |_| draft.slice != draft.original.slice.to_string(),
                     |slice| slice != draft.original.slice,
                 );
@@ -437,10 +442,10 @@ pub fn show(
         ObjectPropertiesDraft::Bus(draft) => {
             let id = field_id(BUS_DECLARATION_FIELD);
             let response = rows.text(
-                "Bus declaration",
+                "Bus",
                 id,
                 &mut draft.declaration,
-                "DATA[15:0] or DATA<15:0>",
+                crate::bus_tap_placement::BUS_SHAPE,
             );
             focus = Some(id);
             edited |= response.changed();
@@ -460,7 +465,7 @@ pub fn show(
                 .map_or("No bus", |(_, label)| label.as_str())
                 .to_owned();
             if let Some(index) = rows.select(
-                "Source bus",
+                "Bus",
                 "object-properties-tap-source-bus",
                 &selected,
                 &labels,
@@ -472,7 +477,12 @@ pub fn show(
             }
             line_under(rows, None, owns(TAP_SOURCE_FIELD), refusal, None);
             let slice = field_id(TAP_SLICE_FIELD);
-            let response = rows.text("Bits", slice, &mut draft.slice, "DATA[3] or DATA[7:0]");
+            let response = rows.text(
+                "Bits",
+                slice,
+                &mut draft.slice,
+                crate::bus_tap_placement::BITS_SHAPE,
+            );
             focus = Some(slice);
             edited |= response.changed();
             line_under(rows, Some(slice), owns(TAP_SLICE_FIELD), refusal, None);

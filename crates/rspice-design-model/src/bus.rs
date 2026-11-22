@@ -140,6 +140,14 @@ impl BusDeclaration {
         (low..=high).contains(&index)
     }
 
+    /// Read the bits a tap takes from this bus: `3` or `7:0` borrow the bus's
+    /// own name and brackets, so a tap on `DATA[15:0]` need not spell `DATA`
+    /// again; a whole selector (`DATA[3]`) parses as written. Membership is
+    /// left to [`Self::validate_slice`].
+    pub fn slice(&self, input: &str) -> Result<BusSlice, BusParseError> {
+        BusSlice::parse_bits(input, &self.name, self.notation)
+    }
+
     /// Validate one scalar or slice against this bus's declared type.
     pub fn validate_slice(&self, slice: &BusSlice) -> Result<(), BusParseError> {
         self.validate()?;
@@ -200,6 +208,29 @@ impl BusSlice {
     pub fn parse(input: &str) -> Result<Self, BusParseError> {
         let parsed = ParsedBusName::parse(input, true)?;
         Self::new(parsed.name, parsed.msb, parsed.lsb, parsed.notation)
+    }
+
+    /// Read `input` as bits of the bus `name`: `3` or `7:0` borrow `name`
+    /// and `notation`; a whole selector (`DATA[3]`) parses as written.
+    pub fn parse_bits(
+        input: &str,
+        name: &str,
+        notation: BusNotation,
+    ) -> Result<Self, BusParseError> {
+        let input = input.trim();
+        let index = |text: &str| -> Option<u32> {
+            (!text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
+                .then(|| text.parse().ok())
+                .flatten()
+        };
+        let bare = match input.split_once(':') {
+            Some((msb, lsb)) => index(msb.trim()).zip(index(lsb.trim())),
+            None => index(input).map(|bit| (bit, bit)),
+        };
+        match bare {
+            Some((msb, lsb)) => Self::new(name, msb, lsb, notation),
+            None => Self::parse(input),
+        }
     }
 
     pub fn validate(&self) -> Result<(), BusParseError> {
@@ -298,15 +329,13 @@ impl fmt::Display for BusParseError {
             Self::MixedBase { expected, found } => {
                 write!(
                     formatter,
-                    "selector base {found} does not match bus base {expected}"
+                    "the bits name {found}, but the bus is {expected}"
                 )
             }
             Self::MixedNotation => {
-                formatter.write_str("selector delimiter style does not match bus")
+                formatter.write_str("the bits are bracketed differently from the bus")
             }
-            Self::SelectorOutOfRange => {
-                formatter.write_str("selector is outside the declared bus range")
-            }
+            Self::SelectorOutOfRange => formatter.write_str("the bits are outside the bus's range"),
             Self::InvalidGeometry => formatter.write_str("invalid bus or bus-tap geometry"),
             Self::InvalidBusReference => {
                 formatter.write_str("bus tap does not reference its source bus")
@@ -534,6 +563,20 @@ mod tests {
             BusDeclaration::parse("DATA[4096:0]"),
             Err(BusParseError::IndexOutOfRange("4096".to_owned()))
         );
+    }
+
+    /// A tap's bits may be typed bare: the bus already names itself.
+    #[test]
+    fn a_bare_bit_or_range_borrows_the_bus_name_and_brackets() {
+        let square = BusDeclaration::parse("DATA[15:0]").unwrap();
+        assert_eq!(square.slice("3"), BusSlice::parse("DATA[3]"));
+        assert_eq!(square.slice(" 7:0 "), BusSlice::parse("DATA[7:0]"));
+        assert_eq!(square.slice("DATA[4]"), BusSlice::parse("DATA[4]"));
+        let angle = BusDeclaration::parse("ADDR<0:7>").unwrap();
+        assert_eq!(angle.slice("2:5"), BusSlice::parse("ADDR<2:5>"));
+        for nothing in ["", "3:", ":0", "x"] {
+            assert!(square.slice(nothing).is_err(), "{nothing}");
+        }
     }
 
     #[test]

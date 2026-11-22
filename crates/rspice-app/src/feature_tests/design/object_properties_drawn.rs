@@ -370,7 +370,7 @@ fn accessibility_tree_exposes_modal_fields_and_actions() {
         node.role() == egui::accesskit::Role::Dialog && node.label() == Some("Bus properties")
     }));
     assert!(nodes.iter().any(|(_, node)| {
-        node.role() == egui::accesskit::Role::TextInput && node.label() == Some("Bus declaration")
+        node.role() == egui::accesskit::Role::TextInput && node.label() == Some("Bus")
     }));
     for label in [PRIMARY, "Cancel"] {
         assert!(nodes.iter().any(|(_, node)| {
