@@ -46,6 +46,16 @@ pub struct ArraySelectionPreviewCache {
     pub(crate) preview: Result<crate::state::SchematicArrayPreview, String>,
 }
 
+/// What the form keeps from one Create to the next, as Virtuoso's forms
+/// keep their last values.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ArrayFormMemory {
+    count: String,
+    around_a_centre: bool,
+    pitch_x: String,
+    pitch_y: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ArraySelectionDialogState {
     pub open: bool,
@@ -67,7 +77,12 @@ pub struct ArraySelectionDialogState {
     pub(crate) initial_kind: crate::state::SchematicArrayKind,
     pub(crate) initial_count: String,
     pub(crate) initial_naming: String,
+    pub(crate) initial_pitch: (String, String),
     pub(crate) dirty: bool,
+    /// Why the drawing refused the last placement, shown in the form it
+    /// came back to until a field changes.
+    pub refusal: Option<String>,
+    pub(crate) memory: ArrayFormMemory,
 }
 
 impl ArraySelectionDialogState {
@@ -77,14 +92,17 @@ impl ArraySelectionDialogState {
         let kind = SchematicArrayCount::parse(&count)
             .map(SchematicArrayCount::grid_kind)
             .unwrap_or_default();
+        let memory = std::mem::take(&mut self.memory);
+        let (pitch_x, pitch_y) = (memory.pitch_x.clone(), memory.pitch_y.clone());
         *self = Self {
             open: true,
             armed: false,
             kind,
             count,
             naming,
-            pitch_x: String::new(),
-            pitch_y: String::new(),
+            initial_pitch: (pitch_x.clone(), pitch_y.clone()),
+            pitch_x,
+            pitch_y,
             place_typed: false,
             authority: Some(authority),
             canvas: Default::default(),
@@ -94,6 +112,18 @@ impl ArraySelectionDialogState {
             initial_count,
             initial_naming,
             dirty: false,
+            refusal: None,
+            memory,
+        };
+    }
+
+    /// Keep what Create was pressed with for the next time the form opens.
+    fn remember(&mut self) {
+        self.memory = ArrayFormMemory {
+            count: self.count.clone(),
+            around_a_centre: self.kind == SchematicArrayKind::RadialDocumentation,
+            pitch_x: self.pitch_x.clone(),
+            pitch_y: self.pitch_y.clone(),
         };
     }
 
@@ -109,14 +139,16 @@ impl ArraySelectionDialogState {
     pub(crate) fn close(&mut self) {
         *self = Self {
             generation: self.generation.wrapping_add(1),
+            memory: std::mem::take(&mut self.memory),
             ..Self::default()
         };
     }
 
     pub(crate) fn mark_edited(&mut self) {
+        self.refusal = None;
         self.dirty = self.kind != self.initial_kind
-            || !self.pitch_x.trim().is_empty()
-            || !self.pitch_y.trim().is_empty()
+            || self.pitch_x.trim() != self.initial_pitch.0.trim()
+            || self.pitch_y.trim() != self.initial_pitch.1.trim()
             || !equivalent_array_count(&self.count, &self.initial_count)
             || !equivalent_array_naming(&self.naming, &self.initial_naming);
         self.preview_cache = None;
@@ -283,8 +315,14 @@ pub fn open_array_selection_dialog_in(
     if model.schematic_edit_read_only() || array_source_refusal(model).is_some() {
         return;
     }
-    let count = SchematicArrayCount::parse(DEFAULT_COUNT)
-        .expect("the mockup-owned default array count is valid");
+    // The count Create was last pressed with, else the default.
+    let count = SchematicArrayCount::parse(&dialog.memory.count)
+        .ok()
+        .filter(|count| count.member_count() > 1)
+        .unwrap_or_else(|| {
+            SchematicArrayCount::parse(DEFAULT_COUNT)
+                .expect("the mockup-owned default array count is valid")
+        });
     let naming = match model.schematic.default_array_naming(count) {
         Ok(naming) => naming.to_string(),
         Err(error) => {
@@ -303,6 +341,10 @@ pub fn open_array_selection_dialog_in(
         count.to_string(),
         naming,
     );
+    if dialog.memory.around_a_centre && documentation_only(model) {
+        dialog.kind = SchematicArrayKind::RadialDocumentation;
+        dialog.initial_kind = dialog.kind;
+    }
 }
 
 fn field_id(stable: &str) -> Id {
@@ -326,7 +368,8 @@ pub(in crate::workbench) fn render_array_selection_dialog(
     let form_refusal = array_error
         .or(naming_error)
         .map(str::to_owned)
-        .or_else(|| validation.form_refusal());
+        .or_else(|| validation.form_refusal())
+        .or_else(|| dialog.refusal.clone());
     let choice = CommandForm::new(TITLE, PRIMARY)
         .primary_enabled(validation.can_commit())
         .status(match form_refusal.as_deref() {
@@ -348,6 +391,7 @@ pub(in crate::workbench) fn render_array_selection_dialog(
                     SchematicArrayKind::RadialDocumentation => None,
                     _ => typed_pitch(dialog).ok().flatten(),
                 };
+                dialog.remember();
                 dialog.arm();
                 dialog.canvas.anchor = radial_center;
                 if let Some(pitch) = typed {
@@ -503,6 +547,26 @@ pub fn armed_array_selection_plan(
     armed_array_selection_authority(draft, model)?;
     SchematicArrayPlan::parse(draft.kind, &draft.count, &draft.naming, placement)
         .map_err(|error| error.to_string())
+}
+
+/// Put an armed array back in its form as it was filled in, so a count or a
+/// pitch can change: Esc on the canvas does, and so does a placement the
+/// drawing refused, which `refusal` states in the form.
+pub fn return_to_array_form(
+    dialog: &mut ArraySelectionDialogState,
+    model: &mut Model,
+    refusal: Option<String>,
+) {
+    if model.schematic.session.editor.tool == Tool::ArraySelection {
+        model.schematic.cancel_tool();
+    }
+    dialog.open = true;
+    dialog.armed = false;
+    dialog.place_typed = false;
+    dialog.canvas = Default::default();
+    dialog.generation = dialog.generation.wrapping_add(1);
+    dialog.preview_cache = None;
+    dialog.refusal = refusal;
 }
 
 /// End an armed Array: close its dialog, and let its tool go if the

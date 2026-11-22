@@ -37,10 +37,10 @@ use crate::workbench::app::dialogs::selection::commands::{
     schematic_selection_has_live_object,
 };
 use crate::workbench::app::{
-    cancel_armed_array_selection_in, cancel_armed_move_selection_in,
-    cancel_armed_stretch_selection_in, cancel_floating_paste_in, copy_active_schematic_selection,
-    cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
-    paste_schematic_clipboard, select_all_schematic_objects,
+    cancel_armed_move_selection_in, cancel_armed_stretch_selection_in, cancel_floating_paste_in,
+    copy_active_schematic_selection, cut_schematic_selection, delete_schematic_selection,
+    duplicate_schematic_selection, paste_schematic_clipboard, return_to_array_form,
+    select_all_schematic_objects,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
@@ -680,8 +680,9 @@ fn cancel(cx: &mut Cx<'_, DesignFeature>) {
         CancelStep::StretchSelection => {
             cancel_armed_stretch_selection_in(&mut cx.state.stretch_selection, cx.model);
         }
+        // Esc on the canvas goes back to the form as it was filled in.
         CancelStep::ArraySelection => {
-            cancel_armed_array_selection_in(&mut cx.state.array_selection, cx.model);
+            return_to_array_form(&mut cx.state.array_selection, cx.model, None);
         }
         CancelStep::Drawer => cx.wb.close_drawer(),
         CancelStep::ObjectProperties => cx.state.object_properties.close(),

@@ -108,7 +108,7 @@ pub mod workbench {
         pub(crate) use dialogs::selection::array::{
             ArraySelectionDialogState, ArraySelectionPreviewCache, armed_array_selection_authority,
             armed_array_selection_plan, cancel_armed_array_selection_in,
-            open_array_selection_dialog_in,
+            open_array_selection_dialog_in, return_to_array_form,
         };
         pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
         pub(crate) use dialogs::selection::commands::floating::{

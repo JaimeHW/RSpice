@@ -6,7 +6,7 @@ use super::{
 use crate::state::{SchematicArrayPlacement, Tool};
 use crate::workbench::app::{
     ArraySelectionDialogState, armed_array_selection_authority, armed_array_selection_plan,
-    cancel_armed_array_selection_in,
+    cancel_armed_array_selection_in, return_to_array_form,
 };
 use egui::{Response, Ui};
 use rspice_schematic_editor::view::array_interaction::{self, ArrayInputRequest, ArrayInputView};
@@ -119,8 +119,7 @@ fn commit_armed_array_selection(
         }) {
         Ok(plan) => plan,
         Err(message) => {
-            state.design.array_selection.canvas.reset_candidate();
-            state.prompt(format!("Array not created: {message}"));
+            refuse_array(state, format!("Array not created: {message}"));
             return;
         }
     };
@@ -144,15 +143,27 @@ fn commit_armed_array_selection(
     ) {
         Ok(impact) => {
             state.sync_active_schematic_to_workspace();
-            state.prompt(format!("Created {} array members.", impact.replicas));
+            let copies = impact.replicas;
+            state.prompt(format!(
+                "Added {copies} {} ({} members).",
+                if copies == 1 { "copy" } else { "copies" },
+                copies.saturating_add(1)
+            ));
             cancel_armed_array_selection_in(&mut state.design.array_selection, state.model);
         }
-        Err(error) => {
-            state.design.array_selection.canvas.preview_error = Some(error.to_string());
-            state.design.array_selection.canvas.reset_candidate();
-            state.prompt(format!("Array not created: {error}"));
-        }
+        Err(error) => refuse_array(state, format!("Array not created: {error}")),
     }
+}
+
+/// A placement the drawing refused goes back to the form, filled in as it
+/// was and stating why, so the count or the pitch can change.
+fn refuse_array(state: &mut CanvasParts<'_>, message: String) {
+    state.prompt(message.clone());
+    return_to_array_form(
+        &mut state.design.array_selection,
+        state.model,
+        Some(message),
+    );
 }
 
 #[cfg(test)]
@@ -362,8 +373,10 @@ mod tests {
         );
     }
 
+    /// A placement the drawing refuses leaves the drawing as it was and
+    /// returns to the form, filled in as it was and saying why.
     #[test]
-    fn rejected_array_candidate_stays_armed_without_mutating_the_document() {
+    fn a_rejected_array_returns_to_its_form_without_mutating_the_document() {
         let mut state = DesignTestHost::default();
         state
             .model
@@ -395,12 +408,21 @@ mod tests {
         commit_armed_array_selection(&mut canvas_parts(&mut state), &symbols);
 
         assert_eq!(state.model.schematic.document().components.len(), 1);
-        assert!(state.design.array_selection.armed);
-        assert_eq!(
+        let draft = &state.design.array_selection;
+        assert!(!draft.armed && draft.open, "the form is back");
+        assert_eq!(draft.count, "8 \u{00d7} 1");
+        assert!(
+            draft
+                .refusal
+                .as_deref()
+                .is_some_and(|refusal| refusal.starts_with("Array not created:")),
+            "{:?}",
+            draft.refusal
+        );
+        assert_ne!(
             state.model.schematic.session.editor.tool,
             Tool::ArraySelection
         );
-        assert!(state.design.array_selection.canvas.preview_error.is_some());
         assert!(!state.model.schematic.can_undo());
     }
 
@@ -443,8 +465,7 @@ mod tests {
             let refusal = state
                 .design
                 .array_selection
-                .canvas
-                .preview_error
+                .refusal
                 .clone()
                 .unwrap_or_default();
             assert!(refusal.contains("object 3 at"), "{case}: {refusal:?}");

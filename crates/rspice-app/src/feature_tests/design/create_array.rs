@@ -5,7 +5,9 @@ use crate::feature_tests::replay::{PRIMARY, Replay};
 use crate::workbench::app::RSpiceApp;
 use egui::accesskit::Role;
 use rspice_app_design::workbench::design::commands::DesignCommand;
-use rspice_app_state::state::{ComponentType, Point, SchematicArrayKind, SchematicProbe};
+use rspice_app_state::state::{
+    ComponentType, Point, SchematicArrayCount, SchematicArrayKind, SchematicProbe,
+};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 
@@ -118,4 +120,69 @@ fn a_typed_pitch_places_the_array_at_once() {
     xs.sort_unstable();
     // Four drawing units to the millimetre.
     assert_eq!(xs, [0, 100, 200]);
+}
+
+/// Esc on the armed canvas goes back to the form as it was filled in; the
+/// form opens next time with the count Create was last pressed with; and a
+/// placement reports the copies it added and the members the array has.
+#[test]
+fn esc_keeps_the_form_and_create_reports_copies_and_members() {
+    let mut replay = create_array_open();
+    replay.click("Count", Role::TextInput);
+    replay.key(egui::Key::A, PRIMARY);
+    replay.type_text("3x1");
+    replay.click("Create", Role::Button);
+    assert!(replay.app.state.design.array_selection.armed);
+
+    replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    let draft = &replay.app.state.design.array_selection;
+    assert!(draft.open && !draft.armed, "Esc went back to the form");
+    assert_eq!(draft.count, "3\u{00d7}1");
+
+    replay.click("Cancel", Role::Button);
+    assert!(!replay.app.state.design.array_selection.open);
+    replay
+        .app
+        .execute_command_key(DesignCommand::ArraySelection.key());
+    assert_eq!(
+        SchematicArrayCount::parse(&replay.app.state.design.array_selection.count).ok(),
+        SchematicArrayCount::new(3, 1).ok(),
+        "the form remembers its count"
+    );
+
+    replay.click("Pitch (mm) X", Role::TextInput);
+    replay.type_text("25");
+    replay.click("Create", Role::Button);
+    replay.frames(Vec::new());
+    assert_eq!(
+        replay.app.state.prompt_text(),
+        Some("Added 2 copies (3 members).")
+    );
+}
+
+/// A placement the drawing refuses, copies too close to touch, comes back
+/// to the form as it was filled in and says why there.
+#[test]
+fn a_refused_placement_comes_back_to_the_form() {
+    let mut replay = create_array_open();
+    replay.click("Pitch (mm) X", Role::TextInput);
+    replay.type_text("10");
+    replay.click("Create", Role::Button);
+    replay.frames(Vec::new());
+
+    let draft = &replay.app.state.design.array_selection;
+    assert!(draft.open && !draft.armed, "the form is back");
+    assert_eq!(draft.pitch_x, "10");
+    assert!(
+        draft
+            .refusal
+            .as_deref()
+            .is_some_and(|refusal| refusal.starts_with("Array not created:")),
+        "{:?}",
+        draft.refusal
+    );
+    assert_eq!(
+        replay.app.state.model.schematic.document().components.len(),
+        1
+    );
 }
