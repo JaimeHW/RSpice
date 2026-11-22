@@ -150,7 +150,48 @@ impl SoaWorstInterval {
         }
     }
 
-    /// The inspector's sentence.
+    /// The details pane's row under the worst instant: what the interval
+    /// is and where it runs. A passing rule has none.
+    fn detail(self, numbers: SoaNumbers) -> Option<(&'static str, String)> {
+        let span = |start_s, end_s| {
+            format!(
+                "{} \u{2026} {}",
+                numbers.value(start_s, "s"),
+                numbers.value(end_s, "s")
+            )
+        };
+        match self {
+            Self::Passed { .. } => None,
+            Self::NotRetained { .. } => Some(("Interval", "not retained".to_owned())),
+            Self::NotReproduced { .. } => Some(("Interval", "not reproduced".to_owned())),
+            Self::Excursion {
+                qualified,
+                start_s,
+                end_s,
+            } => Some((
+                if qualified {
+                    "Excursion"
+                } else {
+                    "Unqualified excursion"
+                },
+                span(start_s, end_s),
+            )),
+            Self::AboveThreshold {
+                warning,
+                start_s,
+                end_s,
+            } => Some((
+                if warning {
+                    "Warning band"
+                } else {
+                    "Exceedance"
+                },
+                span(start_s, end_s),
+            )),
+        }
+    }
+
+    /// The sentence a copied row carries.
     fn full(self, numbers: SoaNumbers) -> String {
         let instant = |seconds| numbers.value(seconds, "s");
         match self {
@@ -438,7 +479,7 @@ pub fn domain_bar(
 
 /// The rule table's columns' least widths, which together are the width the
 /// table needs before it scrolls sideways.
-const RULE_COLUMN_WIDTHS: [f32; 7] = [96.0, 150.0, 104.0, 104.0, 104.0, 176.0, 76.0];
+const RULE_COLUMN_WIDTHS: [f32; 7] = [72.0, 150.0, 96.0, 88.0, 96.0, 128.0, 76.0];
 
 pub fn show(
     ui: &mut Ui,
@@ -737,6 +778,10 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
         ..
     } = source;
     let margin = evaluation.limit_value - evaluation.worst_actual_value;
+    let interval = facts.map_or_else(
+        || worst_interval(None, None, evaluation),
+        |facts| facts.worst_interval,
+    );
 
     // The limit's own warning and critical fractions are rule settings and
     // live on the verdict's hover; the sample count and the clipped and
@@ -756,51 +801,45 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
             threshold_text(evaluation.thresholds.critical_fraction)
         ),
     );
-    stat_table(
-        ui,
-        &[
-            ("Device", evaluation.device_id.clone(), true),
-            (
-                "Quantity",
-                parameter_label(evaluation.parameter).to_owned(),
-                false,
+    let mut rows = vec![
+        ("Device", evaluation.device_id.clone(), true),
+        (
+            "Quantity",
+            parameter_label(evaluation.parameter).to_owned(),
+            false,
+        ),
+        (
+            "Observed",
+            numbers.value(evaluation.worst_actual_value, &evaluation.unit),
+            true,
+        ),
+        (
+            "Limit",
+            numbers.value(evaluation.limit_value, &evaluation.unit),
+            false,
+        ),
+        ("Rating", evaluation.description.clone(), false),
+        (
+            "Signed margin",
+            format!(
+                "{}{margin_percent}",
+                numbers.difference(margin, &evaluation.unit)
             ),
-            (
-                "Observed",
-                numbers.value(evaluation.worst_actual_value, &evaluation.unit),
-                true,
-            ),
-            (
-                "Limit",
-                numbers.value(evaluation.limit_value, &evaluation.unit),
-                false,
-            ),
-            ("Rating", evaluation.description.clone(), false),
-            (
-                "Signed margin",
-                format!(
-                    "{}{margin_percent}",
-                    numbers.difference(margin, &evaluation.unit)
-                ),
-                true,
-            ),
-            (
-                "Worst at",
-                format!(
-                    "{} ({})",
-                    numbers.value(evaluation.worst_time_s, "s"),
-                    facts
-                        .map_or_else(
-                            || worst_interval(None, None, evaluation),
-                            |facts| facts.worst_interval,
-                        )
-                        .full(numbers)
-                ),
-                false,
-            ),
-            ("Violation events", event_count.to_string(), false),
-        ],
-    );
+            true,
+        ),
+        (
+            "Worst at",
+            numbers.value(evaluation.worst_time_s, "s"),
+            false,
+        ),
+    ];
+    // The interval holding the worst point is a row of its own, named for
+    // what it is, so neither row wraps in a narrow pane.
+    if let Some((name, value)) = interval.detail(numbers) {
+        rows.push((name, value, false));
+    }
+    rows.push(("Violation events", event_count.to_string(), false));
+    stat_table(ui, &rows);
     if let Some(duration) = evaluation.duration {
         stat_table(
             ui,
@@ -1144,7 +1183,7 @@ fn stress_trace_card(
     let fit_clicked = header.fit_clicked;
     egui::Frame::new()
         .fill(t.color.canvas_bg)
-        .inner_margin(egui::Margin::symmetric(8, 7))
+        .inner_margin(PLOT_CARD_MARGIN)
         .show(ui, |ui| {
             // The card is a canvas: its text takes the canvas theme's inks,
             // which a light interface over a dark canvas does not share.
@@ -1621,6 +1660,15 @@ const RULE_TABLE_LEAST_ROWS: f32 = 3.0;
 /// The shortest a plot over the rule table is drawn, however little room
 /// the table leaves it.
 const PLOT_LEAST_HEIGHT: f32 = 120.0;
+/// The canvas around a plot over the rule table: none under it, so the
+/// plot's axis band sits on the table's head band as a plot sheet's sits on
+/// the dock.
+const PLOT_CARD_MARGIN: egui::Margin = egui::Margin {
+    left: 8,
+    right: 8,
+    top: 7,
+    bottom: 0,
+};
 
 /// The device's path in its voltage-current plane against the boundary its
 /// rules draw, the first crossing marked and named as the rule table names
@@ -1662,7 +1710,7 @@ fn locus_card(
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.canvas_bg)
-        .inner_margin(egui::Margin::symmetric(8, 7))
+        .inner_margin(PLOT_CARD_MARGIN)
         .show(ui, |ui| {
             ui.visuals_mut().override_text_color = Some(t.color.canvas_text);
             let ((x_low, x_high), (y_low, y_high)) = locus.axes;
@@ -2009,7 +2057,11 @@ mod tests {
             quantity_policy: QuantityPresentationPolicy::default(),
         };
         assert_eq!(interval.full(numbers), "Warning band: 2 ps to 3 ps");
-        assert_eq!(interval.compact(numbers), "2 ps…3 ps");
+        assert_eq!(interval.compact(numbers), "2 ps \u{2026} 3 ps");
+        assert_eq!(
+            SoaWorstInterval::Passed { worst_s: 1e-6 }.compact(numbers),
+            "at 1 \u{b5}s"
+        );
         assert_eq!(threshold_text(None), "Disabled");
         assert_eq!(threshold_text(Some(1.5)), "150% of limit");
     }
