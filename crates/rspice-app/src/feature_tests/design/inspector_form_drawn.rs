@@ -4,7 +4,7 @@
 
 use crate::workbench::RSpiceApp;
 use rspice_app_design::workbench::design::inspector::component::{
-    BROWSE_MODELS, identity_section, parameters_section,
+    BROWSE_MODELS, SOURCE_FUNCTION, identity_section, parameters_section,
 };
 use rspice_app_design::workbench::design::inspector::inline_instance::field_value;
 use rspice_app_design::workbench::design::inspector::model_evidence::component_model_evidence;
@@ -409,4 +409,64 @@ fn browse_beside_a_model_opens_the_model_browser() {
     let dialog = &panel.app.state.design.tabbed_property_dialog;
     assert!(dialog.open, "the component editor opens");
     assert!(dialog.model_browser.open, "its model browser opens");
+}
+
+/// A source's function is a property: choosing SIN on a DC source swaps it
+/// in place, one undo step, keeping its name, position and wiring and the
+/// values both functions take.
+#[test]
+fn a_sources_function_changes_in_place() {
+    let mut app = RSpiceApp::test_instance();
+    let id = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::VoltageSource, Point::origin());
+    let placed = app.state.model.schematic.document().components[0].clone();
+    let (_, pin) = placed.terminal_positions()[0];
+    let wire = app
+        .state
+        .model
+        .schematic
+        .add_wire(vec![pin, Point::new(pin.x - 40, pin.y)])
+        .expect("a wire on the pin");
+    {
+        let source = &mut app.state.model.schematic.document_mut_for_test().components[0];
+        source.value = "3.3".to_owned();
+        source.params = "ac=1 rs=50".to_owned();
+    }
+    app.state.model.schematic.clear_undo_history();
+    let before = app.state.model.schematic.document().clone();
+    let mut panel = Panel::new(app, id);
+
+    panel.click(SOURCE_FUNCTION);
+    panel.click("SIN");
+    let sine = panel.component();
+    assert_eq!(sine.kind, ComponentType::VoltageSourceSin);
+    assert_eq!(
+        (sine.id, sine.name.as_str()),
+        (placed.id, placed.name.as_str())
+    );
+    assert_eq!(sine.pos, placed.pos);
+    assert_eq!(sine.terminal_positions()[0].1, pin);
+    let document = panel.app.state.model.schematic.document();
+    let kept = document
+        .wires
+        .iter()
+        .find(|candidate| candidate.id == wire)
+        .expect("the wire stays");
+    assert!(kept.points.contains(&pin), "{kept:?}");
+    let params = rspice_app_state::state::parse_params_string(&sine.params);
+    assert_eq!(params.get("ac").map(String::as_str), Some("1"));
+    assert!(
+        !params.contains_key("dc"),
+        "a sine has no DC level: {params:?}"
+    );
+
+    assert!(panel.app.state.model.schematic.undo());
+    assert_eq!(
+        panel.app.state.model.schematic.document().components,
+        before.components
+    );
+    assert!(!panel.app.state.model.schematic.can_undo());
 }

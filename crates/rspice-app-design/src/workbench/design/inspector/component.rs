@@ -690,6 +690,7 @@ pub fn parameters_section(
 ) {
     let editable = !cx.model.schematic_edit_read_only();
     section_header(ui, "Parameters", (!editable).then_some("read-only"));
+    source_function_row(ui, cx, component, editable);
     // Every parameter the component editor offers is present, in its groups,
     // even on a freshly placed instance whose parameter string is still
     // empty. Values the sheet does not declare follow, and are never hidden.
@@ -777,6 +778,209 @@ pub fn parameters_section(
                 component.name
             )),
         }
+    }
+}
+
+/// What an independent source's Function row is called.
+pub const SOURCE_FUNCTION: &str = "Function";
+
+/// The functions a source of `kind`'s quantity can take, each as the part it
+/// is and the keyword its card carries; `None` for anything that is not an
+/// independent source.
+pub fn source_functions(kind: ComponentType) -> Option<Vec<(ComponentType, &'static str)>> {
+    use rspice_design::stimulus_library::definition::{StimulusFamily, StimulusKind};
+    StimulusFamily::of(kind)?;
+    let quantity = StimulusKind::of(kind)?;
+    Some(
+        StimulusFamily::ALL
+            .iter()
+            .map(|family| (family.component_type(quantity), family.label()))
+            .collect(),
+    )
+}
+
+/// An independent source's function, as a choice that swaps it in place.
+fn source_function_row(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, DesignFeature>,
+    component: &Component,
+    editable: bool,
+) {
+    let Some(functions) = source_functions(component.kind) else {
+        return;
+    };
+    let mut selected = format!("{:?}", component.kind);
+    let choices = functions
+        .iter()
+        .map(|(kind, label)| (format!("{kind:?}"), (*label).to_owned()))
+        .collect::<Vec<_>>();
+    if property_row_combo(
+        ui,
+        SOURCE_FUNCTION,
+        ("design-inspector-source-function", component.id),
+        &mut selected,
+        &choices,
+        editable,
+    ) && let Some((target, _)) = functions
+        .iter()
+        .find(|(kind, _)| format!("{kind:?}") == selected)
+    {
+        change_source_function(cx, component, *target);
+    }
+}
+
+/// The part `component` becomes when its function changes to `target`.
+///
+/// A value carries over where the new function takes a property of the
+/// same name, since a SPICE source card names a quantity the same way in
+/// every function that has it: the AC magnitude and phase, the parasitics,
+/// the noise switch and the delay `TD` a pulse and a sine share, and a
+/// pulse's `V1` into an exponential's. The part's value is the new
+/// function's primary property, taken from the old value when the two
+/// share it and from a parameter of that name otherwise, so a DC source's
+/// level becomes an AC source's DC bias and back. Anything the new function
+/// does not take is dropped, which the change reports and an undo restores.
+/// This is how Virtuoso's source cell keeps its common fields when its
+/// source type changes. The name, position, wiring and purchasing fields
+/// are the instance's and stay.
+pub fn source_function_target(
+    registry: &crate::properties::PropertyEditorSchema,
+    component: &Component,
+    target: ComponentType,
+) -> crate::state::SchematicReplacementTargetSpec {
+    use crate::properties::property_bridge::get_primary_property_name;
+    let source_primary = get_primary_property_name(component.kind);
+    let target_primary = get_primary_property_name(target);
+    let declared = crate::state::parse_params_string(&component.params);
+    let sheet = registry.get(target);
+    let declares = |name: &str| sheet.is_some_and(|sheet| sheet.get(name).is_some());
+    let value = if source_primary == target_primary && !component.value.trim().is_empty() {
+        component.value.clone()
+    } else {
+        declared
+            .get(target_primary)
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| target.default_value().to_owned())
+    };
+    let parameters = sheet
+        .map(|sheet| {
+            sheet
+                .iter()
+                .filter(|definition| {
+                    definition.name != "name"
+                        && definition.name != "symbol"
+                        && !definition.name.eq_ignore_ascii_case(target_primary)
+                })
+                .map(|definition| {
+                    let parameter =
+                        crate::state::SchematicReplacementParameter::new(definition.name.clone());
+                    let default = definition.default_value.display_string();
+                    if definition.required && !default.is_empty() {
+                        parameter.required().with_default(default)
+                    } else {
+                        parameter
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let carried_value = if source_primary != target_primary
+        && declares(source_primary)
+        && !component.value.trim().is_empty()
+        && !declared.contains_key(source_primary)
+    {
+        rspice_design::schematic::replacement::format_replacement_parameters(&HashMap::from([(
+            source_primary.to_owned(),
+            component.value.trim().to_owned(),
+        )]))
+    } else {
+        String::new()
+    };
+    let symbol = component.symbol_variant.clone().filter(|variant| {
+        sheet
+            .and_then(|sheet| sheet.get("symbol"))
+            .is_some_and(|definition| {
+                matches!(&definition.default_value, PropertyValue::Enum { options, .. }
+                    if options.contains(variant))
+            })
+    });
+    crate::state::SchematicReplacementTargetSpec::primitive(target)
+        .with_value(value)
+        .with_default_params(carried_value)
+        .with_symbol_variant(symbol)
+        .with_parameters(parameters)
+}
+
+/// Change a source's function in place, as one undo step: the same part on
+/// the same wires, now with the new function's card.
+pub fn change_source_function(
+    cx: &mut Cx<'_, DesignFeature>,
+    component: &Component,
+    target: ComponentType,
+) {
+    if target == component.kind || !commit_pending_inspector_edit(cx.model, cx.wb) {
+        return;
+    }
+    let spec = source_function_target(&cx.state.property_registry, component, target);
+    // The old value goes when the new function has no property of its name.
+    let value_kept = {
+        use crate::properties::property_bridge::get_primary_property_name;
+        let primary = get_primary_property_name(component.kind);
+        component.value.trim().is_empty()
+            || primary == get_primary_property_name(target)
+            || cx
+                .state
+                .property_registry
+                .get(target)
+                .is_some_and(|sheet| sheet.get(primary).is_some())
+    };
+    cx.model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(component.id);
+    let changed = cx
+        .model
+        .schematic
+        .replacement_authority()
+        .and_then(|authority| {
+            cx.model
+                .schematic
+                .replace_selected_instance(&authority, &spec)
+        });
+    match changed {
+        Ok(impact) => {
+            rspice_app_runs::workbench::preflight::invalidate(
+                &mut cx.runs.preflight,
+                &mut *cx.handles.run_controller,
+            );
+            let function = source_functions(target)
+                .and_then(|functions| {
+                    functions
+                        .into_iter()
+                        .find(|(kind, _)| *kind == target)
+                        .map(|(_, label)| label)
+                })
+                .unwrap_or_default();
+            let dropped = impact.dropped_parameters + usize::from(!value_kept);
+            if dropped > 0 {
+                let (values, were) = if dropped == 1 {
+                    ("value", "was")
+                } else {
+                    ("values", "were")
+                };
+                cx.wb.prompt(format!(
+                    "{} is now a {function} source. {dropped} {values} that {function} does not take {were} dropped.",
+                    component.name,
+                ));
+            }
+        }
+        Err(error) => cx.wb.prompt(format!(
+            "The function of {} was not changed: {error}",
+            component.name
+        )),
     }
 }
 
