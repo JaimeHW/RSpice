@@ -413,12 +413,13 @@ fn a_hierarchy_past_a_million_instances_lists_its_nets_once() {
 fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
     let mut app = nested_app(4);
     let expanded = 1 + 32 + 32 * 32 + 32 * 32 * 32 + 32 * 32 * 32 * 32;
-    assert!(expanded > 1_000_000);
+    assert_eq!(expanded, 1_082_401);
 
+    // A count is read as a magnitude, its thousands grouped.
     let shown = frame(&mut app, 1440.0);
     for fact in [
-        format!("{expanded} of {expanded} instances bound"),
-        format!("{expanded} instances"),
+        "1,082,401 of 1,082,401 instances bound",
+        "1,082,401 instances",
     ] {
         assert!(
             shown.says(&fact),

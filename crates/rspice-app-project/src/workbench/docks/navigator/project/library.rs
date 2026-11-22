@@ -54,11 +54,8 @@ pub(super) fn project_library_navigator(
             .iter()
             .any(|model| model.name.to_ascii_lowercase().contains(&query));
     let total = libraries.len() + 1;
-    let visible = libraries
-        .iter()
-        .filter(|(_, _, visible)| *visible)
-        .count()
-        + usize::from(builtin_matches);
+    let visible =
+        libraries.iter().filter(|(_, _, visible)| *visible).count() + usize::from(builtin_matches);
     // The ratio is a fact only while the filter is hiding something; with no
     // filter it reads "3 / 3" on every project.
     section_header(
