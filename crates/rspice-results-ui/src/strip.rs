@@ -40,6 +40,7 @@ pub(crate) const X_SCALE_LABEL: &str = "log X";
 
 /// The chip that returns a zoomed strip to its automatic view.
 const FIT_LABEL: &str = "Fit";
+const EXPRESSION_ACTION_LABEL: &str = "+ Expression";
 
 /// Where the window control `slot` places from the right stands in a header
 /// row spanning `rect`: the rightmost, 0, ends on the rule every row of strip
@@ -141,6 +142,7 @@ fn strip_content_layout(
     kind_natural_width: f32,
     subtitle_natural_width: f32,
     has_legend: bool,
+    legend_natural_width: f32,
 ) -> StripContentLayout {
     let available_width = available_width.max(0.0);
     if available_width == 0.0 {
@@ -187,11 +189,17 @@ fn strip_content_layout(
         0.0
     };
     // The legend is the flexible/scrolling owner. Reserve at most 60 px for
-    // it, then let a bounded subtitle use only the surplus.
+    // it. While every chip still fits beside it, the subtitle takes its whole
+    // width; only a row too full for both bounds it, and it shares the row.
     let legend_reserve = 60.0_f32.min(available_width * 0.24).min(after_kind);
     let legend_gap = HEADER_LEGEND_GAP
         .min((available_width - kind.end() - metadata_gap - legend_reserve).max(0.0));
-    let subtitle_cap = (available_width * 0.32).min(180.0);
+    let beside_whole_legend = available_width
+        - kind.end()
+        - metadata_gap
+        - HEADER_LEGEND_GAP
+        - legend_natural_width.max(0.0);
+    let subtitle_cap = (available_width * 0.32).min(180.0).max(beside_whole_legend);
     let subtitle_budget =
         (available_width - kind.end() - metadata_gap - legend_gap - legend_reserve).max(0.0);
     let subtitle_width = subtitle_natural_width
@@ -550,6 +558,7 @@ impl<'a> StripHeader<'a> {
             kind_natural_width,
             subtitle_natural_width,
             !self.legend.is_empty() || self.expr_action,
+            legend_natural_width(ui, self.legend, self.expr_action),
         );
         let span_rect = |span: HorizontalSpan| {
             Rect::from_min_max(
@@ -646,7 +655,7 @@ impl<'a> StripHeader<'a> {
                         ui.add_space(2.0);
                         if action_chip(
                             ui,
-                            "+ Expression",
+                            EXPRESSION_ACTION_LABEL,
                             "Add an expression trace, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))",
                         )
                         .clicked()
@@ -826,6 +835,44 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// The face a legend chip's name is set in.
+fn legend_chip_font() -> egui::FontId {
+    theme::mono(tokens::FS_0, FontWeight::Regular)
+}
+
+/// A legend chip's width: swatch, gap, name and padding.
+fn legend_chip_width(name_width: f32) -> f32 {
+    6.0 + 14.0 + 5.0 + name_width + 6.0
+}
+
+/// The width the legend's chips, and the expression action after them, take
+/// laid out in a row with nothing scrolled away.
+fn legend_natural_width(ui: &mut Ui, legend: &[LegendChip<'_>], expr_action: bool) -> f32 {
+    const CHIP_SPACING: f32 = 4.0;
+    let chips: f32 = legend
+        .iter()
+        .map(|chip| {
+            let name_width = ui.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(
+                        chip.name.to_owned(),
+                        legend_chip_font(),
+                        egui::Color32::WHITE,
+                    )
+                    .size()
+                    .x
+            });
+            legend_chip_width(name_width) + CHIP_SPACING
+        })
+        .sum();
+    let action = if expr_action {
+        2.0 + action_chip_width(ui, EXPRESSION_ACTION_LABEL) + CHIP_SPACING
+    } else {
+        0.0
+    };
+    chips + action
+}
+
 /// A legend chip: 14×3 color swatch + mono name; dimmed when off.
 fn legend_chip(
     ui: &mut Ui,
@@ -835,15 +882,10 @@ fn legend_chip(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let galley = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            chip.name.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.text_dim,
-        )
-    });
+    let galley =
+        ui.fonts_mut(|f| f.layout_no_wrap(chip.name.to_owned(), legend_chip_font(), c.text_dim));
     let (rect, allocation) = ui.allocate_exact_size(
-        vec2(6.0 + 14.0 + 5.0 + galley.size().x + 6.0, 20.0),
+        vec2(legend_chip_width(galley.size().x), 20.0),
         Sense::hover(),
     );
     let selection_rect = Rect::from_min_max(
