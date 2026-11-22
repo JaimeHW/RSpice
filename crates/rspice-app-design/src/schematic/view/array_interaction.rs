@@ -33,6 +33,13 @@ pub(super) fn handle_armed_array_selection(
         cancel_armed_array_selection_in(&mut state.design.array_selection, state.model);
         return;
     }
+    // A pitch typed in the form places the array now; the pointer has no
+    // pitch to give it.
+    if state.design.array_selection.place_typed {
+        state.design.array_selection.place_typed = false;
+        commit_armed_array_selection(state, symbol_context);
+        return;
+    }
     if let Some(transition) = array_interaction::input(
         ui,
         response,

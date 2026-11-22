@@ -87,3 +87,35 @@ fn the_count_alone_sets_a_row_or_a_grid() {
     assert!(draft.armed, "a 4 x 2 count arms the canvas");
     assert_eq!(draft.kind, SchematicArrayKind::Rectangular);
 }
+
+/// A pitch typed in millimetres places the array at once, the copies that
+/// far apart, with no clicks on the canvas.
+#[test]
+fn a_typed_pitch_places_the_array_at_once() {
+    let mut replay = create_array_open();
+    replay.click("Count", Role::TextInput);
+    replay.key(egui::Key::A, PRIMARY);
+    replay.type_text("3x1");
+    replay.click("Pitch (mm) X", Role::TextInput);
+    replay.type_text("25");
+    replay.click("Create", Role::Button);
+    replay.frames(Vec::new());
+
+    let state = &replay.app.state;
+    assert!(
+        !state.design.array_selection.armed,
+        "nothing waits on the canvas: {:?}",
+        state.prompt_text()
+    );
+    let mut xs: Vec<i32> = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|part| part.pos.x)
+        .collect();
+    xs.sort_unstable();
+    // Four drawing units to the millimetre.
+    assert_eq!(xs, [0, 100, 200]);
+}

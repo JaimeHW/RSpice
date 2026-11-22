@@ -1,11 +1,12 @@
-//! Create array: a count, then the canvas takes the pitch.
+//! Create array: a count and a pitch.
 //!
 //! The count says whether the array is a row, a column or a grid, as
 //! Virtuoso's Rows and Columns and Altium's Paste Array counts do, so there
 //! is no second control to disagree with it; only notes and shapes can also
-//! be arrayed around a centre. Placement is acquired from the canvas after
-//! the draft has been parsed and the immutable schematic authority has been
-//! revalidated.
+//! be arrayed around a centre. A typed pitch places the array at once, as
+//! Virtuoso's Delta X and Delta Y and Altium's spacing do; left blank, the
+//! canvas takes it from two clicks once the draft has been parsed and the
+//! immutable schematic authority has been revalidated.
 //!
 //! The model prints a count as `8 × 1` and a naming range as
 //! `U4…U11 · DATA[0]…DATA[7]`. None of `×`, `…` or `·` is on a keyboard, so
@@ -16,10 +17,11 @@
 use egui::{Context, Id};
 
 use crate::state::{
-    Point, SchematicArrayCount, SchematicArrayKind, SchematicArrayNaming, SchematicArrayPlacement,
-    SchematicArrayPlan, Tool,
+    Point, SchematicArrayCount, SchematicArrayError, SchematicArrayKind, SchematicArrayNaming,
+    SchematicArrayPlacement, SchematicArrayPlan, Tool,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows};
+use rspice_schematic_editor::view::drawing_sheet::DRAWING_SHEET_UNITS_PER_MM;
 
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::dialogs::selection::move_selection::{
@@ -51,6 +53,13 @@ pub struct ArraySelectionDialogState {
     pub kind: crate::state::SchematicArrayKind,
     pub count: String,
     pub naming: String,
+    /// The pitch between members, typed in millimetres; both blank leaves it
+    /// to the canvas.
+    pub pitch_x: String,
+    pub pitch_y: String,
+    /// Create was pressed with a typed pitch: the canvas places the array on
+    /// its next frame without asking for one.
+    pub(crate) place_typed: bool,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
     pub generation: u64,
@@ -74,6 +83,9 @@ impl ArraySelectionDialogState {
             kind,
             count,
             naming,
+            pitch_x: String::new(),
+            pitch_y: String::new(),
+            place_typed: false,
             authority: Some(authority),
             canvas: Default::default(),
             generation: self.generation.wrapping_add(1),
@@ -103,6 +115,8 @@ impl ArraySelectionDialogState {
 
     pub(crate) fn mark_edited(&mut self) {
         self.dirty = self.kind != self.initial_kind
+            || !self.pitch_x.trim().is_empty()
+            || !self.pitch_y.trim().is_empty()
             || !equivalent_array_count(&self.count, &self.initial_count)
             || !equivalent_array_naming(&self.naming, &self.initial_naming);
         self.preview_cache = None;
@@ -147,9 +161,15 @@ struct DraftErrors {
     array: Option<String>,
     count: Option<String>,
     naming: Option<String>,
+    pitch: Option<String>,
 }
 
 impl DraftErrors {
+    fn push_pitch(&mut self, message: String) {
+        append_field_error(&mut self.pitch, &message);
+        self.messages.push(message);
+    }
+
     fn push_array(&mut self, message: String) {
         append_field_error(&mut self.array, &message);
         self.messages.push(message);
@@ -193,6 +213,13 @@ impl DraftValidation {
         }
     }
 
+    fn pitch_error(&self) -> Option<&str> {
+        match self {
+            Self::Invalid(errors) => errors.pitch.as_deref(),
+            Self::Valid => None,
+        }
+    }
+
     fn field_error_details(&self) -> (Option<&str>, Option<&str>, Option<&str>) {
         match self {
             Self::Invalid(errors) => (
@@ -214,7 +241,7 @@ impl DraftValidation {
             .messages
             .iter()
             .filter(|message| {
-                ![&errors.array, &errors.count, &errors.naming]
+                ![&errors.array, &errors.count, &errors.naming, &errors.pitch]
                     .into_iter()
                     .flatten()
                     .any(|field| field.contains(message.as_str()))
@@ -230,7 +257,6 @@ impl DraftValidation {
 /// the first copy is placed, so nothing armed can fail for a reason known
 /// now.
 pub(crate) fn array_source_refusal(model: &Model) -> Option<&'static str> {
-    use crate::state::SchematicArrayError;
     match model.schematic.validate_array_source_selection().err()? {
         SchematicArrayError::ProbeSelectionUnsupported => {
             Some("probes are not copied into an array; leave them out of the selection")
@@ -318,8 +344,16 @@ pub(in crate::workbench) fn render_array_selection_dialog(
                 } else {
                     None
                 };
+                let typed = match dialog.kind {
+                    SchematicArrayKind::RadialDocumentation => None,
+                    _ => typed_pitch(dialog).ok().flatten(),
+                };
                 dialog.arm();
                 dialog.canvas.anchor = radial_center;
+                if let Some(pitch) = typed {
+                    dialog.canvas.preview_delta = pitch;
+                    dialog.place_typed = true;
+                }
                 model.schematic.arm_tool(Tool::ArraySelection);
                 rspice_schematic_editor::view::canvas::request_focus(ctx);
             }
@@ -374,25 +408,34 @@ fn validate_draft(draft: &ArraySelectionDialogState, model: &Model) -> DraftVali
     {
         errors.push_naming(format!("Naming: {error}"));
     }
+    let pitch = match draft.kind {
+        SchematicArrayKind::RadialDocumentation => None,
+        _ => typed_pitch(draft).unwrap_or_else(|error| {
+            errors.push_pitch(error);
+            None
+        }),
+    };
     if let (Some(count), Some(naming)) = (count, naming.as_ref())
         && errors.count.is_none()
         && errors.naming.is_none()
+        && errors.pitch.is_none()
     {
+        let grid = model.schematic.document().grid_size.max(1);
         let placement = match draft.kind {
             SchematicArrayKind::RadialDocumentation => {
                 SchematicArrayPlacement::Center(Point::origin())
             }
-            SchematicArrayKind::Linear => SchematicArrayPlacement::Pitch(Point::new(
-                model.schematic.document().grid_size.max(1),
-                model.schematic.document().grid_size.max(1),
-            )),
-            SchematicArrayKind::Rectangular => SchematicArrayPlacement::Pitch(Point::new(
-                model.schematic.document().grid_size.max(1),
-                model.schematic.document().grid_size.max(1),
-            )),
+            SchematicArrayKind::Linear | SchematicArrayKind::Rectangular => {
+                SchematicArrayPlacement::Pitch(pitch.unwrap_or(Point::new(grid, grid)))
+            }
         };
-        if let Err(error) = SchematicArrayPlan::new(draft.kind, count, naming.clone(), placement) {
-            errors.messages.push(error.to_string());
+        match SchematicArrayPlan::new(draft.kind, count, naming.clone(), placement) {
+            Err(
+                error @ (SchematicArrayError::ZeroPitch
+                | SchematicArrayError::RectangularPitchRequiresTwoAxes),
+            ) => errors.push_pitch(format!("Pitch: {error}")),
+            Err(error) => errors.messages.push(error.to_string()),
+            Ok(_) => {}
         }
     }
     if errors.messages.is_empty() {
@@ -413,6 +456,32 @@ pub fn armed_array_selection_authority(
         DraftValidation::Valid => Ok(()),
         DraftValidation::Invalid(errors) => Err(errors.messages.join(" ")),
     }
+}
+
+/// The typed pitch in drawing units, `None` while both fields are blank. A
+/// blank axis is zero, so a row needs only its X and a column its Y.
+fn typed_pitch(draft: &ArraySelectionDialogState) -> Result<Option<Point>, String> {
+    let (x, y) = (draft.pitch_x.trim(), draft.pitch_y.trim());
+    if x.is_empty() && y.is_empty() {
+        return Ok(None);
+    }
+    let axis = |text: &str| -> Result<i32, String> {
+        if text.is_empty() {
+            return Ok(0);
+        }
+        let units = text
+            .strip_suffix("mm")
+            .unwrap_or(text)
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|mm| (mm * DRAWING_SHEET_UNITS_PER_MM).round())
+            .filter(|units| units.is_finite() && units.abs() <= f64::from(i32::MAX));
+        units.map(|units| units as i32).ok_or_else(|| {
+            format!("Pitch: '{text}' is not a distance in millimetres, such as 5 or 2.5.")
+        })
+    };
+    Ok(Some(Point::new(axis(x)?, axis(y)?)))
 }
 
 /// Whether the selection is only notes and shapes, the one selection that
@@ -525,6 +594,28 @@ fn array_form(
             None => FieldLine::Derived(&names),
         },
     );
+
+    if draft.kind != SchematicArrayKind::RadialDocumentation {
+        let pitch_id = field_id("pitch");
+        let (x, y) = rows.point(
+            "Pitch (mm)",
+            pitch_id,
+            &mut draft.pitch_x,
+            &mut draft.pitch_y,
+        );
+        if x.changed() || y.changed() {
+            draft.mark_edited();
+        }
+        let blank = draft.pitch_x.trim().is_empty() && draft.pitch_y.trim().is_empty();
+        rows.field_line(
+            Some(pitch_id),
+            match validation.pitch_error() {
+                Some(error) => FieldLine::Error(error),
+                None if blank => FieldLine::Derived("Left blank, two clicks on the canvas set it"),
+                None => FieldLine::Blank,
+            },
+        );
+    }
     Some(count_id)
 }
 
