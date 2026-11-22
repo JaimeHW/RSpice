@@ -44,6 +44,7 @@ mod shelf_drag;
 mod snap_resolution;
 pub(crate) mod standard_value_snap;
 pub mod stretch_interaction;
+mod text_entry;
 pub mod violations;
 mod zoom_box;
 
@@ -64,6 +65,7 @@ pub use self::scene::transient_annotation_status;
 use self::shelf_drag::{
     ShelfDropOutcome, can_accept_shelf_drop, commit_shelf_drop, handle_placement_transform_keys,
 };
+pub(crate) use self::text_entry::InstanceTextEntry;
 
 pub(crate) use self::interaction::{
     ensure_probe_visible_with_feedback, ensure_retained_probe_visible_with_feedback,
@@ -608,6 +610,9 @@ pub fn render_schematic_view(
         &response,
         canvas.model.workspace.content.active_view_type(),
     );
+    // After the canvas has claimed the keyboard for the double-click that
+    // opened it, so the entry takes the keyboard back.
+    text_entry::show(ui.ctx(), &mut canvas.parts());
 }
 
 #[cfg(test)]

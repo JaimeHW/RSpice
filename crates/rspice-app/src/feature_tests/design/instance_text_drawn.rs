@@ -5,6 +5,7 @@
 use super::gestures_drawn::Fixture;
 use egui::{Event, Modifiers, PointerButton, Pos2, vec2};
 use rspice_app_state::state::Component;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_design::schematic::label_layout::{self, INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
 use rspice_design::schematic::label_position::{InstanceText, LabelPosition};
 use rspice_schematic_editor::session::drag::DragType;
@@ -148,4 +149,86 @@ fn a_click_on_a_parts_name_selects_the_part() {
     assert_eq!(selection.components.len(), 1);
     assert_eq!(part(&fixture), before, "a click moves nothing");
     assert!(!fixture.app.state.model.schematic.can_undo());
+}
+
+fn key(key: egui::Key) -> Event {
+    Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+/// Double-click the part's `text`, then let the entry take the caret.
+fn double_click(fixture: &mut Fixture, text: InstanceText) {
+    let (x, y) = centre(fixture, text);
+    let at = screen(fixture, x, y);
+    fixture.frame(vec![Event::PointerMoved(at), button(at, true)], true);
+    fixture.frame(vec![button(at, false)], true);
+    fixture.frame(vec![button(at, true)], true);
+    fixture.frame(vec![button(at, false)], true);
+    fixture.frame(vec![], true);
+}
+
+#[test]
+fn a_double_click_on_a_value_edits_it_where_it_stands_as_one_undo_step() {
+    let mut fixture = Fixture::new(false);
+    let before = part(&fixture);
+
+    double_click(&mut fixture, InstanceText::Value);
+    assert!(
+        fixture.app.state.design.interaction.text_entry_open(),
+        "the double-click opened the value's entry"
+    );
+    // What is typed goes to the entry, not to the canvas's keys: R would
+    // turn the part.
+    fixture.frame(
+        vec![key(egui::Key::R), Event::Text("4.7k".to_owned())],
+        true,
+    );
+    fixture.frame(vec![key(egui::Key::Enter)], true);
+
+    let after = part(&fixture);
+    assert_eq!(after.value, "4.7k", "Enter commits the typed value");
+    assert_eq!(after.rotation, before.rotation, "typing turned nothing");
+    assert_eq!(after.pos, before.pos);
+    assert!(!fixture.app.state.design.interaction.text_entry_open());
+    fixture.app.execute_command_key(ids::UNDO);
+    assert_eq!(part(&fixture), before, "one undo puts the value back");
+    assert!(!fixture.app.state.model.schematic.can_undo());
+}
+
+#[test]
+fn a_double_click_on_a_name_renames_the_part_and_escape_leaves_it() {
+    let mut fixture = Fixture::new(false);
+    let before = part(&fixture);
+
+    double_click(&mut fixture, InstanceText::Name);
+    assert!(fixture.app.state.design.interaction.text_entry_open());
+    fixture.frame(vec![Event::Text("R9".to_owned())], true);
+    fixture.frame(vec![key(egui::Key::Escape)], true);
+    assert!(!fixture.app.state.design.interaction.text_entry_open());
+    assert_eq!(part(&fixture), before, "Escape leaves the name as it was");
+
+    // Long enough that egui counts the next two clicks as a double-click of
+    // their own, not as the third and fourth of a triple-click.
+    for _ in 0..40 {
+        fixture.frame(vec![], true);
+    }
+    double_click(&mut fixture, InstanceText::Name);
+    assert!(
+        fixture.app.state.design.interaction.text_entry_open(),
+        "the second double-click opened the name's entry"
+    );
+    fixture.frame(vec![Event::Text("R9".to_owned())], true);
+    fixture.frame(vec![key(egui::Key::Enter)], true);
+    assert_eq!(part(&fixture).name, "R9", "Enter renames the part");
+    fixture.app.execute_command_key(ids::UNDO);
+    assert_eq!(
+        part(&fixture).name,
+        before.name,
+        "one undo puts the name back"
+    );
 }

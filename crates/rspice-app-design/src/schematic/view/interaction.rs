@@ -14,6 +14,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::Model;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
+use rspice_design::schematic::label_position::InstanceText;
 use rspice_schematic_editor::view::documentation_shape_input::{
     self, ShapeInputAction, ShapeInputRequest, ShapeInputTransition, ShapeInputView,
 };
@@ -276,8 +277,24 @@ pub fn handle_tool_interactions(
                 pos,
             )
             .is_some();
+        // A double-click on a part's name or value edits that text where it
+        // stands.
+        let text = match target {
+            Some(PointerTarget::Component(id)) => super::text_entry::editable_text_at(
+                state,
+                symbol_context,
+                viewport,
+                ui.ctx(),
+                pos,
+                id,
+            )
+            .map(|text| (id, text)),
+            _ => None,
+        };
         let action = if on_title_block {
             SelectDoubleClickAction::EditSheetTitle
+        } else if let Some((id, text)) = text {
+            SelectDoubleClickAction::EditText(id, text)
         } else {
             select_double_click_action(state, target, canvas_is_empty_at_pointer)
         };
@@ -334,6 +351,21 @@ pub fn handle_tool_interactions(
                     pos,
                 );
             }
+            SelectDoubleClickAction::EditText(id, text) => {
+                let selection = &mut state.model.schematic.session.editor.selection;
+                selection.select_only_component(id);
+                if let Some(part) = state
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .iter()
+                    .find(|part| part.id == id)
+                    .cloned()
+                {
+                    super::text_entry::open(state, &part, text, pos);
+                }
+            }
             SelectDoubleClickAction::EditSheetTitle => super::context_menu::show_sheet_properties(
                 state,
                 Some(crate::state::DrawingSheetTitleFieldId::SheetTitle),
@@ -382,6 +414,8 @@ enum SelectDoubleClickAction {
     OpenVerilogA(u64),
     ActivateRequirement(u64),
     OpenProperties,
+    /// Edit a part's name or value where it stands.
+    EditText(u64, InstanceText),
     EditSheetTitle,
     Ascend,
     None,

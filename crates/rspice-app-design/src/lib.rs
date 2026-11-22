@@ -202,7 +202,7 @@ pub mod workbench {
             design_checks, design_history, diagnostic_store, model, waivers,
         };
         pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts::{
-            accessibility_shortcut_summary, report_engineering_canvas_focus,
+            accessibility_shortcut_summary, report_engineering_canvas_focus, report_escape_owner,
             request_engineering_canvas_focus, return_engineering_canvas_focus,
             runtime_command_platform,
         };

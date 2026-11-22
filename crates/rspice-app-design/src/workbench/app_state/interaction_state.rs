@@ -46,11 +46,21 @@ pub struct InteractionState {
     /// This is device-local presentation state and never project data.
     #[serde(skip)]
     pub(crate) schematic_keyboard_focus: Option<SchematicKeyboardFocus>,
+
+    /// The entry a double-click opened over a part's name or value.
+    #[serde(skip)]
+    pub(crate) text_entry: Option<crate::schematic::view::InstanceTextEntry>,
 }
 
 pub use rspice_schematic_editor::view::context_menu::ContextTarget;
 
 impl InteractionState {
+    /// Whether the entry over a part's name or value is open.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn text_entry_open(&self) -> bool {
+        self.text_entry.is_some()
+    }
+
     /// Clear all transient state
     #[cfg(test)]
     pub fn clear(&mut self) {
@@ -60,6 +70,7 @@ impl InteractionState {
         self.last_click_pos = None;
         self.hover_wire_vertex = None;
         self.context_target = None;
+        self.text_entry = None;
         self.schematic_keyboard_focus = None;
     }
 }
