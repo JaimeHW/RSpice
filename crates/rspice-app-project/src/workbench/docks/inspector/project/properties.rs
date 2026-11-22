@@ -40,12 +40,20 @@ pub(super) fn project_properties(
     let mut edit = ProjectPropertiesEdit::default();
 
     section_header(ui, "Project", None);
-    edit.name = edited_text(ui, "Name", &properties.name, refusal, |text| {
-        project_name(text).err()
-    });
-    edit.description = edited_text(ui, "Description", &properties.description, refusal, |_| {
-        None
-    });
+    edit.name = edited_text(
+        ui,
+        "Name",
+        &properties.name,
+        (refusal, inspector.focus_name),
+        |text| project_name(text).err(),
+    );
+    edit.description = edited_text(
+        ui,
+        "Description",
+        &properties.description,
+        (refusal, false),
+        |_| None,
+    );
     // A path is told apart by its end, so it is cut in the middle.
     property_row_path(
         ui,
@@ -129,12 +137,12 @@ fn runs_use(
 /// when it differs from `value` and `refuse` has nothing against it; Escape
 /// puts the value back. While `refuse` objects, the field is marked and says
 /// why on hover. A read-only project shows `value` as a fact, `read_only` on
-/// hover.
+/// hover. A field asked to take the keys (`focus`) takes them as it draws.
 fn edited_text(
     ui: &mut Ui,
     label: &str,
     value: &str,
-    read_only: Option<&'static str>,
+    (read_only, focus): (Option<&'static str>, bool),
     refuse: impl Fn(&str) -> Option<String>,
 ) -> Option<String> {
     if let Some(read_only) = read_only {
@@ -147,6 +155,9 @@ fn edited_text(
         .unwrap_or_else(|| value.to_owned());
     let refusal = refuse(&text);
     let response = property_row_input(ui, label, &mut text, refusal.is_some());
+    if focus {
+        response.request_focus();
+    }
     let response = match &refusal {
         Some(refusal) => response.on_hover_text(refusal),
         None => response,

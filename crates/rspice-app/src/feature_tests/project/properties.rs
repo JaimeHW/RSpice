@@ -1,22 +1,25 @@
-//! Project properties through whole application frames: opened from the
-//! project's name or the palette, it changes the name,
-//! description, top cell and include search paths. What it applies survives
-//! save and reopen, each Apply is one step of Undo, and runs without a
-//! configuration start at the top it sets, as they do after Set as project
-//! top in Cell actions.
+//! Project properties through whole application frames: File > Project
+//! properties… shows the project inspector beside the Overview with its Name
+//! taking the keys; the inspector changes the name, description and top
+//! cell, and the Dependencies page the include search paths. What they apply
+//! survives save and reopen, each change is one step of Undo, and runs
+//! without a configuration start at the top it sets, as they do after Set as
+//! project top in Cell actions.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
 
 use egui::accesskit::Role;
+use egui::{Key, Modifiers};
 
-use super::super::replay::{Control, Replay, only};
+use super::super::replay::{Control, PRIMARY, Replay, only};
 use super::recovery_frames::painted;
 use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference::{
     self, AMP_CELL, SCHEMATIC_VIEW, TOP_CELL, USER_LIBRARY,
 };
+use rspice_app_project::workbench::project::library_dialogs::library_files::answer_next_folder_pick;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::CellViewRef;
@@ -35,9 +38,6 @@ fn saved_reference(folder: &Path, page: ProjectPage) -> (Replay, PathBuf) {
     assert!(app.state.save_project_to_path(&path));
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = page;
-    // The project inspector edits the same fields in place: closed, the
-    // dialog's are the only ones on screen.
-    app.state.workbench.inspector_visible = false;
     (Replay::of(app), path)
 }
 
@@ -65,102 +65,99 @@ fn schematic(cell: &str) -> CellViewRef {
     CellViewRef::new(USER_LIBRARY, cell, SCHEMATIC_VIEW)
 }
 
-/// The name the Overview header shows, read from its link.
-fn header_name(controls: &[Control]) -> String {
-    controls
-        .iter()
-        .find(|control| control.role == Role::Link && control.label.starts_with("Project "))
-        .map(|control| control.label["Project ".len()..].to_owned())
-        .expect("the header names the project")
+fn project_name(replay: &Replay) -> String {
+    replay
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .properties()
+        .name
 }
 
-/// The project's description as Project properties shows it; the dialog is
-/// closed again with Cancel.
-fn shown_description(replay: &mut Replay) -> String {
-    let opened = replay.choose_command(PALETTE);
-    let description = only(&opened, "Description", Role::MultilineTextInput)
+/// What the inspector's field `label` holds.
+fn field(replay: &mut Replay, label: &str) -> String {
+    only(&replay.frames(Vec::new()), label, Role::TextInput)
         .value
-        .clone();
-    replay.click("Cancel", Role::Button);
-    description
+        .clone()
 }
 
-/// Whether Project properties is open: its Name field is on screen.
-fn is_open(controls: &[Control]) -> bool {
-    controls
-        .iter()
-        .any(|control| control.role == Role::TextInput && control.label == "Name")
+/// Type `text` over what the inspector's field `label` holds, and leave it
+/// with Enter, which applies it.
+fn retype(replay: &mut Replay, label: &str, text: &str) {
+    replay.click(label, Role::TextInput);
+    replay.key(Key::A, PRIMARY);
+    replay.type_text(text);
+    replay.key(Key::Enter, Modifiers::NONE);
 }
 
-/// The name, description, top cell and an include search path, changed in
-/// one Apply from the dialog the project's name opens, are what the project
+/// The inspector's Top cell set to `cell` of the user library.
+fn choose_top(replay: &mut Replay, cell: &str) {
+    replay.click("Top cell", Role::ComboBox);
+    click_named(replay, &format!("{USER_LIBRARY}/{cell}"));
+}
+
+/// File > Project properties…, from any page and with the inspector hidden,
+/// shows the project inspector beside the Overview, with nothing selected
+/// and the project's Name taking the keys: what is typed renames the
+/// project.
+#[test]
+fn project_properties_lands_on_the_inspector_with_the_name_taking_the_keys() {
+    let folder = unique_temp_dir("project-properties-command");
+    let (mut replay, _) = saved_reference(&folder, ProjectPage::Dependencies);
+    replay.app.state.workbench.inspector_visible = false;
+    replay.frames(Vec::new());
+
+    replay.choose_command(PALETTE);
+    let state = &replay.app.state;
+    assert_eq!(state.workbench.workspace, Workspace::Project);
+    assert_eq!(state.project.project_page, ProjectPage::Overview);
+    assert!(state.workbench.inspector_visible, "the inspector is shown");
+    let shown = replay.frames(Vec::new());
+    assert_eq!(
+        only(&shown, "Name", Role::TextInput).value,
+        project_name(&replay)
+    );
+
+    replay.key(Key::A, PRIMARY);
+    replay.type_text("Bandgap reference");
+    replay.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(project_name(&replay), "Bandgap reference");
+    std::fs::remove_dir_all(folder).ok();
+}
+
+/// The name, description and top cell changed in the inspector, and an
+/// include search path added on the Dependencies page, are what the project
 /// opens with after it is saved and opened again.
 #[test]
 fn what_project_properties_applies_survives_save_and_reopen() {
     let folder = unique_temp_dir("project-properties-reopen");
     std::fs::create_dir_all(folder.join("models")).unwrap();
     let (mut replay, path) = saved_reference(&folder, ProjectPage::Overview);
-    let name = header_name(&replay.frames(Vec::new()));
 
-    let opened = replay.click(&format!("Project {name}"), Role::Link);
-    assert_eq!(only(&opened, "Name", Role::TextInput).value, name);
-    assert_eq!(
-        only(&opened, "Description", Role::MultilineTextInput).value,
-        ""
-    );
-    let shown = painted(&replay.frame(Vec::new()));
-    for fact in [
-        "Project properties",
-        "user/top",
-        "reference.rspiceproj",
-        "Runs use configuration Reference hierarchy, which starts at user/top/schematic.",
-    ] {
-        assert!(shown.contains(fact), "the dialog shows {fact:?}:\n{shown}");
-    }
-
-    // The name has the caret with its text selected: typing replaces it.
-    replay.type_text("Bandgap reference");
-    replay.click("Description", Role::MultilineTextInput);
-    replay.type_text("Bias for the converter tests");
-    replay.click("Top cell", Role::ComboBox);
-    replay.click("user/amp", Role::ListBoxOption);
-    replay.click("Include search paths", Role::TextInput);
-    replay.type_text("models");
-    let added = replay.click("Add include search path", Role::Button);
-    assert!(
-        added
-            .iter()
-            .any(|control| control.role == Role::Button && control.label == "Remove models"),
-        "the path is listed, with its remove button, once added"
-    );
-    let applied = replay.click("Apply", Role::Button);
-    assert!(!is_open(&applied), "Apply closes the dialog");
-    assert_eq!(header_name(&applied), "Bandgap reference");
+    retype(&mut replay, "Name", "Bandgap reference");
+    retype(&mut replay, "Description", "Bias for the converter tests");
+    choose_top(&mut replay, AMP_CELL);
+    replay.app.state.project.project_page = ProjectPage::Dependencies;
+    answer_next_folder_pick(&folder.join("models"));
+    replay.click("Add", Role::Button);
+    click_named(&mut replay, "Include path\u{2026}");
     assert!(replay.app.state.save_project_to_path(&path));
+    // The project is let go before it is opened again, so the second
+    // session does not find it held and open it read-only.
+    drop(replay);
 
     let mut reopened = RSpiceApp::test_instance();
     assert!(reopened.state.load_project_from_path(&path));
     reopened.state.workbench.activate(Workspace::Project);
     reopened.state.project.project_page = ProjectPage::Overview;
-    reopened.state.workbench.inspector_visible = false;
     let mut reopened = Replay::of(reopened);
+    assert_eq!(field(&mut reopened, "Name"), "Bandgap reference");
     assert_eq!(
-        header_name(&reopened.frames(Vec::new())),
-        "Bandgap reference"
-    );
-    let opened = reopened.choose_command(PALETTE);
-    assert_eq!(
-        only(&opened, "Name", Role::TextInput).value,
-        "Bandgap reference"
-    );
-    assert_eq!(
-        only(&opened, "Description", Role::MultilineTextInput).value,
+        field(&mut reopened, "Description"),
         "Bias for the converter tests"
-    );
-    assert!(
-        opened
-            .iter()
-            .any(|control| control.role == Role::Button && control.label == "Remove models")
     );
     let shown = painted(&reopened.frame(Vec::new()));
     assert!(shown.contains("user/amp"), "{shown}");
@@ -174,56 +171,40 @@ fn what_project_properties_applies_survives_save_and_reopen() {
 }
 
 /// With no configuration used for runs, runs start at the top cell the
-/// dialog sets. Each Apply is one step of Undo, and Undo takes back the
+/// inspector sets. Each change is one step of Undo, and Undo takes back the
 /// top cell, the description and the name in turn.
 #[test]
-fn each_apply_is_one_step_of_undo_and_runs_start_at_the_top_it_sets() {
+fn each_change_is_one_step_of_undo_and_runs_start_at_the_top_it_sets() {
     let folder = unique_temp_dir("project-properties-undo");
     let (mut replay, _) = saved_reference(&folder, ProjectPage::Overview);
     run_without_a_configuration(&mut replay);
-    let name = header_name(&replay.frames(Vec::new()));
+    let name = project_name(&replay);
     assert_eq!(runs_start_at(&replay), schematic(TOP_CELL));
 
-    replay.choose_command(PALETTE);
-    let shown = painted(&replay.frame(Vec::new()));
-    assert!(
-        shown.contains("Runs start here: no configuration is used for runs."),
-        "{shown}"
-    );
-    replay.type_text("Renamed");
-    replay.click("Apply", Role::Button);
-
-    replay.choose_command(PALETTE);
-    replay.click("Description", Role::MultilineTextInput);
-    replay.type_text("Described");
-    replay.click("Apply", Role::Button);
-
-    replay.choose_command(PALETTE);
-    replay.click("Top cell", Role::ComboBox);
-    replay.click("user/amp", Role::ListBoxOption);
-    let applied = replay.click("Apply", Role::Button);
-    assert!(!is_open(&applied));
+    retype(&mut replay, "Name", "Renamed");
+    retype(&mut replay, "Description", "Described");
+    choose_top(&mut replay, AMP_CELL);
     assert_eq!(runs_start_at(&replay), schematic(AMP_CELL));
 
     replay.app.execute_command_key(ids::UNDO);
     assert_eq!(runs_start_at(&replay), schematic(TOP_CELL));
-    assert_eq!(shown_description(&mut replay), "Described");
+    assert_eq!(field(&mut replay, "Description"), "Described");
 
     replay.app.execute_command_key(ids::UNDO);
-    assert_eq!(shown_description(&mut replay), "");
-    assert_eq!(header_name(&replay.frames(Vec::new())), "Renamed");
+    assert_eq!(field(&mut replay, "Description"), "");
+    assert_eq!(project_name(&replay), "Renamed");
 
     replay.app.execute_command_key(ids::UNDO);
-    assert_eq!(header_name(&replay.frames(Vec::new())), name);
+    assert_eq!(project_name(&replay), name);
     assert_eq!(runs_start_at(&replay), schematic(TOP_CELL));
 
     // Redo puts them forward again, in the order they were made.
     replay.app.execute_command_key(ids::REDO);
-    assert_eq!(header_name(&replay.frames(Vec::new())), "Renamed");
+    assert_eq!(project_name(&replay), "Renamed");
     replay.app.execute_command_key(ids::REDO);
     replay.app.execute_command_key(ids::REDO);
     assert_eq!(runs_start_at(&replay), schematic(AMP_CELL));
-    assert_eq!(shown_description(&mut replay), "Described");
+    assert_eq!(field(&mut replay, "Description"), "Described");
     std::fs::remove_dir_all(folder).ok();
 }
 

@@ -51,6 +51,7 @@ fn announced(
                     workspace: state.workbench.workspace,
                     presentation: &*state.results.results,
                 },
+                focus_name: false,
             };
             let _ = project_library(ui, &inspector);
         });

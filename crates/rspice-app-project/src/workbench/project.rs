@@ -95,7 +95,7 @@ impl Feature for ProjectFeature {
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
 /// order lists them by, in that order: New project, Check and save, Design
-/// management, Revision history, Project properties, the configuration dialogs, New Cell, New
+/// management, Revision history, the configuration dialogs, New Cell, New
 /// View, Copy Cell, Rename Cell, the deletion review and the staged
 /// deletion. Then the library and view membership dialogs the Library
 /// surface draws, which hold a modal gate while open. Each is open while its
@@ -123,11 +123,6 @@ const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
         key: DialogKey("project.project_revision_history"),
         is_open: |project| project.project_revision_history.open,
         render: ProjectFeature::render_project_revision_history_dialog,
-    },
-    FeatureDialog {
-        key: DialogKey("project.properties"),
-        is_open: |project| project.project_properties.is_open(),
-        render: ProjectFeature::render_project_properties_dialog,
     },
     FeatureDialog {
         key: DialogKey("project.configuration"),
@@ -402,6 +397,7 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
     let model = &*cx.model;
     let library_shown =
         crate::workbench::surfaces::project::library::shown_selection(model, cx.state);
+    let focus_name = std::mem::take(&mut cx.state.focus_project_name);
     let project = &mut *cx.state;
     let action = crate::workbench::docks::inspector::project::project(
         ui,
@@ -421,6 +417,7 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             model,
             facts: cx.runs.slot_facts(cx.peers.design().review_markers()),
             lifecycle: lifecycle_view(model, cx.platform, cx.wb, &cx.peers),
+            focus_name,
         },
     );
     match action {
@@ -761,7 +758,15 @@ impl CommandSet for ProjectCommand {
                 cx.model,
                 cx.platform,
             ),
-            Self::Properties => cx.state.project_properties.open(cx.model, cx.platform),
+            // The project's properties are edited in the project inspector,
+            // beside the Overview, which selects nothing: the inspector is
+            // shown and its Name takes the keys.
+            Self::Properties => {
+                cx.wb.activate(Workspace::Project);
+                cx.state.project_page = ProjectPage::Overview;
+                cx.wb.inspector_visible = true;
+                cx.state.focus_project_name = true;
+            }
             // Saving a symbol in front runs its checks, so Check and save
             // there is the save itself.
             Self::CheckAndSave

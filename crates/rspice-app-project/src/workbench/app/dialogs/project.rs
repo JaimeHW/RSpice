@@ -9,11 +9,8 @@
 pub mod configuration;
 pub mod configuration_dialogs;
 pub mod new_project;
-mod properties;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod save_conflict;
-
-pub use properties::ProjectPropertiesDialogState;
 
 /// Retained draft for the mockup-owned project technology transaction.
 /// Selection remains isolated until the primary action verifies every pinned

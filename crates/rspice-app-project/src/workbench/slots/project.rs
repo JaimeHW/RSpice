@@ -166,8 +166,9 @@ pub struct ProjectState {
     pub library_deletion_review:
         crate::workbench::project::workspace_state::LibraryDeletionReviewState,
 
-    /// The open project's properties, while their dialog is open.
-    pub project_properties: crate::workbench::app::dialogs::project::ProjectPropertiesDialogState,
+    /// File > Project properties… asked the project inspector's Name to
+    /// take the keys; the inspector takes it the next time it draws.
+    pub focus_project_name: bool,
 
     /// Reviewed identity for the project File > New is about to create.
     pub new_project: crate::workbench::app::dialogs::project::new_project::NewProjectDialogState,
@@ -243,7 +244,6 @@ impl ProjectState {
     /// project going away.
     pub fn on_project_changed(&mut self) {
         self.check_and_save.close();
-        self.project_properties.close();
         self.project_library_filter.clear();
         self.builtin_models.open = false;
         self.builtin_models.source = None;

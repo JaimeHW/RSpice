@@ -246,7 +246,7 @@ fn revision_text(model: &Model, library: &str, file: &LibraryFile) -> Option<Str
 }
 
 /// When a save last wrote a view with a change, on the reader's clock, as
-/// Project properties states the project's own save.
+/// the project inspector states the project's own save.
 fn saved_time(unix_ms: u64) -> Option<String> {
     let stamp = crate::time_compat::local_date_time(unix_ms)?;
     Some(format!(

@@ -53,6 +53,9 @@ pub struct ProjectInspector<'a> {
     pub facts: SlotFacts,
     /// Read for how many documents a save would write.
     pub lifecycle: LifecycleView<'a>,
+    /// Whether the project's Name takes the keys as the inspector draws:
+    /// File > Project properties… asked for it.
+    pub focus_name: bool,
 }
 
 /// Which of the Library page's selected cell and view its find lists. A
@@ -150,10 +153,6 @@ pub fn inspects_project(
         ProjectPage::Dependencies => dependency_selection.is_none(),
         ProjectPage::Recovery => checkpoint_selection.is_none(),
     }
-}
-
-fn inspector_action(ui: &mut Ui, label: &str) -> bool {
-    inspector_action_enabled(ui, label, true)
 }
 
 /// One of the inspector's actions: the kit's button, as the page beside it
