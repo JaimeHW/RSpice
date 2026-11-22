@@ -119,7 +119,12 @@ impl TraceKind {
     }
 }
 
+/// The `waveform_index` of a row the readout reads from a plotted
+/// expression rather than from a retained waveform.
+pub const EXPRESSION_ROW: usize = usize::MAX;
+
 /// One trace of a strip, with owned `Arc` handles into the run data.
+#[derive(Clone)]
 pub struct StripTrace {
     pub waveform_index: usize,
     /// Name of the source waveform in the immutable dataset. Display names
@@ -166,6 +171,13 @@ pub struct StripTrace {
 }
 
 impl StripTrace {
+    /// Whether the row is a plotted expression the readout reads, which no
+    /// marker anchors to: the stack draws it from the expression, not from a
+    /// trace of the strip.
+    pub const fn is_expression(&self) -> bool {
+        self.waveform_index == EXPRESSION_ROW
+    }
+
     /// The trace's samples as two slices: as they are when held in memory; a stored column once
     /// the read service has read it off the frame. `None` while a read is on its way, and for a
     /// stored column larger than the loaded results may hold, which is drawn from its tiles and
@@ -224,14 +236,17 @@ pub struct LaneTrace {
 }
 
 /// The search markers found on a strip: each placement's trace, X bits and kind, with where
-/// the search found it, or `Err` with where it was put.
-pub type MarkerPositions = std::sync::Mutex<
-    Vec<(
-        WaveformPresentationKey,
-        u64,
-        rspice_results::result_presentation::MarkerKind,
-        Result<f64, f64>,
-    )>,
+/// the search found it, or `Err` with where it was put. Shared by a copy of the strip, so the
+/// readout's copy reads where the stack found each.
+pub type MarkerPositions = std::sync::Arc<
+    std::sync::Mutex<
+        Vec<(
+            WaveformPresentationKey,
+            u64,
+            rspice_results::result_presentation::MarkerKind,
+            Result<f64, f64>,
+        )>,
+    >,
 >;
 
 /// The traces of one unit on a strip: the first of them, which names the
@@ -325,6 +340,7 @@ impl<const N: usize> PartialEq<[usize; N]> for PaneTraces {
 pub(crate) type PaneNames = Vec<((usize, String), Option<String>)>;
 
 /// One strip (== one analysis of the active run).
+#[derive(Clone)]
 pub struct StripModel {
     pub analysis_index: usize,
     pub analysis_key: AnalysisPresentationKey,

@@ -751,7 +751,7 @@ pub fn marker_spot(state: &ResultViewerState, source: ReadoutInput<'_>) -> Optio
             readout_traces(model)
                 .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
         })
-        .or_else(|| readout_traces(model).find(|trace| !trace.overlay))?;
+        .or_else(|| readout_traces(model).find(|trace| !trace.overlay && !trace.is_expression()))?;
     let anchor = anchor_key(model, trace);
     let x = window_point(model, shown_x_window(state, model)?, 0.5);
     Some(MarkerSpot {

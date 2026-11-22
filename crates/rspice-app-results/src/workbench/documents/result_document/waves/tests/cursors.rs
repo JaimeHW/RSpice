@@ -745,6 +745,68 @@ fn a_plotted_expression_reads_the_cursors_and_a_marker_by_name() {
     );
 }
 
+/// A plotted expression is a row of the Cursors table: it reads at A and
+/// B, their difference and its slope, as its signal does, scaled.
+#[test]
+fn a_plotted_expression_is_a_row_of_the_cursor_table() {
+    let mut state = host_on(damped_run());
+    state.quick_frame();
+    let key = {
+        let run = state.model.simulation.active_run().expect("the run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    };
+    state
+        .results
+        .results
+        .add_expression_trace(&state.model.simulation, key, "V(out)*2".to_owned())
+        .expect("the strip takes the expression");
+    place_cursors(&mut state, Some(time()[400]), Some(time()[1200]));
+    state.quick_frame();
+    let tables = super::super::readout::cursor_tables(&mut state.results_parts());
+    let rows = &tables[0].bands[0].rows;
+    let signal = rows
+        .iter()
+        .find(|row| row.name == "V(out)")
+        .expect("the signal's row");
+    let expression = rows
+        .iter()
+        .find(|row| row.name.contains("V(out)*2"))
+        .unwrap_or_else(|| {
+            panic!(
+                "an expression row among {:?}",
+                rows.iter().map(|row| &row.name).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        expression.cells.len(),
+        signal.cells.len(),
+        "A, B, B-A and slope"
+    );
+    let value = |cell: &str| -> f64 {
+        let (number, unit) = cell.split_once(' ').unwrap_or((cell, ""));
+        let scale = match unit.chars().next() {
+            Some('m') => 1e-3,
+            Some('\u{b5}') => 1e-6,
+            Some('n') => 1e-9,
+            Some('k') => 1e3,
+            Some('M') => 1e6,
+            _ => 1.0,
+        };
+        number
+            .replace('\u{2212}', "-")
+            .parse::<f64>()
+            .expect("a number")
+            * scale
+    };
+    for (twice, once) in expression.cells.iter().zip(&signal.cells) {
+        let (twice, once) = (value(twice), value(once));
+        assert!(
+            (twice - 2.0 * once).abs() <= 2e-3 * once.abs().max(1e-12),
+            "{twice} is not twice {once}"
+        );
+    }
+}
+
 /// With Snap on, a cursor put between samples stands on the nearest one.
 #[test]
 fn snap_stands_a_cursor_on_the_nearest_sample() {

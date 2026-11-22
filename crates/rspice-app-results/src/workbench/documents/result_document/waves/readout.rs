@@ -37,17 +37,24 @@ pub(super) fn with_readout<R>(
 ) -> R {
     let presentation = state.results_reads().presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    let mut models_generation = state.results.models.generation();
     let models = if need_models {
-        cached_models(
+        let models = cached_models(
             &state.model.simulation,
             state.results,
             presentation.complex_number_display(),
             tokens,
-        )
+        );
+        let (models, rows) = with_expression_rows(state, models, tokens);
+        // A strip that reads its expressions is another strip whenever one
+        // of them is evaluated anew.
+        if rows != 0 {
+            models_generation = rspice_results_ui::waves::stable_hash(&(models_generation, rows));
+        }
+        models
     } else {
         std::sync::Arc::default()
     };
-    let models_generation = state.results.models.generation();
     let strips = on_screen_strips(state.results_reads());
     // Design notation changes labels only; the rows' keys stay the result's.
     // It is read the first time a row is named, so a frame that names none
@@ -69,6 +76,114 @@ pub(super) fn with_readout<R>(
             },
         },
     )
+}
+
+/// The strips as the readout reads them: each with the expressions it
+/// draws as rows after its signals, so the Cursors page and the details
+/// pane read an expression at A, B and every marker, with its differences
+/// and slope, as they read a signal. The strips are copied only when one
+/// draws an expression. With them, the digest of the evaluations the rows
+/// read, `0` when no strip draws one.
+fn with_expression_rows(
+    state: &mut ResultsParts<'_>,
+    models: std::sync::Arc<Vec<StripModel>>,
+    tokens: &Tokens,
+) -> (std::sync::Arc<Vec<StripModel>>, u64) {
+    let rows: Vec<Vec<StripTrace>> = models
+        .iter()
+        .map(|model| expression_rows(state, model, tokens))
+        .collect();
+    if rows.iter().all(Vec::is_empty) {
+        return (models, 0);
+    }
+    let evaluations: Vec<u64> = rows
+        .iter()
+        .flatten()
+        .map(|row| row.presentation_key)
+        .collect();
+    let digest = rspice_results_ui::waves::stable_hash(&evaluations).max(1);
+    let models = std::sync::Arc::new(
+        models
+            .iter()
+            .zip(rows)
+            .map(|(model, rows)| {
+                let mut model = model.clone();
+                model.traces.extend(rows);
+                model
+            })
+            .collect(),
+    );
+    (models, digest)
+}
+
+/// The expressions `model`'s strip draws, each as a row: named as its
+/// legend names it, in the unit of the pane it is drawn on, and kept by
+/// its text, which is what a measurement of it reads.
+fn expression_rows(
+    state: &mut ResultsParts<'_>,
+    model: &StripModel,
+    tokens: &Tokens,
+) -> Vec<StripTrace> {
+    let texts: Vec<String> = match state
+        .results
+        .session
+        .analysis_exprs
+        .get(&model.analysis_key)
+    {
+        Some(list) if !list.is_empty() => list.iter().map(|expr| expr.text.clone()).collect(),
+        _ => return Vec::new(),
+    };
+    let run_id = model
+        .traces
+        .iter()
+        .find(|trace| !trace.overlay)
+        .map_or(0, |trace| trace.run_id);
+    super::expressions::resolve_strip_exprs(state, model, tokens)
+        .into_iter()
+        .map(|expr| {
+            // A unit no pane can state reads as a plain number; an
+            // expression no pane routed reads its signals' unit.
+            let unit = model
+                .expression_panes
+                .iter()
+                .find(|pane| pane.slot == expr.slot)
+                .map(|pane| {
+                    if pane.unknown.is_some() {
+                        String::new()
+                    } else {
+                        pane.unit.clone()
+                    }
+                });
+            let text = texts
+                .get(expr.slot)
+                .cloned()
+                .unwrap_or_else(|| expr.label.clone());
+            StripTrace {
+                waveform_index: rspice_results_ui::waves::EXPRESSION_ROW,
+                source_waveform_name: expr.label.clone(),
+                base_name: text,
+                name: expr.label,
+                unit,
+                signal_color: expr.color,
+                color: expr.color,
+                palette_slot: None,
+                x: expr.x,
+                y: expr.y,
+                shape: expr.shape,
+                kind: rspice_results_ui::waves::TraceKind::Value,
+                visible: true,
+                run_id,
+                overlay: false,
+                // Its evaluation's key, so a reading cached for one
+                // evaluation is never served for the next.
+                presentation_key: expr.cache_key,
+                family_group_ordinal: (expr.presentation_key != 0).then_some(0),
+                family_style: expr.family_style,
+                family_visibility_key: None,
+                style: Default::default(),
+            }
+        })
+        .collect()
 }
 
 fn apply_marker_actions(state: &mut ResultsParts<'_>, actions: MarkerActions) {

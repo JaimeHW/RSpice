@@ -344,11 +344,17 @@ impl Measurements {
         };
         let (what, function) = reading.names();
         // A reading is kept as the calculator's function of the trace's own
-        // name, read over the same window.
+        // name, read over the same window; an expression is kept by its
+        // text, and its row's name is its legend's.
+        let named = if trace.is_expression() {
+            &trace.base_name
+        } else {
+            &trace.name
+        };
         MeasurementRow {
             label: format!("{name} {what}"),
             value,
-            keep: keeps(trace, measured.branch).then(|| format!("{function}({})", trace.name)),
+            keep: keeps(trace, measured.branch).then(|| format!("{function}({named})")),
         }
     }
 }

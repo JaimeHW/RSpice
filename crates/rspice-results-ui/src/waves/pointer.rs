@@ -118,7 +118,7 @@ pub fn marker_spot(state: &ResultViewerState, source: ReadoutInput<'_>) -> Optio
     let Some((model, pointer)) = pointed(state, source) else {
         return page_marker_spot(state, source);
     };
-    let rides = |trace: &&StripTrace| !trace.overlay;
+    let rides = |trace: &&StripTrace| !trace.overlay && !trace.is_expression();
     let trace = pointer
         .trace
         .as_ref()
