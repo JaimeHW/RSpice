@@ -85,21 +85,21 @@ fn a_model_file_from_the_page_is_bound_and_runs_the_section_its_row_picks() {
         "voltage source",
         "Voltage Source",
         (100, 100),
-        &[("Instance", "v1"), ("Value", "5")],
+        &[("Instance", "v1"), ("DC voltage, V", "5")],
     );
     e.connect(&source, &["in", "0"]);
     let resistor = e.place(
         "resistor",
         "Resistor",
         (250, 100),
-        &[("Instance", "r1"), ("Value", "1k")],
+        &[("Instance", "r1"), ("Resistance, Ω", "1k")],
     );
     e.connect(&resistor, &["in", "a"]);
     let diode = e.place(
         "diode",
         "Diode",
         (400, 100),
-        &[("Instance", "d1"), ("Value", "dx")],
+        &[("Instance", "d1"), ("Model", "dx")],
     );
     e.connect(&diode, &["a", "0"]);
     e.transient("10n", "100n");
