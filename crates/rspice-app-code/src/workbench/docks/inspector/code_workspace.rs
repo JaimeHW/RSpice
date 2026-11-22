@@ -14,7 +14,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::super::design_system::{
-    WorkbenchIcon, paint_problem_mark, property_row, property_row_problem,
+    Fact, WorkbenchIcon, fact_rows, paint_problem_mark, property_row, property_row_problem,
 };
 
 /// What the Netlist workspace's inspector reads: the model, the netlist
@@ -23,6 +23,8 @@ use super::super::super::design_system::{
 pub(crate) struct CodeInspector<'a> {
     pub(crate) model: &'a Model,
     pub(crate) netlist: &'a NetlistDocumentState,
+    /// The deck's facts while the deck's own file is in front.
+    pub(crate) deck_facts: Option<&'a crate::workbench::code::netlist_first::DeckFacts>,
     pub(crate) messages: MessageCatalog,
 }
 
@@ -498,21 +500,23 @@ fn deck_file_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
         }
         return;
     };
-    property_row(
-        ui,
-        &messages.text(MessageId::CodeSourceFileFile),
-        &file.path.display().to_string(),
-    );
-    property_row(
-        ui,
-        &messages.text(MessageId::NetlistEncoding),
-        file.encoding.label(),
-    );
-    property_row(
-        ui,
-        &messages.text(MessageId::CodeSourceLineEndings),
-        file.line_ending.label(),
-    );
+    let encoding = messages.text(MessageId::NetlistEncoding);
+    let line_endings = messages.text(MessageId::CodeSourceLineEndings);
+    let save = [
+        Fact::new(&encoding, file.encoding.label()),
+        Fact::new(&line_endings, file.line_ending.label()),
+    ];
+    if let Some(facts) = reads.deck_facts {
+        // The rows every deck page's inspector lists, then how Save writes
+        // the file back, in the same list.
+        crate::workbench::code::netlist_first::deck_fact_rows(ui, facts, &save, messages);
+        return;
+    }
+    let file_label = messages.text(MessageId::CodeSourceFileFile);
+    let path = file.path.display().to_string();
+    let mut rows = vec![Fact::path(&file_label, &path)];
+    rows.extend_from_slice(&save);
+    fact_rows(ui, &rows);
 }
 
 fn dependency_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {

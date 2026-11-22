@@ -11,9 +11,24 @@ use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per cell view open in Design, named by its cell and view. Tabs
 /// that would read the same, one cell's name in two libraries, name the
-/// library too, so no two tabs read alike.
+/// library too, so no two tabs read alike. A project whose simulation is its
+/// deck and that has no schematic has no schematic tab: the empty top cell
+/// it keeps is not a document anyone drew.
 pub fn design_documents(model: &Model) -> Vec<WorkspaceDocument> {
-    let open = &model.workspace.content.open_views;
+    let no_schematic = model.is_netlist_first_without_schematic();
+    let open = model
+        .workspace
+        .content
+        .open_views
+        .iter()
+        .filter(|document| {
+            !(no_schematic
+                && matches!(
+                    document.view_type,
+                    ViewType::Schematic | ViewType::Testbench
+                ))
+        })
+        .collect::<Vec<_>>();
     let short = |document: &crate::state::OpenCellView| {
         format!(
             "{} · {}",
@@ -21,7 +36,7 @@ pub fn design_documents(model: &Model) -> Vec<WorkspaceDocument> {
             document.view_type.caption_for(&document.reference.view)
         )
     };
-    let labels = open.iter().map(short).collect::<Vec<_>>();
+    let labels = open.iter().copied().map(short).collect::<Vec<_>>();
     open.iter()
         .zip(&labels)
         .map(|(document, label)| WorkspaceDocument {

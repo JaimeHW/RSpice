@@ -27,6 +27,10 @@ pub fn design_engineering_context(
     model: &Model,
     symbol: &SymbolUiState,
 ) -> String {
+    // A deck project's Design page has no schematic to point into.
+    if model.is_netlist_first_without_schematic() {
+        return String::new();
+    }
     let view_type = model.workspace.content.active_view_type();
     let symbol_grid = symbol.editor.grid_spacing.model_step();
     canvas_hover.map_or_else(
@@ -86,7 +90,9 @@ pub fn selection_summary(
         // again would print it twice.
         return String::new();
     }
-    if wb.workspace != Workspace::Design {
+    // Outside Design, and on a deck project's Design page, there is no
+    // schematic selection to summarize: the segment names the workspace.
+    if wb.workspace != Workspace::Design || model.is_netlist_first_without_schematic() {
         return wb.workspace.label().to_owned();
     }
     if model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {

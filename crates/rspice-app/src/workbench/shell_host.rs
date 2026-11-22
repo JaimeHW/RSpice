@@ -275,13 +275,16 @@ impl Host for RSpiceApp {
                         features::show_navigator::<CodeFeature>(app, ui);
                         app.after_contribution();
                     }
+                    // A deck project's Design page, a Verilog-A module's: the
+                    // code feature's navigator.
                     Workspace::Design
-                        if app
-                            .state
-                            .model
-                            .workspace
-                            .content
-                            .active_view_is_hdl_source() =>
+                        if app.state.is_netlist_first_without_schematic()
+                            || app
+                                .state
+                                .model
+                                .workspace
+                                .content
+                                .active_view_is_hdl_source() =>
                     {
                         features::show_navigator::<CodeFeature>(app, ui);
                         app.after_contribution();
@@ -331,14 +334,16 @@ impl Host for RSpiceApp {
                         app.after_contribution();
                     }
                     // A Verilog-A module is inspected for what it compiles
-                    // to, not for a schematic selection it does not have.
+                    // to, and a deck project's Design page for its deck: not
+                    // for a schematic selection neither has.
                     Workspace::Design
-                        if app
-                            .state
-                            .model
-                            .workspace
-                            .content
-                            .active_view_is_hdl_source() =>
+                        if app.state.is_netlist_first_without_schematic()
+                            || app
+                                .state
+                                .model
+                                .workspace
+                                .content
+                                .active_view_is_hdl_source() =>
                     {
                         features::show_inspector::<CodeFeature>(app, ui);
                     }
@@ -428,6 +433,9 @@ impl Host for RSpiceApp {
                     }
                     ToolbarScope::Workspace(workspace) => match workspace {
                         Workspace::Project => project_tools(ui, app, layout),
+                        // No schematic to draw on, edit, zoom, check or view:
+                        // the run controls every workspace has are the bar.
+                        Workspace::Design if app.state.is_netlist_first_without_schematic() => {}
                         Workspace::Design
                             if app.state.model.workspace.content.active_view_type()
                                 == Some(ViewType::Symbol) =>
@@ -608,6 +616,10 @@ impl Host for RSpiceApp {
             },
             Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
             Workspace::Netlist => messages.text(MessageId::CodeInspectorNetlistTitle),
+            // A deck project's Design page inspects its deck.
+            Workspace::Design if app.state.is_netlist_first_without_schematic() => {
+                messages.text(MessageId::CodeInspectorNetlistTitle)
+            }
             // A result sheet's context panel is named by the sheet it is
             // reading, the way every other workspace names its subject.
             Workspace::Results => {
@@ -647,6 +659,15 @@ impl Host for RSpiceApp {
             // The page tabs under the title name the page in front, so the
             // narrow layout's title names the project.
             Workspace::Project => app
+                .state
+                .model
+                .workspace
+                .content
+                .project
+                .display_name()
+                .to_owned(),
+            // A deck project has no cell view in Design to name.
+            Workspace::Design if app.state.is_netlist_first_without_schematic() => app
                 .state
                 .model
                 .workspace

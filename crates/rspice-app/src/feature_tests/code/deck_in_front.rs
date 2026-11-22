@@ -77,11 +77,25 @@ fn the_landings_open_the_deck_brings_the_deck_to_the_front() {
     let (mut replay, _) = deck_project_on_its_generated_netlist();
     replay.app.state.workbench.activate(Workspace::Design);
 
-    replay.click("Open the deck in the Netlist workspace", Role::Button);
+    replay.click("Open in Netlist", Role::Button);
 
     assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
     assert!(
         matches!(replay.app.state.code.netlist.front, NetlistTab::Deck(_)),
         "the deck is in front"
     );
+}
+
+/// The landing's other way on makes a schematic: the new cell dialog, set
+/// to create one.
+#[test]
+fn the_landings_create_schematic_opens_the_new_cell_dialog() {
+    let mut replay = Replay::of(super::netlist_first::netlist_first_app());
+    replay.app.state.workbench.activate(Workspace::Design);
+    replay.frames(Vec::new());
+
+    replay.click("Create schematic\u{2026}", Role::Button);
+
+    assert!(replay.app.state.project.new_cell_dialog);
+    assert!(replay.app.state.project.new_cell_create_schematic);
 }

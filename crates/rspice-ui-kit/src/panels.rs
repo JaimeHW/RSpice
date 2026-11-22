@@ -1044,6 +1044,87 @@ pub fn property_row_path(ui: &mut Ui, label: &str, path: &str) -> Response {
     property_row_with_tone(ui, label, path, t.color.text, None, elide_path, face)
 }
 
+/// One fact in a [`fact_rows`] list: its label, its value, and whether the
+/// value is a file's path.
+#[derive(Debug, Clone, Copy)]
+pub struct Fact<'a> {
+    pub label: &'a str,
+    pub value: &'a str,
+    pub path: bool,
+}
+
+impl<'a> Fact<'a> {
+    pub const fn new(label: &'a str, value: &'a str) -> Self {
+        Self {
+            label,
+            value,
+            path: false,
+        }
+    }
+
+    pub const fn path(label: &'a str, value: &'a str) -> Self {
+        Self {
+            label,
+            value,
+            path: true,
+        }
+    }
+}
+
+/// A list of read-only facts: each label and value set in one face and
+/// size, the label secondary, on one label column as wide as the widest
+/// label. A list of counts and names is one table, so it reads as one; a
+/// [`property_row`]'s value is set at a typed field's size, and its label
+/// column is a share of the row however short the labels. A path elides
+/// from the front, so its file's name stays in view; every row's whole text
+/// is in its hover.
+pub fn fact_rows(ui: &mut Ui, facts: &[Fact<'_>]) {
+    let t = Tokens::get(ui.ctx());
+    let font = fact_font();
+    let label_width = facts
+        .iter()
+        .map(|fact| {
+            ui.painter()
+                .layout_no_wrap(fact.label.to_owned(), font.clone(), Color32::WHITE)
+                .size()
+                .x
+                .ceil()
+        })
+        .fold(0.0, f32::max);
+    for fact in facts {
+        let (slot, response) = row_slot(ui, Some(label_width), Sense::hover());
+        let painter = ui.painter();
+        let label = elide_text(ui, fact.label, &font, slot.label.width());
+        painter.with_clip_rect(slot.label).text(
+            Pos2::new(slot.label.left(), slot.label.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            font.clone(),
+            t.color.text_dim,
+        );
+        let elide = if fact.path {
+            elide_path_front
+        } else {
+            elide_text
+        };
+        let value = elide(ui, fact.value, &font, slot.value.width());
+        painter.with_clip_rect(slot.value).text(
+            Pos2::new(slot.value.left(), slot.value.center().y),
+            Align2::LEFT_CENTER,
+            value,
+            font.clone(),
+            t.color.text,
+        );
+        announce_row(ui, &response, fact.label, fact.value);
+        response.on_hover_text(format!("{}: {}", fact.label, fact.value));
+    }
+}
+
+/// The one face a [`fact_rows`] list sets its labels and values in.
+fn fact_font() -> egui::FontId {
+    theme::sans(tokens::FS_1, FontWeight::Regular)
+}
+
 /// Property row whose value communicates an explicit semantic tone.
 pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
     let face = value_face(value);
@@ -2670,6 +2751,50 @@ pub fn elide_path(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> S
         .filter(|&start| start + 1 < tail.len())
         .map_or(tail, |start| &tail[start..]);
     format!("{root}\u{2026}{}", tail.concat())
+}
+
+/// Shorten a path from the front: as many of its trailing components as
+/// fit after an ellipsis, starting on a separator, so the file's name always
+/// shows while there is room for it.
+pub fn elide_path_front(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+    let fits = |candidate: &str| {
+        ui.painter()
+            .layout_no_wrap(candidate.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+            <= max_width
+    };
+    if max_width <= 0.0 {
+        return String::new();
+    }
+    if fits(text) {
+        return text.to_owned();
+    }
+    let is_separator = |grapheme: &str| grapheme == "/" || grapheme == "\\";
+    let graphemes = UnicodeSegmentation::graphemes(text, true).collect::<Vec<_>>();
+    let candidate =
+        |tail: usize| format!("\u{2026}{}", graphemes[graphemes.len() - tail..].concat());
+    let mut low = 0;
+    let mut high = graphemes.len();
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        if fits(&candidate(middle)) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    if low == 0 {
+        return String::new();
+    }
+    // Start the kept tail on a component boundary when one is in it.
+    let tail = &graphemes[graphemes.len() - low..];
+    let tail = tail
+        .iter()
+        .position(|grapheme| is_separator(grapheme))
+        .filter(|&start| start + 1 < tail.len())
+        .map_or(tail, |start| &tail[start..]);
+    format!("\u{2026}{}", tail.concat())
 }
 
 pub fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
