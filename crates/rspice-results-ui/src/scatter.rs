@@ -830,7 +830,19 @@ pub fn right_panel(
     if selection.is_empty() {
         return;
     }
-    section_header(ui, "Brushed trials", Some(&selection.len().to_string()));
+    // The header carries the count and the action that clears the brush, so
+    // the table ends the pane flush, with no button standing under it.
+    let clear = rspice_ui_kit::panels::section_header_action(
+        ui,
+        &match selection.len() {
+            1 => "1 brushed trial".to_owned(),
+            count => format!("{count} brushed trials"),
+        },
+        "Clear",
+        true,
+    )
+    .on_hover_text("Clear the brushed selection (Esc)")
+    .clicked();
     // Every row, at the table's own height: the pane scrolls, not the table.
     brushed_table(
         ui,
@@ -840,7 +852,7 @@ pub fn right_panel(
         (x_column, y_column),
         significant_digits,
     );
-    if ui.button("Clear selection").clicked() {
+    if clear {
         clear_selection(state, members);
     }
 }
