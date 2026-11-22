@@ -831,8 +831,7 @@ pub fn right_panel(
         return;
     }
     section_header(ui, "Brushed trials", Some(&selection.len().to_string()));
-    // The table fills the pane above the button that clears it.
-    let button = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+    // Every row, at the table's own height: the pane scrolls, not the table.
     brushed_table(
         ui,
         plan,
@@ -840,16 +839,35 @@ pub fn right_panel(
         &selection,
         (x_column, y_column),
         significant_digits,
-        ui.available_height() - button,
     );
     if ui.button("Clear selection").clicked() {
         clear_selection(state, members);
     }
 }
 
+/// A value as a column of the brushed table prints it: the sheet's one
+/// spelling, prefix and all, with the unit left to the column's head
+/// (`311.7 µ` under `offset (V)`).
+fn cell_text(value: f64, unit: &str, significant_digits: usize) -> String {
+    let text = fmt_si_significant(value, unit, significant_digits);
+    match text.strip_suffix(unit) {
+        Some(number) if !unit.is_empty() => number.trim_end().to_owned(),
+        _ => text,
+    }
+}
+
+/// A column's head, its unit in brackets as every other table states one.
+fn column_head(column: &PopulationColumn) -> String {
+    if column.unit.is_empty() {
+        column.name.clone()
+    } else {
+        format!("{} ({})", column.name, column.unit)
+    }
+}
+
 /// Every brushed trial: its two values, in the units the heads name, and
-/// its verdict, in trial order. The table scrolls rather than stopping at a
-/// count, so a brush over a hundred trials lists a hundred.
+/// its verdict, in trial order. The table lists every one, so a brush over
+/// a hundred trials lists a hundred.
 fn brushed_table(
     ui: &mut Ui,
     plan: &PopulationData,
@@ -857,7 +875,6 @@ fn brushed_table(
     selection: &[usize],
     (x_column, y_column): (&PopulationColumn, &PopulationColumn),
     significant_digits: usize,
-    max_height: f32,
 ) {
     let mut brushed: Vec<(usize, f64, f64)> = selection
         .iter()
@@ -886,22 +903,19 @@ fn brushed_table(
                 y,
                 text: [
                     trial.to_string(),
-                    fmt_si_significant(x, "", significant_digits),
-                    fmt_si_significant(y, "", significant_digits),
+                    cell_text(x, &x_column.unit, significant_digits),
+                    cell_text(y, &y_column.unit, significant_digits),
                 ],
                 status,
                 tone,
             }
         })
         .collect();
-    let head = |column: &PopulationColumn| {
-        if column.unit.is_empty() {
-            column.name.clone()
-        } else {
-            format!("{} \u{b7} {}", column.name, column.unit)
-        }
-    };
-    let heads = ["Trial".to_owned(), head(x_column), head(y_column)];
+    let heads = [
+        "Trial".to_owned(),
+        column_head(x_column),
+        column_head(y_column),
+    ];
     // Each column as wide as its widest words, so nothing is cut short.
     let head_font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let number_font = theme::mono(tokens::FS_0, FontWeight::Regular);
@@ -941,7 +955,6 @@ fn brushed_table(
         DataTable::new("rspice.results.scatter.brushed", &columns, rows.len())
             .state(state)
             .revision(revision)
-            .max_height(max_height.max(0.0))
             .show(ui, |index| {
                 let row = &rows[index];
                 vec![
@@ -1014,18 +1027,17 @@ fn register_rows(
             fit.map_or_else(
                 || "Not defined".to_owned(),
                 |(slope, intercept)| {
-                    // The whole equation, named: a bare slope and intercept
-                    // beside one another cannot be told apart, and the reader
-                    // has to be able to hold this against a datasheet.
+                    // The whole equation, in the axes' letters the rows
+                    // around it use: a bare slope and intercept beside one
+                    // another cannot be told apart, and the columns' own
+                    // names would run the equation past the pane's width.
                     format!(
-                        "{} = {} \u{b7} {} {} {}",
-                        y_column.name,
+                        "y = {} \u{b7} x {} {}",
                         fmt_si_significant(
                             slope,
                             &slope_unit(x_column, y_column),
                             significant_digits
                         ),
-                        x_column.name,
                         if intercept < 0.0 { "\u{2212}" } else { "+" },
                         fmt_si_significant(intercept.abs(), &y_column.unit, significant_digits)
                     )
@@ -1091,7 +1103,7 @@ fn requirement_row(column: &PopulationColumn, values: &[f64], significant_digits
                     )
                 },
             ),
-        None => "No requirement bounds this measurement".to_owned(),
+        None => "none".to_owned(),
     }
 }
 
@@ -1229,7 +1241,7 @@ mod tests {
         // intercept is 40 dB.
         assert_eq!(
             by_name("Fit"),
-            "gain_dc = 2 dB \u{b7} XBRIDGE.dR + 40 dB",
+            "y = 2 dB \u{b7} x + 40 dB",
             "the fit states the equation the reader holds against a datasheet"
         );
         assert_eq!(

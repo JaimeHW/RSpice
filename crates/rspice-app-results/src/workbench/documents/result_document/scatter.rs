@@ -205,8 +205,8 @@ mod tests {
             "{rows:?}"
         );
         assert!(
-            rows.windows(2).any(|row| row[0] == "Y requirement"
-                && row[1] == "No requirement bounds this measurement"),
+            rows.windows(2)
+                .any(|row| row[0] == "Y requirement" && row[1] == "none"),
             "{rows:?}"
         );
     }
