@@ -304,7 +304,9 @@ impl Host for RSpiceApp {
                         features::show_navigator::<ResultsFeature>(app, ui);
                         app.after_contribution();
                     }
-                    Workspace::Project => features::show_navigator::<ProjectFeature>(app, ui),
+                    // The Project workspace keeps no navigator: each page's
+                    // list is its own picker.
+                    Workspace::Project => {}
                     Workspace::Simulate => {
                         features::show_navigator::<SimulateFeature>(app, ui);
                         app.after_contribution();
@@ -529,12 +531,7 @@ impl Host for RSpiceApp {
         let app = self;
         let messages = app.state.workbench.messages();
         let title: std::borrow::Cow<'static, str> = match workspace {
-            Workspace::Project => match app.state.project.project_page {
-                ProjectPage::Overview | ProjectPage::Library => "Project".into(),
-                ProjectPage::Configuration => "Configurations".into(),
-                ProjectPage::Dependencies => "Dependencies".into(),
-                ProjectPage::Recovery => "Recovery".into(),
-            },
+            Workspace::Project => "Project".into(),
             Workspace::Design => "Design navigator".into(),
             Workspace::Simulate => "Simulation setup".into(),
             Workspace::Stimulus => "Library browser".into(),
@@ -545,14 +542,7 @@ impl Host for RSpiceApp {
             Workspace::Netlist => messages.text(MessageId::NetlistNavigatorTitle).into(),
         };
         let placeholder: std::borrow::Cow<'static, str> = match workspace {
-            Workspace::Project => match app.state.project.project_page {
-                // The rail lists libraries; a cell's or a view's name finds
-                // the library that holds it.
-                ProjectPage::Overview | ProjectPage::Library => "Filter libraries…".into(),
-                ProjectPage::Configuration => "Filter configurations…".into(),
-                ProjectPage::Dependencies => "Filter dependencies…".into(),
-                ProjectPage::Recovery => "Filter checkpoints…".into(),
-            },
+            Workspace::Project => "".into(),
             Workspace::Design => "Find instance, net or port…".into(),
             Workspace::Simulate => "Filter setup…".into(),
             Workspace::Stimulus => "Search definitions…".into(),

@@ -208,7 +208,7 @@ pub struct ProjectState {
     /// They affect presentation only and never participate in project
     /// revisioning, execution snapshots, or recovery checkpoints.
     pub project_library_filter: String,
-    /// The library the Dependencies page's rail and inspector have selected.
+    /// The library the Dependencies page and its inspector have selected.
     /// It belongs to the open project, so it is neither saved in the session
     /// nor kept when the project is replaced; the page filters by the
     /// workspace navigator's filter.

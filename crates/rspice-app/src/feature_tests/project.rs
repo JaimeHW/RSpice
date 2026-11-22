@@ -45,7 +45,6 @@ mod project_autosave;
 mod project_workflow;
 mod properties;
 mod publication;
-mod rails;
 mod read_only_open;
 mod recovery_comparison;
 mod recovery_frames;

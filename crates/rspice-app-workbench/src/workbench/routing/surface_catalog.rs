@@ -279,6 +279,16 @@ define_surface_catalog! {
     DockedTool => { id: "docked-tool", label: "Docked subordinate tool", archetype: Manager, tier: ReleaseTarget, status: Preview, deep_link: "?surface=docked-tool" },
 }
 
+impl SurfaceId {
+    /// Whether the surface keeps a navigator beside it. The Project workspace
+    /// keeps none: each of its pages is a list, and the list is its own
+    /// picker.
+    #[must_use]
+    pub const fn has_navigator(self) -> bool {
+        !matches!(self, Self::Project)
+    }
+}
+
 /// A page of a workspace a link may open on, named after the workspace's
 /// own selector: `?view=verify&page=corners`. It says where a link lands,
 /// not which surface is open, so it is no part of a route's identity and the

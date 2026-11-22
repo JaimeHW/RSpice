@@ -36,8 +36,8 @@ use rspice_app_workbench::workbench::framework::dialogs::DialogKey;
 use rspice_app_workbench::workbench::framework::requests::{
     self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox, WindowFrame,
 };
-use rspice_app_workbench::workbench::layout::LayoutSpec;
-use rspice_app_workbench::workbench::routing::surface_catalog::{SurfaceArchetype, SurfaceId};
+use rspice_app_workbench::workbench::layout::{LayoutSpec, SurfaceDocks};
+use rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId;
 
 pub(in crate::workbench) mod dialog_order;
 
@@ -101,8 +101,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     synchronize_activity_stream(ctx, app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
-    let context_docks_enabled = app.state.workbench.current_route().surface_id().archetype()
-        != SurfaceArchetype::SpecialistWorkspace;
+    let docks = SurfaceDocks::of(app.state.workbench.current_route().surface_id());
     let layout = LayoutSpec::resolve_for_shell(
         viewport.x,
         viewport.y,
@@ -113,7 +112,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
             &app.state.model,
         ),
         app.state.platform.project_lifecycle.is_open(),
-        context_docks_enabled,
+        docks,
         &app.state.workbench,
     );
     // egui persists panel rectangles independently of application state.
@@ -995,8 +994,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     reconcile_platform_full_screen(app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
-    let context_docks_enabled = app.state.workbench.current_route().surface_id().archetype()
-        != SurfaceArchetype::SpecialistWorkspace;
+    let docks = SurfaceDocks::of(app.state.workbench.current_route().surface_id());
     let layout = LayoutSpec::resolve_for_shell(
         viewport.x,
         viewport.y,
@@ -1007,7 +1005,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
             &app.state.model,
         ),
         app.state.platform.project_lifecycle.is_open(),
-        context_docks_enabled,
+        docks,
         &app.state.workbench,
     );
     docks::synchronize_panel_memory(ctx, app, layout);

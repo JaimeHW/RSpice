@@ -118,7 +118,7 @@ fn the_tool_opens_whole_in_the_lower_right_of_the_workspace() {
         true,
         false,
         app.state.platform.project_lifecycle.is_open(),
-        true,
+        rspice_app_workbench::workbench::layout::SurfaceDocks::BOTH,
         &app.state.workbench,
     );
     let workspace = egui::Rect::from_min_max(

@@ -199,7 +199,7 @@ impl ConfigurationPageState {
 
     /// The reader picked `selection`. Edits that are not applied are never
     /// dropped silently: with some in front, the switch waits for an answer.
-    pub(crate) fn request_selection(
+    pub fn request_selection(
         &mut self,
         catalog: &ConfigurationSetCatalog,
         selection: ConfigurationSelection,

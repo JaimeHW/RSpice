@@ -483,9 +483,8 @@ fn dependencies_states_a_stale_technology_once_its_model_file_is_refreshed() {
     let _ = std::fs::remove_dir_all(folder);
 }
 
-/// The dependency ledger and the rail beside it keep their rows until a
-/// catalogue changes: a library added since the last frame is a row of both
-/// on the next.
+/// The dependency ledger keeps its rows until a catalogue changes: a
+/// library added since the last frame is a row on the next.
 #[test]
 fn a_library_added_since_the_last_frame_is_a_dependency() {
     let mut app = RSpiceApp::test_instance();
@@ -500,10 +499,7 @@ fn a_library_added_since_the_last_frame_is_a_dependency() {
         .library_manager
         .add_library(Library::new("aa-late"));
     let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    assert!(
-        next.matches("aa-late").count() >= 2,
-        "the rail and the ledger both list it: {next}"
-    );
+    assert!(next.contains("aa-late"), "the ledger lists it: {next}");
 }
 
 /// One whole application frame on a screen of `size`.

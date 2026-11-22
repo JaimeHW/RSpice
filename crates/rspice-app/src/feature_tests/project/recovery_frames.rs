@@ -94,7 +94,8 @@ pub(super) fn painted(output: &egui::FullOutput) -> String {
 }
 
 /// A press and release in the middle of the control `output` announced as
-/// `label`.
+/// `label`: the topmost, when several are, as a reader takes the first row
+/// of a list.
 pub(super) fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Event> {
     let bounds = output
         .platform_output
@@ -103,7 +104,8 @@ pub(super) fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Even
         .expect("the frame publishes its tree")
         .nodes
         .iter()
-        .find_map(|(_, node)| (node.label()? == label).then_some(node.bounds()?))
+        .filter_map(|(_, node)| (node.label()? == label).then_some(node.bounds()?))
+        .min_by(|a, b| a.y0.total_cmp(&b.y0))
         .unwrap_or_else(|| panic!("the frame announces `{label}`"));
     let at = pos2(
         ((bounds.x0 + bounds.x1) / 2.0) as f32,

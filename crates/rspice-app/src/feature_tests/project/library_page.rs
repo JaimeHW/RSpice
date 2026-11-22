@@ -686,11 +686,10 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
     );
 }
 
-/// A library clicked in the rail is the one the page shows, even when the
-/// built-in library is open: the rail selects the way the page's own Library
-/// column does. The rail lists the built-in library as the column does.
+/// A library clicked in the page's Library column is the one the page
+/// shows, even when the built-in library is open.
 #[test]
-fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
+fn a_library_clicked_in_the_column_leaves_the_built_in_library() {
     use egui::accesskit::Role;
 
     use super::super::replay::{Replay, only};
@@ -716,27 +715,20 @@ fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
     );
 
     let controls = replay.frames(Vec::new());
-    // The rail announces a row's access after its name; so does the
-    // column's list.
-    only(
-        &controls,
-        &format!("{BUILTIN_VERILOGA_LIBRARY}, Read-only"),
-        Role::Button,
-    );
+    // The column announces a row's access after its name.
     only(
         &controls,
         &format!("{BUILTIN_VERILOGA_LIBRARY}, Read-only"),
         Role::ListBoxOption,
     );
-    only(&controls, "authoring", Role::ListBoxOption);
-    let rail_row = only(&controls, "authoring", Role::Button).center;
+    let row = only(&controls, "authoring", Role::ListBoxOption).center;
     let press = |pressed| egui::Event::PointerButton {
-        pos: rail_row,
+        pos: row,
         button: egui::PointerButton::Primary,
         pressed,
         modifiers: egui::Modifiers::NONE,
     };
-    replay.frames(vec![egui::Event::PointerMoved(rail_row), press(true)]);
+    replay.frames(vec![egui::Event::PointerMoved(row), press(true)]);
     replay.frames(vec![press(false)]);
 
     let state = &replay.app.state;

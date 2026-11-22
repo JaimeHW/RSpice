@@ -119,11 +119,6 @@ pub mod workbench {
 
             pub mod project;
         }
-        pub mod navigator {
-            pub use rspice_app_workbench::workbench::docks::navigator::*;
-
-            pub mod project;
-        }
     }
     pub mod project;
     pub mod slots {

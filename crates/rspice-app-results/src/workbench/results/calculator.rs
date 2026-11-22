@@ -95,7 +95,7 @@ fn workspace_rect(ctx: &Context, wb: &WorkbenchSession, project_open: bool) -> e
         true,
         false,
         project_open,
-        true,
+        crate::workbench::layout::SurfaceDocks::BOTH,
         wb,
     );
     egui::Rect::from_min_max(

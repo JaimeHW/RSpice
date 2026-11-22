@@ -35,12 +35,11 @@ use crate::workbench::app::dialogs::project::configuration_dialogs::{
 use crate::workbench::app::{open_check_and_save_dialog, open_design_management_dialog};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
-use crate::workbench::docks::navigator::project::ProjectNavigator;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    NoHandles, Peers, Reads,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureRegistry, NoHandles, Peers,
+    Reads,
 };
 use crate::workbench::framework::requests::{FocusProjectLauncherSearch, ProjectFileAction};
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -83,9 +82,6 @@ impl Feature for ProjectFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ProjectCommand>();
-        registry.navigator(FeatureNavigator {
-            show: show_navigator,
-        });
         registry.inspector(FeatureInspector {
             show: show_inspector,
             // What the section holds typed is committed by its own fields as
@@ -393,35 +389,6 @@ pub(in crate::workbench) fn lifecycle_parts<'a>(
         platform,
         workspace: wb.workspace,
         presentation: peers.results().saved_presentation(),
-    }
-}
-
-/// The Project workspace's navigator: the rail of the page in front, over
-/// the feature's state, the model and the navigator's filter. A library the
-/// rail selects is selected the way the Library page's own column does it.
-fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
-    let project = &mut *cx.state;
-    let intent = crate::workbench::docks::navigator::project::project(
-        ui,
-        &mut ProjectNavigator {
-            page: project.project_page,
-            configuration: &mut project.configuration,
-            configuration_dialog: &mut project.configuration_dialog,
-            dependency_selection: &mut project.project_dependency_selection,
-            checkpoint_recovery: &project.project_checkpoint_recovery,
-            checkpoint_selection: &mut project.project_checkpoint_selection,
-            builtin_library_open: project.builtin_models.open,
-            model: cx.model,
-            filter: cx.wb.navigator_filter(),
-        },
-    );
-    if let Some(intent) = intent {
-        // The Overview shows no library, so a library chosen on its rail is
-        // opened on the Library page, which does.
-        if cx.state.project_page == ProjectPage::Overview {
-            cx.state.project_page = ProjectPage::Library;
-        }
-        crate::workbench::surfaces::project::library::apply_library_intent(ui.ctx(), cx, intent);
     }
 }
 

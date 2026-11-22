@@ -1,7 +1,7 @@
 //! The Dependencies page through whole application frames: each library has
-//! one status, and the rail, the table and the inspector beside the page say
-//! the same thing about it, in every state a library can be in; and each row
-//! of the table can be opened, shown, read again or removed from the page.
+//! one status, and the table and the inspector beside it say the same thing
+//! about it, in every state a library can be in; and each row of the table
+//! can be opened, shown, read again or removed from the page.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -55,21 +55,6 @@ fn announced(output: &egui::FullOutput) -> Vec<(String, Option<String>, Option<S
         .collect()
 }
 
-/// The rail's row for `name`: its name and its status, nothing else.
-fn rail_row<'a>(
-    nodes: &'a [(String, Option<String>, Option<String>, bool)],
-    name: &str,
-) -> Vec<&'a (String, Option<String>, Option<String>, bool)> {
-    nodes
-        .iter()
-        .filter(|(label, ..)| {
-            let (_, words) = severity(label);
-            let cells: Vec<_> = words.split(", ").collect();
-            cells.len() == 2 && cells[0] == name
-        })
-        .collect()
-}
-
 /// The table's row for `name` of `kind`, which a screen reader is told cell
 /// by cell under its head, the status last.
 fn table_row<'a>(
@@ -94,9 +79,9 @@ fn row_status(label: &str) -> &str {
     label.rsplit("Status: ").next().unwrap_or(label)
 }
 
-/// What the rail, the table and the inspector say about `library`, in the
-/// frame after it was selected.
-pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 3] {
+/// What the table and the inspector say about `library`, in the frame
+/// after it was selected.
+pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 2] {
     let kind = match library.kind {
         rspice_app_project::workbench::project::DependencyKind::Design => "Design",
         rspice_app_project::workbench::project::DependencyKind::Model => "Model",
@@ -106,14 +91,6 @@ pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [S
     app_frame(&ctx, app, Vec::new());
     let output = app_frame(&ctx, app, Vec::new());
     let nodes = announced(&output);
-
-    let rail = rail_row(&nodes, &library.name);
-    assert_eq!(rail.len(), 1, "one rail row names {library:?}: {nodes:#?}");
-    let (rail_severity, words) = severity(&rail[0].0);
-    let rail = (
-        words.split(", ").nth(1).expect("a status").to_owned(),
-        rail_severity,
-    );
 
     let table = table_row(&nodes, &library.name, kind);
     assert_eq!(
@@ -133,7 +110,7 @@ pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [S
         statuses[0].1.clone().expect("the status row has a value"),
         statuses[0].2.clone(),
     );
-    [rail, table, inspector]
+    [table, inspector]
 }
 
 /// One model file written to `folder`, imported as the Models workspace
@@ -216,8 +193,8 @@ fn assert_said(app: &mut RSpiceApp, library: DependencyLibrary, status: &str, ma
     let said = said_about(app, &library);
     assert_eq!(
         said,
-        [expected.clone(), expected.clone(), expected],
-        "the rail, the table and the inspector on {library:?}"
+        [expected.clone(), expected],
+        "the table and the inspector on {library:?}"
     );
 }
 
@@ -395,11 +372,6 @@ fn a_design_and_a_model_library_of_one_name_are_selected_apart() {
     let output = app_frame(&ctx, &mut app, Vec::new());
     let nodes = announced(&output);
 
-    let rail = rail_row(&nodes, "shared");
-    assert_eq!(rail.len(), 2, "both are rail rows: {rail:?}");
-    let selected: Vec<_> = rail.iter().filter(|(.., selected)| *selected).collect();
-    assert_eq!(selected.len(), 1, "one rail row is selected: {rail:?}");
-    assert!(selected[0].0.ends_with("Built in"), "{selected:?}");
     let design = table_row(&nodes, "shared", "Design");
     let model = table_row(&nodes, "shared", "Model");
     assert!(!design[0].3 && model[0].3, "{design:?} {model:?}");
@@ -412,11 +384,10 @@ fn a_design_and_a_model_library_of_one_name_are_selected_apart() {
     assert_eq!(status[0].1.as_deref(), Some("Built in"));
 }
 
-/// The rail and the table list the same libraries in the same order under
-/// the one filter, and a project that replaces this one starts with neither
-/// the filter nor the selection.
+/// The table lists the libraries the filter leaves, and a project that
+/// replaces this one starts with neither the filter nor the selection.
 #[test]
-fn the_rail_and_the_table_share_one_filter_and_lose_it_with_the_project() {
+fn the_tables_filter_and_selection_are_lost_with_the_project() {
     let mut libraries = libraries();
     let app = &mut libraries.app;
     app.state.workbench.set_navigator_filter("CHANGED");
@@ -425,13 +396,10 @@ fn the_rail_and_the_table_share_one_filter_and_lose_it_with_the_project() {
     let ctx = offscreen();
     app_frame(&ctx, app, Vec::new());
     let nodes = announced(&app_frame(&ctx, app, Vec::new()));
-    let found_rail = rail_row(&nodes, &libraries.found);
-    let found_table = table_row(&nodes, &libraries.found, "Model");
     assert!(
-        found_rail.is_empty() && found_table.is_empty(),
-        "the filter hides it in both"
+        table_row(&nodes, &libraries.found, "Model").is_empty(),
+        "the filter hides it"
     );
-    assert_eq!(rail_row(&nodes, &name).len(), 1);
     assert_eq!(table_row(&nodes, &name, "Model").len(), 1);
 
     crate::workbench::app_state::services_access::reset_for_new_project(&mut app.state);

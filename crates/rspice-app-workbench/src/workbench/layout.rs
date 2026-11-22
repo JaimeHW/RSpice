@@ -1,5 +1,6 @@
 //! Responsive workbench composition policy.
 
+use super::routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 use super::state::{WidthClass, WorkbenchSession};
 
 /// Widest the toolbar's plan chip may grow before its copy is clipped.
@@ -16,6 +17,40 @@ use super::state::{WidthClass, WorkbenchSession};
 /// chip's height, because the toolbar reserves the room before the chip's
 /// owner draws in it.
 pub const RUN_CONFIG_CHIP_MAX_WIDTH: f32 = 224.0;
+
+/// The context docks a surface keeps beside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceDocks {
+    pub navigator: bool,
+    pub inspector: bool,
+}
+
+impl SurfaceDocks {
+    /// Both docks, as a primary workspace keeps them.
+    pub const BOTH: Self = Self {
+        navigator: true,
+        inspector: true,
+    };
+    /// Neither dock.
+    pub const NONE: Self = Self {
+        navigator: false,
+        inspector: false,
+    };
+
+    /// The docks `surface` keeps: none beside a specialist workspace, which
+    /// takes the whole width; otherwise the inspector, and the navigator
+    /// unless the surface declares it has none.
+    #[must_use]
+    pub const fn of(surface: SurfaceId) -> Self {
+        if matches!(surface.archetype(), SurfaceArchetype::SpecialistWorkspace) {
+            return Self::NONE;
+        }
+        Self {
+            navigator: surface.has_navigator(),
+            inspector: true,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutSpec {
@@ -98,7 +133,7 @@ impl LayoutSpec {
             document_strip_visible,
             false,
             true,
-            true,
+            SurfaceDocks::BOTH,
             state,
         )
     }
@@ -110,15 +145,15 @@ impl LayoutSpec {
         document_strip_visible: bool,
         sheet_strip_visible: bool,
         project_open: bool,
-        context_docks_enabled: bool,
+        docks: SurfaceDocks,
         state: &WorkbenchSession,
     ) -> Self {
         let width_class = WidthClass::for_width(viewport_width);
         let short_landscape = viewport_width <= 900.0 && viewport_height <= 500.0;
         let compact_shell = width_class.uses_bottom_navigation() || short_landscape;
-        let navigator_uses_drawer = project_open && context_docks_enabled && compact_shell;
+        let navigator_uses_drawer = project_open && docks.navigator && compact_shell;
         let inspector_uses_drawer = project_open
-            && context_docks_enabled
+            && docks.inspector
             && (compact_shell || width_class.inspector_uses_drawer());
         let workspaces_uses_drawer = project_open && (viewport_width <= 560.0 || short_landscape);
         let show_console_body =
@@ -179,12 +214,12 @@ impl LayoutSpec {
             inspector_width_bounds(width_class);
 
         let show_navigator_dock = project_open
-            && context_docks_enabled
+            && docks.navigator
             && !navigator_uses_drawer
             && !state.focus_mode
             && state.navigator_visible;
         let show_inspector_dock = project_open
-            && context_docks_enabled
+            && docks.inspector
             && !inspector_uses_drawer
             && !state.focus_mode
             && state.inspector_visible;
@@ -424,7 +459,7 @@ mod tests {
             false,
             false,
             false,
-            true,
+            SurfaceDocks::BOTH,
             &WorkbenchSession::default(),
         );
 
@@ -445,7 +480,7 @@ mod tests {
             true,
             false,
             true,
-            false,
+            SurfaceDocks::NONE,
             &WorkbenchSession::default(),
         );
 
@@ -456,6 +491,37 @@ mod tests {
         assert!(!spec.inspector_uses_drawer);
         assert!(!spec.has_overlay_drawer);
         assert!(spec.show_console_strip);
+    }
+
+    /// A surface that declares no navigator gets neither the dock nor its
+    /// drawer, at any width, and keeps its inspector; one that keeps a
+    /// navigator gets both.
+    #[test]
+    fn a_surface_without_a_navigator_keeps_only_its_inspector() {
+        let shell = |width: f32, surface: SurfaceId| {
+            LayoutSpec::resolve_for_shell(
+                width,
+                900.0,
+                false,
+                true,
+                false,
+                true,
+                SurfaceDocks::of(surface),
+                &WorkbenchSession::default(),
+            )
+        };
+        assert!(!SurfaceId::Project.has_navigator());
+        let project = shell(1_440.0, SurfaceId::Project);
+        assert!(!project.show_navigator_dock);
+        assert!(project.show_inspector_dock);
+        let design = shell(1_440.0, SurfaceId::Design);
+        assert!(design.show_navigator_dock);
+        assert!(design.show_inspector_dock);
+
+        let compact = shell(700.0, SurfaceId::Project);
+        assert!(!compact.navigator_uses_drawer);
+        assert!(compact.inspector_uses_drawer);
+        assert!(shell(700.0, SurfaceId::Design).navigator_uses_drawer);
     }
 
     #[test]

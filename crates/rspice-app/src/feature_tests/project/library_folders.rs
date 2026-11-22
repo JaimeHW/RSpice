@@ -7,9 +7,8 @@
 //! who holds it before it edits, an edit a crash recovery puts back counts
 //! as unsaved and takes its lock once edited again, naming a missing
 //! library's root on the Paths page reads it at once, every status reads
-//! alike on the Dependencies page's rail, table and inspector and in the
-//! Overview, and a reference this session cannot read is saved back as it
-//! was.
+//! alike on the Dependencies page's table and inspector and in the Overview,
+//! and a reference this session cannot read is saved back as it was.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -825,7 +824,7 @@ fn a_held_edit_goes_back_over_a_library_the_paths_page_finds() {
     );
 }
 
-/// What the Dependencies page's rail, table and inspector say about `work`,
+/// What the Dependencies page's table and inspector say about `work`,
 /// and the Overview's Dependencies row, agree with `label` and `mark`.
 fn assert_every_place_says(app: &mut RSpiceApp, label: &str, mark: Option<&str>) {
     app.state.workbench.activate(Workspace::Project);
@@ -833,8 +832,8 @@ fn assert_every_place_says(app: &mut RSpiceApp, label: &str, mark: Option<&str>)
     let expected = (label.to_owned(), mark.map(str::to_owned));
     assert_eq!(
         said_about(app, &DependencyLibrary::design(LIBRARY)),
-        [expected.clone(), expected.clone(), expected],
-        "the rail, the table and the inspector"
+        [expected.clone(), expected],
+        "the table and the inspector"
     );
     let snapshot = OverviewSnapshot::capture(
         &egui::Context::default(),
