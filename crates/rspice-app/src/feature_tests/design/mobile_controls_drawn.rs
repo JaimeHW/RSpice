@@ -20,6 +20,8 @@ struct Finger {
     named: Vec<(String, Rect)>,
     /// A modal dialog is open over the canvas, shown before the strip.
     modal: bool,
+    /// What the last frame painted.
+    painted: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Finger {
@@ -49,6 +51,7 @@ impl Finger {
             time: 0.0,
             named: Vec::new(),
             modal: false,
+            painted: Vec::new(),
         };
         finger.frame(Vec::new());
         finger
@@ -81,6 +84,7 @@ impl Finger {
             time,
             named,
             modal,
+            painted,
         } = self;
         let output = ctx.run_ui(
             RawInput {
@@ -96,7 +100,7 @@ impl Finger {
                 rspice_app_design::schematic::view::render_schematic_view(
                     ui,
                     &mut app.state.canvas_frame(),
-                    None,
+                    app.symbol_library.as_ref(),
                 );
                 if *modal {
                     egui::Modal::new(egui::Id::new("dialog-over-the-strip"))
@@ -107,6 +111,7 @@ impl Finger {
                 app.state.reconcile_schematic_drag(ui.ctx(), true);
             },
         );
+        *painted = output.shapes;
         named.clear();
         for (_, node) in output
             .platform_output
@@ -236,6 +241,39 @@ impl Finger {
         }
         self.up(to);
         self.frame(Vec::new());
+    }
+
+    /// Where the last frame painted the placement ghost, which strokes in
+    /// the held-back selection colour: the bounds of its strokes.
+    fn ghost(&self) -> Option<Rect> {
+        use egui::epaint::{ColorMode, Shape};
+        let ink = rspice_ui_kit::tokens::Tokens::get(&self.ctx)
+            .color
+            .canvas_select
+            .gamma_multiply(0.85);
+        fn walk(shape: &Shape, ink: egui::Color32, out: &mut Rect) {
+            let stroked = match shape {
+                Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, ink, out);
+                    }
+                    false
+                }
+                Shape::LineSegment { stroke, .. } => stroke.color == ink,
+                Shape::Path(path) => path.stroke.color == ColorMode::Solid(ink),
+                Shape::Circle(circle) => circle.stroke.color == ink,
+                Shape::Rect(rect) => rect.stroke.color == ink,
+                _ => false,
+            };
+            if stroked {
+                *out = out.union(shape.visual_bounding_rect());
+            }
+        }
+        let mut bounds = Rect::NOTHING;
+        for clipped in &self.painted {
+            walk(&clipped.shape, ink, &mut bounds);
+        }
+        bounds.is_positive().then_some(bounds)
     }
 
     /// A finger held still past egui's long-press time, then lifted: the
@@ -702,6 +740,42 @@ fn the_strip_turns_the_part_being_placed() {
         .last()
         .expect("the tap placed the part");
     assert_eq!((part.rotation, part.mirror_h), (quarter, true));
+}
+
+/// On touch the placement ghost stands where the finger last was, so the
+/// strip's Rotate shows the part it turned. A lifted finger leaves no hover,
+/// and the ghost was drawn only under a hovering pointer, so Rotate seemed
+/// to do nothing until the next tap placed a turned part.
+#[test]
+fn the_strips_rotate_shows_the_turned_ghost_where_the_finger_last_was() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    // The ghost is the part's own artwork, which needs the symbol library.
+    finger.app.symbol_library = Some(
+        rspice_app_design::schematic::symbols::SymbolLibrary::load_embedded()
+            .expect("the built-in artwork loads"),
+    );
+    finger.wake();
+    finger
+        .app
+        .state
+        .model
+        .schematic
+        .arm_tool(rspice_app_state::state::Tool::Place(
+            ComponentType::Resistor,
+        ));
+    let at = finger.screen(Point::new(300, 200));
+    finger.tap(at);
+    let upright = finger.ghost().expect("the ghost stands at the last tap");
+    assert!(upright.expand(4.0).contains(at), "{upright:?} by {at:?}");
+
+    finger.press("Rotate clockwise");
+    let turned = finger.ghost().expect("the turned ghost is drawn");
+    assert!(turned.expand(4.0).contains(at), "{turned:?} by {at:?}");
+    assert_ne!(
+        upright.width() > upright.height(),
+        turned.width() > turned.height(),
+        "the ghost turned a quarter: {upright:?} then {turned:?}"
+    );
 }
 
 /// A finger has no Z: the empty canvas's long-press menu arms the zoom box,

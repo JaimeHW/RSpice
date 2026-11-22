@@ -55,6 +55,21 @@ pub fn pending_library_cell_component(
     )
 }
 
+/// Where the placement ghost stands: under the pointer, or on touch where
+/// the finger last was on the canvas. A lifted finger leaves no hover, so a
+/// turn pressed on the touch strip would otherwise turn a ghost nobody sees;
+/// the next tap places the part where the finger lands.
+fn ghost_position(response: &Response) -> Option<egui::Pos2> {
+    let id = response.id.with("placement-ghost-touch");
+    if let Some(position) = response.hover_pos() {
+        response.ctx.data_mut(|data| data.insert_temp(id, position));
+        return Some(position);
+    }
+    super::super::pointer_target::canvas_touch_mode(&response.ctx)
+        .then(|| response.ctx.data(|data| data.get_temp(id)))
+        .flatten()
+}
+
 pub fn draw_component_preview(
     painter: &Painter,
     response: &Response,
@@ -72,7 +87,7 @@ pub fn draw_component_preview(
     let preview_mirror_h = view.editor.preview_mirror_h;
 
     if let Tool::Place(component_type) = preview_tool
-        && let Some(hover_pos) = response.hover_pos()
+        && let Some(hover_pos) = ghost_position(response)
     {
         let grid_pos = resolve_grid_pointer(
             &view.editor.snap_engine,
