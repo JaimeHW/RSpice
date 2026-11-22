@@ -304,6 +304,19 @@ impl CheckAndSaveValidationReport {
                 projection,
             )
         });
+        // A document other than the root is netlisted as drawn, as its own
+        // top, over the same frozen buffers and connectivity. The plan's
+        // instance paths run from the configured root, so they name none of a
+        // document's own instances, and a document the configuration does not
+        // reach has no binding in it at all: checked under the plan, each of
+        // its instances would read as unresolved.
+        let document_hierarchy = execution_projection.as_ref().ok().map(|projection| {
+            HierarchySource::from_workspace(
+                reads.model.library_manager.catalog(),
+                projection.schematic_buffers(),
+            )
+            .with_connectivity(projection.connectivity())
+        });
 
         // A stale instance is the one netlist blocker with a one-click remedy,
         // so it is stated as its own finding rather than left inside the
@@ -573,7 +586,7 @@ impl CheckAndSaveValidationReport {
                 key.eq_ignore_ascii_case(&active_key),
                 &mut findings,
             );
-            if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
+            if let (Some(hierarchy), Some(schematic)) = (document_hierarchy.as_ref(), projected) {
                 let generated = generate_netlist_hierarchical(
                     schematic,
                     &[],

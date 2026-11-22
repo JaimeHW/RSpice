@@ -539,6 +539,54 @@ fn an_unplaced_document_is_checked_through_its_hierarchy() {
     assert!(!unground("work/bench/schematic"), "{:?}", report.blockers());
 }
 
+/// A document the configured root does not reach is netlisted as drawn,
+/// as its own top. The plan's instance paths run from the root and name
+/// none of its placements, which are not unresolved for that.
+#[test]
+fn a_document_the_root_does_not_reach_is_netlisted_as_drawn() {
+    let mut state = AppState::default();
+    add_cells(
+        &mut state,
+        &[("leaf", &["schematic"]), ("wrapper", &["schematic"])],
+    );
+    let pin = [rspice_app_state::state::PortSpec {
+        name: "a".to_owned(),
+        direction: rspice_app_state::state::PortDirection::InOut,
+    }];
+    let mut leaf = rspice_app_state::state::SchematicState::default();
+    add_port(&mut leaf, "a", "inout");
+    state
+        .model
+        .workspace
+        .insert_schematic_editor("work/leaf/schematic".to_owned(), leaf);
+    let mut wrapper = rspice_app_state::state::SchematicState::default();
+    place(&mut wrapper, "leaf", "XW", &pin, Point::new(100, 0));
+    state
+        .model
+        .workspace
+        .insert_schematic_editor("work/wrapper/schematic".to_owned(), wrapper);
+    place(
+        &mut state.model.schematic,
+        "leaf",
+        "XR",
+        &pin,
+        Point::new(100, 0),
+    );
+    state.sync_active_schematic_to_workspace();
+
+    let report = CheckAndSaveValidationReport::validate(&state).expect("report");
+
+    assert!(
+        !report
+            .blockers()
+            .iter()
+            .any(|finding| finding.source == "netlist"
+                && finding.message.starts_with("work/wrapper/schematic")),
+        "{:?}",
+        report.blockers()
+    );
+}
+
 #[test]
 fn first_save_discloses_all_document_scope() {
     let state = AppState::default();
