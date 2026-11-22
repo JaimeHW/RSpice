@@ -14,7 +14,9 @@
 //!   `[ghost] [secondary] [primary]`, or `[secondary] … [ghost] [primary]`
 //!   when the secondary is set apart, with the primary always rightmost,
 //!   always exactly one, accent-filled (or `err` when destructive), plus an
-//!   optional hint on the left: a sentence of at most two lines.
+//!   optional hint on the left: a sentence of at most two lines. A footer
+//!   whose one button is Close commits nothing, so that Close is the neutral
+//!   button; Esc and Enter close it all the same.
 //! - **Body** — the scrolling middle region, laid out inside a stable
 //!   scrollbar gutter: the bar's track is withheld from the body whether or
 //!   not a bar is showing, so the body's width answers to the surface's width
@@ -437,6 +439,9 @@ const WORKFLOW_FOOTER_VERTICAL_MARGIN: i8 = 10;
 const TOUCH_FOOTER_VERTICAL_MARGIN: i8 = 8;
 const DIALOG_CLOSE_TARGET_WIDTH: f32 = 28.0;
 const DIALOG_CLOSE_TARGET_HEIGHT: f32 = 27.0;
+/// The footer action that only dismisses. Every dialog names it in these
+/// words, the catalogue's "Close" included, so the footer knows it by them.
+const CLOSE: &str = "Close";
 /// The surface's own border, drawn inside the resolved surface rect. The
 /// header, body, and footer share the rect less this measure on every side.
 const SURFACE_BORDER_WIDTH: f32 = 1.0;
@@ -2025,9 +2030,8 @@ impl<'a> Dialog<'a> {
                     }
                     let action_width = ui.available_width();
                     let action_height = large_targets.unwrap_or(29.0);
-                    let primary = crate::widgets::Button::new(&self.primary)
-                        .accent()
-                        .destructive(self.destructive)
+                    let primary = self
+                        .primary_button()
                         .enabled(self.primary_enabled)
                         .min_width(action_width)
                         .max_width(action_width)
@@ -2098,11 +2102,7 @@ impl<'a> Dialog<'a> {
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let primary = crate::widgets::Button::new(&self.primary)
-                            .accent()
-                            .destructive(self.destructive)
-                            .enabled(self.primary_enabled)
-                            .show(ui);
+                        let primary = self.primary_button().enabled(self.primary_enabled).show(ui);
                         primary_id = self.primary_enabled.then_some(primary.id);
                         if primary.clicked() {
                             choice = DialogChoice::Primary;
@@ -2160,11 +2160,25 @@ impl<'a> Dialog<'a> {
     }
 
     fn hides_close_only_footer(&self, hide_close_only_footer: bool) -> bool {
-        hide_close_only_footer
-            && self.primary == "Close"
-            && self.secondary.is_none()
-            && self.ghost.is_none()
-            && self.hint.is_none()
+        hide_close_only_footer && self.only_closes() && self.hint.is_none()
+    }
+
+    /// Whether the footer's one button is Close: a dialog that commits
+    /// nothing, such as a report or a manager whose rows act at once.
+    fn only_closes(&self) -> bool {
+        self.primary == CLOSE && self.secondary.is_none() && self.ghost.is_none()
+    }
+
+    /// The footer's primary: the accent button (or the `err` one when
+    /// destructive), except a lone Close, which is the neutral button. An
+    /// accent slab says "this commits", and a Close commits nothing.
+    fn primary_button(&self) -> crate::widgets::Button<'_> {
+        let button = crate::widgets::Button::new(&self.primary);
+        if self.only_closes() {
+            button
+        } else {
+            button.accent().destructive(self.destructive)
+        }
     }
 }
 

@@ -771,3 +771,48 @@ fn enter_submits_by_default_but_multiline_opt_out_keeps_newlines() {
     assert_eq!(choice, DialogChoice::None);
     assert_eq!(body_text, "\n");
 }
+
+/// Whether any rectangle the frame painted is filled with `fill`.
+fn paints_fill(output: &egui::FullOutput, fill: Color32) -> bool {
+    fn walk(shape: &egui::Shape, fill: Color32) -> bool {
+        match shape {
+            egui::Shape::Rect(rect) => rect.fill == fill,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| walk(shape, fill)),
+            _ => false,
+        }
+    }
+    output
+        .shapes
+        .iter()
+        .any(|clipped| walk(&clipped.shape, fill))
+}
+
+/// A footer whose one button is Close commits nothing, so the Close is the
+/// neutral button rather than the accent slab a committing primary is; Enter
+/// still closes the dialog through it.
+#[test]
+fn a_lone_close_is_the_neutral_button_and_enter_still_closes() {
+    let show = |ctx: &Context, primary: &str, events: Vec<egui::Event>| {
+        let mut choice = DialogChoice::None;
+        let output = ctx.run_ui(raw_input(events), |ctx| {
+            choice = Dialog::new(TEST_TITLE, primary).show(ctx, |ui| {
+                let _ = ui.label("Ready");
+            });
+        });
+        (choice, output)
+    };
+    for (primary, accent) in [("Accept", true), ("Close", false)] {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let mut output = show(&ctx, primary, Vec::new()).1;
+        for _ in 0..3 {
+            output = show(&ctx, primary, Vec::new()).1;
+        }
+        let fill = Tokens::get(&ctx).color.accent;
+        assert_eq!(paints_fill(&output, fill), accent, "{primary}");
+
+        let (choice, _) = show(&ctx, primary, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        assert_eq!(choice, DialogChoice::Primary, "{primary}");
+    }
+}
