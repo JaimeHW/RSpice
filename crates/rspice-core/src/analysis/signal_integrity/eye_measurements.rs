@@ -13,6 +13,8 @@
 //! figure, this module reports that it cannot.
 
 use super::eye_data::EyeData;
+use super::jitter_fit::{Bathtub, bathtub, gaussian_tail_departure};
+use super::normal::q_function;
 use std::f64::consts::PI;
 
 /// Half-width, in unit intervals, of the phase slice sampled for the eye
@@ -34,14 +36,94 @@ const CROSSING_SEARCH_STEPS: usize = 24;
 // Eye Measurements
 // =============================================================================
 
+/// Fewest levels an eye is measured with: NRZ.
+pub const MIN_EYE_LEVELS: u8 = 2;
+/// Most levels an eye is measured with: PAM4.
+pub const MAX_EYE_LEVELS: u8 = 4;
+
+/// What an eye is measured with beyond its folded acquisitions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyeMeasureOptions {
+    /// Signal levels, from [`MIN_EYE_LEVELS`] to [`MAX_EYE_LEVELS`].
+    pub levels: u8,
+    /// Where in the folded window, in unit intervals, the height is read:
+    /// the window's centre when `None`.
+    pub height_at: Option<f64>,
+    /// The level, in volts, the width of a two-level eye is read at: the
+    /// crossing threshold when `None`.
+    pub width_at: Option<f64>,
+}
+
+impl Default for EyeMeasureOptions {
+    fn default() -> Self {
+        Self {
+            levels: MIN_EYE_LEVELS,
+            height_at: None,
+            width_at: None,
+        }
+    }
+}
+
+/// One signal level of the eye at the sampling phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyeLevel {
+    /// Mean of the level's samples, in volts.
+    pub mean: f64,
+    /// Their standard deviation, in volts.
+    pub sigma: f64,
+}
+
+/// One opening of the eye, between two neighbouring levels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyeOpening {
+    /// The decision threshold between the two levels, in volts: midway
+    /// between their means.
+    pub threshold: f64,
+    /// Vertical opening at the sampling phase, in volts.
+    pub height: f64,
+    /// Horizontal opening at the threshold, as a fraction of the unit
+    /// interval.
+    pub width: f64,
+    /// Q factor of the two levels; `None` when either has no samples.
+    pub q_factor: Option<f64>,
+}
+
+/// The bit-error rate the eye's levels support, and why there is none when
+/// there is none.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum BerEstimate {
+    /// The levels could not be measured, or are too few to judge.
+    #[default]
+    Unmeasured,
+    /// The Gaussian tail of the Q factor at the sampling phase: Q(Q).
+    FromQ(f64),
+    /// The spread at the sampling phase is not random noise — none at all,
+    /// or the bounded, stepped spread of intersymbol interference — so a
+    /// Gaussian tail extrapolated from it is not an error rate.
+    NoRandomNoise,
+}
+
+impl BerEstimate {
+    /// The estimated rate, when there is one.
+    #[must_use]
+    pub fn value(self) -> Option<f64> {
+        match self {
+            Self::FromQ(ber) => Some(ber),
+            Self::Unmeasured | Self::NoRandomNoise => None,
+        }
+    }
+}
+
 /// Complete eye diagram measurements
 #[derive(Debug, Clone, Default)]
 pub struct EyeMeasurements {
-    /// Eye height (vertical opening) in volts
+    /// Eye height (vertical opening) in volts: the narrowest opening of a
+    /// multi-level eye.
     pub eye_height: f64,
-    /// Eye width (horizontal opening) as fraction of UI
+    /// Eye width (horizontal opening) as fraction of UI: the narrowest
+    /// opening of a multi-level eye.
     pub eye_width: f64,
-    /// Eye area (normalized, height × width)
+    /// Eye area: height times width, in volt unit intervals.
     pub eye_area: f64,
     /// Vertical eye opening margin at center
     pub vertical_margin: f64,
@@ -53,12 +135,15 @@ pub struct EyeMeasurements {
     pub rise_time: Option<f64>,
     /// Fall time (80%-20%) in seconds, on the same terms as [`Self::rise_time`].
     pub fall_time: Option<f64>,
-    /// Total jitter (peak-to-peak) in seconds
+    /// Peak-to-peak spread of the crossing times in seconds, each edge
+    /// polarity about its own: random and deterministic jitter together.
     pub jitter_pp: f64,
-    /// Random jitter (RMS) in seconds
+    /// RMS spread of the crossing times in seconds, on the same terms.
     pub jitter_rms: f64,
-    /// Deterministic jitter (peak-to-peak) in seconds
-    pub jitter_dj: f64,
+    /// The crossings' bathtub, and the dual-Dirac fit that separates their
+    /// random jitter from their deterministic jitter when there are enough
+    /// of them.
+    pub bathtub: Bathtub,
     /// Measured crossing level in volts — where the rising and falling edge
     /// families intersect. `None` when they do not intersect within the eye,
     /// which is what duty-cycle distortion large enough to split the crossing
@@ -67,14 +152,22 @@ pub struct EyeMeasurements {
     /// Crossing level as a fraction of the eye amplitude (one level minus
     /// zero level, both measured at the eye centre).
     pub crossing_percentage: Option<f64>,
+    /// Highest level's mean less the lowest's, in volts.
+    pub amplitude: Option<f64>,
     /// Signal-to-noise ratio in dB. `Some(f64::INFINITY)` for a noiseless
     /// eye; `None` when the levels could not be measured.
     pub snr_db: Option<f64>,
     /// Q-factor (quality factor). `Some(f64::INFINITY)` for a noiseless eye;
-    /// `None` when the levels could not be measured.
+    /// `None` when the levels could not be measured. The lowest opening's of
+    /// a multi-level eye.
     pub q_factor: Option<f64>,
-    /// Estimated BER (bit error rate), derived from [`Self::q_factor`].
-    pub estimated_ber: Option<f64>,
+    /// Bit-error rate estimated from [`Self::q_factor`], when the spread at
+    /// the sampling phase is random noise.
+    pub ber: BerEstimate,
+    /// The levels at the sampling phase, lowest first.
+    pub levels: Vec<EyeLevel>,
+    /// The openings between them, lowest first.
+    pub openings: Vec<EyeOpening>,
     /// Data rate in bits per second
     pub data_rate: f64,
     /// Unit interval in seconds
@@ -104,7 +197,8 @@ impl EyeMeasurements {
         })
     }
 
-    /// Estimate BER from Q-factor using Q-function approximation
+    /// The bit-error rate of a Q factor: the Gaussian tail Q(Q) = ½·erfc(Q/√2),
+    /// on the complementary error function at every Q.
     pub fn estimate_ber_from_q(q: f64) -> f64 {
         if q <= 0.0 {
             return 1.0;
@@ -112,15 +206,7 @@ impl EyeMeasurements {
         if q.is_infinite() {
             return 0.0;
         }
-        // BER ≈ erfc(Q/√2) / 2 ≈ exp(-Q²/2) / (Q·√(2π))
-        let q_sq = q * q;
-        if q > 8.0 {
-            // Very low BER, use asymptotic
-            (-q_sq / 2.0).exp() / (q * (2.0 * PI).sqrt())
-        } else {
-            // Use complementary error function approximation
-            0.5 * erfc_approx(q / 2.0_f64.sqrt())
-        }
+        q_function(q)
     }
 }
 
@@ -128,8 +214,16 @@ impl EyeMeasurements {
 // Measurement Calculator
 // =============================================================================
 
-/// Calculate comprehensive eye measurements from eye data
+/// Calculate the measurements of a two-level eye.
 pub fn calculate_eye_measurements(data: &EyeData) -> EyeMeasurements {
+    calculate_eye_measurements_with(data, &EyeMeasureOptions::default())
+}
+
+/// Calculate an eye's measurements with `options`.
+pub fn calculate_eye_measurements_with(
+    data: &EyeData,
+    options: &EyeMeasureOptions,
+) -> EyeMeasurements {
     let mut m = EyeMeasurements::new();
 
     if data.traces.is_empty() {
@@ -138,31 +232,36 @@ pub fn calculate_eye_measurements(data: &EyeData) -> EyeMeasurements {
 
     m.unit_interval = data.bit_period;
     m.data_rate = data.data_rate;
+    let levels = options.levels.clamp(MIN_EYE_LEVELS, MAX_EYE_LEVELS);
+    let sampling_phase = options
+        .height_at
+        .filter(|phase| phase.is_finite())
+        .unwrap_or(data.ui_count as f64 / 2.0);
 
     // Calculate eye opening at center of UI
-    let center_opening = calculate_eye_opening_at_center(data);
+    let center_opening = calculate_eye_opening_at(data, sampling_phase);
     m.eye_height = center_opening.height;
     m.vertical_margin = center_opening.margin;
 
     // Calculate horizontal eye opening
-    let horizontal_opening = calculate_horizontal_opening(data);
+    let width_level = options
+        .width_at
+        .filter(|level| level.is_finite())
+        .unwrap_or(data.v_cross);
+    let horizontal_opening = calculate_horizontal_opening(data, width_level);
     m.eye_width = horizontal_opening.width_fraction;
     m.horizontal_margin = horizontal_opening.margin_fraction;
-
-    // Calculate eye area
-    m.eye_area = m.eye_height * m.eye_width;
 
     // Calculate jitter from edge crossings
     let jitter_stats = calculate_jitter_stats(data);
     m.jitter_pp = jitter_stats.peak_to_peak;
     m.jitter_rms = jitter_stats.rms;
-    m.jitter_dj = jitter_stats.deterministic;
 
     // The one and zero levels of the eye come from the amplitude histograms
     // at the eye centre, not from the record's extremes: overshoot and
     // ringing are excursions, not levels, and quoting a Q or a crossing
     // percentage against them understates both.
-    let noise_stats = calculate_noise_stats(data);
+    let noise_stats = calculate_noise_stats(data, sampling_phase);
 
     // Calculate rise/fall times
     let edge_times = calculate_edge_times(data, &noise_stats);
@@ -184,7 +283,6 @@ pub fn calculate_eye_measurements(data: &EyeData) -> EyeMeasurements {
             noise_stats.sigma_high,
             noise_stats.sigma_low,
         );
-        m.estimated_ber = m.q_factor.map(EyeMeasurements::estimate_ber_from_q);
 
         if amplitude > 0.0 {
             let noise_power = noise_stats.sigma_high.powi(2) + noise_stats.sigma_low.powi(2);
@@ -195,6 +293,29 @@ pub fn calculate_eye_measurements(data: &EyeData) -> EyeMeasurements {
             });
         }
     }
+
+    if levels == MIN_EYE_LEVELS {
+        let populations = split_two_levels(data, sampling_phase, NOISE_PHASE_TOLERANCE_UI);
+        m.levels = populations
+            .iter()
+            .filter_map(|samples| level_of(samples))
+            .collect();
+        if m.levels.len() == 2 {
+            m.amplitude = Some(m.levels[1].mean - m.levels[0].mean);
+            m.openings = vec![EyeOpening {
+                threshold: data.v_cross,
+                height: m.eye_height,
+                width: m.eye_width,
+                q_factor: m.q_factor,
+            }];
+        }
+        m.ber = ber_estimate(m.q_factor, &populations);
+    } else {
+        measure_multilevel(data, sampling_phase, levels, &mut m);
+    }
+
+    m.eye_area = m.eye_height * m.eye_width;
+    m.bathtub = crossing_bathtub(data, jitter_threshold(&m, data));
 
     m
 }
@@ -222,7 +343,6 @@ struct HorizontalOpening {
 struct JitterStats {
     peak_to_peak: f64,
     rms: f64,
-    deterministic: f64,
 }
 
 /// Edge timing statistics
@@ -255,14 +375,12 @@ struct FoldedCrossing {
 // Internal Calculation Functions
 // =============================================================================
 
-fn calculate_eye_opening_at_center(data: &EyeData) -> CenterOpening {
+/// Vertical opening at `phase` unit intervals into the folded window.
+fn calculate_eye_opening_at(data: &EyeData, phase: f64) -> CenterOpening {
     if data.traces.is_empty() || data.ui_count == 0 {
         return CenterOpening::default();
     }
-
-    // Sample at the centre of the folded window, which the fold anchor puts
-    // at the centre of the eye opening.
-    let center_ui = data.ui_count as f64 / 2.0;
+    let center_ui = phase;
 
     let mut high_samples = Vec::new();
     let mut low_samples = Vec::new();
@@ -310,8 +428,8 @@ fn calculate_eye_opening_at_center(data: &EyeData) -> CenterOpening {
 /// *unfolded* two-unit-interval window. Those two families are a whole unit
 /// interval apart there, so the difference was a negative number clamped to
 /// zero: the eye width read 0 UI for every signal, open or closed.
-fn calculate_horizontal_opening(data: &EyeData) -> HorizontalOpening {
-    let crossings = collect_folded_crossings(data);
+fn calculate_horizontal_opening(data: &EyeData, level: f64) -> HorizontalOpening {
+    let crossings = collect_folded_crossings(data, level);
     if crossings.len() < 2 {
         return HorizontalOpening::default();
     }
@@ -336,8 +454,8 @@ fn calculate_horizontal_opening(data: &EyeData) -> HorizontalOpening {
     }
 }
 
-/// Every threshold crossing of every acquisition, folded to `[0, 1)`.
-fn collect_folded_crossings(data: &EyeData) -> Vec<FoldedCrossing> {
+/// Every crossing of `level` in every acquisition, folded to `[0, 1)`.
+fn collect_folded_crossings(data: &EyeData, level: f64) -> Vec<FoldedCrossing> {
     let mut crossings = Vec::new();
     for trace in &data.traces {
         let n = trace.time.len().min(trace.amplitude.len());
@@ -347,7 +465,7 @@ fn collect_folded_crossings(data: &EyeData) -> Vec<FoldedCrossing> {
                 trace.time[i + 1],
                 trace.amplitude[i],
                 trace.amplitude[i + 1],
-                data.v_cross,
+                level,
             ) {
                 crossings.push(FoldedCrossing {
                     phase: crossing.0.rem_euclid(1.0),
@@ -476,7 +594,7 @@ fn wrap_phase_difference(difference: f64) -> f64 {
 fn calculate_jitter_stats(data: &EyeData) -> JitterStats {
     // Keep the two polarities apart: they are two different eye edges, and
     // pooling them would report their separation as jitter.
-    let folded = collect_folded_crossings(data);
+    let folded = collect_folded_crossings(data, data.v_cross);
     let rising_crossings: Vec<f64> = folded
         .iter()
         .filter(|crossing| crossing.rising)
@@ -507,14 +625,8 @@ fn calculate_jitter_stats(data: &EyeData) -> JitterStats {
 
     let peak_to_peak = peak_to_peak_ui * data.bit_period;
     let rms = rms_ui * data.bit_period;
-    // Approximate DDJ by removing RJ envelope from measured total jitter.
-    let dj = (peak_to_peak - 14.0 * rms).max(0.0);
 
-    JitterStats {
-        peak_to_peak,
-        rms,
-        deterministic: dj,
-    }
+    JitterStats { peak_to_peak, rms }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -710,9 +822,9 @@ fn mean_of(values: &[f64]) -> Option<f64> {
 }
 
 /// One/zero levels and their noise, from the amplitude histograms in a slice
-/// through the centre of the eye.
-fn calculate_noise_stats(data: &EyeData) -> NoiseStats {
-    let center_ui = data.ui_count as f64 / 2.0;
+/// through the eye at `phase`.
+fn calculate_noise_stats(data: &EyeData, phase: f64) -> NoiseStats {
+    let center_ui = phase;
 
     let mut high_samples = Vec::new();
     let mut low_samples = Vec::new();
@@ -756,27 +868,227 @@ fn level_and_sigma(samples: &[f64]) -> (Option<f64>, f64) {
 }
 
 // =============================================================================
-// Utility Functions
+// Levels, openings and the error rate
 // =============================================================================
 
-/// Complementary error function approximation
-fn erfc_approx(x: f64) -> f64 {
-    // Abramowitz and Stegun approximation
-    let t = 1.0 / (1.0 + 0.5 * x.abs());
-    let tau = t
-        * (-x.powi(2) - 1.26551223
-            + 1.00002368 * t
-            + 0.37409196 * t.powi(2)
-            + 0.09678418 * t.powi(3)
-            - 0.18628806 * t.powi(4)
-            + 0.27886807 * t.powi(5)
-            - 1.13520398 * t.powi(6)
-            + 1.48851587 * t.powi(7)
-            - 0.82215223 * t.powi(8)
-            + 0.17087277 * t.powi(9))
-        .exp();
+/// How far a level's inner tail may depart from a Gaussian's, in standard
+/// deviations of the Q scale, and still be read as random noise. Random
+/// noise sits near 0.03 on a record's few thousand centre samples; the
+/// stepped spread of intersymbol interference with no noise, above 0.1.
+const GAUSSIAN_TAIL_LIMIT: f64 = 0.07;
+/// Most rounds of assigning samples to levels and re-centring the levels.
+const LEVEL_ROUNDS: usize = 100;
 
-    if x >= 0.0 { tau } else { 2.0 - tau }
+/// Samples within `tolerance` unit intervals of `phase` in every
+/// acquisition.
+fn samples_near(data: &EyeData, phase: f64, tolerance: f64) -> Vec<f64> {
+    let mut samples = Vec::new();
+    for trace in &data.traces {
+        for (i, &t) in trace.time.iter().enumerate() {
+            if (t - phase).abs() < tolerance
+                && let Some(&v) = trace.amplitude.get(i)
+                && v.is_finite()
+            {
+                samples.push(v);
+            }
+        }
+    }
+    samples
+}
+
+/// The zero and one populations near `phase`, split at the crossing
+/// threshold, each ascending.
+fn split_two_levels(data: &EyeData, phase: f64, tolerance: f64) -> Vec<Vec<f64>> {
+    let mut samples = samples_near(data, phase, tolerance);
+    samples.sort_by(f64::total_cmp);
+    let split = samples.partition_point(|&v| v < data.v_cross);
+    let high = samples.split_off(split);
+    vec![samples, high]
+}
+
+/// Mean and standard deviation of one level's samples.
+fn level_of(samples: &[f64]) -> Option<EyeLevel> {
+    let (mean, sigma) = level_and_sigma(samples);
+    mean.map(|mean| EyeLevel { mean, sigma })
+}
+
+/// The error rate the levels support: the Gaussian tail of `q` when every
+/// tail facing a threshold is random noise.
+///
+/// Q is quoted as it is conventionally defined, from the levels' standard
+/// deviations, but the tail it implies is an error rate only where those
+/// deviations are random. A simulation with no noise source spreads its
+/// levels by intersymbol interference alone: a bounded spread whose Gaussian
+/// extrapolation reads 1.4e-7 for an eye open by 0.74 V that never errs.
+fn ber_estimate(q: Option<f64>, populations: &[Vec<f64>]) -> BerEstimate {
+    let Some(q) = q else {
+        return BerEstimate::Unmeasured;
+    };
+    if q.is_infinite() {
+        return BerEstimate::NoRandomNoise;
+    }
+    let last = populations.len().saturating_sub(1);
+    for (index, samples) in populations.iter().enumerate() {
+        // The lowest level faces a threshold above it only, the highest one
+        // below it only, the levels between face both.
+        let mut tails: Vec<Vec<f64>> = Vec::with_capacity(2);
+        if index > 0 {
+            tails.push(samples.clone());
+        }
+        if index < last {
+            tails.push(samples.iter().rev().map(|v| -v).collect());
+        }
+        for inner_first in tails {
+            match gaussian_tail_departure(&inner_first) {
+                None => return BerEstimate::Unmeasured,
+                Some(departure) if departure > GAUSSIAN_TAIL_LIMIT => {
+                    return BerEstimate::NoRandomNoise;
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    BerEstimate::FromQ(EyeMeasurements::estimate_ber_from_q(q))
+}
+
+/// Levels, openings, Q and the error rate of an eye of `levels` levels.
+///
+/// The levels are found by one-dimensional k-means on the samples around
+/// the sampling phase, started at evenly spaced levels across the swing;
+/// each opening's threshold is midway between its two levels' means.
+fn measure_multilevel(data: &EyeData, phase: f64, levels: u8, m: &mut EyeMeasurements) {
+    let mut samples = samples_near(data, phase, NOISE_PHASE_TOLERANCE_UI);
+    samples.sort_by(f64::total_cmp);
+    let count = usize::from(levels);
+    if samples.len() < count || !(data.swing.is_finite() && data.swing > 0.0) {
+        return;
+    }
+    let mut means: Vec<f64> = (0..count)
+        .map(|level| data.v_low + data.swing * level as f64 / (count - 1) as f64)
+        .collect();
+    let thresholds_of = |means: &[f64]| -> Vec<f64> {
+        means
+            .windows(2)
+            .map(|pair| 0.5 * (pair[0] + pair[1]))
+            .collect()
+    };
+    let split = |sorted: &[f64], thresholds: &[f64]| -> Vec<std::ops::Range<usize>> {
+        let mut bounds = vec![0usize];
+        bounds.extend(
+            thresholds
+                .iter()
+                .map(|&threshold| sorted.partition_point(|&v| v < threshold)),
+        );
+        bounds.push(sorted.len());
+        bounds.windows(2).map(|pair| pair[0]..pair[1]).collect()
+    };
+    for _ in 0..LEVEL_ROUNDS {
+        let ranges = split(&samples, &thresholds_of(&means));
+        let next: Vec<f64> = ranges
+            .iter()
+            .zip(&means)
+            .map(|(range, &held)| mean_of(&samples[range.clone()]).unwrap_or(held))
+            .collect();
+        let settled = next == means;
+        means = next;
+        if settled {
+            break;
+        }
+    }
+
+    let thresholds = thresholds_of(&means);
+    let populations: Vec<Vec<f64>> = split(&samples, &thresholds)
+        .into_iter()
+        .map(|range| samples[range].to_vec())
+        .collect();
+    m.levels = populations
+        .iter()
+        .filter_map(|samples| level_of(samples))
+        .collect();
+    if m.levels.len() != count {
+        m.levels.clear();
+        return;
+    }
+
+    let mut narrow = samples_near(data, phase, HEIGHT_PHASE_TOLERANCE_UI);
+    narrow.sort_by(f64::total_cmp);
+    let slices = split(&narrow, &thresholds);
+    m.openings = thresholds
+        .iter()
+        .enumerate()
+        .map(|(index, &threshold)| {
+            let below = &narrow[slices[index].clone()];
+            let above = &narrow[slices[index + 1].clone()];
+            let height = match (below.last(), above.first()) {
+                (Some(&top), Some(&bottom)) => (bottom - top).max(0.0),
+                _ => 0.0,
+            };
+            let (lower, upper) = (m.levels[index], m.levels[index + 1]);
+            EyeOpening {
+                threshold,
+                height,
+                width: calculate_horizontal_opening(data, threshold).width_fraction,
+                q_factor: EyeMeasurements::calculate_q(
+                    upper.mean,
+                    lower.mean,
+                    upper.sigma,
+                    lower.sigma,
+                ),
+            }
+        })
+        .collect();
+
+    let narrowest =
+        |value: fn(&EyeOpening) -> f64| m.openings.iter().map(value).fold(f64::INFINITY, f64::min);
+    m.eye_height = narrowest(|opening| opening.height);
+    m.eye_width = narrowest(|opening| opening.width);
+    m.vertical_margin = m.eye_height / 2.0;
+    m.horizontal_margin = m.eye_width / 2.0;
+    m.q_factor = m
+        .openings
+        .iter()
+        .filter_map(|opening| opening.q_factor)
+        .reduce(f64::min);
+    m.amplitude = Some(m.levels[count - 1].mean - m.levels[0].mean);
+    // The crossing level and S/N of a two-level eye name no one threshold
+    // of a multi-level one.
+    m.crossing_level = None;
+    m.crossing_percentage = None;
+    m.snr_db = None;
+    m.ber = ber_estimate(m.q_factor, &populations);
+}
+
+/// The threshold the crossings are fitted at: the crossing threshold of a
+/// two-level eye, the middle opening's (the lower middle one of three
+/// levels) of a multi-level one.
+fn jitter_threshold(m: &EyeMeasurements, data: &EyeData) -> f64 {
+    if m.openings.len() < 2 {
+        return data.v_cross;
+    }
+    m.openings[(m.openings.len() - 1) / 2].threshold
+}
+
+/// The bathtub of the crossings of `level`: each acquisition contributes
+/// the crossings of its first unit interval, so every crossing of the
+/// record is counted once over one unit interval per acquisition.
+fn crossing_bathtub(data: &EyeData, level: f64) -> Bathtub {
+    let mut phases = Vec::new();
+    for trace in &data.traces {
+        let n = trace.time.len().min(trace.amplitude.len());
+        for i in 0..n.saturating_sub(1) {
+            if let Some((time, _)) = interpolate_crossing(
+                trace.time[i],
+                trace.time[i + 1],
+                trace.amplitude[i],
+                trace.amplitude[i + 1],
+                level,
+            ) && (0.0..1.0).contains(&time)
+            {
+                phases.push(time);
+            }
+        }
+    }
+    bathtub(&phases, data.traces.len(), data.bit_period)
 }
 
 // =============================================================================
@@ -859,7 +1171,7 @@ mod tests {
             "crossing {crossing} of the eye amplitude"
         );
         assert_eq!(m.q_factor, Some(f64::INFINITY), "noiseless eye");
-        assert_eq!(m.estimated_ber, Some(0.0), "noiseless eye");
+        assert_eq!(m.ber, BerEstimate::NoRandomNoise, "noiseless eye");
     }
 
     #[test]
@@ -1190,5 +1502,172 @@ mod tests {
             (fall - RISE_2080).abs() <= 0.05 * RISE_2080,
             "fall {fall:e} s, expected {RISE_2080:e}"
         );
+    }
+
+    /// Q to bit-error rate stays on the complementary error function past
+    /// Q = 8, where the one-term asymptote it switched to read 1.5 % high
+    /// and jumped. The rates are scipy's `norm.sf`.
+    #[test]
+    fn the_error_rate_of_a_q_stays_on_erfc_past_eight() {
+        for (q, expected) in [
+            (7.9, 1.394_517_146_659_261e-15),
+            (8.0, 6.220_960_574_271_74e-16),
+            (8.01, 5.735_422_180_258_049e-16),
+            (10.0, 7.619_853_024_160_47e-24),
+        ] {
+            let ber = EyeMeasurements::estimate_ber_from_q(q);
+            assert!(
+                ((ber - expected) / expected).abs() < 1e-12,
+                "Q = {q}: {ber:e}, not {expected:e}"
+            );
+        }
+    }
+
+    /// PRBS7 through a first-order lag of time constant `tau_ui` unit
+    /// intervals, 100 samples a bit, with Gaussian noise of `noise` volts rms,
+    /// folded at the bit period it was generated at.
+    fn lagged_prbs7_eye(tau_ui: f64, noise: f64) -> EyeData {
+        let bits = super::super::eye_test_signals::prbs_bits(7, (7, 6), 600);
+        let dt = UI / 100.0;
+        let decay = (-(dt / UI) / tau_ui).exp();
+        let mut draw = super::super::eye_test_signals::gaussian_draws(0x0e1e_7e5e);
+        let mut held = 0.0;
+        let mut time = Vec::with_capacity(bits.len() * 100);
+        let mut signal = Vec::with_capacity(bits.len() * 100);
+        for (index, &bit) in bits.iter().enumerate() {
+            for step in 0..100 {
+                held = decay * held + (1.0 - decay) * if bit { 1.0 } else { 0.0 };
+                time.push((index * 100 + step) as f64 * dt);
+                signal.push(held + noise * draw());
+            }
+        }
+        let phase =
+            crate::analysis::signal_integrity::unit_interval::crossing_phase_at(&time, &signal, UI)
+                .expect("the lagged record crosses");
+        EyeDataBuilder::new()
+            .bit_period(UI)
+            .ui_count(2)
+            .skip_initial(4)
+            .fold_anchor(fold_anchor(phase.phase, UI))
+            .build(&time, &signal)
+    }
+
+    /// With no noise source the levels at the eye centre are spread by
+    /// intersymbol interference alone. The audit's eye, open by 0.74 V, read
+    /// an estimated error rate of 1.4e-7; it has no random noise to estimate
+    /// one from and says so, while its Q, conventionally defined, stays.
+    #[test]
+    fn a_noise_free_open_eye_reports_no_estimated_error_rate() {
+        let m = calculate_eye_measurements(&lagged_prbs7_eye(0.45, 0.0));
+        assert!(m.eye_height > 0.5, "eye height {} V", m.eye_height);
+        let q = m.q_factor.expect("the levels are measured");
+        assert!(q.is_finite() && q > 1.0, "Q {q}");
+        assert_eq!(m.ber, BerEstimate::NoRandomNoise);
+    }
+
+    /// The same eye with 20 mV of random noise has an error rate to estimate,
+    /// the Gaussian tail of its Q.
+    #[test]
+    fn a_noisy_eye_estimates_its_error_rate_from_its_q() {
+        let m = calculate_eye_measurements(&lagged_prbs7_eye(0.45, 0.02));
+        let q = m.q_factor.expect("the levels are measured");
+        assert_eq!(m.ber, BerEstimate::FromQ(q_function(q)));
+    }
+
+    /// Four levels at 0, 0.3, 0.7 and 1 V, symbols drawn from a seeded
+    /// generator: three openings, as tall as the gaps between the levels.
+    #[test]
+    fn a_four_level_eye_reports_three_openings_at_the_generated_heights() {
+        let levels = [0.0, 0.3, 0.7, 1.0];
+        let mut draw = super::super::eye_test_signals::uniform_draws(0x4a_4a4a);
+        let symbols: Vec<f64> = (0..1_500)
+            .map(|_| levels[((draw() * 4.0) as usize).min(3)])
+            .collect();
+        let t_start = 0.137e-9;
+        let events: Vec<LevelEvent> = symbols
+            .windows(2)
+            .enumerate()
+            .filter(|(_, pair)| pair[0] != pair[1])
+            .map(|(index, pair)| (t_start + (index + 1) as f64 * UI, pair[1]))
+            .collect();
+        let (time, signal) = trapezoid(
+            symbols[0],
+            &events,
+            t_start + (symbols.len() as f64 + 1.0) * UI,
+            DT,
+            RISE_2080,
+        );
+        let phase =
+            crate::analysis::signal_integrity::unit_interval::crossing_phase_at(&time, &signal, UI)
+                .expect("the record crosses mid-swing");
+        let data = EyeDataBuilder::new()
+            .bit_period(UI)
+            .ui_count(2)
+            .skip_initial(2)
+            .fold_anchor(fold_anchor(phase.phase, UI))
+            .build(&time, &signal);
+        let m = calculate_eye_measurements_with(
+            &data,
+            &EyeMeasureOptions {
+                levels: 4,
+                ..EyeMeasureOptions::default()
+            },
+        );
+
+        assert_eq!(m.levels.len(), 4);
+        for (level, expected) in m.levels.iter().zip(levels) {
+            assert!((level.mean - expected).abs() < 1e-9, "level {level:?}");
+        }
+        assert_eq!(m.openings.len(), 3);
+        for (opening, expected) in m.openings.iter().zip([0.3, 0.4, 0.3]) {
+            assert!(
+                (opening.height - expected).abs() < 1e-9,
+                "opening {opening:?}, not {expected} V tall"
+            );
+            assert!(opening.width > 0.8, "opening {opening:?}");
+        }
+        assert!((m.eye_height - 0.3).abs() < 1e-9);
+        assert!(
+            m.amplitude
+                .is_some_and(|amplitude| (amplitude - 1.0).abs() < 1e-9)
+        );
+    }
+
+    /// A clock whose edges carry 0.05 UI of sinusoidal jitter: the fit finds
+    /// it deterministic, a dual-Dirac figure just inside its 0.1 UI
+    /// peak-to-peak with a sliver of random jitter.
+    ///
+    /// The sinusoid runs some sixty periods over the record. One of a few
+    /// periods is partly a slow wander, which the recovered timebase follows
+    /// as a clock recovery would, and the eye then shows less of it.
+    #[test]
+    fn an_eye_with_sinusoidal_jitter_separates_it_as_deterministic() {
+        let data = jittered_clock_eye(1_000, 0.137e-9, 0.05 * UI, 61.7e6);
+        let m = calculate_eye_measurements(&data);
+        let fit = m.bathtub.fit.expect("a thousand crossings are fitted");
+        let dj = fit.deterministic() / UI;
+        let rj = fit.random_rms() / UI;
+        assert!((0.085..=0.1).contains(&dj), "DJ {dj} UI");
+        assert!(rj <= 0.1 * dj, "RJ {rj} UI beside DJ {dj} UI");
+        // A clock crosses at every boundary.
+        assert!((fit.transition_density - 1.0).abs() < 0.01);
+    }
+
+    /// A clock whose edges carry 0.02 UI rms of Gaussian jitter: the fit finds
+    /// it random, its sigma within 15 % over half the crossings the fit's
+    /// 10 % is quoted at.
+    #[test]
+    fn an_eye_with_gaussian_jitter_separates_it_as_random() {
+        let mut draw = super::super::eye_test_signals::gaussian_draws(0x00ab_cdef);
+        let jitter: Vec<f64> = (0..2_000).map(|_| 0.02 * UI * draw()).collect();
+        let t_start = 0.137e-9;
+        let (initial, events) = clock_events(2_000, t_start, UI, 0.0, 1.0, |n| jitter[n]);
+        let data = eye_of(initial, &events, t_start + 2_001.0 * UI);
+        let m = calculate_eye_measurements(&data);
+        let fit = m.bathtub.fit.expect("two thousand crossings are fitted");
+        let rj = fit.random_rms() / UI;
+        let dj = fit.deterministic() / UI;
+        assert!((rj - 0.02).abs() <= 0.15 * 0.02, "RJ {rj} UI");
+        assert!(dj <= 0.5 * rj, "DJ {dj} UI beside RJ {rj} UI");
     }
 }

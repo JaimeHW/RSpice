@@ -42,6 +42,11 @@ const MAX_SUBDIVISION: u32 = 4;
 const MIN_CROSSINGS: usize = 4;
 /// Below this many crossings the estimate is labelled low-confidence.
 const LOW_CONFIDENCE_BELOW: usize = 8;
+/// Above this RMS residual, in unit intervals, the estimate is labelled
+/// low-confidence: crossings this far off their grid close the eye at a
+/// 1e-12 error rate by random jitter alone (2 × 7.03 sigma is one unit
+/// interval), and the period rests on intervals that no longer stand apart.
+const WEAK_FIT_RESIDUAL_UI: f64 = 0.071;
 /// Most rounds of assigning each interval its multiple and refitting the
 /// period; the assignment normally settles in two or three.
 const MAX_REFIT_ITERS: usize = 8;
@@ -66,7 +71,8 @@ pub struct UiEstimate {
     /// RMS residual of the crossings against the fitted grid, in unit
     /// intervals.
     pub rms_residual_ui: f64,
-    /// Too few crossings to be trusted without the reader's confirmation.
+    /// Too few crossings, or crossings too far off the fitted grid, to be
+    /// trusted without the reader's confirmation.
     pub low_confidence: bool,
     /// Mean crossing time modulo the unit interval, in seconds in `[0, T)`.
     pub mean_crossing_phase: f64,
@@ -149,7 +155,8 @@ pub fn estimate_unit_interval(
         unit_interval: fit.period,
         crossing_count: crossings.len(),
         rms_residual_ui: fit.rms_residual_ui,
-        low_confidence: crossings.len() < LOW_CONFIDENCE_BELOW,
+        low_confidence: crossings.len() < LOW_CONFIDENCE_BELOW
+            || fit.rms_residual_ui > WEAK_FIT_RESIDUAL_UI,
         mean_crossing_phase: fit.phase,
     })
 }
@@ -424,7 +431,7 @@ mod tests {
     use super::*;
     use crate::analysis::signal_integrity::eye_test_signals::{
         DT, RISE_2080, UI, beating_toggle_events, clock_events, dcd_clock_events, gaussian_draws,
-        nrz_events, prbs7_bits, trapezoid, uniform_draws,
+        nrz_events, prbs_bits, prbs7_bits, trapezoid, uniform_draws,
     };
 
     /// The shipping estimator this module replaces: the median gap between
@@ -528,6 +535,59 @@ mod tests {
             estimate.unit_interval
         );
         assert!(!estimate.low_confidence);
+    }
+
+    /// The 11-18 audit's records: PRBS7 of 300 and 600 bits and PRBS9 of
+    /// 1,022 (two whole periods) at 1 Gb/s, 40 samples a bit, 0.2 UI linear
+    /// edges. Judged by clusters of run lengths, each folded at half its
+    /// period, 500 ps, and said nothing of it. The greatest common period
+    /// they show is the bit period.
+    #[test]
+    fn the_audited_prbs_records_read_their_own_bit_period() {
+        for (label, bits) in [
+            ("PRBS7, 300 bits", prbs_bits(7, (7, 6), 300)),
+            ("PRBS7, 600 bits", prbs_bits(7, (7, 6), 600)),
+            ("PRBS9, 1,022 bits", prbs_bits(9, (9, 5), 1022)),
+        ] {
+            let dt = UI / 40.0;
+            let (initial, events) = nrz_events(&bits, 0.0, UI, 0.0, 1.0);
+            let samples = bits.len() * 40;
+            let (time, signal) = trapezoid(
+                initial,
+                &events,
+                (samples as f64 - 0.5) * dt,
+                dt,
+                0.6 * 0.2 * UI,
+            );
+            assert_eq!(time.len(), samples);
+            let estimate = estimate_unit_interval(&time, &signal)
+                .unwrap_or_else(|rejection| panic!("{label} refused: {rejection:?}"));
+            assert!(
+                (estimate.unit_interval - UI).abs() <= 1e-4 * UI,
+                "{label}: unit interval {:e}",
+                estimate.unit_interval
+            );
+            assert!(!estimate.low_confidence, "{label} flagged weak");
+        }
+    }
+
+    /// Crossings scattered 0.09 UI rms about their grid still give the bit
+    /// period, but the fit is weak and says so; at 0.05 UI it is not.
+    #[test]
+    fn a_fit_far_off_its_grid_is_flagged_weak() {
+        let ui = 1e-9;
+        let (time, signal) = jittered_prbs7(3_000, ui, 0.09);
+        let weak = estimate_unit_interval(&time, &signal).expect("still a bit period");
+        assert!(
+            (weak.unit_interval - ui).abs() <= 1e-2 * ui,
+            "{:e}",
+            weak.unit_interval
+        );
+        assert!(weak.low_confidence, "residual {} UI", weak.rms_residual_ui);
+
+        let (time, signal) = jittered_prbs7(3_000, ui, 0.05);
+        let firm = estimate_unit_interval(&time, &signal).expect("a bit period");
+        assert!(!firm.low_confidence, "residual {} UI", firm.rms_residual_ui);
     }
 
     /// PRBS7 at `ui` whose every crossing is displaced by Gaussian random

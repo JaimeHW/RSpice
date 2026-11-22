@@ -22,7 +22,7 @@ pub use selection::{
 pub use typed::{EncodedTypedCsv, TypedCsvSummary, encode_typed_result_csv};
 
 use crate::table::escape_csv_field as csv_text;
-use rspice_core::analysis::signal_integrity::EyeMeasurements;
+use rspice_core::analysis::signal_integrity::{BerEstimate, EyeMeasurements};
 use rspice_results::fft::data::FftData;
 use rspice_results::histogram::{Histogram, HistogramDistribution};
 
@@ -109,48 +109,115 @@ fn csv_measurement(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.17e}"))
 }
 
-/// Encode measurements and the acquisition/timebase context selected by the caller.
+/// Encode measurements and the acquisition/timebase context selected by the
+/// caller. `opening_ber` is the error rate the total jitter and the
+/// horizontal opening are read at.
+///
+/// A fraction is named a fraction and every dimensioned figure carries its
+/// unit. Random and deterministic jitter are the dual-Dirac fit's, empty
+/// when the record has too few crossings to fit; the estimated error rate
+/// is empty where the eye has no random noise to estimate one from, and
+/// `estimated_ber_basis` says which.
 pub fn encode_eye_measurements_csv(
     acquisitions: usize,
     unit_intervals: u32,
     unit_interval_source: &str,
     m: &EyeMeasurements,
+    opening_ber: f64,
 ) -> String {
-    let mut contents = String::from("field,value,unit\n");
-    for (field, value, unit) in [
-        ("acquisitions", acquisitions.to_string(), ""),
-        ("unit_intervals", unit_intervals.to_string(), ""),
-        ("data_rate", format!("{:.17e}", m.data_rate), "b/s"),
-        ("unit_interval", format!("{:.17e}", m.unit_interval), "s"),
-        ("unit_interval_source", csv_text(unit_interval_source), ""),
-        ("eye_height", format!("{:.17e}", m.eye_height), "V"),
-        ("eye_width", format!("{:.17e}", m.eye_width), "UI"),
-        ("eye_area", format!("{:.17e}", m.eye_area), ""),
+    let fit = m.bathtub.fit.as_ref();
+    let exact = |value: f64| format!("{value:.17e}");
+    let mut rows: Vec<(String, String, &str)> = vec![
+        ("acquisitions".into(), acquisitions.to_string(), ""),
+        ("unit_intervals".into(), unit_intervals.to_string(), ""),
+        ("data_rate".into(), exact(m.data_rate), "b/s"),
+        ("unit_interval".into(), exact(m.unit_interval), "s"),
         (
-            "vertical_margin",
-            format!("{:.17e}", m.vertical_margin),
+            "unit_interval_source".into(),
+            csv_text(unit_interval_source),
+            "",
+        ),
+        ("eye_height".into(), exact(m.eye_height), "V"),
+        ("eye_width".into(), exact(m.eye_width), "UI"),
+        ("eye_area".into(), exact(m.eye_area), "V*UI"),
+        ("vertical_margin".into(), exact(m.vertical_margin), "V"),
+        ("horizontal_margin".into(), exact(m.horizontal_margin), "UI"),
+        ("amplitude".into(), csv_measurement(m.amplitude), "V"),
+        ("rise_time".into(), csv_measurement(m.rise_time), "s"),
+        ("fall_time".into(), csv_measurement(m.fall_time), "s"),
+        ("jitter_pp".into(), exact(m.jitter_pp), "s"),
+        ("jitter_rms".into(), exact(m.jitter_rms), "s"),
+        (
+            "jitter_rj".into(),
+            csv_measurement(fit.map(|fit| fit.random_rms())),
+            "s",
+        ),
+        (
+            "jitter_dj".into(),
+            csv_measurement(fit.map(|fit| fit.deterministic())),
+            "s",
+        ),
+        // A rate the reader states reads as they stated it.
+        ("opening_ber".into(), format!("{opening_ber:e}"), ""),
+        (
+            "jitter_tj".into(),
+            csv_measurement(fit.and_then(|fit| fit.total_jitter(opening_ber))),
+            "s",
+        ),
+        (
+            "eye_opening_at_ber".into(),
+            csv_measurement(fit.and_then(|fit| fit.opening(opening_ber))),
+            "UI",
+        ),
+        (
+            "crossing_level".into(),
+            csv_measurement(m.crossing_level),
             "V",
         ),
         (
-            "horizontal_margin",
-            format!("{:.17e}", m.horizontal_margin),
-            "UI",
-        ),
-        ("rise_time", csv_measurement(m.rise_time), "s"),
-        ("fall_time", csv_measurement(m.fall_time), "s"),
-        ("jitter_pp", format!("{:.17e}", m.jitter_pp), "s"),
-        ("jitter_rms", format!("{:.17e}", m.jitter_rms), "s"),
-        ("jitter_dj", format!("{:.17e}", m.jitter_dj), "s"),
-        ("crossing_level", csv_measurement(m.crossing_level), "V"),
-        (
-            "crossing_percentage",
+            "crossing_fraction".into(),
             csv_measurement(m.crossing_percentage),
             "",
         ),
-        ("snr", csv_measurement(m.snr_db), "dB"),
-        ("q_factor", csv_measurement(m.q_factor), ""),
-        ("estimated_ber", csv_measurement(m.estimated_ber), ""),
-    ] {
+        ("snr".into(), csv_measurement(m.snr_db), "dB"),
+        ("q_factor".into(), csv_measurement(m.q_factor), ""),
+        ("estimated_ber".into(), csv_measurement(m.ber.value()), ""),
+        (
+            "estimated_ber_basis".into(),
+            match m.ber {
+                BerEstimate::FromQ(_) => "gaussian tail of q_factor",
+                BerEstimate::NoRandomNoise => "none: no random noise",
+                BerEstimate::Unmeasured => "",
+            }
+            .to_owned(),
+            "",
+        ),
+    ];
+    for (index, level) in m.levels.iter().enumerate() {
+        rows.push((format!("level_{index}_mean"), exact(level.mean), "V"));
+        rows.push((format!("level_{index}_sigma"), exact(level.sigma), "V"));
+    }
+    for (index, opening) in m.openings.iter().enumerate() {
+        rows.push((
+            format!("opening_{index}_threshold"),
+            exact(opening.threshold),
+            "V",
+        ));
+        rows.push((
+            format!("opening_{index}_height"),
+            exact(opening.height),
+            "V",
+        ));
+        rows.push((format!("opening_{index}_width"), exact(opening.width), "UI"));
+        rows.push((
+            format!("opening_{index}_q_factor"),
+            csv_measurement(opening.q_factor),
+            "",
+        ));
+    }
+
+    let mut contents = String::from("field,value,unit\n");
+    for (field, value, unit) in rows {
         contents.push_str(&format!("{field},{value},{unit}\n"));
     }
     contents
@@ -212,15 +279,30 @@ mod tests {
         let measurements = EyeMeasurements {
             snr_db: Some(f64::INFINITY),
             q_factor: Some(f64::INFINITY),
-            estimated_ber: Some(0.0),
+            ber: BerEstimate::NoRandomNoise,
+            crossing_percentage: Some(0.5),
             fall_time: Some(-0.0),
             ..Default::default()
         };
-        let text =
-            encode_eye_measurements_csv(3, 2, "auto from 6 edges (low confidence)", &measurements);
+        let text = encode_eye_measurements_csv(
+            3,
+            2,
+            "auto from 6 edges (low confidence)",
+            &measurements,
+            1e-12,
+        );
         assert!(text.contains("acquisitions,3,\nunit_intervals,2,\n"));
         assert!(text.contains("unit_interval_source,auto from 6 edges (low confidence),\n"));
         assert!(text.contains("rise_time,,s\nfall_time,-0.00000000000000000e0,s\n"));
-        assert!(text.contains("crossing_level,,V\ncrossing_percentage,,\nsnr,inf,dB\nq_factor,inf,\nestimated_ber,0.00000000000000000e0,\n"));
+        // A fraction is named a fraction; the area has its unit.
+        assert!(text.contains("\ncrossing_fraction,5.00000000000000000e-1,\n"));
+        assert!(text.contains("\neye_area,0.00000000000000000e0,V*UI\n"));
+        assert!(!text.contains("crossing_percentage"));
+        // Unfitted jitter and an eye with no random noise leave their cells
+        // empty and say why.
+        assert!(text.contains("\njitter_rj,,s\njitter_dj,,s\nopening_ber,1e-12,\njitter_tj,,s\n"));
+        assert!(text.contains(
+            "\nsnr,inf,dB\nq_factor,inf,\nestimated_ber,,\nestimated_ber_basis,none: no random noise,\n"
+        ));
     }
 }

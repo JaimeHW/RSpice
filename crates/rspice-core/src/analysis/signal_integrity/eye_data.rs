@@ -124,6 +124,10 @@ pub struct EyeDataBuilder {
     /// window lands on. `None` starts the first window at the first usable
     /// sample — an arbitrary phase.
     fold_anchor: Option<f64>,
+    /// Absolute times each acquisition starts at, ascending, for an eye
+    /// triggered from a clock signal; `None` steps one bit period from the
+    /// anchor.
+    triggers: Option<Vec<f64>>,
 }
 
 impl Default for EyeDataBuilder {
@@ -134,6 +138,7 @@ impl Default for EyeDataBuilder {
             skip_initial: 10,
             points_per_ui: 100,
             fold_anchor: None,
+            triggers: None,
         }
     }
 }
@@ -193,6 +198,16 @@ impl EyeDataBuilder {
         self
     }
 
+    /// Start every acquisition at one of `times`, ascending, rather than one
+    /// bit period after the last: the edges of a clock signal the eye is
+    /// triggered from, each moved by the delay that places the data. Times
+    /// before the settling skip, and windows past the record's end, are not
+    /// acquired.
+    pub fn triggers(mut self, times: Vec<f64>) -> Self {
+        self.triggers = Some(times.into_iter().filter(|t| t.is_finite()).collect());
+        self
+    }
+
     /// Build eye diagram from transient waveform
     pub fn build(&self, time: &[f64], signal: &[f64]) -> EyeData {
         let n = time.len().min(signal.len());
@@ -249,6 +264,16 @@ impl EyeDataBuilder {
             }
             None => first_time,
         };
+        let mut triggers = self
+            .triggers
+            .as_deref()
+            .map(|times| times.iter().copied().filter(|&t| t >= first_time));
+        if let Some(first) = triggers.as_mut().map(Iterator::next) {
+            match first {
+                Some(first) => window_start = first,
+                None => return eye_data,
+            }
+        }
         let mut sample_start_idx = start_idx;
         let mut sample_end_idx = start_idx;
         while window_start + window_duration <= last_time {
@@ -283,7 +308,13 @@ impl EyeDataBuilder {
                 eye_data.add_trace(trace);
             }
 
-            window_start += self.bit_period;
+            match triggers.as_mut() {
+                Some(times) => match times.next() {
+                    Some(next) => window_start = next,
+                    None => break,
+                },
+                None => window_start += self.bit_period,
+            }
         }
 
         eye_data

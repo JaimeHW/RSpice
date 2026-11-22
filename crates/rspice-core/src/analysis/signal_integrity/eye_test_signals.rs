@@ -192,6 +192,23 @@ pub(super) fn prbs7_bits(count: usize) -> Vec<bool> {
         .collect()
 }
 
+/// A Fibonacci PRBS of `order` with feedback taps `taps` (1-based), seeded
+/// to all ones and read from its oldest stage: the generator the 11-18
+/// numbers audit drew its PRBS7 (taps 7, 6) and PRBS9 (taps 9, 5) records
+/// from, so a record here is bit for bit the one it measured.
+pub(super) fn prbs_bits(order: usize, taps: (usize, usize), count: usize) -> Vec<bool> {
+    let mut stages = vec![true; order];
+    (0..count)
+        .map(|_| {
+            let feedback = stages[taps.0 - 1] ^ stages[taps.1 - 1];
+            let out = stages[order - 1];
+            stages.rotate_right(1);
+            stages[0] = feedback;
+            out
+        })
+        .collect()
+}
+
 /// Level changes for a waveform that toggles at the union of two square
 /// waves' edges — the classic two-incommensurate-clocks case, which has no
 /// single bit period to find.

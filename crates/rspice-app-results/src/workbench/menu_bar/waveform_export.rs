@@ -761,6 +761,7 @@ fn eye_measurements_csv(state: ResultsReads<'_>) -> Option<PreparedTypedResultCs
         eye.data.ui_count,
         &unit_interval_source,
         m,
+        rspice_core::analysis::signal_integrity::DEFAULT_OPENING_BER,
     );
     Some(PreparedTypedResultCsv {
         default_name: "rspice-eye.csv",
