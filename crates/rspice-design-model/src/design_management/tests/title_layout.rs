@@ -132,7 +132,13 @@ const ISO_OPTIONAL: [Field; 6] = [
 ];
 
 fn iso_with_optional(shown: &[Field]) -> SchematicSheetFormat {
-    showing(&SchematicSheetFormat::default(), shown)
+    showing(
+        &SchematicSheetFormat::from_standard(
+            DrawingSheetStandard::IsoA4,
+            SchematicPageOrientation::Landscape,
+        ),
+        shown,
+    )
 }
 
 #[test]
@@ -288,16 +294,20 @@ fn the_iso_form_holds_what_iso_7200_recommends_each_field_hold() {
 
 #[test]
 fn a_hidden_optional_field_merges_into_its_neighbour() {
-    // A new sheet shows neither Checked by, Classification nor the language
-    // code: each merges into the cell on its left, so Created by takes
-    // Checked by's place, Approved by Classification's and Sheet Lang.'s.
-    // No rule moves, and no other cell does.
-    let layout = layout_of(&SchematicSheetFormat::default());
+    // A new ISO sheet shows neither Checked by, Classification nor the
+    // language code. The people's names share the row they leave evenly, so
+    // Created by and Approved by split it 90 / 90; the language code merges
+    // into the cell on its left, the sheet. No other cell moves.
+    let layout = layout_of(&iso_with_optional(&[
+        Field::DocumentStatus,
+        Field::CellView,
+        Field::Revision,
+    ]));
     assert_eq!(
         form_cells(&layout),
         [
-            (Field::DrawnBy, 0, 0, 95_000, 11_250),
-            (Field::ApprovedBy, 95_000, 0, 85_000, 11_250),
+            (Field::DrawnBy, 0, 0, 90_000, 11_250),
+            (Field::ApprovedBy, 90_000, 0, 90_000, 11_250),
             (Field::Organization, 0, 11_250, 47_500, 33_750),
             (Field::DocumentType, 47_500, 11_250, 62_500, 11_250),
             (Field::DocumentStatus, 110_000, 11_250, 70_000, 11_250),
@@ -366,10 +376,14 @@ fn a_hidden_optional_field_merges_into_its_neighbour() {
 }
 
 /// Whatever a sheet hides, every rule stands where the form designs one: a
-/// vertical rule at one of its column lines, a horizontal one on a row line.
+/// vertical rule at one of its column lines, or where the names it shows
+/// split the people's row evenly, and a horizontal one on a row line.
 #[test]
 fn the_iso_forms_rules_stand_only_where_it_designs_them() {
-    const COLUMNS_UM: [u64; 7] = [47_500, 95_000, 110_000, 120_500, 142_500, 146_500, 168_000];
+    const COLUMNS_UM: [u64; 11] = [
+        47_500, 60_000, 71_250, 90_000, 95_000, 110_000, 120_000, 120_500, 142_500, 146_500,
+        168_000,
+    ];
     const ROWS_UM: [u64; 3] = [11_250, 22_500, 33_750];
     for mask in 0..1_u32 << ISO_OPTIONAL.len() {
         let shown = ISO_OPTIONAL

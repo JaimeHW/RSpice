@@ -30,12 +30,15 @@
 //! and each rule within a row stands at least 10 mm from any in the rows
 //! beside it, so no two rules nearly meet.
 //!
-//! An optional field the sheet does not show merges its cell into the one on
+//! The people's names are a row of equal boxes, and a sheet that does not
+//! show Checked by or Classification shares their width evenly among the
+//! names it shows: Created by and Approved by split the row 90 / 90, and
+//! with Checked by shown the three names stand 60 mm apart. Any other
+//! optional field the sheet does not show merges its cell into the one on
 //! its left, or the one on its right when it starts its row, so the rules
-//! that remain stand where the form puts them and no rule appears anywhere
-//! the form does not have one. Nothing in any other row moves. The fields
-//! ISO 7200 makes mandatory are always on the form; their values may stay
-//! empty until the drawing is signed.
+//! that remain stand where the form puts them. Nothing in any other row
+//! moves. The fields ISO 7200 makes mandatory are always on the form; their
+//! values may stay empty until the drawing is signed.
 
 use super::form_table::*;
 use super::*;
@@ -68,6 +71,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 47_500,
         row: 0,
         rows: 1,
+        pooled: true,
         lines: &[line(Field::DrawnBy)],
     },
     FormCell {
@@ -76,6 +80,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 47_500,
         row: 0,
         rows: 1,
+        pooled: true,
         lines: &[line(Field::CheckedBy)],
     },
     FormCell {
@@ -84,6 +89,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 47_500,
         row: 0,
         rows: 1,
+        pooled: true,
         lines: &[line(Field::ApprovedBy)],
     },
     FormCell {
@@ -92,6 +98,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 37_500,
         row: 0,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Classification)],
     },
     // The legal owner's name wraps rather than being cut: the cell is as
@@ -102,6 +109,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 47_500,
         row: 1,
         rows: 3,
+        pooled: false,
         lines: &[FormLine {
             max_lines: 3,
             ..line(Field::Organization)
@@ -113,6 +121,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 62_500,
         row: 1,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::DocumentType)],
     },
     FormCell {
@@ -121,6 +130,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 70_000,
         row: 1,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::DocumentStatus)],
     },
     // The title, and under it the supplementary title on the value line of
@@ -131,6 +141,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 62_500,
         row: 2,
         rows: 2,
+        pooled: false,
         lines: &[
             line(Field::SheetTitle),
             FormLine {
@@ -145,6 +156,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 70_000,
         row: 2,
         rows: 1,
+        pooled: false,
         lines: &[FormLine {
             lettering_um: IDENTIFIER_UM,
             ..line(Field::DocumentId)
@@ -156,6 +168,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 10_500,
         row: 3,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Revision)],
     },
     FormCell {
@@ -164,6 +177,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 26_000,
         row: 3,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Date)],
     },
     FormCell {
@@ -172,6 +186,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 21_500,
         row: 3,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Page)],
     },
     FormCell {
@@ -180,6 +195,7 @@ const FORM_CELLS: [FormCell; 13] = [
         width_um: 12_000,
         row: 3,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Language)],
     },
 ];

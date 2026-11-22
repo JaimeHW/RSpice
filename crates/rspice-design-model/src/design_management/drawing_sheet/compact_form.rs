@@ -56,6 +56,7 @@ const fn full_row(caption: &'static str, row: u64, lines: &'static [FormLine]) -
         width_um: COMPACT_FORM_WIDTH_UM,
         row,
         rows: 1,
+        pooled: false,
         lines,
     }
 }
@@ -80,6 +81,7 @@ const FORM_CELLS: [FormCell; 8] = [
         width_um: 54_000,
         row: 3,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::DocumentId)],
     },
     FormCell {
@@ -88,6 +90,7 @@ const FORM_CELLS: [FormCell; 8] = [
         width_um: 21_000,
         row: 3,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Revision)],
     },
     FormCell {
@@ -96,6 +99,7 @@ const FORM_CELLS: [FormCell; 8] = [
         width_um: 35_000,
         row: 3,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Date)],
     },
     FormCell {
@@ -104,6 +108,7 @@ const FORM_CELLS: [FormCell; 8] = [
         width_um: 75_000,
         row: 4,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::DrawnBy)],
     },
     FormCell {
@@ -112,6 +117,7 @@ const FORM_CELLS: [FormCell; 8] = [
         width_um: 35_000,
         row: 4,
         rows: 1,
+        pooled: false,
         lines: &[line(Field::Page)],
     },
 ];

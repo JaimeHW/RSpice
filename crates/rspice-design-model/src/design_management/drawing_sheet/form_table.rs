@@ -6,10 +6,11 @@
 //! one of two ways: over the value, on a line of their own, or inline before
 //! it on the value's line.
 //!
-//! An optional field the sheet does not show merges its cell into the one on
-//! its left, or the one on its right when it starts its row, so the rules
-//! that remain stand where the form puts them and no rule appears anywhere
-//! the form does not have one. Nothing in any other row moves.
+//! An optional field the sheet does not show gives its cell's width away:
+//! to the pooled cells of its row, a row of equal boxes such as the people's
+//! names, shared evenly so they stay equal; elsewhere to the cell on its
+//! left, or the one on its right when it starts its row, so the rules that
+//! remain stand where the form puts them. Nothing in any other row moves.
 
 use super::*;
 
@@ -44,6 +45,11 @@ pub(super) struct FormCell {
     /// The first row the cell covers, from the top, and how many it spans.
     pub(super) row: u64,
     pub(super) rows: u64,
+    /// Whether the cell is one of its row's equal boxes: the width hidden
+    /// cells of the row give away is shared evenly among the pooled cells
+    /// still shown, so a row of names stays a row of equal boxes, instead of
+    /// going to the hidden cell's neighbour.
+    pub(super) pooled: bool,
     /// What it letters, the first being the field the cell is for.
     pub(super) lines: &'static [FormLine],
 }
@@ -254,9 +260,11 @@ fn place_form_cells(
     placed
 }
 
-/// Place a run of side-by-side cells in one row: each hidden cell merges
-/// into the shown cell on its left, or on its right when it starts the row,
-/// so every rule that remains stands where the form puts it.
+/// Place a run of side-by-side cells in one row. Where the run has pooled
+/// cells shown, they share the width of its hidden cells evenly; otherwise
+/// each hidden cell merges into the shown cell on its left, or on its right
+/// when it starts the row, so every rule that remains stands where the form
+/// puts it.
 fn share_run(
     run: &[&'static FormCell],
     shown: &impl Fn(DrawingSheetTitleFieldId) -> bool,
@@ -279,28 +287,45 @@ fn share_run(
         return;
     }
     let mut widths = run.iter().map(|cell| cell.width_um).collect::<Vec<_>>();
-    let mut index = 0;
-    while index < run.len() {
-        if visible[index] {
-            index += 1;
-            continue;
-        }
-        let start = index;
-        while index < run.len() && !visible[index] {
-            index += 1;
-        }
-        let given_um = run[start..index]
+    let pool = (0..run.len())
+        .filter(|&index| run[index].pooled && visible[index])
+        .collect::<Vec<_>>();
+    if let Some(&last) = pool.last() {
+        let given_um = run
             .iter()
-            .map(|cell| cell.width_um)
+            .zip(&visible)
+            .filter(|(_, visible)| !**visible)
+            .map(|(cell, _)| cell.width_um)
             .sum::<u64>();
-        // Into the cell on the left, or the one on the right for the first
-        // cells of a row; a run that is hidden whole has none and stays
-        // blank.
-        if let Some(neighbour) = start
-            .checked_sub(1)
-            .or((index < run.len()).then_some(index))
-        {
-            widths[neighbour] += given_um;
+        let share_um = given_um / pool.len() as u64;
+        for &index in &pool {
+            widths[index] += share_um;
+        }
+        widths[last] += given_um - share_um * pool.len() as u64;
+    } else {
+        let mut index = 0;
+        while index < run.len() {
+            if visible[index] {
+                index += 1;
+                continue;
+            }
+            let start = index;
+            while index < run.len() && !visible[index] {
+                index += 1;
+            }
+            let given_um = run[start..index]
+                .iter()
+                .map(|cell| cell.width_um)
+                .sum::<u64>();
+            // Into the cell on the left, or the one on the right for the
+            // first cells of a row; a run that is hidden whole has none and
+            // stays blank.
+            if let Some(neighbour) = start
+                .checked_sub(1)
+                .or((index < run.len()).then_some(index))
+            {
+                widths[neighbour] += given_um;
+            }
         }
     }
     let mut x_um = first.x_um;
