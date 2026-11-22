@@ -59,11 +59,6 @@ pub const READ_ONLY: &str = "This schematic is read-only.";
 pub const NAMES_MISSING: &str = "Type the names of the pins to place.";
 pub const DOCUMENT_CHANGED: &str =
     "The active schematic changed. Close this form and open it again.";
-pub const TOO_MANY: &str = "A batch holds at most 256 pins.";
-
-/// One batch's ceiling. A cell with more than this many new pins is a cell
-/// being generated, not drawn.
-pub const MAX_NAMES: usize = 256;
 
 /// Open Create pins for the active schematic.
 ///
@@ -157,9 +152,6 @@ fn draft(form: &PinPortDialogState, model: &Model) -> Draft {
         .collect::<Vec<_>>();
     if names.is_empty() {
         return Draft::Empty;
-    }
-    if names.len() > MAX_NAMES {
-        return Draft::Refused(TOO_MANY.to_owned());
     }
     let mut seen = std::collections::HashSet::new();
     for name in &names {

@@ -94,13 +94,18 @@ fn a_name_listed_twice_is_refused_before_arming() {
         draft(&app.state),
         Draft::Refused("en is listed twice.".to_owned())
     );
+}
 
-    let names = (0..=MAX_NAMES)
-        .map(|index| format!("P{index}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    app.state.design.pin_port.fields.names = names;
-    assert_eq!(draft(&app.state), Draft::Refused(TOO_MANY.to_owned()));
+/// A port list pasted from a wide digital block arms as one batch, however
+/// many names it holds, as Virtuoso's Create Pin takes any count.
+#[test]
+fn a_batch_of_any_size_arms() {
+    let mut app = RSpiceApp::test_instance();
+    let names = (0..512)
+        .map(|index| format!("D{index}"))
+        .collect::<Vec<_>>();
+    open_with(&mut app.state, &names.join(" "));
+    assert_eq!(draft(&app.state), Draft::Ready(names));
 }
 
 #[test]
