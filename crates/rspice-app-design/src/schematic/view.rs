@@ -256,6 +256,7 @@ fn set_canvas_cursor(
             state.design.interaction.drag.drag_type,
             rspice_schematic_editor::session::drag::DragType::MoveSelection
                 | rspice_schematic_editor::session::drag::DragType::MoveText(..)
+                | rspice_schematic_editor::session::drag::DragType::WireSegment(..)
         ),
         tool: editor.tool,
     };

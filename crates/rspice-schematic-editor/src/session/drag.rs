@@ -14,4 +14,7 @@ pub enum DragType {
     WireVertex,
     /// Moving one part's name or value, which leaves the part where it is.
     MoveText(u64, InstanceText),
+    /// Sliding one segment of a wire (its id and segment index) sideways;
+    /// the wires that meet its ends follow it.
+    WireSegment(u64, usize),
 }

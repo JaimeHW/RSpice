@@ -7,6 +7,7 @@ use super::{
     mobile_controls::touch_latches,
     pointer_target::{PointerHit, PointerQuery, PointerTarget, canvas_touch_mode, pointer_target},
     snap_resolution::{resolve_grid_pointer, resolve_target_pointer, target_acquisition_radius},
+    stretch_interaction::stretch_delta_for_policy,
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
@@ -20,7 +21,12 @@ use crate::{
     },
 };
 use egui::{PointerButton, Response, Ui};
-use rspice_design::schematic::selection::Selection;
+use rspice_design::schematic::{
+    document::SchematicDocument,
+    selection::Selection,
+    stretch::{StretchOrthogonalPolicy, StretchTarget},
+    wire::WireSegment,
+};
 use rspice_design_model::Point;
 use rspice_design_model::design_management::SheetTextVariables;
 
@@ -52,6 +58,14 @@ pub enum SelectionDragAction {
         position: Point,
     },
     BeginWireVertex(Point),
+    /// A drag that began on a wire's body, away from its corners: it takes
+    /// the wire alone and slides that segment, and the wires meeting its
+    /// ends follow (see [`wire_segment_drag_motion`]).
+    BeginWireSegment {
+        wire_id: u64,
+        segment_index: usize,
+        position: Point,
+    },
     BeginMarquee(Point),
     /// A finger's drag that pans the sheet: it began on empty canvas or on
     /// an object outside the selection (R-3). The view follows the finger
@@ -73,6 +87,13 @@ pub enum SelectionDragAction {
         hit: InstanceTextHit,
         from: Point,
         delta: Point,
+        position: Point,
+    },
+    /// The pointer moved during a segment drag. The drawing is untouched
+    /// until release; the canvas previews where the segment would land.
+    MoveWireSegment {
+        operation_id: u64,
+        from: Point,
         position: Point,
     },
     UpdateMarquee(Point),
@@ -237,12 +258,94 @@ pub fn start(
             let wire = wire();
             if view.design.active_wire_point_is_draggable(wire) {
                 SelectionDragAction::BeginWireVertex(wire)
+            } else if let Some(PointerTarget::Wire(id)) = target {
+                wire_body_drag(view, id, band, grid)
+                    .unwrap_or(SelectionDragAction::BeginMarquee(band))
             } else {
                 SelectionDragAction::BeginMarquee(band)
             }
         }
         _ => SelectionDragAction::BeginMarquee(band),
     })
+}
+
+/// What a drag that began on wire `id`'s body, away from its corners,
+/// starts. Grabbed as one member of a larger selection, the wire carries the
+/// whole selection, as a part does; otherwise the wire is taken alone and
+/// the segment under `band` slides, keeping the wires at its ends attached.
+fn wire_body_drag(
+    view: &SelectionDragView<'_>,
+    id: u64,
+    band: Point,
+    grid: Point,
+) -> Option<SelectionDragAction> {
+    let selection = &view.editor.selection;
+    if selection.has_wire(id) && selection.count() > 1 {
+        return Some(SelectionDragAction::BeginSelection {
+            target: PointerTarget::Wire(id),
+            position: grid,
+        });
+    }
+    Some(SelectionDragAction::BeginWireSegment {
+        wire_id: id,
+        segment_index: wire_segment_at(view.design.document, id, band)?,
+        position: grid,
+    })
+}
+
+/// The segment of wire `id` nearest `point`.
+pub fn wire_segment_at(document: &SchematicDocument, id: u64, point: Point) -> Option<usize> {
+    let wire = document.wires.iter().find(|wire| wire.id == id)?;
+    wire.points
+        .windows(2)
+        .enumerate()
+        .map(|(index, ends)| {
+            (
+                index,
+                WireSegment::new(ends[0], ends[1]).distance_to_point(point),
+            )
+        })
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(index, _)| index)
+}
+
+/// What a segment drag from `from` to `to` asks of the stretch that carries
+/// it out. A square segment under square routing slides sideways only, so it
+/// and the wires at its ends stay square, as a dragged segment does in KiCad
+/// and Altium; an angled segment, or any segment under 45-degree or free
+/// routing, follows the pointer and its neighbours may turn diagonal.
+pub fn wire_segment_drag_motion(
+    document: &SchematicDocument,
+    wire_id: u64,
+    segment_index: usize,
+    from: Point,
+    to: Point,
+    square_routing: bool,
+) -> (Point, StretchTarget, StretchOrthogonalPolicy) {
+    let target = StretchTarget::WireSegment {
+        wire_id,
+        segment_index,
+    };
+    let delta = Point::new(to.x.saturating_sub(from.x), to.y.saturating_sub(from.y));
+    let square = document
+        .wires
+        .iter()
+        .find(|wire| wire.id == wire_id)
+        .and_then(|wire| {
+            wire.points
+                .get(segment_index..segment_index.checked_add(2)?)
+        })
+        .is_some_and(|ends| WireSegment::new(ends[0], ends[1]).is_orthogonal());
+    if square_routing && square {
+        let policy = StretchOrthogonalPolicy::PreserveOrthogonal;
+        (
+            stretch_delta_for_policy(delta, target, policy, document),
+            target,
+            policy,
+        )
+    } else {
+        (delta, target, StretchOrthogonalPolicy::AllowDiagonal)
+    }
 }
 
 /// Where a one-finger drag began, for [`TouchDragStart::action`].
@@ -270,10 +373,13 @@ impl TouchDragStart {
             {
                 match target {
                     PointerTarget::Junction(_) | PointerTarget::Wire(_) => {
-                        if view.filter.wires
-                            && view.design.active_wire_point_is_draggable(self.wire)
-                        {
+                        if !view.filter.wires {
+                            SelectionDragAction::BeginTouchPan
+                        } else if view.design.active_wire_point_is_draggable(self.wire) {
                             SelectionDragAction::BeginWireVertex(self.wire)
+                        } else if let PointerTarget::Wire(id) = target {
+                            wire_body_drag(view, id, self.band, self.grid)
+                                .unwrap_or(SelectionDragAction::BeginTouchPan)
                         } else {
                             SelectionDragAction::BeginTouchPan
                         }
@@ -347,6 +453,15 @@ pub fn update(
             last_position: Some(from),
             operation_id,
         }) => Some(SelectionDragAction::MoveWireVertex {
+            operation_id,
+            from,
+            position,
+        }),
+        Some(ActiveSelectionDrag {
+            kind: DragType::WireSegment(..),
+            last_position: Some(from),
+            operation_id,
+        }) => (position != from).then_some(SelectionDragAction::MoveWireSegment {
             operation_id,
             from,
             position,

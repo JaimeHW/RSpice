@@ -16,7 +16,7 @@ use rspice_schematic_editor::view::instance_text::{self, InstanceTextHit};
 use rspice_schematic_editor::view::pointer_target::PointerTarget;
 use rspice_schematic_editor::view::selection_drag::{
     self, SelectionDragAction, SelectionDragRequest, SelectionDragView, select_drag_can_start,
-    select_drag_is_authorized, select_drag_target,
+    select_drag_is_authorized, select_drag_target, wire_segment_drag_motion,
 };
 
 fn view<'a>(state: &'a CanvasParts<'_>, ctx: &egui::Context) -> SelectionDragView<'a> {
@@ -141,6 +141,29 @@ pub fn apply(
             }
             state.begin_schematic_drag((position.x, position.y), DragType::WireVertex, ctx);
         }
+        // The wire is taken alone, as a click on it takes it; the drawing
+        // changes on release, when the segment lands.
+        SelectionDragAction::BeginWireSegment {
+            wire_id,
+            segment_index,
+            position,
+        } => {
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_wire(wire_id);
+            if state.deny_read_only_edit() {
+                return;
+            }
+            state.begin_schematic_drag(
+                (position.x, position.y),
+                DragType::WireSegment(wire_id, segment_index),
+                ctx,
+            );
+        }
         SelectionDragAction::BeginMarquee(position) => state
             .model
             .schematic
@@ -186,6 +209,26 @@ pub fn apply(
                     .drag
                     .update((position.x, position.y));
             }
+        }
+        SelectionDragAction::MoveWireSegment {
+            operation_id,
+            from,
+            position,
+        } => {
+            if !owns_operation(state, ctx, operation_id, None)
+                || !matches!(
+                    state.design.interaction.drag.drag_type,
+                    DragType::WireSegment(..)
+                )
+                || state.design.interaction.drag.last_pos != Some((from.x, from.y))
+            {
+                return;
+            }
+            state
+                .design
+                .interaction
+                .drag
+                .update((position.x, position.y));
         }
         SelectionDragAction::MoveText {
             operation_id,
@@ -255,6 +298,13 @@ pub fn apply(
             if !owns_operation(state, ctx, operation_id, None) {
                 return;
             }
+            if let DragType::WireSegment(wire_id, segment_index) =
+                state.design.interaction.drag.drag_type
+            {
+                land_wire_segment(state, symbols, wire_id, segment_index);
+                state.design.interaction.drag.cancel();
+                return;
+            }
             // A moved name or value leaves every pin and wire where it was.
             if !matches!(
                 state.design.interaction.drag.drag_type,
@@ -302,6 +352,74 @@ pub fn apply(
                 state.model.schematic.session.editor.selection_crossing,
             );
             select_in_rect_on_active_sheet(state, symbols, window, additive);
+        }
+    }
+}
+
+/// Where a segment drag's pointer went, from where it began, as the motion
+/// and policy the stretch is asked for; `None` before the pointer has moved.
+pub(super) fn wire_segment_drag(
+    state: &CanvasParts<'_>,
+    wire_id: u64,
+    segment_index: usize,
+) -> Option<(
+    Point,
+    crate::state::StretchTarget,
+    crate::state::StretchOrthogonalPolicy,
+)> {
+    let drag = &state.design.interaction.drag;
+    let (start, last) = (drag.start_pos?, drag.last_pos?);
+    Some(wire_segment_drag_motion(
+        state.model.schematic.document(),
+        wire_id,
+        segment_index,
+        Point::new(start.0, start.1),
+        Point::new(last.0, last.1),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .routing_mode
+            .is_orthogonal(),
+    ))
+}
+
+/// Release a segment drag: the segment lands where the preview showed it,
+/// with the wires at its ends following, as one undo step. A drop the
+/// drawing cannot take leaves every wire as drawn and says why.
+fn land_wire_segment(
+    state: &mut CanvasParts<'_>,
+    symbols: &SchematicSymbolContext,
+    wire_id: u64,
+    segment_index: usize,
+) {
+    let Some((delta, target, policy)) = wire_segment_drag(state, wire_id, segment_index)
+        .filter(|(delta, ..)| *delta != Point::origin())
+    else {
+        state.model.schematic.cancel_operation();
+        return;
+    };
+    let landed = with_active_wire_topology(state.model, |schematic, scope| {
+        schematic.stretch_target_resolved(
+            delta,
+            target,
+            policy,
+            |component| symbols.terminal_points(component),
+            |component| symbols.component_bounds_tuple(component),
+            scope,
+        )
+    });
+    match landed {
+        Ok(_) => {
+            if state.model.schematic.end_operation() {
+                state.sync_active_schematic_to_workspace();
+            }
+        }
+        Err(error) => {
+            state.model.schematic.cancel_operation();
+            state.prompt(format!("Wire not moved: {error}"));
         }
     }
 }

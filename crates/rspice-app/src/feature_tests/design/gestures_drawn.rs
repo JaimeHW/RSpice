@@ -760,6 +760,128 @@ fn a_double_click_on_a_wire_shows_its_net_in_the_inspector() {
     );
 }
 
+/// Press on the canvas at `press`, drag through `steps` (offsets from the
+/// press, one frame each) and release at the last.
+fn drag_from(fixture: &mut Fixture, press: egui::Pos2, steps: &[egui::Vec2]) {
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    fixture.frame(
+        vec![egui::Event::PointerMoved(press), button(press, true)],
+        true,
+    );
+    let mut at = press;
+    for step in steps {
+        at = press + *step;
+        fixture.frame(vec![egui::Event::PointerMoved(at)], true);
+    }
+    fixture.frame(vec![button(at, false)], true);
+}
+
+/// A square route of three wires, as the wire tool stores one: a segment
+/// from (100, 100) to (200, 100) with a leg down from each end.
+fn square_route(fixture: &mut Fixture) -> Vec<Wire> {
+    let schematic = &mut fixture.app.state.model.schematic;
+    schematic.document_mut_for_test().wires = vec![
+        Wire::new(1, vec![Point::new(100, 200), Point::new(100, 100)]),
+        Wire::new(2, vec![Point::new(100, 100), Point::new(200, 100)]),
+        Wire::new(3, vec![Point::new(200, 100), Point::new(200, 200)]),
+    ];
+    schematic.recalculate_runtime_state();
+    schematic.clear_undo_history();
+    fixture.app.state.sync_active_schematic_to_workspace();
+    fixture.app.state.model.schematic.document().wires.clone()
+}
+
+/// A drag on a wire's body slides that segment sideways: the legs at its
+/// ends follow it and stay square, the wire alone is selected, and the
+/// whole drag is one undo step. The sideways part of the pointer's travel
+/// is dropped, so the segment keeps its length and stays square.
+#[test]
+fn a_dragged_wire_segment_moves_and_its_neighbours_stay_square() {
+    let mut fixture = Fixture::new(true);
+    let drawn = square_route(&mut fixture);
+    let press = fixture.origin + egui::vec2(150.0, 100.0);
+    drag_from(
+        &mut fixture,
+        press,
+        &[egui::vec2(0.0, 10.0), egui::vec2(10.0, 40.0)],
+    );
+
+    let schematic = &fixture.app.state.model.schematic;
+    assert!(!schematic.has_pending_operation());
+    let wires = &schematic.document().wires;
+    let y = wires[1].points[0].y;
+    assert!(y > 100, "the segment did not move down: {wires:?}");
+    assert_eq!(
+        wires
+            .iter()
+            .map(|wire| (wire.id, wire.points.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, vec![Point::new(100, 200), Point::new(100, y)]),
+            (2, vec![Point::new(100, y), Point::new(200, y)]),
+            (3, vec![Point::new(200, y), Point::new(200, 200)]),
+        ],
+    );
+    assert_eq!(schematic.session.editor.selection.wires, [2].into());
+    assert!(fixture.app.state.model.schematic.undo());
+    assert_eq!(fixture.app.state.model.schematic.document().wires, drawn);
+    assert!(!fixture.app.state.model.schematic.can_undo());
+}
+
+/// A selected group grabbed by one of its wires moves as one and stays
+/// selected; the drag does not start a selection box that replaces it.
+#[test]
+fn a_selection_grabbed_by_one_of_its_wires_moves_as_one_and_stays_selected() {
+    let mut fixture = Fixture::new(true);
+    let drawn = fixture.app.state.model.schematic.document().wires.clone();
+    let selection = &mut fixture.app.state.model.schematic.session.editor.selection;
+    selection.select_wire(1);
+    selection.select_wire(2);
+    let press = fixture.origin + egui::vec2(150.0, 100.0);
+    drag_from(
+        &mut fixture,
+        press,
+        &[egui::vec2(0.0, 10.0), egui::vec2(0.0, 40.0)],
+    );
+
+    let schematic = &fixture.app.state.model.schematic;
+    assert_eq!(
+        schematic.session.editor.selection.wires,
+        [1, 2].into(),
+        "the group stayed selected"
+    );
+    let moved = |wire: &Wire| {
+        let mut points = wire.points.clone();
+        points.sort_by_key(|point| (point.x, point.y));
+        points
+    };
+    let wires = &schematic.document().wires;
+    let dy = wires
+        .iter()
+        .flat_map(|wire| wire.points.iter())
+        .map(|point| point.y)
+        .min()
+        .expect("wires")
+        - 100;
+    assert!(dy > 0, "the group did not move: {wires:?}");
+    for wire in &drawn {
+        let mut expected = wire.clone();
+        for point in &mut expected.points {
+            point.y += dy;
+        }
+        assert!(
+            wires.iter().any(|now| moved(now) == moved(&expected)),
+            "wire {} did not move with the group: {wires:?}",
+            wire.id
+        );
+    }
+}
+
 /// Esc lets a floating paste go and the drawing never changed.
 #[test]
 fn escape_lets_a_floating_paste_go() {

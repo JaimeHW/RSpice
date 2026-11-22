@@ -61,6 +61,7 @@ pub(super) fn draw_interaction_previews(
         symbol_library,
     );
     draw_stretch_selection_preview(painter, response, state, viewport, symbol_context);
+    draw_wire_segment_drag_preview(painter, response, state, viewport, symbol_context);
     draw_array_selection_preview(
         painter,
         response,
@@ -241,6 +242,35 @@ fn draw_stretch_selection_preview(
             )
         });
     preview::draw_transform_feedback(painter, response, true, detail);
+}
+
+/// Where a dragged wire segment would land, and its neighbours with it; a
+/// drop the drawing cannot take says why beside the pointer instead.
+fn draw_wire_segment_drag_preview(
+    painter: &Painter,
+    response: &Response,
+    state: &mut CanvasParts<'_>,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+) {
+    let Some(drag) = state.schematic_drag_snapshot(painter.ctx()) else {
+        return;
+    };
+    let crate::workbench::app_state::DragType::WireSegment(wire_id, segment_index) = drag.kind
+    else {
+        return;
+    };
+    let Some((delta, target, policy)) =
+        super::selection_drag::wire_segment_drag(state, wire_id, segment_index)
+            .filter(|(delta, ..)| *delta != Point::origin())
+    else {
+        return;
+    };
+    match stretch_preview_diff(state, symbol_context, delta, target, policy) {
+        Ok(Some(diff)) => preview::draw_stretch_diff(painter, viewport, &diff),
+        Ok(None) => {}
+        Err(error) => preview::draw_transform_feedback(painter, response, false, error),
+    }
 }
 
 /// The preview held for `key`, or the one `compute` finds, held from now on.

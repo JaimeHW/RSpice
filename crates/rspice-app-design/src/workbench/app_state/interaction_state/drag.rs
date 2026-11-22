@@ -35,6 +35,7 @@ impl DragState {
         let description = match kind {
             DragType::MoveSelection => "move selection",
             DragType::WireVertex => "drag wire vertex",
+            DragType::WireSegment(..) => "drag wire segment",
             DragType::MoveText(_, InstanceText::Name) => "move name",
             DragType::MoveText(_, InstanceText::Value) => "move value",
             DragType::None => return false,
