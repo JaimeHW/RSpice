@@ -39,24 +39,6 @@ fn edit(app: &mut RSpiceApp, index: i32) {
     });
 }
 
-/// A cell named `name` with a schematic, created in the project's library as
-/// New cell creates one.
-pub(super) fn add_cell(app: &mut RSpiceApp, name: &str) {
-    app.state.project.new_cell_library = app
-        .state
-        .model
-        .workspace
-        .content
-        .project
-        .root_library
-        .clone();
-    app.state.project.new_cell_name = name.to_owned();
-    app.state.project.new_cell_create_schematic = true;
-    app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
-    assert!(super::with_cx(app, create_new_cell), "the cell is created");
-    app.after_contribution();
-}
-
 fn parts(app: &RSpiceApp) -> usize {
     app.state
         .model
@@ -465,7 +447,7 @@ fn autosaves_beside(file: &Path) -> usize {
 
 /// Give the open project a second cell with a schematic, named `name`, and
 /// return its schematic view.
-fn add_cell(app: &mut RSpiceApp, name: &str) -> CellViewRef {
+pub(super) fn add_cell(app: &mut RSpiceApp, name: &str) -> CellViewRef {
     let library = app
         .state
         .model
@@ -479,7 +461,7 @@ fn add_cell(app: &mut RSpiceApp, name: &str) -> CellViewRef {
     project.new_cell_name = name.to_owned();
     project.new_cell_create_schematic = true;
     project.new_cell_library_revision = app.state.model.library_manager.revision();
-    assert!(with_cx(app, create_new_cell), "the cell is created");
+    assert!(super::with_cx(app, create_new_cell), "the cell is created");
     app.after_contribution();
     CellViewRef::new(&library, name, "schematic")
 }
