@@ -21,12 +21,13 @@ use crate::workbench::commands::result_navigation::{
 };
 use crate::workbench::documents::result_document::view_edits;
 use crate::workbench::documents::result_document::{
-    ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
-    cursor_jump_availability, family_available, fit_gesture_available, fit_y_to_visible_x,
-    hide_selected_trace, jump_cursor, linked_cursors, open_create_document, open_dataset_browser,
-    opening_sheet, place_marker_at_cursor, request_view_gesture, selected_trace_on_sheet,
-    viewer_is_available, viewer_unavailability_reason, zoom_gesture_available, zoom_next,
-    zoom_next_available, zoom_previous, zoom_previous_available,
+    ResultsParts, ResultsReads, ShowingRun, add_pane_available, compare_availability,
+    copy_cursor_text, cursor_jump_availability, family_available, fit_gesture_available,
+    fit_y_to_visible_x, hide_selected_trace, jump_cursor, linked_cursors, open_create_document,
+    open_dataset_browser, opening_sheet, place_marker_at_cursor, request_view_gesture,
+    selected_trace_on_sheet, settle_shown_analysis, settling_analysis, viewer_is_available,
+    viewer_unavailability_reason, zoom_gesture_available, zoom_next, zoom_next_available,
+    zoom_previous, zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -64,14 +65,18 @@ impl ResultsFeature {
         selected
     }
 
-    /// Open Results on the run a press of Run finished, on the sheet its
-    /// analyses open on: its curves when it has any, as ADE plots on
-    /// completion, else the default sheet of what it did produce. A run that
-    /// has left the history opens nothing. The shell answers the command it
-    /// raises straight after.
+    /// Open Results on the run a press of Run finished, showing the analysis
+    /// the plan's view keeps when the run solved it, else its curves when it
+    /// has any, as ADE plots on completion, else its first analysis; on that
+    /// analysis' default sheet. A run that has left the history opens
+    /// nothing. The shell answers the command it raises straight after.
     pub fn open_finished_run(cx: &mut Cx<'_, Self>, run_sequence: u64) {
         if !cx.model.simulation.select_run_by_sequence(run_sequence) {
             return;
+        }
+        if let Some(index) = settling_analysis(cx.state.reads(cx.model, cx.wb), ShowingRun::Opened)
+        {
+            settle_shown_analysis(&mut cx.state.results, &mut cx.model.simulation, index);
         }
         cx.state.results.session.viewer =
             opening_sheet(cx.state.reads(cx.model, cx.wb)).unwrap_or(ResultViewer::Waves);

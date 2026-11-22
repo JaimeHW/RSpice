@@ -22,6 +22,7 @@ mod result_import_workflow;
 mod retained_memo;
 mod runs;
 mod saved_documents;
+mod shown_analysis;
 mod two_windows;
 mod viewer_capabilities;
 mod waveform_export;

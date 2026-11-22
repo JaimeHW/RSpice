@@ -207,11 +207,16 @@ pub fn select_result_dataset(state: &mut ResultsParts<'_>, run_index: usize) -> 
     {
         return false;
     }
+    crate::workbench::documents::result_document::open_shown_run(state);
     state.results.session.selected_trace = None;
     state.results.session.selected_result_artifact = None;
     true
 }
 
+/// Show analysis `analysis_index` of run `run_index`: the data browser picks
+/// what is shown, and the canvas follows on the next frame, staying on its
+/// sheet when the analysis has that view and else opening on the analysis'
+/// default sheet. The run's view keeps the pick for the plan's next run.
 pub fn select_result_analysis(
     state: &mut ResultsParts<'_>,
     run_index: usize,
@@ -234,6 +239,7 @@ pub fn select_result_analysis(
     if !state.model.simulation.select_analysis(analysis_index) {
         return false;
     }
+    crate::workbench::documents::result_document::keep_picked_analysis(state);
     state.results.session.selected_trace = None;
     state.results.session.selected_result_artifact = None;
     true

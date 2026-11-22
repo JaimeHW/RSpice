@@ -64,7 +64,6 @@ pub(crate) struct ResultSheetCsv {
 // The application retains the Events source-order cache; viewer selections
 // belong to the lower-owned session.
 pub(crate) use events::EventOrderCache;
-pub(crate) use manifest::export_csv as export_manifest_csv;
 pub(crate) use network_matrix::exact_values as network_matrix_exact_values;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
@@ -113,7 +112,6 @@ pub(crate) fn open_dataset_browser(state: &mut ResultsParts<'_>) {
         .workbench
         .outbox
         .push(crate::workbench::framework::requests::FocusNavigatorSearch);
-    state.results.session.viewer = ResultViewer::Manifest;
 }
 
 /// Open a fresh immutable-dataset-bound result-document transaction.
@@ -525,9 +523,9 @@ pub(crate) fn fit_gesture_available(state: ResultsReads<'_>) -> bool {
 
 /// Whether this sheet draws a plot pane at all.
 ///
-/// The evidence tables (OP, sample table, event history, manifest) and
-/// the scalar transfer-function readout draw no axes, so they have no
-/// viewport, no fit, and no limit mask to report.
+/// The evidence tables (OP, sample table, event history) and the scalar
+/// transfer-function readout draw no axes, so they have no viewport, no
+/// fit, and no limit mask to report.
 pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
     !matches!(
         viewer,
@@ -535,7 +533,6 @@ pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
             | ResultViewer::Table
             | ResultViewer::Events
             | ResultViewer::TransferFunction
-            | ResultViewer::Manifest
     )
 }
 
@@ -1533,6 +1530,9 @@ pub struct ResultsState {
     /// overlay or a hidden trace leave the reader's cursors and selection be;
     /// another run or analysis retires what named the one before.
     seen_selection: Option<ShownSelection>,
+    /// The runs the quick view has settled on an analysis to show; see
+    /// [`settling_analysis`]. Transient.
+    pub(crate) settled_runs: HashSet<DatasetId>,
     /// The analysis kind the A/B cursors were last read against. Their X is
     /// kept across runs and analyses of one kind, and cleared for another.
     cursor_kind: Option<crate::state::AnalysisType>,
@@ -2033,23 +2033,131 @@ fn starting_sheet(run: &SimulationRun) -> Option<ResultViewer> {
         .find_map(|task| ResultViewer::live_sheet(task.result_analysis_type()))
 }
 
-/// The sheet the active run opens on, from the one table of default sheets
-/// and what the run can fill.
+/// The sheet the shown analysis opens on, from the one table of default
+/// sheets and what the analysis can fill.
 pub(crate) fn opening_sheet(state: ResultsReads<'_>) -> Option<ResultViewer> {
+    let shown = shown_analysis(&state.model.simulation).map(|analysis| analysis.analysis_type);
+    rspice_results::result_presentation::opening_sheet(shown, |viewer| {
+        viewer_is_available(state, viewer)
+    })
+}
+
+/// The analysis the data browser shows: the one picked, or, before any is,
+/// the run's first, which is the one the browser marks.
+fn shown_analysis(simulation: &crate::state::SimulationState) -> Option<&AnalysisResult> {
+    simulation
+        .active_analysis()
+        .or_else(|| simulation.active_run()?.analyses.first())
+}
+
+/// The analysis the active run opens on when nothing has picked one: its
+/// first curves, else its first analysis.
+fn opening_analysis(state: ResultsReads<'_>) -> Option<usize> {
     let run = state.model.simulation.active_run()?;
     let kinds = run
         .analyses
         .iter()
         .map(|analysis| analysis.analysis_type)
         .collect::<Vec<_>>();
-    let shown = state
-        .model
-        .simulation
-        .active_analysis()
-        .map(|analysis| analysis.analysis_type);
-    rspice_results::result_presentation::opening_sheet(&kinds, shown, |viewer| {
-        viewer_is_available(state, viewer)
+    rspice_results::result_presentation::opening_analysis(&kinds, |index, sheet| {
+        let analysis = &run.analyses[index];
+        rspice_results::renderability::viewer_can_render(sheet, analysis, |gate| {
+            analysis_answers_structural_gate(state, run.dataset_id, analysis, gate)
+        })
     })
+}
+
+/// How the active run comes to be shown, which decides what it opens on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShowingRun {
+    /// The quick view draws the run while it is written.
+    Writing,
+    /// The reader opened the run: a run finished, a run imported, a run
+    /// picked in the data browser.
+    Opened,
+}
+
+/// The analysis the active run is to show, the first time it is shown: the
+/// one its view keeps, which the reader last picked in the data browser in
+/// a run of the plan, when the run solved it. A run still writing waits for
+/// that analysis and shows what it writes meanwhile; an opened run that did
+/// not solve it opens on its curves, else on its first analysis.
+///
+/// `None` once the run is settled, while it waits, and for a finished run
+/// the quick view merely draws: whatever showed that run chose its analysis.
+pub(crate) fn settling_analysis(state: ResultsReads<'_>, showing: ShowingRun) -> Option<usize> {
+    let run = state.model.simulation.active_run()?;
+    if run.analyses.is_empty() || state.results.settled_runs.contains(&run.dataset_id) {
+        return None;
+    }
+    let writing = !run.lifecycle.is_terminal();
+    if showing == ShowingRun::Writing && !writing {
+        return None;
+    }
+    let kept = working_view::kept_analysis(state, run);
+    let solved = kept.and_then(|kept| {
+        run.analyses
+            .iter()
+            .position(|analysis| create_document::source_analysis_identity(run, analysis) == kept)
+    });
+    match (solved, showing) {
+        (Some(index), _) => Some(index),
+        (None, ShowingRun::Writing) => None,
+        (None, ShowingRun::Opened) if writing && kept.is_some() => None,
+        (None, ShowingRun::Opened) => opening_analysis(state),
+    }
+}
+
+/// Settle the active run on what it opens on when the reader opens it.
+pub(crate) fn open_shown_run(state: &mut ResultsParts<'_>) {
+    if let Some(index) = settling_analysis(state.results_reads(), ShowingRun::Opened) {
+        settle_shown_analysis(state.results, &mut state.model.simulation, index);
+    }
+}
+
+/// Show analysis `index` of the active run and count the run settled: from
+/// now on it shows whatever the reader picks in it.
+pub(crate) fn settle_shown_analysis(
+    results: &mut ResultsState,
+    simulation: &mut crate::state::SimulationState,
+    index: usize,
+) {
+    let Some(dataset) = simulation.active_run().map(|run| run.dataset_id) else {
+        return;
+    };
+    if simulation.view.active_analysis_idx != Some(index) {
+        simulation.select_analysis(index);
+    }
+    let runs = &simulation.retained.runs;
+    results
+        .settled_runs
+        .retain(|held| runs.iter().any(|run| run.dataset_id == *held));
+    results.settled_runs.insert(dataset);
+}
+
+/// Show the analysis the quick view's run, still writing, waits for once it
+/// has written it. A persistent pane shows the analysis it binds.
+fn settle_writing_run(state: &mut ResultsParts<'_>) {
+    if state.results.session.persistent_pane_context.is_none()
+        && let Some(index) = settling_analysis(state.results_reads(), ShowingRun::Writing)
+    {
+        settle_shown_analysis(state.results, &mut state.model.simulation, index);
+    }
+}
+
+/// The reader picked the shown analysis in the data browser: the run shows
+/// it from now on, and the run's view keeps it, so the plan's next run and
+/// the project reopened show it too.
+pub(crate) fn keep_picked_analysis(state: &mut ResultsParts<'_>) {
+    let simulation = &state.model.simulation;
+    let (Some(run), Some(analysis)) = (simulation.active_run(), simulation.active_analysis())
+    else {
+        return;
+    };
+    let dataset = run.dataset_id;
+    let kept = create_document::source_analysis_identity(run, analysis);
+    state.results.settled_runs.insert(dataset);
+    working_view::keep_analysis(state, dataset, kept);
 }
 
 fn shown_selection(simulation: &crate::state::SimulationState) -> Option<ShownSelection> {
@@ -2064,6 +2172,7 @@ fn shown_selection(simulation: &crate::state::SimulationState) -> Option<ShownSe
 
 pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
     synchronize_quick_view_dataset_authority(state);
+    settle_writing_run(state);
     state
         .results
         .reconcile_retained_datasets(&state.model.simulation);
@@ -2276,7 +2385,7 @@ fn show_viewer_well(
         return;
     }
 
-    if viewer_requires_retained_results(viewer) && !state.model.simulation.retained.has_results() {
+    if !state.model.simulation.retained.has_results() {
         let shortcut = state.model.preferences.shortcuts().resolved_label(
             state.commands,
             ids::RUN_SIMULATION,
@@ -2343,14 +2452,7 @@ fn show_viewer_well(
         ResultViewer::Events => events::show(ui, state),
         ResultViewer::Soa => soa::show(ui, state),
         ResultViewer::Optimization => optimization::show(ui, state),
-        ResultViewer::Manifest => manifest::show(ui, state),
     }
-}
-
-/// Whether this viewer is meaningless without a retained result dataset:
-/// every one but the Manifest.
-const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
-    !matches!(viewer, ResultViewer::Manifest)
 }
 
 /// The plot pane's controls, over the right end of its first row: another
@@ -2615,11 +2717,14 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
         .is_none_or(|family| family.offers_sheet(viewer))
 }
 
+/// Keep the canvas on a view of the shown analysis: the sheet it is on while
+/// the shown analysis offers it (Table stays Table when the reader picks
+/// another analysis that has a table), else the shown analysis' opening
+/// sheet. Choosing a tab never comes back here to change the analysis.
 fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
-    // A run that has written nothing yet opens on the sheet its plot arrives
-    // on, not on its inventory, which has nothing to say about it yet.
-    if state.results.session.viewer == ResultViewer::Manifest
-        && let Some(run) = state.model.simulation.active_run()
+    // A run that has written nothing yet opens on the sheet its plot
+    // arrives on, where the sheet says the run is starting.
+    if let Some(run) = state.model.simulation.active_run()
         && run.analyses.is_empty()
         && !run.lifecycle.is_terminal()
         && let Some(sheet) = starting_sheet(run)
@@ -2649,7 +2754,29 @@ fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
     }
 }
 
+/// Whether `viewer` is offered: the run's data can fill it, and it is a view
+/// of the analysis the data browser shows. The tabs offer the shown
+/// analysis' views and nothing of another: picking an analysis is the
+/// browser's alone.
 pub fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> ViewerAvailability {
+    let availability = run_viewer_availability(state, viewer);
+    if availability.available
+        && let Some(run) = state.model.simulation.active_run()
+        && let Some(shown) = shown_analysis(&state.model.simulation)
+        && !rspice_results::renderability::viewer_can_render(viewer, shown, |gate| {
+            analysis_answers_structural_gate(state, run.dataset_id, shown, gate)
+        })
+    {
+        return ViewerAvailability::unavailable(
+            "Not a view of the analysis shown; pick an analysis it draws in the data browser",
+        );
+    }
+    availability
+}
+
+/// Whether the active run's data can fill `viewer`, and if not, what it
+/// needs.
+fn run_viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> ViewerAvailability {
     let active_run = state.model.simulation.active_run();
     // The sheet a starting run's plot arrives on is offered before its first
     // results, so the reader is shown where the run is starting.
@@ -2922,13 +3049,6 @@ pub fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> Vie
                 )
             }
         }
-        ResultViewer::Manifest => {
-            if active_run.is_some() {
-                ViewerAvailability::available("The active run's inventory is available")
-            } else {
-                ViewerAvailability::unavailable("Requires a selected retained dataset")
-            }
-        }
     }
 }
 
@@ -3051,10 +3171,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ResultViewer::PoleZero => pz::right_panel(ui, state),
         ResultViewer::TransferFunction => transfer_function::right_panel(ui, state),
         // The table and network-matrix panels held nothing but what their
-        // own sheet already states. The manifest's run identity is in Run
-        // details, and its saved outputs are in the inspector's run section,
-        // whichever sheet is showing.
-        ResultViewer::Table | ResultViewer::NetworkMatrix | ResultViewer::Manifest => {}
+        // own sheet already states.
+        ResultViewer::Table | ResultViewer::NetworkMatrix => {}
         ResultViewer::Scatter => scatter::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::BoxViolin => box_violin::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::Events => events::right_panel(ui, state),

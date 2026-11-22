@@ -1456,6 +1456,10 @@ pub struct Pane {
     /// The reader maximized the pane's strip over the others.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub maximized: bool,
+    /// The data browser last showed the pane's analysis, so a run of the
+    /// plan opens on it. One pane of a view at most.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2834,6 +2838,7 @@ impl VisualizationDocument {
                 hidden: false,
                 strips: Vec::new(),
                 maximized: false,
+                shown: false,
             }],
             axes: Vec::new(),
             traces: Vec::new(),

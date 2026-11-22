@@ -106,6 +106,42 @@ fn a_working_view_has_a_pane_per_analysis_plotting_only_what_it_was_given() {
     assert_eq!(back.working_view(), document.working_view());
 }
 
+/// The analysis the data browser shows is the view's, so the plan's next run
+/// and the project reopened open on it; showing another forgets the first.
+#[test]
+fn a_view_keeps_the_one_analysis_the_browser_shows_across_a_reload() {
+    let TwoAnalyses {
+        mut document,
+        tran,
+        ac,
+    } = two_analyses();
+    assert!(document.shown_pane().is_none(), "nothing was picked yet");
+    let pane_of = |document: &VisualizationDocument, analysis| {
+        document
+            .pane_of_analysis(analysis)
+            .expect("each analysis has a pane")
+            .id
+    };
+    for analysis in [ac, tran, ac] {
+        let pane_id = pane_of(&document, analysis);
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::ShowPaneAnalysis { pane_id }],
+            )
+            .expect("a view shows one of its panes' analyses");
+        let back: VisualizationDocument =
+            serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+        assert_eq!(
+            back.shown_pane().and_then(|pane| pane.binding),
+            document
+                .pane_of_analysis(analysis)
+                .and_then(|pane| pane.binding),
+        );
+        assert_eq!(back.panes().iter().filter(|pane| pane.shown).count(), 1);
+    }
+}
+
 #[test]
 fn plotting_a_signal_adds_its_trace_once_and_closing_a_strip_keeps_it() {
     let TwoAnalyses {

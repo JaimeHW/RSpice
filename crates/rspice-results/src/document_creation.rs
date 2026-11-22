@@ -80,13 +80,9 @@ impl ResultDocumentFamily {
     /// read the bound dataset through a different sheet without introducing a
     /// pane type the family does not compose.
     pub fn offers_sheet(self, viewer: ResultViewer) -> bool {
-        // Dataset-native sheets are evidence the bound dataset either carries
-        // or it does not, never one of a family's plot modes. No family claims
-        // or excludes them; `viewer_availability` is their only gate.
-        let Some(document_id) = viewer.viewer_document_id() else {
-            return true;
-        };
-        if viewer_document(document_id).is_some_and(|document| self.includes(document)) {
+        if viewer_document(viewer.viewer_document_id())
+            .is_some_and(|document| self.includes(document))
+        {
             return true;
         }
         match self {

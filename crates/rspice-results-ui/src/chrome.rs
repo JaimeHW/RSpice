@@ -39,7 +39,6 @@ const fn viewer_tab_icon(viewer: ResultViewer) -> WorkbenchIcon {
         | ResultViewer::Events
         | ResultViewer::Table => WorkbenchIcon::Grid,
         ResultViewer::Optimization => WorkbenchIcon::Results,
-        ResultViewer::Manifest => WorkbenchIcon::Layers,
     }
 }
 

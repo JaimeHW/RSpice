@@ -565,7 +565,6 @@ fn prepare_active_sheet_csv(
         ));
     }
     let sheet = match displayed.viewer {
-        ResultViewer::Manifest => Some(result_document::export_manifest_csv(displayed.run(state)?)),
         // The operating point is the one sheet whose refusal has to be
         // stated. Its export needs a successful DC solve, and the payload
         // router underneath it answers for an `OperatingPoint` payload with

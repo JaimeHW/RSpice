@@ -810,7 +810,6 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::Soa), "Safe operating area").access('A'),
     MenuEntry::offered(viewer(ResultViewer::Optimization), "Optimization").access('O'),
     MenuEntry::offered(viewer(ResultViewer::Table), "Sample table").access('L'),
-    MenuEntry::offered(viewer(ResultViewer::Manifest), "Dataset manifest").access('M'),
 ];
 
 /// Verify: its views in the order its navigator lists them.

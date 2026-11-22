@@ -834,6 +834,7 @@ fn insert_kept_import(state: &mut ResultsParts<'_>, kept: KeptResultImport) -> R
                 .to_owned(),
         );
     }
+    crate::workbench::documents::result_document::open_shown_run(state);
     state.results.session.viewer =
         crate::workbench::documents::result_document::opening_sheet(state.results_reads())
             .unwrap_or(crate::workbench::ResultViewer::Waves);

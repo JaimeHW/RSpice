@@ -25,9 +25,7 @@ fn all_catalog_rows_are_covered_by_family_classification() {
 fn every_family_offers_the_sheets_its_create_path_can_bind() {
     for family in ResultDocumentFamily::ALL {
         for viewer in ResultViewer::all() {
-            let Some(document_id) = viewer.viewer_document_id() else {
-                continue;
-            };
+            let document_id = viewer.viewer_document_id();
             let composes = VIEWER_DOCUMENTS
                 .iter()
                 .any(|document| document.id == document_id && family.includes(document));

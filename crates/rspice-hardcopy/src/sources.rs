@@ -45,10 +45,7 @@ pub use quick_plot::{
     stable_page_id, stable_quick_trace_id,
 };
 pub use reports::{ReportHardcopySource, resolve_report_source};
-pub use result_documents::{
-    resolve_results_manifest_source, resolve_results_quick_view_stack, results_manifest_identity,
-    results_stack_identity,
-};
+pub use result_documents::{resolve_results_quick_view_stack, results_stack_identity};
 pub use result_summary::semantic_result_summary;
 pub use result_view::{
     QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation,

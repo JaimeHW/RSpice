@@ -655,11 +655,10 @@ fn the_waves_details_panel_states_ranges_and_method_as_rows_and_meta() {
     );
 }
 
-/// A deferred saved output is materialized from the inspector's run section
-/// while the manifest sheet is showing, the one sheet whose panel the
-/// inspector used to hide along with the only Materialize the product had.
+/// A deferred saved output is materialized from the inspector's run section,
+/// whichever sheet is showing.
 #[test]
-fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sheet() {
+fn materialize_in_the_run_section_evaluates_a_deferred_output() {
     use egui::accesskit::{Action, ActionRequest, Role, TreeId};
 
     let mut app = deferred_output_app();
@@ -706,7 +705,7 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sh
             node.role() == Role::Button && node.label() == Some("Materialize output_voltage")
         })
         .map(|(id, _)| *id)
-        .expect("the deferred output's row offers Materialize on the manifest sheet");
+        .expect("the deferred output's row offers Materialize");
 
     pass(
         &mut app,
@@ -721,7 +720,7 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sh
 
     assert_eq!(
         app.state.results.results.session.viewer,
-        ResultViewer::Manifest
+        ResultViewer::Table
     );
     let analysis = &app.state.model.simulation.retained.runs[0].analyses[0];
     assert!(
@@ -751,7 +750,7 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sh
     );
 }
 
-/// A finished transient on the manifest sheet whose analysis saved one output
+/// A finished transient on the sample table whose analysis saved one output
 /// on demand: `output_voltage`, the recipe `V(out)` over the retained `out`.
 fn deferred_output_app() -> RSpiceApp {
     use rspice_app_state::state::{
@@ -801,7 +800,7 @@ fn deferred_output_app() -> RSpiceApp {
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     app.state.model.simulation.view.active_analysis_idx = Some(0);
-    app.state.results.results.session.viewer = ResultViewer::Manifest;
+    app.state.results.results.session.viewer = ResultViewer::Table;
     app
 }
 

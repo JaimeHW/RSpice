@@ -145,11 +145,6 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         | ResultViewer::PoleZero => HardcopySemanticDocument::ResultSummary(Box::new(
             semantic_result_summary(viewer, active.analysis)?,
         )),
-        ResultViewer::Manifest => {
-            return Err(HardcopySourceError::UnsupportedVisualizationViewer(
-                "dataset-native Manifest must resolve from its owning run".to_owned(),
-            ));
-        }
     };
     let digest = canonical_digest(
         b"rspice-hardcopy-results-quick-view-v2",

@@ -689,11 +689,6 @@ pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
                 });
             }
         }
-        ResultViewer::Manifest => {
-            return Err(HardcopySourceError::UnsupportedVisualizationViewer(
-                "dataset-native Manifest cannot be derived from one analysis".to_owned(),
-            ));
-        }
         viewer => {
             return Err(HardcopySourceError::UnsupportedVisualizationViewer(
                 viewer.label().to_owned(),

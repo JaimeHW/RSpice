@@ -72,11 +72,6 @@ pub enum ResultViewer {
     Soa,
     /// Optimizer cost convergence and the candidate history behind it.
     Optimization,
-    /// Immutable task and retained-value inventory for the active dataset.
-    ///
-    /// This is dataset-native and deliberately has no viewer-document
-    /// identity in the catalog.
-    Manifest,
     /// Exact single-ended and mixed-mode power-wave matrices.
     NetworkMatrix,
 }
@@ -109,7 +104,6 @@ impl ResultViewer {
             ResultViewer::Events => "EVENTS",
             ResultViewer::Soa => "SOA",
             ResultViewer::Optimization => "OPT",
-            ResultViewer::Manifest => "MANIFEST",
         }
     }
 
@@ -143,11 +137,9 @@ impl ResultViewer {
         ResultViewer::Soa,
         ResultViewer::Optimization,
     ];
-    const DATASET_NATIVE: [ResultViewer; 1] = [ResultViewer::Manifest];
-
     /// Every result presentation, in the established tab order.
     pub fn all() -> impl Iterator<Item = ResultViewer> {
-        Self::PRIMARY.into_iter().chain(Self::DATASET_NATIVE)
+        Self::PRIMARY.into_iter()
     }
 
     /// Human-readable document-tab label from the upgraded Results mockup.
@@ -177,15 +169,10 @@ impl ResultViewer {
             ResultViewer::Events => "Events",
             ResultViewer::Soa => "SOA",
             ResultViewer::Optimization => "Optimization",
-            ResultViewer::Manifest => "Manifest",
         }
     }
 
-    /// The catalog viewer document this sheet renders, if any.
-    ///
-    /// `None` means the sheet is dataset-native: it reads the retained result
-    /// directly and has no place in the viewer catalog, so binding a page to
-    /// it would name a renderer that cannot draw the page.
+    /// The catalog viewer document this sheet renders.
     ///
     /// One owner on purpose. Three copies of this map existed — in the
     /// persistent-document layer, the Studio, and the workbench state — and
@@ -193,9 +180,8 @@ impl ResultViewer {
     /// Studio's own said `viewer-spectrum`, which the catalog rejects for a
     /// `noise` analysis. Whether a noise sheet could be pinned into a
     /// document depended on which path asked.
-    pub const fn viewer_document_id(self) -> Option<&'static str> {
-        Some(match self {
-            ResultViewer::Manifest => return None,
+    pub const fn viewer_document_id(self) -> &'static str {
+        match self {
             ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
             ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
                 "viewer-bode"
@@ -217,7 +203,7 @@ impl ResultViewer {
             ResultViewer::Events => "viewer-digital-events",
             ResultViewer::Soa => "viewer-soa",
             ResultViewer::Optimization => "viewer-optimization",
-        })
+        }
     }
 
     /// The sheet that draws a retained pane bound to this viewer document.
@@ -327,29 +313,38 @@ impl ResultViewer {
     }
 }
 
-/// The sheet a run opens on, from the kinds of its analyses in run order and
-/// the kind of the analysis shown.
+/// The analysis a run shows when nothing has chosen one, from the kinds of
+/// its analyses in run order.
 ///
-/// A run opens where its curves are: the default sheet of its first analysis
-/// whose default sheet is a waveform stack the run can fill, as ADE plots a
-/// finished run's waveforms. Failing that, the shown analysis' default sheets
-/// in order, then every other analysis' in run order. A run none of whose
-/// default sheets it can fill opens on the first sheet in tab order it can.
-pub fn opening_sheet(
+/// A run opens where its curves are: on its first analysis whose default
+/// sheet is a waveform stack that analysis `fills` (asked with the
+/// analysis' index), as ADE plots a finished run's waveforms. A run with no
+/// curves opens on its first analysis.
+pub fn opening_analysis(
     kinds: &[AnalysisType],
+    mut fills: impl FnMut(usize, ResultViewer) -> bool,
+) -> Option<usize> {
+    kinds
+        .iter()
+        .enumerate()
+        .find(|(index, kind)| {
+            let sheet = ResultViewer::default_sheet(**kind);
+            viewer_uses_wave_stack(sheet) && fills(*index, sheet)
+        })
+        .map(|(index, _)| index)
+        .or_else(|| (!kinds.is_empty()).then_some(0))
+}
+
+/// The sheet the shown analysis opens on: the first of its default sheets
+/// that is `available`, else the first available sheet in tab order. The
+/// tabs offer only the shown analysis' views, so nothing here can open a
+/// sheet of another analysis.
+pub fn opening_sheet(
     shown: Option<AnalysisType>,
     mut available: impl FnMut(ResultViewer) -> bool,
 ) -> Option<ResultViewer> {
-    if let Some(sheet) = kinds
-        .iter()
-        .map(|kind| ResultViewer::default_sheet(*kind))
-        .find(|sheet| viewer_uses_wave_stack(*sheet) && available(*sheet))
-    {
-        return Some(sheet);
-    }
     shown
         .into_iter()
-        .chain(kinds.iter().copied())
         .flat_map(|kind| ResultViewer::default_sheets(kind).iter().copied())
         .find(|sheet| available(*sheet))
         .or_else(|| ResultViewer::all().find(|sheet| available(*sheet)))
@@ -731,14 +726,7 @@ mod tests {
         use crate::viewer_catalog::VIEWER_DOCUMENTS;
 
         for viewer in ResultViewer::all() {
-            let Some(document_id) = viewer.viewer_document_id() else {
-                assert_eq!(
-                    ResultViewer::from_viewer_document_id(viewer.label()),
-                    None,
-                    "{viewer:?} is dataset-native and must not answer to a document id"
-                );
-                continue;
-            };
+            let document_id = viewer.viewer_document_id();
             assert!(
                 VIEWER_DOCUMENTS
                     .iter()
@@ -749,7 +737,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("{document_id} has no sheet"));
             assert_eq!(
                 drawn_by.viewer_document_id(),
-                Some(document_id),
+                document_id,
                 "{document_id} resolves to {drawn_by:?}, which renders something else"
             );
         }
@@ -810,16 +798,14 @@ mod tests {
         AnalysisType::TransientNoise,
     ];
 
-    /// Each kind names its sheets once, never the inventory (which is the
-    /// run's, not an analysis'), and the sheet a kind streams into while its
-    /// run writes is one of the sheets it opens on, so a run never leaves the
-    /// sheet it was drawing on for one it was never offered.
+    /// Each kind names its sheets once, and the sheet a kind streams into
+    /// while its run writes is one of the sheets it opens on, so a run never
+    /// leaves the sheet it was drawing on for one it was never offered.
     #[test]
     fn every_analysis_kind_states_its_sheets_and_streams_into_one_of_them() {
         for kind in EVERY_KIND.into_iter().chain([AnalysisType::DcMismatch]) {
             let sheets = ResultViewer::default_sheets(kind);
             assert!(!sheets.is_empty(), "{kind:?}");
-            assert!(!sheets.contains(&ResultViewer::Manifest), "{kind:?}");
             for (index, sheet) in sheets.iter().enumerate() {
                 assert!(
                     !sheets[..index].contains(sheet),
@@ -834,45 +820,56 @@ mod tests {
     }
 
     #[test]
-    fn a_run_opens_on_its_first_curves_then_the_shown_analysis_then_any_sheet() {
-        let everything = |_| true;
+    fn a_run_opens_on_its_first_curves_else_its_first_analysis() {
+        let everything = |_, _| true;
         // An operating point ahead of a transient: the transient's curves.
         assert_eq!(
-            opening_sheet(
-                &[AnalysisType::DcOp, AnalysisType::Transient],
-                Some(AnalysisType::DcOp),
-                everything
-            ),
-            Some(ResultViewer::Waves)
+            opening_analysis(&[AnalysisType::DcOp, AnalysisType::Transient], everything),
+            Some(1)
         );
-        // No curves: the shown analysis' default sheet, then the others'.
+        // An AC sweep ahead of a transient: the first curves are the sweep's.
         assert_eq!(
-            opening_sheet(
-                &[AnalysisType::DcOp, AnalysisType::Sensitivity],
-                Some(AnalysisType::Sensitivity),
-                everything
+            opening_analysis(&[AnalysisType::Ac, AnalysisType::Transient], everything),
+            Some(0)
+        );
+        // A transient with no curves to fill its stack gives way to the next.
+        assert_eq!(
+            opening_analysis(
+                &[AnalysisType::Transient, AnalysisType::Ac],
+                |index, _| index == 1
             ),
+            Some(1)
+        );
+        // No curves at all: the first analysis.
+        assert_eq!(
+            opening_analysis(&[AnalysisType::DcOp, AnalysisType::Sensitivity], everything),
+            Some(0)
+        );
+        assert_eq!(opening_analysis(&[], everything), None);
+    }
+
+    #[test]
+    fn the_shown_analysis_opens_on_its_default_sheet_else_any_it_fills() {
+        let everything = |_| true;
+        assert_eq!(
+            opening_sheet(Some(AnalysisType::Sensitivity), everything),
             Some(ResultViewer::Contribution)
         );
         assert_eq!(
-            opening_sheet(&[AnalysisType::Soa], Some(AnalysisType::Soa), everything),
+            opening_sheet(Some(AnalysisType::Soa), everything),
             Some(ResultViewer::Soa)
         );
         // A transient that kept only its event nodes opens on Events.
         assert_eq!(
-            opening_sheet(
-                &[AnalysisType::Transient],
-                Some(AnalysisType::Transient),
-                |sheet| sheet == ResultViewer::Events
-            ),
+            opening_sheet(Some(AnalysisType::Transient), |sheet| sheet
+                == ResultViewer::Events),
             Some(ResultViewer::Events)
         );
         // Nothing the table names can be filled: the first sheet that can.
         assert_eq!(
-            opening_sheet(&[AnalysisType::Tf], None, |sheet| sheet
-                == ResultViewer::Manifest),
-            Some(ResultViewer::Manifest)
+            opening_sheet(Some(AnalysisType::Tf), |sheet| sheet == ResultViewer::Table),
+            Some(ResultViewer::Table)
         );
-        assert_eq!(opening_sheet(&[], None, |_| false), None);
+        assert_eq!(opening_sheet(None, |_| false), None);
     }
 }

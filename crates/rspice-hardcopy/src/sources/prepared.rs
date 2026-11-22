@@ -903,7 +903,6 @@ fn validate_prepared_result_history(
     let analysis_count = runs.first().map_or(0, |run| run.analyses.len());
     let has_exact_shape = runs.len() == 1
         && match presentation.viewer() {
-            ResultViewer::Manifest => true,
             viewer if rspice_results::result_presentation::viewer_uses_wave_stack(viewer) => {
                 (1..=MAX_HARDCOPY_SOURCE_SET_MEMBERS).contains(&analysis_count)
             }
@@ -1143,12 +1142,6 @@ fn prepared_payload_identity(
             presentation,
             scope,
         } => {
-            if presentation.viewer() == ResultViewer::Manifest {
-                return Ok((
-                    results_manifest_identity(source_key, *project_id, run)?,
-                    scope.clone(),
-                ));
-            }
             if run.analyses.len() > 1 {
                 return Ok((
                     results_stack_identity(source_key, *project_id, run, presentation.viewer())?,
@@ -1373,14 +1366,6 @@ impl PreparedRetainedHardcopyResolution {
                 presentation,
                 scope,
             } => {
-                if presentation.viewer() == ResultViewer::Manifest {
-                    return resolve_results_manifest_source(
-                        source_key,
-                        project_id,
-                        scope,
-                        run.as_ref(),
-                    );
-                }
                 if run.analyses.len() > 1 {
                     return resolve_results_quick_view_stack(
                         source_key,

@@ -205,6 +205,7 @@ impl VisualizationDocument {
             hidden: false,
             strips: Vec::new(),
             maximized: false,
+            shown: false,
         });
         Ok(id)
     }
@@ -641,6 +642,13 @@ impl VisualizationDocument {
             }
             DocumentEdit::SetPaneMaximized { pane_id, maximized } => {
                 self.pane_mut(pane_id)?.maximized = maximized;
+                Ok(())
+            }
+            DocumentEdit::ShowPaneAnalysis { pane_id } => {
+                self.pane_mut(pane_id)?;
+                for pane in &mut self.panes {
+                    pane.shown = pane.id == pane_id;
+                }
                 Ok(())
             }
             DocumentEdit::AddBoundPane(pane) => {

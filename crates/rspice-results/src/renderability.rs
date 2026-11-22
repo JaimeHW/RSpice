@@ -645,6 +645,5 @@ pub fn viewer_can_render(
             analysis.family_metadata,
             Some(AnalysisResultFamilyMetadata::Optimization { ref iterations, .. }) if !iterations.is_empty()
         ),
-        ResultViewer::Manifest => false,
     }
 }

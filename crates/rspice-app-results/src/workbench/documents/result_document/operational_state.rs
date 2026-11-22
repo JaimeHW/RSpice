@@ -488,9 +488,7 @@ pub(crate) fn classify_viewer(
         return ResultOperationalStatus::canonical(ResultOperationalState::Stale, false);
     }
 
-    if super::viewer_requires_retained_results(viewer)
-        && !super::viewer_availability(state.results_reads(), viewer).available
-    {
+    if !super::viewer_availability(state.results_reads(), viewer).available {
         return ResultOperationalStatus {
             state: ResultOperationalState::Unsupported,
             detail: super::viewer_unavailability_reason(state.results_reads(), viewer)

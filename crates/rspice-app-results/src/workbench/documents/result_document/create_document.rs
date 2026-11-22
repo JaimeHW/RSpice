@@ -756,7 +756,7 @@ pub(super) fn view_pane_viewer(
     // The analysis' default sheets first, as the quick view opens on them.
     ResultViewer::default_sheets(analysis.analysis_type)
         .iter()
-        .filter_map(|sheet| sheet.viewer_document_id())
+        .map(|sheet| sheet.viewer_document_id())
         .filter_map(|id| VIEWER_DOCUMENTS.iter().find(|viewer| viewer.id == id))
         .find(draws)
         .or_else(|| VIEWER_DOCUMENTS.iter().find(draws))

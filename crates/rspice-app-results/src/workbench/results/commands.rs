@@ -158,7 +158,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 70] = [
+    pub const ALL: [Self; 69] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -199,7 +199,6 @@ impl ResultsCommand {
         Self::ResultViewer(ResultViewer::Events),
         Self::ResultViewer(ResultViewer::Soa),
         Self::ResultViewer(ResultViewer::Optimization),
-        Self::ResultViewer(ResultViewer::Manifest),
         Self::AddVisualizationPane,
         Self::VisualizationDocumentProperties,
         Self::CursorToMaximum,
@@ -565,7 +564,6 @@ const fn cursor_command(
 /// The key of the command that opens `viewer`.
 const fn viewer_key(viewer: ResultViewer) -> CommandKey {
     match viewer {
-        ResultViewer::Manifest => CommandKey::new("result-manifest"),
         ResultViewer::Waves => ids::RESULT_WAVEFORMS,
         ResultViewer::DcSweep => CommandKey::new("result-dc-sweep"),
         ResultViewer::Bode => CommandKey::new("result-bode"),
@@ -596,7 +594,6 @@ const fn viewer_key(viewer: ResultViewer) -> CommandKey {
 /// The label of the command that opens `viewer`.
 const fn viewer_label(viewer: ResultViewer) -> &'static str {
     match viewer {
-        ResultViewer::Manifest => "Open dataset manifest",
         // Named for the sheet it selects, not for the workspace it lands
         // in: opening the results workspace is the route that restores
         // whatever sheet was last open, and two palette rows reading "Open

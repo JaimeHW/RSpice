@@ -16,8 +16,8 @@ use super::{DatasetWalk, FrameSampleRead, WorkCounts};
 // Results workspace's own surfaces with the session type that workspace
 // already holds, and does not reach for the session aggregate on its own.
 use super::super::{
-    ResultViewer, ResultsTestHost, bode, events, eye, fft, manifest, noise_contrib, nyquist,
-    op_inspector, optimization, sensitivity, soa, table, waves,
+    ResultViewer, ResultsTestHost, bode, events, eye, fft, noise_contrib, nyquist, op_inspector,
+    optimization, sensitivity, soa, table, waves,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, DcOpResult,
@@ -573,7 +573,6 @@ fn steady_state_work(
 /// Every measured surface, named for the failure message.
 fn surfaces() -> Vec<(&'static str, ResultViewer)> {
     vec![
-        ("Manifest", ResultViewer::Manifest),
         ("OP inspector", ResultViewer::Op),
         ("Table", ResultViewer::Table),
         ("SOA", ResultViewer::Soa),
@@ -614,7 +613,6 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut ResultsTest
         let _ = waves::family_envelope_available(&mut state.results_parts(), &tokens);
     }
     match viewer {
-        ResultViewer::Manifest => manifest::show(ui, &mut state.results_parts()),
         ResultViewer::Op => op_inspector::show(ui, &mut state.results_parts()),
         ResultViewer::Table => table::show(ui, &mut state.results_parts()),
         ResultViewer::Soa => soa::show(ui, &mut state.results_parts()),

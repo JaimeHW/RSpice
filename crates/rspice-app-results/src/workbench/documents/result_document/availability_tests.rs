@@ -310,8 +310,13 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
     state.model.simulation.retained.runs = vec![run].into();
     assert!(state.model.simulation.select_run(0));
 
+    // Each is a view of its own analysis, offered while the browser shows it.
     assert!(viewer_availability(state.results_reads(), ResultViewer::Waves).available);
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::DcSweep).available);
+    assert!(state.model.simulation.select_analysis(1));
+    assert!(!viewer_availability(state.results_reads(), ResultViewer::Waves).available);
     assert!(viewer_availability(state.results_reads(), ResultViewer::DcSweep).available);
+    assert!(state.model.simulation.select_analysis(0));
 
     state.results.results.session.viewer = ResultViewer::Waves;
     let presentation = state.model.preferences.result_presentation_policy();
@@ -677,8 +682,9 @@ fn the_sheet_bar_names_its_subject_and_what_an_unfilled_sheet_needs() {
 }
 
 /// A running run that has written nothing yet keeps the reader on the sheet its results
-/// arrive on, so a transient's live plot appears where the reader is looking; a run that
-/// ended with nothing to show still falls back to its inventory.
+/// arrive on, so a transient's live plot appears where the reader is looking, and a run
+/// that ended with nothing to show stays there too: the sheet says what happened, and the
+/// run's inventory is in Run details.
 #[test]
 fn a_run_that_has_written_nothing_yet_keeps_the_readers_sheet() {
     let mut state = ResultsTestHost::default();
@@ -699,14 +705,7 @@ fn a_run_that_has_written_nothing_yet_keeps_the_readers_sheet() {
 
     set_lifecycle(&mut state, crate::state::SimulationRunLifecycle::Failed);
     reconcile_active_viewer(&mut state.results_parts());
-    assert_eq!(state.results.results.session.viewer, ResultViewer::Manifest);
-}
-
-#[test]
-fn only_the_manifest_draws_without_a_retained_dataset() {
-    assert!(!viewer_requires_retained_results(ResultViewer::Manifest));
-    assert!(viewer_requires_retained_results(ResultViewer::Waves));
-    assert!(viewer_requires_retained_results(ResultViewer::Op));
+    assert_eq!(state.results.results.session.viewer, ResultViewer::Waves);
 }
 
 #[test]
@@ -756,17 +755,6 @@ fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
     assert_eq!(hidden_wave_strip_count(state.results_reads()), 1);
 }
 
-const MOCKUP_FAMILIES: [&str; 8] = [
-    "Waveform worksheet",
-    "Frequency & stability",
-    "RF & network",
-    "Statistics & yield",
-    "Digital & AMS events",
-    "Fields & physical",
-    "Photonics",
-    "Report page",
-];
-
 #[test]
 fn persistent_document_families_scope_to_their_own_plot_types() {
     assert!(family_allows_viewer(
@@ -813,19 +801,6 @@ fn persistent_document_families_scope_to_their_own_plot_types() {
         ResultViewer::Waves
     ));
     assert!(!family_allows_viewer("Photonics", ResultViewer::Waves));
-}
-
-/// Dataset-native sheets carry evidence the bound dataset either has or has
-/// not; they are not one family's plot mode, and availability is their only
-/// gate. A family that hid them would drop evidence the same dataset shows
-/// in the workspace the moment the user promoted the view to a document.
-#[test]
-fn every_family_offers_the_dataset_native_sheets() {
-    for family in MOCKUP_FAMILIES {
-        for viewer in ResultViewer::all().filter(|viewer| viewer.viewer_document_id().is_none()) {
-            assert!(family_allows_viewer(family, viewer), "{family} {viewer:?}");
-        }
-    }
 }
 
 /// Pages carry their family only as their title, so a renamed or imported

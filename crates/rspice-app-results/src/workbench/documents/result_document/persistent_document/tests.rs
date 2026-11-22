@@ -143,7 +143,7 @@ fn every_release_target_has_an_exact_native_renderer_identity() {
             viewer.id
         );
         assert_eq!(
-            native.and_then(ResultViewer::viewer_document_id),
+            native.map(ResultViewer::viewer_document_id),
             Some(viewer.id),
             "release-target viewer {} does not round-trip its canonical identity",
             viewer.id
@@ -215,9 +215,7 @@ fn interactive_result_viewers_keep_canonical_document_identity() {
         ResultViewer::Soa,
         ResultViewer::Optimization,
     ] {
-        let document_id = viewer
-            .viewer_document_id()
-            .expect("interactive viewers have catalog identities");
+        let document_id = viewer.viewer_document_id();
         assert!(
             viewer_document(document_id).is_some(),
             "{viewer:?} mapped to unknown canonical document {document_id}"

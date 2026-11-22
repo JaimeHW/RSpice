@@ -547,7 +547,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Safe operating area | result-safe-operating-area |  | hidden",
             "  Optimization | result-optimization |  | hidden",
             "  Sample table | result-table |  | hidden",
-            "  Dataset manifest | result-manifest |  | hidden",
             "---",
             "New result document… | create-result-document |  | off: no retained result dataset is available",
             "Save view as document | save-view-as-document | Shift+N | off: open a result in Results",

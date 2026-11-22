@@ -155,6 +155,10 @@ pub enum DocumentEdit {
         pane_id: PaneId,
         maximized: bool,
     },
+    /// Keep that the data browser shows a pane's analysis, and no other's.
+    ShowPaneAnalysis {
+        pane_id: PaneId,
+    },
     AddPaneOnNewPage {
         page: NewPage,
         pane: NewPagePane,

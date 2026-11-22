@@ -196,22 +196,6 @@ fn sensitivity_app(parameters: usize) -> RSpiceApp {
     app
 }
 
-fn manifest_app(analyses: usize) -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    let mut run = SimulationRun::new(1);
-    for index in 0..analyses {
-        run.add_analysis(AnalysisResult::new(
-            index as u64 + 1,
-            AnalysisType::Transient,
-            format!("TRAN {index}"),
-        ));
-    }
-    app.state.model.simulation.retained.runs = vec![run].into();
-    assert!(app.state.model.simulation.select_run(0));
-    assert!(app.state.model.simulation.select_analysis(0));
-    app
-}
-
 fn state_with_analysis(analysis: AnalysisResult) -> AppState {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
@@ -420,11 +404,6 @@ fn the_evidence_tables_cost_their_viewport_not_their_dataset() {
             drawn_shape_count(&mut sensitivity_app(64), ResultViewer::Contribution),
             drawn_shape_count(&mut sensitivity_app(20_000), ResultViewer::Contribution),
         ),
-        (
-            ResultViewer::Manifest,
-            drawn_shape_count(&mut manifest_app(64), ResultViewer::Manifest),
-            drawn_shape_count(&mut manifest_app(4_000), ResultViewer::Manifest),
-        ),
     ] {
         assert!(
             large < small * 2,
@@ -610,7 +589,6 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
     let analysis = match viewer {
         ResultViewer::Waves
         | ResultViewer::Table
-        | ResultViewer::Manifest
         | ResultViewer::Eye
         | ResultViewer::Fft => transient_analysis(),
         ResultViewer::DcSweep => AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
@@ -1012,10 +990,7 @@ fn every_sheet_opens_as_a_document_pane() {
     use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
     for viewer in ResultViewer::all() {
-        // The manifest is the run's own inventory, not a viewer document.
-        let Some(viewer_id) = viewer.viewer_document_id() else {
-            continue;
-        };
+        let viewer_id = viewer.viewer_document_id();
         let mut app = app_showing(viewer);
         if viewer == ResultViewer::Table {
             app.state.model.simulation.retained.runs[0].analyses[0].analysis_type =

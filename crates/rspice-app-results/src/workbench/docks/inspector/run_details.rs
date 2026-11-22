@@ -1,9 +1,9 @@
 //! Run details…: everything that proves where one retained run came from.
 //!
 //! The Results inspector names the run and how long it took; the identifiers,
-//! digests, inputs, model sources and solver statistics behind it live here,
-//! one dialog reached from the inspector's Run section and from a run's row
-//! in the data browser.
+//! digests, the inventory of its analyses, inputs, model sources and solver
+//! statistics behind it live here, one dialog reached from the inspector's
+//! Run section and from a run's row in the data browser.
 //!
 //! The run's manifest is projected once, when the dialog opens. Its dataset
 //! digest reads every sample the run holds in memory (a run kept in a results
@@ -63,7 +63,7 @@ impl RunDetailsDialogState {
 /// names.
 const TIME_DIGITS: usize = 6;
 
-/// How tall a forced-point list grows before it scrolls.
+/// How tall a forced-point list, or the inventory, grows before it scrolls.
 const FORCED_LIST_HEIGHT: f32 = 160.0;
 
 /// Open Run details… on the retained run `run_id`. A run that is no longer
@@ -183,6 +183,7 @@ pub fn show(
                 property_row(ui, "Dataset digest", digest);
                 property_row(ui, "Integrity", &manifest.integrity);
             });
+            inventory(ui, manifest);
             match &manifest.authority {
                 Some(authority) => {
                     property_card(ui, "Plan and inputs", |ui| {
@@ -286,6 +287,53 @@ pub fn show(
         open_plan,
         open_deck,
     }
+}
+
+/// The run's analyses as its manifest lists them, one row per task: what
+/// each kept and whether it may be cited. The rest of a row (its domain,
+/// precision, expansion and identities) is on hover. A save-all run lists
+/// thousands, so the list scrolls rather than the dialog.
+fn inventory(ui: &mut Ui, manifest: &rspice_results::manifest::ManifestViewModel) {
+    property_card(ui, "Analyses", |ui| {
+        property_row(
+            ui,
+            "Retained",
+            &format!(
+                "{} of {} tasks \u{b7} {}",
+                manifest.retained_result_count, manifest.task_count, manifest.inventory_status
+            ),
+        );
+        egui::ScrollArea::vertical()
+            .id_salt("run-details-inventory")
+            .max_height(FORCED_LIST_HEIGHT)
+            .auto_shrink([false, true])
+            .show_rows(
+                ui,
+                property_row_height(ui),
+                manifest.rows.len(),
+                |ui, range| {
+                    for row in &manifest.rows[range] {
+                        let mut details = vec![
+                            format!("Domain axis {}", row.domain_axis),
+                            format!("Precision {}", row.precision),
+                            format!("Expansion {}", row.expansion),
+                        ];
+                        details.extend(row.task_identity.iter().map(|id| format!("Task {id}")));
+                        details.extend(
+                            row.config_digest
+                                .iter()
+                                .map(|digest| format!("Configuration digest {digest}")),
+                        );
+                        property_row(
+                            ui,
+                            &row.analysis,
+                            &format!("{} \u{b7} {}", row.stored_values, row.eligibility),
+                        )
+                        .on_hover_text(details.join("\n"));
+                    }
+                },
+            );
+    });
 }
 
 /// One analysis's solver statistics: its transient's, and for a periodic

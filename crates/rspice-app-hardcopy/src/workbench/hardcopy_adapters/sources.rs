@@ -581,11 +581,9 @@ pub fn prepare_retained_hardcopy_resolution(
         if source_key == result_key {
             require_active_result_document(reads, run.dataset_id)?;
             let viewer = displayed.viewer;
-            let prepared_run = if viewer == ResultViewer::Manifest {
-                // The dataset-native manifest states the complete immutable
-                // run.
-                run.clone()
-            } else if rspice_results::result_presentation::viewer_uses_wave_stack(viewer) {
+            let prepared_run = if rspice_results::result_presentation::viewer_uses_wave_stack(
+                viewer,
+            ) {
                 if displayed.analysis_indices.len() > MAX_HARDCOPY_SOURCE_SET_MEMBERS {
                     return Err(HardcopySourceError::InvalidVisualizationSource(format!(
                         "{} displays {} analyses, exceeding the {}-sheet hardcopy limit; maximize one strip before exporting",
@@ -777,11 +775,6 @@ pub fn quick_result_availability(
         ));
     }
     let viewer = results.result_viewer();
-    if viewer == ResultViewer::Manifest {
-        // Manifest hardcopy is bound to the terminal dataset as a whole and
-        // must not require an arbitrarily selected analysis.
-        return RetainedHardcopySourceAvailability::Available;
-    }
     let Some(index) = quick_result_analysis_index(model, run, viewer) else {
         return unavailable(format!(
             "no saved analysis has results for {}",
@@ -910,8 +903,6 @@ pub fn quick_result_availability(
             Some(AnalysisResultFamilyMetadata::Optimization { iterations, .. })
                 if !iterations.is_empty()
         ),
-        // Handled before analysis selection because this is dataset-native.
-        ResultViewer::Manifest => true,
     };
     if available {
         RetainedHardcopySourceAvailability::Available

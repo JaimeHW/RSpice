@@ -109,6 +109,56 @@ pub fn view_of_run(state: ResultsReads<'_>, dataset_id: DatasetId) -> Option<Res
     view_of(state, source_of(run))
 }
 
+/// The authored analysis `run`'s view keeps as the one the data browser
+/// shows: the one the reader last picked in a run of its plan.
+pub(crate) fn kept_analysis(
+    state: ResultsReads<'_>,
+    run: &SimulationRun,
+) -> Option<crate::product::AnalysisInstanceId> {
+    let view = view_of(state, source_of(run))?;
+    state
+        .model
+        .workspace
+        .content
+        .visualization_document(view)?
+        .shown_pane()?
+        .binding
+        .map(|binding| binding.analysis_id)
+}
+
+/// Keep in the view of run `dataset` that the data browser shows its
+/// authored analysis `analysis`. A view not made yet, or with no pane for
+/// the analysis, keeps nothing.
+pub(crate) fn keep_analysis(
+    state: &mut ResultsParts<'_>,
+    dataset: DatasetId,
+    analysis: crate::product::AnalysisInstanceId,
+) {
+    let Some(view) = view_of_run(state.results_reads(), dataset) else {
+        return;
+    };
+    let Some(document) = state.model.workspace.content.visualization_document(view) else {
+        return;
+    };
+    let Some(pane) = document.pane_of_analysis(analysis) else {
+        return;
+    };
+    if pane.shown {
+        return;
+    }
+    let (pane_id, revision) = (pane.id, document.revision());
+    if let Err(error) = view_edits::apply_following(
+        state,
+        view,
+        revision,
+        vec![DocumentEdit::ShowPaneAnalysis { pane_id }],
+    ) {
+        state.prompt(format!(
+            "Could not keep the analysis shown in the view: {error}"
+        ));
+    }
+}
+
 /// Before the quick view draws: keep what the reader changed since it last
 /// drew, make or follow the shown run's view, and draw from it.
 pub fn sync(state: &mut ResultsParts<'_>) {
@@ -582,6 +632,7 @@ pub fn choose_run(
         .position(|run| run.dataset_id == target.dataset_id)
     {
         simulation.select_run(index);
+        super::open_shown_run(state);
     }
     Ok(())
 }

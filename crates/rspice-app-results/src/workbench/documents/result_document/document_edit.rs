@@ -352,9 +352,7 @@ fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), St
                 .any(|(candidate, _)| candidate == viewer)
         })
         .ok_or_else(|| "The selected sheet cannot draw this analysis.".to_owned())?;
-    let viewer_id = viewer
-        .viewer_document_id()
-        .ok_or_else(|| "The selected sheet cannot be kept as a pane.".to_owned())?;
+    let viewer_id = viewer.viewer_document_id();
     let definition = viewer_document(viewer_id)
         .ok_or_else(|| "The selected sheet is not a registered viewer.".to_owned())?;
     let source = super::create_document::source_reference(run, analysis)

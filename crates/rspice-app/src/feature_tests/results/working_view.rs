@@ -397,8 +397,9 @@ fn a_run_plots_the_outputs_its_plan_marks_and_a_rerun_plots_a_new_one() {
 }
 
 /// A plan's run opens on the sheet its plot arrives on: while it has written
-/// nothing yet, a reader left on the run inventory is taken to the Waves
-/// sheet its transient draws on, where the sheet says the run is starting.
+/// nothing yet, a reader left on another analysis' sheet is taken to the
+/// Waves sheet its transient draws on, where the sheet says the run is
+/// starting.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_starting_run_opens_on_the_sheet_its_plot_arrives_on() {
@@ -423,7 +424,7 @@ fn a_starting_run_opens_on_the_sheet_its_plot_arrives_on() {
         .expect("the starting run");
     assert!(run.analyses.is_empty(), "the run has written nothing yet");
     assert!(!run.lifecycle.is_terminal());
-    state.results.results.session.viewer = ResultViewer::Manifest;
+    state.results.results.session.viewer = ResultViewer::Bode;
 
     prepare_viewer_state(&mut state.results_parts());
 

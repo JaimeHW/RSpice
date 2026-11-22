@@ -335,66 +335,6 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
 }
 
 #[test]
-fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_worker_handoff() {
-    let mut state = AppState::default();
-    let mut displayed = SimulationRun::new(1);
-    displayed.lifecycle = SimulationRunLifecycle::Completed;
-    displayed
-        .analyses
-        .push(AnalysisResult::new(1, AnalysisType::Transient, "Transient"));
-    displayed
-        .analyses
-        .push(AnalysisResult::new(2, AnalysisType::Ac, "AC"));
-    displayed
-        .restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
-        .expect("terminal fixture has explicit legacy provenance");
-    let displayed_dataset = displayed.dataset_id;
-
-    let mut background = SimulationRun::new(2);
-    background.lifecycle = SimulationRunLifecycle::Completed;
-    background
-        .analyses
-        .push(AnalysisResult::new(3, AnalysisType::DcOp, "Background OP"));
-    background
-        .restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
-        .expect("background fixture has explicit legacy provenance");
-    state.model.simulation.retained.runs = vec![displayed, background].into();
-    state.model.simulation.view.active_run_idx = Some(1);
-    state.model.simulation.view.active_analysis_idx = Some(0);
-    state.results.results.session.viewer = ResultViewer::Manifest;
-    state.workbench.workspace = Workspace::Results;
-    state
-        .workbench
-        .documents
-        .activate(WorkspaceDocumentId::ResultDataset(displayed_dataset));
-
-    let source_key = format!(
-        "project:{}:result-dataset:{}",
-        state.model.workspace.content.project.id().as_uuid(),
-        displayed_dataset
-    );
-    let prepared = prepare_retained_hardcopy_resolution(
-        source_reads(&state),
-        &source_key,
-        HardcopyScope::ActivePlotDocument,
-    )
-    .expect("complete displayed manifest prepares");
-    let worker_bytes = prepared
-        .into_worker_snapshot_json()
-        .expect("manifest worker snapshot serializes");
-    let restored = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes)
-        .expect("manifest worker snapshot restores");
-    let resolved = restored.resolve_owned().expect("manifest resolves");
-    let HardcopySemanticDocument::ResultSummary(summary) = resolved.semantic_document() else {
-        panic!("expected semantic manifest summary")
-    };
-    assert_eq!(summary.viewer, ResultViewer::Manifest);
-    assert_eq!(summary.tables[0].rows.len(), 2);
-    assert_eq!(summary.tables[0].rows[0][0], "Transient");
-    assert_eq!(summary.tables[0].rows[1][0], "AC Analysis");
-}
-
-#[test]
 fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);

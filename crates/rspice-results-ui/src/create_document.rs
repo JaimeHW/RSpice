@@ -441,9 +441,7 @@ mod tests {
             }
         }
         for viewer in ResultViewer::all() {
-            let Some(id) = viewer.viewer_document_id() else {
-                continue;
-            };
+            let id = viewer.viewer_document_id();
             let definition = VIEWER_DOCUMENTS
                 .iter()
                 .find(|definition| definition.id == id)

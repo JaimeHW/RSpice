@@ -22,9 +22,7 @@ use rspice_app_workbench::workbench::state::workbench_session::{Drawer, Workbenc
 fn every_claimed_viewer_document_is_in_the_catalog() {
     use rspice_app_results::workbench::documents::result_document::ResultViewer;
     for viewer in ResultViewer::all() {
-        let Some(id) = viewer.viewer_document_id() else {
-            continue;
-        };
+        let id = viewer.viewer_document_id();
         assert!(
             rspice_app_state::results::viewer_catalog::viewer_document(id).is_some(),
             "{viewer:?} claims the unregistered document {id}"

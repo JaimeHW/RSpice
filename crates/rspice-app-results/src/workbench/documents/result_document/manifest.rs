@@ -1,13 +1,12 @@
-//! Dataset-manifest cache ownership and exact export.
+//! The run's manifest: its identity and inventory, which the inspector's
+//! run section and Run details state.
 
 use super::frame_work::{self, DatasetWalk};
 use crate::state::{RunHistoryRevision, SimulationRun};
 use crate::workbench::documents::result_document::ResultsParts;
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
-use egui::Ui;
 use rspice_results::manifest::ManifestViewModel;
-use rspice_results_ui::manifest as viewer;
 use std::sync::Arc;
 pub fn manifest_for_run(run: &SimulationRun) -> ManifestViewModel {
     frame_work::note(DatasetWalk::ManifestViewModel);
@@ -54,18 +53,6 @@ pub(crate) fn active_manifest(state: &mut ResultsParts<'_>) -> Option<Arc<Manife
     });
     state.results.plans.manifest = Some(Arc::clone(&built));
     Some(built)
-}
-pub(crate) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let plan = active_manifest(state);
-    viewer::show(ui, plan.as_ref().map(|plan| &plan.model));
-}
-pub(crate) fn export_csv(run: &SimulationRun) -> super::ResultSheetCsv {
-    let manifest = manifest_for_run(run);
-    super::ResultSheetCsv {
-        default_name: "rspice-result-manifest.csv",
-        detail: format!("{} retained analyses", manifest.rows.len()),
-        contents: rspice_formats::result_csv::encode_manifest_csv(&manifest),
-    }
 }
 #[cfg(test)]
 mod tests {

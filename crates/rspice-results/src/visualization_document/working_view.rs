@@ -127,6 +127,13 @@ impl VisualizationDocument {
         })
     }
 
+    /// The pane whose analysis the data browser last showed, which a run of
+    /// the plan opens on.
+    #[must_use]
+    pub fn shown_pane(&self) -> Option<&Pane> {
+        self.panes.iter().find(|pane| pane.shown)
+    }
+
     /// A bound pane with its canonical axes and no traces: the reader
     /// chooses what it plots.
     pub(super) fn add_view_pane(

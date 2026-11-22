@@ -21,15 +21,6 @@ fn quick_view_binding_requires_one_successful_terminal_analysis_and_valid_contro
         RetainedQuickViewSource::try_new(&run, 7, |_| true),
         Err(HardcopySourceError::UnretainedResult(_))
     ));
-    assert!(matches!(
-        resolve_results_manifest_source(
-            "manifest".to_owned(),
-            ProjectId::new(),
-            HardcopyScope::ActiveDocument,
-            &run
-        ),
-        Err(HardcopySourceError::UnretainedResult(_))
-    ));
     run.lifecycle = SimulationRunLifecycle::Completed;
     assert!(matches!(
         RetainedQuickViewSource::try_new(&run, 8, |_| true),

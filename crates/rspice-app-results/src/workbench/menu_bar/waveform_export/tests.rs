@@ -175,24 +175,6 @@ fn bind_active_fft_authority(state: &mut ResultsTestHost) {
 
 #[test]
 fn report_and_table_sheets_export_the_evidence_they_render() {
-    let mut manifest_state = state_with_typed_result(
-        AnalysisResult::new(1, AnalysisType::Transient, "Transient")
-            .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0], vec![0.0, 1.0])]),
-    );
-    activate_result_document(
-        &mut manifest_state,
-        crate::workbench::ResultViewer::Manifest,
-    );
-    let manifest_io = MockExportWorkflowIo::default();
-    action_export_dataset_with_io(
-        &mut manifest_state.results_parts(),
-        &manifest_io,
-        &DatasetExportChoice::default(),
-    );
-    let manifest = &manifest_io.text_files.borrow()[0].1;
-    assert!(manifest.contains("dataset_id"));
-    assert!(manifest.contains("inventory,,,Transient"));
-
     let mut op = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
     op.dc_op = Some(crate::state::DcOpResult {
         node_voltages: vec![crate::state::OperatingPointValue {

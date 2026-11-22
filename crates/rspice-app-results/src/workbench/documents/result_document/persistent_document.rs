@@ -202,28 +202,14 @@ pub fn show(
     let activated_pane_id = ui
         .allocate_ui(vec2(available.width(), well_height), |ui| {
             ui.set_min_height(well_height);
-            if active_viewer == Some(ResultViewer::Manifest) {
-                // Manifest is a dataset-native document, so it replaces the
-                // page projection instead of masquerading as one retained
-                // visualization pane.
-                super::show_persistent_pane_viewer(
-                    ui,
-                    state,
-                    run_controller,
-                    ResultViewer::Manifest,
-                    None,
-                );
-                None
-            } else {
-                render_page(
-                    ui,
-                    state,
-                    run_controller,
-                    page,
-                    active_pane_id,
-                    active_viewer,
-                )
-            }
+            render_page(
+                ui,
+                state,
+                run_controller,
+                page,
+                active_pane_id,
+                active_viewer,
+            )
         })
         .inner;
 
@@ -777,7 +763,7 @@ fn render_pane(
         ui.allocate_ui_with_layout(
             vec2(ui.available_width(), viewer_height),
             Layout::top_down(Align::Min),
-            |ui| render_pane_viewer(ui, state, run_controller, pane, viewer, is_active),
+            |ui| render_pane_viewer(ui, state, run_controller, pane, viewer),
         );
         activated_pane_id
     })
@@ -808,9 +794,7 @@ fn pane_header(
     let viewer_title = viewer.map_or_else(
         || pane.viewer_id.as_str(),
         |viewer| {
-            viewer
-                .viewer_document_id()
-                .and_then(viewer_document)
+            viewer_document(viewer.viewer_document_id())
                 .map_or(viewer.tab_label(), |document| document.title)
         },
     );
@@ -860,7 +844,6 @@ fn render_pane_viewer(
     run_controller: &mut SimulationController,
     pane: &PaneProjection,
     viewer: Option<ResultViewer>,
-    is_active: bool,
 ) {
     if let Err(reason) = select_pane_binding(state, pane) {
         unavailable_surface(ui, &pane.title, &reason);
@@ -896,14 +879,6 @@ fn render_pane_viewer(
             &pane.title,
             super::viewer_unavailability_reason(state.results_reads(), viewer)
                 .unwrap_or("This sheet cannot show the selected analysis."),
-        );
-        return;
-    }
-    if is_active && viewer.viewer_document_id().is_none() {
-        unavailable_surface(
-            ui,
-            &pane.title,
-            "Dataset-native views cannot be retained as visualization panes.",
         );
         return;
     }

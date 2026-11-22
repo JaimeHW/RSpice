@@ -4,7 +4,6 @@
 
 mod analysis_stack;
 mod correlation;
-mod manifest;
 mod network_matrix;
 mod noise_report;
 mod operating_point_report;
@@ -13,7 +12,6 @@ mod selection;
 mod typed;
 pub use analysis_stack::{AnalysisStackCsv, AnalysisStackCsvError};
 pub use correlation::{CorrelationCsvError, encode_correlation_csv};
-pub use manifest::encode_manifest_csv;
 pub use network_matrix::encode_network_matrix_csv;
 pub use noise_report::NoiseReportCsv;
 pub use operating_point_report::OperatingPointReportCsv;
