@@ -85,14 +85,21 @@ impl ResultsFeature {
 
     /// Show the run a press of Run on the drawing finished in the plot pane
     /// beside it, as Virtuoso, ADS and KiCad plot beside the schematic: the
-    /// drawing stays the active page. A pane already showing keeps its
-    /// sheet, signals and zoom, so a re-run updates the plot in place; a
-    /// first run opens it on the sheet the run's analyses open on. A pane
-    /// the reader closed stays closed. Returns whether the plot is on
-    /// screen.
+    /// drawing stays the active page. The run settles on the analysis it
+    /// opens on, as a run opened in Results does: the one the plan's view
+    /// keeps when the run solved it, else its curves, else its first
+    /// analysis, and the data browser marks it. A pane already showing keeps
+    /// its sheet, signals and zoom while that analysis offers the sheet, so a
+    /// re-run updates the plot in place; a first run opens it on that
+    /// analysis' default sheet. A pane the reader closed stays closed.
+    /// Returns whether the plot is on screen.
     pub fn plot_finished_run(cx: &mut Cx<'_, Self>, run_sequence: u64) -> bool {
         if !cx.model.simulation.select_run_by_sequence(run_sequence) {
             return false;
+        }
+        if let Some(index) = settling_analysis(cx.state.reads(cx.model, cx.wb), ShowingRun::Opened)
+        {
+            settle_shown_analysis(&mut cx.state.results, &mut cx.model.simulation, index);
         }
         let viewer = cx.state.results.session.viewer;
         let keep = cx.wb.split_with_results
