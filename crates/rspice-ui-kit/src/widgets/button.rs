@@ -555,6 +555,39 @@ impl<'a> IconButton<'a> {
     }
 }
 
+/// Buttons in an equal-column grid across the width `ui` offers: `columns`
+/// to a row and `gap` between neighbours, across and down. Every button is
+/// one cell wide, so a set of verbs reads as one block rather than a ragged
+/// row of label widths, and the grid's right edge is the row's. Cells are
+/// whole points; the last column takes the remainder, so its edge lands on
+/// the row's. Returns each button's response, in the order given.
+pub fn button_grid(
+    ui: &mut Ui,
+    columns: usize,
+    gap: f32,
+    buttons: Vec<Button<'_>>,
+) -> Vec<Response> {
+    let columns = columns.max(1);
+    let width = ui.available_width();
+    let gaps = gap * (columns - 1) as f32;
+    let cell = ((width - gaps) / columns as f32).floor().max(1.0);
+    let last = (width - gaps - cell * (columns - 1) as f32).max(1.0);
+    let mut responses = Vec::with_capacity(buttons.len());
+    let mut buttons = buttons.into_iter().peekable();
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = vec2(gap, gap);
+        while buttons.peek().is_some() {
+            ui.horizontal(|ui| {
+                for (column, button) in buttons.by_ref().take(columns).enumerate() {
+                    let cell = if column + 1 == columns { last } else { cell };
+                    responses.push(button.min_width(cell).max_width(cell).show(ui));
+                }
+            });
+        }
+    });
+    responses
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
