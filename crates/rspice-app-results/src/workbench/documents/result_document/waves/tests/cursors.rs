@@ -419,6 +419,56 @@ fn add_places_a_delta_pair_and_a_vertical_marker_the_table_reads() {
     assert_eq!(row.cells[2], "0 V");
 }
 
+/// The A/B cursors are the working view's: saved with the project, they
+/// stand where they stood when it is opened again, and clearing them clears
+/// the view's.
+#[test]
+fn the_cursors_are_saved_with_the_project() {
+    let mut state = host_on(damped_run());
+    state.quick_frame();
+    {
+        let session = &mut state.results.results.session;
+        session.cursors.a = Some(1.0e-3);
+        session.cursors.b = Some(2.0e-3);
+        session.cursor_strip = Some(0);
+    }
+    state.quick_frame();
+    use crate::results::visualization_document::TypedValue;
+    let mut held: Vec<_> = state
+        .working_view()
+        .expect("the run's view")
+        .cursors()
+        .iter()
+        .map(|cursor| (cursor.label.clone(), cursor.position.clone()))
+        .collect();
+    held.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        held,
+        vec![
+            ("A".to_owned(), TypedValue::Real(1.0e-3)),
+            ("B".to_owned(), TypedValue::Real(2.0e-3)),
+        ]
+    );
+
+    let mut reopened = state.reopened();
+    reopened.quick_frame();
+    let session = &reopened.results.results.session;
+    assert_eq!(
+        (session.cursors.a, session.cursors.b, session.cursor_strip),
+        (Some(1.0e-3), Some(2.0e-3), Some(0))
+    );
+
+    reopened.results.results.session.clear_cursors();
+    reopened.quick_frame();
+    assert!(
+        reopened
+            .working_view()
+            .expect("the run's view")
+            .cursors()
+            .is_empty()
+    );
+}
+
 /// With Snap on, a cursor put between samples stands on the nearest one.
 #[test]
 fn snap_stands_a_cursor_on_the_nearest_sample() {

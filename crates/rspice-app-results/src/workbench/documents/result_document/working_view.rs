@@ -6,8 +6,9 @@
 //! projection of the run's working view: before the quick view draws, each
 //! analysis' strip takes what the view's pane for that analysis holds (the
 //! signals plotted, the expressions and their units, the X scale, the strips
-//! drawn against a signal, the log axes, a closed strip, the event lanes and
-//! the markers), and what the reader changed is written back through
+//! drawn against a signal, the log axes, a closed strip, the event lanes,
+//! the markers and the A/B cursors), and what the reader changed is written
+//! back through
 //! [`view_edits::apply`] once the quick view has drawn. A pane is found by
 //! the authored analysis every run of a plan solves, so a window showing an
 //! older run of the plan shows it through the same view.
@@ -58,6 +59,16 @@ struct ViewScratch {
         crate::results::visualization_document::FamilyPresentationPolicy,
     >,
     maximized: Option<AnalysisPresentationKey>,
+    /// The strip the A/B cursors stand on, by its analysis' place in the
+    /// run, and where they stand.
+    cursors: CursorScratch,
+}
+
+/// The A/B cursors as the window shows them: the strip, then A and B.
+type CursorScratch = (Option<usize>, Option<f64>, Option<f64>);
+
+fn cursor_scratch(session: &rspice_results_ui::session::ResultViewerState) -> CursorScratch {
+    (session.cursor_strip, session.cursors.a, session.cursors.b)
 }
 
 /// The view the quick view last drew, the run it drew it over, and the
@@ -85,6 +96,14 @@ pub(crate) struct QuickViewBinding {
     /// a marker sits on its signal only while the signal is drawn, so the
     /// markers are drawn from the view again, and nothing else.
     remark: bool,
+}
+
+impl QuickViewBinding {
+    /// Another window's Results state is now on screen: its cursors are
+    /// that window's own, not a change the reader made to the view.
+    pub(crate) fn window_shown(&mut self, session: &rspice_results_ui::session::ResultViewerState) {
+        self.scratch.cursors = cursor_scratch(session);
+    }
 }
 
 /// Whose working view draws `run`.
@@ -1604,6 +1623,19 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         return;
     };
     let panes = bound_panes(document, run);
+    let previous = state
+        .results
+        .working_view
+        .as_ref()
+        .map(|binding| binding.view);
+    if previous != Some(view) {
+        project_cursors(
+            &mut state.results.session,
+            document,
+            &panes,
+            previous.is_some(),
+        );
+    }
     // Where each marker drawn from the view sits, while the view is drawn
     // from what changed.
     let anchors: HashMap<
@@ -2179,6 +2211,7 @@ fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)
             .map(|(key, policy)| (*key, policy.clone()))
             .collect(),
         maximized: session.maximized_strip.filter(|key| shown(key)),
+        cursors: cursor_scratch(session),
     }
 }
 
@@ -2209,6 +2242,7 @@ fn scratch_holds(state: ResultsReads<'_>, binding: &QuickViewBinding) -> bool {
         && same_entries(&session.strip_layouts, &scratch.strips, shown)
         && same_entries(&session.family_policies, &scratch.family, shown)
         && session.maximized_strip.filter(|key| shown(key)) == scratch.maximized
+        && cursor_scratch(session) == scratch.cursors
 }
 
 /// Whether the entries of `now` that `shown` picks are exactly `then`.
@@ -2245,6 +2279,80 @@ fn same_members<K: Eq + std::hash::Hash>(
         }
     }
     picked == then.len()
+}
+
+/// Where the A or B cursor `label` stands on `pane_id`, as `document`
+/// keeps it.
+fn held_cursor(document: &VisualizationDocument, pane_id: PaneId, label: &str) -> Option<f64> {
+    document
+        .cursors()
+        .iter()
+        .find(|cursor| cursor.pane_id == pane_id && cursor.label == label)
+        .and_then(|cursor| match cursor.position {
+            TypedValue::Real(position) => Some(position),
+            _ => None,
+        })
+}
+
+/// Show the A/B cursors `document` keeps, on the strip of the pane that
+/// keeps them, as the view is drawn anew. A view that keeps none clears
+/// the cursors of the view it takes over from (`replacing`), and leaves a
+/// window's restored cursors be when it is the first drawn.
+fn project_cursors(
+    session: &mut rspice_results_ui::session::ResultViewerState,
+    document: &VisualizationDocument,
+    panes: &[(usize, AnalysisPresentationKey, PaneId)],
+    replacing: bool,
+) {
+    let held = panes.iter().find_map(|&(index, _, pane_id)| {
+        let pair = (
+            held_cursor(document, pane_id, "A"),
+            held_cursor(document, pane_id, "B"),
+        );
+        (pair.0.is_some() || pair.1.is_some()).then_some((index, pair))
+    });
+    match held {
+        Some((index, (a, b))) => {
+            session.clear_cursors();
+            session.cursors.a = a;
+            session.cursors.b = b;
+            session.cursor_strip = Some(index);
+        }
+        None if replacing => session.clear_cursors(),
+        None => {}
+    }
+}
+
+/// The edits that leave the A/B cursors where the window shows them: on
+/// the pane of the strip they stand on (the first strip's, when none is
+/// named), and on no other.
+fn cursor_edits(
+    document: &VisualizationDocument,
+    panes: &[(usize, AnalysisPresentationKey, PaneId)],
+    (strip, a, b): CursorScratch,
+) -> Vec<DocumentEdit> {
+    let strip = strip.or_else(|| panes.first().map(|&(index, _, _)| index));
+    let mut edits = Vec::new();
+    for &(index, _, pane_id) in panes {
+        let desired = if Some(index) == strip {
+            (a, b)
+        } else {
+            (None, None)
+        };
+        let held = (
+            held_cursor(document, pane_id, "A"),
+            held_cursor(document, pane_id, "B"),
+        );
+        // A pane with no X axis has nowhere to keep a cursor; the window
+        // keeps it, as it always has.
+        if held != desired
+            && let Ok(more) =
+                super::document_edit::links::cursor_pair_edits(document, pane_id, desired)
+        {
+            edits.extend(more);
+        }
+    }
+    edits
 }
 
 /// What the quick view drew that its view does not hold yet.
@@ -2474,6 +2582,10 @@ fn capture_edits(
         if maximized != pane.maximized {
             edits.push(DocumentEdit::SetPaneMaximized { pane_id, maximized });
         }
+    }
+    let cursors = cursor_scratch(session);
+    if cursors != binding.scratch.cursors {
+        edits.extend(cursor_edits(document, &bound_panes(document, run), cursors));
     }
     Captured {
         edits,

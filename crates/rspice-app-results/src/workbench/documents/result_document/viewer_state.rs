@@ -64,6 +64,9 @@ impl ResultsState {
             }
         }
         self.session.show_window_view(view);
+        if let Some(binding) = self.working_view.as_mut() {
+            binding.window_shown(&self.session);
+        }
         self.quick_view_viewer = view.quick_view_viewer;
         self.seen_selection = shown_selection(simulation);
         if let Some(kind) = self.seen_selection.and_then(|shown| shown.kind) {
