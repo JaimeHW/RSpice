@@ -25,6 +25,9 @@
 //! identification number 3.5 mm — with 2 mm of padding inside each rule: the
 //! people's names 20 characters, the title and supplementary title 27, the
 //! identification number 21, the date of issue 10, the sheet `12 of 12`.
+//! A longer title wraps at its spaces onto a second line, between its first
+//! and the supplementary title, which keeps its own line: the cell holds 54
+//! characters of title, and the lettering never shrinks.
 //! The vertical rules stand on one grid: the legal owner's rule runs from
 //! the top of the block to its foot, the title's from the second row down,
 //! and each rule within a row stands at least 10 mm from any in the rows
@@ -133,8 +136,8 @@ const FORM_CELLS: [FormCell; 13] = [
         pooled: false,
         lines: &[line(Field::DocumentStatus)],
     },
-    // The title, and under it the supplementary title on the value line of
-    // the row beside it.
+    // The title, wrapping onto a second line when it is long, and under it
+    // the supplementary title on the value line of the row below.
     FormCell {
         caption: "Title",
         x_um: 47_500,
@@ -143,7 +146,10 @@ const FORM_CELLS: [FormCell; 13] = [
         rows: 2,
         pooled: false,
         lines: &[
-            line(Field::SheetTitle),
+            FormLine {
+                max_lines: 2,
+                ..line(Field::SheetTitle)
+            },
             FormLine {
                 row: 1,
                 ..line(Field::CellView)

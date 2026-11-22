@@ -179,7 +179,7 @@ fn the_iso_7200_form_is_a_fixed_set_of_cells() {
         (Field::Organization, (2_500, 20, 3)),
         (Field::DocumentType, (2_500, 27, 1)),
         (Field::DocumentStatus, (2_500, 30, 1)),
-        (Field::SheetTitle, (2_500, 27, 1)),
+        (Field::SheetTitle, (2_500, 27, 2)),
         (Field::CellView, (2_500, 27, 1)),
         (Field::DocumentId, (3_500, 21, 1)),
         (Field::Revision, (2_500, 3, 1)),
@@ -560,8 +560,8 @@ fn a_long_legal_owner_wraps_in_its_cell() {
         ["Abcdefghijklmnopqrst", "uvwxyz"]
     );
     // A single-line value never wraps.
-    let title = layout.value(Field::SheetTitle).unwrap();
-    assert_eq!(title.letter(long).len(), 1);
+    let document_type = layout.value(Field::DocumentType).unwrap();
+    assert_eq!(document_type.letter(long).len(), 1);
 }
 
 #[test]
@@ -1158,4 +1158,70 @@ fn a_value_read_right_to_left_is_set_against_the_right_of_its_cell() {
             .filter(|line| line.role == DrawingSheetTitleLetteringRole::Caption)
             .all(|caption| caption.align == Left)
     );
+}
+
+/// A 40-character title is lettered whole on every template, never shrunk
+/// or cut: on one line of the compact block, and on ISO 7200's form wrapped
+/// at a space onto a second line above the supplementary title, which keeps
+/// its own.
+#[test]
+fn every_template_letters_a_forty_character_title_whole() {
+    const TITLE: &str = "Bandgap reference with trimmed PTAT core";
+    assert_eq!(TITLE.chars().count(), 40);
+    for (standard, template) in [
+        (
+            DrawingSheetStandard::IsoA4,
+            DrawingSheetTitleBlockTemplate::Compact,
+        ),
+        (
+            DrawingSheetStandard::IsoA4,
+            DrawingSheetTitleBlockTemplate::Standard,
+        ),
+        (
+            DrawingSheetStandard::AnsiB,
+            DrawingSheetTitleBlockTemplate::AsmeY141,
+        ),
+    ] {
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape)
+                .try_update(|draft| draft.title_block.template = template)
+                .unwrap();
+        let layout = layout_of(&format);
+        let fields = resolve_drawing_sheet_title_fields(
+            &format,
+            &BTreeMap::from([
+                (Field::SheetTitle, TITLE.to_owned()),
+                (Field::CellView, "lib / bandgap / schematic".to_owned()),
+            ]),
+        );
+        assert!(
+            !layout.cut_fields(&fields).contains(&Field::SheetTitle),
+            "{template:?}"
+        );
+        let title = layout.value(Field::SheetTitle).unwrap();
+        let lines = title.letter(TITLE);
+        assert_eq!(lines.join(" "), TITLE, "{template:?}");
+        let lettered = layout
+            .lettering(&fields)
+            .into_iter()
+            .map(|line| line.text)
+            .collect::<Vec<_>>();
+        for line in &lines {
+            assert!(
+                lettered.contains(line),
+                "{template:?}: {line} in {lettered:?}"
+            );
+        }
+        match template {
+            DrawingSheetTitleBlockTemplate::Compact => assert_eq!(lines.len(), 1),
+            DrawingSheetTitleBlockTemplate::Standard => {
+                assert_eq!(lines, ["Bandgap reference with", "trimmed PTAT core"]);
+                // The supplementary title keeps its own line below both.
+                let supplementary = layout.value(Field::CellView).unwrap();
+                assert!(supplementary.seat_um >= title.seat_um + title.line_pitch_um * 2);
+                assert!(lettered.contains(&"lib / bandgap / schematic".to_owned()));
+            }
+            _ => {}
+        }
+    }
 }

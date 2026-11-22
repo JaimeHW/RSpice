@@ -719,9 +719,9 @@ fn print_never_embeds_a_face_whose_licence_forbids_it() {
     );
 }
 
-/// A title value in each script, long enough that its cell cuts it: Arabic
-/// with its vowel marks, Hebrew with a number, a unit and brackets, Thai
-/// with its tone marks, and Japanese.
+/// A title value in each script, long enough that its cell cuts it even
+/// where it wraps, as a title does: Arabic with its vowel marks, Hebrew with
+/// a number, a unit and brackets, Thai with its tone marks, and Japanese.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn script_title_values() -> [String; 4] {
     [
@@ -730,7 +730,7 @@ pub(super) fn script_title_values() -> [String; 4] {
         "\u{e2a}\u{e27}\u{e31}\u{e2a}\u{e14}\u{e35}\u{e04}\u{e23}\u{e31}\u{e1a} ",
         "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{56de}\u{8def}\u{56f3} ",
     ]
-    .map(|phrase| phrase.repeat(6).trim_end().to_owned())
+    .map(|phrase| phrase.repeat(12).trim_end().to_owned())
 }
 
 /// `format` with its first authored title fields holding a value in each
@@ -763,7 +763,10 @@ fn a_title_value_in_any_script_is_cut_between_clusters_and_copies_back_as_plotte
     use unicode_segmentation::UnicodeSegmentation;
 
     let _japanese = Installed::japanese();
-    let format = titled_in_every_script(&SchematicSheetFormat::default());
+    let format = titled_in_every_script(&SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    ));
     let values = script_title_values();
     let lettering = super::title_lettering::laid_out_lettering(&format)
         .into_iter()
