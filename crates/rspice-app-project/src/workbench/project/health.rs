@@ -17,7 +17,7 @@
 //! from, as the Project pages keep theirs.
 
 use crate::state::SimulationRunLifecycle;
-use crate::ui::accessibility::{counted, finding_counts};
+use crate::ui::accessibility::{counted, finding_counts_and_notes};
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::{DesignCheckStatus, Model, PlatformState, SlotFacts};
 use crate::workbench::project::dependency_status::{
@@ -97,11 +97,10 @@ pub fn schematic_checks(model: &Model, facts: SlotFacts) -> SubjectStatus {
         DesignCheckStatus::Current(receipt) => {
             let summary = receipt.result.summary();
             let errors = summary.critical + summary.errors;
-            let advisories = summary.warnings + summary.info;
-            let state = if errors + advisories == 0 {
+            let state = if errors + summary.warnings + summary.info == 0 {
                 "Passed".to_owned()
             } else {
-                finding_counts(errors, advisories)
+                finding_counts_and_notes(errors, summary.warnings, summary.info)
             };
             let tone = if errors > 0 {
                 Tone::Error

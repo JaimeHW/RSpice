@@ -67,32 +67,28 @@ use arrange::{Arrangement, Line};
 use grid::{Columns, RowMark};
 
 /// The counts the tab strip shows and the status bar states, under one rule:
-/// an error is a condition that stops the design working, an advisory is
-/// every other current finding, and a stale finding is neither — it is a
-/// finding about a design that no longer exists.
+/// an error is a condition that stops the design working, a warning is a
+/// current finding at the warning level, a note is every other current
+/// finding, and a stale finding is none of these — it is a finding about a
+/// design that no longer exists.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProblemCount {
     pub errors: usize,
-    pub advisories: usize,
+    pub warnings: usize,
+    pub notes: usize,
 }
 
 impl ProblemCount {
     pub const fn total(self) -> usize {
-        self.errors + self.advisories
+        self.errors + self.warnings + self.notes
     }
 
-    /// The counts in words, for the tab's accessible name and its tooltip.
-    /// The badge itself has room for one number; this is where the number is
-    /// broken down, so the strip never implies that twelve advisories are
-    /// twelve errors.
+    /// The counts in words, for the tab's accessible name and its tooltip,
+    /// as the status bar says them. The badge itself has room for one
+    /// number; this is where the number is broken down, so the strip never
+    /// implies that twelve warnings are twelve errors.
     pub fn announcement(self) -> String {
-        format!(
-            "{} error{}, {} advisor{}",
-            self.errors,
-            if self.errors == 1 { "" } else { "s" },
-            self.advisories,
-            if self.advisories == 1 { "y" } else { "ies" },
-        )
+        crate::ui::accessibility::finding_counts_and_notes(self.errors, self.warnings, self.notes)
     }
 }
 
@@ -103,7 +99,8 @@ pub fn active_problem_count(state: &impl ListingSource, pass: u64) -> ProblemCou
     let counts = listing_in_pass(state, pass).counts();
     ProblemCount {
         errors: counts.errors,
-        advisories: counts.advisories,
+        warnings: counts.warnings,
+        notes: counts.notes(),
     }
 }
 

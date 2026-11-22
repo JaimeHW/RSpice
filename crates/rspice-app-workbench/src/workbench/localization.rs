@@ -128,6 +128,7 @@ define_messages! {
     NetlistWarnings => "{count} warnings",
     NetlistErrors => "Errors",
     NetlistAdvisories => "Warnings",
+    NetlistNotes => "Notes",
     NetlistMoreInProblems => "{count} more in Problems",
     NetlistIncludeProvenance => "Include",
     NetlistDisplayName => "Name",

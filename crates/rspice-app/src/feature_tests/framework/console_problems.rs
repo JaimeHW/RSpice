@@ -792,7 +792,7 @@ fn grouping_prints_a_header_that_carries_its_counts_and_collapses() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
     state.workbench.problems_view.grouping = ProblemGrouping::Producer;
-    let header = "Design rules · 1 error · 1 advisory";
+    let header = "Design rules · 1 error · 1 warning";
 
     let grouped = render(&mut state, sized(egui::RawInput::default()));
     let node = grouped
@@ -1864,10 +1864,17 @@ fn a_logged_failure_is_not_a_problem() {
 fn counts_name_their_severities_separately() {
     let count = ProblemCount {
         errors: 1,
-        advisories: 12,
+        warnings: 12,
+        notes: 0,
     };
     assert_eq!(count.total(), 13);
-    assert_eq!(count.announcement(), "1 error, 12 advisories");
+    assert_eq!(count.announcement(), "1 error \u{b7} 12 warnings");
+    let noted = ProblemCount { notes: 2, ..count };
+    assert_eq!(noted.total(), 15);
+    assert_eq!(
+        noted.announcement(),
+        "1 error \u{b7} 12 warnings \u{b7} 2 notes"
+    );
 }
 
 /// A row that says nothing but its severity, standing and waiver.

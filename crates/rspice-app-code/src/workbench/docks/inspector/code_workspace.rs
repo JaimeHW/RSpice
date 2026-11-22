@@ -44,7 +44,7 @@ pub(in crate::workbench) fn code_workspace_inspector(
     ui: &mut Ui,
     reads: &CodeInspector<'_>,
 ) -> Option<FindingPress> {
-    use crate::workbench::documents::netlist_document::{DiagnosticSeverity, NetlistRoot};
+    use crate::workbench::documents::netlist_document::NetlistRoot;
 
     let messages = reads.messages;
     const DIAGNOSTIC_PREVIEW_LIMIT: usize = 20;
@@ -52,55 +52,40 @@ pub(in crate::workbench) fn code_workspace_inspector(
     let summary = diagnostics.summary();
     let mut pressed = None;
 
-    if summary.current_errors > 0 {
-        code_inspector_section(
-            ui,
-            &messages.text(crate::workbench::MessageId::NetlistErrors),
-            Some(&summary.current_errors.to_string()),
+    // Errors, then warnings, then notes, each its own section counting what
+    // it lists, as the status bar counts them. A kind with nothing in it has
+    // no section: a heading spent on the absence of a problem says nothing.
+    let sections = [
+        (
+            MessageId::NetlistErrors,
+            summary.current_errors,
             Some(Problem::Failure),
-            |ui| {
-                for diagnostic in diagnostics
-                    .iter()
-                    .filter(|diagnostic| {
-                        diagnostic.is_current() && diagnostic.severity == DiagnosticSeverity::Error
-                    })
-                    .take(DIAGNOSTIC_PREVIEW_LIMIT)
-                {
-                    if let Some(press) = diagnostic_row(ui, diagnostic, messages) {
-                        pressed = Some(press);
-                    }
-                }
-                if summary.current_errors > DIAGNOSTIC_PREVIEW_LIMIT {
-                    empty_diagnostic_row(
-                        ui,
-                        &messages.format(
-                            crate::workbench::MessageId::NetlistMoreInProblems,
-                            &[(
-                                "count",
-                                &(summary.current_errors - DIAGNOSTIC_PREVIEW_LIMIT).to_string(),
-                            )],
-                        ),
-                    );
-                }
-            },
-        );
-    }
-
-    // A document with nothing to advise shows no Advisories section. A
-    // section whose whole body says it is empty is a heading spent on the
-    // absence of a problem.
-    let advisories = summary.current_advisories();
-    if advisories > 0 {
+        ),
+        (
+            MessageId::NetlistAdvisories,
+            summary.current_warnings,
+            Some(Problem::Warning),
+        ),
+        (
+            MessageId::NetlistNotes,
+            summary.current_information + summary.current_hints,
+            None,
+        ),
+    ];
+    for (title, count, problem) in sections {
+        if count == 0 {
+            continue;
+        }
         code_inspector_section(
             ui,
-            &messages.text(crate::workbench::MessageId::NetlistAdvisories),
-            Some(&advisories.to_string()),
-            Some(Problem::Warning),
+            &messages.text(title),
+            Some(&count.to_string()),
+            problem,
             |ui| {
                 for diagnostic in diagnostics
                     .iter()
                     .filter(|diagnostic| {
-                        diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
+                        diagnostic.is_current() && section_of(diagnostic.severity) == title
                     })
                     .take(DIAGNOSTIC_PREVIEW_LIMIT)
                 {
@@ -108,15 +93,12 @@ pub(in crate::workbench) fn code_workspace_inspector(
                         pressed = Some(press);
                     }
                 }
-                if advisories > DIAGNOSTIC_PREVIEW_LIMIT {
+                if count > DIAGNOSTIC_PREVIEW_LIMIT {
                     empty_diagnostic_row(
                         ui,
                         &messages.format(
-                            crate::workbench::MessageId::NetlistMoreInProblems,
-                            &[(
-                                "count",
-                                &(advisories - DIAGNOSTIC_PREVIEW_LIMIT).to_string(),
-                            )],
+                            MessageId::NetlistMoreInProblems,
+                            &[("count", &(count - DIAGNOSTIC_PREVIEW_LIMIT).to_string())],
                         ),
                     );
                 }
@@ -142,6 +124,20 @@ pub(in crate::workbench) fn code_workspace_inspector(
         }
     }
     pressed
+}
+
+/// The inspector section a finding of `severity` is listed in, named by
+/// its title: a note or a hint is not a warning.
+fn section_of(
+    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
+) -> MessageId {
+    use crate::workbench::documents::netlist_document::DiagnosticSeverity;
+
+    match severity {
+        DiagnosticSeverity::Error => MessageId::NetlistErrors,
+        DiagnosticSeverity::Warning => MessageId::NetlistAdvisories,
+        DiagnosticSeverity::Info | DiagnosticSeverity::Hint => MessageId::NetlistNotes,
+    }
 }
 
 /// One finding: its message, the file and line it is on, and the fix it

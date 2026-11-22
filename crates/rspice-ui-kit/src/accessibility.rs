@@ -24,13 +24,25 @@ pub fn grouped(count: usize) -> String {
 
 /// A count of findings as every place that states one says it: errors
 /// first, then warnings, both always named. An error stops the design
-/// working; every other current finding is a warning.
+/// working; a warning is a finding at the warning level, and a note is
+/// none of these, counted apart where it is counted at all.
 pub fn finding_counts(errors: usize, warnings: usize) -> String {
     format!(
         "{} \u{b7} {}",
         counted(errors, "error", "errors"),
         counted(warnings, "warning", "warnings")
     )
+}
+
+/// [`finding_counts`], then the notes when there are any: a note is not a
+/// warning, so it is counted apart ("0 errors · 5 warnings · 1 note").
+pub fn finding_counts_and_notes(errors: usize, warnings: usize, notes: usize) -> String {
+    let counts = finding_counts(errors, warnings);
+    if notes == 0 {
+        counts
+    } else {
+        format!("{counts} \u{b7} {}", counted(notes, "note", "notes"))
+    }
 }
 
 /// The bare pluralizing suffix for a count, for copy that inflects a regular
@@ -55,6 +67,14 @@ mod tests {
         assert_eq!(finding_counts(1, 1), "1 error \u{b7} 1 warning");
         assert_eq!(finding_counts(0, 2), "0 errors \u{b7} 2 warnings");
         assert_eq!(finding_counts(3, 0), "3 errors \u{b7} 0 warnings");
+        assert_eq!(
+            finding_counts_and_notes(0, 5, 1),
+            "0 errors \u{b7} 5 warnings \u{b7} 1 note"
+        );
+        assert_eq!(
+            finding_counts_and_notes(1, 0, 0),
+            "1 error \u{b7} 0 warnings"
+        );
     }
 
     #[test]

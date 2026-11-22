@@ -282,6 +282,11 @@ pub struct DiagnosticCounts {
 }
 
 impl DiagnosticCounts {
+    /// The advisories that are not warnings: notes and hints.
+    pub const fn notes(&self) -> usize {
+        self.advisories.saturating_sub(self.warnings)
+    }
+
     pub fn tally(&mut self, standing: Tally, waived: bool, level: DiagnosticLevel) {
         match (standing, waived) {
             (Tally::Stale, _) => self.stale += 1,

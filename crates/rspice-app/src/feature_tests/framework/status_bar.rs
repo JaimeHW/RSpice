@@ -229,7 +229,7 @@ fn findings_that_cannot_be_evaluated_are_not_called_stale() {
     assert_eq!(check_problem(counts), Some(Problem::Warning));
 }
 
-/// A note or a hint is counted, but it is not a warning and raises no
+/// A note or a hint is counted as a note, not a warning, and raises no
 /// warning mark; it used to, because every advisory did.
 #[test]
 fn only_a_warning_raises_the_warning_mark() {
@@ -239,7 +239,7 @@ fn only_a_warning_raises_the_warning_mark() {
     };
     assert_eq!(
         check_summary(notes).as_deref(),
-        Some("Problems · 0 errors · 2 warnings")
+        Some("Problems · 0 errors · 0 warnings · 2 notes")
     );
     assert_eq!(check_problem(notes), None);
 
@@ -247,6 +247,10 @@ fn only_a_warning_raises_the_warning_mark() {
         warnings: 1,
         ..notes
     };
+    assert_eq!(
+        check_summary(warned).as_deref(),
+        Some("Problems · 0 errors · 1 warning · 1 note")
+    );
     assert_eq!(check_problem(warned), Some(Problem::Warning));
 }
 

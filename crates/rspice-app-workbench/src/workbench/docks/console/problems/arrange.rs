@@ -52,7 +52,8 @@ pub enum Line {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct GroupCounts {
     pub(super) errors: usize,
-    pub(super) advisories: usize,
+    pub(super) warnings: usize,
+    pub(super) notes: usize,
     pub(super) stale: usize,
     pub(super) waived: usize,
 }
@@ -63,17 +64,19 @@ impl GroupCounts {
             (false, _) => self.stale += 1,
             (true, true) => self.waived += 1,
             (true, false) if facet.level.is_error() => self.errors += 1,
-            (true, false) => self.advisories += 1,
+            (true, false) if facet.level == DiagnosticLevel::Warning => self.warnings += 1,
+            (true, false) => self.notes += 1,
         }
     }
 
     /// The counts in the words a group header prints, worst first, naming only
     /// what the group actually holds.
     pub(super) fn summary(self) -> String {
-        let mut stated = Vec::with_capacity(4);
+        let mut stated = Vec::with_capacity(5);
         for (count, singular, plural) in [
             (self.errors, "error", "errors"),
-            (self.advisories, "advisory", "advisories"),
+            (self.warnings, "warning", "warnings"),
+            (self.notes, "note", "notes"),
             (self.stale, "stale", "stale"),
             (self.waived, "waived", "waived"),
         ] {
@@ -85,7 +88,7 @@ impl GroupCounts {
             }
         }
         // A group exists because a finding is in it, so at least one of the
-        // four counts above is non-zero.
+        // counts above is non-zero.
         stated.join(" · ")
     }
 }

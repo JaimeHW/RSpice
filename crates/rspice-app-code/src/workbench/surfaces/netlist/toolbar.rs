@@ -126,7 +126,8 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         .filter(|(_, problem)| toolbar_status_visible(phone, *problem));
     // Nothing is said when there are no warnings, and "0 warnings" is not
     // news: the count appears only once there is something in it, and where
-    // it fits beside the chip and the status.
+    // it fits beside the chip and the status. A note is not a warning, as
+    // the status bar counts it.
     let warnings = cx
         .state
         .netlist
@@ -135,7 +136,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         .filter(|diagnostic| {
             diagnostic.is_current()
                 && diagnostic.severity
-                    != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
+                    == crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning
         })
         .count()
         + cx.model

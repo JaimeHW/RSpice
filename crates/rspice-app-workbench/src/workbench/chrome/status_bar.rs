@@ -333,7 +333,11 @@ pub fn check_summary(counts: DiagnosticCounts) -> Option<String> {
     }
     let mut label = format!(
         "Problems · {}",
-        crate::ui::accessibility::finding_counts(counts.errors, counts.advisories)
+        crate::ui::accessibility::finding_counts_and_notes(
+            counts.errors,
+            counts.warnings,
+            counts.notes()
+        )
     );
     use std::fmt::Write as _;
     if counts.stale > 0 {
