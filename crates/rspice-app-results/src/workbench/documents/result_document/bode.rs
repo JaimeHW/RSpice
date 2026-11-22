@@ -280,7 +280,7 @@ pub(super) fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrum
 /// where the sweep reaches half the carrier.
 fn edge_jitter(
     density: Option<&RetainedTrace>,
-    summary: &crate::state::NoiseSummary,
+    summary: &rspice_results::noise::NoiseSummary,
 ) -> inspector::EdgeJitter {
     use rspice_results::phase_noise::{cycle_jitter, integrate_density};
     let samples = density.and_then(|density| {
