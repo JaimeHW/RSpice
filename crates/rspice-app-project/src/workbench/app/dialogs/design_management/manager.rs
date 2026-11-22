@@ -453,25 +453,14 @@ pub(super) fn annotation_manager_body(
     split_surface(ui, MAIN_SPLIT_LEFT_FRACTION, |left, right| {
         let policy = draft.annotation().policy().clone();
         let ranges = policy.definition().reserved_ranges.clone();
-        section_header(
-            left,
-            "Reference-designator ownership",
-            Some(if draft.annotation().journal().is_empty() {
-                "preview required"
-            } else {
-                "mapping current"
-            }),
-        );
+        section_header(left, "Reserved ranges", None);
         paint_table_header(
             left,
             &[0.24, 0.19, 0.23, 0.13, 0.21],
             &["Scope", "Prefix", "Reserved range", "Used", "Collision"],
         );
         if ranges.is_empty() {
-            empty_table_row(
-                left,
-                "No reserved ranges. Project allocation is policy-owned.",
-            );
+            empty_table_row(left, "No reserved ranges: every prefix numbers from 1.");
         } else {
             for range in &ranges {
                 let scope = match &range.scope {
@@ -493,7 +482,7 @@ pub(super) fn annotation_manager_body(
             }
         }
         toolbar(left, |ui| {
-            if Button::new("Preview renumbering\u{2026}")
+            if Button::new("Renumber\u{2026}")
                 .enabled(write_allowed)
                 .show(ui)
                 .clicked()

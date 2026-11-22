@@ -93,7 +93,7 @@ impl DesignManagementPage {
             Self::NewVariant => "Create assembly variant",
             Self::CompareVariants => "Compare assembly variants",
             Self::VariantMatrix => "Variant substitution matrix",
-            Self::RenumberPreview => "Preview reference-designator renumbering",
+            Self::RenumberPreview => "Renumber reference designators",
             Self::AnnotationPolicy => "Edit annotation policy",
             Self::HierarchyAudit => "Audit hierarchy and view resolution",
         }
@@ -103,11 +103,11 @@ impl DesignManagementPage {
         match self {
             Self::Manager => MANAGER_PRIMARY,
             Self::NewSheet => "Create sheet",
-            Self::MoveSelection => "Create reviewed move",
+            Self::MoveSelection => "Move",
             Self::NewVariant => "Create variant",
             Self::CompareVariants => "Open comparison",
             Self::VariantMatrix => "Apply reviewed substitutions",
-            Self::RenumberPreview => "Create renumber transaction",
+            Self::RenumberPreview => "Renumber",
             Self::AnnotationPolicy => "Save policy",
             Self::HierarchyAudit => "Run audit",
         }
