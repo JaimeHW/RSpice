@@ -48,6 +48,7 @@ const SHEET_PROPERTIES: &[ShortcutBinding] =
 // alternates are Ctrl+Alt+Page Up/Down, so neither chord is shadowed.
 const PREVIOUS_SHEET: &[ShortcutBinding] = &[primary(Key::PageUp, false, false, false, "Page Up")];
 const NEXT_SHEET: &[ShortcutBinding] = &[primary(Key::PageDown, false, false, false, "Page Down")];
+const NEW_SHEET: &[ShortcutBinding] = &[primary(Key::N, true, true, false, "Ctrl+Alt+N")];
 
 /// What every sheet command that reaches the project declares: it is listed
 /// in the palette, needs an open project and waits for a project operation.
@@ -142,7 +143,7 @@ impl SheetsCommand {
                 "Design",
                 DRAWING_EDIT,
                 ShortcutContext::EngineeringCanvas,
-                NONE,
+                NEW_SHEET,
             ),
             Self::DeleteSheet => (
                 "Delete active sheet",

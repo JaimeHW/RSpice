@@ -608,6 +608,28 @@ fn shift_t_resolves_schematic_text_without_breaking_plain_bus_tap() {
     assert_eq!(resolve(shift, models_symbol(true)).command, None);
 }
 
+/// Ctrl+Alt+N on the schematic canvas adds a sheet.
+#[test]
+fn ctrl_alt_n_on_the_schematic_canvas_adds_a_sheet() {
+    use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+
+    let primary_alt = Modifiers {
+        alt: true,
+        ..primary()
+    };
+    let resolved = ShortcutResolverState::default().resolve(
+        &snapshot(&[event(Key::N, primary_alt, false)], false),
+        &ShortcutPreferences::default(),
+        &CommandRegistry,
+        CommandPlatform::Desktop,
+        design(true),
+        Duration::ZERO,
+        |_| true,
+    );
+
+    assert_eq!(resolved.command, Some(SheetsCommand::NewSheet.key()));
+}
+
 /// One command owns each key in the symbol canvas: G is the grid there as
 /// in the schematic, Shift+L draws a polygon, and Ctrl+R and Ctrl+M turn and
 /// flip the selection as the Arrange menu does.

@@ -120,7 +120,7 @@ fn every_sheet_command_is_a_registered_canvas_command() {
 }
 
 #[test]
-fn paging_chords_have_exactly_one_owner_on_every_platform() {
+fn sheet_chords_have_exactly_one_owner_on_every_platform() {
     let next = shortcut_bindings(SheetsCommand::NextSheet);
     let previous = shortcut_bindings(SheetsCommand::PreviousSheet);
     assert_eq!(next.len(), 1);
@@ -157,7 +157,13 @@ fn paging_chords_have_exactly_one_owner_on_every_platform() {
         );
     }
 
-    assert!(shortcut_bindings(SheetsCommand::NewSheet).is_empty());
+    let new_sheet = shortcut_bindings(SheetsCommand::NewSheet);
+    assert_eq!(new_sheet.len(), 1);
+    assert_eq!(new_sheet[0].chord.label, "Ctrl+Alt+N");
+    assert_eq!(
+        chord_owners(SheetsCommand::NewSheet),
+        vec![SheetsCommand::NewSheet.key()]
+    );
     assert!(shortcut_bindings(SheetsCommand::DeleteSheet).is_empty());
 }
 

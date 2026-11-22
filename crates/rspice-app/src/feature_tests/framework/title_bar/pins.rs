@@ -451,7 +451,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "Sheet >",
             "  Previous sheet | previous-sheet | PageUp | off: the active cell view has a single sheet",
             "  Next sheet | next-sheet | PageDown | off: the active cell view has a single sheet",
-            "  New sheet | new-sheet |  | on",
+            "  New sheet | new-sheet | Ctrl+Alt+N | on",
             "  Delete… | delete-sheet |  | off: the active cell view has a single sheet",
             "  ---",
             "  Sheet properties | page-setup | Ctrl+Alt+Shift+P | on",
