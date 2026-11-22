@@ -13,6 +13,7 @@ pub use body::{
     PANEL_HEADER_GAP, PANEL_INSET, PANEL_ROW_H, PANEL_SECTION_GAP, panel_bleed, panel_body,
     panel_inset, property_row_height, section_block_gap,
 };
+pub(crate) use body::{end_flush_band, flush_under_header};
 pub use captioned::{
     PropertyRowCaption, property_row_captioned, property_row_flagged, property_row_input_captioned,
 };

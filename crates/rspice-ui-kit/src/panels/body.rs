@@ -11,7 +11,9 @@
 //! The rhythm is owned the same way. Inside a body a section header leaves
 //! [`PANEL_SECTION_GAP`] above itself unless it opens the body, and
 //! [`PANEL_HEADER_GAP`] below; rows are [`PANEL_ROW_H`] tall and stack with no
-//! spacing between them; the body closes with one more section gap.
+//! spacing between them; the body closes with one more section gap. A band
+//! that rules its own edges, a table, sits flush: right under a header it
+//! takes the header's gap back, and a header right under it leaves none.
 
 use egui::{Rect, Ui, UiBuilder, UiStackInfo, Vec2};
 
@@ -26,6 +28,9 @@ pub const PANEL_HEADER_GAP: f32 = 4.0;
 /// Space between one section's last row and the next section's header, and
 /// between two blocks of one section's body.
 pub const PANEL_SECTION_GAP: f32 = 8.0;
+
+/// The width of a rule: a header's, and a table's between its rows.
+const HAIRLINE: f32 = 1.0;
 
 /// A panel row is this much shorter than a standalone control at the same
 /// density: its field gives up the padding a free-standing control keeps.
@@ -93,7 +98,10 @@ pub fn panel_body<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
                 ui.add_space(PANEL_SECTION_GAP);
             }
             let body = ui.stack().id;
-            ui.data_mut(|data| data.remove_temp::<f32>(header_bottom_id(body)));
+            ui.data_mut(|data| {
+                data.remove_temp::<f32>(header_bottom_id(body));
+                data.remove_temp::<f32>(flush_bottom_id(body));
+            });
             inner
         },
     )
@@ -155,14 +163,49 @@ fn header_bottom_id(body: egui::Id) -> egui::Id {
     body.with("rspice.panel-body.header-bottom")
 }
 
+/// Where the last flush band in the body around `ui` ended.
+fn flush_bottom_id(body: egui::Id) -> egui::Id {
+    body.with("rspice.panel-body.flush-bottom")
+}
+
 /// Space a section header leaves above itself: one section gap, unless it is
-/// the first thing in its body. Outside a body a header leaves none; the
-/// surface it sits on owns that space.
+/// the first thing in its body or stands right under a flush band, whose
+/// closing rule its own rule then lies on, so the two read as one hairline.
+/// Outside a body a header leaves none; the surface it sits on owns that
+/// space.
 pub(super) fn before_header(ui: &mut Ui) {
-    if let Some((_, inner, _)) = enclosing_body(ui)
-        && ui.cursor().top() > inner.top() + 0.5
-    {
-        ui.add_space(PANEL_SECTION_GAP);
+    if let Some((_, inner, body)) = enclosing_body(ui) {
+        let top = ui.cursor().top();
+        let flush = ui
+            .data(|data| data.get_temp::<f32>(flush_bottom_id(body)))
+            .is_some_and(|bottom| (top - bottom).abs() < 0.5);
+        if flush {
+            ui.add_space(-HAIRLINE);
+        } else if top > inner.top() + 0.5 {
+            ui.add_space(PANEL_SECTION_GAP);
+        }
+    }
+}
+
+/// How far a band that rules its own edges reaches up to sit flush under the
+/// section header above it: the header's gap when nothing stands between the
+/// header and the band, and nothing anywhere else.
+pub(crate) fn flush_under_header(ui: &Ui) -> f32 {
+    let header_bottom = enclosing_body(ui)
+        .and_then(|(_, _, body)| ui.data(|data| data.get_temp::<f32>(header_bottom_id(body))));
+    if header_bottom.is_some_and(|bottom| (ui.cursor().top() - bottom).abs() < 0.5) {
+        PANEL_HEADER_GAP
+    } else {
+        0.0
+    }
+}
+
+/// Marks the cursor as where a band that rules its own edges ends, so a
+/// section header right under it sits on its edge.
+pub(crate) fn end_flush_band(ui: &mut Ui) {
+    if let Some((_, _, body)) = enclosing_body(ui) {
+        let bottom = ui.cursor().top();
+        ui.data_mut(|data| data.insert_temp(flush_bottom_id(body), bottom));
     }
 }
 

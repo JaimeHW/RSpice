@@ -69,6 +69,9 @@ use state::{Line, Step, TYPE_AHEAD_PAUSE, TreeStep, arrange, step, tree_step, ty
 pub const TABLE_HEAD_H: f32 = 24.0;
 /// Height of one table row at the compact density under a fine pointer.
 pub const TABLE_ROW_H: f32 = 24.0;
+/// The fewest whole rows a table in a panel body shows when it scrolls: the
+/// least that reads as a list to scroll rather than a row cut short.
+const LEAST_SCROLLED_ROWS: f32 = 3.0;
 /// Where the first column's words start and the last column's end: the panel
 /// inset, so a table's text lines up with the toolbar title over it.
 pub const TABLE_EDGE_INSET: f32 = crate::panels::PANEL_INSET;
@@ -552,6 +555,10 @@ pub struct DataTable<'a> {
     selected: Option<usize>,
     clickable: bool,
     max_height: f32,
+    /// Whether a body too short for its rows shows whole rows only, its
+    /// last one ending on the table's edge: a table in a panel body, where
+    /// the next section's rule meets that edge.
+    whole_rows: bool,
     editor: Option<CellEditor<'a>>,
     state: Option<&'a mut TableState>,
     keys: Option<&'a [RowKey]>,
@@ -826,6 +833,7 @@ impl<'a> DataTable<'a> {
             selected: None,
             clickable: false,
             max_height: f32::INFINITY,
+            whole_rows: false,
             editor: None,
             state: None,
             keys: None,
@@ -977,16 +985,25 @@ impl<'a> DataTable<'a> {
         // A table on a panel body's inset runs to the panel's edges, as the
         // body's bands do: its edge inset is the panel's, so its first and
         // last columns' words stand where the rows around it stand theirs.
+        // It rules its own edges, so it sits flush under the section header
+        // above it and the next header sits flush under it.
         let given = ui.available_rect_before_wrap();
         let bled = crate::panels::panel_bleed(ui, given);
         if bled != given {
-            let mut edge = ui.new_child(egui::UiBuilder::new().max_rect(bled).layout(*ui.layout()));
+            let top = given.top() - crate::panels::flush_under_header(ui);
+            let mut edge = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(bled.with_min_y(top))
+                    .layout(*ui.layout()),
+            );
+            self.whole_rows = true;
             let response = self.show(&mut edge, row_at);
             let height = edge.min_rect().height();
             ui.advance_cursor_after_rect(Rect::from_min_size(
-                given.min,
+                egui::pos2(given.left(), top),
                 vec2(given.width(), height),
             ));
+            crate::panels::end_flush_band(ui);
             return response;
         }
         let t = Tokens::get(ui.ctx());
@@ -1157,8 +1174,23 @@ impl<'a> DataTable<'a> {
 
         // Where the columns go.
         let bands_h = band_h * self.bands.len() as f32;
-        let body_max = (self.max_height - bands_h - head_h).max(row_h);
+        let mut body_max = (self.max_height - bands_h - head_h).max(row_h);
         let lines_h = row_h * lines.len() as f32;
+        // A table in a panel body is as tall as its rows when they fit in
+        // what the page gave it and the panel leaves it; when they do not,
+        // it shows whole rows, at least the fewest a reader scrolls, so its
+        // last row ends on its edge, where the next section's rule meets it.
+        let whole_rows = self.whole_rows.then(|| {
+            let room = (ui.available_height() - bands_h - head_h)
+                .max(LEAST_SCROLLED_ROWS * row_h)
+                .min(body_max);
+            if lines_h > room + 0.5 {
+                body_max = (room / row_h).floor().max(1.0) * row_h;
+                body_max
+            } else {
+                lines_h
+            }
+        });
         // A floating bar rides the last column's edge inset, which holds no
         // words, so the columns keep their width whether it shows or not.
         let scroll_style = ui.spacing().scroll;
@@ -1364,6 +1396,9 @@ impl<'a> DataTable<'a> {
             .id_salt((self.id, "rows"))
             .max_height(body_max)
             .auto_shrink([false, true]);
+        if let Some(shown) = whole_rows {
+            scroll = scroll.min_scrolled_height(shown);
+        }
         if !scrolls_x {
             scroll = scroll.horizontal_scroll_offset(0.0);
         } else if let Some(offset) = scroll_x {
