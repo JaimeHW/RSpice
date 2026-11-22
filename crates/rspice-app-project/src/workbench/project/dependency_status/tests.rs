@@ -1,5 +1,5 @@
 //! The rows every place on the Dependencies page reads: one order and one
-//! filter over both catalogues.
+//! filter over everything the project reads.
 
 use rspice_app_state::workbench::workspace::restore_model_library_manager;
 
@@ -20,6 +20,9 @@ fn a_row_is_found_by_anything_it_shows() {
         library: DependencyLibrary::model("models_tt"),
         version: "2.1".to_owned(),
         source: "/models/tt.lib".to_owned(),
+        location: "../models/tt.lib".to_owned(),
+        resolved: Some("/models/tt.lib".to_owned()),
+        access: "Read-only",
         digest: "12ab".to_owned(),
         status: LibraryStatus::neutral("Found", None),
     };
@@ -28,6 +31,7 @@ fn a_row_is_found_by_anything_it_shows() {
         "model library",
         "2.1",
         "tt.lib",
+        "../models",
         "12ab",
         "found",
     ] {
@@ -92,21 +96,72 @@ fn a_path_is_shown_without_the_prefix_canonicalising_adds() {
     }
 }
 
-/// A selection naming no library of the project is replaced by the first
-/// row shown; one naming a library is kept, even under a filter.
+/// A selection naming nothing the project reads is dropped, so the
+/// inspector states the project; one naming a dependency is kept.
 #[test]
-fn a_selection_is_kept_only_while_it_names_a_library() {
+fn a_selection_is_kept_only_while_it_names_a_dependency() {
     let mut model = model();
     model.library_manager.add_library(Library::new("cells"));
     let rows = build_rows(&model);
-    let visible: Vec<usize> = (0..rows.len()).collect();
 
     let mut selection = Some(DependencyLibrary::design("gone"));
-    settle_selection(&rows, &visible, &mut selection);
-    assert_eq!(selection, Some(rows[0].library.clone()));
+    settle_selection(&rows, &mut selection);
+    assert_eq!(selection, None);
 
     let kept = DependencyLibrary::design("cells");
     let mut selection = Some(kept.clone());
-    settle_selection(&rows, &[], &mut selection);
+    settle_selection(&rows, &mut selection);
     assert_eq!(selection, Some(kept));
+}
+
+/// An include search path is listed by the folder it names, the path the
+/// project stores telling two of one name apart, in the order the folders
+/// are searched rather than by name; one no folder answers to is not found.
+#[test]
+fn include_search_paths_are_rows_in_search_order() {
+    let folder = std::env::temp_dir().join(format!("rspice-include-rows-{}", std::process::id()));
+    std::fs::create_dir_all(folder.join("zeta")).expect("the folder is made");
+    std::fs::create_dir_all(folder.join("alpha")).expect("the folder is made");
+    let mut model = model();
+    model
+        .workspace
+        .content
+        .project
+        .set_include_search_paths(vec![
+            folder.join("zeta"),
+            folder.join("alpha"),
+            folder.join("gone"),
+        ])
+        .expect("three folders are a chain");
+    let rows = build_rows(&model);
+    let paths: Vec<_> = rows
+        .iter()
+        .filter(|row| row.library.kind == DependencyKind::IncludePath)
+        .map(|row| (row.library.shown_name(), row.status.label))
+        .collect();
+    assert_eq!(
+        paths,
+        [("zeta", "Found"), ("alpha", "Found"), ("gone", "Not found")]
+    );
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// A path is read from the project folder when it is in it or beside it,
+/// and whole when it is farther away.
+#[test]
+fn a_location_is_read_from_the_project_folder_when_it_is_near() {
+    let project = std::path::Path::new("/work/chip/design");
+    for (path, shown) in [
+        ("/work/chip/design/models/tt.lib", "models/tt.lib"),
+        ("/work/chip/design", "."),
+        ("/work/chip/libraries/vendor", "../libraries/vendor"),
+        ("/opt/pdk/demo180/models.lib", "/opt/pdk/demo180/models.lib"),
+    ] {
+        let found = project_relative(std::path::Path::new(path), Some(project));
+        assert_eq!(
+            found.replace(std::path::MAIN_SEPARATOR, "/"),
+            shown,
+            "{path}"
+        );
+    }
 }

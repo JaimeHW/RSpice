@@ -366,11 +366,20 @@ impl TechnologyAttachmentDialogState {
     }
 }
 
-/// The Dependencies page: its ledger, and the model library it is reading.
+/// The Dependencies page: its bar's filter and kind, its table, and the
+/// model library it is reading.
 #[derive(Clone, Default)]
 pub struct DependencyPageState {
-    /// The ledger's sort, selection and sideways scroll.
+    /// What the bar's filter holds: a row is listed when anything it shows
+    /// contains it.
+    pub filter: String,
+    /// The one kind the bar lists, or every kind.
+    pub kind: Option<crate::workbench::project::DependencyKind>,
+    /// The table's sort, selection and sideways scroll.
     pub(crate) table: crate::ui::widgets::table::TableState,
+    /// The table had the keyboard last frame, so Alt+Up and Alt+Down move
+    /// the selected include search path.
+    pub(crate) focused: bool,
     /// A model library's files being read again, off the frame.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) read: Option<ModelLibraryRead>,
@@ -380,6 +389,8 @@ impl std::fmt::Debug for DependencyPageState {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("DependencyPageState")
+            .field("filter", &self.filter)
+            .field("kind", &self.kind)
             .field("table", &self.table)
             .field("reading", &self.reading())
             .finish()

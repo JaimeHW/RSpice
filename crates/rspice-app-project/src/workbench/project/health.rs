@@ -20,9 +20,7 @@ use crate::state::SimulationRunLifecycle;
 use crate::ui::accessibility::{counted, finding_counts_and_notes};
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::{DesignCheckStatus, Model, PlatformState, SlotFacts};
-use crate::workbench::project::dependency_status::{
-    dependency_rows, shown_path, technology_status,
-};
+use crate::workbench::project::dependency_status::{DependencyKind, dependency_rows, shown_path};
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
 
@@ -374,26 +372,32 @@ pub fn model_sources(ctx: &egui::Context, model: &Model) -> SubjectStatus {
     )
 }
 
-/// The libraries the project depends on and its technology, each as the
-/// Dependencies page states it.
+/// What the project reads, each as the Dependencies page states it: its
+/// libraries counted, and whatever of it needs attention named.
 pub fn dependencies(ctx: &egui::Context, model: &Model) -> SubjectStatus {
     let rows = dependency_rows(ctx, model);
-    let technology = technology_status(model);
-    let mut flagged = rows
+    let flagged = rows
         .iter()
         .filter(|row| row.status.mark != Tone::Neutral)
-        .map(|row| (row.library.name.as_str(), &row.status))
+        .map(|row| {
+            let name = match row.library.kind {
+                DependencyKind::Technology => "Technology",
+                _ => row.library.shown_name(),
+            };
+            (name, &row.status)
+        })
         .collect::<Vec<_>>();
-    if technology.mark != Tone::Neutral {
-        flagged.push(("Technology", &technology));
-    }
+    let libraries = rows
+        .iter()
+        .filter(|row| row.library.kind.is_library())
+        .count();
     let tone = flagged
         .iter()
         .map(|(_, status)| status.mark)
         .fold(Tone::Neutral, worse);
     match flagged.as_slice() {
         [] => SubjectStatus::neutral(
-            counted(rows.len(), "library", "libraries"),
+            counted(libraries, "library", "libraries"),
             model
                 .workspace
                 .content

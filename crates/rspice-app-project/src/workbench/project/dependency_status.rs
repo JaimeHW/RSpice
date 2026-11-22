@@ -1,18 +1,21 @@
-//! What each library the project depends on stands at: one status per
-//! library, read by every place that names one.
+//! Everything the project reads, and what each stands at: one status per
+//! dependency, read by every place that names one.
 //!
 //! A design library is read from the project file, so it is in the project
 //! for as long as the catalogue holds it. A model library is built in, or it
 //! executes from source files whose bytes the project pinned when they were
 //! attached; whether those still hold is the retained drift report's answer,
-//! which is decided on events and never on a frame. Nothing here reads the
-//! disk or hashes a byte, so a status is as cheap to ask for as the report
-//! and the catalogues are to read.
+//! which is decided on events and never on a frame. The technology states
+//! its last proven verdict. None of these reads the disk or hashes a byte.
+//! The project's include search paths, its decks and the files their include
+//! lines name are files of the host: they are read when the project changes
+//! or the reader asks to read them again, never on a frame.
 //!
-//! The rail, the table and the inspector beside the Dependencies page read
-//! the rows built here, once per change of what a status reads, so the three
-//! list one set of libraries in one order under one filter and say the same
-//! thing about each.
+//! The table and the inspector beside the Dependencies page read the rows
+//! built here, once per change of what a status reads, so the two list one
+//! set of dependencies in one order and say the same thing about each.
+
+mod files;
 
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -21,40 +24,62 @@ use std::sync::Arc;
 
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 use crate::workbench::app_state::Model;
-use crate::workbench::app_state::model::ModelSourceDriftScope;
+use crate::workbench::app_state::model::{LibraryMode, ModelSourceDriftScope};
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
+
+pub use files::reread_files;
 
 /// Painted in a column the library on that row has no value for.
 pub(crate) const UNSET: &str = "\u{2014}";
 
-/// Which catalogue a library is in. A design library and a model library may
-/// share a name, so a library is named by both.
+/// What a dependency is, in the order the table lists the kinds. A design
+/// library and a model library may share a name, so a dependency is named by
+/// both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DependencyKind {
+    /// The process the project simulates with.
+    Technology,
     Design,
     Model,
+    /// A folder the project's include lines are searched in.
+    IncludePath,
+    /// A SPICE deck the project is made of.
+    Deck,
+    /// A file a deck's include line names.
+    Include,
 }
 
 impl DependencyKind {
+    pub const ALL: [Self; 6] = [
+        Self::Technology,
+        Self::Design,
+        Self::Model,
+        Self::IncludePath,
+        Self::Deck,
+        Self::Include,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Technology => "Technology",
             Self::Design => "Design library",
             Self::Model => "Model library",
+            Self::IncludePath => "Include path",
+            Self::Deck => "Deck",
+            Self::Include => "Include",
         }
     }
 
-    /// The word for the catalogue under a "Type" heading, which says the
-    /// rest.
-    pub const fn kind_word(self) -> &'static str {
-        match self {
-            Self::Design => "Design",
-            Self::Model => "Model",
-        }
+    /// A design or a model library: what the catalogues hold.
+    pub const fn is_library(self) -> bool {
+        matches!(self, Self::Design | Self::Model)
     }
 }
 
-/// One library the project depends on, by catalogue and name.
+/// One dependency of the project, by kind and name. An include search path
+/// is named by its path as the project stores it, an include by its path as
+/// the deck writes it, and the technology by its package.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DependencyLibrary {
     pub kind: DependencyKind,
@@ -75,6 +100,32 @@ impl DependencyLibrary {
             name: name.into(),
         }
     }
+
+    pub fn include_path(path: impl Into<String>) -> Self {
+        Self {
+            kind: DependencyKind::IncludePath,
+            name: path.into(),
+        }
+    }
+
+    /// What the table's Name column says: a folder or a file by its own
+    /// name, the path that tells two of one name apart under Location.
+    pub fn shown_name(&self) -> &str {
+        match self.kind {
+            DependencyKind::IncludePath | DependencyKind::Include => {
+                last_component(&self.name).unwrap_or(&self.name)
+            }
+            _ => &self.name,
+        }
+    }
+}
+
+/// The last named part of a path as written, with either separator.
+fn last_component(path: &str) -> Option<&str> {
+    path.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty() && *name != "." && *name != "..")
 }
 
 /// Where one library stands: the mark it earns, the word for it, and what
@@ -114,6 +165,12 @@ pub fn library_status(model: &Model, library: &DependencyLibrary) -> LibraryStat
             .model_library_manager
             .get_library(&library.name)
             .map_or_else(not_in_project, |found| model_library_status(model, found)),
+        DependencyKind::Technology => technology_status(model),
+        // A file's status is read from the disk with its row; by name alone
+        // nothing can be said of it.
+        DependencyKind::IncludePath | DependencyKind::Deck | DependencyKind::Include => {
+            not_in_project()
+        }
     }
 }
 
@@ -435,6 +492,9 @@ fn file_name(path: &Path) -> String {
 /// a path.
 pub const PROJECT_FILE_SOURCE: &str = "Project file";
 
+/// Where a library that ships with RSpice is.
+pub const BUILT_IN_SOURCE: &str = "Built in";
+
 /// A path as the reader knows it. Canonicalising a Windows drive path adds
 /// the verbatim `\\?\` prefix, which is no part of the name they gave it.
 pub(crate) fn shown_path(path: &Path) -> String {
@@ -452,12 +512,41 @@ pub(crate) fn shown_path(path: &Path) -> String {
     text
 }
 
+/// `path` as it is found from the project: from the project folder when it
+/// is inside it, or inside the folder that holds it, where a project keeps
+/// the libraries and models beside it; else the whole path, since a climb
+/// out of the project's neighbourhood names nothing the reader knows it by.
+pub(crate) fn project_relative(path: &Path, project_folder: Option<&Path>) -> String {
+    let whole = shown_path(path);
+    let Some(folder) = project_folder.map(|folder| shown_path(folder)) else {
+        return whole;
+    };
+    let path = Path::new(&whole);
+    let folder = Path::new(&folder);
+    if let Ok(inside) = path.strip_prefix(folder) {
+        return if inside.as_os_str().is_empty() {
+            ".".to_owned()
+        } else {
+            inside.display().to_string()
+        };
+    }
+    folder
+        .parent()
+        .filter(|parent| parent.parent().is_some())
+        .and_then(|parent| path.strip_prefix(parent).ok())
+        .filter(|beside| !beside.as_os_str().is_empty())
+        .map_or(whole.clone(), |beside| {
+            Path::new("..").join(beside).display().to_string()
+        })
+}
+
 fn model_files(count: usize) -> String {
     format!("{count} model file{}", if count == 1 { "" } else { "s" })
 }
 
-/// What every status reads: the two catalogues and the drift report. Each is
-/// read by its stamp or by what it found, never by walking a catalogue, so
+/// What every status reads: the two catalogues, the drift report, the
+/// technology's status and the files the project reads. Each is read by its
+/// stamp or by what it found, never by walking a catalogue or the disk, so
 /// asking for the key costs an idle frame nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependencyStatusKey {
@@ -466,9 +555,11 @@ pub struct DependencyStatusKey {
     design: [u64; 3],
     models: [u64; 3],
     drift: (Option<ModelSourceDriftScope>, u64),
+    technology: u64,
+    files: files::FilesKey,
 }
 
-pub fn dependency_status_key(model: &Model) -> DependencyStatusKey {
+pub fn dependency_status_key(ctx: &egui::Context, model: &Model) -> DependencyStatusKey {
     // The report holds only the libraries that drifted, so hashing what it
     // found is as cheap as the report is short, and catches a rescan that
     // found something new under the same scope.
@@ -481,6 +572,16 @@ pub fn dependency_status_key(model: &Model) -> DependencyStatusKey {
             finding.on_disk.hash(&mut findings);
         }
     }
+    let mut technology = DefaultHasher::new();
+    let binding = model.workspace.content.project.technology_binding();
+    binding
+        .map(|binding| binding.display_label())
+        .hash(&mut technology);
+    binding
+        .map(|binding| binding.root_source())
+        .hash(&mut technology);
+    let status = technology_status(model);
+    (status.mark as u8, status.label, status.detail).hash(&mut technology);
     DependencyStatusKey {
         design: [
             model.library_manager.content_stamp(),
@@ -489,16 +590,32 @@ pub fn dependency_status_key(model: &Model) -> DependencyStatusKey {
         ],
         models: model.model_library_manager.content_stamp(),
         drift: (model.source_drift.scanned, findings.finish()),
+        technology: technology.finish(),
+        files: files::files_key(ctx, model),
     }
 }
 
-/// One row of the libraries the project depends on, as the rail, the table
-/// and the inspector show it.
+/// One row of what the project depends on, as the table and the inspector
+/// show it.
 #[derive(Debug, Clone)]
 pub struct DependencyRow {
     pub library: DependencyLibrary,
+    /// The version it states, or [`UNSET`].
     pub version: String,
+    /// Where it is read from, as the project stores it: a path as written,
+    /// or words for a library with none ([`PROJECT_FILE_SOURCE`],
+    /// [`BUILT_IN_SOURCE`]).
     pub source: String,
+    /// Where it is, as the Location column states it: from the project
+    /// folder when that is near, as written for a path the project stores.
+    pub location: String,
+    /// The whole path it resolves to on this computer, for the hover over
+    /// its location and the inspector's Resolves to; `None` for what is not
+    /// a file or folder of the host.
+    pub resolved: Option<String>,
+    /// Editable or Read-only, or [`UNSET`] for what has no access of its
+    /// own to set.
+    pub access: &'static str,
     pub digest: String,
     pub status: LibraryStatus,
 }
@@ -513,6 +630,7 @@ impl DependencyRow {
                 self.library.kind.label(),
                 self.version.as_str(),
                 self.source.as_str(),
+                self.location.as_str(),
                 self.digest.as_str(),
                 self.status.label,
             ]
@@ -521,35 +639,37 @@ impl DependencyRow {
     }
 }
 
-/// Every library the project depends on, design libraries first, each kind
-/// by name without regard to case. Built when a status input changes, so an
-/// idle frame sorts nothing.
+/// Everything the project depends on, by kind in [`DependencyKind`]'s order,
+/// each kind by name without regard to case, except the include search
+/// paths, which keep the order they are searched in. Built when a status
+/// input changes, so an idle frame sorts nothing.
 pub fn dependency_rows(ctx: &egui::Context, model: &Model) -> Arc<[DependencyRow]> {
     derived(
         ctx,
         "dependencies.rows",
-        dependency_status_key(model),
+        dependency_status_key(ctx, model),
         || build_rows(model).into(),
     )
 }
 
-/// The rows `filter` lets through, by index into [`dependency_rows`], chosen
-/// when the filter or the rows change. The rail and the table both read
-/// this, so they list the same libraries.
+/// The rows `filter` and `kind` let through, by index into
+/// [`dependency_rows`], chosen when the filter, the kind or the rows change.
 pub fn visible_dependency_rows(
     ctx: &egui::Context,
     model: &Model,
     filter: &str,
+    kind: Option<DependencyKind>,
 ) -> (Arc<[DependencyRow]>, Arc<[usize]>) {
     let rows = dependency_rows(ctx, model);
     let filter = filter.trim().to_lowercase();
     let visible = derived(
         ctx,
         "dependencies.visible",
-        (dependency_status_key(model), filter.clone()),
+        (dependency_status_key(ctx, model), filter.clone(), kind),
         || {
             rows.iter()
                 .enumerate()
+                .filter(|(_, row)| kind.is_none_or(|kind| row.library.kind == kind))
                 .filter(|(_, row)| row.matches(&filter))
                 .map(|(index, _)| index)
                 .collect::<Arc<[usize]>>()
@@ -559,6 +679,8 @@ pub fn visible_dependency_rows(
 }
 
 fn build_rows(model: &Model) -> Vec<DependencyRow> {
+    let project_folder = model.workspace.content.project.data_root();
+    let technology = technology_row(model, project_folder);
     let design = model
         .library_manager
         .catalog()
@@ -566,20 +688,28 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
         .into_iter()
         .map(|library| {
             let key = DependencyLibrary::design(&library.name);
+            let source = model.library_manager.reference(&library.name).map_or_else(
+                || PROJECT_FILE_SOURCE.to_owned(),
+                |reference| {
+                    reference
+                        .path
+                        .shown(rspice_design::library::folder::HostPlatform::current())
+                },
+            );
             DependencyRow {
                 status: library_status(model, &key),
                 library: key,
                 // A design library has no version; the technology it is
                 // drawn for is the inspector's to state.
                 version: UNSET.to_owned(),
-                source: model.library_manager.reference(&library.name).map_or_else(
-                    || PROJECT_FILE_SOURCE.to_owned(),
-                    |reference| {
-                        reference
-                            .path
-                            .shown(rspice_design::library::folder::HostPlatform::current())
-                    },
-                ),
+                location: source.clone(),
+                source,
+                resolved: model.library_folder(&library.name).map(shown_path),
+                access: if library.read_only {
+                    LibraryMode::ReadOnly.label()
+                } else {
+                    LibraryMode::Editable.label()
+                },
                 digest: UNSET.to_owned(),
             }
         });
@@ -589,14 +719,34 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
         .into_iter()
         .map(|library| {
             let key = DependencyLibrary::model(&library.name);
+            let built_in = !library.source_authority.has_execution_source();
             DependencyRow {
                 status: library_status(model, &key),
                 library: key,
                 version: nonempty_or_unset(&library.version),
-                source: library
-                    .root_path
-                    .as_deref()
-                    .map_or_else(|| UNSET.to_owned(), shown_path),
+                source: library.root_path.as_deref().map_or_else(
+                    || {
+                        if built_in {
+                            BUILT_IN_SOURCE.to_owned()
+                        } else {
+                            UNSET.to_owned()
+                        }
+                    },
+                    shown_path,
+                ),
+                location: library.root_path.as_deref().map_or_else(
+                    || {
+                        if built_in {
+                            BUILT_IN_SOURCE.to_owned()
+                        } else {
+                            UNSET.to_owned()
+                        }
+                    },
+                    |root| project_relative(root, project_folder),
+                ),
+                resolved: library.root_path.as_deref().map(shown_path),
+                // RSpice reads a model file and never writes one.
+                access: LibraryMode::ReadOnly.label(),
                 digest: library
                     .source_closure
                     .iter()
@@ -608,8 +758,8 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
                     ),
             }
         });
-    let mut rows: Vec<_> = design.chain(models).collect();
-    rows.sort_by(|left, right| {
+    let mut libraries: Vec<_> = design.chain(models).collect();
+    libraries.sort_by(|left, right| {
         left.library
             .kind
             .cmp(&right.library.kind)
@@ -621,7 +771,61 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
             })
             .then_with(|| left.library.name.cmp(&right.library.name))
     });
-    rows
+    technology
+        .into_iter()
+        .chain(libraries)
+        .chain(files::file_rows(model))
+        .collect()
+}
+
+/// The technology's row: the package it is attached from, the main model
+/// file its runs read, and its last proven status. A project with none has
+/// no row, unless its setup needs one, when the row is what says so.
+fn technology_row(model: &Model, project_folder: Option<&Path>) -> Option<DependencyRow> {
+    let status = technology_status(model);
+    let Some(binding) = model.workspace.content.project.technology_binding() else {
+        return status.mark.problem().map(|_| DependencyRow {
+            library: DependencyLibrary {
+                kind: DependencyKind::Technology,
+                name: String::new(),
+            },
+            version: UNSET.to_owned(),
+            source: UNSET.to_owned(),
+            location: UNSET.to_owned(),
+            resolved: None,
+            access: UNSET,
+            digest: UNSET.to_owned(),
+            status,
+        });
+    };
+    let root = binding.root_source();
+    let version = binding
+        .pdk_package()
+        .map(|pin| pin.revision().to_owned())
+        .or_else(|| binding.package_version().map(str::to_owned))
+        .unwrap_or_else(|| UNSET.to_owned());
+    Some(DependencyRow {
+        library: DependencyLibrary {
+            kind: DependencyKind::Technology,
+            name: binding.package_name().to_owned(),
+        },
+        version,
+        source: shown_path(root),
+        location: project_relative(root, project_folder),
+        resolved: Some(shown_path(root)),
+        // Its sources are pinned when it is attached.
+        access: LibraryMode::ReadOnly.label(),
+        digest: binding
+            .source_closure()
+            .iter()
+            .find(|pin| pin.path == root)
+            .or_else(|| binding.source_closure().first())
+            .map_or_else(
+                || UNSET.to_owned(),
+                |pin| pin.digest.to_string().chars().take(8).collect(),
+            ),
+        status,
+    })
 }
 
 fn nonempty_or_unset(value: &str) -> String {
@@ -650,18 +854,15 @@ pub fn refresh_source_drift(ctx: &egui::Context, model: &mut Model) {
     });
 }
 
-/// What the Dependencies page's rail and inspector have selected: kept while
-/// it names a library of the project, else the first row the filter shows.
-pub fn settle_selection(
-    rows: &[DependencyRow],
-    visible: &[usize],
-    selection: &mut Option<DependencyLibrary>,
-) {
+/// What the Dependencies page has selected: kept while it names a
+/// dependency of the project, else nothing, which the inspector reads as
+/// the project itself.
+pub fn settle_selection(rows: &[DependencyRow], selection: &mut Option<DependencyLibrary>) {
     let names_a_row = selection
         .as_ref()
         .is_some_and(|selected| rows.iter().any(|row| &row.library == selected));
     if !names_a_row {
-        *selection = visible.first().map(|&index| rows[index].library.clone());
+        *selection = None;
     }
 }
 

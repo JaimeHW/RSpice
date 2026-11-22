@@ -3,7 +3,7 @@
 //! returns, each in the order it has always run. The landing, the Library
 //! page with its publication dialogs, and the launcher are children.
 
-use egui::{ScrollArea, Ui};
+use egui::Ui;
 
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
@@ -40,22 +40,8 @@ pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
         ProjectPage::Library => library::library(ui, app),
         ProjectPage::Recovery => recovery(ui, &mut features::cx(app)),
         ProjectPage::Configuration => configuration::configuration(ui, &mut features::cx(app)),
-        page => {
-            ScrollArea::vertical()
-                .id_salt(("workbench.project.surface", page))
-                .auto_shrink([false, false])
-                .show(ui, |ui| match page {
-                    ProjectPage::Dependencies => {
-                        dependencies::dependencies(ui, &mut features::cx(app))
-                    }
-                    ProjectPage::Overview
-                    | ProjectPage::Library
-                    | ProjectPage::Configuration
-                    | ProjectPage::Recovery => {
-                        unreachable!("page owns its scroll contract")
-                    }
-                });
-        }
+        // The table under the page's bar scrolls itself, to the page's floor.
+        ProjectPage::Dependencies => dependencies::dependencies(ui, &mut features::cx(app)),
     });
     ui.ctx().accesskit_node_builder(panel.response.id, |node| {
         node.set_role(egui::accesskit::Role::TabPanel);

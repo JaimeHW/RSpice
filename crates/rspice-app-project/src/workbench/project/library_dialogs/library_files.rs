@@ -563,17 +563,17 @@ pub fn take_revealed_folder() -> Option<PathBuf> {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-fn pick_folder(_: &str) -> Option<PathBuf> {
+pub(crate) fn pick_folder(_: &str) -> Option<PathBuf> {
     PICKED.with(|picked| picked.borrow_mut().take())
 }
 
 #[cfg(all(not(any(test, feature = "test-support")), not(target_arch = "wasm32")))]
-fn pick_folder(title: &str) -> Option<PathBuf> {
+pub(crate) fn pick_folder(title: &str) -> Option<PathBuf> {
     rfd::FileDialog::new().set_title(title).pick_folder()
 }
 
 #[cfg(all(not(any(test, feature = "test-support")), target_arch = "wasm32"))]
-fn pick_folder(_: &str) -> Option<PathBuf> {
+pub(crate) fn pick_folder(_: &str) -> Option<PathBuf> {
     None
 }
 
