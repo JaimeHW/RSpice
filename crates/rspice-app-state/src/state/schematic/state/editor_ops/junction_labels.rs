@@ -29,6 +29,16 @@ impl SchematicState {
         removed
     }
 
+    /// Mark one pin of a placed part as meant to stay open, or clear the
+    /// mark. Says whether that changed anything.
+    pub fn set_pin_no_connect(&mut self, component_id: u64, pin: &str, flagged: bool) -> bool {
+        let changed = self.design.set_pin_no_connect(component_id, pin, flagged);
+        if changed {
+            self.session.is_dirty = true;
+        }
+        changed
+    }
+
     /// Check if a junction exists at a position
     pub fn has_junction(&self, pos: Point) -> bool {
         self.design

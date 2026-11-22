@@ -231,6 +231,9 @@ pub fn handle_tool_interactions(
             ToolPointerAction::Probe(position) => {
                 handle_probe_click(state, position, symbol_context);
             }
+            ToolPointerAction::NoConnect { position, radius } => {
+                super::no_connect::handle_no_connect_click(state, position, radius, symbol_context);
+            }
             // The armed tool determines whether the naming transaction makes
             // a local label or an off-sheet connector at this shared anchor.
             ToolPointerAction::NetLabel(anchor) => {

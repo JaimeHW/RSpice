@@ -30,6 +30,7 @@ pub mod keyboard_navigation;
 pub(crate) mod label_reset;
 pub mod mobile_controls;
 pub mod move_interaction;
+pub(crate) mod no_connect;
 mod parts;
 mod pick_chooser;
 mod preview;

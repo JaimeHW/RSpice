@@ -1,5 +1,6 @@
 //! Borrowed geometry and visibility for the active schematic sheet.
 
+use super::symbol_context::SchematicSymbolContext;
 use crate::session::{canvas_cache::CanvasCache, visibility::SchematicReviewMarkerVisibility};
 use rspice_design::schematic::{
     component_display::SchematicParameterLabelVisibility,
@@ -131,6 +132,38 @@ impl<'a> DesignView<'a> {
             None => std::sync::Arc::new(find()),
         };
         nearest_junction_candidate(&candidates, point, radius)
+    }
+
+    /// The pin end nearest `point` within `radius`, of a part on this sheet,
+    /// as its part's id and the pin's terminal name, with each part's pins
+    /// resolved through the symbols the canvas draws.
+    pub fn pin_end_near(
+        &self,
+        symbols: &SchematicSymbolContext,
+        point: Point,
+        radius: i32,
+    ) -> Option<(u64, String)> {
+        let reach = i64::from(radius.max(0)).pow(2);
+        self.document
+            .components
+            .iter()
+            .filter(|component| self.object_is_visible(component.id))
+            .flat_map(|component| {
+                symbols
+                    .named_terminal_points(component)
+                    .into_iter()
+                    .map(move |(pin, end)| (component.id, pin, end))
+            })
+            .map(|(id, pin, end)| {
+                let (dx, dy) = (
+                    i64::from(end.x) - i64::from(point.x),
+                    i64::from(end.y) - i64::from(point.y),
+                );
+                (dx * dx + dy * dy, id, pin)
+            })
+            .filter(|(distance, ..)| *distance <= reach)
+            .min_by_key(|(distance, ..)| *distance)
+            .map(|(_, id, pin)| (id, pin))
     }
 
     pub fn active_wire_point_is_draggable(&self, point: Point) -> bool {

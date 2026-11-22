@@ -71,6 +71,11 @@ pub enum Tool {
     ///
     /// Click on the attachment point, then name the net and its direction.
     OffSheetConnector,
+
+    /// Mark a pin as meant to stay open, or clear its mark.
+    ///
+    /// Click a pin's end to toggle its no-connect mark.
+    NoConnect,
 }
 
 impl Tool {
@@ -91,6 +96,7 @@ impl Tool {
             Tool::Probe => "Probe",
             Tool::Label => "Label",
             Tool::OffSheetConnector => "Off-sheet connector",
+            Tool::NoConnect => "No-connect",
         }
     }
 
@@ -120,6 +126,7 @@ impl Tool {
             Tool::Label => None,
             // Every plausible mnemonic is already owned by another tool.
             Tool::OffSheetConnector => None,
+            Tool::NoConnect => Some('x'),
             _ => None,
         }
     }
@@ -155,7 +162,8 @@ impl Tool {
             | Tool::Place(_)
             | Tool::Probe
             | Tool::Label
-            | Tool::OffSheetConnector => egui::CursorIcon::Crosshair,
+            | Tool::OffSheetConnector
+            | Tool::NoConnect => egui::CursorIcon::Crosshair,
         }
     }
 }

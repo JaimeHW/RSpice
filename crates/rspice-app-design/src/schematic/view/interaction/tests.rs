@@ -23,6 +23,7 @@ use rspice_schematic_editor::view::selection_drag::{
 };
 
 mod bus_tap;
+mod no_connect;
 mod probe_markers;
 mod probe_requests;
 mod wiring;

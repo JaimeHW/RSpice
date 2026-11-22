@@ -112,6 +112,12 @@ pub enum ToolPointerAction {
     Select(PointerQuery),
     Probe(Point),
     NetLabel(Point),
+    /// A click with the no-connect tool: the pin end nearest `position`
+    /// within `radius` toggles its mark.
+    NoConnect {
+        position: Point,
+        radius: i32,
+    },
 }
 
 impl ToolPointerView<'_> {
@@ -160,6 +166,7 @@ impl ToolPointerView<'_> {
             | Tool::DocumentationShape
             | Tool::Label
             | Tool::OffSheetConnector
+            | Tool::NoConnect
                 if !self.can_edit =>
             {
                 ToolPointerAction::ReadOnly
@@ -225,6 +232,10 @@ impl ToolPointerView<'_> {
             Tool::MoveSelection | Tool::StretchSelection | Tool::ArraySelection => return None,
             Tool::Probe => ToolPointerAction::Probe(target_position()),
             Tool::Label | Tool::OffSheetConnector => ToolPointerAction::NetLabel(target_position()),
+            Tool::NoConnect => ToolPointerAction::NoConnect {
+                position: screen_to_schematic(viewport, position),
+                radius: target_acquisition_radius(viewport),
+            },
         })
     }
 }

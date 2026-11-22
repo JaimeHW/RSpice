@@ -592,4 +592,31 @@ mod tests {
         assert_eq!(document.components.len(), 2);
         assert_eq!(serde_json::to_value(&clipboard).unwrap(), clipboard_before);
     }
+
+    /// A copied part keeps its no-connect marks, through the clipboard's
+    /// text as well as in memory.
+    #[test]
+    fn a_pasted_part_keeps_its_no_connect_marks() {
+        let mut document = SchematicDocument::default();
+        let mut source = Component::new(7, ComponentType::Resistor, Point::new(10, 20));
+        source.name = "R7".to_owned();
+        source.set_no_connect("-", true);
+        document.components.push(source.clone());
+        let copied = ClipboardData::from_selection(vec![source], Vec::new(), Vec::new());
+        let clipboard: ClipboardData =
+            serde_json::from_value(serde_json::to_value(&copied).unwrap()).unwrap();
+        let mut identity = SchematicIdentity::with_cursor(9);
+        let pasted = ClipboardPaste::prepare(
+            &mut document,
+            &mut identity,
+            &clipboard,
+            Point::new(100, 200),
+            |_| false,
+        )
+        .unwrap()
+        .unwrap()
+        .commit();
+        assert!(pasted.components[0].is_no_connect("-"));
+        assert!(!pasted.components[0].is_no_connect("+"));
+    }
 }
