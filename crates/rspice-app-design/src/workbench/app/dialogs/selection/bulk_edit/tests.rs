@@ -212,6 +212,69 @@ fn bulk_edit_starts_from_the_selection() {
     assert!(ticked(&state).is_empty());
 }
 
+/// The value is what is most often changed in bulk: every 10k resistor to
+/// 12k. It is a property of its own and is written to the part's value,
+/// and `value=` is refused as a parameter override, which would have added
+/// a parameter named value to the card and left the value at 10k.
+#[test]
+fn bulk_edit_sets_the_value_of_the_ticked_parts() {
+    let mut state = DesignTestHost::default();
+    let mut parts = Vec::new();
+    for (id, value) in [(1, "10k"), (2, "10k"), (3, "10k")] {
+        let mut part = Component::new(id, ComponentType::Resistor, Point::new(id as i32 * 100, 0));
+        part.name = format!("R{id}");
+        part.value = value.to_owned();
+        parts.push(part);
+    }
+    state.model.schematic.document_mut_for_test().components = parts;
+    state.model.schematic.init_undo_history();
+    for id in [1, 2] {
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
+    }
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
+    assert_eq!(
+        state.design.selection_bulk_edit.property,
+        SelectionBulkProperty::Value
+    );
+    state.design.selection_bulk_edit.new_value = "12k".to_owned();
+
+    commit_selection_bulk_edit(
+        &mut state.design.selection_bulk_edit,
+        &mut state.model,
+        &mut state.workbench,
+    )
+    .expect("the value applies");
+
+    let values: Vec<(&str, &str)> = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|part| (part.value.as_str(), part.params.as_str()))
+        .collect();
+    assert_eq!(values, vec![("12k", ""), ("12k", ""), ("10k", "")]);
+    assert!(
+        validate_bulk_value(
+            SelectionBulkProperty::ParameterOverride,
+            "value=12k",
+            SelectionBulkUnsetBehavior::SetExplicitValue,
+            None,
+        )
+        .is_err()
+    );
+}
+
 /// The sections offered are the bound library's own, not a fixed list,
 /// and a library that defines none says so.
 #[test]
@@ -225,6 +288,7 @@ fn bulk_edit_offers_the_bound_librarys_sections() {
         &state.model,
     );
     assert!(state.design.selection_bulk_edit.bound_sections.is_empty());
+    state.design.selection_bulk_edit.property = SelectionBulkProperty::ModelSection;
     assert_eq!(
         missing_value_reason(&state.design.selection_bulk_edit),
         Some(NO_BOUND_SECTIONS)
@@ -248,6 +312,7 @@ fn bulk_edit_offers_the_bound_librarys_sections() {
         &state.design.schematic_bulk_edit_filters,
         &state.model,
     );
+    state.design.selection_bulk_edit.property = SelectionBulkProperty::ModelSection;
     let dialog = &state.design.selection_bulk_edit;
     assert_eq!(dialog.bound_sections, ["mc_ss", "TT_PRE"]);
     assert_eq!(

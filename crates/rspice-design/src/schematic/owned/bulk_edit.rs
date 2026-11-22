@@ -69,7 +69,9 @@ pub fn replace_components(
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SelectionBulkProperty {
+    /// The part's value text: `10k`, `1N4148`, `{R*2}`.
     #[default]
+    Value,
     ModelSection,
     Temperature,
     Tolerance,
@@ -86,6 +88,9 @@ pub enum SelectionBulkUnsetBehavior {
     SetExplicitValue,
     RestoreInheritedValue,
 }
+
+/// Why "Restore inherited value" cannot apply to a part's value.
+const VALUE_HAS_NO_INHERITANCE: &str = "A part's value has nothing to inherit; type the new value.";
 
 pub fn apply_bulk_edit(
     schematic: &mut Schematic,
@@ -154,6 +159,21 @@ pub fn mutate_component(
     let restore = unset == SelectionBulkUnsetBehavior::RestoreInheritedValue
         || normalized.eq_ignore_ascii_case("inherit");
     match property {
+        SelectionBulkProperty::Value => {
+            if restore {
+                return Err(VALUE_HAS_NO_INHERITANCE.to_owned());
+            }
+            if unset == SelectionBulkUnsetBehavior::LeaveUnchanged
+                && component.value.trim().is_empty()
+            {
+                return Ok(false);
+            }
+            if component.value == normalized {
+                return Ok(false);
+            }
+            normalized.clone_into(&mut component.value);
+            Ok(true)
+        }
         SelectionBulkProperty::ModelSection => {
             let Some(binding) = component.library_cell.as_mut() else {
                 return Err(format!(
@@ -268,6 +288,11 @@ pub fn validate_bulk_value(
     current_property: Option<&str>,
 ) -> Result<String, String> {
     let value = value.trim();
+    if unset == SelectionBulkUnsetBehavior::RestoreInheritedValue
+        && property == SelectionBulkProperty::Value
+    {
+        return Err(VALUE_HAS_NO_INHERITANCE.to_owned());
+    }
     if unset == SelectionBulkUnsetBehavior::RestoreInheritedValue {
         return if property == SelectionBulkProperty::ParameterOverride {
             parameter_key_from_filter(value, current_property).map(|key| format!("{key}=inherit"))
@@ -279,6 +304,9 @@ pub fn validate_bulk_value(
         return Err("A new value is required.".to_owned());
     }
     match property {
+        // A value is kept as typed: a number with its suffix, a model name
+        // or an expression.
+        SelectionBulkProperty::Value => Ok(value.to_owned()),
         // A section is whatever the bound library defines (`.lib TT`,
         // `.lib mc_ss`), so it is kept as authored. Which names the library
         // actually holds is the caller's to check: this layer has no library.
@@ -324,6 +352,11 @@ pub fn validate_bulk_value(
                 .trim();
             if !valid_replacement_parameter_name(&key) {
                 return Err("Parameter override has an invalid parameter name.".to_owned());
+            }
+            // `value=12k` would add a parameter named value to the card and
+            // leave the part's value as it was.
+            if key == "value" {
+                return Err("A part's value is set with the Value property.".to_owned());
             }
             if explicit_value.is_empty() {
                 return Err("Parameter override requires a value after '='.".to_owned());

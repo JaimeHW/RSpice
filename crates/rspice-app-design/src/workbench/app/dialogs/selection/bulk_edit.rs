@@ -40,7 +40,8 @@ use crate::workbench::state::WorkbenchSession;
 pub const TITLE: &str = "Bulk edit";
 pub const PRIMARY: &str = "Apply";
 
-const BULK_PROPERTIES: [SelectionBulkProperty; 13] = [
+const BULK_PROPERTIES: [SelectionBulkProperty; 14] = [
+    SelectionBulkProperty::Value,
     SelectionBulkProperty::ModelSection,
     SelectionBulkProperty::Temperature,
     SelectionBulkProperty::Tolerance,
@@ -58,6 +59,7 @@ const BULK_PROPERTIES: [SelectionBulkProperty; 13] = [
 
 const fn bulk_property_label(value: SelectionBulkProperty) -> &'static str {
     match value {
+        SelectionBulkProperty::Value => "Value",
         SelectionBulkProperty::ModelSection => "Model section",
         SelectionBulkProperty::Temperature => "Temperature",
         SelectionBulkProperty::Tolerance => "Tolerance",
@@ -1242,7 +1244,8 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
             }
             before != dialog.new_value
         }
-        SelectionBulkProperty::Temperature
+        SelectionBulkProperty::Value
+        | SelectionBulkProperty::Temperature
         | SelectionBulkProperty::Tolerance
         | SelectionBulkProperty::ParameterOverride
         | SelectionBulkProperty::Bom(_) => {
@@ -1617,6 +1620,7 @@ fn component_row(
     let lock = if !active_owner {
         Some("Other owner".to_owned())
     } else if (kind == SelectionBulkRowKind::Port && property != SelectionBulkProperty::Display)
+        || (property == SelectionBulkProperty::Value && component.kind == ComponentType::Ground)
         || (property == SelectionBulkProperty::ModelSection && component.library_cell.is_none())
         || (matches!(
             property,
