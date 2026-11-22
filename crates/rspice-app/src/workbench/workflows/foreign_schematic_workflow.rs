@@ -43,7 +43,7 @@ use rspice_app_state::state::model_library::SimulationPlanModelBinding;
 use rspice_app_state::state::{Cell, CellViewRef, SchematicState, View, ViewType};
 
 use plan::{ForeignPlan, plan_from_cards};
-use sheet::{OwnSheet, place_on_sheet};
+use sheet::{OwnSheet, drawing_centre, place_on_sheet};
 
 /// The file-picker filter and the gesture's name, per source program.
 const fn picker(tool: ForeignTool) -> (&'static str, &'static str, &'static str) {
@@ -92,8 +92,10 @@ struct ImportedTree {
     directive_blocks: Vec<(u64, rspice_design_model::Point, Vec<String>)>,
 }
 
-/// Imports the schematic at `path` into the open project and opens it.
-/// Returns the sentence the log records.
+/// Imports the schematic at `path` into the open project and opens it,
+/// saying on the status line what came across and how much did not; when
+/// something did not, the Problems page opens on a row for each. Returns
+/// that sentence.
 pub(crate) fn import_foreign_schematic_file(
     app: &mut RSpiceApp,
     path: &Path,
@@ -143,6 +145,8 @@ pub(crate) fn import_foreign_schematic_file(
 
     let mut own_sheets = add_symbol_cells(&mut app.state, &library, &mut tree.cells)?;
     let top_sheet = place_on_sheet(&app.state.model, &mut tree.document);
+    let parts = tree.document.components.len();
+    let centre = drawing_centre(&app.state.model, &tree.document);
     let reference = app.state.import_loaded_schematic_as_cell_view(
         SchematicState::from_document(std::mem::take(&mut tree.document)),
         SchematicLoadOrigin::PersistentPath(path),
@@ -158,12 +162,13 @@ pub(crate) fn import_foreign_schematic_file(
         &includes,
         &mut notices,
     );
-    commit_plan(app, &reference.cell, &plan, model_bindings, &mut notices);
+    let plan = commit_plan(app, &reference.cell, &plan, model_bindings, &mut notices);
 
     let refusals = notices
         .iter()
         .filter(|(severity, _)| *severity == ForeignNoticeSeverity::Refusal)
-        .count();
+        .map(|(_, message)| message.clone())
+        .collect::<Vec<_>>();
     for (severity, message) in &notices {
         let severity = match severity {
             ForeignNoticeSeverity::Notice => LogSeverity::Info,
@@ -172,17 +177,60 @@ pub(crate) fn import_foreign_schematic_file(
         app.state
             .record(severity, LogSource::Studio, message.clone());
     }
-    let summary = format!(
-        "Imported {} schematic {} as {}: {} notice(s), {refusals} of them about content that did not come across.",
-        tool.label(),
-        path.display(),
-        reference.display_path(),
-        notices.len(),
+    let source = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let facts = app.state.slot_facts();
+    app.state
+        .model
+        .publish_import_refusals(&reference, &source, centre, &refusals, facts);
+    let summary = import_summary(
+        &format!("{} schematic {source}", tool.label()),
+        &reference,
+        parts,
+        plan.as_deref(),
+        refusals.len(),
     );
     app.state
         .record(LogSeverity::Info, LogSource::Studio, summary.clone());
+    app.state.prompt(summary.clone());
+    if !refusals.is_empty() {
+        app.state.workbench.show_problem_findings();
+    }
     app.invalidate_simulation_preflight();
     Ok(summary)
+}
+
+/// What an import says it did: the drawing and the plan that came across,
+/// and how much did not, which the Problems page lists.
+fn import_summary(
+    source: &str,
+    reference: &CellViewRef,
+    parts: usize,
+    plan: Option<&str>,
+    refusals: usize,
+) -> String {
+    use rspice_ui_kit::accessibility::counted;
+
+    let mut summary = format!(
+        "Imported {source} as {}: {}",
+        reference.display_path(),
+        counted(parts, "part", "parts")
+    );
+    if let Some(plan) = plan {
+        summary.push_str("; ");
+        summary.push_str(plan);
+    }
+    summary.push('.');
+    if refusals > 0 {
+        summary.push_str(&format!(
+            " {} did not come across; Problems lists {}.",
+            counted(refusals, "item", "items"),
+            if refusals == 1 { "it" } else { "them" }
+        ));
+    }
+    summary
 }
 
 fn read_drawing(
@@ -934,13 +982,14 @@ fn bind_to_active_plan(
 /// Activates a simulation plan named after the cell holding the drawing's
 /// analyses, options, temperature, design variables, run-set axes and
 /// measurements. A drawing with no analysis leaves the active plan as it is.
+/// Returns what the import's summary says of the plan, if it made one.
 fn commit_plan(
     app: &mut RSpiceApp,
     cell: &str,
     plan: &ForeignPlan,
     model_bindings: Vec<SimulationPlanModelBinding>,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
-) {
+) -> Option<String> {
     let mut analyses = rspice_simulation_contract::plan_model::SimulationPlan::empty();
     for (card, draft) in &plan.analyses {
         let id = rspice_vocabulary::product::AnalysisInstanceId::new();
@@ -960,8 +1009,9 @@ fn commit_plan(
                 .to_owned(),
         ));
         bind_to_active_plan(app, model_bindings, notices);
-        return;
+        return None;
     }
+    let stated = analyses.instances().len();
     let mut variables = Vec::new();
     for (name, value) in &plan.variables {
         match DesignVariable::new(
@@ -1012,18 +1062,28 @@ fn commit_plan(
         model_bindings,
         &payload,
     ) {
-        Ok(name) => notices.push((
-            ForeignNoticeSeverity::Notice,
-            format!(
-                "The schematic's analyses are the active simulation plan `{name}`, with {} stepped axis(es) in its run set and {} measurement(s).",
-                plan.sweeps.len(),
-                plan.measurements.len()
-            ),
-        )),
-        Err(error) => notices.push((
-            ForeignNoticeSeverity::Refusal,
-            format!("The schematic's analyses could not become a simulation plan: {error}"),
-        )),
+        Ok(name) => {
+            notices.push((
+                ForeignNoticeSeverity::Notice,
+                format!(
+                    "The schematic's analyses are the active simulation plan `{name}`, with {} stepped axis(es) in its run set and {} measurement(s).",
+                    plan.sweeps.len(),
+                    plan.measurements.len()
+                ),
+            ));
+            Some(format!(
+                "its {} {} the active plan `{name}`",
+                rspice_ui_kit::accessibility::counted(stated, "analysis", "analyses"),
+                if stated == 1 { "is" } else { "are" }
+            ))
+        }
+        Err(error) => {
+            notices.push((
+                ForeignNoticeSeverity::Refusal,
+                format!("The schematic's analyses could not become a simulation plan: {error}"),
+            ));
+            None
+        }
     }
 }
 

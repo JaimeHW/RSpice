@@ -65,6 +65,10 @@ pub(super) enum DigestKey {
     /// The stamps of every text the project letters, and how often the
     /// faces' coverage has been settled.
     Lettering(super::super::lettering::LetteringKey),
+    Import {
+        design: DesignProjectionKey,
+        project: ProjectId,
+    },
 }
 
 impl DigestKey {
@@ -139,6 +143,10 @@ impl DigestKey {
             DiagnosticInputs::Lettering => {
                 Some(Self::Lettering(super::super::lettering::inputs_key(model)))
             }
+            DiagnosticInputs::Import { .. } => Some(Self::Import {
+                design: design()?,
+                project,
+            }),
         }
     }
 }

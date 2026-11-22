@@ -82,6 +82,19 @@ pub(super) fn place_on_sheet(model: &Model, document: &mut SchematicDocument) ->
     })
 }
 
+/// The middle of what `document` draws, where a reader is taken to see it.
+pub(super) fn drawing_centre(model: &Model, document: &SchematicDocument) -> Point {
+    let resolver = SymbolResolver::new(
+        model.library_manager.catalog(),
+        &model.workspace.content.schematic_buffers,
+    );
+    SchematicSymbolContext::new(document, None, &resolver, 0)
+        .content_bounds(document)
+        .map_or(Point::new(0, 0), |(min_x, min_y, max_x, max_y)| {
+            Point::new(min_x.midpoint(max_x), min_y.midpoint(max_y))
+        })
+}
+
 /// The standard sheets of `project`'s series larger than it, smallest
 /// first, each in the project's orientation and then the other.
 fn larger_sheets(project: &SchematicSheetFormat) -> impl Iterator<Item = SchematicSheetFormat> {

@@ -951,6 +951,104 @@ fn an_imported_initial_condition_starts_the_transient_where_it_says() {
     );
 }
 
+/// The import ends by saying on the status line what came across. A clean
+/// import leaves the dock as it was; one that left something out says how
+/// much and opens the Problems page, which lists each thing as a warning that
+/// opens the drawing.
+#[test]
+fn an_import_says_what_came_across_and_problems_lists_what_did_not() {
+    use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing;
+    use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
+
+    let folder = drawing_folder();
+    let clean = folder.join("clean.asc");
+    std::fs::write(
+        &clean,
+        "Version 4\nSHEET 1 880 680\n\
+         SYMBOL res 32 64 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+         SYMBOL res 128 64 R0\nSYMATTR InstName R2\nSYMATTR Value 2k\n\
+         TEXT 32 240 Left 2 !.op\n",
+    )
+    .expect("schematic");
+    let partial = folder.join("partial.asc");
+    std::fs::write(
+        &partial,
+        "Version 4\nSHEET 1 880 680\n\
+         SYMBOL res 32 64 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+         SYMBOL nosuchpart 128 64 R0\nSYMATTR InstName U1\n",
+    )
+    .expect("schematic");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+
+    let said = import_foreign_schematic_file(&mut app, &clean, ForeignTool::Ltspice)
+        .expect("the clean drawing imports");
+    let drawing = app.state.model.workspace.content.active_view.clone();
+    assert_eq!(
+        said,
+        format!(
+            "Imported LTspice schematic clean.asc as {}: 2 parts; its 1 analysis is the active plan `clean`.",
+            drawing.display_path()
+        )
+    );
+    assert_eq!(app.state.prompt_text(), Some(said.as_str()));
+    assert!(
+        !app.state.workbench.console_visible,
+        "nothing to read there"
+    );
+
+    let said = import_foreign_schematic_file(&mut app, &partial, ForeignTool::Ltspice)
+        .expect("the partial drawing imports");
+    std::fs::remove_dir_all(&folder).ok();
+    let drawing = app.state.model.workspace.content.active_view.clone();
+    assert_eq!(
+        said,
+        format!(
+            "Imported LTspice schematic partial.asc as {}: 2 parts. 1 item did not come across; Problems lists it.",
+            drawing.display_path()
+        )
+    );
+    assert_eq!(app.state.prompt_text(), Some(said.as_str()));
+    let workbench = &app.state.workbench;
+    assert!(workbench.console_visible);
+    assert_eq!(workbench.console_page, ConsolePage::Problems);
+
+    let listed = listing(&app.state);
+    let rows = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .map(|row| row.message)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            "U1 (nosuchpart): no symbol file `nosuchpart.asy` was found beside the schematic or in LTspice's symbol library, so its pins are unknown; it is drawn as a box with no pins."
+        ]
+    );
+    assert_eq!(listed.counts().warnings, 1);
+    let batch = app
+        .state
+        .model
+        .diagnostics
+        .batches()
+        .find(|batch| {
+            batch.inputs
+                == rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs::Import {
+                    subject: drawing.clone(),
+                }
+        })
+        .expect("the rows are filed under the drawing the import made");
+    assert!(
+        matches!(
+            &batch.records[0].route,
+            Some(rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute::Anchor(
+                rspice_app_state::diagnostics::LogAnchor::Schematic { cell_view, .. }
+            )) if *cell_view == drawing
+        ),
+        "{:?}",
+        batch.records[0].route
+    );
+}
+
 /// LTspice 26.1.1 and QSPICE read values past the sixth of an `EXP` source
 /// differently, and both draw `mc()` anew at every `.step` point, so the
 /// source program decides what the imported deck's cards mean.

@@ -507,6 +507,9 @@ pub enum DiagnosticOwner {
     /// The characters no typeface here can letter, wherever the project's
     /// text holds them.
     Lettering,
+    /// What an imported drawing held that did not come across, per drawing
+    /// the import made.
+    Import,
 }
 
 impl DiagnosticOwner {
@@ -517,13 +520,14 @@ impl DiagnosticOwner {
     /// the assertion below holds this list to one owner per place. The tests
     /// that must drive every owner walk this list rather than naming the
     /// owners they happen to know about.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::DesignRules,
         Self::SymbolPins,
         Self::Dispatch,
         Self::Run,
         Self::RuleDeck,
         Self::Lettering,
+        Self::Import,
     ];
 
     /// This owner's place in [`Self::ALL`].
@@ -535,6 +539,7 @@ impl DiagnosticOwner {
             Self::Run => 3,
             Self::RuleDeck => 4,
             Self::Lettering => 5,
+            Self::Import => 6,
         }
     }
 
@@ -546,6 +551,7 @@ impl DiagnosticOwner {
             Self::Run => "run",
             Self::RuleDeck => "rule-deck",
             Self::Lettering => "lettering",
+            Self::Import => "import",
         }
     }
 }
@@ -596,6 +602,9 @@ pub enum DiagnosticInputs {
     /// Every text the project letters, and what the typefaces here are known
     /// to have.
     Lettering,
+    /// One drawing an import made, as the import left it: what of the source
+    /// file did not come across stands while the drawing is as imported.
+    Import { subject: CellViewRef },
 }
 
 impl DiagnosticInputs {
@@ -607,6 +616,7 @@ impl DiagnosticInputs {
             Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
             Self::RuleDeck => DiagnosticOwner::RuleDeck,
             Self::Lettering => DiagnosticOwner::Lettering,
+            Self::Import { .. } => DiagnosticOwner::Import,
         }
     }
 
@@ -649,6 +659,10 @@ impl DiagnosticInputs {
             Self::Lettering => "the project's text, or what the typefaces here are known to \
                                 have, has changed since this was reported"
                 .to_owned(),
+            Self::Import { subject } => format!(
+                "the drawing {} has changed since it was imported",
+                subject.display_path()
+            ),
         }
     }
 
@@ -661,7 +675,9 @@ impl DiagnosticInputs {
     fn key(&self) -> String {
         let owner = self.owner().key_prefix();
         match self {
-            Self::DesignCheck { subject } | Self::SymbolPins { subject } => {
+            Self::DesignCheck { subject }
+            | Self::SymbolPins { subject }
+            | Self::Import { subject } => {
                 let subject = crate::state::canonical_cell_view_owner_key(
                     &subject.library,
                     &subject.cell,
@@ -729,6 +745,7 @@ impl DiagnosticInputs {
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
             Self::RuleDeck => super::rule_deck::live_input_digest(model),
             Self::Lettering => super::lettering::live_input_digest(model),
+            Self::Import { subject } => super::import_report::live_input_digest(model, subject),
         }
     }
 
@@ -1455,7 +1472,8 @@ impl Model {
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::RuleDeck
-                | DiagnosticInputs::Lettering => false,
+                | DiagnosticInputs::Lettering
+                | DiagnosticInputs::Import { .. } => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();
@@ -1490,7 +1508,8 @@ impl Model {
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::CampaignMember { .. }
                 | DiagnosticInputs::RuleDeck
-                | DiagnosticInputs::Lettering => false,
+                | DiagnosticInputs::Lettering
+                | DiagnosticInputs::Import { .. } => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();

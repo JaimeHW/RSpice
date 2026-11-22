@@ -66,6 +66,9 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
             }
             DiagnosticOwner::RuleDeck => DiagnosticInputs::RuleDeck,
             DiagnosticOwner::Lettering => DiagnosticInputs::Lettering,
+            DiagnosticOwner::Import => DiagnosticInputs::Import {
+                subject: state.model.workspace.content.active_schematic_reference(),
+            },
         };
         state
             .publish_diagnostics(inputs.clone(), Vec::new())
@@ -148,6 +151,14 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
                     part.value = "\u{3a2}".to_owned();
                 }
             }
+            DiagnosticOwner::Import => {
+                // The imported drawing, edited and stored in its library.
+                state.model.schematic.add_component(
+                    rspice_app_state::state::ComponentType::Resistor,
+                    rspice_app_state::state::Point::new(0, 0),
+                );
+                state.sync_active_schematic_to_workspace();
+            }
         }
 
         assert_eq!(
@@ -204,7 +215,8 @@ fn run_batches(state: &AppState) -> Vec<u64> {
             | DiagnosticInputs::Dispatch
             | DiagnosticInputs::CampaignMember { .. }
             | DiagnosticInputs::RuleDeck
-            | DiagnosticInputs::Lettering => None,
+            | DiagnosticInputs::Lettering
+            | DiagnosticInputs::Import { .. } => None,
         })
         .collect()
 }

@@ -163,6 +163,32 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                     .state
                     .refresh_live_checks(rspice_app_state::time_compat::Instant::now());
             }
+            DiagnosticOwner::Import => {
+                // A drawing placing a symbol no library has: it comes across
+                // as a box with no pins, which the import says.
+                let folder = std::env::temp_dir().join(format!(
+                    "rspice-import-report-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("system time after epoch")
+                        .as_nanos()
+                ));
+                std::fs::create_dir_all(&folder).expect("drawing folder");
+                let file = folder.join("unknown.asc");
+                std::fs::write(
+                    &file,
+                    "Version 4\nSHEET 1 880 680\nSYMBOL nosuchpart 32 80 R0\nSYMATTR InstName U1\n",
+                )
+                .expect("schematic");
+                crate::workbench::workflows::foreign_schematic_workflow::import_foreign_schematic_file(
+                    &mut app,
+                    &file,
+                    rspice_design::foreign_schematic::ForeignTool::Ltspice,
+                )
+                .expect("the drawing imports");
+                std::fs::remove_dir_all(&folder).ok();
+            }
         }
 
         let batch = app
@@ -216,7 +242,8 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
         let counted = match owner {
             DiagnosticOwner::RuleDeck
             | DiagnosticOwner::Lettering
-            | DiagnosticOwner::SymbolPins => listed.counts().warnings,
+            | DiagnosticOwner::SymbolPins
+            | DiagnosticOwner::Import => listed.counts().warnings,
             _ => listed.counts().errors,
         };
         assert!(
