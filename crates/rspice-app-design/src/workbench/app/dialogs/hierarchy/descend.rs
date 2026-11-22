@@ -127,9 +127,7 @@ impl DescendHierarchyDialogState {
 }
 
 const TITLE: &str = "Descend into hierarchy";
-const PRIMARY: &str = "Open edit context";
-const DESCRIPTION: &str =
-    "Review the operation, its inputs, impact, validation state, and available actions.";
+const DESCRIPTION: &str = "Choose how to open what the selected instance is an instance of.";
 
 pub fn open_descend_hierarchy_dialog(
     dialog: &mut DescendHierarchyDialogState,
@@ -251,8 +249,9 @@ pub fn render_descend_hierarchy_dialog(
     let instance = dialog.instance_name.clone();
     let occurrence_path = descend_target_path(&model.workspace, &instance);
     let error = dialog.validation_error.clone();
+    let primary = primary_label(dialog.edit_mode);
     let draft = &mut *dialog;
-    let choice = CommandForm::new(TITLE, PRIMARY)
+    let choice = CommandForm::new(TITLE, primary)
         .describe(DESCRIPTION)
         // Wide enough for "Unsaved parent changes" on one line.
         .label_column(136.0)
@@ -458,6 +457,17 @@ fn descend_rows(
         rows.value("Unsaved parent changes", "Kept as a working checkpoint");
     }
     Some(edit_mode.response.id)
+}
+
+/// The primary button says what the chosen mode does.
+const fn primary_label(mode: HierarchyDescendEditMode) -> &'static str {
+    match mode {
+        HierarchyDescendEditMode::EditInPlace | HierarchyDescendEditMode::ReadOnlyReference => {
+            "Descend"
+        }
+        HierarchyDescendEditMode::OpenIsolated | HierarchyDescendEditMode::OpenVerilogA => "Open",
+        HierarchyDescendEditMode::EditSymbolInPlace => "Edit symbol",
+    }
 }
 
 const fn edit_mode_label(mode: HierarchyDescendEditMode) -> &'static str {

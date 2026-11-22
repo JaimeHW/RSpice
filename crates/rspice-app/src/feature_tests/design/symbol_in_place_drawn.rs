@@ -906,7 +906,7 @@ fn descend_with_options_edits_a_symbol_only_cell_in_place() {
             && control.value.contains("Edit symbol in place")),
         "a single way in is not a choice"
     );
-    fixture.replay.click("Open edit context", Role::Button);
+    fixture.replay.click("Edit symbol", Role::Button);
     let state = &fixture.replay.app.state;
     assert_eq!(state.model.workspace.content.active_view, fixture.symbol);
     assert!(
