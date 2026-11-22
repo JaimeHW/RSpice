@@ -16,7 +16,7 @@ use rspice_simulation::netlist_preparation::IncludeSearchChain;
 
 use super::{
     DependencyKind, DependencyLibrary, DependencyRow, LibraryStatus, PROJECT_FILE_SOURCE, UNSET,
-    lexical, project_relative, shown_path,
+    project_relative, shown_path,
 };
 use crate::state::{DeckSource, ProjectDeck, StoredDeck};
 use crate::workbench::app_state::Model;
@@ -297,7 +297,7 @@ fn read_deck(model: &Model, deck: &str, file: &Path) -> (LibraryStatus, Vec<Depe
                     .map(|directory| directory.join(requested))
                     .find(|candidate| candidate.is_file())
             };
-            match at.map(|at| lexical(&at)) {
+            match at.map(|at| super::lexical(&at)) {
                 Some(at) => include_row(
                     locator,
                     project_relative(&at, folder),
