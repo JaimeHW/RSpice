@@ -559,9 +559,24 @@ impl CanvasParts<'_> {
         in_place_bounds(self.symbol_in_place()?, self.model)
     }
 
-    /// Land the floating copy where it sits now.
+    /// Land the floating copy where it sits now. The probe markers it
+    /// carries are probed again where they land, in the same undo step.
     pub(crate) fn place_floating_paste(&mut self) -> bool {
-        place_floating_paste(&mut self.design.floating_paste, self.model, self.workbench)
+        let Some(probes) =
+            super::interaction::PastedProbes::of(&self.design.floating_paste, self.model)
+        else {
+            return place_floating_paste(
+                &mut self.design.floating_paste,
+                self.model,
+                self.workbench,
+            );
+        };
+        self.model.schematic.begin_operation("paste");
+        let placed =
+            place_floating_paste(&mut self.design.floating_paste, self.model, self.workbench);
+        let probed = probes.land(self, placed);
+        self.model.schematic.end_operation();
+        placed || probed
     }
 
     pub(crate) fn prepare_schematic_drag(&mut self) {

@@ -1879,7 +1879,8 @@ fn retained_probe_net_name(state: &CanvasParts<'_>, position: Point) -> Option<S
         .cloned()
 }
 
-/// What a click on a component probes, unscoped.
+/// What a probe measures, unscoped: a click on a wire or a pin asks for a
+/// net's voltage, a click on a part's body for its current.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ComponentProbe {
     /// The voltage of the net under an exact pin.
@@ -2075,6 +2076,170 @@ fn probe_subject(
 
 type ProbeRequest = fn(&mut CanvasParts<'_>, &OccurrenceProbeSpelling) -> ProbeSignalOutcome;
 
+/// What a probe at `place` measures, as a Probe-tool click there resolves
+/// it: the net of the wire under it, the voltage at an exact pin, or the
+/// current of the part under it. `None` when no signal is there.
+fn probe_signal_at(
+    state: &CanvasParts<'_>,
+    place: Point,
+    symbol_context: &SchematicSymbolContext,
+) -> Option<ComponentProbe> {
+    match probe_subject_at(state, place, symbol_context)? {
+        ProbeSubject::Wire(wire_id) => live_wire_probe_net_name(state, wire_id)
+            .or_else(|| retained_probe_net_name(state, place))
+            .map(ComponentProbe::Voltage),
+        ProbeSubject::Part(part) => component_probe_expression(state, part, place, symbol_context),
+    }
+}
+
+/// Ask for what `probe` measures through `request`.
+fn commit_signal(
+    state: &mut CanvasParts<'_>,
+    probe: &ComponentProbe,
+    request: ProbeRequest,
+) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
+    match probe {
+        ComponentProbe::Voltage(net) => {
+            commit_probe_request(state, net, &format!("V({net})"), request)
+        }
+        ComponentProbe::Current { drawn, engine } => {
+            commit_element_current(state, drawn, engine, request)
+        }
+    }
+}
+
+/// The probe markers a floating Paste or Duplicate carries, and where each
+/// lands if the copy is placed now.
+///
+/// The drawing pastes no probe: a copy keeping the original's expression
+/// would measure the original's signal. Each marker is probed again where it
+/// lands instead, as a Probe-tool click there would, and keeps no marker
+/// where no signal is under it.
+pub(super) struct PastedProbes {
+    places: Vec<Point>,
+    /// The copy holds nothing but these markers.
+    alone: bool,
+    /// "Pasted" or "Duplicated", for the line the placement answers with.
+    verb: &'static str,
+}
+
+impl PastedProbes {
+    /// The markers of the copy floating in `floating`, or `None` when it
+    /// carries none or would be cancelled rather than placed.
+    pub(super) fn of(
+        floating: &Option<
+            crate::workbench::app::dialogs::selection::commands::floating::FloatingPaste,
+        >,
+        model: &Model,
+    ) -> Option<Self> {
+        use crate::workbench::app::dialogs::selection::commands::floating::FloatingPasteOrigin;
+        let copy = floating.as_ref()?;
+        if copy.objects.probes.is_empty()
+            || crate::workbench::app::floating_paste_scope(floating, model).is_err()
+        {
+            return None;
+        }
+        // The paste moves every object by its anchor less the copy's origin.
+        let (at, origin) = (copy.at(), copy.objects.origin);
+        let offset = Point::new(at.x.saturating_sub(origin.x), at.y.saturating_sub(origin.y));
+        Some(Self {
+            places: copy
+                .objects
+                .probes
+                .iter()
+                .map(|probe| {
+                    Point::new(
+                        probe.position.x.saturating_add(offset.x),
+                        probe.position.y.saturating_add(offset.y),
+                    )
+                })
+                .collect(),
+            alone: copy.objects.count() == copy.objects.probes.len(),
+            verb: match copy.origin {
+                FloatingPasteOrigin::Paste => "Pasted",
+                FloatingPasteOrigin::Duplicate { .. } => "Duplicated",
+            },
+        })
+    }
+
+    /// Probe each place once the rest of the copy has landed (`placed`),
+    /// within the paste's own undo step. The markers kept join the paste's
+    /// selection, and the status line adds how many found no signal.
+    /// Returns whether any marker was kept.
+    pub(super) fn land(self, state: &mut CanvasParts<'_>, placed: bool) -> bool {
+        // A paste that failed lands none of its probes either.
+        if !placed && !self.alone {
+            return false;
+        }
+        let paste_line = state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|line| line.text.clone());
+        let mut selection = state.model.schematic.session.editor.selection.clone();
+        let focus = state.design.interaction.schematic_keyboard_focus;
+        let symbol_context = state.model.schematic_symbol_context();
+        let kept: Vec<u64> = self
+            .places
+            .iter()
+            .filter_map(|place| probe_pasted_place(state, *place, &symbol_context))
+            .collect();
+        let missed = self.places.len() - kept.len();
+
+        if self.alone {
+            selection.clear();
+        }
+        for id in &kept {
+            selection.select_probe(*id);
+        }
+        state.model.schematic.session.editor.selection = selection;
+        state.design.interaction.schematic_keyboard_focus = focus;
+
+        let left_out = |count: usize| match count {
+            1 => "1 probe landed on no signal and was left out.".to_owned(),
+            count => format!("{count} probes landed on no signal and were left out."),
+        };
+        let line = match (self.alone, kept.len(), missed) {
+            (true, 0, _) => format!(
+                "Nothing was {}: a probe goes on a wire, a pin or a part.",
+                self.verb.to_lowercase()
+            ),
+            (true, 1, 0) => format!("{} 1 probe.", self.verb),
+            (true, kept, 0) => format!("{} {kept} probes.", self.verb),
+            (true, 1, missed) => format!("{} 1 probe. {}", self.verb, left_out(missed)),
+            (true, kept, missed) => format!("{} {kept} probes. {}", self.verb, left_out(missed)),
+            (false, _, 0) => paste_line.unwrap_or_default(),
+            (false, _, missed) => match paste_line {
+                Some(line) => format!("{line} {}", left_out(missed)),
+                None => left_out(missed),
+            },
+        };
+        if !line.is_empty() {
+            state.prompt(line);
+        }
+        !kept.is_empty()
+    }
+}
+
+/// Probe `place` for a pasted marker, as a Probe-tool click there does, and
+/// keep the marker on the signal under it. `None` when no signal is there.
+fn probe_pasted_place(
+    state: &mut CanvasParts<'_>,
+    place: Point,
+    symbol_context: &SchematicSymbolContext,
+) -> Option<u64> {
+    let signal = probe_signal_at(state, place, symbol_context)?;
+    let (spelling, outcome) = commit_signal(state, &signal, request_probe_signal);
+    if matches!(
+        outcome,
+        ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
+    ) {
+        return None;
+    }
+    let binding = current_probe_output_binding(state, spelling.engine());
+    retain_probe_flag(state, place, Some(&spelling), binding).ok()
+}
+
 /// How a probe asks for its signal: an editable view saves it for the next
 /// run as well; a read-only view only plots what the last run holds.
 fn probe_request(read_only: bool) -> ProbeRequest {
@@ -2137,16 +2302,7 @@ fn handle_component_probe(
             return;
         };
 
-        let request = probe_request(read_only);
-        let (spelling, outcome) = match probe {
-            ComponentProbe::Voltage(net) => {
-                let display = format!("V({net})");
-                commit_probe_request(state, &net, &display, request)
-            }
-            ComponentProbe::Current { drawn, engine } => {
-                commit_element_current(state, &drawn, &engine, request)
-            }
-        };
+        let (spelling, outcome) = commit_signal(state, &probe, probe_request(read_only));
         finish_probe(state, grid_pos, &spelling, outcome, read_only);
     }
 }

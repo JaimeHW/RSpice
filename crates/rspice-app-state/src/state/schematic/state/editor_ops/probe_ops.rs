@@ -37,8 +37,10 @@ impl SchematicState {
         if edit.value.is_some() || edit.committed {
             self.finish_document_edit(edit.committed);
         }
+        // Inside a caller's open operation the marker joins it, and the
+        // caller's step commits it.
         match edit.value {
-            Some(id) if edit.committed && id != 0 => Ok(id),
+            Some(id) if (edit.committed || self.has_pending_operation()) && id != 0 => Ok(id),
             _ => Err("the probe marker did not change the active schematic".to_owned()),
         }
     }

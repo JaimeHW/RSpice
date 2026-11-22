@@ -131,9 +131,6 @@ impl SchematicState {
                     .selection
                     .select_documentation_shape(object.id);
             }
-            for object in pasted.probes {
-                self.session.editor.selection.select_probe(object.id);
-            }
             for object in pasted.buses {
                 self.session.editor.selection.select_bus(object.id);
             }
@@ -646,8 +643,11 @@ mod tests {
         );
     }
 
+    /// A copied probe is not pasted with the original's expression, which
+    /// would measure the original's net: the drawing pastes no probe, and
+    /// the editor probes the copy's new place itself.
     #[test]
-    fn bound_probe_copy_paste_preserves_expression_without_changing_topology() {
+    fn a_copied_probe_is_not_pasted_with_the_original_expression() {
         let original =
             SchematicProbe::new(120, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap();
@@ -665,33 +665,12 @@ mod tests {
             .select_only_probe(original.id);
         let clipboard = schematic.copy_selection();
         schematic.clear_undo_history();
-        let topology = schematic.topology_version();
 
         assert_eq!(clipboard.probes, vec![original.clone()]);
         assert_eq!(clipboard.origin, original.position);
-        assert!(schematic.paste_at(&clipboard, Point::new(110, 220)));
+        assert!(!schematic.paste_at(&clipboard, Point::new(110, 220)));
 
-        assert_eq!(schematic.design.document().probes.len(), 2);
-        let pasted = schematic
-            .design
-            .document()
-            .probes
-            .iter()
-            .find(|probe| probe.id != original.id)
-            .unwrap();
-        assert_eq!(pasted.position, Point::new(110, 220));
-        assert_eq!(pasted.reference, original.reference);
-        assert_eq!(pasted.source_expression, original.source_expression);
-        assert_eq!(
-            schematic.session.editor.selection.single_probe(),
-            Some(pasted.id)
-        );
-        assert_eq!(schematic.topology_version(), topology);
-        assert_eq!(schematic.undo_description(), Some("paste"));
-
-        assert!(schematic.undo());
         assert_eq!(schematic.design.document().probes, vec![original]);
-        assert_eq!(schematic.topology_version(), topology);
-        assert!(!schematic.can_undo());
+        assert!(!schematic.can_undo(), "nothing was pasted");
     }
 }

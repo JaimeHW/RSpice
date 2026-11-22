@@ -214,7 +214,6 @@ pub struct PastedObjects<'a> {
     pub net_labels: &'a [NetLabel],
     pub design_notes: &'a [DesignNote],
     pub documentation_shapes: &'a [DocumentationShape],
-    pub probes: &'a [SchematicProbe],
     pub buses: &'a [Bus],
     pub bus_taps: &'a [BusTap],
     pub junctions: &'a [Junction],
@@ -232,7 +231,6 @@ impl PastedObjects<'_> {
             || !self.net_labels.is_empty()
             || !self.design_notes.is_empty()
             || !self.documentation_shapes.is_empty()
-            || !self.probes.is_empty()
             || !self.buses.is_empty()
             || !self.bus_taps.is_empty()
             || !self.junctions.is_empty()
@@ -349,7 +347,6 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
         let net_labels_start = document.net_labels.len();
         let design_notes_start = document.design_notes.len();
         let documentation_shapes_start = document.documentation_shapes.len();
-        let probes_start = document.probes.len();
         let buses_start = document.buses.len();
         let bus_taps_start = document.bus_taps.len();
         let junctions_start = document.junctions.len();
@@ -366,7 +363,6 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
         let clipboard_bus_taps = clipboard.bus_taps.clone();
         let clipboard_design_notes = clipboard.design_notes.clone();
         let clipboard_documentation_shapes = clipboard.documentation_shapes.clone();
-        let clipboard_probes = clipboard.probes.clone();
         let origin = clipboard.origin;
 
         let offset_x = paste_pos.x.saturating_sub(origin.x);
@@ -450,27 +446,10 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             document.documentation_shapes.push(shape);
         }
 
-        // Probe markers are non-electrical authored output intent. Bound
-        // markers retain their exact raw expression; unbound markers get
-        // a fresh display reference matching their new stable identity.
-        for mut probe in clipboard_probes {
-            if probe.validate().is_err() {
-                continue;
-            }
-            let new_id = identity.allocate(document);
-            probe.id = new_id;
-            probe.position = Point::new(
-                probe.position.x.saturating_add(offset_x),
-                probe.position.y.saturating_add(offset_y),
-            );
-            if probe.source_expression.is_none() {
-                probe.reference = format!("P{new_id}");
-            }
-            if probe.validate().is_err() {
-                continue;
-            }
-            document.probes.push(probe);
-        }
+        // Probe markers are not pasted here. A probe measures the signal
+        // under it, which only the editor's live connectivity can name, and a
+        // copy keeping the original's expression would measure the original.
+        // The editor probes each copied marker's new place itself.
 
         // Paste buses before taps so every source reference can be
         // remapped to a fresh stable document identity.
@@ -549,7 +528,6 @@ impl<'document, 'clipboard> ClipboardPaste<'document, 'clipboard> {
             net_labels: &document.net_labels[net_labels_start..],
             design_notes: &document.design_notes[design_notes_start..],
             documentation_shapes: &document.documentation_shapes[documentation_shapes_start..],
-            probes: &document.probes[probes_start..],
             buses: &document.buses[buses_start..],
             bus_taps: &document.bus_taps[bus_taps_start..],
             junctions: &document.junctions[junctions_start..],

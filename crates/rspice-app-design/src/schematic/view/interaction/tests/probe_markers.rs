@@ -263,3 +263,134 @@ fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
     assert!(!state.model.schematic.session.is_dirty);
     assert!(!state.model.schematic.can_undo());
 }
+
+/// Wire `OUT` with a probe on it, and wire `IN` 100 below it.
+fn two_net_host() -> (DesignTestHost, SchematicProbe) {
+    let mut state = DesignTestHost::default();
+    let document = state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document.wires = vec![
+        Wire::new(91, vec![Point::new(0, 20), Point::new(80, 20)]),
+        Wire::new(93, vec![Point::new(0, 120), Point::new(80, 120)]),
+    ];
+    document.net_labels = vec![
+        NetLabel::new(92, Point::new(70, 20), "OUT"),
+        NetLabel::new(94, Point::new(70, 120), "IN"),
+    ];
+    state.sync_active_schematic_to_workspace();
+    state.model.schematic.init_undo_history();
+    let symbol_context = schematic_symbol_context(&state);
+    handle_probe_click(
+        &mut canvas_parts(&mut state),
+        Point::new(40, 20),
+        &symbol_context,
+    );
+    let original = state.model.schematic.document().probes[0].clone();
+    assert_eq!(original.reference, "V(OUT)");
+    (state, original)
+}
+
+/// Copy what is selected and place the paste `offset` from where it was.
+fn paste_selection_moved_by(state: &mut DesignTestHost, offset: Point) -> bool {
+    state.design.schematic_clipboard = state.model.schematic.copy_selection();
+    let origin = state.design.schematic_clipboard.origin;
+    let anchor = Point::new(origin.x + offset.x, origin.y + offset.y);
+    assert!(
+        crate::workbench::app::paste_schematic_clipboard_at(
+            state.design.floating_copy_parts(),
+            &mut state.model,
+            &mut state.workbench,
+            anchor,
+        )
+        .expect("the copy floats")
+    );
+    canvas_parts(state).place_floating_paste()
+}
+
+/// A pasted probe measures the signal under its new place, not the one the
+/// original measures: a note and the probe on `OUT`, pasted 100 below, land
+/// a probe on `IN`, bound to that signal, in the paste's one undo step and
+/// selected with the note.
+#[test]
+fn a_pasted_probe_binds_to_the_signal_under_its_new_place() {
+    let (mut state, original) = two_net_host();
+    let note =
+        crate::state::DesignNote::new(77, Point::new(40, 0), DesignNoteKind::ReviewNote, "Output")
+            .unwrap();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .design_notes
+        .push(note);
+    state.sync_active_schematic_to_workspace();
+    state.model.schematic.clear_undo_history();
+    let selection = &mut state.model.schematic.session.editor.selection;
+    selection.clear();
+    selection.select_design_note(77);
+    selection.select_probe(original.id);
+
+    assert!(paste_selection_moved_by(&mut state, Point::new(0, 100)));
+
+    let document = state.model.schematic.document();
+    assert_eq!(document.design_notes.len(), 2, "the note is pasted");
+    assert_eq!(document.probes.len(), 2);
+    let copy = document
+        .probes
+        .iter()
+        .find(|probe| probe.id != original.id)
+        .expect("the pasted probe")
+        .clone();
+    assert_eq!(copy.position, Point::new(40, 120));
+    assert_eq!(copy.reference, "V(IN)");
+    assert_eq!(
+        copy.source_expression
+            .as_deref()
+            .map(normalized_probe_expression),
+        Some("v(in)".to_owned())
+    );
+    let output = saved_outputs(&state)
+        .iter()
+        .find(|output| normalized_probe_expression(&output.source_expression) == "v(in)")
+        .expect("the copy's signal is asked of the run")
+        .id;
+    assert_eq!(copy.saved_output_id, Some(output));
+    let selection = &state.model.schematic.session.editor.selection;
+    assert!(
+        selection.probes.contains(&copy.id),
+        "the copy's probe is selected"
+    );
+    assert_eq!(selection.design_notes.len(), 1, "with the pasted note");
+
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().probes, vec![original]);
+    assert_eq!(state.model.schematic.document().design_notes.len(), 1);
+    assert!(
+        !state.model.schematic.can_undo(),
+        "the paste is one undo step"
+    );
+}
+
+/// A probe pasted where no wire, pin or part is under it is not pasted, and
+/// the status line says why.
+#[test]
+fn a_probe_pasted_on_no_signal_is_left_out() {
+    let (mut state, original) = two_net_host();
+    state.model.schematic.clear_undo_history();
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_probe(original.id);
+
+    assert!(!paste_selection_moved_by(&mut state, Point::new(0, 300)));
+
+    assert_eq!(state.model.schematic.document().probes, vec![original]);
+    assert!(!state.model.schematic.can_undo());
+    assert_eq!(
+        state.prompt_text(),
+        Some("Nothing was pasted: a probe goes on a wire, a pin or a part.")
+    );
+}
