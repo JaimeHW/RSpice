@@ -170,7 +170,7 @@ pub(super) fn paint_table_header(ui: &mut Ui, weights: &[f32], labels: &[&str]) 
         .iter()
         .map(|label| (*label).to_owned())
         .collect::<Vec<_>>();
-    paint_table_cells(ui, weights, &values, true, None);
+    paint_table_cells(ui, weights, &values, true, None, Sense::hover());
 }
 
 pub(super) fn paint_table_row(
@@ -179,7 +179,19 @@ pub(super) fn paint_table_row(
     values: &[String],
     tone: Option<egui::Color32>,
 ) {
-    paint_table_cells(ui, weights, values, false, tone);
+    paint_table_cells(ui, weights, values, false, tone, Sense::hover());
+}
+
+/// [`paint_table_row`] for a row that answers `sense`, as a row that opens
+/// what it names on a double-click does.
+pub(super) fn paint_table_row_sensed(
+    ui: &mut Ui,
+    weights: &[f32],
+    values: &[String],
+    tone: Option<egui::Color32>,
+    sense: Sense,
+) -> egui::Response {
+    paint_table_cells(ui, weights, values, false, tone, sense)
 }
 
 pub(super) fn paint_table_cells(
@@ -188,11 +200,11 @@ pub(super) fn paint_table_cells(
     values: &[String],
     header: bool,
     tone: Option<egui::Color32>,
-) {
+    sense: Sense,
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let height = if header { 27.0 } else { 29.0 };
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), sense);
     // A row reads as its cells, for whoever cannot see them.
     if !header {
         response.widget_info(|| {
@@ -254,6 +266,7 @@ pub(super) fn paint_table_cells(
             );
         x += width;
     }
+    response
 }
 
 /// A table's one row when it has none: a sentence, so the body face, at the

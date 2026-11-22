@@ -217,42 +217,11 @@ pub(super) fn commit_design_management_subflow(
                 .map_err(|error| error.to_string())?;
             (DesignManagementTab::Variants, None)
         }
-        DesignManagementPage::CompareVariants => {
-            let reference = inputs
-                .compare_reference
-                .ok_or_else(|| "Reference variant is required.".to_owned())?;
-            let comparison = inputs
-                .compare_target
-                .ok_or_else(|| "Comparison variant is required.".to_owned())?;
-            let result = parts
-                .dialog
-                .draft
-                .as_ref()
-                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?
-                .variants()
-                .compare(Some(reference), Some(comparison))
-                .map_err(|error| error.to_string())?;
-            let (difference_count, class_label) = match inputs.difference_classes {
-                VariantDifferenceClasses::DevicesValuesDnpModels => {
-                    (result.differences.len(), "device/value/DNP/model")
-                }
-                VariantDifferenceClasses::ConnectivityOnly => (
-                    variant_connectivity_difference_count(parts.model, reference, comparison)?,
-                    "connectivity",
-                ),
-            };
-            // The comparison has nowhere else to land: no tab lists it.
-            (
-                DesignManagementTab::Variants,
-                Some(format!(
-                    "{difference_count} {class_label} difference{}",
-                    if difference_count == 1 { "" } else { "s" }
-                )),
-            )
-        }
         // A read-out's Close changes nothing and goes back to the tab it
         // was opened from.
-        DesignManagementPage::VariantMatrix => (DesignManagementTab::Variants, None),
+        DesignManagementPage::CompareVariants | DesignManagementPage::VariantMatrix => {
+            (DesignManagementTab::Variants, None)
+        }
         DesignManagementPage::RenumberPreview => {
             let design_management = parts
                 .dialog
@@ -688,8 +657,24 @@ pub fn variant_connectivity_difference_count(
     reference: AssemblyVariantId,
     comparison: AssemblyVariantId,
 ) -> Result<usize, String> {
-    let reference = variant_connectivity_signature(model, reference)?;
-    let comparison = variant_connectivity_signature(model, comparison)?;
+    connectivity_difference_count(
+        model,
+        model.workspace.content.design_management.variants(),
+        Some(reference),
+        Some(comparison),
+    )
+}
+
+/// How many nets join different pins in two choices of `variants`; `None`
+/// on either side is the base design.
+pub(super) fn connectivity_difference_count(
+    model: &Model,
+    variants: &crate::state::AssemblyVariantCatalog,
+    reference: Option<AssemblyVariantId>,
+    comparison: Option<AssemblyVariantId>,
+) -> Result<usize, String> {
+    let reference = variant_connectivity_signature(model, variants, reference)?;
+    let comparison = variant_connectivity_signature(model, variants, comparison)?;
     Ok(reference.symmetric_difference(&comparison).count())
 }
 
@@ -698,16 +683,18 @@ pub fn variant_connectivity_difference_count(
 /// stable component-terminal identities sharing a canonical electrical net.
 /// Comparing these partitions detects DNP and substitution topology effects
 /// without treating value/model-only changes as connectivity differences.
-pub(super) fn variant_connectivity_signature(
+/// The variants are `variants`, which may be a draft the project does not
+/// have yet; `None` is the base design.
+fn variant_connectivity_signature(
     model: &Model,
-    variant_id: AssemblyVariantId,
+    variants: &crate::state::AssemblyVariantCatalog,
+    variant_id: Option<AssemblyVariantId>,
 ) -> Result<BTreeSet<Vec<String>>, String> {
     let mut workspace = model.workspace.clone();
-    workspace
-        .content
-        .design_management
-        .variants_mut()
-        .set_active(variant_id)
+    let chosen = workspace.content.design_management.variants_mut();
+    *chosen = variants.clone();
+    chosen
+        .choose(variant_id)
         .map_err(|error| error.to_string())?;
     let projection = workspace
         .configuration_execution_projection(

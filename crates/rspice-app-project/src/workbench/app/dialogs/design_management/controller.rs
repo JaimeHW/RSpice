@@ -123,6 +123,7 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
                 &parts.model.schematic,
                 &drawing_sheet_personal,
                 write_allowed,
+                &mut body_action,
             ))
         };
         response.map(|response| response.id)
@@ -231,6 +232,44 @@ fn handle_design_management_body_action(
             );
             *parts.configuration_tab =
                 crate::workbench::project::configuration_state::ConfigurationTab::Instances;
+        }
+        DesignManagementBodyAction::ShowPart(object) => {
+            if parts.dialog.dirty() {
+                parts.dialog.error = Some(
+                    "Apply or discard this Design Management draft before going to a part."
+                        .to_owned(),
+                );
+                return;
+            }
+            let Some(place) = super::variant_readout::part_place(parts.model, &object) else {
+                parts.dialog.error = Some("That part is no longer in the design.".to_owned());
+                return;
+            };
+            // The draft is the project's own, so the Comparison it names is
+            // a variant the project has, or the base design.
+            let comparison = parts.dialog.inputs.compare_target;
+            let chosen = parts
+                .model
+                .workspace
+                .content
+                .design_management
+                .variants()
+                .active_variant_id();
+            parts.dialog.close_and_discard();
+            super::close_design_management_dialog_route(parts.wb);
+            match parts.model.choose_assembly_variant(comparison) {
+                Ok(message) => {
+                    if chosen != comparison {
+                        rspice_app_runs::workbench::preflight::invalidate(
+                            &mut parts.runs.preflight,
+                            parts.run_controller,
+                        );
+                    }
+                    parts.wb.prompt(message);
+                }
+                Err(error) => parts.wb.prompt(error),
+            }
+            parts.wb.outbox.push(place);
         }
     }
 }
@@ -359,20 +398,8 @@ pub(super) fn validate_design_management_page(
                 return Err(VARIANT_NAME_NEEDED.to_owned());
             }
         }
-        DesignManagementPage::CompareVariants => {
-            let reference = dialog
-                .inputs
-                .compare_reference
-                .ok_or_else(|| "Reference variant is required.".to_owned())?;
-            let comparison = dialog
-                .inputs
-                .compare_target
-                .ok_or_else(|| "Comparison variant is required.".to_owned())?;
-            if reference == comparison {
-                return Err("Reference and comparison variants must be different.".to_owned());
-            }
-        }
-        DesignManagementPage::VariantMatrix => {}
+        // A read-out says in its list why it shows nothing.
+        DesignManagementPage::CompareVariants | DesignManagementPage::VariantMatrix => {}
         DesignManagementPage::RenumberPreview => {
             let table = dialog
                 .renumber_table

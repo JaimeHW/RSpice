@@ -1,10 +1,12 @@
-//! The Variants tab's read-out: the Substitution matrix, every part a
-//! variant changes against every variant. It changes nothing; the parts are
-//! changed in the inspector with a variant chosen.
+//! The Variants tab's read-outs: the Substitution matrix, every part a
+//! variant changes against every variant, and Compare, every part two
+//! choices treat differently. Neither changes anything; parts are changed in
+//! the inspector with a variant chosen.
 
 use super::widgets::*;
 use super::*;
 use crate::state::{AssemblyVariantCatalog, CellViewRef, VariantObjectOverride};
+use crate::workbench::app_state::model::BASE_DESIGN;
 
 /// What a read-out was worked out from; a change to any of it works the
 /// read-out out again.
@@ -14,6 +16,9 @@ struct ReadoutBasis {
     /// Each variant and its revision, so an edit to any of them shows.
     variants: Vec<(AssemblyVariantId, u64)>,
     scope: VariantMatrixScope,
+    reference: Option<AssemblyVariantId>,
+    comparison: Option<AssemblyVariantId>,
+    classes: VariantDifferenceClasses,
 }
 
 /// One part of a read-out.
@@ -24,8 +29,8 @@ pub(super) struct ReadoutRow {
     part: String,
     /// The cell that holds the part.
     cell: String,
-    /// What each column does to the part; empty where it is fitted as the
-    /// base design has it.
+    /// What each column does to the part; empty in the matrix where it is
+    /// fitted as the base design has it.
     cells: Vec<String>,
 }
 
@@ -33,9 +38,17 @@ pub(super) struct ReadoutRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct VariantReadout {
     basis: ReadoutBasis,
-    /// The headings of the columns after Part and Cell.
+    /// The list's heading and the count beside it.
+    heading: &'static str,
+    count: String,
+    /// The headings of the columns after Part and Cell; none where the
+    /// read-out is a count alone.
     columns: Vec<String>,
     pub(super) rows: Vec<ReadoutRow>,
+    /// What the list says while it has no row.
+    empty: String,
+    /// Whether a double-click on a row shows the part in Design.
+    navigable: bool,
 }
 
 /// Work the open read-out page's table out again when what it reads has
@@ -47,6 +60,7 @@ pub(super) fn refresh_variant_readout(dialog: &mut DesignManagementDialogState, 
         return;
     };
     let catalog = draft.variants();
+    let inputs = &dialog.inputs;
     let basis = ReadoutBasis {
         page,
         variants: catalog
@@ -54,7 +68,10 @@ pub(super) fn refresh_variant_readout(dialog: &mut DesignManagementDialogState, 
             .iter()
             .map(|variant| (variant.id(), variant.revision()))
             .collect(),
-        scope: dialog.inputs.matrix_scope,
+        scope: inputs.matrix_scope,
+        reference: inputs.compare_reference,
+        comparison: inputs.compare_target,
+        classes: inputs.difference_classes,
     };
     if dialog
         .variant_readout
@@ -63,7 +80,11 @@ pub(super) fn refresh_variant_readout(dialog: &mut DesignManagementDialogState, 
     {
         return;
     }
-    let readout = substitution_matrix(catalog, &dialog.owner_key, model, basis);
+    let readout = if page == DesignManagementPage::CompareVariants {
+        comparison(catalog, model, basis)
+    } else {
+        substitution_matrix(catalog, &dialog.owner_key, model, basis)
+    };
     dialog.variant_readout = Some(readout);
 }
 
@@ -95,50 +116,159 @@ fn substitution_matrix(
         .flat_map(BTreeMap::keys)
         .filter(|object| in_scope(object))
         .collect::<BTreeSet<_>>();
-    let mut rows = objects
-        .into_iter()
-        .map(|object| {
-            let (part, cell) = part_and_cell(model, object);
-            let cells = variants
-                .iter()
-                .zip(&resolved)
-                .map(|(variant, overrides)| {
-                    overrides.get(object).map_or_else(String::new, |change| {
-                        let label = change_label(change, true);
-                        if variant.definition().overrides.contains_key(object) {
-                            label
-                        } else {
-                            format!("{label} (inherited)")
-                        }
+    let rows = sorted(
+        objects
+            .into_iter()
+            .map(|object| {
+                let cells = variants
+                    .iter()
+                    .zip(&resolved)
+                    .map(|(variant, overrides)| {
+                        overrides.get(object).map_or_else(String::new, |change| {
+                            let label = change_label(change, true);
+                            if variant.definition().overrides.contains_key(object) {
+                                label
+                            } else {
+                                format!("{label} (inherited)")
+                            }
+                        })
                     })
-                })
-                .collect();
-            ReadoutRow {
-                object: object.clone(),
-                part,
-                cell,
-                cells,
-            }
-        })
-        .collect::<Vec<_>>();
-    rows.sort_by(|left, right| {
-        left.cell
-            .cmp(&right.cell)
-            .then_with(|| designator_order(&left.part, &right.part))
-    });
+                    .collect();
+                row(model, object, cells)
+            })
+            .collect(),
+    );
     VariantReadout {
         basis,
+        heading: "Parts",
+        count: format!(
+            "{} \u{00b7} {}",
+            counted(rows.len(), "part"),
+            counted(variants.len(), "variant")
+        ),
         columns: variants
             .iter()
             .map(|variant| variant.name().to_owned())
             .collect(),
         rows,
+        empty: "No variant changes a part in this scope.".to_owned(),
+        navigable: false,
     }
+}
+
+/// Every part the Reference and the Comparison treat differently, and what
+/// each does to it; or, for connectivity, how many nets join different pins.
+fn comparison(
+    catalog: &AssemblyVariantCatalog,
+    model: &Model,
+    basis: ReadoutBasis,
+) -> VariantReadout {
+    let name = |id: Option<AssemblyVariantId>| {
+        id.and_then(|id| catalog.find(id))
+            .map_or(BASE_DESIGN, |variant| variant.name())
+            .to_owned()
+    };
+    let columns = vec![name(basis.reference), name(basis.comparison)];
+    let mut readout = VariantReadout {
+        heading: "Differences",
+        count: String::new(),
+        columns,
+        rows: Vec::new(),
+        empty: String::new(),
+        navigable: true,
+        basis,
+    };
+    let (reference, comparison) = (readout.basis.reference, readout.basis.comparison);
+    if reference == comparison {
+        readout.empty = "Choose two different designs to compare.".to_owned();
+        return readout;
+    }
+    if readout.basis.classes == VariantDifferenceClasses::ConnectivityOnly {
+        readout.heading = "Connectivity";
+        readout.columns.clear();
+        readout.navigable = false;
+        match super::operations::connectivity_difference_count(
+            model, catalog, reference, comparison,
+        ) {
+            Ok(count) => {
+                readout.count = counted(count, "difference");
+                readout.empty = if count == 0 {
+                    "Every pin joins the same net in both designs."
+                } else {
+                    "Some pins join different nets in the two designs."
+                }
+                .to_owned();
+            }
+            Err(error) => readout.empty = error,
+        }
+        return readout;
+    }
+    match catalog.compare(reference, comparison) {
+        Ok(found) => {
+            let fitted = "Fitted".to_owned();
+            let label = |change: Option<&VariantObjectOverride>| {
+                change.map_or_else(|| fitted.clone(), |change| change_label(change, false))
+            };
+            readout.rows = sorted(
+                found
+                    .differences
+                    .iter()
+                    .map(|difference| {
+                        let cells = vec![
+                            label(difference.reference.as_ref()),
+                            label(difference.comparison.as_ref()),
+                        ];
+                        row(model, &difference.object, cells)
+                    })
+                    .collect(),
+            );
+            readout.count = counted(readout.rows.len(), "difference");
+            readout.empty = "The two designs fit every part alike.".to_owned();
+        }
+        Err(error) => readout.empty = error.to_string(),
+    }
+    readout
+}
+
+/// A read-out's row for `object`, named as the design draws it now.
+fn row(model: &Model, object: &SchematicObjectKey, cells: Vec<String>) -> ReadoutRow {
+    let (part, cell) = part_and_cell(model, object);
+    ReadoutRow {
+        object: object.clone(),
+        part,
+        cell,
+        cells,
+    }
+}
+
+/// `rows` by cell, then by name in the order a reader counts them.
+fn sorted(mut rows: Vec<ReadoutRow>) -> Vec<ReadoutRow> {
+    rows.sort_by(|left, right| {
+        left.cell
+            .cmp(&right.cell)
+            .then_with(|| designator_order(&left.part, &right.part))
+    });
+    rows
 }
 
 /// The part `object` names and the cell that holds it, as the design draws
 /// them now.
 fn part_and_cell(model: &Model, object: &SchematicObjectKey) -> (String, String) {
+    let view_key = object.cell_view_key();
+    let part = drawn_part(model, object).map_or_else(
+        || format!("deleted part #{}", object.object_id()),
+        |component| component.name.clone(),
+    );
+    let cell = CellViewRef::from_key(view_key)
+        .map_or_else(|| view_key.to_owned(), |reference| reference.cell);
+    (part, cell)
+}
+
+/// The part `object` names, as the design draws it now.
+fn drawn_part<'a>(
+    model: &'a Model,
+    object: &SchematicObjectKey,
+) -> Option<&'a crate::state::Component> {
     let view_key = object.cell_view_key();
     let content = &model.workspace.content;
     let document = if view_key.eq_ignore_ascii_case(&content.active_schematic_reference().key()) {
@@ -148,21 +278,37 @@ fn part_and_cell(model: &Model, object: &SchematicObjectKey) -> (String, String)
             .schematic_buffers
             .get(view_key)
             .map(|buffer| buffer.document())
-    };
-    let part = document
-        .and_then(|document| {
-            document
-                .components
-                .iter()
-                .find(|component| component.id == object.object_id())
-        })
-        .map_or_else(
-            || format!("deleted part #{}", object.object_id()),
-            |component| component.name.clone(),
-        );
-    let cell = CellViewRef::from_key(view_key)
-        .map_or_else(|| view_key.to_owned(), |reference| reference.cell);
-    (part, cell)
+    }?;
+    document
+        .components
+        .iter()
+        .find(|component| component.id == object.object_id())
+}
+
+/// Where Design shows the part `object` names: its cell view, the sheet
+/// that draws it, centred on it and selected. `None` once the part is gone.
+pub(super) fn part_place(
+    model: &Model,
+    object: &SchematicObjectKey,
+) -> Option<crate::workbench::framework::requests::ShowOnSchematic> {
+    let view_key = object.cell_view_key();
+    let point = drawn_part(model, object)?.pos;
+    let cell_view = CellViewRef::from_key(view_key)?;
+    let sheet = model
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog(view_key)
+        .filter(|catalog| catalog.sheets().len() > 1)
+        .and_then(|catalog| catalog.sheet_for_object(object.object_id()));
+    let mut selection = rspice_design::schematic::selection::Selection::default();
+    selection.select_component(object.object_id());
+    Some(crate::workbench::framework::requests::ShowOnSchematic {
+        cell_view,
+        sheet,
+        point,
+        selection,
+    })
 }
 
 /// What `change` does to a part, in a cell's few words. `short` names a
@@ -210,30 +356,39 @@ const READOUT_ROW_HEIGHT: f32 = 29.0;
 /// How tall the list stands before it scrolls.
 const READOUT_LIST_HEIGHT: f32 = 12.0 * READOUT_ROW_HEIGHT;
 
-/// The read-out's list under a heading with its count.
-pub(super) fn variant_readout_list(ui: &mut Ui, readout: &VariantReadout) {
+/// The read-out's list under a heading with its count. Returns the part
+/// whose row was double-clicked, where a row can be.
+pub(super) fn variant_readout_list(
+    ui: &mut Ui,
+    readout: &VariantReadout,
+) -> Option<SchematicObjectKey> {
     section_header(
         ui,
-        "Parts",
-        Some(&format!(
-            "{} \u{00b7} {}",
-            counted(readout.rows.len(), "part"),
-            counted(readout.columns.len(), "variant")
-        )),
+        readout.heading,
+        (!readout.count.is_empty()).then_some(readout.count.as_str()),
     );
     let weights = [PART_WEIGHT, CELL_WEIGHT]
         .into_iter()
         .chain(readout.columns.iter().map(|_| VARIANT_WEIGHT))
         .collect::<Vec<_>>();
-    let headings = ["Part", "Cell"]
-        .into_iter()
-        .chain(readout.columns.iter().map(String::as_str))
-        .collect::<Vec<_>>();
-    paint_table_header(ui, &weights, &headings);
-    if readout.rows.is_empty() {
-        empty_table_row(ui, "No variant changes a part in this scope.");
-        return;
+    if !readout.columns.is_empty() {
+        let headings = ["Part", "Cell"]
+            .into_iter()
+            .chain(readout.columns.iter().map(String::as_str))
+            .collect::<Vec<_>>();
+        paint_table_header(ui, &weights, &headings);
     }
+    if readout.rows.is_empty() {
+        empty_table_row(ui, &readout.empty);
+        return None;
+    }
+    let sense = if readout.navigable {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let shown_in = readout.columns.last().cloned().unwrap_or_default();
+    let mut opened = None;
     egui::ScrollArea::vertical()
         .id_salt("variant-readout")
         .max_height(READOUT_LIST_HEIGHT)
@@ -245,7 +400,15 @@ pub(super) fn variant_readout_list(ui: &mut Ui, readout: &VariantReadout) {
                     .into_iter()
                     .chain(row.cells.iter().cloned())
                     .collect::<Vec<_>>();
-                paint_table_row(ui, &weights, &values, None);
+                let response = paint_table_row_sensed(ui, &weights, &values, None, sense);
+                if readout.navigable {
+                    let response = response
+                        .on_hover_text(format!("Double-click to show {} in {shown_in}", row.part));
+                    if response.double_clicked() {
+                        opened = Some(row.object.clone());
+                    }
+                }
             }
         });
+    opened
 }

@@ -2,6 +2,7 @@
 
 use super::widgets::*;
 use super::*;
+use crate::workbench::app_state::model::BASE_DESIGN;
 
 pub(super) fn design_management_subflow_body(
     ui: &mut Ui,
@@ -11,6 +12,7 @@ pub(super) fn design_management_subflow_body(
     schematic: &crate::state::SchematicState,
     drawing_sheet_personal: &crate::workbench::DrawingSheetPersonalPreferences,
     write_allowed: bool,
+    action: &mut DesignManagementBodyAction,
 ) -> egui::Response {
     let mut first_response = None;
     if dialog.page == DesignManagementPage::RenumberPreview {
@@ -57,8 +59,12 @@ pub(super) fn design_management_subflow_body(
                         write_allowed,
                     ));
                 });
-            if let Some(readout) = dialog.variant_readout.as_ref() {
-                super::variant_readout::variant_readout_list(right, readout);
+            if let Some(object) = dialog
+                .variant_readout
+                .as_ref()
+                .and_then(|readout| super::variant_readout::variant_readout_list(right, readout))
+            {
+                *action = DesignManagementBodyAction::ShowPart(object);
             }
         });
     } else {
@@ -323,18 +329,20 @@ pub(super) fn subflow_fields(
         }
         DesignManagementPage::CompareVariants => {
             let variants = variant_choices(dialog);
-            let response = field_combo_by_id(
+            let response = field_combo_optional_base(
                 ui,
                 "Reference",
                 &variants,
                 &mut dialog.inputs.compare_reference,
+                BASE_DESIGN,
                 true,
             );
-            field_combo_by_id(
+            field_combo_optional_base(
                 ui,
                 "Comparison",
                 &variants,
                 &mut dialog.inputs.compare_target,
+                BASE_DESIGN,
                 true,
             );
             field_combo(

@@ -107,7 +107,7 @@ impl DesignManagementPage {
             Self::NewSheet => "Create sheet",
             Self::MoveSelection => "Move",
             Self::NewVariant => "Create variant",
-            Self::CompareVariants => "Open comparison",
+            Self::CompareVariants => "Close",
             Self::VariantMatrix => "Close",
             Self::RenumberPreview => "Renumber",
             Self::AnnotationPolicy => "Save policy",
@@ -119,7 +119,7 @@ impl DesignManagementPage {
     /// back to the manager and changes nothing, so it needs no Cancel and
     /// is offered on a project that cannot be written.
     const fn read_out(self) -> bool {
-        matches!(self, Self::VariantMatrix)
+        matches!(self, Self::CompareVariants | Self::VariantMatrix)
     }
 
     /// What the page is for, in a sentence under its title.
@@ -129,7 +129,9 @@ impl DesignManagementPage {
             Self::NewSheet => "Add a sheet to this cell view's drawing.",
             Self::MoveSelection => "Move the selected objects to another sheet of this cell view.",
             Self::NewVariant => "Add an assembly variant of this design.",
-            Self::CompareVariants => "Compare two assembly variants.",
+            Self::CompareVariants => {
+                "Every part the two designs treat differently. Double-click a part to show it in the comparison."
+            }
             Self::VariantMatrix => {
                 "What each variant does to each part it changes. An empty cell is the part as the base design fits it."
             }
@@ -468,14 +470,12 @@ impl DesignManagementDialogState {
             }
             let variants = draft.variants();
             inputs.variant_parent = variants.active_variant_id();
-            inputs.compare_reference = variants
+            // The base design against the variant the design is seen as,
+            // as KiCad compares a variant with its default.
+            inputs.compare_reference = None;
+            inputs.compare_target = variants
                 .active_variant_id()
                 .or_else(|| variants.variants().first().map(|variant| variant.id()));
-            inputs.compare_target = variants
-                .variants()
-                .iter()
-                .map(|variant| variant.id())
-                .find(|id| Some(*id) != inputs.compare_reference);
             let policy = draft.annotation().policy().definition();
             inputs.prefix_allocation = policy.prefix_allocation;
             inputs.reserved_ranges = format_reserved_ranges(&policy.reserved_ranges);
@@ -727,13 +727,16 @@ fn split_widths(available: f32, left_fraction: f32) -> (f32, f32) {
     (left, (usable - left).max(0.0))
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 enum DesignManagementBodyAction {
     #[default]
     None,
     Open(DesignManagementPage),
     OpenConfigurationBinding,
     OpenConfigurationSets,
+    /// Close the dialog and show this part in Design, seen as the variant
+    /// Compare's Comparison names.
+    ShowPart(SchematicObjectKey),
 }
 
 mod controller;

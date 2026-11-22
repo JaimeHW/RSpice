@@ -311,8 +311,9 @@ pub(super) fn variants_manager_body(
             {
                 action = DesignManagementBodyAction::Open(DesignManagementPage::NewVariant);
             }
+            // One variant is compared with the base design.
             if Button::new("Compare variants\u{2026}")
-                .enabled(variants.len() > 1)
+                .enabled(!variants.is_empty())
                 .show(ui)
                 .clicked()
             {

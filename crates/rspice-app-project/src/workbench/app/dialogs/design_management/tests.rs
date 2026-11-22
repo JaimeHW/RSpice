@@ -715,3 +715,99 @@ fn the_substitution_matrix_reads_each_variants_changes_and_only_closes() {
     assert_eq!(dialog.active_tab, DesignManagementTab::Variants);
     assert_eq!(dialog.draft, before, "closing the matrix changed the draft");
 }
+
+/// Compare lists each part the Reference and the Comparison treat
+/// differently, with what each does to it, the base design first; and a
+/// double-click on a part shows it in Design, seen as the Comparison.
+#[test]
+fn compare_lists_each_difference_and_a_double_click_shows_the_part() {
+    let ctx = themed_context();
+    let (mut harness, _, automotive) = two_variants_over_three_parts();
+    // What Compare reads is what the project has, so nothing is pending
+    // and the part can be shown.
+    let draft = harness.state.design_management.draft.clone().unwrap();
+    harness
+        .model
+        .workspace
+        .content
+        .replace_design_management(draft.clone())
+        .unwrap();
+    let dialog = &mut harness.state.design_management;
+    dialog.original = Some(draft);
+    dialog.active_tab = DesignManagementTab::Variants;
+    dialog.reset_inputs_for_page(DesignManagementPage::CompareVariants, None, None);
+    assert_eq!(
+        dialog.inputs.compare_reference, None,
+        "Compare does not open on the base design"
+    );
+    dialog.inputs.compare_target = Some(automotive);
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = frame(&ctx, &mut harness, Vec::new());
+    }
+    let cell = CellViewRef::from_key(&harness.state.design_management.owner_key)
+        .unwrap()
+        .cell;
+    for row in [
+        format!("R1, {cell}, Fitted, Do not populate"),
+        format!("R2, {cell}, Fitted, qualified/res_aec \u{00b7} 2k"),
+        format!("R3, {cell}, Fitted, Value 4k7"),
+    ] {
+        assert!(says(&nodes, &row), "Compare has no row {row:?}");
+    }
+    assert!(says(&nodes, "3 differences"));
+    assert!(!says(&nodes, "Open comparison"));
+
+    let (_, r2) = nodes
+        .iter()
+        .find(|(_, node)| {
+            let row = format!("R2, {cell}");
+            node.label().is_some_and(|label| label.starts_with(&row))
+                || node.value().is_some_and(|value| value.starts_with(&row))
+        })
+        .expect("R2's row");
+    let bounds = r2.bounds().expect("the row is laid out");
+    let at = egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    let _ = frame(&ctx, &mut harness, vec![egui::Event::PointerMoved(at)]);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = frame(
+        &ctx,
+        &mut harness,
+        vec![button(true), button(false), button(true), button(false)],
+    );
+
+    assert!(
+        !harness.state.design_management.open,
+        "the dialog stays open"
+    );
+    assert_eq!(
+        harness
+            .model
+            .chosen_assembly_variant()
+            .map(|variant| variant.id()),
+        Some(automotive),
+        "the design is not seen as the Comparison"
+    );
+    let shown = harness
+        .wb
+        .outbox
+        .take::<crate::workbench::framework::requests::ShowOnSchematic>()
+        .expect("Design is not asked to show the part");
+    assert_eq!(
+        shown.point,
+        Point::new(200, 0),
+        "the canvas centres elsewhere"
+    );
+    assert!(
+        shown.selection.components.contains(&2),
+        "R2 is not selected on arrival"
+    );
+}
