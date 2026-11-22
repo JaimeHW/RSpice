@@ -1193,6 +1193,55 @@ impl fmt::Display for SchematicArrayError {
     }
 }
 
+impl SchematicArrayError {
+    /// The refusal as the user reads it, with the parts, nets and labels it
+    /// names looked up in `document` rather than given by internal number.
+    /// An object `document` does not hold is one of the copies.
+    pub fn describe(&self, document: &super::document::SchematicDocument) -> String {
+        let name = |id: u64| document.object_name(id);
+        let pair = |object_id: u64, other_id: u64| match (name(object_id), name(other_id)) {
+            (None, None) => ("Two copies".to_owned(), String::new()),
+            (None, Some(other)) | (Some(other), None) => ("A copy".to_owned(), other),
+            (Some(object), Some(other)) => (super::document::capitalized(&object), other),
+        };
+        match self {
+            Self::GeometryCollision {
+                object_id,
+                other_id,
+            } => match pair(*object_id, *other_id) {
+                (two, other) if other.is_empty() => format!("{two} would overlap."),
+                (object, other) => format!("{object} would overlap {other}."),
+            },
+            Self::UnintendedContact {
+                object_id,
+                other_id,
+                ..
+            } => match pair(*object_id, *other_id) {
+                (two, other) if other.is_empty() => format!("{two} would touch."),
+                (object, other) => format!("{object} would touch {other}."),
+            },
+            Self::StaleSelection { .. } => {
+                "A selected object is no longer in the schematic.".to_owned()
+            }
+            Self::RadialDocumentationOnly { object_id } => format!(
+                "{} is electrical, so it cannot repeat around a centre.",
+                name(*object_id).map_or_else(
+                    || "The selection".to_owned(),
+                    |n| super::document::capitalized(&n)
+                )
+            ),
+            Self::InvalidGeometry { object_id } => format!(
+                "A copy of {} would have invalid geometry.",
+                name(*object_id).unwrap_or_else(|| "the selection".to_owned())
+            ),
+            Self::InvalidBusTap { .. } => {
+                "A copied bus tap would not sit on its copied bus.".to_owned()
+            }
+            _ => self.to_string(),
+        }
+    }
+}
+
 impl std::error::Error for SchematicArrayError {}
 
 fn validate_placement(
@@ -1394,6 +1443,47 @@ mod tests {
             Some("A[00]")
         );
         assert_eq!(naming.to_string(), "R011…R004 · A[07]…A[00]");
+    }
+
+    /// A refusal names the parts and nets it is about; an object the
+    /// drawing does not hold yet is one of the copies.
+    #[test]
+    fn a_refusal_names_the_part_or_net_and_calls_the_rest_copies() {
+        use crate::schematic::component::Component;
+        use crate::schematic::component_type::ComponentType;
+        use crate::schematic::document::SchematicDocument;
+        use crate::schematic::net_label::NetLabel;
+        use crate::schematic::wire::Wire;
+        let mut document = SchematicDocument::default();
+        document.components.push(
+            Component::new(3, ComponentType::Resistor, Point::origin()).with_name_value("R3", "1k"),
+        );
+        document
+            .wires
+            .push(Wire::segment(7, Point::new(0, 100), Point::new(200, 100)));
+        document
+            .net_labels
+            .push(NetLabel::new(9, Point::new(100, 100), "OUT"));
+        let collision = SchematicArrayError::GeometryCollision {
+            object_id: 900,
+            other_id: 3,
+        };
+        assert_eq!(collision.describe(&document), "A copy would overlap R3.");
+        let contact = SchematicArrayError::UnintendedContact {
+            object_id: 900,
+            other_id: 7,
+            point: Point::new(20, 100),
+        };
+        assert_eq!(
+            contact.describe(&document),
+            "A copy would touch the wire of net OUT."
+        );
+        let copies = SchematicArrayError::UnintendedContact {
+            object_id: 900,
+            other_id: 901,
+            point: Point::new(20, 0),
+        };
+        assert_eq!(copies.describe(&document), "Two copies would touch.");
     }
 
     /// Copies numbered on from a free run read as the source, then the run,

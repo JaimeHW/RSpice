@@ -130,6 +130,65 @@ impl SchematicDocument {
         ports.into_iter().map(|(_, _, spec)| spec).collect()
     }
 
+    /// What a refusal calls object `id`, as the user knows it: a part by its
+    /// name, a wire by a net label on it, a label, tap or bus by its name.
+    /// `None` when no object here has that id, such as a copy that has not
+    /// been made yet.
+    pub fn object_name(&self, id: u64) -> Option<String> {
+        let named = |kind: &str, name: &str| {
+            let name = name.trim();
+            if name.is_empty() {
+                format!("an unnamed {kind}")
+            } else {
+                format!("{kind} {name}")
+            }
+        };
+        if let Some(part) = self.components.iter().find(|part| part.id == id) {
+            let name = part.name.trim();
+            return Some(if name.is_empty() {
+                "an unnamed part".to_owned()
+            } else {
+                name.to_owned()
+            });
+        }
+        if let Some(wire) = self.wires.iter().find(|wire| wire.id == id) {
+            return Some(
+                self.net_labels
+                    .iter()
+                    .find(|label| wire.contains_point(label.pos) && !label.name.trim().is_empty())
+                    .map_or_else(
+                        || "a wire".to_owned(),
+                        |label| format!("the wire of net {}", label.name.trim()),
+                    ),
+            );
+        }
+        if let Some(label) = self.net_labels.iter().find(|label| label.id == id) {
+            return Some(named("net label", &label.name));
+        }
+        if let Some(bus) = self.buses.iter().find(|bus| bus.id == id) {
+            return Some(bus.declaration.as_ref().map_or_else(
+                || "an unnamed bus".to_owned(),
+                |declaration| format!("bus {declaration}"),
+            ));
+        }
+        if let Some(tap) = self.bus_taps.iter().find(|tap| tap.id == id) {
+            return Some(format!("the tap of {}", tap.slice));
+        }
+        if let Some(probe) = self.probes.iter().find(|probe| probe.id == id) {
+            return Some(named("probe", &probe.reference));
+        }
+        if self.junctions.iter().any(|junction| junction.id == id) {
+            return Some("a junction".to_owned());
+        }
+        if self.design_notes.iter().any(|note| note.id == id) {
+            return Some("a note".to_owned());
+        }
+        if self.documentation_shapes.iter().any(|shape| shape.id == id) {
+            return Some("a shape".to_owned());
+        }
+        None
+    }
+
     /// `true` when the schematic declares at least one interface port —
     /// i.e. it is a reusable cell rather than a top-level testbench.
     pub fn has_interface(&self) -> bool {
@@ -137,6 +196,14 @@ impl SchematicDocument {
             .iter()
             .any(|component| component.port_spec().is_some())
     }
+}
+
+/// `text` with its first letter upper case, to open a sentence with a name.
+pub(crate) fn capitalized(text: &str) -> String {
+    let mut characters = text.chars();
+    characters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(characters).collect()
+    })
 }
 
 impl AsRef<SchematicDocument> for SchematicDocument {

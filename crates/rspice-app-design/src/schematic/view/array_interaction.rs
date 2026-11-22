@@ -151,7 +151,10 @@ fn commit_armed_array_selection(
             ));
             cancel_armed_array_selection_in(&mut state.design.array_selection, state.model);
         }
-        Err(error) => refuse_array(state, format!("Array not created: {error}")),
+        Err(error) => {
+            let reason = error.describe(state.model.schematic.document());
+            refuse_array(state, format!("Array not created: {reason}"));
+        }
     }
 }
 
@@ -468,7 +471,10 @@ mod tests {
                 .refusal
                 .clone()
                 .unwrap_or_default();
-            assert!(refusal.contains("object 3 at"), "{case}: {refusal:?}");
+            assert!(
+                refusal.contains("A copy would touch a wire."),
+                "{case}: {refusal:?}"
+            );
             let document = state.model.schematic.document();
             assert_eq!(document.components.len(), 1, "{case}");
             assert!(document.junctions.is_empty(), "{case}");

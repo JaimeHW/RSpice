@@ -348,7 +348,7 @@ pub(super) fn stretch_preview_diff(
                 &candidate,
             )))),
             Ok(None) => Ok(None),
-            Err(error) => Err(error.to_string()),
+            Err(error) => Err(error.describe(state.model.schematic.document())),
         }
     })
 }
@@ -466,7 +466,7 @@ fn draw_array_selection_preview(
                 |component| symbol_context.named_terminal_points(component),
                 |component| symbol_context.component_bounds_tuple(component),
             )
-            .map_err(|error| error.to_string());
+            .map_err(|error| error.describe(state.model.schematic.document()));
         cache = Some(crate::workbench::app::ArraySelectionPreviewCache {
             plan,
             library_revision,

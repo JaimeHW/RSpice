@@ -163,10 +163,11 @@ pub(super) fn commit_armed_stretch_selection(
         }
         Err(error) => {
             state.model.schematic.cancel_operation();
+            let reason = error.describe(state.model.schematic.document());
             let draft = &mut state.design.stretch_selection;
-            draft.canvas.gesture.preview_error = Some(error.to_string());
+            draft.canvas.gesture.preview_error = Some(reason.clone());
             draft.canvas.gesture.reset_candidate();
-            state.prompt(format!("Stretch not committed: {error}"));
+            state.prompt(format!("Stretch not committed: {reason}"));
         }
     }
 }

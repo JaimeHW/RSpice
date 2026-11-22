@@ -419,7 +419,8 @@ fn land_wire_segment(
         }
         Err(error) => {
             state.model.schematic.cancel_operation();
-            state.prompt(format!("Wire not moved: {error}"));
+            let reason = error.describe(state.model.schematic.document());
+            state.prompt(format!("Wire not moved: {reason}"));
         }
     }
 }

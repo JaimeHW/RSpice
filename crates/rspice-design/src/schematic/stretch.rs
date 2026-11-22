@@ -153,6 +153,76 @@ impl std::fmt::Display for StretchSelectionError {
     }
 }
 
+impl StretchSelectionError {
+    /// The refusal as the user reads it, with the wires, parts and labels it
+    /// names looked up in `document` rather than given by internal number.
+    pub fn describe(&self, document: &SchematicDocument) -> String {
+        let name = |id: u64| {
+            document
+                .object_name(id)
+                .unwrap_or_else(|| "an object".to_owned())
+        };
+        match self {
+            Self::DegenerateGeometry { object_id } => format!(
+                "Stretching {} would leave a segment of no length.",
+                name(*object_id)
+            ),
+            Self::NonOrthogonalSource { object_id } => format!(
+                "{} has angled segments; choose Allow diagonal to stretch it.",
+                super::document::capitalized(&name(*object_id))
+            ),
+            Self::NetLabelAnchor { label_id, .. } => format!(
+                "{} sits on the segment; a stretch cannot move off or under it.",
+                super::document::capitalized(&name(*label_id))
+            ),
+            Self::ConnectedTerminal { component_id, .. } => format!(
+                "A pin of {} is connected at the segment's end, so that end cannot move.",
+                name(*component_id)
+            ),
+            Self::InvalidTapAttachment { tap_id } => format!(
+                "{} cannot stay on both its bus and its wire.",
+                super::document::capitalized(&name(*tap_id))
+            ),
+            Self::ConductorOverlap {
+                object_id,
+                other_id,
+            } => format!(
+                "Stretching {} would overlap {}.",
+                name(*object_id),
+                name(*other_id)
+            ),
+            Self::UnintendedConductorContact {
+                object_id,
+                other_id,
+            } => format!(
+                "Stretching {} would touch {}.",
+                name(*object_id),
+                name(*other_id)
+            ),
+            Self::UnintendedTerminalContact {
+                object_id,
+                component_id,
+            } => format!(
+                "Stretching {} would touch a pin of {}.",
+                name(*object_id),
+                name(*component_id)
+            ),
+            Self::ComponentBodyEntry {
+                object_id,
+                component_id,
+            } => format!(
+                "Stretching {} would run through {}.",
+                name(*object_id),
+                name(*component_id)
+            ),
+            Self::InvalidDocumentationGeometry { .. } => {
+                "Moving that point would leave the shape invalid.".to_owned()
+            }
+            _ => self.to_string(),
+        }
+    }
+}
+
 impl std::error::Error for StretchSelectionError {}
 
 /// Stretch using caller-resolved component terminal geometry.
@@ -1447,6 +1517,47 @@ mod tests {
             |_| Vec::new(),
             Component::bounding_box,
         )
+    }
+
+    /// A refusal names the part, wire or label by what the user knows it
+    /// as, never by an internal number.
+    #[test]
+    fn a_refusal_names_parts_wires_and_labels() {
+        use crate::schematic::component_type::ComponentType;
+        use crate::schematic::net_label::NetLabel;
+        let mut document = document(vec![Wire::segment(7, Point::new(0, 0), Point::new(100, 0))]);
+        document.components.push(
+            Component::new(3, ComponentType::Resistor, Point::new(0, 50))
+                .with_name_value("R3", "1k"),
+        );
+        document
+            .net_labels
+            .push(NetLabel::new(9, Point::new(40, 0), "OUT"));
+        let at = Point::new(0, 0);
+        assert_eq!(
+            StretchSelectionError::ConnectedTerminal {
+                component_id: 3,
+                point: at
+            }
+            .describe(&document),
+            "A pin of R3 is connected at the segment's end, so that end cannot move."
+        );
+        assert_eq!(
+            StretchSelectionError::ComponentBodyEntry {
+                object_id: 7,
+                component_id: 3
+            }
+            .describe(&document),
+            "Stretching the wire of net OUT would run through R3."
+        );
+        assert_eq!(
+            StretchSelectionError::NetLabelAnchor {
+                label_id: 9,
+                point: at
+            }
+            .describe(&document),
+            "Net label OUT sits on the segment; a stretch cannot move off or under it."
+        );
     }
 
     fn points(document: &SchematicDocument, wire_id: u64) -> Vec<Point> {
