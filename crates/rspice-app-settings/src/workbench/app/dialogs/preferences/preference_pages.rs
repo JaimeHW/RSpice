@@ -711,8 +711,17 @@ fn schematic(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
                     .model
                     .preferences
                     .choice(ChoicePreference::SchematicGrid);
+                // New schematics take the project's default drawing sheet.
+                let unit = state
+                    .model
+                    .workspace
+                    .content
+                    .design_management
+                    .drawing_sheet_settings()
+                    .default_format
+                    .display_unit;
                 let labels = crate::state::SchematicGridPitch::ALL
-                    .map(crate::state::policy_labels::grid_pitch_label);
+                    .map(|pitch| crate::state::policy_labels::grid_pitch_label(pitch, unit));
                 if segmented(
                     ui,
                     "preferences.schematic.grid",

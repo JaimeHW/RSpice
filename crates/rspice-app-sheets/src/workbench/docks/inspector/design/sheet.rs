@@ -218,7 +218,8 @@ pub enum SchematicEdit {
 fn schematic_section(ui: &mut Ui, model: &Model, editable: bool, edit: &mut Option<SchematicEdit>) {
     section_header(ui, "Schematic", None);
     let policy = &model.schematic.document().document_policy;
-    let grids = SchematicGridPitch::ALL.map(|pitch| (pitch, grid_pitch_label(pitch)));
+    let unit = model.active_sheet_display_unit();
+    let grids = SchematicGridPitch::ALL.map(|pitch| (pitch, grid_pitch_label(pitch, unit)));
     if let Some(pitch) = choice_row(
         ui,
         editable,

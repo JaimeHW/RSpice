@@ -29,10 +29,11 @@ impl GridSnapSpacingChoice {
     /// Free first, then the pitches finest first.
     pub(crate) const ALL: [Self; 4] = [Self::Free, Self::Mm1, Self::Mm1_25, Self::Mm2_5];
 
-    pub(crate) fn label(self) -> String {
+    /// The choice as the open sheet reads lengths.
+    pub(crate) fn label(self, unit: crate::state::DrawingSheetDisplayUnit) -> String {
         self.pitch().map_or_else(
             || "Free".to_owned(),
-            crate::state::policy_labels::grid_pitch_label,
+            |pitch| crate::state::policy_labels::grid_pitch_label(pitch, unit),
         )
     }
 
@@ -165,8 +166,13 @@ pub(in crate::workbench) fn show_grid_snap_routing_form(
         // A refusal is known only once Apply is pressed.
         .status(validation_error.as_deref().map_or(Ok(None), Err))
         .show(ctx, |rows| {
-            let (grid, spacing) =
-                grid_snap_routing_rows(rows, transaction, read_only, angled_routing);
+            let (grid, spacing) = grid_snap_routing_rows(
+                rows,
+                transaction,
+                read_only,
+                angled_routing,
+                model.active_sheet_display_unit(),
+            );
             spacing_id = Some(spacing);
             Some(grid)
         });
@@ -237,6 +243,7 @@ fn grid_snap_routing_rows(
     transaction: &mut GridSnapRoutingDialogState,
     read_only: bool,
     angled_routing: bool,
+    unit: crate::state::DrawingSheetDisplayUnit,
 ) -> (egui::Id, egui::Id) {
     let grid_options = GRID_STYLES.map(|style| grid_style_label(style).to_owned());
     let grid = rows.select_with_response(
@@ -250,11 +257,11 @@ fn grid_snap_routing_rows(
         transaction.validation_error = None;
     }
 
-    let spacing_labels = GridSnapSpacingChoice::ALL.map(GridSnapSpacingChoice::label);
+    let spacing_labels = GridSnapSpacingChoice::ALL.map(|choice| choice.label(unit));
     let spacing = rows.select_with_response(
         "Snap spacing",
         "grid-snap-routing-spacing",
-        &transaction.draft.snap_spacing.label(),
+        &transaction.draft.snap_spacing.label(unit),
         &spacing_labels,
     );
     if let Some(index) = spacing.picked {

@@ -45,6 +45,24 @@ impl Model {
         }
     }
 
+    /// The unit the open view's sheet shows lengths in.
+    pub fn active_sheet_display_unit(&self) -> crate::state::DrawingSheetDisplayUnit {
+        let key = self.workspace.content.active_schematic_reference().key();
+        let design_management = &self.workspace.content.design_management;
+        match design_management
+            .sheet_catalog(&key)
+            .and_then(|catalog| catalog.active())
+        {
+            Some(sheet) => self.sheet_print_format(sheet).display_unit,
+            None => {
+                design_management
+                    .drawing_sheet_settings()
+                    .default_format
+                    .display_unit
+            }
+        }
+    }
+
     /// The format `sheet` prints on: its own, or the project's default with
     /// the sheet's own title values where it inherits the default.
     fn sheet_print_format(&self, sheet: &DesignSheet) -> SchematicSheetFormat {
