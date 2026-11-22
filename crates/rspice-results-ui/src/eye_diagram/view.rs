@@ -427,8 +427,8 @@ fn density_uv(extent: (f64, f64, f64, f64), x: (f64, f64), y: (f64, f64)) -> egu
     egui::Rect::from_min_max(egui::pos2(u(x.0), v(y.1)), egui::pos2(u(x.1), v(y.0)))
 }
 
-/// Rasterize every acquisition into an alpha-accumulated density image —
-/// the same visual as stroking each at ~18/255 alpha, computed once.
+/// Rasterize every acquisition into a density image in the trace colour,
+/// its strength at each pixel graded by [`density_strength`].
 fn rasterize_density(
     data: &EyeData,
     x0: f64,
@@ -457,15 +457,47 @@ fn rasterize_density(
         }
     }
 
+    let densest = coverage.iter().copied().fold(0.0f32, f32::max);
     let [r, g, b, _] = color.to_array();
     let pixels = coverage
         .iter()
-        .map(|&cov| {
-            let alpha = (cov * 18.0).min(255.0) as u8;
+        .map(|&hits| {
+            let alpha = (density_strength(hits, densest) * 255.0).round() as u8;
             egui::Color32::from_rgba_unmultiplied(r, g, b, alpha)
         })
         .collect();
     egui::ColorImage::new([width, height], pixels)
+}
+
+/// The strength, as a fraction of the trace colour, a lone acquisition draws
+/// at. Fainter, a trace that occurs once reads as background.
+const LONE_TRACE_STRENGTH: f32 = 0.6;
+
+/// How strongly a pixel draws, as a fraction of the trace colour, from the
+/// acquisitions crossing it (`hits`, in traces: one trace passing squarely
+/// through a pixel leaves one) and the most any pixel holds (`densest`).
+///
+/// The densest pixel draws at full strength and a lone trace at
+/// [`LONE_TRACE_STRENGTH`]. Between them strength rises with the logarithm of
+/// the count, as an intensity-graded persistence display does, so an eye of
+/// ten thousand acquisitions keeps its gradient instead of saturating. Below
+/// one hit the pixel is a trace's anti-aliased edge: the pixel nearest a
+/// trace's centre always holds at least half a hit, so it reaches the full
+/// lone-trace strength there and fades to nothing away from it.
+fn density_strength(hits: f32, densest: f32) -> f32 {
+    if hits.is_nan() || hits <= 0.0 {
+        return 0.0;
+    }
+    let edge = (hits * 2.0).min(1.0);
+    if densest <= 1.0 {
+        // Nothing overlaps, so every trace is the densest thing drawn.
+        return edge;
+    }
+    if hits <= 1.0 {
+        return LONE_TRACE_STRENGTH * edge;
+    }
+    let graded = (hits.ln() / densest.ln()).min(1.0);
+    LONE_TRACE_STRENGTH + (1.0 - LONE_TRACE_STRENGTH) * graded
 }
 
 fn clip_line_to_raster(
@@ -765,6 +797,48 @@ mod tests {
         assert!(summary.starts_with("auto · "), "{summary}");
         assert!(!summary.contains("incoherent"), "{summary}");
         assert!(!timebase_is_incoherent(&eye));
+    }
+
+    /// The densest pixel is the full trace colour, a trace that occurs once
+    /// still reads plainly, and more acquisitions never draw fainter than
+    /// fewer.
+    #[test]
+    fn density_reads_from_a_lone_trace_to_the_densest_pixel() {
+        for densest in [2.0, 12.0, 10_000.0] {
+            assert_eq!(density_strength(densest, densest), 1.0, "densest {densest}");
+            assert!(density_strength(1.0, densest) >= LONE_TRACE_STRENGTH);
+            assert!(density_strength(0.5, densest) >= LONE_TRACE_STRENGTH);
+            let mut last = 0.0;
+            for step in 0..=4_000 {
+                let hits = densest * step as f32 / 4_000.0;
+                let strength = density_strength(hits, densest);
+                assert!(strength >= last, "{hits} of {densest} drew fainter");
+                last = strength;
+            }
+        }
+        // A rail ten times rarer than the densest pixel of a large eye is
+        // still visibly fainter than it: the gradient survives.
+        assert!(density_strength(1_000.0, 10_000.0) < 0.95);
+
+        // In the raster: a lone trace beside a dozen stacked ones.
+        let mut data = EyeData::new(1.0e-9, 2);
+        data.add_trace(EyeTrace::new(vec![0.0, 2.0], vec![0.25, 0.25]));
+        for _ in 0..12 {
+            data.add_trace(EyeTrace::new(vec![0.0, 2.0], vec![0.75, 0.75]));
+        }
+        let image = rasterize_density(&data, 0.0, 2.0, 0.0, 1.0, [64, 64], egui::Color32::WHITE);
+        let brightest_in_rows = |rows: std::ops::Range<usize>| {
+            rows.flat_map(|y| image.pixels[y * 64..(y + 1) * 64].iter())
+                .map(|pixel| pixel.a())
+                .max()
+                .unwrap_or(0)
+        };
+        assert_eq!(brightest_in_rows(0..32), 255, "the stacked traces");
+        assert!(
+            f32::from(brightest_in_rows(32..64)) >= LONE_TRACE_STRENGTH * 255.0 - 0.5,
+            "the lone trace drew at {}",
+            brightest_in_rows(32..64)
+        );
     }
 
     #[test]
