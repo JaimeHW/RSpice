@@ -390,11 +390,14 @@ fn display_menu(ui: &mut Ui, state: &mut BoxViolinSheetState) {
 // ---------------------------------------------------------------------------
 
 /// Render the box/violin sheet.
+/// `pinned` is the ordinate the reader set in the inspector, if any; the
+/// columns' own padded range otherwise.
 pub fn show(
     ui: &mut Ui,
     population: Option<&PopulationData>,
     state: &BoxViolinSheetState,
     show_limits: bool,
+    pinned: Option<(f64, f64)>,
     cache: &mut plot::DecimationCache,
 ) -> Option<PlotWithRequirements> {
     let Some(plan) = population else {
@@ -467,7 +470,7 @@ pub fn show(
     }
     strip::StripHeader::new("DIST", &subtitle, &legend).show(ui);
 
-    let (y0, y1) = ordinate_range(&columns, show_limits);
+    let (y0, y1) = pinned.unwrap_or_else(|| ordinate_range(&columns, show_limits));
     let slots = columns.len() as f64;
     let mut x_axis = Axis::with_ticks(
         0.0,

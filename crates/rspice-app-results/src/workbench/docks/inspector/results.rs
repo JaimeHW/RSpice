@@ -369,7 +369,11 @@ fn active_result_pane(
     // Explicit limits, each with its own fit. Comparing two runs on identical
     // axes, or holding a decade while a parameter sweeps, cannot be done by
     // dragging; the fields show the viewport, so no row restates it.
-    axis_limit_row(ui, state, &facts, PaneAxis::X, "X range");
+    // A distribution's abscissa is its measurements, a slot each: there is
+    // no interval to set on it, so only its ordinate takes one.
+    if viewer != rspice_results::result_presentation::ResultViewer::BoxViolin {
+        axis_limit_row(ui, state, &facts, PaneAxis::X, "X range");
+    }
     axis_limit_row(ui, state, &facts, PaneAxis::Y, "Y range");
 }
 

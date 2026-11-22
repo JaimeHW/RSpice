@@ -6,23 +6,43 @@ use rspice_results_ui::box_violin as view;
 
 pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     let plan = population::plan(context);
-    view::domain_bar(
+    let ordinate = |sheet: &view::BoxViolinSheetState| {
+        (sheet.grouping, sheet.scale, sheet.measurement.clone())
+    };
+    let before = ordinate(&context.results.session.box_violin);
+    let drawn = view::domain_bar(
         ui,
         plan.as_deref().map(|plan| &**plan),
         &mut context.results.session.box_violin,
         &mut context.results.session.show_spec_limits,
-    )
+    );
+    // Another grouping, scale or measurement is another ordinate, in its own
+    // unit: a range the reader set on the last one no longer applies.
+    if ordinate(&context.results.session.box_violin) != before {
+        context
+            .results
+            .session
+            .reset_plot_view(super::ResultViewer::BoxViolin, 0);
+    }
+    drawn
 }
 
 /// Draw the distribution; the measurement whose specification the reader
 /// followed a requirement line to, if they did.
 pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) -> Option<String> {
     let plan = population::plan(context);
+    // The ordinate the inspector's Y range pinned, if it pinned one.
+    let pinned = context
+        .results
+        .session
+        .plot_view(super::ResultViewer::BoxViolin, 0)
+        .y;
     let drawn = view::show(
         ui,
         plan.as_deref().map(|plan| &**plan),
         &context.results.session.box_violin,
         context.results.session.show_spec_limits,
+        pinned,
         &mut context.results.session.cache,
     )?;
     super::record_drawn_axes(context.results, super::ResultViewer::BoxViolin, &drawn.plot);
@@ -179,6 +199,33 @@ mod tests {
         // Accessibility updates are keyed by node identity, not visual row order.
         columns.sort_by(|left, right| left.0.total_cmp(&right.0));
         columns.into_iter().map(|(_, name)| name).collect()
+    }
+
+    /// A Y range set in the inspector is the ordinate the distribution is
+    /// drawn on, and the axes the inspector reads back are that range.
+    #[test]
+    fn a_pinned_ordinate_is_the_one_the_distribution_draws() {
+        let (simulation, workspace, mut results) = fixture(101);
+        let viewer = super::super::ResultViewer::BoxViolin;
+        results.session.plot_view_mut(viewer, 0).y = Some((-5.0, 5.0));
+        let egui = egui::Context::default();
+        crate::ui::Theme::default().apply(&egui);
+        let _ = egui.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 700.0),
+                )),
+                ..Default::default()
+            },
+            |root| {
+                egui::CentralPanel::default().show(root, |ui| {
+                    show(ui, &mut context(&simulation, &workspace, &mut results));
+                });
+            },
+        );
+        let (_, y) = results.session.drawn_axes[&viewer];
+        assert_eq!(y, (-5.0, 5.0));
     }
 
     #[test]
