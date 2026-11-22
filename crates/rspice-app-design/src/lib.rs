@@ -103,7 +103,7 @@ pub mod workbench {
             open_net_label_placement_in, place_sequenced_net_label_in,
         };
         pub(crate) use dialogs::replace_instance::{
-            open_replace_instance_dialog, replace_instance_available,
+            open_replace_instance_dialog, replace_instance_available, replace_instance_refusal,
         };
         pub(crate) use dialogs::selection::array::{
             ArraySelectionDialogState, ArraySelectionPreviewCache, armed_array_selection_authority,

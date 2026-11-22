@@ -72,7 +72,8 @@ use crate::workbench::app::dialogs::placement::bus_tap::open_bus_tap;
 use crate::workbench::app::dialogs::placement::pin_port::open_create_pins;
 use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::replace_instance::{
-    ReplaceInstance, open_replace_instance_dialog, replace_instance_available,
+    NoReplacement, ReplaceInstance, open_replace_instance_dialog, replace_instance_available,
+    replace_instance_refusal,
 };
 use crate::workbench::app::dialogs::selection::commands::{
     schematic_selection_has_live_object, select_schematic_objects_of_kind,
@@ -291,10 +292,14 @@ impl CommandSet for DesignCommand {
             Self::ReplaceInstance | Self::CreateHierarchy if !schematic => {
                 Some("open an editable schematic or testbench")
             }
+            // An instance some other master could stand in for is greyed
+            // with why none passes the form's checks, rather than opening
+            // nothing.
             Self::ReplaceInstance
                 if replace_instance_available(&reads.state.property_registry, reads.model) =>
             {
-                None
+                replace_instance_refusal(&reads.state.property_registry, reads.model)
+                    .map(NoReplacement::reason)
             }
             Self::CreateHierarchy if reads.model.create_hierarchy_available() => None,
             Self::ReplaceInstance | Self::CreateHierarchy

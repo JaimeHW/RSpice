@@ -17,7 +17,7 @@ use crate::workbench::{
         StimulusLinkMode, copy_active_schematic_selection, cut_schematic_selection,
         delete_schematic_selection, duplicate_schematic_selection_at, open_replace_instance_dialog,
         open_stimulus_link, paste_schematic_clipboard_at, replace_instance_available,
-        schematic_grid_step, show_stimulus_definition,
+        replace_instance_refusal, schematic_grid_step, show_stimulus_definition,
     },
     design::commands::DesignCommand,
     framework::command_registry::ids,
@@ -1474,10 +1474,19 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
         // instance, editable, and a different ready master that preserves the
         // connected terminal contract. Restating any of that here would offer
         // the row where the dialog would immediately refuse.
-        ContextAction::ReplaceInstance => (
-            replace_instance_available(&state.design.property_registry, state.model),
-            "Select one editable instance that a different ready master can stand in for",
-        ),
+        ContextAction::ReplaceInstance => {
+            if !replace_instance_available(&state.design.property_registry, state.model) {
+                (
+                    false,
+                    "Select one editable instance that a different ready master can stand in for",
+                )
+            } else {
+                match replace_instance_refusal(&state.design.property_registry, state.model) {
+                    None => (true, ""),
+                    Some(refusal) => (false, refusal.sentence()),
+                }
+            }
+        }
         ContextAction::CreateHierarchy => (
             state.model.create_hierarchy_available(),
             "Select one or more editable instances, with no port, bus, note or piece of a wire",

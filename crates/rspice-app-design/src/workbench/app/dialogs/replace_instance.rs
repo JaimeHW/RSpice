@@ -10,7 +10,7 @@ use crate::state::{
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
     SchematicReplacementTerminal, SymbolResolver,
 };
-use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
+use crate::ui::widgets::{CommandForm, DialogChoice, SelectGroup, TableColumn};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
@@ -35,6 +35,11 @@ pub struct ReplaceInstanceDialogState {
     pub replacement: String,
     /// The masters the instance can be replaced with, the likeliest first.
     pub candidates: Vec<String>,
+    /// The library each candidate comes from, the heading it is listed
+    /// under.
+    pub(crate) candidate_libraries: Vec<String>,
+    /// What the reader typed to narrow the list.
+    pub(crate) query: String,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) replacement_authority: Option<crate::state::SchematicReplacementAuthority>,
     pub(crate) initial_target_identity: String,
@@ -53,6 +58,7 @@ pub struct ReplaceInstanceOpen {
     pub initial_target_identity: String,
     pub initial_target_spec: crate::state::SchematicReplacementTargetSpec,
     pub candidates: Vec<String>,
+    pub candidate_libraries: Vec<String>,
 }
 
 impl ReplaceInstanceDialogState {
@@ -64,6 +70,8 @@ impl ReplaceInstanceDialogState {
             current: request.current,
             replacement: request.replacement,
             candidates: request.candidates,
+            candidate_libraries: request.candidate_libraries,
+            query: String::new(),
             authority: Some(request.authority),
             replacement_authority: Some(request.replacement_authority),
             initial_target_identity: request.initial_target_identity,
@@ -112,6 +120,8 @@ const MAPPING_COLUMNS: [TableColumn<'static>; 3] = [
 struct ResolvedReplacement {
     identity: String,
     display: String,
+    /// The library the master comes from, the heading it is listed under.
+    library: String,
     target: SchematicReplacementTargetSpec,
     preview: SchematicReplacementPreview,
 }
@@ -294,20 +304,33 @@ pub fn open_replace_instance_dialog(
         }
     };
     let ranked = ranked_replacements(registry, model, &replacement_authority);
-    let Some(resolved) = best_replacement(model, &replacement_authority, &ranked) else {
-        workbench.prompt(NO_SUBSTITUTE);
-        return;
+    let resolved = match best_replacement(model, &replacement_authority, &ranked) {
+        Ok(resolved) => resolved,
+        // The row is greyed with the kind of refusal; the status line gives
+        // the first candidate's own words.
+        Err(Some(refusal)) => {
+            workbench.prompt(refusal.message());
+            return;
+        }
+        Err(None) => {
+            workbench.prompt(NO_SUBSTITUTE);
+            return;
+        }
     };
     let current = current_display(replacement_authority.source_component());
     // The proposed master leads the picks; the rest follow in rank order.
-    let candidates = std::iter::once(resolved.display.clone())
-        .chain(
-            ranked
-                .into_iter()
-                .map(|candidate| candidate.entry.display)
-                .filter(|display| *display != resolved.display),
-        )
-        .collect();
+    let (candidates, candidate_libraries) =
+        std::iter::once((resolved.display.clone(), resolved.library.clone()))
+            .chain(
+                ranked
+                    .into_iter()
+                    .filter(|candidate| candidate.entry.display != resolved.display)
+                    .map(|candidate| {
+                        let library = catalog_library(&candidate.entry);
+                        (candidate.entry.display, library)
+                    }),
+            )
+            .unzip();
     dialog.open(ReplaceInstanceOpen {
         authority: SchematicEditAuthority::capture(model),
         replacement_authority: replacement_authority.clone(),
@@ -317,7 +340,32 @@ pub fn open_replace_instance_dialog(
         initial_target_identity: resolved.identity,
         initial_target_spec: resolved.target,
         candidates,
+        candidate_libraries,
     });
+}
+
+/// The heading a catalog entry is listed under: its library, or "Built-in"
+/// for a primitive or a device that names none.
+fn catalog_library(entry: &InstanceCatalogEntry) -> String {
+    entry
+        .template
+        .library_cell
+        .as_ref()
+        .map_or_else(|| "Built-in".to_owned(), |binding| binding.library.clone())
+}
+
+/// The candidates grouped by library, in the order each library first
+/// appears in the ranking, each group in rank order: the indices into
+/// `candidates` under each heading.
+fn candidate_groups(libraries: &[String]) -> Vec<(&str, Vec<usize>)> {
+    let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
+    for (index, library) in libraries.iter().enumerate() {
+        match groups.iter_mut().find(|(heading, _)| *heading == library) {
+            Some((_, members)) => members.push(index),
+            None => groups.push((library, vec![index])),
+        }
+    }
+    groups
 }
 
 /// What Replace instance draws over and changes: its draft, the property
@@ -340,7 +388,18 @@ impl ReplaceInstance<'_> {
             .as_ref()
             .and_then(|evidence| dropped_parameter_consequence(evidence.dropped_parameters));
         let table = evidence.as_ref().map(ReplacementEvidence::table);
-        let dialog = &*self.dialog;
+        let dialog = &mut *self.dialog;
+        let groups = candidate_groups(&dialog.candidate_libraries);
+        let select_groups = groups
+            .iter()
+            .map(|(heading, members)| SelectGroup {
+                heading,
+                options: members
+                    .iter()
+                    .map(|index| (dialog.candidates[*index].clone(), ""))
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
         let mut picked = None;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .wide()
@@ -350,18 +409,22 @@ impl ReplaceInstance<'_> {
             .consequence(consequence.as_deref())
             .show(ctx, |rows| {
                 rows.value("Current", &dialog.current);
-                let replace_with = rows.select_with_response(
+                // A searchable list grouped by library, as KiCad's Change
+                // Symbol opens its chooser: a catalog of every library cell
+                // is too long to scroll.
+                picked = rows.searchable_select(
                     "Replace with",
                     "replace-instance-master",
                     &dialog.replacement,
-                    &dialog.candidates,
+                    &select_groups,
+                    &mut dialog.query,
                 );
-                picked = replace_with.picked;
                 if let Some(table) = table.as_ref() {
                     rows.table(&MAPPING_COLUMNS, table);
                 }
-                Some(replace_with.response.id)
+                None
             });
+        let picked = picked.and_then(|(group, option)| groups.get(group)?.1.get(option).copied());
         if let Some(index) = picked {
             let dialog = &mut *self.dialog;
             if let Some(display) = dialog.candidates.get(index).cloned() {
@@ -404,9 +467,21 @@ impl ReplaceInstance<'_> {
                         || "the instance".to_owned(),
                         |component| component.name.clone(),
                     );
+                let connections = impact.preserved_connections;
+                let parameters = impact.preserved_parameters;
                 self.workbench.prompt(format!(
-                    "Replaced {replaced} with {}; {} connections and {} parameter values kept.",
-                    resolved.identity, impact.preserved_connections, impact.preserved_parameters,
+                    "Replaced {replaced} with {}; {connections} {} and {parameters} {} kept.",
+                    resolved.display,
+                    if connections == 1 {
+                        "connection"
+                    } else {
+                        "connections"
+                    },
+                    if parameters == 1 {
+                        "parameter value"
+                    } else {
+                        "parameter values"
+                    },
                 ));
                 self.dialog.close();
             }
@@ -531,12 +606,13 @@ fn resolve_replacement(
         Ok(preview) => preview,
         Err(error) => return ReplacementValidation::Invalid(error.to_string()),
     };
-    if let Err(error) = validate_downstream(model, authority, &target) {
-        return ReplacementValidation::Invalid(error);
+    if let Err(refusal) = validate_downstream(model, authority, &target) {
+        return ReplacementValidation::Invalid(refusal.message());
     }
     ReplacementValidation::Valid(Box::new(ResolvedReplacement {
         identity: entry.identity.clone(),
         display: entry.display.clone(),
+        library: catalog_library(entry),
         target,
         preview,
     }))
@@ -699,21 +775,137 @@ struct RankedReplacement {
 }
 
 /// The first of `ranked` whose replacement also passes the downstream
-/// checks: the form's opening choice.
+/// checks: the form's opening choice. Without one, why the likeliest
+/// candidate was refused, or nothing when no master previews at all.
 fn best_replacement(
     model: &Model,
     authority: &SchematicReplacementAuthority,
     ranked: &[RankedReplacement],
-) -> Option<ResolvedReplacement> {
-    ranked.iter().find_map(|candidate| {
-        validate_downstream(model, authority, &candidate.target).ok()?;
-        Some(ResolvedReplacement {
-            identity: candidate.entry.identity.clone(),
-            display: candidate.entry.display.clone(),
-            target: candidate.target.clone(),
-            preview: candidate.preview.clone(),
-        })
-    })
+) -> Result<ResolvedReplacement, Option<DownstreamRefusal>> {
+    let mut first_refusal = None;
+    for candidate in ranked {
+        match validate_downstream(model, authority, &candidate.target) {
+            Ok(()) => {
+                return Ok(ResolvedReplacement {
+                    identity: candidate.entry.identity.clone(),
+                    display: candidate.entry.display.clone(),
+                    library: catalog_library(&candidate.entry),
+                    target: candidate.target.clone(),
+                    preview: candidate.preview.clone(),
+                });
+            }
+            Err(refusal) => {
+                first_refusal.get_or_insert(refusal);
+            }
+        }
+    }
+    Err(first_refusal)
+}
+
+/// Why no other master can stand in for the selected instance, by kind:
+/// what a greyed Replace instance row says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoReplacement {
+    /// No other master keeps every connection.
+    LosesConnections,
+    /// Every master that fits leaves the hierarchy unresolved.
+    BreaksHierarchy,
+    /// Every master that fits makes the netlist fail.
+    BreaksNetlist,
+}
+
+impl NoReplacement {
+    /// The reason as a command's unavailable state completes it.
+    pub const fn reason(self) -> &'static str {
+        match self {
+            Self::LosesConnections => "no other master keeps every connection",
+            Self::BreaksHierarchy => "every master that fits leaves the hierarchy unresolved",
+            Self::BreaksNetlist => "every master that fits makes the netlist fail",
+        }
+    }
+
+    /// The reason as a sentence of its own, for a menu row's tooltip.
+    pub const fn sentence(self) -> &'static str {
+        match self {
+            Self::LosesConnections => "No other master keeps every connection",
+            Self::BreaksHierarchy => "Every master that fits leaves the hierarchy unresolved",
+            Self::BreaksNetlist => "Every master that fits makes the netlist fail",
+        }
+    }
+}
+
+/// Why one candidate's replacement was refused after its preview passed.
+#[derive(Debug, Clone)]
+struct DownstreamRefusal {
+    kind: NoReplacement,
+    message: String,
+}
+
+impl DownstreamRefusal {
+    fn message(self) -> String {
+        self.message
+    }
+}
+
+/// What the replacement availability was worked out from: the selection and
+/// everything a candidate's preview and checks read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AvailabilityKey {
+    selected_component_id: Option<u64>,
+    library_revision: u64,
+    project_revision: u64,
+    design_execution_epoch: u64,
+    active_schematic_epoch: u64,
+    topology_version: u64,
+    content_version: u64,
+}
+
+thread_local! {
+    /// The last availability worked out: a greyed row is asked every frame
+    /// its menu is open, and each answer previews every master and netlists
+    /// the likeliest.
+    static AVAILABILITY: std::cell::RefCell<Option<(AvailabilityKey, Option<NoReplacement>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Why Replace instance has nothing to offer the selected instance, when
+/// [`replace_instance_available`] holds but no master passes the checks the
+/// form makes before it opens: the row is greyed with this instead of
+/// opening nothing.
+pub fn replace_instance_refusal(
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) -> Option<NoReplacement> {
+    let key = AvailabilityKey {
+        selected_component_id: model.schematic.session.editor.selection.single_component(),
+        library_revision: model.library_manager.revision(),
+        project_revision: model.workspace.content.project.revision().get(),
+        design_execution_epoch: model.design_execution_epoch,
+        active_schematic_epoch: model.active_schematic_epoch,
+        topology_version: model.schematic.topology_version(),
+        content_version: model.schematic.content_version(),
+    };
+    if let Some(refusal) = AVAILABILITY.with_borrow(|cached| {
+        cached
+            .as_ref()
+            .filter(|(cached, _)| *cached == key)
+            .map(|(_, refusal)| *refusal)
+    }) {
+        return refusal;
+    }
+    let refusal = match replacement_authority(registry, model) {
+        Err(_) => Some(NoReplacement::LosesConnections),
+        Ok(authority) => {
+            let ranked = ranked_replacements(registry, model, &authority);
+            match best_replacement(model, &authority, &ranked) {
+                Ok(_) => None,
+                Err(Some(refusal)) => Some(refusal.kind),
+                Err(None) => Some(NoReplacement::LosesConnections),
+            }
+        }
+    };
+    AVAILABILITY.with_borrow_mut(|cached| *cached = Some((key, refusal)));
+    refusal
 }
 
 /// Every other master the selected instance can be replaced with, the
@@ -778,11 +970,12 @@ fn validate_downstream(
     model: &Model,
     authority: &SchematicReplacementAuthority,
     target: &SchematicReplacementTargetSpec,
-) -> Result<(), String> {
+) -> Result<(), DownstreamRefusal> {
+    let refused = |kind, message: String| DownstreamRefusal { kind, message };
     let mut candidate = model.schematic.clone();
     candidate
         .replace_selected_instance(authority, target)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| refused(NoReplacement::LosesConnections, error.to_string()))?;
 
     let baseline_hierarchy = model.workspace.resolve_hierarchy_with_active(
         &model.library_manager,
@@ -800,14 +993,21 @@ fn validate_downstream(
         .cloned()
         .collect::<Vec<_>>();
     if !new_failures.is_empty() {
-        return Err(format!(
-            "Replacement introduces unresolved hierarchy: {}.",
-            new_failures.join("; ")
+        return Err(refused(
+            NoReplacement::BreaksHierarchy,
+            format!(
+                "Replacement introduces unresolved hierarchy: {}.",
+                new_failures.join("; ")
+            ),
         ));
     }
 
-    let baseline_generation = generate_candidate_netlist(model, &model.schematic)?;
-    let candidate_generation = generate_candidate_netlist(model, &candidate)?;
+    let netlist = |schematic| {
+        generate_candidate_netlist(model, schematic)
+            .map_err(|message| refused(NoReplacement::BreaksNetlist, message))
+    };
+    let baseline_generation = netlist(&model.schematic)?;
+    let candidate_generation = netlist(&candidate)?;
     let baseline_errors = baseline_generation
         .errors
         .into_iter()
@@ -819,9 +1019,12 @@ fn validate_downstream(
         .filter(|error| !baseline_errors.contains(error.trim()))
         .collect::<Vec<_>>();
     if !new_errors.is_empty() {
-        return Err(format!(
-            "Replacement is not netlist-compatible: {}",
-            new_errors.join(" ")
+        return Err(refused(
+            NoReplacement::BreaksNetlist,
+            format!(
+                "Replacement is not netlist-compatible: {}",
+                new_errors.join(" ")
+            ),
         ));
     }
     Ok(())
@@ -927,6 +1130,130 @@ pub(crate) mod tests {
             &state.design.property_registry,
             &state.model
         ));
+    }
+
+    /// One instance of `work/blk`, whose two pins have names no other master
+    /// carries, each wired.
+    fn wired_unique_block() -> DesignTestHost {
+        use crate::state::{Cell, Library, LibraryCellInstance, View, ViewType, Wire};
+        use crate::state::{SchematicState, WireConnection};
+
+        let mut state = DesignTestHost::default();
+        let mut master = SchematicState::default();
+        for (index, name) in ["ZQX1", "ZQX2"].into_iter().enumerate() {
+            let port = master.add_component(
+                ComponentType::Port,
+                Point::new(i32::try_from(index).unwrap_or(0) * 40, 0),
+            );
+            master
+                .document_mut_for_test()
+                .components
+                .iter_mut()
+                .find(|component| component.id == port)
+                .expect("the placed port is retained")
+                .value = name.to_owned();
+        }
+        let mut binding = LibraryCellInstance::new("work", "blk", "schematic");
+        binding.bind_interface(&master.interface_ports());
+        let mut cell = Cell::new("blk");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        let mut library = Library::new("work");
+        library.add_cell(cell);
+        state.model.library_manager.add_library(library);
+        state
+            .model
+            .workspace
+            .insert_schematic_editor("work/blk/schematic".to_owned(), master);
+        let id = state
+            .model
+            .schematic
+            .add_library_cell_component(Point::new(200, 200), binding);
+        for (index, terminal) in ["ZQX1", "ZQX2"].into_iter().enumerate() {
+            let wire = 900 + u64::try_from(index).unwrap_or(0);
+            let y = 400 + i32::try_from(index).unwrap_or(0) * 40;
+            let document = state.model.schematic.document_mut_for_test();
+            document
+                .wires
+                .push(Wire::segment(wire, Point::new(0, y), Point::new(60, y)));
+            document
+                .connections
+                .push(WireConnection::new(wire, 0, id, terminal));
+        }
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
+        state
+    }
+
+    #[test]
+    fn the_row_is_greyed_with_why_no_master_fits_rather_than_opening_nothing() {
+        let mut state = wired_unique_block();
+        assert!(
+            replace_instance_available(&state.design.property_registry, &state.model),
+            "other masters exist"
+        );
+        assert!(
+            replacement_authority(&state.design.property_registry, &state.model).is_ok(),
+            "the instance itself is a valid source"
+        );
+        assert_eq!(
+            replace_instance_refusal(&state.design.property_registry, &state.model),
+            Some(NoReplacement::LosesConnections)
+        );
+        assert_eq!(
+            NoReplacement::LosesConnections.reason(),
+            "no other master keeps every connection"
+        );
+
+        let source = placed_source("");
+        assert_eq!(
+            replace_instance_refusal(&source.design.property_registry, &source.model),
+            None,
+            "a source another source can stand in for is offered"
+        );
+
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
+        assert!(!state.design.replace_instance.open);
+    }
+
+    #[test]
+    fn a_replacement_is_reported_by_the_name_the_list_shows() {
+        let mut state = placed_source("");
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
+        let replacement = state.design.replace_instance.replacement.clone();
+        assert_eq!(
+            state.design.replace_instance.candidate_libraries.len(),
+            state.design.replace_instance.candidates.len(),
+            "every pick is listed under its library"
+        );
+        ReplaceInstance {
+            dialog: &mut state.design.replace_instance,
+            registry: &state.design.property_registry,
+            model: &mut state.model,
+            workbench: &mut state.workbench,
+        }
+        .commit_instance_replacement();
+
+        let prompt = state.prompt_text().unwrap_or_default().to_owned();
+        assert!(
+            prompt.starts_with(&format!("Replaced V1 with {replacement};")),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("primitive/"), "{prompt}");
     }
 
     #[test]

@@ -140,6 +140,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                 rspice_app_state::state::ComponentType::Resistor,
             ),
             candidates: vec!["OPA188 \u{00b7} 5 pin".to_owned()],
+            candidate_libraries: vec!["work".to_owned()],
         });
     });
     assert_blocks_shortcuts(|dialogs| {
@@ -404,6 +405,7 @@ const DIALOG_GATE: &[DialogRow] = &[
                 rspice_app_state::state::ComponentType::Resistor,
             ),
             candidates: vec!["OPA188".to_owned()],
+            candidate_libraries: vec!["work".to_owned()],
         });
     }),
     ("stimulus_link", |dialogs| {
