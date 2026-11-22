@@ -3,9 +3,9 @@
 //! Controls stand left to right from the bar's inset: the page's filter, its
 //! kind select, its actions, each one control tall. What the page reports (a
 //! count, a state) stands at the right end in neutral dim words, behind a
-//! problem's mark when it is one. The report gives way first: it elides into
-//! whatever the controls leave, its whole text on hover, and a control is
-//! never shortened for it. A 1-pt rule closes the bar on its last pixel row.
+//! problem's mark when it is one. The report gives way first: it drops its
+//! leading facts, then elides, into whatever the controls leave, its whole
+//! text on hover, and a control is never shortened for it. A 1-pt rule closes the bar on its last pixel row.
 
 use std::hash::Hash;
 
@@ -101,7 +101,31 @@ fn report_font() -> egui::FontId {
     theme::mono(tokens::FS_0, FontWeight::Regular)
 }
 
-/// The report, right-aligned on `line`: the mark, then the words, elided to
+/// What of a report fits in `room`. A report is facts joined by " · ", the
+/// one that matters most last ("9 dependencies · 1 problem"): it gives way a
+/// whole fact at a time from the front, so no word is cut while a shorter
+/// report would fit, and only a last fact too wide alone is elided.
+fn fitted_report(ui: &Ui, text: &str, font: &egui::FontId, room: f32) -> String {
+    const JOIN: &str = " \u{b7} ";
+    let width = |words: &str| {
+        ui.painter()
+            .layout_no_wrap(words.to_owned(), font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+    };
+    let mut rest = text;
+    loop {
+        if width(rest) <= room {
+            return rest.to_owned();
+        }
+        match rest.split_once(JOIN) {
+            Some((_, later)) => rest = later,
+            None => return elide_text(ui, rest, font, room),
+        }
+    }
+}
+
+/// The report, right-aligned on `line`: the mark, then the words, fitted to
 /// what is left with the whole text on hover.
 fn paint_report(ui: &mut Ui, line: Rect, text: &str, problem: Option<Problem>) {
     let t = Tokens::get(ui.ctx());
@@ -112,7 +136,7 @@ fn paint_report(ui: &mut Ui, line: Rect, text: &str, problem: Option<Problem>) {
         0.0
     };
     let room = (line.width() - mark).max(0.0);
-    let words = elide_text(ui, text, &font, room);
+    let words = fitted_report(ui, text, &font, room);
     if words.is_empty() {
         return;
     }
