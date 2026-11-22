@@ -1108,3 +1108,69 @@ fn reset_label_position_is_offered_for_a_moved_name_and_raises_its_command() {
         Some(DesignCommand::ResetLabelPosition.key())
     );
 }
+
+/// A right-click while a wire is being drawn offers the route's own rows,
+/// Enter, Backspace and Escape as rows, and nothing about the selection.
+/// Each does what its key does: Remove last point takes back the last
+/// vertex, Finish lays the wire down, Cancel lets the route go and keeps
+/// the tool.
+#[test]
+fn a_right_click_while_routing_finishes_shortens_or_cancels_the_route() {
+    let mut state = DesignTestHost::default();
+    state.model.schematic.document_mut_for_test().wires.clear();
+    let wires_before = state.model.schematic.document().wires.len();
+    state.model.schematic.arm_tool(crate::state::Tool::Wire);
+    state.model.schematic.start_wire(Point::new(0, 0));
+    state.model.schematic.extend_wire(Point::new(100, 0));
+    state.model.schematic.extend_wire(Point::new(100, 80));
+    state.design.interaction.context_target = Some((ContextTarget::Canvas, (100, 80)));
+
+    let entries = menu_entries(&state, ContextTarget::Canvas);
+    assert_eq!(
+        labels_of(&entries),
+        vec!["Finish", "Remove last point", "Cancel"]
+    );
+    assert_eq!(
+        menu_summary(&state, ContextTarget::Canvas).as_deref(),
+        Some("Wire being drawn")
+    );
+    let symbol_context = schematic_symbol_context(&state);
+    let run = |state: &mut DesignTestHost, action| {
+        let binding = context_menu_binding(&canvas_facts(state)).expect("the menu is open");
+        super::apply_context_request(
+            &mut canvas_parts(state),
+            ContextMenuRequest { binding, action },
+            &symbol_context,
+        );
+    };
+
+    run(&mut state, ContextAction::RemoveRoutePoint);
+    let drawing = &state.model.schematic.session.editor.wire_drawing;
+    assert!(drawing.active);
+    assert_eq!(drawing.points, vec![Point::new(0, 0), Point::new(100, 0)]);
+
+    run(&mut state, ContextAction::FinishRoute);
+    assert!(!state.model.schematic.session.editor.wire_drawing.active);
+    assert_eq!(
+        state.model.schematic.document().wires.len(),
+        wires_before + 1,
+        "the route was laid down"
+    );
+
+    state.model.schematic.start_wire(Point::new(0, 200));
+    assert_eq!(
+        action_availability(ContextAction::FinishRoute, &state),
+        (false, "Click a second point to finish the route")
+    );
+    run(&mut state, ContextAction::CancelRoute);
+    assert!(!state.model.schematic.session.editor.wire_drawing.active);
+    assert_eq!(
+        state.model.schematic.document().wires.len(),
+        wires_before + 1
+    );
+    assert_eq!(
+        state.model.schematic.session.editor.tool,
+        crate::state::Tool::Wire,
+        "Cancel lets the route go and keeps the tool, as Escape does"
+    );
+}

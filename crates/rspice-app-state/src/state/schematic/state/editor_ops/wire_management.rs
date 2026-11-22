@@ -43,6 +43,20 @@ impl SchematicState {
         self.session.editor.wire_drawing.remove_last_point();
     }
 
+    /// Take back the last placed vertex of the wire or bus being drawn, as
+    /// Backspace does. Whether a route was live to take it from.
+    pub fn retract_route(&mut self) -> bool {
+        let editor = &mut self.session.editor;
+        if editor.bus_drawing.active {
+            editor.bus_drawing.remove_last_point();
+        } else if editor.wire_drawing.active {
+            editor.wire_drawing.remove_last_point();
+        } else {
+            return false;
+        }
+        true
+    }
+
     /// Finish drawing the current wire
     ///
     /// Implements professional EDA behavior:

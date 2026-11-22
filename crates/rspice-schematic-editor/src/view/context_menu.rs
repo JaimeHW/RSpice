@@ -114,6 +114,12 @@ pub enum ContextAction {
     PlaceLabel,
     /// Open the text and note form.
     PlaceText,
+    /// End the wire or bus being drawn where it stands, as Enter does.
+    FinishRoute,
+    /// Take back the route's last point, as Backspace does.
+    RemoveRoutePoint,
+    /// Let go of the route, as Escape does.
+    CancelRoute,
 }
 
 /// The Arrange page's commands, in the Design menu's order: turn and flip,

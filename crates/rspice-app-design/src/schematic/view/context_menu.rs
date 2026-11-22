@@ -58,6 +58,27 @@ pub struct ContextCommand {
 pub type ContextEntry = context_surface::ContextEntry<ContextCommand>;
 
 const CONTEXT_ENTRIES: &[ContextEntry] = &[
+    // The wire or bus being drawn: Enter, Backspace and Escape, as rows. A
+    // right-click while routing offers these alone.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::FinishRoute,
+        icon: ContextIcon::Check,
+        label: "Finish",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::RemoveRoutePoint,
+        icon: ContextIcon::Back,
+        label: "Remove last point",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::CancelRoute,
+        icon: ContextIcon::Close,
+        label: "Cancel",
+        shortcut_command: Some(ids::CANCEL),
+    }),
+    ContextEntry::Separator,
     // What can be started on a bare sheet: only the empty canvas offers them.
     ContextEntry::Command(ContextCommand {
         action: ContextAction::PlaceInstance,
@@ -323,6 +344,8 @@ fn clicked_source<'a>(state: &CanvasFacts<'a>) -> Option<&'a crate::state::Compo
 /// What one menu is about, which decides its rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuSubject {
+    /// A wire or bus being drawn.
+    Route,
     /// The canvas itself: nothing was under the pointer, and nothing is
     /// selected.
     Canvas,
@@ -346,6 +369,9 @@ enum MenuSubject {
 }
 
 fn menu_subject(state: &CanvasFacts<'_>, target: ContextTarget) -> MenuSubject {
+    if route_is_live(state) {
+        return MenuSubject::Route;
+    }
     let selection = &state.model.schematic.session.editor.selection;
     if selection.count() > 1 {
         return MenuSubject::Selection;
@@ -389,9 +415,10 @@ fn menu_subject(state: &CanvasFacts<'_>, target: ContextTarget) -> MenuSubject {
     }
 }
 
-/// A click on empty sheet with nothing selected.
-fn is_bare_canvas(state: &CanvasFacts<'_>, target: ContextTarget) -> bool {
-    menu_subject(state, target) == MenuSubject::Canvas
+/// Whether a wire or bus is being drawn.
+fn route_is_live(state: &CanvasFacts<'_>) -> bool {
+    let editor = &state.model.schematic.session.editor;
+    editor.wire_drawing.active || editor.bus_drawing.active
 }
 
 /// The Arrange page: the Design menu's Arrange submenu, group by group.
@@ -471,6 +498,13 @@ fn arrange_layout(action: ArrangeAction) -> Option<SelectionLayoutCommand> {
 /// and says why.
 fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
     use MenuSubject as S;
+    let route_row = matches!(
+        action,
+        ContextAction::FinishRoute | ContextAction::RemoveRoutePoint | ContextAction::CancelRoute
+    );
+    if subject == S::Route || route_row {
+        return subject == S::Route && route_row;
+    }
     let instance = matches!(subject, S::Instance | S::VerilogAInstance);
     let part = instance || subject == S::Source;
     let turns = part || matches!(subject, S::NetLabel | S::Annotation | S::Selection);
@@ -513,7 +547,11 @@ fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
         // A probe goes on a part or a wire; the canvas's own probe is the tool.
         ContextAction::Probe => part || subject == S::Wire,
         ContextAction::OperatingPoint => part || subject == S::Canvas,
-        ContextAction::ArrangeCommand(_) | ContextAction::Choose(_) => false,
+        ContextAction::ArrangeCommand(_)
+        | ContextAction::Choose(_)
+        | ContextAction::FinishRoute
+        | ContextAction::RemoveRoutePoint
+        | ContextAction::CancelRoute => false,
     }
 }
 
@@ -587,7 +625,7 @@ pub(super) fn handle_context_menu(
     response: &Response,
     state: &mut CanvasParts<'_>,
     viewport: &Viewport,
-    _routing_was_active: bool,
+    routing_was_active: bool,
     symbol_context: &SchematicSymbolContext,
 ) {
     state.model.retain_selection_on_active_sheet();
@@ -604,7 +642,13 @@ pub(super) fn handle_context_menu(
         return;
     }
     let anchor = if opening.secondary_clicked {
-        capture_pointer_target(response, state, viewport, symbol_context)
+        capture_pointer_target(
+            response,
+            state,
+            viewport,
+            symbol_context,
+            routing_was_active,
+        )
     } else {
         if opening.keyboard_open {
             forget_choices(&response.ctx);
@@ -641,17 +685,24 @@ fn forget_choices(ctx: &Context) {
     ctx.data_mut(|data| data.remove::<Vec<ChooserRow>>(choices_id()));
 }
 
+/// Name what the menu opens on and where, and select it. A right-click
+/// while routing opens the route's menu and selects nothing: the route is
+/// what the menu is about.
 fn capture_pointer_target(
     response: &Response,
     state: &mut CanvasParts<'_>,
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
+    routing: bool,
 ) -> Option<egui::Pos2> {
     let pos = response.interact_pointer_pos()?;
     let grid_pos = screen_to_grid(viewport, state.model.schematic.document().grid_size, pos);
     let hit_pos = screen_to_schematic(viewport, pos);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
-    let target = if response.long_touched() {
+    let target = if routing {
+        forget_choices(&response.ctx);
+        ContextTarget::Canvas
+    } else if response.long_touched() {
         let target = touch_target(&response.ctx, &state.facts(), viewport, symbol_context, pos);
         select_context_target(state, target)
     } else {
@@ -1059,7 +1110,14 @@ fn keyboard_target(
 
 /// What the menu's header names, which on a bare canvas is nothing.
 fn menu_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> Option<String> {
-    (!is_bare_canvas(state, target)).then(|| selection_summary(state, target))
+    match menu_subject(state, target) {
+        MenuSubject::Canvas => None,
+        MenuSubject::Route if state.model.schematic.session.editor.bus_drawing.active => {
+            Some("Bus being drawn".to_owned())
+        }
+        MenuSubject::Route => Some("Wire being drawn".to_owned()),
+        _ => Some(selection_summary(state, target)),
+    }
 }
 
 pub fn selection_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> String {
@@ -1611,6 +1669,13 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
         ),
+        ContextAction::FinishRoute => (
+            route_points(state) >= 2,
+            "Click a second point to finish the route",
+        ),
+        ContextAction::RemoveRoutePoint | ContextAction::CancelRoute => {
+            (route_is_live(state), "No wire or bus is being drawn")
+        }
         // A choice row is not a catalog command; `choose_target` checks it
         // against the rows the menu showed.
         ContextAction::Choose(_) => (false, "Long-press the objects to choose among them"),
@@ -1631,6 +1696,11 @@ pub fn execute_context_action(
     match action {
         // A page turn, which the menu takes itself.
         ContextAction::Arrange => {}
+        ContextAction::FinishRoute => finish_route(state),
+        ContextAction::RemoveRoutePoint => {
+            state.model.schematic.retract_route();
+        }
+        ContextAction::CancelRoute => state.model.schematic.cancel_interaction_step(),
         ContextAction::ZoomBox => {
             state.model.schematic.session.editor.zoom_box.arm();
             state.prompt("Drag a box to zoom to it.");
@@ -1773,6 +1843,30 @@ const fn row_command(action: ContextAction) -> Option<CommandKey> {
         ContextAction::FitContent => DesignCommand::FitSchematicContent.key(),
         _ => return None,
     })
+}
+
+/// The points the route being drawn has placed.
+fn route_points(state: &CanvasFacts<'_>) -> usize {
+    let editor = &state.model.schematic.session.editor;
+    if editor.bus_drawing.active {
+        editor.bus_drawing.points.len()
+    } else if editor.wire_drawing.active {
+        editor.wire_drawing.points.len()
+    } else {
+        0
+    }
+}
+
+/// End the route where it stands, as Enter does: the menu's binding has
+/// already held the drawing to the one the route began on.
+fn finish_route(state: &mut CanvasParts<'_>) {
+    if state.model.schematic.session.editor.wire_drawing.active {
+        super::sheet_visibility::finish_wire_on_active_sheet(state.model);
+    } else if state.model.schematic.session.editor.bus_drawing.active
+        && let Err(error) = state.model.schematic.finish_bus()
+    {
+        state.prompt(format!("Bus not committed: {error}"));
+    }
 }
 
 /// Show the selected instance's card in the generated deck. The Netlist
@@ -1956,6 +2050,15 @@ pub fn context_menu_view(state: &CanvasFacts<'_>, ctx: &Context) -> Option<Conte
     })
 }
 
+/// The key a row with no command of its own answers to on the canvas.
+const fn canvas_key(action: ContextAction) -> Option<egui::Key> {
+    match action {
+        ContextAction::FinishRoute => Some(egui::Key::Enter),
+        ContextAction::RemoveRoutePoint => Some(egui::Key::Backspace),
+        _ => None,
+    }
+}
+
 /// One catalog entry as the menu draws it: available or not and why, with
 /// its key.
 fn resolve_entry(
@@ -1967,16 +2070,17 @@ fn resolve_entry(
         return context_surface::ContextEntry::Separator;
     };
     let (enabled, disabled_reason) = action_availability(command.action, state);
-    let shortcut = command
-        .shortcut_command
-        .map_or_else(String::new, |product_command| {
+    let shortcut = command.shortcut_command.map_or_else(
+        || canvas_key(command.action).map_or_else(String::new, |key| key.name().to_owned()),
+        |product_command| {
             state.model.preferences.shortcuts().resolved_label(
                 state.commands,
                 product_command,
                 crate::workbench::app_state::runtime_command_platform(ctx),
                 ctx.os(),
             )
-        });
+        },
+    );
     context_surface::ContextEntry::Command(context_surface::ContextCommand {
         action: command.action,
         icon: command.icon,
