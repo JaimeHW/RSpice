@@ -139,7 +139,7 @@ fn navigator_expansion_is_lazy_and_cycle_guarded() {
     );
 }
 
-/// The row click is the descent: it lands the active document on exactly the
+/// The descent a double-click makes lands the active document on exactly the
 /// occurrence the row names, and on the way back up it ascends to it.
 #[test]
 fn an_occurrence_row_lands_the_session_on_that_occurrence() {
@@ -1023,4 +1023,109 @@ fn the_filter_is_emptied_by_its_own_control_and_by_escape() {
         panel.band_if_present("Clear the filter").is_none(),
         "so the control goes with the query"
     );
+}
+
+/// Expand the occurrences `paths` name in the Design navigator's tree.
+#[cfg(not(target_arch = "wasm32"))]
+fn expand_occurrences(app: &mut RSpiceApp, paths: &[&InstancePath]) {
+    let tree = app
+        .state
+        .workbench
+        .navigator_trees
+        .for_workspace(Workspace::Design);
+    for path in paths {
+        tree.expand(NavigatorTreeNode::Occurrence(path.fold_key()));
+    }
+}
+
+/// A click on a block's Occurrences row finds the block on the sheet that
+/// places it, selected and centred, and leaves the reader where they are; a
+/// double-click goes into it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_occurrence_click_finds_the_block_and_a_double_click_descends() {
+    let mut app = recursive_design();
+    app.state.workbench.activate(Workspace::Design);
+    expand_occurrences(&mut app, &[&InstancePath::root()]);
+    let mut panel = NavigatorPanel::open(app);
+
+    panel.click("XA");
+
+    let state = &panel.app.state;
+    assert_eq!(
+        state.model.workspace.content.occurrence_path(),
+        InstancePath::root(),
+        "a click stays on the sheet that places the block"
+    );
+    let editor = &state.model.schematic.session.editor;
+    assert!(editor.selection.has_component(101));
+    let position = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == 101)
+        .map(|component| component.pos);
+    assert_eq!(editor.center_request, position);
+
+    let at = panel.band("XA").0.center();
+    let mut events = click_events(at);
+    events.extend(click_events(at));
+    panel.pass(events);
+    panel.pass(Vec::new());
+
+    assert_eq!(
+        panel.app.state.model.workspace.content.occurrence_path(),
+        InstancePath::root().child("XA").expect("nameable")
+    );
+}
+
+/// A row that cannot be opened says why: a click finds the instance on the
+/// sheet that places it and states the reason.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_recursive_occurrence_says_why_it_cannot_be_opened() {
+    let mut app = recursive_design();
+    app.state.workbench.activate(Workspace::Design);
+    let xa = InstancePath::root().child("XA").expect("nameable");
+    expand_occurrences(&mut app, &[&InstancePath::root(), &xa]);
+    let mut panel = NavigatorPanel::open(app);
+
+    panel.click("XLOOP");
+
+    let state = &mut panel.app.state;
+    assert_eq!(state.model.workspace.content.occurrence_path(), xa);
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(202)
+    );
+    state.drain_notices(&egui::Context::default());
+    assert!(
+        state
+            .prompt_text()
+            .is_some_and(|text| text.starts_with("XLOOP cannot be opened")),
+        "{:?}",
+        state.prompt_text()
+    );
+}
+
+/// A flat cell with several sheets lists them under its row, as a cell that
+/// places blocks does.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_flat_cell_with_several_sheets_lists_its_sheets() {
+    let mut app = two_sheet_named_signals();
+    app.state.workbench.activate(Workspace::Design);
+    expand_occurrences(&mut app, &[&InstancePath::root()]);
+    let panel = NavigatorPanel::open(app);
+
+    let rows = panel.rows_under("Occurrences");
+    assert!(rows.iter().any(|row| row == "Input stage"), "{rows:?}");
+    assert!(rows.iter().any(|row| row == "Output stage"), "{rows:?}");
 }

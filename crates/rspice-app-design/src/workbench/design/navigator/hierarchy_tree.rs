@@ -207,9 +207,12 @@ impl Walk<'_> {
             .cloned()
             .unwrap_or_else(|| master.cell.clone());
         let authored = authored_view(self.source.libraries, &master);
+        // A cell view with several sheets lists them, whether or not it
+        // places a block, as a flat design's top cell does.
         let expandable = authored
             && !binding.stop_boundary()
-            && places_instances(self.source.projection, &master);
+            && (places_instances(self.source.projection, &master)
+                || !sheets_of(self.source.sheets, &master).is_empty());
         // A filter asks about the whole design, so it unfolds what it finds
         // instead of waiting to be unfolded.
         let unfold = expandable
@@ -529,6 +532,9 @@ pub(super) struct TreeRow<'a> {
     /// painted as one.
     pub alert: bool,
     pub selected: bool,
+    /// The row is where the canvas stands (the occurrence or the sheet in
+    /// front), which is told apart from what is selected.
+    pub current: bool,
 }
 
 /// What the reader did to one row.
@@ -632,7 +638,7 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
             egui::pos2(rect.left() + 33.5 + indent, rect.center().y),
             egui::Vec2::splat(15.0),
         ),
-        if row.selected {
+        if row.selected || row.current {
             t.color.text
         } else {
             t.color.text_dim
@@ -668,12 +674,19 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
             egui::pos2(label_left, rect.center().y),
             egui::Align2::LEFT_CENTER,
             row.label,
-            if row.mono {
-                theme::mono(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular)
-            } else {
-                theme::sans(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular)
+            {
+                let weight = if row.current {
+                    FontWeight::SemiBold
+                } else {
+                    FontWeight::Regular
+                };
+                if row.mono {
+                    theme::mono(SCHEMATIC_NAV_LABEL_SIZE, weight)
+                } else {
+                    theme::sans(SCHEMATIC_NAV_LABEL_SIZE, weight)
+                }
             },
-            if row.selected {
+            if row.selected || row.current {
                 t.color.text
             } else {
                 t.color.text_dim
@@ -754,6 +767,7 @@ pub(super) fn masters_section(
                 meta: Some(cell_count.as_str()),
                 alert: false,
                 selected: false,
+                current: false,
             },
         );
         if response.row.clicked() || response.disclosure.is_some_and(|caret| caret.clicked()) {
@@ -782,6 +796,7 @@ pub(super) fn masters_section(
                     meta: Some(view_count.as_str()),
                     alert: false,
                     selected: false,
+                    current: false,
                 },
             );
             if response.row.clicked() || response.disclosure.is_some_and(|caret| caret.clicked()) {
@@ -812,6 +827,7 @@ pub(super) fn masters_section(
                         meta: Some(meta),
                         alert: master.condition.is_some(),
                         selected: model.workspace.content.active_view == reference,
+                        current: false,
                     },
                 );
                 // A master that did not resolve says why, and how much of the
@@ -929,9 +945,24 @@ pub fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         return;
     }
 
-    let active = cx.model.workspace.content.occurrence_path();
+    // Where the canvas stands is marked only on the design it stands in: a
+    // library cell opened on its own is no occurrence of this tree.
+    let content = &cx.model.workspace.content;
+    let tree_root = rows.iter().find_map(|entry| match entry {
+        DesignTreeRow::Occurrence(row) if row.path.depth() == 0 => Some(row.master.key()),
+        _ => None,
+    });
+    let active = tree_root
+        .is_some_and(|root| {
+            root.eq_ignore_ascii_case(&content.active_occurrence_or_root().root.key())
+        })
+        .then(|| content.occurrence_path());
+    let active_sheet = cx.model.active_sheet_id();
+    let selected = canvas_selected_occurrence(cx.model);
     let scroll_to = tree.take_scroll_to();
     let mut descend = None;
+    let mut locate = None;
+    let mut refused = None;
     let mut enter_sheet = None;
     for entry in &rows {
         let painted = match entry {
@@ -964,17 +995,30 @@ pub fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                         mono: false,
                         meta: Some(note.as_str()),
                         alert: row.state.note().is_some(),
-                        selected: tree.selection() == Some(&row.path) || row.path == active,
+                        selected: selected.as_ref() == Some(&row.path),
+                        current: active.as_ref() == Some(&row.path),
                     },
                 );
-                if row.state == OccurrenceState::Device {
-                    response.row = response.row.on_hover_text(DEVICE_MASTER_HINT);
+                if let Some(reason) = cannot_open(row) {
+                    response.row = response.row.on_hover_text(reason);
                 }
+                // A click finds the block on the sheet that places it; a
+                // double-click goes into it. The top cell has nothing above
+                // it to be found on, so a click opens it.
+                let opens = response.row.double_clicked()
+                    || (row.path.depth() == 0 && response.row.clicked());
                 if response.disclosure.is_some_and(|caret| caret.clicked()) {
                     tree.toggle(NavigatorTreeNode::Occurrence(row.path.fold_key()));
-                } else if response.row.clicked() && row.state.is_bound() {
+                } else if opens {
                     tree.select(row.path.clone());
-                    descend = Some(row.path.clone());
+                    match cannot_open(row) {
+                        Some(reason) => refused = Some(reason),
+                        None => descend = Some(row.path.clone()),
+                    }
+                } else if response.row.clicked() {
+                    tree.select(row.path.clone());
+                    locate = Some((row.path.clone(), row.label.clone()));
+                    refused = cannot_open(row).filter(|_| row.state != OccurrenceState::Device);
                 }
                 occurrence_context_menu(&response.row, cx, row);
                 Some(response.row)
@@ -1001,6 +1045,7 @@ pub fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                         meta: None,
                         alert: false,
                         selected: false,
+                        current: active.as_ref() == Some(occurrence) && active_sheet == Some(*id),
                     },
                 );
                 if response.row.clicked() {
@@ -1033,7 +1078,73 @@ pub fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         let _ = cx.wb.report(outcome);
     } else if let Some(path) = descend {
         open_occurrence(cx.state, cx.model, cx.wb, cx.runs, &path);
+    } else if let Some((path, instance)) = locate {
+        locate_occurrence(cx, &path, &instance);
     }
+    if let Some(reason) = refused {
+        cx.wb.prompt(reason);
+    }
+}
+
+/// Why an occurrence row cannot be opened, as the row's hover and a refused
+/// open say it; `None` for a row that opens.
+fn cannot_open(row: &OccurrenceRow) -> Option<String> {
+    match row.state {
+        OccurrenceState::Leaf | OccurrenceState::Collapsed | OccurrenceState::Expanded => None,
+        OccurrenceState::Device => Some(DEVICE_MASTER_HINT.to_owned()),
+        OccurrenceState::Unbound => Some(format!(
+            "{} cannot be opened: the configuration binds no view of {} there.",
+            row.label,
+            row.master.display_path()
+        )),
+        OccurrenceState::Recursive => Some(format!(
+            "{} cannot be opened: {} already encloses it, so it would place itself.",
+            row.label,
+            row.master.display_path()
+        )),
+    }
+}
+
+/// Find the block an occurrence row stands for on the sheet that places it:
+/// its parent occurrence opens, and the instance is selected and centred
+/// on its own sheet.
+fn locate_occurrence(cx: &mut Cx<'_, DesignFeature>, path: &InstancePath, instance: &str) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    open_occurrence(cx.state, cx.model, cx.wb, cx.runs, &parent);
+    if cx.model.workspace.content.occurrence_path() != parent {
+        return;
+    }
+    let Some((id, position)) = cx
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.name.eq_ignore_ascii_case(instance))
+        .map(|component| (component.id, component.pos))
+    else {
+        return;
+    };
+    super::show_navigator_component(cx, id, position);
+}
+
+/// The occurrence of the one block the canvas has selected, if it has one.
+fn canvas_selected_occurrence(model: &Model) -> Option<InstancePath> {
+    let component = model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()?;
+    let (instance, _) = crate::workbench::app::hierarchy_master_for_component(model, component)?;
+    model
+        .workspace
+        .content
+        .occurrence_path()
+        .child(&instance)
+        .ok()
 }
 
 /// The design projection, or the reason there is none, stated in the
@@ -1088,18 +1199,10 @@ fn occurrence_context_menu(
 
 /// Point the tree at the instance the canvas has selected.
 ///
-/// One direction only: the canvas names an occurrence and the tree reveals it.
-/// The other direction is the row click, which descends.
+/// The canvas names an occurrence and the tree reveals it; the other
+/// direction is the row click, which finds the block on its sheet.
 fn reveal_canvas_selection(model: &Model, tree: &mut NavigatorTreeState) {
-    let Some(component) = model.schematic.session.editor.selection.single_component() else {
-        return;
-    };
-    let Some((instance, _)) =
-        crate::workbench::app::hierarchy_master_for_component(model, component)
-    else {
-        return;
-    };
-    let Ok(path) = model.workspace.content.occurrence_path().child(&instance) else {
+    let Some(path) = canvas_selected_occurrence(model) else {
         return;
     };
     if tree.selection() == Some(&path) {

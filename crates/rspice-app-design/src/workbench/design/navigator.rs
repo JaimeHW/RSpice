@@ -959,6 +959,7 @@ fn port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                     .editor
                     .selection
                     .has_component(port.component_id),
+                current: false,
             },
         )
         .row
