@@ -397,6 +397,9 @@ pub struct DrawingSheetPalette {
     pub block_ink: Color32,
     pub block_label: Color32,
     pub overflow: Color32,
+    /// The paper an owner's logo stands on where the block is too dark to
+    /// show it as it prints; `None` where the block is the paper's own tone.
+    pub logo_plate: Option<Color32>,
 }
 
 impl DrawingSheetPalette {
@@ -414,6 +417,7 @@ impl DrawingSheetPalette {
                 block_ink: Color32::from_rgb(0x1f, 0x25, 0x28),
                 block_label: Color32::from_rgb(0x67, 0x6e, 0x72),
                 overflow: tokens.color.warn,
+                logo_plate: None,
             }
         } else {
             // The paper stands clear of the desk by its own fill, not by its
@@ -431,6 +435,9 @@ impl DrawingSheetPalette {
                 block_ink: Color32::from_rgb(0xc5, 0xcd, 0xd2),
                 block_label: Color32::from_rgb(0x7f, 0x89, 0x8f),
                 overflow: tokens.color.warn,
+                // A paper tone held below white, so the plate previews the
+                // printed page without glaring off the dark sheet.
+                logo_plate: Some(Color32::from_rgb(0xe3, 0xe7, 0xe9)),
             }
         }
     }
@@ -1388,19 +1395,28 @@ fn draw_title_block(
             palette,
         );
     }
-    // The owner's logo, where the form seats it, as it prints.
+    // The owner's logo, where the form seats it, as it prints. A dark block
+    // seats it on a plate of paper, as the printed page does, rather than
+    // recolouring it: a brand's mark keeps its own colours, and its dark
+    // parts stay legible.
     if let (Some(seat), Some(logo)) = (logo_seat, &sheet.owner_logo)
         && let Some(texture) = owner_logo_texture(painter.ctx(), logo)
     {
+        let picture = Rect::from_min_max(
+            pos2(x_at(seat.x_um), y_at(seat.y_um)),
+            pos2(
+                x_at(seat.x_um + seat.width_um),
+                y_at(seat.y_um + seat.height_um),
+            ),
+        );
+        // The plate is the paper the picture covers, so it stands clear of
+        // the cell's rules and the owner's name wherever the picture does.
+        if let Some(plate) = palette.logo_plate {
+            painter.rect_filled(picture, 0.0, plate);
+        }
         painter.image(
             texture.id(),
-            Rect::from_min_max(
-                pos2(x_at(seat.x_um), y_at(seat.y_um)),
-                pos2(
-                    x_at(seat.x_um + seat.width_um),
-                    y_at(seat.y_um + seat.height_um),
-                ),
-            ),
+            picture,
             Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
             Color32::WHITE,
         );
