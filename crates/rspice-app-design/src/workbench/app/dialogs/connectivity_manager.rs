@@ -651,9 +651,12 @@ fn build_global_rows(
                 id: label.id,
                 name: label.name.clone(),
             };
+            // A supply symbol declares its rail as a `!` name does: the label
+            // states it, whatever the rail is called.
+            let declares = label.global_declaration().is_some();
             match policy.global_promotion {
                 GlobalNetPromotionPolicy::ExplicitReviewedDeclaration => {
-                    if label.name.ends_with('!') {
+                    if declares {
                         declarations.push(occurrence);
                     } else {
                         locals.push(occurrence);
@@ -663,7 +666,7 @@ fn build_global_rows(
                     if contract
                         .technology_global_canonical_name(&label.name)
                         .is_some()
-                        || label.name.ends_with('!')
+                        || declares
                     {
                         declarations.push(occurrence);
                     } else {

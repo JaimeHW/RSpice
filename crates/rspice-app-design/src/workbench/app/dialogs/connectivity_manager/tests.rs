@@ -34,6 +34,54 @@ fn global_alias_repairs_are_derived_from_real_label_ids() {
     }
 }
 
+/// A supply symbol declares its rail global, so the Global nets tab lists
+/// it, beside a `!` label of the same rail, as one resolved global with
+/// nothing to rename.
+#[test]
+fn a_supply_symbol_is_a_global_declaration() {
+    let mut state = DesignTestHost::default();
+    let labels = &mut state.model.schematic.document_mut_for_test().net_labels;
+    labels.push(NetLabel::supply(
+        10,
+        Point::new(0, 0),
+        "VDD",
+        rspice_design::schematic::net_label::SupplyGlyph::Bar,
+    ));
+    labels.push(NetLabel::supply(
+        11,
+        Point::new(40, 0),
+        "VIO",
+        rspice_design::schematic::net_label::SupplyGlyph::Bar,
+    ));
+    state.sync_active_schematic_to_workspace();
+    let policy = ConnectivityPolicy::default();
+    let projection = preview_projection(&state.model, &policy).expect("a design projection");
+    let globals = build_global_rows(&state.model, &policy, &projection);
+    let mut listed = globals
+        .iter()
+        .map(|row| (row.canonical.as_str(), row.state.as_str()))
+        .collect::<Vec<_>>();
+    listed.sort_unstable();
+    assert_eq!(listed, [("VDD", "resolved"), ("VIO", "resolved")]);
+
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .net_labels
+        .push(NetLabel::new(12, Point::new(80, 0), "VDD!"));
+    state.sync_active_schematic_to_workspace();
+    let projection = preview_projection(&state.model, &policy).expect("a design projection");
+    let globals = build_global_rows(&state.model, &policy, &projection);
+    let vdd = globals
+        .iter()
+        .find(|row| row.canonical == "VDD")
+        .expect("the VDD rail");
+    assert_eq!(vdd.declarations.len(), 2);
+    assert_eq!(vdd.state, "resolved");
+    assert!(build_global_repairs(&state.model, &policy, &globals).is_empty());
+}
+
 #[test]
 fn technology_catalog_promotes_exact_declared_aliases() {
     let mut state = DesignTestHost::default();
