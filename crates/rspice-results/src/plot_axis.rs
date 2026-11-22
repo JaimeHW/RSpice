@@ -114,13 +114,33 @@ pub fn linear_ticks(min: f64, max: f64, target: usize) -> TickSeries {
         first = (min / step).ceil() as i64;
         last = (max / step).floor() as i64;
     }
+    series_at(min, max, step, first..=last)
+}
+
+/// Linear tick positions covering `[min, max]` at exactly `step`: the ladder
+/// [`linear_ticks`] chose, re-stepped. Empty when `step` would cut the window
+/// into more than [`MAX_AXIS_TICKS`] steps.
+pub fn linear_ticks_at(min: f64, max: f64, step: f64) -> TickSeries {
+    if !(max > min && step.is_finite() && step > 0.0) {
+        return TickSeries::default();
+    }
+    let first = (min / step).ceil() as i64;
+    let last = (max / step).floor() as i64;
+    if last.saturating_sub(first) >= MAX_AXIS_TICKS as i64 {
+        return TickSeries::default();
+    }
+    series_at(min, max, step, first..=last)
+}
+
+/// The ticks at the ladder indices `indices` of `step`, labelled.
+fn series_at(min: f64, max: f64, step: f64, indices: std::ops::RangeInclusive<i64>) -> TickSeries {
     let anchor = wants_offset_notation(min, max).then(|| {
         // An anchor on the tick grid keeps every delta an exact multiple of
         // the step, so the offsets read as round numbers rather than as the
         // rounding error between two of them.
         (((min + max) * 0.5) / step).round() * step
     });
-    let values = (first..=last)
+    let values = indices
         .map(|index| {
             let value = index as f64 * step;
             // Snap float noise (e.g. 0.30000000000000004) to the step grid.
@@ -147,6 +167,93 @@ pub fn linear_ticks(min: f64, max: f64, target: usize) -> TickSeries {
         anchor,
         step,
     }
+}
+
+/// How a column of tick labels stands along an axis `length` points long:
+/// each label `label` points tall, kept at least `gap` points from the next.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LabelColumn {
+    pub length: f64,
+    pub label: f64,
+    pub gap: f64,
+}
+
+impl LabelColumn {
+    /// Where the label of a tick `fraction` of the way up the axis is
+    /// centred, in points from its low end: on the tick, nudged inside at
+    /// either end, as a framed plot keeps no margin to clip a label in.
+    #[must_use]
+    pub fn centre(&self, fraction: f64) -> f64 {
+        let half = self.label * 0.5;
+        (fraction * self.length).clamp(half, (self.length - half).max(half))
+    }
+
+    /// Whether the labels of ticks standing at `fractions` of the axis, low
+    /// end first, all stand clear of each other.
+    #[must_use]
+    pub fn holds(&self, fractions: impl IntoIterator<Item = f64>) -> bool {
+        let centres: Vec<f64> = fractions.into_iter().map(|f| self.centre(f)).collect();
+        stands_clear(&centres, self.label + self.gap)
+    }
+}
+
+/// Whether labels centred at `centres`, in points from the axis' low end and
+/// in that order, stand at least `pitch` apart. A rounding hair under the
+/// pitch still counts as clear.
+fn stands_clear(centres: &[f64], pitch: f64) -> bool {
+    centres
+        .windows(2)
+        .all(|pair| pair[1] - pair[0] >= pitch - 1.0e-6)
+}
+
+/// The ladder a linear axis over `[min, max]` is labelled with along
+/// `column`: the densest 1–2–5 step, `step` or coarser, at which every label
+/// stands clear of the next, so a short plot reads even steps with every
+/// value named rather than a dense ladder with labels dropped from it. A
+/// column too short even for two clear labels keeps the sparsest ladder that
+/// still has two ticks, and [`even_labels`] chooses which of them it names.
+pub fn fitted_linear_ticks(min: f64, max: f64, step: f64, column: LabelColumn) -> TickSeries {
+    let fractions = |series: &TickSeries| {
+        series
+            .ticks
+            .iter()
+            .map(|(value, _)| (value - min) / (max - min))
+            .collect::<Vec<_>>()
+    };
+    let mut series = linear_ticks_at(min, max, step);
+    while !column.holds(fractions(&series)) {
+        let next_step = coarser(series.step);
+        if !(next_step.is_finite() && next_step > series.step) {
+            break;
+        }
+        let next = linear_ticks_at(min, max, next_step);
+        if next.ticks.len() < 2 {
+            break;
+        }
+        series = next;
+    }
+    series
+}
+
+/// Which of the labels centred at `centres` (points from the axis' low end,
+/// in that order) a column too short for all of them names: every `k`-th,
+/// counted down from the top one, at the smallest `k` whose labels stand
+/// `pitch` apart. The labels left keep even steps, and no hole opens between
+/// two of them; the top one, which carries the unit, is always named.
+#[must_use]
+pub fn even_labels(centres: &[f64], pitch: f64) -> Vec<bool> {
+    let count = centres.len();
+    let named = |stride: usize, index: usize| (count - 1 - index).is_multiple_of(stride);
+    let stride = (1..count)
+        .find(|&stride| {
+            let kept: Vec<f64> = (0..count)
+                .filter(|&index| named(stride, index))
+                .map(|index| centres[index])
+                .collect();
+            stands_clear(&kept, pitch)
+        })
+        .unwrap_or(count.max(1));
+    (0..count).map(|index| named(stride, index)).collect()
 }
 
 /// Tick positions for a log axis covering `[min, max]`.
@@ -268,6 +375,119 @@ pub fn anchor_label(series: &TickSeries, unit: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The next finer spacing on the 1–2–5 ladder.
+    fn finer(step: f64) -> f64 {
+        let magnitude = 10f64.powf(step.log10().floor());
+        let residual = (step / magnitude).round();
+        if residual == 5.0 {
+            step * 0.4
+        } else {
+            step * 0.5
+        }
+    }
+
+    /// A short plot reads even steps with every tick named. 3C's harmonic
+    /// spectrum, −74 dBV to 10 dBV on a strip about 120 points tall, kept
+    /// the tall plot's 10 dB ladder and dropped the −60 label beside a −70
+    /// nudged inside the frame: "−50, [gap], −70" read as a missing value.
+    #[test]
+    fn a_short_axis_coarsens_its_ladder_until_every_label_is_named() {
+        let column = |length| LabelColumn {
+            length,
+            label: 13.0,
+            gap: 2.0,
+        };
+        for (min, max) in [
+            (-74.08, 10.0),
+            (-114.5, -38.2),
+            (0.0, 1.0),
+            (-1.3e-3, 2.2e-3),
+            (-180.0, 180.0),
+        ] {
+            let tall = linear_ticks(min, max, 6);
+            for length in [60.0, 90.0, 120.0, 140.0, 240.0, 600.0] {
+                let series = fitted_linear_ticks(min, max, tall.step, column(length));
+                let values: Vec<f64> = series.ticks.iter().map(|(value, _)| *value).collect();
+                let at = format!("{min} … {max} over {length} pt: {values:?}");
+                assert!(values.len() >= 2, "a scale needs two ticks, {at}");
+                assert!(
+                    values
+                        .windows(2)
+                        .all(|pair| ((pair[1] - pair[0]) - series.step).abs() <= series.step * 1e-9),
+                    "the steps are uneven, {at}"
+                );
+                let fraction = |value: &f64| (value - min) / (max - min);
+                assert!(
+                    column(length).holds(values.iter().map(fraction)),
+                    "a label is dropped, {at}"
+                );
+                let centres: Vec<f64> = values
+                    .iter()
+                    .map(|value| column(length).centre(fraction(value)))
+                    .collect();
+                assert!(
+                    even_labels(&centres, 15.0).iter().all(|named| *named),
+                    "a tick goes unnamed, {at}"
+                );
+                // The ladder is the densest that fits: the tall plot's where it
+                // fits, else one finer step would drop a label.
+                if series.step > tall.step {
+                    let denser = linear_ticks_at(min, max, finer(series.step));
+                    assert!(
+                        !column(length)
+                            .holds(denser.ticks.iter().map(|(value, _)| fraction(value))),
+                        "a denser ladder fits, {at}"
+                    );
+                } else {
+                    assert_eq!(series.step, tall.step, "{at}");
+                }
+            }
+        }
+    }
+
+    /// The spectrum strip of the report, at the three heights 3C pictures.
+    #[test]
+    fn the_harmonic_spectrum_reads_twenty_db_steps_on_a_short_strip() {
+        let column = |length| LabelColumn {
+            length,
+            label: 13.0,
+            gap: 2.0,
+        };
+        let labels = |length| {
+            fitted_linear_ticks(-74.08, 10.0, 10.0, column(length))
+                .ticks
+                .into_iter()
+                .map(|(_, label)| label)
+                .collect::<Vec<_>>()
+        };
+        // At 140 points the 10 dB ladder would fit but for its top tick,
+        // 10 dBV on the frame, whose label is nudged down onto 0 dBV's.
+        assert_eq!(labels(60.0), ["−50", "0"]);
+        assert_eq!(labels(90.0), ["−60", "−40", "−20", "0"]);
+        assert_eq!(labels(140.0), ["−60", "−40", "−20", "0"]);
+        assert_eq!(
+            labels(200.0),
+            ["−70", "−60", "−50", "−40", "−30", "−20", "−10", "0", "10"]
+        );
+    }
+
+    /// A column too short for even two clear labels names every k-th from
+    /// the top, the top one always: never a hole between two named ticks.
+    #[test]
+    fn labels_too_tight_for_the_column_are_named_at_even_strides_from_the_top() {
+        assert_eq!(even_labels(&[6.0, 30.0, 54.0], 15.0), [true, true, true]);
+        assert_eq!(
+            even_labels(&[6.0, 14.0, 22.0, 30.0, 38.0], 15.0),
+            [true, false, true, false, true]
+        );
+        assert_eq!(
+            even_labels(&[6.0, 12.0, 18.0, 24.0], 15.0),
+            [true, false, false, true]
+        );
+        assert_eq!(even_labels(&[6.0, 9.0], 15.0), [false, true]);
+        assert!(even_labels(&[], 15.0).is_empty());
+    }
 
     #[test]
     fn linear_ticks_are_nice() {

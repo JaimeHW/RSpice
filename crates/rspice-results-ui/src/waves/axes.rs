@@ -321,7 +321,7 @@ pub(crate) fn secondary_axes(
             .layout_no_wrap(text.to_owned(), font.clone(), Color32::PLACEHOLDER)
             .size()
     };
-    let pitch = plot::y_tick_pitch(ui);
+    let column = plot::y_label_column(ui.painter(), plot_rect.height());
     let label_height = measure("0").y;
     let columns: Vec<Option<Column>> = axes
         .iter()
@@ -340,7 +340,7 @@ pub(crate) fn secondary_axes(
                     .filter_map(|index| model.traces.get(*index).map(|trace| trace.color))
                     .chain(axis.expressions.iter().map(|expr| expr.color)),
             );
-            let ladder = super::pane::secondary_ticks(plot_rect.height(), pitch, (low, high));
+            let ladder = super::pane::secondary_ticks(column, (low, high));
             // Ticks stated as offsets from an anchor would need the anchor
             // beside them, which the column has no room for: such a ladder
             // is labelled in full.
@@ -360,18 +360,21 @@ pub(crate) fn secondary_axes(
                     plot_rect.top() + half,
                     (plot_rect.bottom() - half).max(plot_rect.top() + half),
                 );
-                let held = labels
-                    .last()
-                    .is_none_or(|(below, _)| below - label_y >= label_height + 2.0);
-                if held {
-                    let label = if offset {
-                        plot::fmt_si_significant(value, "", 4)
-                    } else {
-                        label
-                    };
-                    labels.push((label_y, label));
-                }
+                let label = if offset {
+                    plot::fmt_si_significant(value, "", 4)
+                } else {
+                    label
+                };
+                labels.push((label_y, label));
             }
+            // Labels that still crowd are named at even strides from the
+            // top, as the first axis' are.
+            let centres: Vec<f64> = labels
+                .iter()
+                .map(|(y, _)| f64::from(plot_rect.bottom() - y))
+                .collect();
+            let mut named = plot::even_labels(&centres, column.label + column.gap).into_iter();
+            labels.retain(|_| named.next().unwrap_or(false));
             // The axis names its unit on its top label, as the first does; a
             // dimensionless axis names none, whose `1` would read as a value.
             let unit = if axis.unit == "1" { "" } else { axis.unit };

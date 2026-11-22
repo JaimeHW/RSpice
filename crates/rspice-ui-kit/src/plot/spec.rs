@@ -5,7 +5,10 @@ use egui::Color32;
 
 use super::format::{axis_tick_labels, offset_anchor_label, offset_tick_labels, tick_label};
 use super::sample::SweepShape;
-use super::scale::{TickSeries, XScale, anchor_label, decade_ticks, linear_ticks};
+use super::scale::{
+    LabelColumn, TickSeries, XScale, anchor_label, decade_ticks, fitted_linear_ticks, linear_ticks,
+    linear_ticks_at,
+};
 
 /// One axis: range, tick positions/labels, and the unit shown at its end.
 #[derive(Debug, Clone)]
@@ -135,6 +138,45 @@ impl Axis {
             }
         }
         self
+    }
+
+    /// This axis as a column of labels `column` long reads it: an even
+    /// linear ladder too dense for every label to stand clear coarsens along
+    /// 1–2–5 until each does, so a short plot keeps even steps and names
+    /// every tick rather than dropping a label from the middle of its scale.
+    /// `None` when the axis already fits, or when its ticks are not a ladder
+    /// it made itself (decades, an explicit list, labels written by hand).
+    #[must_use]
+    pub fn fitted(&self, column: LabelColumn) -> Option<Self> {
+        if !(self.tick_step > 0.0 && self.max > self.min) {
+            return None;
+        }
+        let fraction = |value: f64| (value - self.min) / (self.max - self.min);
+        if column.holds(self.ticks.iter().map(|(value, _)| fraction(*value))) {
+            return None;
+        }
+        let rebuilt = |series: TickSeries| {
+            let mut axis = Self::from_series(self.min, self.max, self.unit.clone(), series);
+            if self.display_scale != 1.0 || self.display_offset != 0.0 {
+                axis = axis.with_display_transform(
+                    self.display_scale,
+                    self.display_offset,
+                    self.unit.clone(),
+                );
+            }
+            axis.label.clone_from(&self.label);
+            axis
+        };
+        if rebuilt(linear_ticks_at(self.min, self.max, self.tick_step)).ticks != self.ticks {
+            return None;
+        }
+        let fitted = rebuilt(fitted_linear_ticks(
+            self.min,
+            self.max,
+            self.tick_step,
+            column,
+        ));
+        (fitted.ticks != self.ticks).then_some(fitted)
     }
 
     /// Attach the exact semantic quantity label rendered with the unit and

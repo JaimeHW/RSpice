@@ -471,10 +471,10 @@ fn pane_spec<'a>(spec: PlotSpec<'a>, pane: &UnitPane) -> PlotSpec<'a> {
     }
 }
 
-/// The ladder an added axis reading `range` labels over a plot `plot_height`
-/// tall, as dense as the strip's first axis would be.
-pub(crate) fn secondary_ticks(plot_height: f32, pitch: f32, range: (f64, f64)) -> Axis {
-    labelled_y_axis(plot_height, pitch, |target| {
+/// The ladder an added axis reading `range` labels along `column`, as dense
+/// as the strip's first axis would be.
+pub(crate) fn secondary_ticks(column: plot::LabelColumn, range: (f64, f64)) -> Axis {
+    labelled_y_axis(column, |target| {
         Axis::linear_with(range.0, range.1, "", target)
     })
 }
@@ -482,45 +482,32 @@ pub(crate) fn secondary_ticks(plot_height: f32, pitch: f32, range: (f64, f64)) -
 /// The steps a tall pane's linear Y ladder aims for.
 const DENSEST_Y_LADDER: usize = 6;
 
-/// The densest linear Y ladder, [`DENSEST_Y_LADDER`] steps at most, whose
-/// every label the pane has room to draw `pitch` apart. A pane too short even
-/// for the sparsest keeps those of its ticks that can be labelled, so it
-/// never draws a grid line it cannot say the value of.
+/// The densest Y ladder, [`DENSEST_Y_LADDER`] steps at most, whose every
+/// label stands clear along `column`, the labels of ticks on the frame
+/// nudged inside it as they are drawn. A pane too short even for the
+/// sparsest coarsens a linear ladder further, to two ticks, and names what
+/// still crowds at even strides from the top: a short pane reads even steps,
+/// never a scale with a value missing from its middle.
 pub(crate) fn labelled_y_axis(
-    plot_height: f32,
-    pitch: f32,
+    column: plot::LabelColumn,
     axis_with: impl Fn(usize) -> Axis,
 ) -> Axis {
     const SPARSEST: usize = 2;
-    let apart = |axis: &Axis, lower: f64, upper: f64| {
-        ((upper - lower).abs() / (axis.max - axis.min)) as f32 * plot_height
-    };
     let fits = |axis: &Axis| {
-        axis.ticks
-            .windows(2)
-            .all(|pair| apart(axis, pair[0].0, pair[1].0) >= pitch)
+        column.holds(
+            axis.ticks
+                .iter()
+                .map(|(value, _)| (value - axis.min) / (axis.max - axis.min)),
+        )
     };
-    if let Some(axis) = (SPARSEST..=DENSEST_Y_LADDER)
+    (SPARSEST..=DENSEST_Y_LADDER)
         .rev()
         .map(&axis_with)
         .find(fits)
-    {
-        return axis;
-    }
-    let mut axis = axis_with(SPARSEST);
-    let mut kept: Option<f64> = None;
-    let ticks = std::mem::take(&mut axis.ticks)
-        .into_iter()
-        .filter(|(value, _)| {
-            let keep = kept.is_none_or(|last| apart(&axis, last, *value) >= pitch);
-            if keep {
-                kept = Some(*value);
-            }
-            keep
+        .unwrap_or_else(|| {
+            let sparsest = axis_with(SPARSEST);
+            sparsest.fitted(column).unwrap_or(sparsest)
         })
-        .collect();
-    axis.ticks = ticks;
-    axis
 }
 
 /// Display inputs resolved by the host for one unit-scoped pane.
@@ -796,7 +783,7 @@ pub fn show_plot<'a>(
             ),
         )
         .height();
-        labelled_y_axis(plot_height, plot::y_tick_pitch(ui), y_axis_with)
+        labelled_y_axis(plot::y_label_column(ui.painter(), plot_height), y_axis_with)
     };
     // The scale the pane is actually drawn on. Every hit test below maps
     // through it rather than assuming a linear ordinate, because "nearest"

@@ -43,10 +43,10 @@ pub use decimate::{BandMember, DecimationCache, SampleInterpolation, display_col
 pub use format::{fmt_si_signed, fmt_si_significant, si_tick_label, tick_with_unit};
 pub use render::{
     InteractionMode, PlotResponse, ReadoutRow, ViewChange, Y_LABEL_GAP, floored_span, hairline,
-    plot_rect, set_interaction_mode, show, square_outer_rect, y_tick_font, y_tick_pitch,
+    plot_rect, set_interaction_mode, show, square_outer_rect, y_label_column, y_tick_font,
 };
 pub use render::{TraceLook, TraceMarkerShape, paint_min_max_band, paint_trace_swatch};
-pub use scale::{MAX_AXIS_TICKS, XScale, anchor_label, linear_ticks};
+pub use scale::{LabelColumn, MAX_AXIS_TICKS, XScale, anchor_label, even_labels, linear_ticks};
 pub use spec::{
     Axis, Band, DrawMode, FIT_HEADROOM, LimitLine, Marker, MarkerShape, PLOT_GUTTER, PlotMapper,
     PlotSpec, RefLine, StoredSamples, Trace, TraceAxis, padded_fit, trace_cache_key,

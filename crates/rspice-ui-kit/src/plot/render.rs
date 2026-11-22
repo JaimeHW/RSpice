@@ -11,7 +11,7 @@ use crate::tokens::Tokens;
 use super::cursor::{CursorId, CursorPair};
 use super::decimate::DecimationCache;
 use super::format::{fmt_si_signed, fmt_si_significant, tick_with_unit};
-use super::scale::XScale;
+use super::scale::{LabelColumn, XScale, even_labels};
 use super::spec::{Axis, DrawMode, MarkerShape, PlotSpec, Trace};
 use crate::palette::TRACE_HUES;
 
@@ -915,18 +915,22 @@ fn y_caption_text(spec: &PlotSpec<'_>) -> Option<String> {
         .or_else(|| spec.y_without_unit.clone())
 }
 
-/// How close two Y tick labels may stand and both be drawn: a label's
+/// How a Y axis `length` points tall stands its tick labels: a label's
 /// height and the gap the renderer keeps between neighbours.
-pub fn y_tick_pitch(ui: &Ui) -> f32 {
-    ui.painter()
+pub fn y_label_column(painter: &egui::Painter, length: f32) -> LabelColumn {
+    let label = painter
         .layout_no_wrap(
             "0".to_owned(),
             theme::mono(Y_TICK_FONT_SIZE, FontWeight::Regular),
             Color32::PLACEHOLDER,
         )
         .size()
-        .y
-        + Y_TICK_LABEL_GAP
+        .y;
+    LabelColumn {
+        length: f64::from(length),
+        label: f64::from(label),
+        gap: f64::from(Y_TICK_LABEL_GAP),
+    }
 }
 
 fn top_margin(spec: &PlotSpec<'_>) -> f32 {
@@ -1181,8 +1185,14 @@ pub fn show(
     }
 
     // ---- grid + ticks
-    // Labels skip when they would collide with the previous label (dense
-    // log decades at deep zoom) — every gridline still draws.
+    // A linear Y ladder too dense for the plot's height to name every tick
+    // coarsens until it can; ticks that still crowd (dense log decades at
+    // deep zoom) are named at even strides from the top, and every gridline
+    // still draws.
+    let fitted_y = (spec.y_scale == XScale::Linear)
+        .then(|| spec.y.fitted(y_label_column(&painter, plot_rect.height())))
+        .flatten();
+    let y_axis = fitted_y.as_ref().unwrap_or(&spec.y);
     // A logarithmic axis is read against its mantissas, 2 … 9 in each decade,
     // lighter than the decades, as ViVA and ADS rule one; a linear axis
     // subdivides only when the reader asks for a minor grid.
@@ -1197,7 +1207,7 @@ pub fn show(
     for value in minors(spec.x_scale, &spec.x) {
         painter.vline(mx(value), plot_rect.y_range(), minor);
     }
-    for value in minors(spec.y_scale, &spec.y) {
+    for value in minors(spec.y_scale, y_axis) {
         painter.hline(plot_rect.x_range(), my(value), minor);
     }
     // The Y column's chrome is either its unit or, when the window is too
@@ -1216,12 +1226,12 @@ pub fn show(
     for (xv, _) in &spec.x.ticks {
         painter.vline(mx(*xv), plot_rect.y_range(), grid);
     }
-    // Y labels skip on collision exactly as the X row does. A pane a few
-    // rows tall carries the same tick count as a full-height one, and
-    // stacked labels are less readable than none.
-    let mut last_label_top = f32::INFINITY;
+    // Labels that still crowd are named at even strides from the top, the
+    // one with the unit always among them: stacked labels are less readable
+    // than none, and a hole in the middle of a scale reads as a missing
+    // value.
     let mut y_labels = Vec::new();
-    for (yv, label) in &spec.y.ticks {
+    for (yv, label) in &y_axis.ticks {
         let py = my(*yv);
         painter.hline(plot_rect.x_range(), py, grid);
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), y_ink);
@@ -1235,13 +1245,19 @@ pub fn show(
                 (plot_rect.bottom() - height).max(plot_rect.top()),
             );
         }
-        if top + height <= last_label_top - Y_TICK_LABEL_GAP
-            && top >= y_chrome_bottom + Y_TICK_LABEL_GAP
-        {
-            last_label_top = top;
+        if top >= y_chrome_bottom + Y_TICK_LABEL_GAP {
             y_labels.push((top, label, galley));
         }
     }
+    let centres: Vec<f64> = y_labels
+        .iter()
+        .map(|(top, _, galley)| f64::from(plot_rect.bottom() - top - galley.size().y * 0.5))
+        .collect();
+    let pitch = y_labels
+        .first()
+        .map_or(0.0, |(_, _, galley)| galley.size().y + Y_TICK_LABEL_GAP);
+    let mut named = even_labels(&centres, f64::from(pitch)).into_iter();
+    y_labels.retain(|_| named.next().unwrap_or(false));
     let topmost = y_labels.len().checked_sub(1);
     for (index, (top, label, galley)) in y_labels.into_iter().enumerate() {
         let galley = if unit_on_tick && Some(index) == topmost {
