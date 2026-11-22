@@ -108,7 +108,7 @@ impl LocateSignalError {
                     .to_owned()
             }
             Self::UnknownNet(net) => {
-                format!("The open sheet has no conductor named {net}.")
+                format!("No sheet of this drawing has a conductor named {net}.")
             }
             Self::OtherOccurrence(occurrence) => {
                 format!(

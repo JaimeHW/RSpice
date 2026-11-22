@@ -151,13 +151,7 @@ fn node_target_available(state: ResultsReads<'_>, name: &str) -> bool {
         return false;
     }
     let name = signal_leaf(name);
-    name != "0"
-        && state
-            .model
-            .active_sheet_net_geometry()
-            .net_to_points
-            .iter()
-            .any(|(candidate, points)| candidate.eq_ignore_ascii_case(name) && !points.is_empty())
+    name != "0" && state.model.drawing_draws_net(name)
 }
 fn device_target(state: ResultsReads<'_>, name: &str) -> Option<u64> {
     if !result_mapping_is_current(state) {

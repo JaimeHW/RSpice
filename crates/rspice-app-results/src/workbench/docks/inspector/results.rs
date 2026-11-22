@@ -733,9 +733,8 @@ fn schematic_cross_probe_unavailability(
         Ok(probe) => probe.leaf,
         Err(_) => net.to_owned(),
     };
-    let mut nets = map.on_sheet(model.active_sheet_id()).net_to_points.iter();
-    let known = nets.any(|(name, points)| name.eq_ignore_ascii_case(&leaf) && !points.is_empty());
-    (!known).then(|| format!("The open sheet has no conductor named {leaf}."))
+    (!model.drawing_draws_net(&leaf))
+        .then(|| format!("No sheet of this drawing has a conductor named {leaf}."))
 }
 
 /// Resolve against the current schematic map before navigation. A stale or

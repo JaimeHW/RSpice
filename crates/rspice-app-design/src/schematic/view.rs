@@ -648,8 +648,9 @@ mod tests {
     }
 
     /// Locate on a later sheet selects the conductor that sheet draws and
-    /// centres where it draws it, and never reaches a wire on a hidden sheet
-    /// that happens to share the coordinates.
+    /// centres where it draws it; a net drawn only on the other sheet brings
+    /// that sheet forward and selects its own wire, never the one that
+    /// shares its coordinates on the sheet that was in view.
     #[test]
     fn locate_on_a_later_sheet_reads_that_sheets_own_geometry() {
         let mut state = frame_cost::two_sheet_operating_point(true);
@@ -666,21 +667,26 @@ mod tests {
         );
         assert_eq!(editor.center_request, Some(Point::new(100, 0)));
 
-        let error = state
+        // A net drawn only on another sheet brings that sheet forward and is
+        // selected there, as Show on schematic from Results asks.
+        let sheet_two = state.model.active_sheet_id();
+        let net = state
             .model
             .select_signal_conductor("V(vout)")
-            .expect_err("VOUT is drawn only on the hidden Sheet 1");
-        assert_eq!(error, LocateSignalError::UnknownNet("vout".to_owned()));
-        assert!(
-            !state
+            .expect("Sheet 1 draws VOUT");
+        assert_eq!(net, "VOUT");
+        assert_ne!(state.model.active_sheet_id(), sheet_two);
+        assert_eq!(
+            state
                 .model
-                .schematic
-                .session
-                .editor
-                .selection
-                .wires
-                .contains(&1),
-            "a wire on the hidden sheet is never selected"
+                .sheet_name(state.model.active_sheet_id().expect("a sheet")),
+            "Sheet 1"
+        );
+        let editor = &state.model.schematic.session.editor;
+        assert_eq!(
+            editor.selection.wires.iter().copied().collect::<Vec<_>>(),
+            vec![1],
+            "only the wire Sheet 1 draws is selected"
         );
     }
 
