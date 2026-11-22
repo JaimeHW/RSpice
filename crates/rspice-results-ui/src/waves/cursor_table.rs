@@ -1,22 +1,21 @@
 //! The Cursors page's table.
 //!
-//! One column per vertical cursor or marker, its head the column's name over
-//! its X, which is typed in place to move it. A difference column follows
+//! A kit table with one column per vertical cursor or marker, named in its
+//! head; the first row reads each one's X, typed in place to move it, and a
+//! right-click in a column offers its menu. A difference column follows
 //! for each other column against the base, and a pair adds its slope. Every
 //! strip on screen that shares the columns' X has a band of rows, one per
 //! trace with its swatch. Cursors and markers on strips with another X make
 //! a table of their own below, as a difference across two domains is not a
 //! measurement.
 //!
-//! The horizontal cursors follow: each pane's levels, and where each of its
-//! traces crosses them.
+//! The horizontal cursors follow in a table of their own: a group per pane
+//! naming its levels, and where each of its traces crosses them.
 
 use super::cursor_values::{marker_position, x_delta, x_reciprocal};
 use super::dock::{MarkerActions, MarkerMove, ReadoutInput, marker_color, visible_markers};
-use super::pane::SwatchStyle;
 use super::readout::{
-    READOUT_ABSENT, READOUT_PAD_X, READOUT_ROW_H, ReadingLayout, TableRow, readout_branch_note,
-    readout_traces, trace_table_rows,
+    READOUT_ABSENT, ReadingLayout, TableRow, readout_branch_note, readout_traces, trace_table_rows,
 };
 use super::{StripModel, anchor_key};
 use crate::session::{HorizontalCursors, ReadingColumnId, ResultViewerState};
@@ -25,16 +24,17 @@ use rspice_results::result_presentation::{
     AnalysisPresentationKey, WavePanePresentationKey, WaveformPresentationKey,
 };
 use rspice_results::waveform::SharedWaveformValues;
-use rspice_ui_kit::plot::{CursorId, CursorPair, TraceLook, XScale, paint_trace_swatch};
+use rspice_ui_kit::plot::{CursorId, CursorPair, XScale};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::table::{
+    CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Group, TableState,
+};
 
-/// The space either side of a cell's text.
-const CELL_PAD: f32 = 10.0;
 /// The narrowest a value column is drawn.
 const VALUE_COLUMN_MIN_W: f32 = 72.0;
-/// The swatch leading a trace's row.
-const SWATCH_W: f32 = 22.0;
+/// The tab of a trace's colour leading its row.
+const SWATCH_W: f32 = 10.0;
 /// The widest a crossings cell is drawn; its count leads, so what the clip
 /// hides is still counted.
 const CROSSINGS_MAX_W: f32 = 420.0;
@@ -128,25 +128,6 @@ impl CursorTable {
             }
         }
         lines.join("\n")
-    }
-
-    /// The table, spoken: one string, as the table is one painted grid.
-    fn spoken(&self) -> String {
-        let heads = self.heads();
-        let mut text = format!("Cursor table. {}:", self.x_label);
-        for (head, x) in heads.iter().zip(&self.x_cells) {
-            text.push_str(&format!(" {head} {x},"));
-        }
-        for band in &self.bands {
-            text.push_str(&format!(" {}.", band.title));
-            for row in &band.rows {
-                text.push_str(&format!(" {}:", row.name));
-                for (head, cell) in heads.iter().zip(&row.cells) {
-                    text.push_str(&format!(" {head} {cell},"));
-                }
-            }
-        }
-        text
     }
 }
 
@@ -690,7 +671,7 @@ pub fn marker_spot(state: &ResultViewerState, source: ReadoutInput<'_>) -> Optio
 }
 
 /// Paint the page's tables, then its horizontal cursors, and take what the
-/// reader asks of them. Every section shares one name column, so their
+/// reader asks of them. Every table shares one name column, so their
 /// readings start on one edge.
 pub fn paint_page(
     ui: &mut Ui,
@@ -699,61 +680,38 @@ pub fn paint_page(
     tables: &[CursorTable],
 ) -> MarkerActions {
     let mut requests = MarkerActions::default();
-    let horizontal = horizontal_sections(
-        source,
-        &super::dock::horizontal_cursor_rows(state, source),
-        &Tokens::get(ui.ctx()),
-    );
+    let horizontal =
+        horizontal_sections(source, &super::dock::horizontal_cursor_rows(state, source));
     let name_w = name_column_width(ui, tables, &horizontal);
     for (index, table) in tables.iter().enumerate() {
-        if index > 0 {
-            seam(ui);
-        }
-        egui::ScrollArea::horizontal()
-            .id_salt(("rspice.results.cursor-table", index))
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                paint_table(ui, state, source, table, name_w, &mut requests);
-            });
+        paint_table(ui, state, source, (index, table), name_w, &mut requests);
     }
     if !horizontal.is_empty() {
-        if !tables.is_empty() {
-            seam(ui);
-        }
-        egui::ScrollArea::horizontal()
-            .id_salt("rspice.results.horizontal-cursors")
-            .auto_shrink([false, true])
-            .show(ui, |ui| paint_horizontal(ui, state, &horizontal, name_w));
+        paint_horizontal(ui, state, &horizontal, name_w);
     }
     requests
 }
 
-/// The name column every section of the page draws: as wide as its widest
+/// The words a table cell prints in, for sizing a column to them.
+fn cell_font() -> egui::FontId {
+    theme::mono(tokens::FS_1, FontWeight::Regular)
+}
+
+/// The name column every table of the page draws: as wide as its widest
 /// name, within bounds.
 fn name_column_width(ui: &Ui, tables: &[CursorTable], horizontal: &[HorizontalSection]) -> f32 {
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let head_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
-    let mut width = text_width(ui, "Trace", &head_font);
+    let font = cell_font();
+    let mut width = text_width(ui, "Trace", &font);
     for table in tables {
         width = width.max(text_width(ui, &table.x_label, &font));
         for row in table.bands.iter().flat_map(|band| &band.rows) {
-            width = width.max(SWATCH_W + text_width(ui, &row.name, &font));
+            width = width.max(text_width(ui, &row.name, &font));
         }
     }
-    for section in horizontal {
-        width = width.max(text_width(ui, &section.name, &head_font));
-        for row in &section.rows {
-            width = width.max(SWATCH_W + text_width(ui, &row.name, &font));
-        }
+    for row in horizontal.iter().flat_map(|section| &section.rows) {
+        width = width.max(text_width(ui, &row.name, &font));
     }
-    width.clamp(120.0, 360.0) + CELL_PAD
-}
-
-fn seam(ui: &mut Ui) {
-    let (seam, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(seam, 0.0, Tokens::get(ui.ctx()).color.border);
+    width.clamp(96.0, 320.0) + CELL_PAD * 2.0
 }
 
 fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
@@ -763,278 +721,216 @@ fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
         .x
 }
 
-fn paint_swatch(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    color: egui::Color32,
-    style: Option<SwatchStyle>,
-    t: &Tokens,
-) {
-    let look = style.map_or(
-        TraceLook {
-            dash: None,
-            marker: None,
-        },
-        |style| style.look(t.color_safe_traces),
-    );
-    paint_trace_swatch(painter, rect, color, look, t.color.bg_panel);
+/// A trace's row leads with a tab of its colour, so a reader ties the row
+/// to its curve without matching names.
+fn swatch_cell(color: egui::Color32) -> Cell {
+    Cell::empty().wash(color)
 }
 
-/// The editor of one column's X while the reader types it.
-fn x_edit_id() -> egui::Id {
-    egui::Id::new("rspice.results.cursor-table.x-edit")
+/// A printed reading as a cell: a number, or the mark for nothing read.
+fn reading_cell(text: &str) -> Cell {
+    if text == READOUT_ABSENT {
+        Cell::absent()
+    } else {
+        Cell::number(text)
+    }
 }
 
-/// A column's X as the reader is typing it, and as it read when they began.
+/// A column's X as the reader types it in the table's X row, and as it
+/// read when they began.
 #[derive(Clone)]
-struct XEdit {
-    column: ReadingColumnId,
+struct XDraft {
+    table: usize,
+    /// The table's column, past its swatch and name.
+    column: usize,
     text: String,
-    original: String,
+    seed: String,
+    focus: bool,
 }
+
+fn x_draft_id() -> egui::Id {
+    egui::Id::new("rspice.results.cursor-table.x-draft")
+}
+
+/// The column menu a right-click in a table asked for: the table, its
+/// column and where.
+fn column_menu_id() -> egui::Id {
+    egui::Id::new("rspice.results.cursor-table.column-menu")
+}
+
+/// Columns before the readings: the swatch and the name.
+const LEAD_COLUMNS: usize = 2;
 
 fn paint_table(
     ui: &mut Ui,
     state: &mut ResultViewerState,
     source: ReadoutInput<'_>,
-    table: &CursorTable,
+    (index, table): (usize, &CursorTable),
     name_w: f32,
     requests: &mut MarkerActions,
 ) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let head_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
+    let font = cell_font();
     let heads = table.heads();
+    let readings = table.columns.len();
 
-    // Columns as wide as what they hold, so no reading is cut short.
-    let widths: Vec<f32> = (0..heads.len())
-        .map(|column| {
-            let mut width = text_width(ui, &heads[column], &head_font);
-            if let Some(x) = table.x_cells.get(column) {
-                width = width.max(text_width(ui, x, &font));
+    // Columns as wide as what they hold, so no reading is cut short; the
+    // last column takes what is left, so the readings stand by the names.
+    let mut columns = vec![
+        Column::words("", SWATCH_W).unsortable(),
+        Column::words("Trace", name_w).unsortable(),
+    ];
+    for (column, head) in heads.iter().enumerate() {
+        let mut width = text_width(ui, head, &font);
+        if let Some(x) = table.x_cells.get(column) {
+            width = width.max(text_width(ui, x, &font));
+        }
+        for row in table.bands.iter().flat_map(|band| &band.rows) {
+            if let Some(cell) = row.cells.get(column) {
+                width = width.max(text_width(ui, cell, &font));
             }
-            for row in table.bands.iter().flat_map(|band| &band.rows) {
-                if let Some(cell) = row.cells.get(column) {
-                    width = width.max(text_width(ui, cell, &font));
+        }
+        let tooltip = match table.columns.get(column) {
+            Some(reading) => reading.hover.clone(),
+            None if column < readings + table.deltas.len() => {
+                format!("{head}: each row's difference, and over it their separation")
+            }
+            None => "The pair's slope, and over it the reciprocal of their separation".to_owned(),
+        };
+        columns.push(
+            Column::number(head, (width + CELL_PAD * 2.0).max(VALUE_COLUMN_MIN_W))
+                .unsortable()
+                .tooltip(tooltip),
+        );
+    }
+    columns.push(Column::name("", 0.0).unsortable());
+
+    // The X row first, its readings' X typed in place; then each strip's
+    // rows under a group head that names it.
+    let mut rows: Vec<Vec<Cell>> = Vec::new();
+    let mut x_row = vec![Cell::empty(), Cell::text(&table.x_label)];
+    for (column, x) in table.x_cells.iter().enumerate() {
+        x_row.push(match table.columns.get(column).map(|reading| &reading.x) {
+            Some(Ok(_)) => Cell::number(x)
+                .editable()
+                .hint("Click to type where it stands; right-click for its menu"),
+            Some(Err(why)) => Cell::text(why),
+            None => reading_cell(x),
+        });
+    }
+    x_row.push(Cell::empty());
+    rows.push(x_row);
+    let mut groups = Vec::new();
+    for band in &table.bands {
+        groups.push(Group::new(&band.title, rows.len()));
+        for row in &band.rows {
+            let mut cells = vec![swatch_cell(row.swatch), Cell::text(&row.name)];
+            cells.extend(row.cells.iter().map(|cell| reading_cell(cell)));
+            cells.push(Cell::empty());
+            rows.push(cells);
+        }
+    }
+
+    let id = format!("rspice.results.cursor-table.{index}");
+    let state_id = egui::Id::new(&id);
+    let mut table_state = ui
+        .data(|data| data.get_temp::<TableState>(state_id))
+        .unwrap_or_default();
+    let mut draft = ui
+        .data(|data| data.get_temp::<XDraft>(x_draft_id()))
+        .filter(|draft| draft.table == index);
+    let editor = draft.as_mut().map(|draft| CellEditor {
+        row: 0,
+        column: draft.column + LEAD_COLUMNS,
+        text: &mut draft.text,
+        focus: std::mem::take(&mut draft.focus),
+    });
+    let response = DataTable::new(&id, &columns, rows.len())
+        .state(&mut table_state)
+        .groups(&groups)
+        .freeze(LEAD_COLUMNS)
+        .editing(editor)
+        .show(ui, |row| rows[row].clone());
+    ui.data_mut(|data| data.insert_temp(state_id, table_state));
+
+    // A reading's X opens for entry; Enter moves it there.
+    if let Some((0, column)) = response.edit
+        && let Some(reading) = column
+            .checked_sub(LEAD_COLUMNS)
+            .and_then(|column| table.columns.get(column))
+        && reading.x.is_ok()
+    {
+        let seed = table.x_cells[column - LEAD_COLUMNS].clone();
+        draft = Some(XDraft {
+            table: index,
+            column: column - LEAD_COLUMNS,
+            text: seed.clone(),
+            seed,
+            focus: true,
+        });
+    }
+    match response.edited {
+        Some(EditOutcome::Cancel) => draft = None,
+        Some(EditOutcome::Commit) => {
+            if let Some(open) = draft.take()
+                && open.text.trim() != open.seed.trim()
+                && let Some(reading) = table.columns.get(open.column)
+            {
+                let unit = &source.models[reading.model].x_unit;
+                match parse_typed_x(&open.text, unit) {
+                    Some(x) => move_column(state, source, reading, x, requests),
+                    // An entry that does not read stays open to be put right.
+                    None => {
+                        draft = Some(XDraft {
+                            focus: true,
+                            ..open
+                        });
+                    }
                 }
             }
-            (width + CELL_PAD * 2.0).max(VALUE_COLUMN_MIN_W)
-        })
-        .collect();
-    let rows = 2 + table
-        .bands
-        .iter()
-        .map(|band| 1 + band.rows.len())
-        .sum::<usize>();
-    let table_w = READOUT_PAD_X * 2.0 + name_w + widths.iter().sum::<f32>();
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(
-            table_w.max(ui.available_width()),
-            rows as f32 * READOUT_ROW_H,
-        ),
-        egui::Sense::hover(),
-    );
-    let left = rect.left() + READOUT_PAD_X;
-    let mut edges = vec![left + name_w];
-    for width in &widths {
-        edges.push(edges.last().copied().unwrap_or(left) + width);
+        }
+        None => {}
     }
-    let row_rect = |row: usize| {
-        let top = rect.top() + row as f32 * READOUT_ROW_H;
-        egui::Rect::from_min_max(
-            egui::pos2(rect.left(), top),
-            egui::pos2(rect.right(), top + READOUT_ROW_H),
-        )
-    };
-    let cell_rect = |row: usize, column: usize| {
-        let row = row_rect(row);
-        egui::Rect::from_x_y_ranges(edges[column]..=edges[column + 1], row.y_range())
-    };
-    let painter = ui.painter().with_clip_rect(rect);
-    let right_text = |row: usize, column: usize, text: &str, font: &egui::FontId, color| {
-        let cell = cell_rect(row, column);
-        painter.with_clip_rect(cell).text(
-            egui::pos2(cell.right() - CELL_PAD, cell.center().y),
-            egui::Align2::RIGHT_CENTER,
-            text,
-            font.clone(),
-            color,
-        );
-    };
-    let name_text = |row: usize, indent: f32, text: &str, font: &egui::FontId, color| {
-        let row = row_rect(row);
-        let clip = egui::Rect::from_x_y_ranges(left..=left + name_w - CELL_PAD, row.y_range());
-        painter.with_clip_rect(clip).text(
-            egui::pos2(left + indent, row.center().y),
-            egui::Align2::LEFT_CENTER,
-            text,
-            font.clone(),
-            color,
-        );
-    };
-
-    // The heads: names over their X.
-    name_text(0, 0.0, "Trace", &head_font, c.text_faint);
-    name_text(1, 0.0, &table.x_label, &font, c.text_dim);
-    let stepping = state.stepping_cursor;
-    for (column, head) in heads.iter().enumerate() {
-        let color = match table.columns.get(column).map(|column| column.id) {
-            Some(ReadingColumnId::Cursor(id)) if id != stepping => c.text_faint,
-            Some(_) => table.columns[column].color,
-            None => c.text_faint,
-        };
-        right_text(0, column, head, &head_font, color);
-    }
-    let editing = ui.data(|data| data.get_temp::<XEdit>(x_edit_id()));
-    for (column, x) in table.x_cells.iter().enumerate() {
-        let is_edited = table.columns.get(column).is_some_and(|reading| {
-            editing
-                .as_ref()
-                .is_some_and(|edit| edit.column == reading.id)
-        });
-        if !is_edited {
-            let color = if table
-                .columns
-                .get(column)
-                .is_some_and(|reading| reading.x.is_err())
+    ui.data_mut(|data| match draft {
+        Some(draft) => {
+            data.insert_temp(x_draft_id(), draft);
+        }
+        None => {
+            if data
+                .get_temp::<XDraft>(x_draft_id())
+                .is_some_and(|draft| draft.table == index)
             {
-                c.text_faint
-            } else {
-                c.text
-            };
-            right_text(1, column, x, &font, color);
-        }
-    }
-
-    // Each strip's band, then its rows.
-    let mut row_index = 2;
-    for band in &table.bands {
-        let band_rect = row_rect(row_index);
-        painter.rect_filled(band_rect, 0.0, c.bg_panel_2);
-        name_text(row_index, 0.0, &band.title, &head_font, c.text_dim);
-        row_index += 1;
-        for row in &band.rows {
-            let swatch = egui::Rect::from_x_y_ranges(
-                left..=left + SWATCH_W - 4.0,
-                row_rect(row_index).y_range(),
-            );
-            paint_swatch(&painter, swatch, row.swatch, row.swatch_style, &t);
-            name_text(row_index, SWATCH_W, &row.name, &font, c.text_dim);
-            for (column, cell) in row.cells.iter().enumerate() {
-                let color = if column < table.columns.len() {
-                    c.text
-                } else {
-                    c.text_dim
-                };
-                right_text(row_index, column, cell, &font, color);
+                data.remove::<XDraft>(x_draft_id());
             }
-            row_index += 1;
         }
-    }
-
-    // The painted grid is one node to a screen reader.
-    let response = ui.interact(rect, ui.id().with("cursor-table"), egui::Sense::hover());
-    let spoken = table.spoken();
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, spoken.clone()));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Table);
-        node.set_label(spoken.clone());
     });
 
-    // A column's head: a click hands a cursor the arrow keys; the menu
-    // makes it the base, snaps, renames or deletes it.
-    for (column, reading) in table.columns.iter().enumerate() {
-        let head = cell_rect(0, column);
-        let key = (table.x_label.as_str(), column);
-        let response = ui
-            .interact(
-                head,
-                ui.id().with(("cursor-table-head", key)),
-                egui::Sense::click(),
-            )
-            .on_hover_text(&reading.hover);
-        if response.clicked()
-            && let ReadingColumnId::Cursor(id) = reading.id
-        {
-            state.stepping_cursor = id;
-        }
-        response.context_menu(|ui| {
-            column_menu(ui, state, source, table, column, requests);
-        });
-
-        // Its X, typed in place.
-        let x_cell = cell_rect(1, column);
-        match editing.as_ref() {
-            Some(edit) if edit.column == reading.id => {
-                let mut text = edit.text.clone();
-                let unit = source.models[reading.model].x_unit.clone();
-                let valid = parse_typed_x(&text, &unit).is_some();
-                let field = ui.put(
-                    x_cell.shrink2(egui::vec2(2.0, 1.0)),
-                    egui::TextEdit::singleline(&mut text)
-                        .id(ui.id().with(("cursor-table-x", key)))
-                        .font(font.clone())
-                        .horizontal_align(egui::Align::Max)
-                        .text_color(if valid { c.text } else { c.warn }),
-                );
-                if !field.has_focus() && !field.lost_focus() {
-                    field.request_focus();
-                }
-                let entered =
-                    field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                let parsed = parse_typed_x(&text, &unit);
-                let keep_editing = if entered {
-                    // An unchanged entry leaves the column where it stands
-                    // rather than at its printed rounding.
-                    if text != edit.original
-                        && let Some(x) = parsed
-                    {
-                        move_column(state, source, reading, x, requests);
-                    }
-                    text != edit.original && parsed.is_none()
-                } else {
-                    !field.lost_focus()
-                };
-                ui.data_mut(|data| {
-                    if keep_editing {
-                        data.insert_temp(
-                            x_edit_id(),
-                            XEdit {
-                                text,
-                                ..edit.clone()
-                            },
-                        );
-                    } else {
-                        data.remove::<XEdit>(x_edit_id());
-                    }
-                });
-            }
-            _ => {
-                let response = ui
-                    .interact(
-                        x_cell,
-                        ui.id().with(("cursor-table-x-cell", key)),
-                        egui::Sense::click(),
-                    )
-                    .on_hover_text("Click to type where it stands");
-                if response.clicked()
-                    && let Some(text) = table.x_cells.get(column).filter(|_| reading.x.is_ok())
-                {
-                    ui.data_mut(|data| {
-                        data.insert_temp(
-                            x_edit_id(),
-                            XEdit {
-                                column: reading.id,
-                                text: text.clone(),
-                                original: text.clone(),
-                            },
-                        );
-                    });
-                }
-            }
-        }
+    // A right-click in a reading's column asks for its menu.
+    let ctx = ui.ctx().clone();
+    if let Some(asked) = response.context_menu
+        && let Some(column) = asked
+            .cell
+            .column
+            .and_then(|column| column.checked_sub(LEAD_COLUMNS))
+            .filter(|column| *column < readings)
+    {
+        ctx.data_mut(|data| data.insert_temp(column_menu_id(), (index, column, asked.position)));
+        egui::Popup::open_id(&ctx, column_menu_id());
+    }
+    if egui::Popup::is_id_open(&ctx, column_menu_id())
+        && let Some((menu_table, column, position)) =
+            ctx.data(|data| data.get_temp::<(usize, usize, egui::Pos2)>(column_menu_id()))
+        && menu_table == index
+        && column < readings
+    {
+        egui::Popup::new(
+            column_menu_id(),
+            ctx.clone(),
+            egui::PopupAnchor::Position(position),
+            egui::LayerId::new(egui::Order::Foreground, column_menu_id()),
+        )
+        .kind(egui::PopupKind::Menu)
+        .open_memory(None)
+        .show(|ui| column_menu(ui, state, source, table, column, requests));
     }
 }
 
@@ -1173,10 +1069,8 @@ pub fn crossings(xs: &[f64], ys: &[f64], level: f64) -> Vec<f64> {
 /// them.
 struct HorizontalSection {
     pane: WavePanePresentationKey,
-    /// The pane, as its band names it.
-    name: String,
-    /// Each level, then their difference, in their colours.
-    heads: Vec<(String, egui::Color32)>,
+    /// The pane, its levels and their difference, as its group head reads.
+    title: String,
     rows: Vec<CrossingRow>,
 }
 
@@ -1184,7 +1078,6 @@ struct HorizontalSection {
 struct CrossingRow {
     name: String,
     swatch: egui::Color32,
-    swatch_style: Option<SwatchStyle>,
     /// Per level, every crossing in X order, as printed.
     crossings: Vec<Vec<String>>,
 }
@@ -1192,9 +1085,7 @@ struct CrossingRow {
 fn horizontal_sections(
     source: ReadoutInput<'_>,
     panes: &[(WavePanePresentationKey, HorizontalCursors)],
-    t: &Tokens,
 ) -> Vec<HorizontalSection> {
-    let c = t.color;
     let digits = usize::from(source.presentation.displayed_significant_digits().get());
     let quantity_policy = source.quantity_policy;
     let mut sections = Vec::new();
@@ -1213,19 +1104,14 @@ fn horizontal_sections(
             .enumerate()
             .filter_map(|(slot, level)| level.map(|level| (slot, level)))
             .collect();
-        let mut heads: Vec<(String, egui::Color32)> = levels
-            .iter()
-            .map(|&(slot, level)| {
-                let color = if slot == 0 {
-                    c.canvas_cursor_a
-                } else {
-                    c.canvas_cursor_b
-                };
-                (format!("H{} {}", slot + 1, format(level)), color)
-            })
-            .collect();
+        let mut title = vec![super::dock::horizontal_pane_name(source.models, pane)];
+        title.extend(
+            levels
+                .iter()
+                .map(|&(slot, level)| format!("H{} {}", slot + 1, format(level))),
+        );
         if let [Some(h1), Some(h2)] = cursors {
-            heads.push((format!("\u{0394}Y {}", format(h2 - h1)), c.text));
+            title.push(format!("\u{0394}Y {}", format(h2 - h1)));
         }
         let mut rows = Vec::new();
         if let Some(model) = model {
@@ -1245,7 +1131,6 @@ fn horizontal_sections(
                 rows.push(CrossingRow {
                     name: (source.display_name)(&trace.name).into_owned(),
                     swatch: trace.color,
-                    swatch_style: Some(SwatchStyle::of(trace)),
                     crossings: levels
                         .iter()
                         .map(|&(_, level)| {
@@ -1260,167 +1145,120 @@ fn horizontal_sections(
         }
         sections.push(HorizontalSection {
             pane: pane.clone(),
-            name: super::dock::horizontal_pane_name(source.models, pane),
-            heads,
+            title: title.join("  \u{00b7}  "),
             rows,
         });
     }
     sections
 }
 
-/// A level's crossings as they fit in `width`: their count, then as many
-/// as fit, and an ellipsis for the rest.
-fn fitted_crossings(ui: &Ui, crossings: &[String], width: f32, font: &egui::FontId) -> String {
+/// A level's crossings as one cell: their count, then each in X order.
+/// The table cuts it after a whole word, and shows it whole on hover.
+fn crossings_text(crossings: &[String]) -> String {
     if crossings.is_empty() {
-        return "no crossing".to_owned();
+        "no crossing".to_owned()
+    } else {
+        format!("{} \u{00b7} {}", crossings.len(), crossings.join(", "))
     }
-    let mut text = format!("{} \u{00b7}", crossings.len());
-    for (index, crossing) in crossings.iter().enumerate() {
-        let next = format!("{text}{} {crossing}", if index == 0 { "" } else { "," });
-        let rest = index + 1 < crossings.len();
-        let probe = if rest {
-            format!("{next}, \u{2026}")
-        } else {
-            next.clone()
-        };
-        if text_width(ui, &probe, font) > width {
-            text.push_str(if index == 0 {
-                " \u{2026}"
-            } else {
-                ", \u{2026}"
-            });
-            return text;
-        }
-        text = next;
-    }
-    text
 }
 
-/// The horizontal cursors: each pane's band with its levels and their
-/// difference, then where each of the pane's traces crosses each level.
+/// The horizontal cursors: a group per pane, its head naming the pane, its
+/// levels and their difference, then where each of the pane's traces
+/// crosses each level. A right-click on a row removes its pane's cursors.
 fn paint_horizontal(
     ui: &mut Ui,
     state: &mut ResultViewerState,
     sections: &[HorizontalSection],
     name_w: f32,
 ) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let head_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
-
-    // One column per level: as wide as its head or its crossings, up to a
-    // bound past which the list is cut with an ellipsis.
+    let font = cell_font();
     let levels = sections
         .iter()
-        .map(|section| section.heads.len())
+        .flat_map(|section| section.rows.iter().map(|row| row.crossings.len()))
         .max()
         .unwrap_or(0);
-    let mut widths = vec![VALUE_COLUMN_MIN_W; levels];
-    for section in sections {
-        for (column, (head, _)) in section.heads.iter().enumerate() {
-            widths[column] = widths[column].max(text_width(ui, head, &head_font) + CELL_PAD * 2.0);
+    let mut columns = vec![
+        Column::words("", SWATCH_W).unsortable(),
+        Column::words("Trace", name_w).unsortable(),
+    ];
+    for level in 0..levels {
+        let width = sections
+            .iter()
+            .flat_map(|section| &section.rows)
+            .filter_map(|row| row.crossings.get(level))
+            .map(|listed| text_width(ui, &crossings_text(listed), &font) + CELL_PAD * 2.0)
+            .fold(VALUE_COLUMN_MIN_W, f32::max)
+            .min(CROSSINGS_MAX_W);
+        columns.push(
+            Column::words(format!("H{} crossings", level + 1), width)
+                .unsortable()
+                .tooltip("Where each trace crosses the level, counted, in X order"),
+        );
+    }
+    columns.push(Column::name("", 0.0).unsortable());
+
+    let mut rows: Vec<Vec<Cell>> = Vec::new();
+    let mut owners = Vec::new();
+    let mut groups = Vec::new();
+    for (index, section) in sections.iter().enumerate() {
+        groups.push(Group::new(&section.title, rows.len()));
+        if section.rows.is_empty() {
+            let mut cells = vec![Cell::empty(), Cell::text("no trace on this pane")];
+            cells.resize_with(columns.len(), Cell::empty);
+            rows.push(cells);
+            owners.push(index);
         }
         for row in &section.rows {
-            for (column, listed) in row.crossings.iter().enumerate() {
-                let whole = fitted_crossings(ui, listed, f32::INFINITY, &font);
-                widths[column] = widths[column]
-                    .max((text_width(ui, &whole, &font) + CELL_PAD * 2.0).min(CROSSINGS_MAX_W));
-            }
+            let mut cells = vec![swatch_cell(row.swatch), Cell::text(&row.name)];
+            cells.extend(
+                row.crossings
+                    .iter()
+                    .map(|listed| Cell::text(crossings_text(listed))),
+            );
+            cells.resize_with(columns.len(), Cell::empty);
+            rows.push(cells);
+            owners.push(index);
         }
     }
-    let rows: usize = sections.iter().map(|section| 1 + section.rows.len()).sum();
-    let width = READOUT_PAD_X * 2.0 + name_w + widths.iter().sum::<f32>() + 24.0;
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(width.max(ui.available_width()), rows as f32 * READOUT_ROW_H),
-        egui::Sense::hover(),
-    );
-    let left = rect.left() + READOUT_PAD_X;
-    let painter = ui.painter().with_clip_rect(rect);
-    let row_rect = |row: usize| {
-        let top = rect.top() + row as f32 * READOUT_ROW_H;
-        egui::Rect::from_min_max(
-            egui::pos2(rect.left(), top),
-            egui::pos2(rect.right(), top + READOUT_ROW_H),
+
+    let id = "rspice.results.horizontal-cursors";
+    let state_id = egui::Id::new(id);
+    let mut table_state = ui
+        .data(|data| data.get_temp::<TableState>(state_id))
+        .unwrap_or_default();
+    let response = DataTable::new(id, &columns, rows.len())
+        .state(&mut table_state)
+        .groups(&groups)
+        .freeze(LEAD_COLUMNS)
+        .show(ui, |row| rows[row].clone());
+    ui.data_mut(|data| data.insert_temp(state_id, table_state));
+
+    let ctx = ui.ctx().clone();
+    let menu = egui::Id::new("rspice.results.horizontal-cursors.menu");
+    if let Some(asked) = response.context_menu
+        && let Some(&owner) = owners.get(asked.cell.row)
+    {
+        ctx.data_mut(|data| data.insert_temp(menu, (owner, asked.position)));
+        egui::Popup::open_id(&ctx, menu);
+    }
+    if egui::Popup::is_id_open(&ctx, menu)
+        && let Some((owner, position)) = ctx.data(|data| data.get_temp::<(usize, egui::Pos2)>(menu))
+        && let Some(section) = sections.get(owner)
+    {
+        egui::Popup::new(
+            menu,
+            ctx.clone(),
+            egui::PopupAnchor::Position(position),
+            egui::LayerId::new(egui::Order::Foreground, menu),
         )
-    };
-    let mut clear = None;
-    let mut row_index = 0;
-    for section in sections {
-        let band = row_rect(row_index);
-        painter.rect_filled(band, 0.0, c.bg_panel_2);
-        painter.text(
-            egui::pos2(left, band.center().y),
-            egui::Align2::LEFT_CENTER,
-            &section.name,
-            head_font.clone(),
-            c.text_dim,
-        );
-        let mut x = left + name_w;
-        for ((head, color), width) in section.heads.iter().zip(&widths) {
-            painter.text(
-                egui::pos2(x, band.center().y),
-                egui::Align2::LEFT_CENTER,
-                head,
-                head_font.clone(),
-                *color,
-            );
-            x += width;
-        }
-        let remove = egui::Rect::from_center_size(
-            egui::pos2(band.right() - READOUT_PAD_X - 8.0, band.center().y),
-            egui::vec2(16.0, READOUT_ROW_H),
-        );
-        let response = ui
-            .interact(
-                remove,
-                ui.id().with(("horizontal-remove", &section.pane)),
-                egui::Sense::click(),
-            )
-            .on_hover_text("Remove this pane's horizontal cursors");
-        painter.text(
-            remove.center(),
-            egui::Align2::CENTER_CENTER,
-            "\u{00d7}",
-            font.clone(),
-            if response.hovered() {
-                c.text
-            } else {
-                c.text_dim
-            },
-        );
-        if response.clicked() {
-            clear = Some(section.pane.clone());
-        }
-        row_index += 1;
-        for row in &section.rows {
-            let line = row_rect(row_index);
-            let swatch = egui::Rect::from_x_y_ranges(left..=left + SWATCH_W - 4.0, line.y_range());
-            paint_swatch(&painter, swatch, row.swatch, row.swatch_style, &t);
-            painter.text(
-                egui::pos2(left + SWATCH_W, line.center().y),
-                egui::Align2::LEFT_CENTER,
-                &row.name,
-                font.clone(),
-                c.text_dim,
-            );
-            let mut x = left + name_w;
-            for (listed, width) in row.crossings.iter().zip(&widths) {
-                let text = fitted_crossings(ui, listed, width - CELL_PAD * 2.0, &font);
-                painter.text(
-                    egui::pos2(x, line.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    text,
-                    font.clone(),
-                    c.text,
-                );
-                x += width;
+        .kind(egui::PopupKind::Menu)
+        .open_memory(None)
+        .show(|ui| {
+            if ui.button("Remove this pane's horizontal cursors").clicked() {
+                state.horizontal_cursors.remove(&section.pane);
+                ui.close();
             }
-            row_index += 1;
-        }
-    }
-    if let Some(pane) = clear {
-        state.horizontal_cursors.remove(&pane);
+        });
     }
 }
 

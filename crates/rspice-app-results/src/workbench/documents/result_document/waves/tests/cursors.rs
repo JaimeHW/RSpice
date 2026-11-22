@@ -515,7 +515,7 @@ fn two_horizontal_cursors_are_placed_moved_and_read_per_pane() {
     assert_eq!(
         painted
             .iter()
-            .filter(|text| text.starts_with("\u{0394}Y "))
+            .filter(|text| text.contains(&format!("\u{0394}Y {delta}")))
             .count(),
         2,
         "and the plot dimensions it on its own axis: {painted:?}"

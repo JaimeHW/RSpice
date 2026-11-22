@@ -413,40 +413,45 @@ fn the_cursor_table_publishes_what_it_paints() {
         )),
         ..Default::default()
     };
-    let mut labels: Vec<String> = Vec::new();
+    let mut nodes: Vec<(egui::accesskit::Role, String)> = Vec::new();
     for _ in 0..2 {
         let output = ctx.run_ui(input.clone(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 cursors_page(ui, &mut state.results_parts());
             });
         });
-        labels = output
+        nodes = output
             .platform_output
             .accesskit_update
             .expect("the workbench publishes an accessibility tree")
             .nodes
             .iter()
-            .filter(|(_, node)| node.role() == egui::accesskit::Role::Table)
-            .filter_map(|(_, node)| node.label())
-            .map(str::to_owned)
+            .filter_map(|(_, node)| node.label().map(|label| (node.role(), label.to_owned())))
             .collect();
     }
 
-    let spoken = labels
+    assert!(
+        nodes
+            .iter()
+            .any(|(role, _)| *role == egui::accesskit::Role::Grid),
+        "the cursor table published no grid: {nodes:?}"
+    );
+    let rows: Vec<&str> = nodes
         .iter()
-        .find(|label| label.starts_with("Cursor table"))
-        .unwrap_or_else(|| panic!("the cursor table published no table node: {labels:?}"));
+        .filter(|(role, _)| *role == egui::accesskit::Role::Row)
+        .map(|(_, label)| label.as_str())
+        .collect();
     assert!(
-        spoken.contains("fwd") && spoken.contains("rev"),
-        "the spoken table lost the branches the painted one shows: {spoken}"
+        rows.iter().any(|row| row.contains("fwd")) && rows.iter().any(|row| row.contains("rev")),
+        "the spoken rows lost the branches the painted ones show: {rows:?}"
     );
     assert!(
-        spoken.contains("2 branches"),
-        "the spoken table did not state the shape of the sweep: {spoken}"
+        nodes.iter().any(|(_, label)| label.contains("2 branches")),
+        "the spoken table did not state the shape of the sweep: {nodes:?}"
     );
     assert!(
-        spoken.contains("Slope"),
-        "the spoken table named no columns: {spoken}"
+        rows.iter().any(|row| row.contains("Slope: ")),
+        "the spoken rows read no cell under its head: {rows:?}"
     );
 }
 
