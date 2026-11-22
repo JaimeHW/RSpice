@@ -848,3 +848,42 @@ fn the_variants_tab_marks_the_active_variant_and_offers_the_base_design() {
         "the base design cannot be made active"
     );
 }
+
+/// New variant opens Design management on its New variant form over the
+/// Variants tab, as the document bar's chooser offers it, and the variant it
+/// creates is the one the design is then seen as.
+#[test]
+fn new_variant_opens_its_form_and_the_new_variant_is_chosen() {
+    use crate::workbench::project::commands::ProjectCommand;
+    let ctx = themed_context();
+    let mut harness = harness();
+    harness.open_project_session();
+    harness.wb.workspace = crate::workbench::state::Workspace::Design;
+    harness.execute(ProjectCommand::NewVariant.key());
+    let dialog = &harness.state.design_management;
+    assert!(dialog.open, "New variant does not open Design management");
+    assert_eq!(dialog.page, DesignManagementPage::NewVariant);
+    assert_eq!(dialog.active_tab, DesignManagementTab::Variants);
+
+    let _ = frame(&ctx, &mut harness, Vec::new());
+    let _ = frame(
+        &ctx,
+        &mut harness,
+        vec![egui::Event::Text("Automotive".to_owned())],
+    );
+    let nodes = frame(&ctx, &mut harness, Vec::new());
+    let (create, _) = node(&nodes, egui::accesskit::Role::Button, "Create variant");
+    let _ = frame(&ctx, &mut harness, vec![click(*create)]);
+    let variants = harness
+        .state
+        .design_management
+        .draft
+        .as_ref()
+        .unwrap()
+        .variants();
+    assert_eq!(
+        variants.active().map(|variant| variant.name()),
+        Some("Automotive"),
+        "the new variant is not the one chosen"
+    );
+}

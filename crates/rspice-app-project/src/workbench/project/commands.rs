@@ -52,6 +52,9 @@ pub enum ProjectCommand {
     DesignManagement,
     /// Design management opened on its Variants tab.
     Variants,
+    /// Design management opened on its New variant form, as the document
+    /// bar's variant chooser offers it.
+    NewVariant,
     /// Design management opened on its Annotation tab.
     Annotate,
     /// New View on the cell in front, preset to a symbol.
@@ -196,7 +199,7 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 46] = [
         Self::ProjectLauncher,
         Self::OpenProject,
         Self::NewProject,
@@ -216,6 +219,7 @@ impl ProjectCommand {
         Self::Page(ProjectPage::Recovery),
         Self::DesignManagement,
         Self::Variants,
+        Self::NewVariant,
         Self::Annotate,
         Self::CreateSymbol,
         Self::RevisionHistory,
@@ -269,6 +273,7 @@ impl ProjectCommand {
             Self::Page(ProjectPage::Recovery) => ids::PROJECT_RECOVERY,
             Self::DesignManagement => CommandKey::new("design-management"),
             Self::Variants => CommandKey::new("design-variants"),
+            Self::NewVariant => CommandKey::new("design-new-variant"),
             Self::Annotate => CommandKey::new("annotate-reference-designators"),
             Self::CreateSymbol => CommandKey::new("create-symbol-from-schematic"),
             Self::RevisionHistory => CommandKey::new("revision-history"),
@@ -368,6 +373,7 @@ impl ProjectCommand {
                 NONE,
             ),
             Self::Variants => ("Variants\u{2026}", "Design", edits, design, NONE),
+            Self::NewVariant => ("New variant\u{2026}", "Design", edits, design, NONE),
             Self::Annotate => (
                 "Annotate reference designators\u{2026}",
                 "Design",

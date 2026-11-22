@@ -22,7 +22,7 @@ use crate::state::ViewType;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::dialogs::check_and_save::CheckAndSaveParts;
 use crate::workbench::app::dialogs::design_management::{
-    DesignManagementParts, DesignManagementTab, open_design_management_on,
+    DesignManagementPage, DesignManagementParts, DesignManagementTab, open_design_management_on,
     render_design_management_dialog,
 };
 use crate::workbench::app::dialogs::project::configuration::{
@@ -649,7 +649,7 @@ impl CommandSet for ProjectCommand {
                 new_view_target(reads.model).is_some(),
                 "select a cell in a writable library",
             ),
-            Self::DesignManagement | Self::Variants | Self::Annotate => (
+            Self::DesignManagement | Self::Variants | Self::NewVariant | Self::Annotate => (
                 schematic_in_front(reads) && open && !reads.model.schematic_edit_read_only(),
                 "open an editable schematic",
             ),
@@ -737,6 +737,21 @@ impl CommandSet for ProjectCommand {
                 cx.wb,
                 DesignManagementTab::Variants,
             ),
+            // The form opens over the Variants tab, so Cancel lands on the
+            // variants it would have joined.
+            Self::NewVariant => {
+                open_design_management(
+                    cx.state,
+                    cx.model,
+                    cx.platform,
+                    cx.wb,
+                    DesignManagementTab::Variants,
+                );
+                let dialog = &mut cx.state.design_management;
+                if dialog.open {
+                    dialog.reset_inputs_for_page(DesignManagementPage::NewVariant, None, None);
+                }
+            }
             Self::Annotate => open_design_management(
                 cx.state,
                 cx.model,

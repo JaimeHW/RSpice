@@ -163,7 +163,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
 /// The command that opens Design management on its Variants tab.
 const MANAGE_VARIANTS: &str = "design-variants";
 /// The command that opens Design management's New variant form.
-const NEW_VARIANT: &str = "design-variants";
+const NEW_VARIANT: &str = "design-new-variant";
 
 /// The variant chooser at the bar's right end: which variant the design is
 /// netlisted, drawn and inspected as. It is there only in the Design

@@ -513,6 +513,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::CreateSymbol.key(),
     ProjectCommand::DesignManagement.key(),
     ProjectCommand::Variants.key(),
+    ProjectCommand::NewVariant.key(),
     ProjectCommand::Annotate.key(),
     DesignCommand::SelectionBulkEdit.key(),
     DesignCommand::ConnectivityManager.key(),

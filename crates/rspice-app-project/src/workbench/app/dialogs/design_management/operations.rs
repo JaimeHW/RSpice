@@ -205,8 +205,8 @@ pub(super) fn commit_design_management_subflow(
                 .draft
                 .as_mut()
                 .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-            draft
-                .variants_mut()
+            let variants = draft.variants_mut();
+            let created = variants
                 .create(AssemblyVariantDraft {
                     name: inputs.variant_name.trim().to_owned(),
                     parent_id: inputs.variant_parent,
@@ -214,6 +214,12 @@ pub(super) fn commit_design_management_subflow(
                     qualification_plan: inputs.variant_qualification,
                     overrides: BTreeMap::new(),
                 })
+                .map_err(|error| error.to_string())?;
+            // A variant is made to be changed, and its parts are changed in
+            // the inspector with it chosen: once applied, the design is
+            // seen as it.
+            variants
+                .choose(Some(created))
                 .map_err(|error| error.to_string())?;
             (DesignManagementTab::Variants, None)
         }
