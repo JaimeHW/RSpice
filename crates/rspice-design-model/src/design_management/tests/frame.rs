@@ -323,6 +323,9 @@ fn every_ansi_size_takes_its_table_4_1_zone_count() {
         (DrawingSheetStandard::AnsiC, (4, 4)),
         (DrawingSheetStandard::AnsiD, (8, 4)),
         (DrawingSheetStandard::AnsiE, (8, 8)),
+        // F's 28 in edge falls between C's and D's; six zones keep each
+        // under 5.50 in and the count even.
+        (DrawingSheetStandard::AnsiF, (8, 6)),
     ] {
         let zones = sheet(standard, SchematicPageOrientation::Landscape)
             .geometry()
@@ -421,6 +424,35 @@ fn arch_sheets_are_zoned_in_equal_zones_of_one_to_five_and_a_half_inches() {
         (762_000, 1_066_800)
     );
     assert_eq!(DrawingSheetStandard::ArchE1.label(), "ARCH E1");
+}
+
+/// The US sizes are listed by the names people buy paper by, Letter and
+/// Tabloid, beside their ANSI letters, and ANSI F is offered; the title
+/// block's paper size keeps the bare designation.
+#[test]
+fn the_size_list_names_letter_and_tabloid_and_offers_ansi_f() {
+    let labels = DrawingSheetStandard::ALL.map(DrawingSheetStandard::label);
+    for name in ["ANSI A (Letter)", "ANSI B (Tabloid)", "ANSI F"] {
+        assert_eq!(
+            labels.iter().filter(|label| **label == name).count(),
+            1,
+            "{name}"
+        );
+    }
+    assert_eq!(DrawingSheetStandard::AnsiA.paper_size(), "ANSI A");
+    assert_eq!(DrawingSheetStandard::AnsiF.paper_size(), "ANSI F");
+    assert_eq!(
+        DrawingSheetStandard::AnsiF.portrait_dimensions_um(),
+        (711_200, 1_016_000)
+    );
+    assert_eq!(
+        DrawingSheetStandard::AnsiF.series(),
+        DrawingSheetStandardSeries::Ansi
+    );
+    assert_eq!(
+        serde_json::to_value(DrawingSheetStandard::AnsiF).unwrap(),
+        serde_json::json!("ansi-f")
+    );
     assert_eq!(
         serde_json::to_value(DrawingSheetStandard::ArchE1).unwrap(),
         serde_json::json!("arch-e1")

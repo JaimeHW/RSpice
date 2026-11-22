@@ -100,7 +100,7 @@ fn a_new_project_default_redraws_the_sheets_that_follow_it() {
             .label()
             .to_owned()
     };
-    assert_eq!(drawn(&app), "ANSI A");
+    assert_eq!(drawn(&app), "ANSI A (Letter)");
     app.state
         .model
         .workspace

@@ -1610,7 +1610,7 @@ fn orientation_segment(
 // ── Shared labels ───────────────────────────────────────────────────────────
 
 fn standard_short_label(standard: DrawingSheetStandard) -> String {
-    let label = standard.label();
+    let label = standard.designation();
     match standard.series() {
         DrawingSheetStandardSeries::Iso => label.trim_start_matches("ISO ").to_owned(),
         DrawingSheetStandardSeries::Ansi => label.trim_start_matches("ANSI ").to_owned(),

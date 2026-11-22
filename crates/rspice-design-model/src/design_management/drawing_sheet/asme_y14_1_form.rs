@@ -450,6 +450,7 @@ impl DrawingSheetStandard {
             Self::AnsiC => Some("C"),
             Self::AnsiD => Some("D"),
             Self::AnsiE => Some("E"),
+            Self::AnsiF => Some("F"),
             Self::ArchA => Some("ARCH A"),
             Self::ArchB => Some("ARCH B"),
             Self::ArchC => Some("ARCH C"),
@@ -474,7 +475,7 @@ impl DrawingSheetStandard {
     /// figure of the ANSI size it stands among.
     const fn asme_title_block_size(self) -> AsmeY141TitleBlockSize {
         match self {
-            Self::AnsiD | Self::AnsiE | Self::ArchD | Self::ArchE | Self::ArchE1 => {
+            Self::AnsiD | Self::AnsiE | Self::AnsiF | Self::ArchD | Self::ArchE | Self::ArchE1 => {
                 AsmeY141TitleBlockSize::Large
             }
             _ => AsmeY141TitleBlockSize::Small,

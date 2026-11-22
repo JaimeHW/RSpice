@@ -60,6 +60,8 @@ pub enum DrawingSheetStandard {
     AnsiC,
     AnsiD,
     AnsiE,
+    /// 28 × 40 in, ASME Y14.1's roll-size sheet.
+    AnsiF,
     ArchA,
     ArchB,
     ArchC,
@@ -74,7 +76,7 @@ pub enum DrawingSheetStandard {
 }
 
 impl DrawingSheetStandard {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::IsoA5,
         Self::IsoA4,
         Self::IsoA3,
@@ -86,6 +88,7 @@ impl DrawingSheetStandard {
         Self::AnsiC,
         Self::AnsiD,
         Self::AnsiE,
+        Self::AnsiF,
         Self::ArchA,
         Self::ArchB,
         Self::ArchC,
@@ -98,8 +101,20 @@ impl DrawingSheetStandard {
         Self::JisB2,
     ];
 
+    /// What the size lists call this sheet: its designation, and for the two
+    /// ANSI sizes known by a common name, that name too.
     #[must_use]
     pub const fn label(self) -> &'static str {
+        match self {
+            Self::AnsiA => "ANSI A (Letter)",
+            Self::AnsiB => "ANSI B (Tabloid)",
+            other => other.designation(),
+        }
+    }
+
+    /// The standard's own designation for this sheet: `ANSI B`, `ARCH E1`.
+    #[must_use]
+    pub const fn designation(self) -> &'static str {
         match self {
             Self::IsoA5 => "ISO A5",
             Self::IsoA4 => "ISO A4",
@@ -112,6 +127,7 @@ impl DrawingSheetStandard {
             Self::AnsiC => "ANSI C",
             Self::AnsiD => "ANSI D",
             Self::AnsiE => "ANSI E",
+            Self::AnsiF => "ANSI F",
             Self::ArchA => "ARCH A",
             Self::ArchB => "ARCH B",
             Self::ArchC => "ARCH C",
@@ -138,7 +154,7 @@ impl DrawingSheetStandard {
             Self::IsoA2 => "A2",
             Self::IsoA1 => "A1",
             Self::IsoA0 => "A0",
-            other => other.label(),
+            other => other.designation(),
         }
     }
 
@@ -148,7 +164,7 @@ impl DrawingSheetStandard {
             Self::IsoA5 | Self::IsoA4 | Self::IsoA3 | Self::IsoA2 | Self::IsoA1 | Self::IsoA0 => {
                 DrawingSheetStandardSeries::Iso
             }
-            Self::AnsiA | Self::AnsiB | Self::AnsiC | Self::AnsiD | Self::AnsiE => {
+            Self::AnsiA | Self::AnsiB | Self::AnsiC | Self::AnsiD | Self::AnsiE | Self::AnsiF => {
                 DrawingSheetStandardSeries::Ansi
             }
             Self::ArchA | Self::ArchB | Self::ArchC | Self::ArchD | Self::ArchE | Self::ArchE1 => {
@@ -175,6 +191,7 @@ impl DrawingSheetStandard {
             Self::AnsiC => (431_800, 558_800),
             Self::AnsiD => (558_800, 863_600),
             Self::AnsiE => (863_600, 1_117_600),
+            Self::AnsiF => (711_200, 1_016_000),
             Self::ArchA => (228_600, 304_800),
             Self::ArchB => (304_800, 457_200),
             Self::ArchC => (457_200, 609_600),
@@ -344,7 +361,7 @@ impl AuthoredDrawingSheetSize {
             Self::Standard { standard } => {
                 let (portrait_width_um, portrait_height_um) = standard.portrait_dimensions_um();
                 SchematicSheetSize::Custom {
-                    name: standard.label().to_owned(),
+                    name: standard.designation().to_owned(),
                     portrait_width_um,
                     portrait_height_um,
                 }

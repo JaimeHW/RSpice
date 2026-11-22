@@ -116,6 +116,7 @@ fn the_block_takes_fig_5_1_on_a_to_c_and_fig_5_2_on_d_and_larger() {
         (DrawingSheetStandard::AnsiC, (inch(750), inch(200))),
         (DrawingSheetStandard::AnsiD, (inch(887), inch(250))),
         (DrawingSheetStandard::AnsiE, (inch(887), inch(250))),
+        (DrawingSheetStandard::AnsiF, (inch(887), inch(250))),
         // ARCH: widened at the left by what `ARCH C` (3 mm) and `ARCH E1`
         // (6 mm) need in SIZE.
         (DrawingSheetStandard::ArchA, (inch(782), inch(200))),
@@ -380,6 +381,7 @@ fn size_letters_the_designation_scale_none_and_weight_stays_blank() {
     for (standard, size) in [
         (DrawingSheetStandard::AnsiB, "B"),
         (DrawingSheetStandard::AnsiE, "E"),
+        (DrawingSheetStandard::AnsiF, "F"),
         (DrawingSheetStandard::ArchC, "ARCH C"),
         (DrawingSheetStandard::ArchD, "ARCH D"),
         (DrawingSheetStandard::ArchE1, "ARCH E1"),

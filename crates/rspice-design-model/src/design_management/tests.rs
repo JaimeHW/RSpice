@@ -127,6 +127,7 @@ fn drawing_sheet_standards_are_exact_valid_and_round_trip() {
         (DrawingSheetStandard::AnsiC, (431_800, 558_800)),
         (DrawingSheetStandard::AnsiD, (558_800, 863_600)),
         (DrawingSheetStandard::AnsiE, (863_600, 1_117_600)),
+        (DrawingSheetStandard::AnsiF, (711_200, 1_016_000)),
         (DrawingSheetStandard::ArchA, (228_600, 304_800)),
         (DrawingSheetStandard::ArchB, (304_800, 457_200)),
         (DrawingSheetStandard::ArchC, (457_200, 609_600)),

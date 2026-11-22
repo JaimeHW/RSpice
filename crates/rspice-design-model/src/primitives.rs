@@ -259,7 +259,7 @@ impl SchematicPageSize {
             Self::A4 => "A4",
             Self::A3 => "A3",
             Self::UsLetter => "US Letter",
-            Self::UsLedger => "US Ledger",
+            Self::UsLedger => "Tabloid",
         }
     }
 }

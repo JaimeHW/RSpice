@@ -1174,7 +1174,7 @@ fn short_paper_label(paper: &PaperDraft) -> String {
         PaperDraft::Standard(paper) => match paper {
             StandardPaper::Letter => "US Letter",
             StandardPaper::Legal => "Legal",
-            StandardPaper::Tabloid => "US Ledger",
+            StandardPaper::Tabloid => "Tabloid",
             StandardPaper::A4 => "A4",
             StandardPaper::A3 => "A3",
             StandardPaper::A2 => "A2",
@@ -2010,7 +2010,7 @@ pub(super) fn standard_paper_label(paper: StandardPaper) -> &'static str {
     match paper {
         StandardPaper::Letter => "US Letter · 8.5 × 11 in",
         StandardPaper::Legal => "Legal · 8.5 × 14 in",
-        StandardPaper::Tabloid => "US Ledger · 11 × 17 in",
+        StandardPaper::Tabloid => "Tabloid · 11 × 17 in",
         StandardPaper::A4 => "A4 · 210 × 297 mm",
         StandardPaper::A3 => "A3 · 297 × 420 mm",
         StandardPaper::A2 => "A2 · 420 × 594 mm",
