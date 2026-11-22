@@ -182,11 +182,27 @@ impl DrawingSheetGeometry {
     }
 
     fn zone_reference(&self, world_x: f64, world_y: f64) -> Option<String> {
-        let unit_um = DRAWING_SHEET_WORLD_UNIT_UM as f64;
-        let x_um = ((world_x - DRAWING_SHEET_ORIGIN.0) * unit_um).round() as i64;
-        let y_um = ((world_y - DRAWING_SHEET_ORIGIN.1) * unit_um).round() as i64;
+        let (x_um, y_um) = world_to_sheet_um(world_x, world_y);
         self.zones.as_ref()?.reference_at(x_um, y_um)
     }
+}
+
+/// A world point in sheet micrometres from the page origin.
+fn world_to_sheet_um(world_x: f64, world_y: f64) -> (i64, i64) {
+    let unit_um = DRAWING_SHEET_WORLD_UNIT_UM as f64;
+    (
+        ((world_x - DRAWING_SHEET_ORIGIN.0) * unit_um).round() as i64,
+        ((world_y - DRAWING_SHEET_ORIGIN.1) * unit_um).round() as i64,
+    )
+}
+
+/// The zone `point` stands in on a sheet printed on `format`, such as `B3`;
+/// `None` where the format draws no zones or the point is outside its frame.
+/// It reads the zones alone, so another sheet's zones cost no frame artwork.
+pub fn zone_on_format(format: &SchematicSheetFormat, point: Point) -> Option<String> {
+    let physical = format.geometry().ok()?;
+    let (x_um, y_um) = world_to_sheet_um(f64::from(point.x), f64::from(point.y));
+    format.zone_layout(&physical)?.reference_at(x_um, y_um)
 }
 
 /// Resolved active-sheet presentation authority.

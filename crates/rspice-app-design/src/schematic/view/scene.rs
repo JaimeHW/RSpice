@@ -197,6 +197,7 @@ pub(super) fn draw_scene(
             open_pins: &open_pins(painter.ctx(), state, symbol_context),
             variant_marks: &variant_marks(painter.ctx(), state.model),
             stale_instances: &stale_instances(painter.ctx(), state),
+            off_sheet_references: &off_sheet_references(painter.ctx(), state.model),
         },
         || state.model.workspace.content.active_view.display_path(),
     );
@@ -449,6 +450,28 @@ fn probe_visual_statuses(state: &CanvasFacts<'_>) -> ProbeMaterializationStatuse
 /// A version-keyed cache of our own would be wrong as well as redundant: net
 /// identity moves with instance values and port parameters, which deliberately
 /// do not advance the schematic topology version.
+type OffSheetReferences = std::sync::Arc<HashMap<u64, String>>;
+
+/// [`Model::off_sheet_partner_references`], kept while the design
+/// management and the drawing stand still.
+fn off_sheet_references(ctx: &egui::Context, model: &Model) -> OffSheetReferences {
+    let key = (
+        model.workspace.content.design_management.revision(),
+        model.workspace.content.active_schematic_reference().key(),
+        model.schematic.content_version(),
+    );
+    let id = egui::Id::new("rspice.schematic.off_sheet_references");
+    if let Some((cached, references)) =
+        ctx.data(|data| data.get_temp::<((u64, String, u64), OffSheetReferences)>(id))
+        && cached == key
+    {
+        return references;
+    }
+    let references = OffSheetReferences::new(model.off_sheet_partner_references());
+    ctx.data_mut(|data| data.insert_temp(id, (key, OffSheetReferences::clone(&references))));
+    references
+}
+
 /// The open-pin set: every terminal nothing meets, by instance. One per
 /// topology, symbol revision and sheet.
 type VariantMarks =

@@ -218,6 +218,7 @@ fn draw_parent(
             open_pins: &HashMap::new(),
             variant_marks: &HashMap::new(),
             stale_instances: &Default::default(),
+            off_sheet_references: &Default::default(),
         },
         || session.parent.display_path(),
     );

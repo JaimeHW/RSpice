@@ -81,6 +81,9 @@ pub struct SceneOverlays<'a> {
     /// The instances whose master's interface moved on since they were
     /// placed, which are drawn in the warning colour until updated.
     pub stale_instances: &'a HashSet<u64>,
+    /// Where each off-sheet connector's partners stand on the other sheets,
+    /// such as `[p2 B3]`, by connector; absent for one with no partner.
+    pub off_sheet_references: &'a HashMap<u64, String>,
 }
 
 pub struct SceneSymbols<'a> {
@@ -443,6 +446,10 @@ pub fn draw_content(
                 hovered: view.hover == Some(PointerTarget::NetLabel(label.id)),
                 preview: false,
                 attachment: (attachment != ConductorInk::Plain).then_some(attachment),
+                partners: overlays
+                    .off_sheet_references
+                    .get(&label.id)
+                    .map(String::as_str),
             },
             palette,
         );
@@ -712,6 +719,7 @@ mod band_tests {
                 open_pins: &HashMap::new(),
                 variant_marks: &HashMap::new(),
                 stale_instances: &HashSet::new(),
+                off_sheet_references: &HashMap::new(),
             },
             String::new,
         );
@@ -842,6 +850,7 @@ mod hover_tests {
                 open_pins,
                 variant_marks: &HashMap::new(),
                 stale_instances: &HashSet::new(),
+                off_sheet_references: &HashMap::new(),
             },
             String::new,
         );

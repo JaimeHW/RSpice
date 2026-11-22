@@ -5,8 +5,8 @@ use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::actions::sheets::*;
 use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use rspice_app_state::state::{
-    Component, ComponentType, DrawingSheetTitleFieldId, Point, SheetDefinition,
-    SheetDeleteBehavior, SheetId, SheetPortPolicy,
+    Component, ComponentType, CrossSheetPortDirection, DrawingSheetTitleFieldId, NetLabel, Point,
+    SheetDefinition, SheetDeleteBehavior, SheetId, SheetPortPolicy,
 };
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_workbench::workbench::framework::feature::CanvasGesturePort;
@@ -814,4 +814,76 @@ fn duplicate_sheet_copies_the_drawing_as_one_undo_step_and_numbers_the_new_sheet
     assert_eq!(sheet_entries(&state).len(), 3);
     assert_eq!(active_sheet_id(&state), Some(copy));
     assert_eq!(on_sheet(&state, copy), copied);
+}
+
+/// An off-sheet connector letters the page and zone of each partner on
+/// another sheet, and the zone is the one the status bar reads with the
+/// pointer on that partner. Names join as the netlister joins them, without
+/// regard to case; a connector with no partner elsewhere letters nothing.
+#[test]
+fn an_off_sheet_connector_names_its_partners_sheet_and_zone() {
+    let (mut state, first, second) = two_sheet_state();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let on_first = Point::new(10, 30);
+    let on_second = Point::new(600, 300);
+    state.model.schematic.document_mut_for_test().net_labels = vec![
+        NetLabel::off_sheet(30, on_first, "CLK", CrossSheetPortDirection::Output),
+        NetLabel::off_sheet(40, on_second, "clk", CrossSheetPortDirection::Input),
+        NetLabel::off_sheet(
+            50,
+            Point::new(10, 60),
+            "DATA",
+            CrossSheetPortDirection::Output,
+        ),
+    ];
+    let catalog = state
+        .model
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("sheet catalog");
+    catalog
+        .assign_objects(catalog.revision(), first, [30, 50])
+        .expect("first sheet assignment");
+    catalog
+        .assign_objects(catalog.revision(), second, [40])
+        .expect("second sheet assignment");
+    let zone_read_at = |state: &AppState, point: Point| {
+        let status = state
+            .model
+            .active_drawing_sheet()
+            .cursor_status(f64::from(point.x), f64::from(point.y));
+        status
+            .split(" zone ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("a zone in {status:?}"))
+            .to_owned()
+    };
+    let first_zone = zone_read_at(&state, on_first);
+
+    let references = state.model.off_sheet_partner_references();
+    assert_eq!(references.get(&30).map(String::as_str), Some("[p2 B4]"));
+    assert_eq!(references.get(&50), None, "DATA has no partner");
+    assert_eq!(references.len(), 1, "{references:?}");
+
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        second,
+    )
+    .expect("the second sheet opens");
+    assert_eq!(zone_read_at(&state, on_second), "B4");
+    let references = state.model.off_sheet_partner_references();
+    assert_eq!(
+        references.get(&40).map(String::as_str),
+        Some(format!("[p1 {first_zone}]").as_str())
+    );
+    assert_eq!(references.len(), 1, "{references:?}");
 }

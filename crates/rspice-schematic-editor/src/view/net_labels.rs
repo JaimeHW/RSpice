@@ -236,6 +236,30 @@ fn paint_connector_tab(
     }
 }
 
+/// Letter where an off-sheet connector's partners stand after its tab, in
+/// the dimmer ink of derived text and at the name's size, as KiCad letters
+/// intersheet references beside a global label.
+fn paint_partner_reference(
+    painter: &Painter,
+    viewport: &Viewport,
+    tab: Rect,
+    partners: &str,
+    font_size: f32,
+    palette: &Palette,
+) {
+    let galley = painter.ctx().fonts_mut(|fonts| {
+        rspice_ui_kit::text::layout_no_wrap(
+            fonts,
+            partners,
+            theme::mono(font_size, FontWeight::Regular),
+            palette.canvas_text_dim,
+        )
+    });
+    let at = tab.right_top() + vec2(CONNECTOR_TAB_GAP_WORLD * viewport.zoom, 0.0);
+    let at = at + vec2(0.0, (tab.height() - galley.size().y) * 0.5);
+    painter.galley(at, galley, palette.canvas_text_dim);
+}
+
 /// The shared connector-tab marks (`label_layout::connector_tab_marks`), in
 /// whatever space `rect` is in.
 pub(crate) fn connector_tab_marks(
@@ -270,6 +294,7 @@ pub fn draw_net_label(
             hovered,
             preview,
             attachment: None,
+            partners: None,
         },
         palette,
     );
@@ -277,7 +302,7 @@ pub fn draw_net_label(
 
 /// How a net label is painted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NetLabelPaint {
+pub struct NetLabelPaint<'a> {
     pub selected: bool,
     pub hovered: bool,
     /// A ghost of a label being placed or moved.
@@ -286,6 +311,10 @@ pub struct NetLabelPaint {
     /// other than plain: the attachment diamond takes it, as a junction
     /// would. The text keeps its own colour.
     pub attachment: Option<ConductorInk>,
+    /// Where an off-sheet connector's partners stand, such as `[p2 B3]`,
+    /// lettered after its tab. It names other sheets, not this label, so it
+    /// takes no part in selection or hit testing.
+    pub partners: Option<&'a str>,
 }
 
 /// The fill behind a selected label's text, over the canvas.
@@ -295,7 +324,7 @@ pub fn draw_net_label_attached(
     painter: &Painter,
     viewport: &Viewport,
     label: &NetLabel,
-    paint: NetLabelPaint,
+    paint: NetLabelPaint<'_>,
     palette: &Palette,
 ) {
     let NetLabelPaint {
@@ -303,6 +332,7 @@ pub fn draw_net_label_attached(
         hovered,
         preview,
         attachment,
+        partners,
     } = paint;
     // Text never takes the selection colour: a selected label keeps its
     // text colour and gets the selection rect.
@@ -400,6 +430,16 @@ pub fn draw_net_label_attached(
             }
             if let Some((tab, direction)) = layout.connector_tab {
                 paint_connector_tab(painter, viewport.zoom, tab, direction, text_color);
+                if let Some(partners) = partners.filter(|_| !preview)
+                    && let TextLod::Draw(font_size) = lod::text_lod(
+                        label_layout::net_label_font_world(label),
+                        viewport.zoom,
+                        painter.pixels_per_point(),
+                        TextClass::Electrical,
+                    )
+                {
+                    paint_partner_reference(painter, viewport, tab, partners, font_size, palette);
+                }
             }
         }
         LabelText::Greeked(bar) => {
