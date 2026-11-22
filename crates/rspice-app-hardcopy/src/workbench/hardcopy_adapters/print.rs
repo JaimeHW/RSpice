@@ -92,6 +92,19 @@ pub struct PrinterPaperCapability {
     display_name: String,
     portrait_width_um: u64,
     portrait_height_um: u64,
+    /// The strip along each edge the printer cannot print on this paper,
+    /// held upright, where the queue states it; `None` where it does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unprintable_um: Option<PaperEdges>,
+}
+
+/// A width along each edge of an upright sheet, in micrometres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaperEdges {
+    pub left: u64,
+    pub top: u64,
+    pub right: u64,
+    pub bottom: u64,
 }
 
 impl PrinterPaperCapability {
@@ -117,7 +130,29 @@ impl PrinterPaperCapability {
             display_name,
             portrait_width_um,
             portrait_height_um,
+            unprintable_um: None,
         })
+    }
+
+    /// This paper with the strip the printer cannot print along each edge,
+    /// as the queue states it; refused when nothing printable would remain.
+    pub fn with_unprintable_edges(mut self, edges: PaperEdges) -> Result<Self, HardcopyPrintError> {
+        if edges.left.saturating_add(edges.right) >= self.portrait_width_um
+            || edges.top.saturating_add(edges.bottom) >= self.portrait_height_um
+        {
+            return Err(HardcopyPrintError::InvalidCapabilitySnapshot(
+                "a paper's unprintable margins must leave a printable area".to_owned(),
+            ));
+        }
+        self.unprintable_um = Some(edges);
+        Ok(self)
+    }
+
+    /// The strip along each edge the printer cannot print on this paper,
+    /// upright, or `None` where the queue does not state one.
+    #[must_use]
+    pub const fn unprintable_edges_um(&self) -> Option<PaperEdges> {
+        self.unprintable_um
     }
 
     #[must_use]
@@ -421,6 +456,21 @@ impl PrinterCapabilitySnapshot {
     #[must_use]
     pub fn papers(&self) -> &[PrinterPaperCapability] {
         &self.papers
+    }
+
+    /// Whether the platform states what the printer can print on paper
+    /// `paper_id`: a Windows driver reports it with every job, and a CUPS
+    /// queue only where its PPD declares the paper's margins.
+    #[must_use]
+    pub fn states_printable_area(&self, paper_id: &str) -> bool {
+        if cfg!(target_os = "windows") {
+            return true;
+        }
+        paper_id.parse::<i16>().is_ok_and(|id| {
+            self.papers
+                .iter()
+                .any(|paper| paper.platform_id == id && paper.unprintable_um.is_some())
+        })
     }
 
     #[must_use]

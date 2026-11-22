@@ -145,11 +145,15 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                     property(
                         ui,
                         "Printable area",
-                        &format!(
-                            "{:.2} × {:.2} in",
-                            printable_width as f64 / f64::from(job.resolution_dpi()),
-                            printable_height as f64 / f64::from(job.resolution_dpi())
-                        ),
+                        &if capabilities.states_printable_area(job.selected_paper_id()) {
+                            format!(
+                                "{:.2} × {:.2} in",
+                                printable_width as f64 / f64::from(job.resolution_dpi()),
+                                printable_height as f64 / f64::from(job.resolution_dpi())
+                            )
+                        } else {
+                            "Not stated by this printer".to_owned()
+                        },
                     );
                     property(
                         ui,

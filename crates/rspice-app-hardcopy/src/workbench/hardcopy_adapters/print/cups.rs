@@ -6,8 +6,10 @@
 //! PDF, one full-page image a page, handed to the queue with `lp`; CUPS copies
 //! the file as it accepts the job, and its request id is the receipt's job.
 //!
-//! CUPS names no hardware margin through these tools, so a page's printable
-//! area is the whole sheet and the plan's own margins keep ink off the edge.
+//! The strip a printer cannot print on each paper is what the queue's PPD
+//! declares with `*ImageableArea`, as every CUPS driver and driverless
+//! queue writes it. A queue without one states no printable area, and the
+//! whole sheet stands for it.
 //!
 //! Reading the tools' output and writing the PDF are plain functions, tested
 //! on every host against captured output; running the tools is the macOS and
@@ -15,7 +17,7 @@
 
 use super::{
     DuplexMode, HardcopyCancellationToken, HardcopyPrintError, HardcopySpoolFailure,
-    HardcopySpoolResult, NativeSpoolBackend, PrinterCapabilityDescriptor,
+    HardcopySpoolResult, NativeSpoolBackend, PaperEdges, PrinterCapabilityDescriptor,
     PrinterCapabilitySnapshot, PrinterPaperCapability, PrinterResolutionCapability,
     PrinterTrayCapability, resolve_native_printer_job, spool_transaction,
     validate_printer_publication,
@@ -24,6 +26,7 @@ use rspice_hardcopy::render::{PrinterRasterPage, RenderedPrinterPages};
 use rspice_hardcopy_contract::{
     HardcopyPlan, PrinterRasterGeometry, RenderTarget, ResolvedOrientation,
 };
+use std::collections::HashMap;
 
 /// The resolution a queue that names none is drawn at.
 const FALLBACK_DPI: u16 = 600;
@@ -165,6 +168,64 @@ pub(super) fn page_size_um(keyword: &str) -> Option<(u64, u64)> {
     })
 }
 
+/// The strip each page size of a PPD cannot print along each edge, by
+/// page-size keyword, from its `*ImageableArea` lines (`llx lly urx ury` in
+/// points from the lower left of the upright sheet) measured against its
+/// `*PaperDimension`, or the size the keyword names where it gives none.
+/// Margins round up to the micrometre, so a printable area is never
+/// overstated.
+pub(super) fn parse_imageable_areas(ppd: &str) -> HashMap<String, PaperEdges> {
+    // `*Main <keyword>[/<translation>]: "<numbers>"`.
+    let entry = |line: &str, main: &str| -> Option<(String, Vec<f64>)> {
+        let rest = line.strip_prefix(main)?.strip_prefix(' ')?;
+        let (spec, value) = rest.split_once(':')?;
+        let keyword = spec.split('/').next()?.trim();
+        let numbers = value
+            .trim()
+            .strip_prefix('"')?
+            .strip_suffix('"')?
+            .split_whitespace()
+            .map(str::parse)
+            .collect::<Result<Vec<f64>, _>>()
+            .ok()?;
+        (!keyword.is_empty()).then(|| (keyword.to_owned(), numbers))
+    };
+    let mut areas = Vec::new();
+    let mut dimensions = HashMap::new();
+    for line in ppd.lines() {
+        if let Some((keyword, area)) = entry(line, "*ImageableArea")
+            && let [llx, lly, urx, ury] = area[..]
+        {
+            areas.push((keyword, [llx, lly, urx, ury]));
+        } else if let Some((keyword, size)) = entry(line, "*PaperDimension")
+            && let [width, height] = size[..]
+        {
+            dimensions.insert(keyword, (width, height));
+        }
+    }
+    let micrometres = |points: f64| (points.max(0.0) * 25_400.0 / 72.0).ceil() as u64;
+    areas
+        .into_iter()
+        .filter_map(|(keyword, [llx, lly, urx, ury])| {
+            let (width, height) = dimensions.get(&keyword).copied().or_else(|| {
+                page_size_um(&keyword).map(|(width, height)| {
+                    (
+                        width as f64 * 72.0 / 25_400.0,
+                        height as f64 * 72.0 / 25_400.0,
+                    )
+                })
+            })?;
+            let edges = PaperEdges {
+                left: micrometres(llx),
+                top: micrometres(height - ury),
+                right: micrometres(width - urx),
+                bottom: micrometres(lly),
+            };
+            Some((keyword, edges))
+        })
+        .collect()
+}
+
 /// A resolution choice, `600dpi` or `1200x600dpi`.
 fn parse_resolution(choice: &str) -> Option<(u16, u16)> {
     let value = choice.strip_suffix("dpi")?;
@@ -204,10 +265,12 @@ fn is_manual_feed(choice: &str) -> bool {
 /// What a queue offers, from its `lpoptions -l`, as the print contract
 /// describes a printer; with the platform id of the paper it defaults to.
 /// Papers are numbered from 1 in the order the queue lists them, and a
-/// page-size keyword whose size is not known is left out.
+/// page-size keyword whose size is not known is left out. Each paper takes
+/// the unprintable margins `imageable` gives its keyword, if any.
 pub(super) fn describe_queue(
     queue: &str,
     options: &[CupsOption],
+    imageable: &HashMap<String, PaperEdges>,
 ) -> Result<(PrinterCapabilityDescriptor, Option<i16>), HardcopyPrintError> {
     let option = |keyword: &str| options.iter().find(|option| option.keyword == keyword);
     let mut papers = Vec::new();
@@ -225,7 +288,14 @@ pub(super) fn describe_queue(
             if page_size.default.as_deref() == Some(choice.as_str()) {
                 default_paper = Some(id);
             }
-            papers.push(PrinterPaperCapability::try_new(id, choice, width, height)?);
+            let paper = PrinterPaperCapability::try_new(id, choice, width, height)?;
+            papers.push(match imageable.get(choice) {
+                Some(edges) => paper
+                    .clone()
+                    .with_unprintable_edges(*edges)
+                    .unwrap_or(paper),
+                None => paper,
+            });
         }
     }
     let mut trays = Vec::new();
@@ -482,8 +552,10 @@ pub(super) fn run_length_encode(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The selected paper at `resolution_dpi`, turned to `orientation`. CUPS
-/// names no hardware margin, so the whole sheet is printable.
+/// The selected paper at `resolution_dpi`, turned to `orientation`, printable
+/// inside the margins its queue declares, or to its edges where it declares
+/// none. CUPS does not say which way it turns a landscape page, so a turned
+/// page keeps the wider of each pair of opposite margins on both sides.
 pub(super) fn resolve_native_printer_mode(
     capabilities: &PrinterCapabilitySnapshot,
     selected_paper_id: &str,
@@ -516,8 +588,34 @@ pub(super) fn resolve_native_printer_mode(
         ResolvedOrientation::Portrait => (short, long),
         ResolvedOrientation::Landscape => (long, short),
     };
-    PrinterRasterGeometry::try_new(width, height, 0, 0, width, height)
-        .map_err(|error| HardcopyPrintError::InvalidDriverGeometry(error.to_string()))
+    let margin = |micrometres: u64| {
+        u32::try_from((micrometres * u64::from(resolution_dpi)).div_ceil(25_400))
+            .unwrap_or(u32::MAX)
+    };
+    let edges = paper.unprintable_edges_um().unwrap_or(PaperEdges {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    });
+    let (left, top, right, bottom) = match orientation {
+        ResolvedOrientation::Portrait => (edges.left, edges.top, edges.right, edges.bottom),
+        ResolvedOrientation::Landscape => {
+            let across = edges.top.max(edges.bottom);
+            let along = edges.left.max(edges.right);
+            (across, along, across, along)
+        }
+    };
+    let (left, top, right, bottom) = (margin(left), margin(top), margin(right), margin(bottom));
+    PrinterRasterGeometry::try_new(
+        width,
+        height,
+        left,
+        top,
+        width.saturating_sub(left.saturating_add(right)),
+        height.saturating_sub(top.saturating_add(bottom)),
+    )
+    .map_err(|error| HardcopyPrintError::InvalidDriverGeometry(error.to_string()))
 }
 
 /// How a finished job reaches the queue: the `lp` call, given the job's
@@ -698,7 +796,16 @@ mod host {
             "lpoptions",
             &["-p".into(), queue.into(), "-l".into()],
         )?;
-        let (descriptor, default_paper) = describe_queue(queue, &parse_options(&options))?;
+        // A queue's PPD is where CUPS keeps it; a queue name never holds a
+        // path separator, and a queue without a readable PPD states no
+        // printable area.
+        let imageable = (!queue.contains('/'))
+            .then(|| std::fs::read_to_string(format!("/etc/cups/ppd/{queue}.ppd")).ok())
+            .flatten()
+            .map(|ppd| parse_imageable_areas(&ppd))
+            .unwrap_or_default();
+        let (descriptor, default_paper) =
+            describe_queue(queue, &parse_options(&options), &imageable)?;
         Ok((
             PrinterCapabilitySnapshot::try_from_descriptor(descriptor)?,
             default_paper,
@@ -773,7 +880,8 @@ ColorModel/Color Mode: *Gray\n";
 ColorModel/Output Mode: Gray *RGB\n";
 
     fn snapshot(queue: &str, options: &str) -> (PrinterCapabilitySnapshot, Option<i16>) {
-        let (descriptor, default_paper) = describe_queue(queue, &parse_options(options)).unwrap();
+        let (descriptor, default_paper) =
+            describe_queue(queue, &parse_options(options), &HashMap::new()).unwrap();
         (
             PrinterCapabilitySnapshot::try_from_descriptor(descriptor).unwrap(),
             default_paper,
@@ -881,7 +989,7 @@ ColorModel/Output Mode: Gray *RGB\n";
     #[test]
     fn a_queue_without_a_known_paper_is_refused() {
         let options = parse_options("PageSize/Media Size: *Custom.WIDTHxHEIGHT\n");
-        let (descriptor, _) = describe_queue("Plotter", &options).unwrap();
+        let (descriptor, _) = describe_queue("Plotter", &options, &HashMap::new()).unwrap();
         assert!(PrinterCapabilitySnapshot::try_from_descriptor(descriptor).is_err());
     }
 
@@ -926,6 +1034,71 @@ ColorModel/Output Mode: Gray *RGB\n";
             resolve_native_printer_mode(&capabilities, "99", 300, ResolvedOrientation::Portrait),
             Err(HardcopyPrintError::UnsupportedPaperIdentity(_))
         ));
+    }
+
+    /// A queue's PPD declares the strip it cannot print on each paper, and
+    /// the page is printable inside it: on an upright page as declared, on a
+    /// turned one with the wider of each pair on both sides. A paper the
+    /// PPD declares nothing for prints to its edges.
+    #[test]
+    fn the_queues_ppd_sets_the_printable_area() {
+        // From a driverless inkjet queue's PPD: 3 mm all round on A4, a
+        // wider foot on Letter, and a borderless A4 variant.
+        let ppd = "*PaperDimension A4: \"595.2756 841.8898\"\n\
+*ImageableArea A4: \"8.5039 8.5039 586.7717 833.3859\"\n\
+*ImageableArea A4.Fullbleed/A4 (Borderless): \"0.0000 0.0000 595.2756 841.8898\"\n\
+*ImageableArea Letter: \"18 36 594 774\"\n\
+*ImageableArea Custom.WIDTHxHEIGHT: \"0 0 0 0\"\n";
+        let areas = parse_imageable_areas(ppd);
+        assert_eq!(
+            areas["A4"],
+            PaperEdges {
+                left: 3_000,
+                top: 3_000,
+                right: 3_000,
+                bottom: 3_000,
+            }
+        );
+        assert_eq!(
+            areas["A4.Fullbleed"],
+            PaperEdges {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            }
+        );
+        assert_eq!(
+            areas["Letter"],
+            PaperEdges {
+                left: 6_350,
+                top: 6_350,
+                right: 6_350,
+                bottom: 12_700,
+            }
+        );
+        assert!(!areas.contains_key("Custom.WIDTHxHEIGHT"));
+
+        let (descriptor, _) = describe_queue("Office", &parse_options(LASER), &areas).unwrap();
+        let capabilities = PrinterCapabilitySnapshot::try_from_descriptor(descriptor).unwrap();
+        // Letter is paper 1 and A4 paper 4; Legal declares nothing.
+        let upright =
+            resolve_native_printer_mode(&capabilities, "1", 300, ResolvedOrientation::Portrait)
+                .unwrap();
+        assert_eq!(upright.physical_size_px(), (2_550, 3_300));
+        assert_eq!(upright.printable_rect_px(), (75, 75, 2_400, 3_075));
+        let turned =
+            resolve_native_printer_mode(&capabilities, "1", 300, ResolvedOrientation::Landscape)
+                .unwrap();
+        assert_eq!(turned.printable_rect_px(), (150, 75, 3_000, 2_400));
+        let a4 =
+            resolve_native_printer_mode(&capabilities, "4", 600, ResolvedOrientation::Portrait)
+                .unwrap();
+        assert_eq!(a4.printable_rect_px().0, 71);
+        let legal =
+            resolve_native_printer_mode(&capabilities, "2", 300, ResolvedOrientation::Portrait)
+                .unwrap();
+        assert_eq!(legal.printable_rect_px(), (0, 0, 2_550, 4_200));
     }
 
     /// The run-length encoding is the PDF filter's: runs, literals, the
