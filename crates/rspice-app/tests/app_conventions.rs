@@ -2610,7 +2610,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-design/src/workbench/design/surface/layout_editor.rs::show_canvas",
     "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_section_header",
     "rspice-app-design/src/workbench/surfaces/stimulus/pwl.rs::table_header",
-    "rspice-results-ui/src/noise_contrib.rs::contributor_header",
     "rspice-results-ui/src/waves/expression_editor.rs::show",
     "rspice-schematic-editor/src/property_values.rs::render_value_editor",
     "rspice-ui-kit/src/panels.rs::card_with_body_margin",
