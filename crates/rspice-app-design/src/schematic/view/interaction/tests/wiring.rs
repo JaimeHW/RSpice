@@ -40,6 +40,53 @@ fn the_label_tool_refuses_an_unmarked_crossing() {
     );
 }
 
+/// "/" while routing flips the bend: a two-click route that went across
+/// then down goes down then across, on the wire being drawn and on the
+/// next bus. The choice is written where every activation reads it back, so
+/// it outlives the open schematic's own copy.
+#[test]
+fn slash_flips_the_route_bend_for_wires_and_buses() {
+    use crate::state::WireRoutingMode;
+
+    let mut state = DesignTestHost::default();
+    state.model.schematic.arm_tool(Tool::Wire);
+    state.model.schematic.start_wire(Point::origin());
+
+    flip_route_corner(&mut canvas_parts(&mut state));
+    state.model.schematic.extend_wire(Point::new(100, 100));
+
+    assert_eq!(
+        state.model.schematic.session.editor.wire_drawing.points,
+        vec![Point::origin(), Point::new(0, 100), Point::new(100, 100)],
+        "the wire leaves downward"
+    );
+    let bus = &mut state.model.schematic.session.editor.bus_drawing;
+    bus.start(Point::origin(), None);
+    bus.add_point(Point::new(100, 100));
+    assert_eq!(
+        bus.points[1],
+        Point::new(0, 100),
+        "the bus bends the same way"
+    );
+    assert_eq!(
+        state.design.schematic_routing_mode,
+        WireRoutingMode::VerticalFirst
+    );
+
+    flip_route_corner(&mut canvas_parts(&mut state));
+    assert_eq!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .routing_mode,
+        WireRoutingMode::HorizontalFirst,
+        "a second press flips it back"
+    );
+}
+
 /// Where a resistor must be placed for its first pin to land on `pin`.
 fn resistor_with_first_pin_at(pin: Point) -> Point {
     let probe = Component::new(0, ComponentType::Resistor, Point::origin());

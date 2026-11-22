@@ -26,8 +26,11 @@ use crate::session::{
 /// Events captured before any tool action changes the editor in this frame.
 pub struct ToolInput {
     pub finish_route: bool,
-    /// Backspace on a live wire route: take back its last vertex.
+    /// Backspace on a live wire or bus route: take back its last vertex.
     pub remove_route_point: bool,
+    /// "/" with the wire or bus tool: flip the corner of the route between
+    /// horizontal first and vertical first.
+    pub flip_route_corner: bool,
     pub shape_double_click: Option<Pos2>,
     pub primary_click: Option<Pos2>,
     pub select_double_click: Option<Pos2>,
@@ -46,13 +49,20 @@ impl ToolInput {
         let route_enter = response.has_focus()
             && route_active
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        let remove_route_point = tool == Tool::Wire
+        let route_tool = matches!(tool, Tool::Wire | Tool::Bus);
+        let remove_route_point = route_tool
             && response.has_focus()
             && route_active
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
+        // KiCad's posture key. It works with the tool armed and no route
+        // live too, so the first bend can be chosen before the first click.
+        let flip_route_corner = route_tool
+            && response.has_focus()
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Slash));
         Self {
             finish_route: route_double_click || route_enter,
             remove_route_point,
+            flip_route_corner,
             shape_double_click: shape_double_click
                 .then(|| response.interact_pointer_pos())
                 .flatten(),
@@ -184,5 +194,67 @@ impl ToolPointerView<'_> {
             Tool::Probe => ToolPointerAction::Probe(target_position()),
             Tool::Label | Tool::OffSheetConnector => ToolPointerAction::NetLabel(target_position()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What one frame over a focused canvas reads with `key` pressed.
+    fn read_with_key(tool: Tool, key: egui::Key) -> ToolInput {
+        let ctx = egui::Context::default();
+        let mut input = None;
+        for events in [
+            Vec::new(),
+            vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        ] {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        // accessibility-pointer-shim: synthetic canvas for the key test.
+                        let response = ui.interact(
+                            ui.max_rect(),
+                            egui::Id::new("tool-input-canvas"),
+                            egui::Sense::click(),
+                        );
+                        response.request_focus();
+                        input = Some(ToolInput::read(ui, &response, tool, true));
+                    });
+                },
+            );
+        }
+        input.expect("the canvas ran")
+    }
+
+    /// "/" flips the route's bend with the wire or the bus tool, and
+    /// Backspace takes back a bus point as it does a wire point.
+    #[test]
+    fn slash_and_backspace_belong_to_both_route_tools() {
+        for tool in [Tool::Wire, Tool::Bus] {
+            assert!(
+                read_with_key(tool, egui::Key::Slash).flip_route_corner,
+                "{tool:?}"
+            );
+            assert!(
+                read_with_key(tool, egui::Key::Backspace).remove_route_point,
+                "{tool:?}"
+            );
+        }
+        assert!(!read_with_key(Tool::Select, egui::Key::Slash).flip_route_corner);
     }
 }

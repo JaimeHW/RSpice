@@ -215,19 +215,6 @@ pub(crate) fn angled_routing_allowed(model: &Model) -> bool {
         == crate::state::WireJunctionPolicy::AnyAngle
 }
 
-pub(crate) fn canonical_routing_mode(
-    requested: WireRoutingMode,
-    current: WireRoutingMode,
-) -> WireRoutingMode {
-    if requested.is_orthogonal() && current.is_orthogonal() {
-        current
-    } else if requested.is_orthogonal() {
-        WireRoutingMode::HorizontalFirst
-    } else {
-        requested
-    }
-}
-
 pub(in crate::workbench) const fn routing_style(
     mode: WireRoutingMode,
 ) -> SchematicWireRoutingStyle {
@@ -295,27 +282,32 @@ fn grid_snap_routing_rows(
         rows.derived("Free spacing turns snapping off; these apply once a pitch is chosen.");
     }
 
-    if angled_routing {
-        let routing_options = ["Orthogonal", "45\u{00b0}", "Free"].map(str::to_owned);
-        if let Some(index) = rows.select(
-            "Wire routing",
-            "grid-snap-routing-wire-routing",
-            routing_label(transaction.draft.wire_routing),
-            &routing_options,
-        ) {
-            transaction.draft.wire_routing = match index {
-                1 => WireRoutingMode::FortyFiveDegree,
-                2 => WireRoutingMode::Diagonal,
-                _ if transaction.draft.wire_routing.is_orthogonal() => {
-                    transaction.draft.wire_routing
-                }
-                _ => WireRoutingMode::HorizontalFirst,
-            };
-            transaction.validation_error = None;
-        }
+    // The two square bends are always offered; the angled routes only where
+    // the document keeps dots at angled joins. "/" flips between the square
+    // bends while routing.
+    let routing_modes: &[WireRoutingMode] = if angled_routing {
+        &ROUTING_MODES
     } else {
-        rows.value("Wire routing", "Orthogonal");
-        rows.derived("45\u{00b0} and free routing need the any-angle junction policy.");
+        &ROUTING_MODES[..2]
+    };
+    let routing_options = routing_modes
+        .iter()
+        .map(|mode| routing_label(*mode).to_owned())
+        .collect::<Vec<_>>();
+    if let Some(index) = rows.select(
+        "Wire routing",
+        "grid-snap-routing-wire-routing",
+        routing_label(transaction.draft.wire_routing),
+        &routing_options,
+    ) && let Some(mode) = routing_modes.get(index)
+    {
+        transaction.draft.wire_routing = *mode;
+        transaction.validation_error = None;
+    }
+    if !angled_routing {
+        rows.derived(
+            "45\u{00b0} and free routing need a schematic created with Wire routing set to Any angle in Preferences.",
+        );
     }
     (grid.response.id, spacing.response.id)
 }
@@ -328,9 +320,18 @@ pub const fn grid_style_label(style: GridStyle) -> &'static str {
     }
 }
 
+/// The routing choices, square bends first.
+const ROUTING_MODES: [WireRoutingMode; 4] = [
+    WireRoutingMode::HorizontalFirst,
+    WireRoutingMode::VerticalFirst,
+    WireRoutingMode::FortyFiveDegree,
+    WireRoutingMode::Diagonal,
+];
+
 const fn routing_label(mode: WireRoutingMode) -> &'static str {
     match mode {
-        WireRoutingMode::HorizontalFirst | WireRoutingMode::VerticalFirst => "Orthogonal",
+        WireRoutingMode::HorizontalFirst => "Horizontal first",
+        WireRoutingMode::VerticalFirst => "Vertical first",
         WireRoutingMode::FortyFiveDegree => "45\u{00b0}",
         WireRoutingMode::Diagonal => "Free",
     }
@@ -513,6 +514,52 @@ pub(crate) mod tests {
             SchematicWireRoutingStyle::FortyFiveDegree
         );
         assert!(!state.design.grid_snap_routing.open);
+    }
+
+    /// "Orthogonal" stood for both square bends, so choosing it kept
+    /// whichever the session had and vertical first could not be chosen.
+    /// Each bend is its own choice and applies as chosen, under either
+    /// junction policy.
+    #[test]
+    fn vertical_first_is_a_choice_of_its_own() {
+        let mut state = DesignTestHost::default();
+        assert_eq!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .routing_mode,
+            WireRoutingMode::HorizontalFirst
+        );
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
+        state.design.grid_snap_routing.draft.wire_routing = WireRoutingMode::VerticalFirst;
+
+        assert!(commit_grid_snap_routing(&mut state).is_ok());
+
+        let editor = &state.model.schematic.session.editor;
+        assert_eq!(
+            editor.wire_drawing.routing_mode,
+            WireRoutingMode::VerticalFirst
+        );
+        assert_eq!(
+            editor.bus_drawing.routing_mode,
+            WireRoutingMode::VerticalFirst
+        );
+        assert_eq!(
+            state.design.schematic_routing_mode,
+            WireRoutingMode::VerticalFirst
+        );
+        assert_eq!(
+            routing_label(WireRoutingMode::VerticalFirst),
+            "Vertical first"
+        );
     }
 
     /// Under an orthogonal junction policy nothing maintains dots at angled

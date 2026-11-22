@@ -53,15 +53,38 @@ pub struct BusDrawing {
     pub preview_pos: Option<Point>,
     pub routing_mode: WireRoutingMode,
     pub declaration: Option<BusDeclaration>,
+    /// How many of `points` stood after each vertex the user placed, so
+    /// taking one back also takes the corner routed to reach it.
+    placed: Vec<usize>,
 }
 
 impl BusDrawing {
     pub fn start(&mut self, position: Point, declaration: Option<BusDeclaration>) {
         self.points.clear();
         self.points.push(position);
+        self.placed.clear();
+        self.placed.push(self.points.len());
         self.active = true;
         self.preview_pos = Some(position);
         self.declaration = declaration;
+    }
+
+    /// Take back the last vertex the user placed, with any corner routed to
+    /// reach it, as a wire route does. Taking back the first point ends the
+    /// route.
+    pub fn remove_last_point(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.placed.pop();
+        let keep = match self.placed.last() {
+            Some(&placed) if placed < self.points.len() => placed,
+            _ => self.points.len().saturating_sub(1),
+        };
+        self.points.truncate(keep);
+        if self.points.is_empty() {
+            self.cancel();
+        }
     }
 
     pub fn update_preview(&mut self, position: Point) {
@@ -82,6 +105,7 @@ impl BusDrawing {
                 self.points.push(point);
             }
         }
+        self.placed.push(self.points.len());
         self.preview_pos = Some(position);
     }
 
@@ -98,8 +122,46 @@ impl BusDrawing {
 
     pub fn cancel(&mut self) {
         self.points.clear();
+        self.placed.clear();
         self.active = false;
         self.preview_pos = None;
         self.declaration = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Backspace takes back the last bus point the user placed, with the
+    /// corner routed to reach it, as it does on a wire; the first point
+    /// going ends the route.
+    #[test]
+    fn taking_back_a_bus_point_takes_its_corner_with_it() {
+        let mut drawing = BusDrawing::default();
+        drawing.start(Point::new(0, 0), None);
+        drawing.add_point(Point::new(100, 100));
+        drawing.add_point(Point::new(200, 100));
+        assert_eq!(
+            drawing.points,
+            vec![
+                Point::new(0, 0),
+                Point::new(100, 0),
+                Point::new(100, 100),
+                Point::new(200, 100)
+            ]
+        );
+
+        drawing.remove_last_point();
+        assert_eq!(
+            drawing.points,
+            vec![Point::new(0, 0), Point::new(100, 0), Point::new(100, 100)]
+        );
+        drawing.remove_last_point();
+        assert_eq!(drawing.points, vec![Point::new(0, 0)]);
+        assert!(drawing.active);
+        drawing.remove_last_point();
+        assert!(!drawing.active);
+        assert!(drawing.points.is_empty());
     }
 }

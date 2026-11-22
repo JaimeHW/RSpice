@@ -108,8 +108,22 @@ pub fn handle_tool_interactions(
         finish_active_route(ui, state);
         return;
     }
+    if input.flip_route_corner {
+        flip_route_corner(state);
+        return;
+    }
     if input.remove_route_point {
-        state.model.schematic.retract_wire();
+        if current_tool == Tool::Bus {
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .bus_drawing
+                .remove_last_point();
+        } else {
+            state.model.schematic.retract_wire();
+        }
         return;
     }
 
@@ -518,6 +532,39 @@ fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut CanvasParts<'_>, ancho
         .workbench
         .toasts
         .warn_with_title(ui.ctx(), "Label not placed", message);
+}
+
+/// "/" while routing: the bend of the route flips between horizontal first
+/// and vertical first, for wires and buses alike, live on the route being
+/// drawn. The choice is the one Grid, snap and routing sets, so it lasts.
+pub(super) fn flip_route_corner(state: &mut CanvasParts<'_>) {
+    use crate::state::WireRoutingMode;
+
+    let flipped = match state
+        .model
+        .schematic
+        .session
+        .editor
+        .wire_drawing
+        .routing_mode
+    {
+        WireRoutingMode::HorizontalFirst => WireRoutingMode::VerticalFirst,
+        WireRoutingMode::VerticalFirst => WireRoutingMode::HorizontalFirst,
+        WireRoutingMode::FortyFiveDegree | WireRoutingMode::Diagonal => {
+            state.prompt(
+                "Only a square bend flips. Choose Horizontal first or Vertical first in Grid, snap and routing.",
+            );
+            return;
+        }
+    };
+    state
+        .design
+        .set_routing_mode(&mut state.model.schematic, flipped);
+    state.prompt(if flipped == WireRoutingMode::VerticalFirst {
+        "Routing: vertical first."
+    } else {
+        "Routing: horizontal first."
+    });
 }
 
 /// A placed part whose pin lands inside one of this sheet's wires is

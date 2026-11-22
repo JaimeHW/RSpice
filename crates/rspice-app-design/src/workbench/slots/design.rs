@@ -467,6 +467,22 @@ impl DesignState {
         }
     }
 
+    /// Set the wire and bus routing everywhere it is kept: the open
+    /// schematic's wire and bus drafts, the slot's routing mode, which every
+    /// schematic takes back when it is activated, and the routing style the
+    /// visibility policy records. A write to the open schematic alone is
+    /// lost at its next activation.
+    pub(crate) fn set_routing_mode(
+        &mut self,
+        schematic: &mut crate::state::SchematicState,
+        mode: crate::state::WireRoutingMode,
+    ) {
+        schematic.session.editor.wire_drawing.set_routing_mode(mode);
+        schematic.session.editor.bus_drawing.routing_mode = mode;
+        self.schematic_routing_mode = mode;
+        self.schematic_visibility.wire_routing = grid_snap_routing::routing_style(mode);
+    }
+
     /// Apply Grid, snap and wire routing: check the whole draft, then set the
     /// grid, the snap and the routing on the slot and the open schematic
     /// together.
@@ -514,10 +530,7 @@ impl DesignState {
         snap_engine.grid_size = requested_pitch
             .unwrap_or(model.schematic.document().document_policy.grid_pitch)
             .canvas_grid_size();
-        let routing_mode = grid_snap_routing::canonical_routing_mode(
-            transaction.draft.wire_routing,
-            model.schematic.session.editor.wire_drawing.routing_mode,
-        );
+        let routing_mode = transaction.draft.wire_routing;
         if !routing_mode.is_orthogonal() && !grid_snap_routing::angled_routing_allowed(model) {
             return Err(GridSnapRoutingCommitError::new(
                 grid_snap_routing::ANGLED_ROUTING_REASON,
@@ -538,15 +551,7 @@ impl DesignState {
         self.set_grid_style(transaction.draft.grid_style);
         model.schematic.session.editor.snap_engine = snap_engine.clone();
         self.schematic_snap = snap_engine;
-        model
-            .schematic
-            .session
-            .editor
-            .wire_drawing
-            .set_routing_mode(routing_mode);
-        model.schematic.session.editor.bus_drawing.routing_mode = routing_mode;
-        self.schematic_routing_mode = routing_mode;
-        self.schematic_visibility.wire_routing = grid_snap_routing::routing_style(routing_mode);
+        self.set_routing_mode(&mut model.schematic, routing_mode);
         if pitch_changed {
             sync_active_schematic(model, workbench);
         }
