@@ -159,10 +159,13 @@ def canonical_projects(browser):
 def validated_save_clock(browser, review_intervals):
     browser.click("Close", "button")
     browser.click("Schematic", "button")
-    # At the fresh document's 100% zoom, construct a closed 5 V / 1 kohm
-    # circuit through normal placement and routing. Ground's terminal is 10
-    # units above its origin; the resistor and source terminals are 20 apart
-    # from their origins. The validation dialog must confirm this actual circuit.
+    # A fresh schematic opens framed on its sheet; Zoom 100% puts one canvas
+    # point on one schematic unit, so the offsets below keep their spacing.
+    choose_command(browser, "Zoom 100%")
+    # At 100% zoom, construct a closed 5 V / 1 kohm circuit through normal
+    # placement and routing. Ground's terminal is 10 units above its origin;
+    # the resistor and source terminals are 20 apart from their origins. The
+    # validation dialog must confirm this actual circuit.
     for command, offset in (("Place ground", (120, 100)),
                             ("Place resistor", (140, 90)),
                             ("Place voltage source", (120, 70))):
