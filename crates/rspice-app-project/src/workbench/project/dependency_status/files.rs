@@ -16,7 +16,7 @@ use rspice_simulation::netlist_preparation::IncludeSearchChain;
 
 use super::{
     DependencyKind, DependencyLibrary, DependencyRow, LibraryStatus, PROJECT_FILE_SOURCE, UNSET,
-    project_relative, shown_path,
+    lexical, project_relative, shown_path,
 };
 use crate::state::{DeckSource, ProjectDeck, StoredDeck};
 use crate::workbench::app_state::Model;
@@ -149,10 +149,17 @@ fn include_path_rows(authored: &[PathBuf], folder: Option<&Path>) -> Vec<Depende
                         .to_owned(),
                 )
             };
+            // Read from the project folder as every other row's location is,
+            // whichever way the project stores it.
+            let location = if placed {
+                project_relative(entry.resolved(), folder)
+            } else {
+                written.clone()
+            };
             DependencyRow {
                 library: DependencyLibrary::include_path(written.clone()),
                 version: UNSET.to_owned(),
-                location: written.clone(),
+                location,
                 source: written,
                 resolved: placed.then(|| shown_path(entry.resolved())),
                 access: UNSET,
@@ -290,7 +297,7 @@ fn read_deck(model: &Model, deck: &str, file: &Path) -> (LibraryStatus, Vec<Depe
                     .map(|directory| directory.join(requested))
                     .find(|candidate| candidate.is_file())
             };
-            match at {
+            match at.map(|at| lexical(&at)) {
                 Some(at) => include_row(
                     locator,
                     project_relative(&at, folder),

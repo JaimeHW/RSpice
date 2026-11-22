@@ -155,6 +155,7 @@ fn a_location_is_read_from_the_project_folder_when_it_is_near() {
         ("/work/chip/design/models/tt.lib", "models/tt.lib"),
         ("/work/chip/design", "."),
         ("/work/chip/libraries/vendor", "../libraries/vendor"),
+        ("/work/chip/design/./../models/tt.lib", "../models/tt.lib"),
         ("/opt/pdk/demo180/models.lib", "/opt/pdk/demo180/models.lib"),
     ] {
         let found = project_relative(std::path::Path::new(path), Some(project));

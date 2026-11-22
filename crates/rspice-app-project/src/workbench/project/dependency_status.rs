@@ -19,7 +19,7 @@ mod files;
 
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
@@ -517,8 +517,8 @@ pub(crate) fn shown_path(path: &Path) -> String {
 /// the libraries and models beside it; else the whole path, since a climb
 /// out of the project's neighbourhood names nothing the reader knows it by.
 pub(crate) fn project_relative(path: &Path, project_folder: Option<&Path>) -> String {
-    let whole = shown_path(path);
-    let Some(folder) = project_folder.map(|folder| shown_path(folder)) else {
+    let whole = shown_path(&lexical(path));
+    let Some(folder) = project_folder.map(|folder| shown_path(&lexical(folder))) else {
         return whole;
     };
     let path = Path::new(&whole);
@@ -538,6 +538,27 @@ pub(crate) fn project_relative(path: &Path, project_folder: Option<&Path>) -> St
         .map_or(whole.clone(), |beside| {
             Path::new("..").join(beside).display().to_string()
         })
+}
+
+/// `path` as the file system reads it, without asking the disk: each `.`
+/// step dropped, each `..` taken against the step before it, and every step
+/// joined with the platform's separator, so a path a deck wrote with `/`
+/// reads as one the project wrote.
+pub(crate) fn lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut steps = PathBuf::new();
+    for step in path.components() {
+        match step {
+            Component::CurDir => {}
+            Component::ParentDir
+                if matches!(steps.components().next_back(), Some(Component::Normal(_))) =>
+            {
+                steps.pop();
+            }
+            other => steps.push(other.as_os_str()),
+        }
+    }
+    steps
 }
 
 fn model_files(count: usize) -> String {
