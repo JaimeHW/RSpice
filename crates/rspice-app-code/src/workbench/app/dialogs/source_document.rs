@@ -16,18 +16,20 @@ use egui::{Context, Grid, RichText, Ui};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ProjectSourceBundle;
+use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogInitialFocus, DialogSize,
-    DialogTransactionTone, Problem, band_header, paint_problem_mark,
+    DialogTransactionTone, IconButton, PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem,
+    band_header, button_grid, control_height, name_control, paint_problem_mark,
 };
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::{LifecycleAction, SourceDocumentRequest};
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    PANEL_INSET, panel_bleed, panel_body, panel_inset, property_row, property_row_height,
-    property_row_problem, property_row_wrapped, section_block_gap, subsection_header,
+    Fact, PANEL_INSET, PANEL_SECTION_GAP, fact_rows, panel_body, property_row_height,
+    section_block_gap, subsection_header,
 };
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceFileAction, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
@@ -36,12 +38,9 @@ use crate::workbench::documents::netlist_document::{self, NetlistDocumentState};
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{MessageCatalog, MessageId};
 
-/// Side of a leading problem mark on an include row, and the advance from its
-/// left edge to the text behind it. Read from the kit rather than restated
-/// here, so an include row's mark is the mark every other panel sets.
-use crate::ui::widgets::{
-    PROBLEM_MARK_ADVANCE as INCLUDE_MARK_ADVANCE, PROBLEM_MARK_SIDE as INCLUDE_MARK_SIDE,
-};
+/// The gap between two buttons of the operations grid, across and down, and
+/// between the add row's field and its buttons.
+const CONTROL_GAP: f32 = 6.0;
 
 /// The shell's `open_source_document_dialog`, over the workspace in front, the model,
 /// the Code workspace's runtime state, the netlist editor's state and the
@@ -111,7 +110,9 @@ fn veriloga_is_visible_in(workspace: Workspace, model: &Model) -> bool {
 pub struct DocumentFacts {
     pub logical_path: String,
     leaf: String,
-    role: String,
+    /// The role a file plays, when it plays one: an ordinary source says
+    /// nothing here.
+    role: Option<String>,
     editable: bool,
     pub is_root: bool,
     line_endings: MessageId,
@@ -134,8 +135,11 @@ struct RevisionRow {
 pub struct NetlistLifecycleFacts {
     /// The file's name.
     logical_path: String,
+    /// Where the file is in the project's folder, or on disk when it is
+    /// outside it.
+    project_path: String,
     line_endings: MessageId,
-    /// Where the file is.
+    /// Where the file is on disk.
     native_path: String,
     /// Whether the file is an include the deck reads.
     include: bool,
@@ -144,14 +148,31 @@ pub struct NetlistLifecycleFacts {
 /// What the dialog states of the file in front: the open deck, or an
 /// include open beside it.
 pub fn netlist_lifecycle_facts(
-    _model: &Model,
+    model: &Model,
     netlist: &NetlistDocumentState,
 ) -> Option<NetlistLifecycleFacts> {
     let file = netlist_document::active_deck_file_in(netlist)?;
+    let native_path = file.path.display().to_string();
+    let project_path = model
+        .workspace
+        .content
+        .project
+        .data_root()
+        .and_then(|root| file.path.strip_prefix(root).ok())
+        .map(|relative| {
+            relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .filter(|relative| !relative.is_empty())
+        .unwrap_or_else(|| native_path.clone());
     Some(NetlistLifecycleFacts {
         logical_path: file.name(),
+        project_path,
         line_endings: line_ending_summary(&file.line_ending.write(&file.text)),
-        native_path: file.path.display().to_string(),
+        native_path,
         include: netlist.front.include().is_some(),
     })
 }
@@ -210,7 +231,9 @@ fn document_facts(
         .collect();
     Some(DocumentFacts {
         leaf: leaf_name(&logical_path),
-        role: role_label(messages, bundle.is_build_profile(&logical_path)),
+        role: bundle
+            .is_build_profile(&logical_path)
+            .then(|| role_label(messages, true)),
         editable: code_workspace::source_bundle_document_is_editable_in(
             model,
             code,
@@ -529,10 +552,15 @@ fn sections<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 }
 
 /// One section of a Files and includes dialog: the dialog's band across
-/// its flush body, then `body` on the panel rhythm with every row on the left
-/// edge of the dialog's title and footer.
+/// its flush body, then `body` on the dialog's inset.
 fn dialog_section(ui: &mut Ui, title: &str, meta: Option<&str>, body: impl FnOnce(&mut Ui)) {
     band_header(ui, title, meta);
+    dialog_inset(ui, body);
+}
+
+/// `body` on the panel rhythm with every row on the left edge of the
+/// dialog's title and footer.
+fn dialog_inset(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     // The panel body insets its rows by its own inset; this frame makes up
     // the difference to the dialog's.
     let edge = (DIALOG_BODY_INSET - PANEL_INSET) as i8;
@@ -583,29 +611,33 @@ fn netlist_lifecycle_body(
             &messages.text(MessageId::CodeSourceCurrentDocument),
             None,
             |ui| {
-                property_row(
+                let file = messages.text(if facts.include {
+                    MessageId::NetlistLogicalIdentity
+                } else {
+                    MessageId::NetlistTopDeck
+                });
+                let line_endings = messages.text(MessageId::CodeSourceLineEndings);
+                let line_ending = messages.text(facts.line_endings);
+                fact_rows(
                     ui,
-                    &messages.text(if facts.include {
-                        MessageId::NetlistLogicalIdentity
-                    } else {
-                        MessageId::NetlistTopDeck
-                    }),
-                    &facts.logical_path,
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourcePath),
-                    &facts.native_path,
-                );
-                property_row_wrapped(
-                    ui,
-                    &messages.text(MessageId::CodeSourceLineEndings),
-                    &messages.text(facts.line_endings),
+                    &[
+                        Fact::path(&file, &facts.project_path).whole(&facts.native_path),
+                        Fact::new(&line_endings, &line_ending),
+                    ],
                 );
             },
         );
         include_search_paths(ui, code, model, messages)
     })
+}
+
+/// What a press on an include folder's row asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FolderAction {
+    Select,
+    MoveUp,
+    MoveDown,
+    Remove,
 }
 
 /// The project's ordered include search chain.
@@ -621,7 +653,6 @@ fn include_search_paths(
     model: &Model,
     messages: MessageCatalog,
 ) -> Option<Vec<std::path::PathBuf>> {
-    let t = Tokens::get(ui.ctx());
     let chain = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
         model.workspace.content.project.include_search_paths(),
         model.workspace.content.project.data_root(),
@@ -633,197 +664,265 @@ fn include_search_paths(
         .include_search_paths()
         .to_vec();
     let unsaved = model.workspace.content.project.data_root().is_none();
+    let selected = code
+        .include_search_selected
+        .filter(|index| *index < authored.len());
     let mut action = None;
-    dialog_section(
+    band_header(
         ui,
         &messages.text(MessageId::NetlistIncludeSearchPaths),
         (!authored.is_empty())
             .then(|| messages.text(MessageId::NetlistIncludeSearchPathCount))
             .as_deref(),
-        |ui| {
-            // The chain goes on into the library folders set in Preferences,
-            // so a list that ended here would misstate where a name is found.
-            let library_folders = !model.library_folders().is_empty();
-            if authored.is_empty() {
-                muted_inspector_copy(
-                    ui,
-                    &messages.text(if library_folders {
-                        MessageId::NetlistIncludeSearchPathEmptyWithLibraryFolders
-                    } else {
-                        MessageId::NetlistIncludeSearchPathEmpty
-                    }),
-                );
+    );
+    // The rows run edge to edge, as the band over them does; their words
+    // keep the dialog's inset.
+    for (index, entry) in chain.entries().iter().enumerate() {
+        let Some(pressed) = include_folder_row(
+            ui,
+            index,
+            authored.len(),
+            entry,
+            selected == Some(index),
+            messages,
+        ) else {
+            continue;
+        };
+        let mut next = authored.clone();
+        match pressed {
+            FolderAction::Select => code.include_search_selected = Some(index),
+            FolderAction::MoveUp => {
+                next.swap(index - 1, index);
+                code.include_search_selected = Some(index - 1);
+                action = Some(next);
             }
-            let inset = panel_inset(ui);
-            for (index, entry) in chain.entries().iter().enumerate() {
-                let selected = code.include_search_selected == Some(index);
-                let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), property_row_height(ui)),
-                    egui::Sense::click(),
-                );
-                // The row is a painted galley, so nothing here reaches a screen
-                // reader on its own, and a clickable sense makes it a tab stop
-                // that would otherwise take focus silently and invisibly.
-                response.widget_info(|| {
-                    egui::WidgetInfo::selected(
-                        egui::WidgetType::SelectableLabel,
-                        ui.is_enabled(),
-                        selected,
-                        format!("{}. {}", index + 1, entry.authored().display()),
-                    )
-                });
-                if ui.is_rect_visible(rect) {
-                    if selected {
-                        ui.painter()
-                            .rect_filled(panel_bleed(ui, rect), 0.0, t.color.accent_dim);
-                    }
-                    // A path that resolves is every path's normal state, so
-                    // only one that does not is marked and named.
-                    let missing =
-                        rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence(
-                        ) && !entry.exists();
-                    let state_text = if missing {
-                        messages.text(MessageId::NetlistIncludeSearchPathMissing)
-                    } else {
-                        String::new()
-                    };
-                    let state_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-                    let mut state_width = ui
-                        .painter()
-                        .layout_no_wrap(state_text.clone(), state_font.clone(), t.color.text_dim)
-                        .size()
-                        .x;
-                    ui.painter().text(
-                        egui::pos2(rect.right() - inset, rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        &state_text,
-                        state_font,
-                        t.color.text_dim,
-                    );
-                    if missing {
-                        paint_problem_mark(
-                            ui.painter(),
-                            egui::Rect::from_center_size(
-                                egui::pos2(
-                                    rect.right() - inset - state_width - INCLUDE_MARK_ADVANCE
-                                        + INCLUDE_MARK_SIDE * 0.5,
-                                    rect.center().y,
-                                ),
-                                egui::Vec2::splat(INCLUDE_MARK_SIDE),
-                            ),
-                            Problem::Warning,
-                        );
-                        state_width += INCLUDE_MARK_ADVANCE;
-                    }
-                    ui.painter()
-                        .with_clip_rect(egui::Rect::from_x_y_ranges(
-                            (rect.left() + inset)..=(rect.right() - inset - 8.0 - state_width),
-                            rect.y_range(),
-                        ))
-                        .text(
-                            egui::pos2(rect.left() + inset, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            format!("{}. {}", index + 1, entry.authored().display()),
-                            theme::mono(tokens::FS_0, FontWeight::Regular),
-                            t.color.text,
-                        );
-                }
-                theme::paint_focus_ring(ui, &response, rect);
-                let response = response.on_hover_text(entry.resolved().display().to_string());
-                if response.clicked() {
-                    code.include_search_selected = Some(index);
-                }
+            FolderAction::MoveDown => {
+                next.swap(index, index + 1);
+                code.include_search_selected = Some(index + 1);
+                action = Some(next);
             }
-            if library_folders && !authored.is_empty() {
-                muted_inspector_copy(
-                    ui,
-                    &messages.text(MessageId::NetlistIncludeSearchPathThenLibraryFolders),
-                );
+            FolderAction::Remove => {
+                next.remove(index);
+                code.include_search_selected = None;
+                action = Some(next);
             }
-            if unsaved && !authored.is_empty() {
-                muted_inspector_copy(
-                    ui,
-                    &messages.text(MessageId::NetlistIncludeSearchPathUnsaved),
-                );
-            }
-            section_block_gap(ui);
-            let selected = code
-                .include_search_selected
-                .filter(|index| *index < authored.len());
-            // The field spans the body; the commands under it wrap.
-            let draft = code.include_search_draft.clone();
-            let mut edited = draft.clone();
-            ui.add(
-                egui::TextEdit::singleline(&mut edited)
-                    .font(theme::field_mono())
-                    .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint)),
+        }
+    }
+    dialog_inset(ui, |ui| {
+        // The chain goes on into the library folders set in Preferences,
+        // so a list that ended here would misstate where a name is found.
+        let library_folders = !model.library_folders().is_empty();
+        if authored.is_empty() {
+            muted_inspector_copy(
+                ui,
+                &messages.text(if library_folders {
+                    MessageId::NetlistIncludeSearchPathEmptyWithLibraryFolders
+                } else {
+                    MessageId::NetlistIncludeSearchPathEmpty
+                }),
             );
-            if edited != draft {
-                code.include_search_draft = edited.clone();
+        } else if library_folders {
+            muted_inspector_copy(
+                ui,
+                &messages.text(MessageId::NetlistIncludeSearchPathThenLibraryFolders),
+            );
+        }
+        if unsaved && !authored.is_empty() {
+            muted_inspector_copy(
+                ui,
+                &messages.text(MessageId::NetlistIncludeSearchPathUnsaved),
+            );
+        }
+        section_block_gap(ui);
+        if let Some(folder) = include_folder_field(ui, code, messages) {
+            let mut next = authored.clone();
+            next.push(folder);
+            action = Some(next);
+        }
+    });
+    action
+}
+
+/// One folder of the chain, flush to the dialog's edges: its place and its
+/// path, whether it is missing, and, while the row is hovered or selected,
+/// the three things that act on it alone.
+fn include_folder_row(
+    ui: &mut Ui,
+    index: usize,
+    count: usize,
+    entry: &rspice_simulation::netlist_preparation::IncludeSearchEntry,
+    selected: bool,
+    messages: MessageCatalog,
+) -> Option<FolderAction> {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let height = property_row_height(ui);
+    let shown = format!("{}. {}", index + 1, entry.authored().display());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    // The row is a painted galley, so nothing here reaches a screen reader
+    // on its own, and a clickable sense makes it a tab stop that would
+    // otherwise take focus silently and invisibly.
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            &shown,
+        )
+    });
+    let mut pressed = response.clicked().then_some(FolderAction::Select);
+    let acting = selected || ui.rect_contains_pointer(rect);
+    // The row's actions, right to left from the inset; laid out only while
+    // they show, so a resting list is its paths and nothing else.
+    let mut right = rect.right() - DIALOG_BODY_INSET;
+    if acting {
+        let side = (height - 4.0).max(1.0);
+        let actions = [
+            (
+                Icon::Trash,
+                MessageId::NetlistIncludeSearchPathRemove,
+                true,
+                FolderAction::Remove,
+            ),
+            (
+                Icon::ChevronDown,
+                MessageId::NetlistIncludeSearchPathMoveDown,
+                index + 1 < count,
+                FolderAction::MoveDown,
+            ),
+            (
+                Icon::ChevronUp,
+                MessageId::NetlistIncludeSearchPathMoveUp,
+                index > 0,
+                FolderAction::MoveUp,
+            ),
+        ];
+        for (icon, label, enabled, action) in actions {
+            let slot = egui::Rect::from_center_size(
+                egui::pos2(right - side * 0.5, rect.center().y),
+                egui::Vec2::splat(side),
+            );
+            right -= side + 2.0;
+            let label = messages.text(label);
+            // A child of its own, so the row below starts where this one
+            // ends rather than where its last action does.
+            let mut slot_ui = ui.new_child(egui::UiBuilder::new().max_rect(slot));
+            let button = IconButton::new(icon)
+                .side(side)
+                .enabled(enabled)
+                .tooltip(&label)
+                .show(&mut slot_ui);
+            if button.clicked() {
+                pressed = Some(action);
             }
-            section_block_gap(ui);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathAdd))
-                    .enabled(!edited.trim().is_empty())
-                    .show(ui)
-                    .clicked()
-                {
-                    let mut next = authored.clone();
-                    next.push(std::path::PathBuf::from(edited.trim()));
-                    code.include_search_draft.clear();
-                    action = Some(next);
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathBrowse))
-                    .show(ui)
-                    .clicked()
-                    && let Some(picked) = rfd::FileDialog::new()
-                        .set_title(messages.text(MessageId::NetlistIncludeSearchPaths))
-                        .pick_folder()
-                {
-                    let mut next = authored.clone();
-                    next.push(picked);
-                    action = Some(next);
-                }
-                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathMoveUp))
-                    .enabled(selected.is_some_and(|index| index > 0))
-                    .show(ui)
-                    .clicked()
-                    && let Some(index) = selected
-                {
-                    let mut next = authored.clone();
-                    next.swap(index - 1, index);
-                    code.include_search_selected = Some(index - 1);
-                    action = Some(next);
-                }
-                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathMoveDown))
-                    .enabled(selected.is_some_and(|index| index + 1 < authored.len()))
-                    .show(ui)
-                    .clicked()
-                    && let Some(index) = selected
-                {
-                    let mut next = authored.clone();
-                    next.swap(index, index + 1);
-                    code.include_search_selected = Some(index + 1);
-                    action = Some(next);
-                }
-                if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathRemove))
-                    .enabled(selected.is_some())
-                    .destructive(true)
-                    .show(ui)
-                    .clicked()
-                    && let Some(index) = selected
-                {
-                    let mut next = authored.clone();
-                    next.remove(index);
-                    code.include_search_selected = None;
-                    action = Some(next);
-                }
-            });
+        }
+        right -= CONTROL_GAP - 2.0;
+    }
+    if ui.is_rect_visible(rect) {
+        if selected {
+            ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
+        }
+        // A path that resolves is every path's normal state, so only one
+        // that does not is marked and named.
+        let missing = rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence()
+            && !entry.exists();
+        if missing {
+            let state = ui.painter().text(
+                egui::pos2(right, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                messages.text(MessageId::NetlistIncludeSearchPathMissing),
+                font.clone(),
+                t.color.text_dim,
+            );
+            right = state.left() - PROBLEM_MARK_ADVANCE;
+            paint_problem_mark(
+                ui.painter(),
+                egui::Rect::from_min_size(
+                    egui::pos2(right, rect.center().y - PROBLEM_MARK_SIDE * 0.5),
+                    egui::Vec2::splat(PROBLEM_MARK_SIDE),
+                ),
+                Problem::Warning,
+            );
+            right -= CONTROL_GAP;
+        }
+        let left = rect.left() + DIALOG_BODY_INSET;
+        ui.painter()
+            .with_clip_rect(egui::Rect::from_x_y_ranges(
+                left..=right.max(left),
+                rect.y_range(),
+            ))
+            .text(
+                egui::pos2(left, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                &shown,
+                font,
+                t.color.text,
+            );
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response.on_hover_text(entry.resolved().display().to_string());
+    pressed
+}
+
+/// The add row under the chain: the path field across the row, then
+/// Browse… and Add at the field's height. Returns the folder it adds.
+fn include_folder_field(
+    ui: &mut Ui,
+    code: &mut CodeWorkspaceRuntimeState,
+    messages: MessageCatalog,
+) -> Option<std::path::PathBuf> {
+    let height = control_height(ui);
+    let add_label = messages.text(MessageId::NetlistIncludeSearchPathAdd);
+    let add_named = messages.text(MessageId::NetlistIncludeSearchPathAddNamed);
+    let field_name = messages.text(MessageId::NetlistIncludeSearchPathField);
+    let typed = !code.include_search_draft.trim().is_empty();
+    let add = Button::new(&add_label)
+        .accessible_label(&add_named)
+        .enabled(typed);
+    #[cfg(not(target_arch = "wasm32"))]
+    let browse_label = messages.text(MessageId::NetlistIncludeSearchPathBrowse);
+    #[cfg(not(target_arch = "wasm32"))]
+    let browse = Button::new(&browse_label);
+    #[cfg(not(target_arch = "wasm32"))]
+    let buttons = browse.measured_width(ui) + add.measured_width(ui) + 2.0 * CONTROL_GAP;
+    #[cfg(target_arch = "wasm32")]
+    let buttons = add.measured_width(ui) + CONTROL_GAP;
+    let mut added = None;
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = CONTROL_GAP;
+            let field = ui.add_sized(
+                egui::vec2((ui.available_width() - buttons).max(1.0), height),
+                egui::TextEdit::singleline(&mut code.include_search_draft)
+                    .font(theme::field_mono())
+                    .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint))
+                    .vertical_align(egui::Align::Center)
+                    .margin(egui::Margin::symmetric(8, 4)),
+            );
+            name_control(ui, &field, &field_name);
+            let entered = typed
+                && field.lost_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            #[cfg(not(target_arch = "wasm32"))]
+            if browse.show(ui).clicked()
+                && let Some(picked) = rfd::FileDialog::new()
+                    .set_title(messages.text(MessageId::NetlistIncludeSearchPaths))
+                    .pick_folder()
+            {
+                added = Some(picked);
+            }
+            if add.show(ui).clicked() || entered {
+                added = Some(std::path::PathBuf::from(code.include_search_draft.trim()));
+                code.include_search_draft.clear();
+            }
         },
     );
-    action
+    added
 }
 
 fn current_document(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
@@ -834,46 +933,66 @@ fn current_document(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog
         &messages.text(MessageId::CodeSourceCurrentDocument),
         ownership.as_deref(),
         |ui| {
-            property_row(
-                ui,
-                &messages.text(MessageId::CodeSourcePath),
-                &facts.logical_path,
-            );
-            property_row(
-                ui,
-                &messages.text(MessageId::CodeSourceRecordedRole),
-                &facts.role,
-            );
-            property_row_wrapped(
-                ui,
-                &messages.text(MessageId::CodeSourceLineEndings),
-                &messages.text(facts.line_endings),
-            );
-            // A current validation is the state this row is in nearly always,
+            let path = messages.text(MessageId::CodeSourcePath);
+            let role = messages.text(MessageId::CodeSourceRecordedRole);
+            let line_endings = messages.text(MessageId::CodeSourceLineEndings);
+            let line_ending = messages.text(facts.line_endings);
+            let compile = messages.text(MessageId::CodeSourceCompile);
+            // The editor's header says it in these words.
+            let edited = messages.text(MessageId::VerilogAStatusModified);
+            let mut rows = vec![Fact::path(&path, &facts.logical_path)];
+            if let Some(role_text) = &facts.role {
+                rows.push(Fact::new(&role, role_text));
+            }
+            rows.push(Fact::new(&line_endings, &line_ending));
+            // A current compile is the state this row is in nearly always,
             // and saying so is the absence of a problem.
             if !facts.validation_current {
-                property_row_problem(
-                    ui,
-                    &messages.text(MessageId::CodeSourceValidation),
-                    &messages.text(MessageId::CodeSourceValidationStale),
-                    Some(Problem::Warning),
-                );
+                rows.push(Fact::new(&compile, &edited).problem(Problem::Warning));
             }
+            fact_rows(ui, &rows);
         },
     );
 }
 
-/// The file operations, in the order they are offered.
-const FILE_OPERATIONS: [(MessageId, CodeSourceFileAction); 5] = [
-    (MessageId::CodeSourceNewFile, CodeSourceFileAction::New),
-    (MessageId::CodeSourceRename, CodeSourceFileAction::Rename),
-    (MessageId::CodeSourceMove, CodeSourceFileAction::Move),
+/// One of the document's operations.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Operation {
+    File(CodeSourceFileAction),
+    History,
+    ReplaceFromFile,
+}
+
+/// The document's operations, in the order the grid offers them: the three
+/// that give it another name or place, then its history and its source, and
+/// delete last. A new file is not an operation on this document; the Files
+/// rail makes one.
+const OPERATIONS: [(MessageId, Operation); 6] = [
+    (
+        MessageId::CodeSourceRename,
+        Operation::File(CodeSourceFileAction::Rename),
+    ),
+    (
+        MessageId::CodeSourceMove,
+        Operation::File(CodeSourceFileAction::Move),
+    ),
     (
         MessageId::CodeSourceDuplicate,
-        CodeSourceFileAction::Duplicate,
+        Operation::File(CodeSourceFileAction::Duplicate),
     ),
-    (MessageId::CodeSourceDelete, CodeSourceFileAction::Delete),
+    (MessageId::CodeSourceRevisionHistory, Operation::History),
+    (
+        MessageId::CodeSourceReplaceFromFile,
+        Operation::ReplaceFromFile,
+    ),
+    (
+        MessageId::CodeSourceDelete,
+        Operation::File(CodeSourceFileAction::Delete),
+    ),
 ];
+
+/// Columns of the operations grid.
+const OPERATION_COLUMNS: usize = 3;
 
 fn operations(
     ui: &mut Ui,
@@ -886,37 +1005,48 @@ fn operations(
         &messages.text(MessageId::CodeSourceFileOperations),
         None,
         |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for (label, candidate) in FILE_OPERATIONS {
-                    let refusal = refusal_reason(facts, candidate);
-                    let response = Button::new(&messages.text(label))
-                        .enabled(refusal.is_none())
-                        .destructive(candidate == CodeSourceFileAction::Delete)
-                        .show(ui);
-                    if response.clicked() {
-                        *action = LifecycleAction::Begin(candidate);
-                    }
-                    if let Some(reason) = refusal {
-                        response.on_disabled_hover_text(reason.resolve());
-                    }
+            let labels = OPERATIONS.map(|(label, _)| messages.text(label));
+            let refusals = OPERATIONS.map(|(_, operation)| match operation {
+                Operation::File(candidate) => {
+                    refusal_reason(facts, candidate).map(Refusal::resolve)
                 }
-                if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
-                    .show(ui)
-                    .clicked()
-                {
-                    *action = LifecycleAction::OpenHistory;
-                }
-                let response = Button::new(&messages.text(MessageId::CodeSourceReplaceFromFile))
-                    .enabled(facts.editable)
-                    .show(ui);
-                if response.clicked() {
-                    *action = LifecycleAction::ReplaceFromFile;
-                }
-                if let Some(reason) = &facts.block_reason {
-                    response.on_disabled_hover_text(reason.as_str());
-                }
+                Operation::History => None,
+                // Replacing the source rewrites the document, so it waits on
+                // what holds every file operation, and on a document that
+                // cannot be edited.
+                Operation::ReplaceFromFile => facts.block_reason.clone().or_else(|| {
+                    (!facts.editable)
+                        .then(|| messages.text(MessageId::CodeSourceReadOnlyDocumentDetail))
+                }),
             });
+            let buttons = OPERATIONS
+                .iter()
+                .zip(&labels)
+                .zip(&refusals)
+                .map(|(((_, operation), label), refusal)| {
+                    Button::new(label)
+                        .enabled(refusal.is_none())
+                        .destructive(*operation == Operation::File(CodeSourceFileAction::Delete))
+                })
+                .collect();
+            // The body leaves this much under the grid; the grid stands as
+            // far below the band.
+            ui.add_space(PANEL_SECTION_GAP);
+            let pressed = button_grid(ui, OPERATION_COLUMNS, CONTROL_GAP, buttons);
+            for ((response, refusal), (_, operation)) in
+                pressed.into_iter().zip(refusals).zip(OPERATIONS)
+            {
+                if response.clicked() {
+                    *action = match operation {
+                        Operation::File(candidate) => LifecycleAction::Begin(candidate),
+                        Operation::History => LifecycleAction::OpenHistory,
+                        Operation::ReplaceFromFile => LifecycleAction::ReplaceFromFile,
+                    };
+                }
+                if let Some(reason) = refusal {
+                    response.on_disabled_hover_text(reason);
+                }
+            }
         },
     );
 }
@@ -970,12 +1100,18 @@ fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
             }
             let imports = messages.text(MessageId::CodeSourceImports);
             let imported_by = messages.text(MessageId::CodeSourceImportedBy);
-            for imported in &facts.imports {
-                property_row(ui, &imports, imported);
-            }
-            for importer in &facts.imported_by {
-                property_row(ui, &imported_by, importer);
-            }
+            let rows: Vec<Fact<'_>> = facts
+                .imports
+                .iter()
+                .map(|imported| Fact::path(&imports, imported))
+                .chain(
+                    facts
+                        .imported_by
+                        .iter()
+                        .map(|importer| Fact::path(&imported_by, importer)),
+                )
+                .collect();
+            fact_rows(ui, &rows);
         },
     );
 }

@@ -1,5 +1,6 @@
 //! New, Rename and Delete from the Verilog-A Files rail, through whole
-//! frames: each opens its own compact form, never Files and includes.
+//! frames: each opens its own compact form, never Files and includes; and
+//! Files and includes, which leaves making a file to the rail.
 
 use egui::Key;
 
@@ -171,4 +172,42 @@ fn the_main_file_cannot_be_deleted_and_says_why() {
         Some(reason.as_str())
     );
     assert!(bundle(&user).contains_file(&main));
+}
+
+/// Files and includes acts on the document in front: its six operations are
+/// there, and a new file is not one of them. The Files rail makes one, so
+/// opening the dialog adds no second New file… to the screen.
+#[test]
+fn files_and_includes_offers_the_documents_operations_and_no_new_file() {
+    let mut user = op_amp();
+    let messages = user.app.state.workbench.messages();
+    let new_file = messages.text(MessageId::CodeSourceNewFile);
+    let shown = |user: &User| {
+        user.named
+            .iter()
+            .filter(|(name, _)| *name == new_file)
+            .count()
+    };
+    let on_the_rail = shown(&user);
+    assert!(on_the_rail > 0, "the rail offers New file…");
+
+    user.app
+        .execute_command_key(CodeCommand::ManageSourceDocument.key());
+    user.settle();
+    user.expect(MANAGE);
+    for operation in [
+        MessageId::CodeSourceRename,
+        MessageId::CodeSourceMove,
+        MessageId::CodeSourceDuplicate,
+        MessageId::CodeSourceRevisionHistory,
+        MessageId::CodeSourceReplaceFromFile,
+        MessageId::CodeSourceDelete,
+    ] {
+        user.expect(&messages.text(operation));
+    }
+    assert_eq!(
+        shown(&user),
+        on_the_rail,
+        "the dialog adds no New file… of its own"
+    );
 }
