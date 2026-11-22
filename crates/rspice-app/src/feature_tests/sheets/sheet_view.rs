@@ -4,11 +4,15 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use egui::{Rect, Vec2};
+use rspice_app_design::workbench::design::commands::DesignCommand;
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
-use rspice_app_state::state::{DrawingSheetStandard, SchematicPageOrientation};
+use rspice_app_state::state::{
+    Component, ComponentType, DrawingSheetStandard, Point, SchematicPageOrientation,
+    SheetDefinition, SheetId, SheetPortPolicy,
+};
 use rspice_app_state::workbench::workspace::Workspace;
 
 const CANVAS: Vec2 = Vec2::new(1_200.0, 800.0);
@@ -116,4 +120,78 @@ fn a_new_sheet_size_frames_the_new_sheet() {
     .expect("the orientation change publishes");
     draw_canvas(&mut app.state, 2.0);
     assert_framed(&app.state, "the sheet turned upright");
+}
+
+/// One cell view with two sheets, Sheet 2 open: a part far out at
+/// (3000, 2000) and one near the origin at (200, 150), each on Sheet 1 but
+/// those `on_second` names.
+fn two_sheet_app(on_second: &[u64]) -> (RSpiceApp, SheetId, SheetId) {
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.model.schematic.document_mut_for_test().components = vec![
+        Component::new(10, ComponentType::Resistor, Point::new(3_000, 2_000)),
+        Component::new(20, ComponentType::Resistor, Point::new(200, 150)),
+    ];
+    let key = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let designs = &mut app.state.model.workspace.content.design_management;
+    let first = designs
+        .bootstrap_for_cell_view(&key, "Sheet 1", [10, 20])
+        .expect("first sheet");
+    let catalog = designs.sheet_catalog_mut(&key).expect("sheet catalog");
+    let second = catalog
+        .create_sheet(
+            SheetDefinition {
+                name: "Sheet 2".to_owned(),
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("second sheet");
+    if !on_second.is_empty() {
+        catalog
+            .assign_objects(catalog.revision(), second, on_second.iter().copied())
+            .expect("second sheet assignment");
+    }
+    catalog.set_active(second).expect("active sheet");
+    (app, first, second)
+}
+
+/// Where world point `(x, y)` lands on the canvas.
+fn on_screen(state: &AppState, (x, y): (f64, f64)) -> egui::Pos2 {
+    let editor = &state.model.schematic.session.editor;
+    egui::pos2(
+        (editor.pan.0 + x * editor.zoom) as f32,
+        (editor.pan.1 + y * editor.zoom) as f32,
+    )
+}
+
+/// Fit content frames the objects of the sheet in front, as KiCad's Zoom to
+/// Objects does: each sheet is its own page, so Sheet 1's part far away
+/// neither shrinks Sheet 2's part into a corner nor pulls the view off it.
+#[test]
+fn fit_content_frames_the_open_sheet_only() {
+    let (mut app, _, _) = two_sheet_app(&[20]);
+    draw_canvas(&mut app.state, 0.0);
+    app.execute_command_key(DesignCommand::FitSchematicContent.key());
+    draw_canvas(&mut app.state, 1.0);
+
+    let canvas = Rect::from_min_size(egui::Pos2::ZERO, CANVAS);
+    let near = on_screen(&app.state, (200.0, 150.0));
+    assert!(
+        near.distance(canvas.center()) < 0.3 * CANVAS.y,
+        "Sheet 2's part {near:?} is framed in the middle of the canvas"
+    );
+    let far = on_screen(&app.state, (3_000.0, 2_000.0));
+    assert!(
+        !canvas.contains(far),
+        "Sheet 1's part {far:?} plays no part in Sheet 2's fit"
+    );
 }

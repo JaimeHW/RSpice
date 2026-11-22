@@ -306,8 +306,14 @@ pub fn render_schematic_view(
     let editor = &mut canvas.model.schematic.session.editor;
     let fit_content = std::mem::take(&mut editor.needs_fit);
     let fit_sheet = std::mem::take(&mut editor.needs_drawing_sheet_fit);
+    // Each sheet is its own page: a content fit frames the open one's
+    // objects, never those the cell view's other sheets hold.
     let content_bounds = fit_content
-        .then(|| symbol_context.content_bounds(canvas.model.schematic.document()))
+        .then(|| {
+            symbol_context.sheet_content_bounds(canvas.model.schematic.document(), |id| {
+                sheet_visibility::object_is_on_active_sheet(&*canvas.model, id)
+            })
+        })
         .flatten();
     if let Some(bounds) = content_bounds {
         canvas

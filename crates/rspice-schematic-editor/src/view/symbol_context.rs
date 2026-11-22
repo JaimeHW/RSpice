@@ -197,6 +197,32 @@ impl SchematicSymbolContext {
         self.bounds_where(document, |_| true)
     }
 
+    /// The world bounds of the objects `on_sheet` keeps: the open sheet's,
+    /// where the document holds every sheet of a cell view. `None` when that
+    /// sheet holds nothing drawn.
+    pub fn sheet_content_bounds(
+        &self,
+        document: &SchematicDocument,
+        on_sheet: impl Fn(u64) -> bool,
+    ) -> Option<(i32, i32, i32, i32)> {
+        self.bounds_where(document, |object| match object {
+            BoundedObject::Component(id)
+            | BoundedObject::Wire(id)
+            | BoundedObject::Bus(id)
+            | BoundedObject::BusTap(id)
+            | BoundedObject::NetLabel(id)
+            | BoundedObject::DesignNote(id)
+            | BoundedObject::DocumentationShape(id)
+            | BoundedObject::Probe(id) => on_sheet(id),
+            // A dot is named by where it sits; it counts when a dot of the
+            // open sheet sits there.
+            BoundedObject::Junction(pos) => document
+                .junctions
+                .iter()
+                .any(|junction| junction.pos == pos && on_sheet(junction.id)),
+        })
+    }
+
     /// The world bounds of what `selection` holds, `None` when it holds
     /// nothing drawn.
     pub fn selection_bounds(
