@@ -1448,7 +1448,10 @@ impl GlobalTouches {
                 DrcViolation::new(
                     0,
                     DrcViolationType::FloatingNode,
-                    format!("Global node '{node}' has only {total} connection(s) in the design"),
+                    format!(
+                        "Global node '{node}' has only {total} connection{} in the design",
+                        if total == 1 { "" } else { "s" }
+                    ),
                     // A global's name is what the node is.
                     DrcLocation::Node {
                         net_name: node.clone(),

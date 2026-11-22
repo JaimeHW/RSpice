@@ -844,7 +844,10 @@ impl DrcChecker {
                     DrcViolation::new(
                         id,
                         DrcViolationType::FloatingNode,
-                        format!("Node '{}' has only {} connection(s)", name, connections),
+                        format!(
+                            "Node '{name}' has only {connections} connection{}",
+                            if connections == 1 { "" } else { "s" }
+                        ),
                         net.location(name),
                     )
                     .with_related(related(&net.on_node, DrcRelation::OnNode)),
