@@ -99,8 +99,9 @@ pub fn open_bus_tap(dialog: &mut BusTapDialogState, model: &Model) {
     dialog.open(source, bus);
 }
 
-/// The bus a tap starts from when the sheet leaves no doubt: the one
-/// declaration it draws.
+/// The bus a tap starts from when the active sheet leaves no doubt: the one
+/// declaration it draws. A bus on another sheet is not on the page the tap
+/// goes on, so it neither fills the field nor makes a second choice.
 ///
 /// A sample value written into the field — this form opened holding
 /// `DATA[15:0]` — is a tap on a bus the design may not have, placed by a
@@ -113,6 +114,9 @@ fn sole_declared_bus(model: &Model) -> String {
         .document()
         .buses
         .iter()
+        .filter(|bus| {
+            crate::schematic::view::sheet_visibility::object_is_on_active_sheet(model, bus.id)
+        })
         .filter_map(|bus| bus.declaration.as_ref().map(ToString::to_string))
         .collect::<Vec<_>>();
     declarations.sort();
@@ -185,5 +189,87 @@ pub mod tests {
         next.document_epoch += 1;
         draft.open(next.clone(), String::new());
         assert_eq!(draft.source.as_ref(), Some(&next));
+    }
+
+    /// The Bus field starts with the one declaration the page being edited
+    /// draws: a bus on another sheet neither fills it nor counts as a second
+    /// choice.
+    #[test]
+    fn the_bus_field_starts_with_the_one_bus_the_active_sheet_draws() {
+        use crate::state::{BusDeclaration, Point, SheetDefinition, SheetPortPolicy};
+        let mut state = DesignTestHost::default();
+        let declared = |state: &mut DesignTestHost, declaration: &str, y: i32| {
+            state
+                .model
+                .schematic
+                .add_bus(
+                    vec![Point::new(0, y), Point::new(120, y)],
+                    Some(BusDeclaration::parse(declaration).unwrap()),
+                )
+                .unwrap()
+        };
+        let data = declared(&mut state, "DATA[7:0]", 0);
+        let key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
+        let first = state
+            .model
+            .workspace
+            .content
+            .design_management
+            .bootstrap_for_cell_view(&key, "Sheet 1", [data])
+            .unwrap();
+        let catalog = state
+            .model
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog_mut(&key)
+            .unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Sheet 2".to_owned(),
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .unwrap();
+        catalog.set_active(second).unwrap();
+        let mut dialog = BusTapDialogState::default();
+        let mut opened = |state: &DesignTestHost| {
+            open_bus_tap(&mut dialog, &state.model);
+            dialog.fields.bus.clone()
+        };
+
+        assert_eq!(opened(&state), "", "the second sheet draws no bus");
+
+        let addr = declared(&mut state, "ADDR[3:0]", 40);
+        let catalog = state
+            .model
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog_mut(&key)
+            .unwrap();
+        catalog
+            .assign_objects(catalog.revision(), second, [addr])
+            .unwrap();
+        assert_eq!(opened(&state), "ADDR[3:0]");
+
+        state
+            .model
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog_mut(&key)
+            .unwrap()
+            .set_active(first)
+            .unwrap();
+        assert_eq!(opened(&state), "DATA[7:0]");
     }
 }
