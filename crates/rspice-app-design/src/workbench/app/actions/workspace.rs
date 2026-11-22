@@ -367,8 +367,7 @@ pub(crate) fn read_only_master_message(model: &Model) -> String {
         return opened.sentence();
     }
     if model.workspace.content.active_read_only_reference() {
-        return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
-            .to_owned();
+        return "Read-only reference - Make editable over the canvas to change it".to_owned();
     }
     if let Some(lock) = model.active_view_locked_elsewhere() {
         return format!(

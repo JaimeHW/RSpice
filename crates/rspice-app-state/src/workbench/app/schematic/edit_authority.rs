@@ -10,9 +10,30 @@ use crate::state::{SchematicDocumentPolicy, SchematicSnapshot, Selection};
 
 use crate::workbench::app_state::model::Model;
 
+/// Why the active cell view refuses writes: one of its four owners, each
+/// lifted a different way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOnlyCause {
+    /// Safe mode, or this window, opened the whole project read-only.
+    Project,
+    /// The view was opened as a read-only hierarchy reference, which the
+    /// reader can make editable again.
+    HierarchyReference,
+    /// Another session holds the lock of the view's library file.
+    LockedElsewhere,
+    /// The view is a master of a read-only library.
+    ReadOnlyLibrary,
+}
+
 impl Model {
     /// Whether the active cellview refuses writes, whatever kind of document
     /// it is.
+    pub fn active_view_read_only(&self) -> bool {
+        self.active_view_read_only_cause().is_some()
+    }
+
+    /// Which owner makes the active cellview refuse writes, the first that
+    /// holds in the order a refusal names them.
     ///
     /// Safe mode is one of the four owners of that refusal, alongside a
     /// read-only library master, a read-only hierarchy reference and a
@@ -20,14 +41,22 @@ impl Model {
     /// rather than only in the schematic gate because every document class
     /// — symbol, layout, hierarchy reference, review comment — writes into
     /// the same project that safe mode opened read-only.
-    pub fn active_view_read_only(&self) -> bool {
-        self.safe_mode.project_read_only()
-            || self.workspace.content.active_read_only_reference()
-            || self
-                .library_manager
-                .get_library(&self.workspace.content.active_view.library)
-                .is_some_and(|library| library.read_only)
-            || self.active_view_locked_elsewhere().is_some()
+    pub fn active_view_read_only_cause(&self) -> Option<ReadOnlyCause> {
+        if self.safe_mode.project_read_only() {
+            Some(ReadOnlyCause::Project)
+        } else if self.workspace.content.active_read_only_reference() {
+            Some(ReadOnlyCause::HierarchyReference)
+        } else if self.active_view_locked_elsewhere().is_some() {
+            Some(ReadOnlyCause::LockedElsewhere)
+        } else if self
+            .library_manager
+            .get_library(&self.workspace.content.active_view.library)
+            .is_some_and(|library| library.read_only)
+        {
+            Some(ReadOnlyCause::ReadOnlyLibrary)
+        } else {
+            None
+        }
     }
 
     /// Single late-bound authority for every schematic mutation surface.

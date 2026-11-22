@@ -8,6 +8,11 @@ use rspice_app_state::state::{
     ViewType,
 };
 use rspice_app_state::workbench::preferences::TogglePreference;
+use rspice_app_state::workbench::workspace::Workspace;
+
+use crate::feature_tests::replay::Replay;
+use crate::workbench::RSpiceApp;
+use egui::accesskit::Role;
 
 /// Apply the choice as the dialog's step and the shell's answer do,
 /// straight after one another.
@@ -178,4 +183,30 @@ fn read_only_reference_belongs_to_its_document_and_never_mutates_library_ownersh
         !rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_copy_available(&state.model),
         "the symbol editor's escape hatch follows the same document"
     );
+}
+
+/// A read-only reference was the reader's own choice, so the banner over its
+/// canvas makes the document editable in place.
+#[test]
+fn make_editable_on_the_banner_lifts_a_read_only_reference() {
+    let (mut state, _, child) = hierarchy_state();
+    assert!(open_descend_hierarchy_dialog(
+        &mut state.design.descend_hierarchy,
+        &state.model,
+        &mut state.workbench,
+    ));
+    state.design.descend_hierarchy.edit_mode = HierarchyDescendEditMode::ReadOnlyReference;
+    commit_descend_context(&mut state).expect("a read-only look is navigation");
+    assert!(state.model.active_view_read_only());
+
+    let mut app = RSpiceApp::test_instance();
+    app.state = state;
+    app.state.workbench.activate(Workspace::Design);
+    let mut replay = Replay::of(app);
+    replay.frames(vec![]);
+    replay.click("Make editable", Role::Button);
+
+    let state = &replay.app.state;
+    assert_eq!(state.model.workspace.content.active_view, child);
+    assert!(!state.model.active_view_read_only());
 }

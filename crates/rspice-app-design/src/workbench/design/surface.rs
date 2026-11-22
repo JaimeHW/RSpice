@@ -13,6 +13,7 @@ use crate::state::ViewType;
 use crate::state::workspace::DocumentOccurrence;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app::schematic::edit_authority::ReadOnlyCause;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CloudSessionPort, Cx};
 
@@ -37,10 +38,10 @@ fn show_document(
     view_type: Option<ViewType>,
 ) -> Option<Rect> {
     // A project this window opened read-only says why, and what to do about
-    // it, under the toolbar; "make an editable copy" is not the way out of
-    // that, so the document's banner waits until the project is writable.
-    if cx.model.active_view_read_only() && cx.model.safe_mode.opened_read_only.is_none() {
-        read_only_banner(ui, cx.model);
+    // it, under the toolbar, so the document's banner waits until the
+    // project is writable.
+    if cx.model.safe_mode.opened_read_only.is_none() {
+        read_only_banner(ui, cx.model, cx.wb);
     }
     occurrence_scope_banner(ui, cx.model);
     tool_options::show(ui, cx.model, cx.state);
@@ -500,29 +501,70 @@ pub fn master_occurrence_paths(model: &Model) -> Arc<[String]> {
     projection.occurrences_of(&model.workspace.content.active_view)
 }
 
-/// Say that the open document cannot be edited, and how to get one that can.
+/// Say why the open document cannot be edited, and how to lift it.
 ///
-/// The tab already names the document, so the banner states the condition and
-/// the route out of it rather than repeating the path.
-/// Why the view in front refuses edits: another session editing its
-/// library file names its holder, until they let go.
-fn read_only_banner(ui: &mut Ui, model: &Model) {
-    let message = model.active_view_locked_elsewhere().map_or_else(
-        || "Read only. Make an editable copy to edit.".to_owned(),
-        |lock| {
-            format!(
-                "Being edited by {}. Read only until they save or close it.",
-                lock.holder()
-            )
-        },
-    );
-    canvas_banner(ui, Problem::Warning, &message);
+/// The tab already names the document, so the banner states the cause and
+/// the route out of it rather than repeating the path. Each of the four
+/// owners of the refusal is lifted a different way: another session editing
+/// the library file names its holder, until they let go; a read-only
+/// reference was the reader's own choice, so its banner makes the document
+/// editable in place, as Virtuoso's Make Editable does.
+fn read_only_banner(
+    ui: &mut Ui,
+    model: &mut Model,
+    wb: &mut crate::workbench::state::WorkbenchSession,
+) {
+    let Some(cause) = model.active_view_read_only_cause() else {
+        return;
+    };
+    let message = match cause {
+        ReadOnlyCause::Project => {
+            "Safe mode opened this project read-only. Restart without safe mode to edit.".to_owned()
+        }
+        ReadOnlyCause::HierarchyReference => "Opened as a read-only reference.".to_owned(),
+        ReadOnlyCause::LockedElsewhere => model
+            .active_view_locked_elsewhere()
+            .map(|lock| {
+                format!(
+                    "Being edited by {}. Read only until they save or close it.",
+                    lock.holder()
+                )
+            })
+            .unwrap_or_default(),
+        ReadOnlyCause::ReadOnlyLibrary => format!(
+            "Read only: {} is a read-only library. Copy the cell into a project library to change it.",
+            model.workspace.content.active_view.library
+        ),
+    };
+    let action = (cause == ReadOnlyCause::HierarchyReference).then_some("Make editable");
+    let (_, clicked) = canvas_banner_with_action(ui, Problem::Warning, &message, action);
+    if clicked {
+        model
+            .workspace
+            .content
+            .set_active_read_only_reference(false);
+        wb.prompt(format!(
+            "{} is editable.",
+            model.workspace.content.active_view.display_path()
+        ));
+    }
 }
 
 /// One banner over the canvas: a problem's mark, then the words in the
 /// ordinary tone on the panel's own inset, which runs the page's whole
 /// width however short the words are.
 fn canvas_banner(ui: &mut Ui, problem: Problem, message: &str) -> egui::Response {
+    canvas_banner_with_action(ui, problem, message, None).0
+}
+
+/// [`canvas_banner`] with a button after the words that lifts what it
+/// reports, and whether that button was pressed.
+fn canvas_banner_with_action(
+    ui: &mut Ui,
+    problem: Problem,
+    message: &str,
+    action: Option<&str>,
+) -> (egui::Response, bool) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_inset)
@@ -538,7 +580,9 @@ fn canvas_banner(ui: &mut Ui, problem: Problem, message: &str) -> egui::Response
                     egui::Sense::hover(),
                 );
                 paint_problem_mark(ui.painter(), mark, problem);
-                ui.label(message)
+                let words = ui.label(message);
+                let pressed = action.is_some_and(|action| ui.button(action).clicked());
+                (words, pressed)
             })
             .inner
         })
