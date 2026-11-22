@@ -1,6 +1,6 @@
 //! Each subject of the project's health read from every place that states
-//! it: the Overview's row, the chip over the other pages, the inspector and
-//! the status bar say it in the same words.
+//! it: the Overview's row, the inspector and the status bar say it in the
+//! same words.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -82,7 +82,7 @@ fn checked_project() -> RSpiceApp {
 }
 
 #[test]
-fn schematic_checks_read_alike_on_the_overview_the_band_the_inspector_and_the_status_bar() {
+fn schematic_checks_read_alike_on_the_overview_the_inspector_and_the_status_bar() {
     let mut app = checked_project();
     let (state, text, tone) = row(&mut app, "Schematic checks");
     assert_eq!(state, "1 error \u{b7} 1 warning");
@@ -97,12 +97,6 @@ fn schematic_checks_read_alike_on_the_overview_the_band_the_inspector_and_the_st
     assert!(
         has_line(&overview, &format!("Problems \u{b7} {state}")),
         "the status bar:\n{overview}"
-    );
-
-    let library = painted_on(&mut app, ProjectPage::Library);
-    assert!(
-        has_line(&library, &format!("Checks \u{b7} {state}")),
-        "the chip:\n{library}"
     );
 }
 
@@ -120,13 +114,10 @@ fn checks_that_have_not_run_read_not_run_and_unmarked_everywhere() {
         "the inspector's Problems:\n{overview}"
     );
     assert!(!overview.contains("Problems \u{b7}"), "{overview}");
-
-    let library = painted_on(&mut app, ProjectPage::Library);
-    assert!(has_line(&library, "Checks \u{b7} Not run"), "{library}");
 }
 
 #[test]
-fn the_configuration_reads_alike_on_the_overview_the_band_and_the_inspector() {
+fn the_configuration_reads_alike_on_the_overview_and_the_inspector() {
     let mut reference = RSpiceApp::test_instance();
     reference.state = hierarchy_reference::build().state;
     for (mut app, name) in [
@@ -139,24 +130,16 @@ fn the_configuration_reads_alike_on_the_overview_the_band_and_the_inspector() {
         let overview = painted_on(&mut app, ProjectPage::Overview);
         assert!(has_line(&overview, &text), "the row:\n{overview}");
         assert!(has_line(&overview, &state), "the inspector:\n{overview}");
-
-        let library = painted_on(&mut app, ProjectPage::Library);
-        assert!(
-            has_line(&library, &format!("Configuration \u{b7} {state}")),
-            "the chip:\n{library}"
-        );
     }
 }
 
 #[test]
-fn the_latest_run_reads_alike_on_the_overview_and_the_band() {
+fn the_latest_run_reads_its_state_on_the_overview() {
     use rspice_app_state::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
     let mut app = schematic_project();
     let (state, _, _) = row(&mut app, "Latest run");
     assert_eq!(state, "No runs");
-    let library = painted_on(&mut app, ProjectPage::Library);
-    assert!(has_line(&library, "No runs"), "the chip:\n{library}");
 
     {
         let run = app.state.model.simulation.start_run();
@@ -170,8 +153,6 @@ fn the_latest_run_reads_alike_on_the_overview_and_the_band() {
     assert_eq!(tone, Tone::Error);
     let overview = painted_on(&mut app, ProjectPage::Overview);
     assert!(has_line(&overview, &text), "the row:\n{overview}");
-    let library = painted_on(&mut app, ProjectPage::Library);
-    assert!(has_line(&library, &state), "the chip:\n{library}");
 }
 
 /// A model file deleted since it was attached is the Dependencies row's to

@@ -612,9 +612,14 @@ fn after_a_save_as_the_overview_and_the_recovery_page_state_one_revision() {
         "{}",
         painted(&overview)
     );
+    // With no checkpoint selected, the inspector beside the page states it.
     app.state.project.project_page = ProjectPage::Recovery;
+    let number = &after["Revision ".len()..];
     paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == after)
+        text.lines()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair == ["Revision", number])
     });
     app.state.project.project_page = ProjectPage::Overview;
     let overview = paint_until(&ctx, &mut app, |text| text.contains("Amplifier.rspiceproj"));

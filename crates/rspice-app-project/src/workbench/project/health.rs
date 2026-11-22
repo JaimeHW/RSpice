@@ -1,12 +1,11 @@
 //! Where each subject of the project stands, one function per subject.
 //!
-//! The Overview's status rows, the health chips over the other Project
-//! pages, the inspector and the status bar each state some of these: the
-//! checks of the cell view runs start from, the deck a netlist-first project
-//! runs, the configuration runs use, the latest run, what Verify judged of
-//! it, the model sources, the libraries the project depends on, and the work
-//! not yet saved. Every one of them reads its words and its mark from here,
-//! so no two places can disagree about a subject.
+//! The Overview's status rows, the inspector and the status bar each state
+//! some of these: the checks of the cell view runs start from, the deck a
+//! netlist-first project runs, the configuration runs use, the latest run,
+//! what Verify judged of it, the model sources, the libraries the project
+//! depends on, and the work not yet saved. Every one of them reads its words
+//! and its mark from here, so no two places can disagree about a subject.
 //!
 //! One rule for the mark: a subject that has not been run yet is neutral, a
 //! result the design has moved on from is the caution, and only what stops
@@ -72,14 +71,6 @@ impl DesignSubject {
         match self {
             Self::SchematicChecks => "Schematic checks",
             Self::SourceDeck => "Source deck",
-        }
-    }
-
-    /// The word a chip puts in front of the state.
-    pub const fn chip_label(self) -> &'static str {
-        match self {
-            Self::SchematicChecks => "Checks",
-            Self::SourceDeck => "Deck",
         }
     }
 }

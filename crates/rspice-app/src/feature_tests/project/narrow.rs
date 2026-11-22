@@ -1,6 +1,6 @@
 //! The Project workspace on a phone: whole application frames under a coarse
-//! pointer at a phone's width. The chips are whole touch targets, the page in
-//! front is in view, and the narrow title names the project.
+//! pointer at a phone's width. The page in front is in view, and the narrow
+//! title names the project.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -106,37 +106,6 @@ fn the_tab_of_the_page_in_front_is_in_view_on_a_phone() {
             "the {} tab is out of view: {rect:?}",
             page.label()
         );
-    }
-}
-
-/// The chips over a page on a phone are each on the screen whole and each
-/// as tall as a finger needs: they take another row rather than running off
-/// its edge.
-#[test]
-fn the_chips_over_a_page_are_whole_touch_targets_on_a_phone() {
-    for page in [ProjectPage::Library, ProjectPage::Dependencies] {
-        let mut app = touch_app(page);
-        let output = settled_frame(&touch_context(), &mut app, PHONE);
-        let chips = announced(&output, Role::Button)
-            .into_iter()
-            .filter(|(label, _)| {
-                label.contains("Configuration used for runs")
-                    || label.contains("Latest run")
-                    || label.contains("checks")
-            })
-            .collect::<Vec<_>>();
-        assert!(chips.len() >= 2, "{page:?}: {chips:?}");
-        for (label, rect) in chips {
-            assert!(
-                rect.left() >= -0.5 && rect.right() <= PHONE.x + 0.5,
-                "{page:?}: `{label}` runs off the screen: {rect:?}"
-            );
-            assert!(
-                rect.height() >= TOUCH_TARGET - 0.5,
-                "{page:?}: `{label}` is {} tall",
-                rect.height()
-            );
-        }
     }
 }
 

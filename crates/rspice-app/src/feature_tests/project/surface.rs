@@ -168,44 +168,12 @@ pub(super) fn click_announced(
     project_frame(ctx, app, click)
 }
 
-/// The tab panels a frame published, by their accessible names.
-fn tab_panels(output: &egui::FullOutput) -> Vec<String> {
-    output
-        .platform_output
-        .accesskit_update
-        .as_ref()
-        .expect("the frame publishes its tree")
-        .nodes
-        .iter()
-        .filter(|(_, node)| node.role() == egui::accesskit::Role::TabPanel)
-        .filter_map(|(_, node)| node.label().map(str::to_owned))
-        .collect()
-}
-
-/// The configuration chip opens the Configuration page in the frame it
-/// was clicked in: the page below the band is the Configuration page.
-#[test]
-fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
-    let (ctx, mut app, settled) = settled_on(ProjectPage::Library);
-    assert_eq!(tab_panels(&settled), ["Project Library Manager"]);
-
-    let clicked = click_announced(
-        &ctx,
-        &mut app,
-        settled,
-        "Configuration used for runs: Default",
-    );
-
-    assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
-    assert_eq!(tab_panels(&clicked), ["Project Configuration"]);
-}
-
-/// The chip reads the Configurations command's availability from the
-/// snapshot its chrome is lent with: the dispatcher's real answer for the
-/// command, so it runs with an open project and not while a project
+/// The project feature reads the Configurations command's availability
+/// from the snapshot its context is lent with: the dispatcher's real answer
+/// for the command, so it runs with an open project and not while a project
 /// operation runs or with no project open.
 #[test]
-fn the_configuration_chip_reads_the_commands_availability_through_the_snapshot() {
+fn the_configurations_command_availability_reads_through_the_snapshot() {
     fn runs(app: &mut RSpiceApp) -> bool {
         features::cx_with_foreign_answers::<ProjectFeature>(app, |_| true)
             .foreign_availability(ids::CONFIGURATION_SETS)
@@ -219,24 +187,6 @@ fn the_configuration_chip_reads_the_commands_availability_through_the_snapshot()
     let mut app = RSpiceApp::test_instance();
     app.state.close_project_session();
     assert!(!runs(&mut app), "no open project, so it cannot run");
-}
-
-/// While a project operation runs, a click on the chip leaves the page
-/// where it was.
-#[test]
-fn the_configuration_chip_is_held_while_a_project_operation_runs() {
-    let (ctx, mut app, _) = settled_on(ProjectPage::Library);
-    begin_project_replacement(&mut app.state).expect("a project replacement starts");
-    let settled = project_frame(&ctx, &mut app, Vec::new());
-
-    click_announced(
-        &ctx,
-        &mut app,
-        settled,
-        "Configuration used for runs: Default",
-    );
-
-    assert_eq!(app.state.project.project_page, ProjectPage::Library);
 }
 
 /// The detail under the Library browser shows the view a click in the
