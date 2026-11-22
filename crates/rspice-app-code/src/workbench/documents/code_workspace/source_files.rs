@@ -6,6 +6,7 @@
 use super::CodeWorkspaceParts;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ProjectSourceBundle, ProjectSourceFile};
+use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
@@ -14,8 +15,13 @@ use super::{
     CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
 };
 
-pub fn source_file_mutation_block_reason(parts: &CodeWorkspaceParts<'_>) -> Option<&'static str> {
-    source_file_mutation_block_reason_in(parts.model, parts.code, parts.platform)
+pub fn source_file_mutation_block_reason(parts: &CodeWorkspaceParts<'_>) -> Option<String> {
+    source_file_mutation_block_reason_in(
+        parts.model,
+        parts.code,
+        parts.platform,
+        parts.wb.messages(),
+    )
 }
 
 /// [`source_file_mutation_block_reason`], over the model, the Code
@@ -24,17 +30,27 @@ pub fn source_file_mutation_block_reason_in(
     model: &Model,
     code: &CodeWorkspaceRuntimeState,
     platform: &PlatformState,
-) -> Option<&'static str> {
+    messages: MessageCatalog,
+) -> Option<String> {
+    block_reason(model, code, platform).map(|reason| messages.text(reason))
+}
+
+/// Why no source file can change now, if one cannot.
+fn block_reason(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+) -> Option<MessageId> {
     if !platform.project_lifecycle.is_open() {
-        return Some("Open a project before changing project source files.");
+        Some(MessageId::CodeSourceNeedsProject)
+    } else if model.safe_mode.project_read_only() {
+        Some(MessageId::CodeSourceProjectReadOnly)
+    } else {
+        code.veriloga
+            .pending
+            .is_some()
+            .then_some(MessageId::CodeSourceWaitsForCompile)
     }
-    if model.safe_mode.project_read_only() {
-        return Some("The project is open read-only.");
-    }
-    code.veriloga
-        .pending
-        .is_some()
-        .then_some("Wait for the Verilog-A compile to finish or cancel it first.")
 }
 
 /// Resolve edit authority from persisted document ownership and semantic
@@ -65,7 +81,7 @@ pub fn source_bundle_document_is_editable_in(
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
-    if source_file_mutation_block_reason_in(model, code, platform).is_some() {
+    if block_reason(model, code, platform).is_some() {
         return false;
     }
     source_bundle_contains_document_in(model, platform, bundle_id, logical_path)
@@ -113,7 +129,7 @@ pub fn open_source_file_dialog(
         .workspace
         .active_source_bundle()
         .map(ProjectSourceBundle::id)
-        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
+        .ok_or_else(|| parts.wb.messages().text(MessageId::SourceRemoved))?;
     open_source_file_dialog_in_bundle(parts, bundle_id, action, source_path, importer_path)
 }
 
@@ -124,18 +140,17 @@ pub fn open_source_file_dialog_in_bundle(
     source_path: &str,
     importer_path: &str,
 ) -> Result<(), String> {
+    let messages = parts.wb.messages();
     if let Some(reason) = source_file_mutation_block_reason(parts) {
-        return Err(reason.to_owned());
+        return Err(reason);
     }
-    let authority_path = if action == CodeSourceFileAction::New {
+    let named = if action == CodeSourceFileAction::New {
         importer_path
     } else {
         source_path
     };
-    if !source_bundle_contains_document(parts, bundle_id, authority_path) {
-        return Err(format!(
-            "The selected source file '{authority_path}' no longer belongs to this project source bundle."
-        ));
+    if !source_bundle_contains_document(parts, bundle_id, named) {
+        return Err(not_in_project(messages, named));
     }
     let bundle = parts
         .model
@@ -143,18 +158,14 @@ pub fn open_source_file_dialog_in_bundle(
         .content
         .project_sources
         .get_bundle(bundle_id)
-        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
     if action != CodeSourceFileAction::New && !bundle.contains_file(source_path) {
-        return Err(format!(
-            "The selected source file '{source_path}' no longer exists."
-        ));
+        return Err(not_in_project(messages, source_path));
     }
     if action == CodeSourceFileAction::Delete
         && crate::state::project_source_paths_equal(source_path, bundle.root().logical_path())
     {
-        return Err(
-            "The main file can't be deleted. Rename it or replace its source instead.".to_owned(),
-        );
+        return Err(messages.text(MessageId::CodeSourceFileMainNotDeleted));
     }
     // A Verilog-A file is added by writing its `include into the file that
     // includes it. A file a role binds — the build profile — is
@@ -197,18 +208,17 @@ pub fn open_source_file_dialog_in_bundle(
 }
 
 pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+    let messages = parts.wb.messages();
     let draft = parts
         .code
         .source_file_dialog
         .clone()
-        .ok_or_else(|| "No source-file transaction is open.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::CodeSourceFileDialogClosed))?;
     if let Some(reason) = source_file_mutation_block_reason(parts) {
-        return Err(reason.to_owned());
+        return Err(reason);
     }
     if draft.project_id != parts.model.workspace.content.project.id() {
-        return Err(
-            "The active project changed while the source-file transaction was open.".to_owned(),
-        );
+        return Err(messages.text(MessageId::CodeSourceProjectChanged));
     }
     let bundle = parts
         .model
@@ -216,26 +226,19 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
         .content
         .project_sources
         .get_bundle(draft.bundle_id)
-        .ok_or_else(|| {
-            "The source bundle was removed while the transaction was open.".to_owned()
-        })?;
-    let authority_path = if draft.action == CodeSourceFileAction::New {
+        .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
+    let named = if draft.action == CodeSourceFileAction::New {
         draft.importer_path.as_str()
     } else {
         draft.source_path.as_str()
     };
-    if !source_bundle_contains_document(parts, draft.bundle_id, authority_path) {
-        return Err(
-            "The file change no longer applies to a source bundle in the project.".to_owned(),
-        );
+    if !source_bundle_contains_document(parts, draft.bundle_id, named) {
+        return Err(not_in_project(messages, named));
     }
     if bundle.revision().get() != draft.bundle_revision
         || bundle.closure_digest() != draft.closure_digest
     {
-        return Err(
-            "The source bundle changed while the transaction was open. Review the current tree and try again."
-                .to_owned(),
-        );
+        return Err(messages.text(MessageId::CodeSourceFileStale));
     }
 
     let proposed = draft.proposed_path.trim();
@@ -257,9 +260,7 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
         CodeSourceFileAction::Duplicate => {
             let content = bundle
                 .file_content(&draft.source_path)
-                .ok_or_else(|| {
-                    format!("The source file '{}' no longer exists.", draft.source_path)
-                })?
+                .ok_or_else(|| not_in_project(messages, &draft.source_path))?
                 .to_owned();
             let file =
                 ProjectSourceFile::try_new(proposed, content).map_err(|error| error.to_string())?;
@@ -285,7 +286,7 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
     };
     if !changed {
         parts.code.source_file_dialog = None;
-        return Ok("Nothing changed.".to_owned());
+        return Ok(messages.text(MessageId::CodeSourceFileNothingChanged));
     }
 
     // A deleted file leaves the reader on the file that included it, else
@@ -301,17 +302,25 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
     super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, draft.bundle_id);
     parts.code.source_file_dialog = None;
     let message = match draft.action {
-        CodeSourceFileAction::New => format!("Created {proposed}."),
-        CodeSourceFileAction::Duplicate => {
-            format!("Duplicated {} as {proposed}.", draft.source_path)
+        CodeSourceFileAction::New => {
+            messages.format(MessageId::CodeSourceFileCreated, &[("file", proposed)])
         }
-        CodeSourceFileAction::Rename => {
-            format!("Renamed {} to {proposed}.", draft.source_path)
-        }
-        CodeSourceFileAction::Move => {
-            format!("Moved {} to {proposed}.", draft.source_path)
-        }
-        CodeSourceFileAction::Delete => format!("Deleted {}.", draft.source_path),
+        CodeSourceFileAction::Duplicate => messages.format(
+            MessageId::CodeSourceFileDuplicated,
+            &[("file", &draft.source_path), ("new", proposed)],
+        ),
+        CodeSourceFileAction::Rename => messages.format(
+            MessageId::CodeSourceFileRenamed,
+            &[("file", &draft.source_path), ("new", proposed)],
+        ),
+        CodeSourceFileAction::Move => messages.format(
+            MessageId::CodeSourceFileMoved,
+            &[("file", &draft.source_path), ("new", proposed)],
+        ),
+        CodeSourceFileAction::Delete => messages.format(
+            MessageId::CodeSourceFileDeleted,
+            &[("file", &draft.source_path)],
+        ),
     };
     parts
         .model
@@ -328,7 +337,7 @@ pub fn open_source_history(
         .workspace
         .active_source_bundle()
         .map(ProjectSourceBundle::id)
-        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
+        .ok_or_else(|| parts.wb.messages().text(MessageId::SourceRemoved))?;
     open_source_history_in_bundle(parts, bundle_id, source_path)
 }
 
@@ -337,10 +346,9 @@ pub(crate) fn open_source_history_in_bundle(
     bundle_id: crate::state::ProjectSourceId,
     source_path: &str,
 ) -> Result<(), String> {
+    let messages = parts.wb.messages();
     if !source_bundle_contains_document(parts, bundle_id, source_path) {
-        return Err(format!(
-            "The selected source file '{source_path}' no longer belongs to this project source bundle."
-        ));
+        return Err(not_in_project(messages, source_path));
     }
     let bundle = parts
         .model
@@ -348,11 +356,9 @@ pub(crate) fn open_source_history_in_bundle(
         .content
         .project_sources
         .get_bundle(bundle_id)
-        .ok_or_else(|| "The Verilog-A source bundle no longer exists.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
     if !bundle.contains_file(source_path) {
-        return Err(format!(
-            "The selected source file '{source_path}' no longer exists."
-        ));
+        return Err(not_in_project(messages, source_path));
     }
     parts.code.source_history = Some(CodeSourceHistoryState {
         project_id: parts.model.workspace.content.project.id(),
@@ -370,43 +376,44 @@ pub(crate) fn open_source_history_in_bundle(
 }
 
 pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+    let messages = parts.wb.messages();
     let draft = parts
         .code
         .source_history
         .clone()
-        .ok_or_else(|| "No source-history transaction is open.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::CodeSourceHistoryClosed))?;
     if parts.model.workspace.content.project.id() != draft.project_id {
-        return Err("The active project changed while source history was open.".to_owned());
+        return Err(messages.text(MessageId::CodeSourceProjectChanged));
     }
     if let Some(reason) = source_file_mutation_block_reason(parts) {
-        return Err(reason.to_owned());
+        return Err(reason);
     }
     let retained_revision = draft
         .selected_revision
-        .ok_or_else(|| "Select a retained revision to restore.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::CodeSourceHistoryPickRevision))?;
     let bundle = parts
         .model
         .workspace
         .content
         .project_sources
         .get_bundle(draft.bundle_id)
-        .ok_or_else(|| "The source bundle no longer exists.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
     if !source_bundle_contains_document(parts, draft.bundle_id, &draft.source_path) {
-        return Err(
-            "Source history no longer applies to a source bundle in the project.".to_owned(),
-        );
+        return Err(not_in_project(messages, &draft.source_path));
     }
     if bundle.revision().get() != draft.bundle_revision
         || bundle.closure_digest() != draft.closure_digest
     {
-        return Err(
-            "The source bundle changed while history was open. Reopen history before restoring."
-                .to_owned(),
-        );
+        return Err(messages.text(MessageId::CodeSourceHistoryStale));
     }
     let expected_current = bundle.revision();
-    let retained_revision = crate::product::ObjectRevision::new(retained_revision)
-        .map_err(|error| format!("The retained revision is invalid: {error}"))?;
+    let retained_revision =
+        crate::product::ObjectRevision::new(retained_revision).map_err(|error| {
+            messages.format(
+                MessageId::CodeSourceHistoryRevisionInvalid,
+                &[("error", &error.to_string())],
+            )
+        })?;
     let changed = parts
         .model
         .workspace
@@ -419,7 +426,7 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
         .map_err(|error| error.to_string())?;
     if !changed {
         parts.code.source_history = None;
-        return Ok("The selected revision already matches the current source graph.".to_owned());
+        return Ok(messages.text(MessageId::CodeSourceHistoryAlreadyCurrent));
     }
 
     let restored_bundle = parts
@@ -428,7 +435,7 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
         .content
         .project_sources
         .get_bundle(draft.bundle_id)
-        .ok_or_else(|| "The restored source bundle is unavailable.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
     let selected_path = if restored_bundle.contains_file(&draft.source_path) {
         draft.source_path.clone()
     } else {
@@ -440,14 +447,19 @@ pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Resu
     });
     super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, draft.bundle_id);
     parts.code.source_history = None;
-    let message = format!(
-        "Restored Verilog-A source bundle revision {} as a new revision.",
-        retained_revision.get()
+    let message = messages.format(
+        MessageId::CodeSourceHistoryRestored,
+        &[("revision", &retained_revision.get().to_string())],
     );
     parts
         .model
         .record(LogSeverity::Info, LogSource::Studio, message.clone());
     Ok(message)
+}
+
+/// `file` is no longer one of the project's source files.
+fn not_in_project(messages: MessageCatalog, file: &str) -> String {
+    messages.format(MessageId::SourceNotInProject, &[("file", file)])
 }
 
 fn default_file_name() -> &'static str {
@@ -894,7 +906,7 @@ mod tests {
 
         let error = commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()))
             .unwrap_err();
-        assert!(error.contains("changed while the transaction was open"));
+        assert!(error.contains("changed while this was open"), "{error}");
         assert_ne!(verilog_a_bundle(&harness).closure_digest(), before);
         assert!(!verilog_a_bundle(&harness).contains_file("untitled.va"));
     }

@@ -224,6 +224,7 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
             &mut parts.model.workspace.content,
             state.index.bundle_id,
             replacements,
+            messages,
         )?
     };
     super::veriloga::invalidate_veriloga_evidence_in(
@@ -279,7 +280,7 @@ fn current_language_transaction(
         .clone()
         .ok_or_else(|| messages.text(MessageId::SourceRenameClosed))?;
     if let Some(reason) = super::source_file_mutation_block_reason(parts) {
-        return Err(reason.to_owned());
+        return Err(reason);
     }
     if !super::source_files::source_bundle_document_is_editable_in(
         parts.model,
@@ -323,7 +324,7 @@ pub fn format_language_document(
 ) -> Result<String, String> {
     let messages = parts.wb.messages();
     if let Some(reason) = super::source_file_mutation_block_reason(parts) {
-        return Err(reason.to_owned());
+        return Err(reason);
     }
     if !super::source_files::source_bundle_document_is_editable_in(
         parts.model,
@@ -386,10 +387,12 @@ fn write_language_document(
     logical_path: &str,
     replacement: String,
 ) -> Result<(), String> {
+    let messages = parts.wb.messages();
     parts.code.source_edit_history.replace(
         &mut parts.model.workspace.content,
         bundle_id,
         vec![(logical_path.to_owned(), replacement)],
+        messages,
     )?;
     super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
     Ok(())

@@ -528,7 +528,7 @@ pub fn request_veriloga_source_replacement(
     logical_path: &str,
 ) -> Result<(), String> {
     if let Some(reason) = super::super::source_file_mutation_block_reason(parts) {
-        return Err(reason.to_owned());
+        return Err(reason);
     }
     if parts.code.veriloga.import_requested {
         return Err("A Verilog-A/AMS file is already being chosen.".to_owned());
@@ -573,10 +573,12 @@ pub fn commit_veriloga_source_replacement(
             review.target.logical_path
         ));
     }
+    let messages = parts.wb.messages();
     let changed = parts.code.source_edit_history.replace(
         &mut parts.model.workspace.content,
         review.target.bundle_id,
         vec![(review.target.logical_path.clone(), review.contents)],
+        messages,
     )? > 0;
     if changed {
         invalidate_veriloga_evidence(parts, review.target.bundle_id);

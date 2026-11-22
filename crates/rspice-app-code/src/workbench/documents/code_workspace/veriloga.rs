@@ -1381,6 +1381,9 @@ mod tests {
                     &mut workbench.model.workspace.content,
                     bundle_id,
                     crate::workbench::framework::requests::StandardCommand::Undo,
+                    crate::workbench::MessageCatalog::new(
+                        crate::workbench::UiTextLocale::EnglishUnitedStates,
+                    ),
                 )
                 .unwrap()
         );

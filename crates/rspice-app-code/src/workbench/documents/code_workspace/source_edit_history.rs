@@ -7,6 +7,7 @@
 
 use crate::state::ProjectSourceId;
 use crate::workbench::framework::requests::StandardCommand;
+use crate::workbench::{MessageCatalog, MessageId};
 use rspice_project::ProjectWorkspace;
 
 /// Steps kept across every bundle. The oldest falls away first.
@@ -39,11 +40,12 @@ impl SourceEditHistory {
         content: &mut ProjectWorkspace,
         bundle_id: ProjectSourceId,
         replacements: Vec<(String, String)>,
+        messages: MessageCatalog,
     ) -> Result<usize, String> {
         let bundle = content
             .project_sources
             .get_bundle(bundle_id)
-            .ok_or_else(|| "The source bundle no longer exists.".to_owned())?;
+            .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
         let files = replacements
             .iter()
             .filter_map(|(logical_path, after)| {
@@ -86,6 +88,7 @@ impl SourceEditHistory {
         content: &mut ProjectWorkspace,
         bundle_id: ProjectSourceId,
         command: StandardCommand,
+        messages: MessageCatalog,
     ) -> Result<bool, String> {
         let undoing = command == StandardCommand::Undo;
         let from = if undoing { &self.undo } else { &self.redo };
@@ -95,14 +98,14 @@ impl SourceEditHistory {
         let bundle = content
             .project_sources
             .get_bundle(bundle_id)
-            .ok_or_else(|| "The source bundle no longer exists.".to_owned())?;
+            .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
         let step = &from[index];
         for file in &step.files {
             let expected = if undoing { &file.after } else { &file.before };
             if bundle.file_content(&file.logical_path) != Some(expected.as_str()) {
-                return Err(format!(
-                    "{} has changed since, so the edit across its files was left as it is.",
-                    file.logical_path
+                return Err(messages.format(
+                    MessageId::SourceEditStepRefused,
+                    &[("file", &file.logical_path)],
                 ));
             }
         }
@@ -138,6 +141,10 @@ mod tests {
 
     const ROOT: &str = "`include \"defs.vams\"\nmodule m; endmodule\n";
     const DEFS: &str = "// definitions\n";
+
+    fn messages() -> MessageCatalog {
+        MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
+    }
 
     fn two_files() -> (ProjectWorkspace, ProjectSourceId) {
         let bundle = ProjectSourceBundle::try_new(
@@ -175,11 +182,16 @@ mod tests {
     fn an_edit_across_files_undoes_and_redoes_in_one_step() {
         let (mut workspace, id) = two_files();
         let mut history = SourceEditHistory::default();
-        assert_eq!(history.replace(&mut workspace, id, both()).unwrap(), 2);
+        assert_eq!(
+            history
+                .replace(&mut workspace, id, both(), messages())
+                .unwrap(),
+            2
+        );
 
         assert!(
             history
-                .step(&mut workspace, id, StandardCommand::Undo)
+                .step(&mut workspace, id, StandardCommand::Undo, messages())
                 .unwrap()
         );
         assert_eq!(text(&workspace, id, "m.va"), ROOT);
@@ -187,13 +199,13 @@ mod tests {
 
         assert!(
             history
-                .step(&mut workspace, id, StandardCommand::Redo)
+                .step(&mut workspace, id, StandardCommand::Redo, messages())
                 .unwrap()
         );
         assert_eq!(text(&workspace, id, "defs.vams"), format!("{DEFS}// b\n"));
         assert!(
             !history
-                .step(&mut workspace, id, StandardCommand::Redo)
+                .step(&mut workspace, id, StandardCommand::Redo, messages())
                 .unwrap(),
             "nothing is left to redo"
         );
@@ -205,14 +217,16 @@ mod tests {
     fn a_step_over_a_file_edited_since_is_refused_and_kept() {
         let (mut workspace, id) = two_files();
         let mut history = SourceEditHistory::default();
-        history.replace(&mut workspace, id, both()).unwrap();
+        history
+            .replace(&mut workspace, id, both(), messages())
+            .unwrap();
         let renamed = text(&workspace, id, "defs.vams");
         workspace
             .replace_project_source_bundle_file(id, "defs.vams", "typed over\n".to_owned())
             .unwrap();
 
         let refused = history
-            .step(&mut workspace, id, StandardCommand::Undo)
+            .step(&mut workspace, id, StandardCommand::Undo, messages())
             .unwrap_err();
         assert!(refused.contains("defs.vams"), "{refused}");
         assert_eq!(text(&workspace, id, "m.va"), format!("{ROOT}// a\n"));
@@ -222,7 +236,7 @@ mod tests {
             .unwrap();
         assert!(
             history
-                .step(&mut workspace, id, StandardCommand::Undo)
+                .step(&mut workspace, id, StandardCommand::Undo, messages())
                 .unwrap()
         );
         assert_eq!(text(&workspace, id, "m.va"), ROOT);
@@ -233,10 +247,15 @@ mod tests {
         let (mut workspace, id) = two_files();
         let mut history = SourceEditHistory::default();
         let unchanged = vec![("m.va".to_owned(), ROOT.to_owned())];
-        assert_eq!(history.replace(&mut workspace, id, unchanged).unwrap(), 0);
+        assert_eq!(
+            history
+                .replace(&mut workspace, id, unchanged, messages())
+                .unwrap(),
+            0
+        );
         assert!(
             !history
-                .step(&mut workspace, id, StandardCommand::Undo)
+                .step(&mut workspace, id, StandardCommand::Undo, messages())
                 .unwrap()
         );
     }

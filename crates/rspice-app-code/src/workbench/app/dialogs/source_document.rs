@@ -119,7 +119,7 @@ pub struct DocumentFacts {
     imports: Vec<String>,
     imported_by: Vec<String>,
     history: Vec<RevisionRow>,
-    block_reason: Option<&'static str>,
+    block_reason: Option<String>,
     /// Why the document cannot be deleted, when it cannot.
     delete_refusal: Option<String>,
 }
@@ -228,7 +228,9 @@ fn document_facts(
         imported_by: dependency_paths(bundle, &logical_path, false),
         delete_refusal: super::source_file_form::delete_refusal(bundle, &logical_path, messages),
         history,
-        block_reason: code_workspace::source_file_mutation_block_reason_in(model, code, platform),
+        block_reason: code_workspace::source_file_mutation_block_reason_in(
+            model, code, platform, messages,
+        ),
         logical_path,
     })
 }
@@ -331,7 +333,7 @@ pub(in crate::workbench) fn render_source_document_dialog(
     .overlay_scrollbar()
     .primary_on_enter(false)
     .initial_focus(DialogInitialFocus::BodyControl);
-    if let Some(reason) = facts.block_reason {
+    if let Some(reason) = facts.block_reason.clone() {
         dialog = dialog.transaction_state(
             DialogTransactionTone::Progress,
             messages.text(MessageId::CodeSourceOperationsHeld),
@@ -911,8 +913,8 @@ fn operations(
                 if response.clicked() {
                     *action = LifecycleAction::ReplaceFromFile;
                 }
-                if let Some(reason) = facts.block_reason {
-                    response.on_disabled_hover_text(reason);
+                if let Some(reason) = &facts.block_reason {
+                    response.on_disabled_hover_text(reason.as_str());
                 }
             });
         },
@@ -926,8 +928,8 @@ fn operations(
 /// read-only to type into and still be renamed, moved, or deleted, and gating
 /// on it would disable buttons the service would have honoured.
 fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Option<Refusal> {
-    if let Some(reason) = facts.block_reason {
-        return Some(Refusal::Service(reason));
+    if let Some(reason) = &facts.block_reason {
+        return Some(Refusal::Service(reason.clone()));
     }
     // The main file, a file a role binds and a file that still includes
     // another: the bundle refuses to delete each, and says why first.
@@ -942,7 +944,7 @@ fn refusal_reason(facts: &DocumentFacts, candidate: CodeSourceFileAction) -> Opt
 /// disagree about the reason.
 #[derive(Clone)]
 enum Refusal {
-    Service(&'static str),
+    Service(String),
     /// The delete form's own refusal, already worded.
     Delete(String),
 }
@@ -950,8 +952,7 @@ enum Refusal {
 impl Refusal {
     fn resolve(self) -> String {
         match self {
-            Self::Service(reason) => reason.to_owned(),
-            Self::Delete(reason) => reason,
+            Self::Service(reason) | Self::Delete(reason) => reason,
         }
     }
 }
@@ -1092,8 +1093,8 @@ fn revision_history(
                 if response.clicked() {
                     action = Some(LifecycleAction::Restore);
                 }
-                if let Some(reason) = facts.block_reason {
-                    response.on_disabled_hover_text(reason);
+                if let Some(reason) = &facts.block_reason {
+                    response.on_disabled_hover_text(reason.as_str());
                 }
                 if Button::new(&messages.text(MessageId::CodeSourceCloseHistory))
                     .ghost()

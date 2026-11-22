@@ -50,7 +50,8 @@ pub(in crate::workbench) fn render(
         .content
         .project_sources
         .get_bundle(draft.bundle_id);
-    let blocked = code_workspace::source_file_mutation_block_reason_in(model, code, platform);
+    let blocked =
+        code_workspace::source_file_mutation_block_reason_in(model, code, platform, messages);
     let stale = bundle.is_none_or(|bundle| {
         draft.project_id != model.workspace.content.project.id()
             || bundle.revision().get() != draft.bundle_revision
@@ -71,7 +72,7 @@ pub(in crate::workbench) fn render(
     let (title, primary) = titles(&draft, messages);
     let enter_name = messages.text(MessageId::CodeSourceFileEnterName);
     let keeps_copy = messages.text(MessageId::CodeSourceFileHistoryKeepsCopy);
-    let status: Result<Option<&str>, &str> = if let Some(reason) = blocked {
+    let status: Result<Option<&str>, &str> = if let Some(reason) = blocked.as_deref() {
         Err(reason)
     } else if stale {
         Err(&stale_text)

@@ -196,18 +196,20 @@ pub(in crate::workbench) fn render_rename_symbol_form(
         return false;
     };
     let (bundle_id, active_path) = (tools.index.bundle_id, tools.active_path.clone());
-    let blocked = code_workspace::source_file_mutation_block_reason_in(model, code, platform)
-        .map(str::to_owned)
-        .or_else(|| {
-            (!code_workspace::source_bundle_document_is_editable_in(
-                model,
-                code,
-                platform,
-                bundle_id,
-                &active_path,
-            ))
-            .then(|| messages.format(MessageId::SourceRenameReadOnly, &[("file", &active_path)]))
-        });
+    let blocked =
+        code_workspace::source_file_mutation_block_reason_in(model, code, platform, messages)
+            .or_else(|| {
+                (!code_workspace::source_bundle_document_is_editable_in(
+                    model,
+                    code,
+                    platform,
+                    bundle_id,
+                    &active_path,
+                ))
+                .then(|| {
+                    messages.format(MessageId::SourceRenameReadOnly, &[("file", &active_path)])
+                })
+            });
     let Some(tools) = code.language_tools.as_mut() else {
         return false;
     };

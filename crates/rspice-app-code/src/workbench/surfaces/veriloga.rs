@@ -545,6 +545,7 @@ fn source_editor(
             &mut cx.model.workspace.content,
             bundle_id,
             step,
+            cx.wb.messages(),
         ) {
             Ok(true) => crate::workbench::documents::code_workspace::invalidate_veriloga_evidence(
                 &mut CodeFeature::workspace_parts(cx),

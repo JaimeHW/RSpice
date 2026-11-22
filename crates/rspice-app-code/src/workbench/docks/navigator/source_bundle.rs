@@ -75,6 +75,7 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
                 parts.model,
                 parts.code_workspace,
                 parts.platform,
+                messages,
             )
             .is_none(),
     });
@@ -388,8 +389,9 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
                     parts.model,
                     parts.code_workspace,
                     parts.platform,
+                    parts.messages,
                 ) {
-                    Some(reason) => Err(reason.to_owned()),
+                    Some(reason) => Err(reason),
                     None => code_workspace::request_veriloga_add_files(
                         parts.model,
                         &mut parts.code_workspace.veriloga,
