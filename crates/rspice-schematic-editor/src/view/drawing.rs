@@ -1041,6 +1041,19 @@ pub enum VariantMark {
     Changed { value: String },
 }
 
+/// The palette an instance is drawn in while its master's interface has
+/// moved on since it was placed: its symbol and labels in the warning
+/// colour, so the parts the deck will refuse stand out on the sheet until
+/// they are updated. A selected one keeps the selection's colour.
+pub fn stale_instance_palette(palette: &Palette) -> Palette {
+    Palette {
+        symbol: palette.warn,
+        text: palette.warn,
+        text_dim: palette.warn,
+        ..*palette
+    }
+}
+
 /// [`draw_component`] for a part the chosen variant changes, marked as
 /// `mark` says. `bounds` is the part's body, in world coordinates, which the
 /// cross of a part left off spans. A selected part keeps the selection's

@@ -196,6 +196,7 @@ pub(super) fn draw_scene(
             selected_trace_expression: &selected_trace_expression,
             open_pins: &open_pins(painter.ctx(), state, symbol_context),
             variant_marks: &variant_marks(painter.ctx(), state.model),
+            stale_instances: &stale_instances(painter.ctx(), state),
         },
         || state.model.workspace.content.active_view.display_path(),
     );
@@ -515,6 +516,38 @@ fn variant_marks(ctx: &egui::Context, model: &Model) -> VariantMarks {
     let marks = VariantMarks::new(marks);
     ctx.data_mut(|data| data.insert_temp(id, (key, VariantMarks::clone(&marks))));
     marks
+}
+
+type StaleInstances = std::sync::Arc<std::collections::HashSet<u64>>;
+
+/// The open drawing's instances whose master's interface moved on since they
+/// were placed: the ones Update all instances repairs and the deck refuses.
+/// Kept while the drawing and every master it resolves through stand still.
+fn stale_instances(ctx: &egui::Context, state: &CanvasFacts<'_>) -> StaleInstances {
+    let key = (
+        state.model.schematic.content_version(),
+        super::symbol_context_revision(state),
+    );
+    let id = egui::Id::new("rspice.schematic.stale_instances");
+    if let Some((cached, stale)) =
+        ctx.data(|data| data.get_temp::<((u64, u64), StaleInstances)>(id))
+        && cached == key
+    {
+        return stale;
+    }
+    let stale = StaleInstances::new(
+        state
+            .model
+            .schematic
+            .stale_instance_ids(
+                &state.model.library_manager,
+                &state.model.workspace.content.schematic_buffers,
+            )
+            .into_iter()
+            .collect(),
+    );
+    ctx.data_mut(|data| data.insert_temp(id, (key, StaleInstances::clone(&stale))));
+    stale
 }
 
 type OpenPins = std::sync::Arc<std::collections::HashMap<u64, Vec<Point>>>;

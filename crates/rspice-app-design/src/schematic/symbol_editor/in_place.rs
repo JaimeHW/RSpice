@@ -217,6 +217,7 @@ fn draw_parent(
             selected_trace_expression: &|| None,
             open_pins: &HashMap::new(),
             variant_marks: &HashMap::new(),
+            stale_instances: &Default::default(),
         },
         || session.parent.display_path(),
     );

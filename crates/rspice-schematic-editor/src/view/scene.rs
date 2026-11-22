@@ -9,7 +9,7 @@ use super::{
         bus_band_width_pt, bus_tap_width_pt, chain_conductors, draw_bus, draw_bus_tap,
         draw_component, draw_conductor, draw_hover_halo, draw_hover_outline, draw_junction,
         draw_open_pin_marks, draw_probe, draw_varied_component, draw_wire_bridge,
-        probe_world_bounds,
+        probe_world_bounds, stale_instance_palette,
     },
     net_labels::{NetLabelPaint, draw_net_label_attached, world_bounds as net_label_world_bounds},
     pointer_target::PointerTarget,
@@ -30,7 +30,7 @@ use rspice_design::schematic::design_note::DesignNoteRenderContext;
 use rspice_design::schematic::probe::SchematicProbe;
 use rspice_design_model::Point;
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 mod annotations;
 mod empty;
@@ -75,6 +75,9 @@ pub struct SceneOverlays<'a> {
     /// The parts the chosen assembly variant changes, and how each is
     /// marked; empty with the base design chosen.
     pub variant_marks: &'a HashMap<u64, VariantMark>,
+    /// The instances whose master's interface moved on since they were
+    /// placed, which are drawn in the warning colour until updated.
+    pub stale_instances: &'a HashSet<u64>,
 }
 
 pub struct SceneSymbols<'a> {
@@ -272,6 +275,13 @@ pub fn draw_content(
         }
         let is_selected = view.editor.selection.components.contains(&component.id)
             || band_instances.is_some_and(|band| band.takes_bounds(min, max));
+        let stale_palette;
+        let palette = if overlays.stale_instances.contains(&component.id) {
+            stale_palette = stale_instance_palette(palette);
+            &stale_palette
+        } else {
+            palette
+        };
 
         if let Some(mark) = overlays.variant_marks.get(&component.id) {
             draw_varied_component(
@@ -681,6 +691,7 @@ mod band_tests {
                 selected_trace_expression: &|| None,
                 open_pins: &HashMap::new(),
                 variant_marks: &HashMap::new(),
+                stale_instances: &HashSet::new(),
             },
             String::new,
         );
@@ -810,6 +821,7 @@ mod hover_tests {
                 selected_trace_expression: &|| None,
                 open_pins,
                 variant_marks: &HashMap::new(),
+                stale_instances: &HashSet::new(),
             },
             String::new,
         );

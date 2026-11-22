@@ -66,6 +66,18 @@ impl SchematicState {
             .collect()
     }
 
+    /// The same instances as [`Self::stale_instance_interfaces`], by the id
+    /// the canvas marks them by.
+    pub fn stale_instance_ids<S: AsRef<SchematicDocument>>(
+        &self,
+        libraries: &LibraryManager,
+        masters: &HashMap<String, S>,
+    ) -> Vec<u64> {
+        stale_instances(self, libraries, masters)
+            .map(|(component, _)| component.id)
+            .collect()
+    }
+
     /// Re-bind every stale instance of this drawing to the interface its
     /// master presents now, as one undo step: the repair
     /// [`Self::update_selected_instance_interface`] makes, for each instance
