@@ -894,7 +894,10 @@ mod tests {
         use rspice_app_workbench::workbench::framework::requests::RevealSheetSection;
 
         let mut app = crate::workbench::RSpiceApp::test_instance();
-        app.state.workbench.outbox.push(RevealSheetSection);
+        app.state
+            .workbench
+            .outbox
+            .push(RevealSheetSection { focus: None });
         let ctx = egui::Context::default();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(Default::default(), |ctx| {

@@ -11,8 +11,8 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use rspice_app_state::state::{
-    Component, ComponentType, DrawingSheetStandard, Point, SchematicPageOrientation,
-    SheetDefinition, SheetId, SheetPortPolicy,
+    Component, ComponentType, DrawingSheetStandard, DrawingSheetTitleFieldId, Point,
+    SchematicPageOrientation, SheetDefinition, SheetId, SheetPortPolicy,
 };
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
@@ -265,5 +265,51 @@ fn a_blank_second_sheet_shows_no_first_use_hint() {
     assert!(
         texts.iter().any(|text| text == "Empty schematic"),
         "{texts:?}"
+    );
+}
+
+/// A double-click on the title block opens the sheet in the inspector with
+/// the cursor in its Title, as KiCad's double-click on the block opens its
+/// page settings: what is typed next is the sheet's Title.
+#[test]
+fn a_double_click_on_the_title_block_puts_the_cursor_in_its_title() {
+    use crate::feature_tests::replay::{Replay, only};
+    use egui::accesskit::Role;
+
+    let mut replay = Replay::new();
+    let controls = replay.frames(Vec::new());
+    let canvas = only(&controls, "Schematic canvas", Role::Canvas).center;
+    let sheet = replay.app.state.model.active_drawing_sheet();
+    let (min_x, min_y, max_x, max_y) = sheet.geometry.paper.as_tuple();
+    let (block_min_x, block_min_y, block_max_x, block_max_y) = sheet
+        .geometry
+        .title_block
+        .expect("the sheet has a title block")
+        .as_tuple();
+    // A new schematic opens framed on its sheet, the paper's centre on the
+    // canvas's.
+    let zoom = replay.app.state.model.schematic.session.editor.zoom;
+    let at = canvas
+        + egui::vec2(
+            (((block_min_x + block_max_x) - (min_x + max_x)) / 2.0 * zoom) as f32,
+            (((block_min_y + block_max_y) - (min_y + max_y)) / 2.0 * zoom) as f32,
+        );
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frame(vec![egui::Event::PointerMoved(at)]);
+    for pressed in [true, false, true, false] {
+        replay.frame(vec![press(pressed)]);
+    }
+    replay.frames(Vec::new());
+    replay.type_text("Loop control\n");
+
+    let sheet = replay.app.state.model.active_drawing_sheet();
+    assert_eq!(
+        sheet.format.title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
+        "Loop control"
     );
 }

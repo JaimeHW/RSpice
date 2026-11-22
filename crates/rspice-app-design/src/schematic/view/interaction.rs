@@ -266,7 +266,22 @@ pub fn handle_tool_interactions(
                 crate::state::SchematicSelectionFilter::default(),
             )
             .is_none();
-        match select_double_click_action(state, target, canvas_is_empty_at_pointer) {
+        // The title block is the sheet's form: a double-click on it puts the
+        // cursor in the sheet's Title, as KiCad's opens its page settings.
+        let on_title_block = canvas_is_empty_at_pointer
+            && super::drawing_sheet::editable_title_block_under(
+                &state.facts(),
+                &state.model.active_drawing_sheet(),
+                viewport,
+                pos,
+            )
+            .is_some();
+        let action = if on_title_block {
+            SelectDoubleClickAction::EditSheetTitle
+        } else {
+            select_double_click_action(state, target, canvas_is_empty_at_pointer)
+        };
+        match action {
             SelectDoubleClickAction::Descend(id) => {
                 state
                     .model
@@ -319,6 +334,10 @@ pub fn handle_tool_interactions(
                     pos,
                 );
             }
+            SelectDoubleClickAction::EditSheetTitle => super::context_menu::show_sheet_properties(
+                state,
+                Some(crate::state::DrawingSheetTitleFieldId::SheetTitle),
+            ),
             SelectDoubleClickAction::Ascend => state.ascend_workspace_level(),
             SelectDoubleClickAction::None => {}
         }
@@ -363,6 +382,7 @@ enum SelectDoubleClickAction {
     OpenVerilogA(u64),
     ActivateRequirement(u64),
     OpenProperties,
+    EditSheetTitle,
     Ascend,
     None,
 }

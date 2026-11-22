@@ -25,7 +25,7 @@ use crate::workbench::app::{open_drawing_sheet_defaults, open_sheet_format_manag
 use crate::workbench::app_state::Model;
 use crate::workbench::chrome::sheet_strip::{self, SheetStrip};
 use crate::workbench::docks::inspector::design::sheet::{
-    SheetInspector, commit_pending_sheet_text, sheet_panel,
+    SheetInspector, commit_pending_sheet_text, focus_title_field, sheet_panel,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -54,8 +54,11 @@ impl Feature for SheetsFeature {
             show: |cx, ui| {
                 // Another feature showed the sheet's properties and asked for
                 // the section; it is brought into view as it draws.
-                if cx.wb.outbox().take::<RevealSheetSection>().is_some() {
+                if let Some(reveal) = cx.wb.outbox().take::<RevealSheetSection>() {
                     cx.state.reveal_sheet_section = true;
+                    if let Some(field) = reveal.focus {
+                        focus_title_field(ui.ctx(), field);
+                    }
                 }
                 let review_markers = cx.peers.design().review_markers();
                 sheet_panel(

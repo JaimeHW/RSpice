@@ -201,6 +201,14 @@ pub struct ActiveDrawingSheet {
 }
 
 impl ActiveDrawingSheet {
+    /// The title block's rectangle on screen, when `pos` is on it.
+    pub fn title_block_under(&self, viewport: &Viewport, pos: Pos2) -> Option<Rect> {
+        self.geometry
+            .title_block
+            .map(|block| block.screen_rect(viewport))
+            .filter(|block| block.contains(pos))
+    }
+
     pub fn format_label(&self) -> String {
         format!(
             "{} \u{00b7} {}",

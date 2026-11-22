@@ -36,6 +36,20 @@ pub(super) fn draw_base(
     );
 }
 
+/// The open sheet's title block on screen when `pos` is on it, the block is
+/// drawn and the sheet is one the user may edit: a double-click there edits
+/// the block, and the pointer over it outlines it to say so.
+pub(super) fn editable_title_block_under(
+    state: &CanvasFacts<'_>,
+    sheet: &ActiveDrawingSheet,
+    viewport: &Viewport,
+    pos: egui::Pos2,
+) -> Option<Rect> {
+    (state.design.drawing_sheet_layers.title_block && state.model.drawing_sheet_writable())
+        .then(|| sheet.title_block_under(viewport, pos))
+        .flatten()
+}
+
 pub(super) fn draw_overflow_advisories(
     painter: &Painter,
     available: Rect,

@@ -49,12 +49,7 @@ fn canvas_hover(
     }
     let cycled = super::pick_chooser::cycle_hover(ctx);
     let editor = &state.model.schematic.session.editor;
-    if !matches!(editor.tool, Tool::Select | Tool::Probe)
-        || editor.selection_rect.is_active()
-        || egui::Popup::is_any_open(ctx)
-        || ctx.input(|input| input.pointer.any_down())
-        || pointer_target::canvas_touch_mode(ctx)
-    {
+    if !matches!(editor.tool, Tool::Select | Tool::Probe) || !hover_shown(ctx, state) {
         return None;
     }
     let position = ctx
@@ -92,6 +87,35 @@ fn canvas_hover(
     }
 }
 
+/// Whether the canvas shows what the pointer is over: not while a button is
+/// down (a drag or a band), a popup is open, or the canvas is driven by
+/// touch, which has no hover.
+fn hover_shown(ctx: &egui::Context, state: &CanvasFacts<'_>) -> bool {
+    let editor = &state.model.schematic.session.editor;
+    !(editor.selection_rect.is_active()
+        || egui::Popup::is_any_open(ctx)
+        || ctx.input(|input| input.pointer.any_down())
+        || pointer_target::canvas_touch_mode(ctx))
+}
+
+/// The title block under the pointer in the Select tool, where nothing else
+/// is: a double-click on it edits the sheet, so it is outlined as a part is.
+fn title_block_hover(
+    ctx: &egui::Context,
+    available: Rect,
+    viewport: &Viewport,
+    state: &CanvasFacts<'_>,
+    sheet: &ActiveDrawingSheet,
+) -> Option<Rect> {
+    if state.model.schematic.session.editor.tool != Tool::Select || !hover_shown(ctx, state) {
+        return None;
+    }
+    let position = ctx
+        .pointer_hover_pos()
+        .filter(|position| available.contains(*position))?;
+    super::drawing_sheet::editable_title_block_under(state, sheet, viewport, position)
+}
+
 pub(super) fn draw_scene(
     painter: &Painter,
     available: Rect,
@@ -102,6 +126,13 @@ pub(super) fn draw_scene(
     drawing_sheet: &ActiveDrawingSheet,
 ) {
     super::drawing_sheet::draw_base(painter, available, viewport, state, drawing_sheet);
+    let hover = canvas_hover(painter.ctx(), available, viewport, state, symbol_context);
+    if hover.is_none()
+        && let Some(block) =
+            title_block_hover(painter.ctx(), available, viewport, state, drawing_sheet)
+    {
+        rspice_schematic_editor::view::drawing::draw_hover_outline(painter, block);
+    }
 
     // First-run guidance: an empty drawing says what to do next instead of
     // presenting a silent dot field.
@@ -136,7 +167,7 @@ pub(super) fn draw_scene(
             parameter_labels: state.design.schematic_visibility.parameter_labels,
             hover_wire_vertex: state.design.interaction.hover_wire_vertex,
             selection_filter: state.design.schematic_selection_filter,
-            hover: canvas_hover(painter.ctx(), available, viewport, state, symbol_context),
+            hover,
         },
         scene::SceneSymbols {
             library: symbol_library,

@@ -385,12 +385,15 @@ impl Request for MarkFailureSites {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// Bring the drawing sheet's inspector section into view. Raised by a
+/// Bring the drawing sheet's inspector section into view, and put the
+/// cursor in the title field `focus` names, where it names one. Raised by a
 /// feature that shows the open sheet's properties from its own surface,
 /// once it has cleared the selection and opened the inspector; the section
 /// takes it as it next draws.
 #[derive(Clone, Debug)]
-pub struct RevealSheetSection;
+pub struct RevealSheetSection {
+    pub focus: Option<crate::state::DrawingSheetTitleFieldId>,
+}
 
 impl Request for RevealSheetSection {
     const DRAIN: Drain = Drain::SheetSection;

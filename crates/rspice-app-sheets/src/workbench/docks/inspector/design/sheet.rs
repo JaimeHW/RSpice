@@ -104,6 +104,9 @@ pub fn sheet_panel(ui: &mut Ui, mut panel: SheetInspector<'_>) {
     );
     schematic_section(ui, panel.model, editable, &mut schematic_edit);
     checks_section(ui, panel.model);
+    // A field asked for and not drawn, locked or left off the form, takes
+    // nothing later.
+    ui.data_mut(|data| data.remove::<SheetText>(focus_request_id()));
     if let Some(edit) = edit
         && let Err(error) =
             edit.and_then(|edit| apply_drawing_sheet_edit_on(panel.model, panel.workbench, edit))
@@ -682,6 +685,17 @@ struct TextDraft {
 /// The cell view and governed sheet the inspector is editing.
 type SheetIdentity = (String, Option<SheetId>);
 
+/// Where the panel holds the value a reveal asks to put the cursor in, until
+/// that value's field draws.
+fn focus_request_id() -> egui::Id {
+    egui::Id::new("sheet-inspector-focus-request")
+}
+
+/// Put the cursor in `field`'s value as the panel next draws it.
+pub fn focus_title_field(ctx: &egui::Context, field: DrawingSheetTitleFieldId) {
+    ctx.data_mut(|data| data.insert_temp(focus_request_id(), SheetText::Field(field)));
+}
+
 fn sheet_identity(model: &Model) -> SheetIdentity {
     let key = model.workspace.content.active_key();
     let sheet = model
@@ -741,6 +755,11 @@ fn text_row(
             Empty::Form(form) => property_row_input_with_hint(ui, label, &mut typed, form, false),
         })
         .inner;
+    if ui.data(|data| data.get_temp::<SheetText>(focus_request_id())) == Some(text) {
+        ui.data_mut(|data| data.remove::<SheetText>(focus_request_id()));
+        response.request_focus();
+        response.scroll_to_me(Some(egui::Align::Center));
+    }
     if response.has_focus() {
         let sheet = sheet.clone();
         ui.data_mut(|data| {
