@@ -849,20 +849,13 @@ fn preset_editor_form(
                 });
         });
     } else {
-        editor_section(ui, "Stored definition", |form| {
+        editor_section(ui, "Saved size", |form| {
             key_value(
                 form,
                 "Portrait size",
                 &portrait_dimensions_from_format(&draft.last_valid_preview),
             );
-            key_value(
-                form,
-                "Stable identity",
-                draft.source_id.as_deref().unwrap_or("\u{2014}"),
-            );
-            form.weak(
-                "Renaming keeps the identity, physical dimensions, border, zones, title block, and every copy saved in sheets.",
-            );
+            form.weak("Renaming changes only the name. Sheets that use this size keep it.");
         });
     }
 
@@ -918,19 +911,9 @@ fn preset_editor_preview(ui: &mut Ui, draft: &PresetEditorDraft) {
             230.0,
             &preview_caption,
         );
-    });
-    editor_section(ui, "Preset contract", |preview| {
-        key_value(preview, "Current sheet", "unchanged");
-        key_value(preview, "Identity", "stable preset ID");
-        key_value(
-            preview,
-            "Portability",
-            "dimensions copied onto every using sheet",
-        );
-        key_value(
-            preview,
-            "Undo",
-            "preset creation remains reversible until project save",
+        preview.add_space(8.0);
+        preview.weak(
+            "Saving adds this size to the list and leaves the open sheet as it is. A sheet that uses the size keeps its own copy of the dimensions.",
         );
     });
 }
@@ -1245,17 +1228,13 @@ fn export_body(
 
 pub(super) fn delete_body(ui: &mut Ui, preset: Option<&DrawingSheetPreset>, used_by: usize) {
     if let Some(preset) = preset {
-        key_value(ui, "Preset", &preset.name);
-        key_value(ui, "Stable identity", &preset.id);
-        key_value(ui, "Authority", scope_label(preset.scope));
+        key_value(ui, "Size", &preset.name);
+        key_value(ui, "Kept in", scope_label(preset.scope));
         key_value(ui, "Portrait size", &portrait_dimensions(preset));
         key_value(
             ui,
             "Used by",
-            &format!(
-                "{used_by} drawing-sheet reference{}",
-                if used_by == 1 { "" } else { "s" }
-            ),
+            &format!("{used_by} sheet{}", if used_by == 1 { "" } else { "s" }),
         );
     } else {
         error_notice(ui, "The selected definition is no longer available.");
