@@ -196,6 +196,7 @@ fn draw_parent(
                     .design_management
                     .sheet_catalog(&key),
                 review_markers: state.design.schematic_visibility.review_markers,
+                parameter_labels: state.design.schematic_visibility.parameter_labels,
             },
             editor: &session.parent_editor,
             net_highlighting: SchematicNetHighlighting::Off,

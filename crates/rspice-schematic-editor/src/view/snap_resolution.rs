@@ -289,6 +289,7 @@ mod tests {
                 canvas_cache,
                 sheet_catalog: None,
                 review_markers: SchematicReviewMarkerVisibility::All,
+                parameter_labels: Default::default(),
             };
             for x in (-10..440).step_by(7) {
                 for y in (-50..110).step_by(7) {

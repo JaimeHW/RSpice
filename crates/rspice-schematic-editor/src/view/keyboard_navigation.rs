@@ -412,6 +412,7 @@ mod tests {
                 canvas_cache: None,
                 sheet_catalog: None,
                 review_markers: crate::session::visibility::SchematicReviewMarkerVisibility::All,
+                parameter_labels: Default::default(),
             },
             editor,
             keyboard_focus: None,

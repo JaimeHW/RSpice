@@ -51,6 +51,7 @@ fn hidden_identity_anchor_is_suppressed_but_unowned_point_remains_visible() {
         canvas_cache: None,
         sheet_catalog: Some(&catalog),
         review_markers: Default::default(),
+        parameter_labels: Default::default(),
     };
     let component = DrcViolation::new(
         1,
@@ -140,6 +141,7 @@ fn an_object_on_another_sheet_is_placed_on_its_own_sheet() {
         canvas_cache: None,
         sheet_catalog: Some(&catalog),
         review_markers: Default::default(),
+        parameter_labels: Default::default(),
     };
     let hidden = DrcLocation::Component {
         id: 20,
@@ -190,6 +192,7 @@ fn a_terminal_on_a_later_sheet_is_anchored_where_that_sheet_draws_it() {
         canvas_cache: None,
         sheet_catalog: Some(&catalog),
         review_markers: Default::default(),
+        parameter_labels: Default::default(),
     };
 
     let terminal = DrcLocation::Terminal {
@@ -236,6 +239,7 @@ fn a_point_on_a_later_sheet_is_anchored_where_that_sheet_draws_it() {
             canvas_cache: None,
             sheet_catalog: Some(catalog),
             review_markers: Default::default(),
+            parameter_labels: Default::default(),
         }
     }
 
@@ -284,6 +288,7 @@ fn findings_at_one_place_share_a_badge_coloured_by_the_worst() {
         canvas_cache: None,
         sheet_catalog: None,
         review_markers: Default::default(),
+        parameter_labels: Default::default(),
     };
 
     let groups = badge_groups(&view, &violations);

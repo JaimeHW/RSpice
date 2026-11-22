@@ -802,6 +802,15 @@ impl Fixture {
     }
 
     pub(crate) fn frame(&mut self, events: Vec<egui::Event>, focused: bool) {
+        let _ = self.frame_output(events, focused);
+    }
+
+    /// [`Self::frame`], keeping what the frame painted.
+    pub(crate) fn frame_output(
+        &mut self,
+        events: Vec<egui::Event>,
+        focused: bool,
+    ) -> egui::FullOutput {
         self.time += 0.02;
         let Self {
             ctx,
@@ -809,7 +818,7 @@ impl Fixture {
             origin,
             time,
         } = self;
-        let _ = ctx.run_ui(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -841,7 +850,7 @@ impl Fixture {
                 }
                 app.state.reconcile_schematic_drag(ui.ctx(), true);
             },
-        );
+        )
     }
 
     pub(crate) fn button(&self, x: f32, pressed: bool) -> egui::Event {

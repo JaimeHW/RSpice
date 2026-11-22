@@ -286,6 +286,7 @@ mod tests {
                                         canvas_cache: None,
                                         sheet_catalog: None,
                                         review_markers: Default::default(),
+                                        parameter_labels: Default::default(),
                                     },
                                     canvas: &canvas,
                                     selection: &selection,

@@ -2,6 +2,7 @@
 
 use crate::session::{canvas_cache::CanvasCache, visibility::SchematicReviewMarkerVisibility};
 use rspice_design::schematic::{
+    component_display::SchematicParameterLabelVisibility,
     design_note::{DesignNote, DesignNoteKind, DesignReviewState},
     document::SchematicDocument,
     junction_candidates::{collect_junction_candidates, nearest_junction_candidate},
@@ -15,6 +16,9 @@ pub struct DesignView<'a> {
     pub canvas_cache: Option<&'a CanvasCache>,
     pub sheet_catalog: Option<&'a SheetCatalog>,
     pub review_markers: SchematicReviewMarkerVisibility,
+    /// Which instance names and values the canvas letters, so a click finds
+    /// a part's name or value only where one is drawn.
+    pub parameter_labels: SchematicParameterLabelVisibility,
 }
 
 /// Unassigned objects belong to the active sheet; legacy views without an
@@ -180,6 +184,7 @@ mod tests {
             canvas_cache: None,
             sheet_catalog: None,
             review_markers: SchematicReviewMarkerVisibility::All,
+            parameter_labels: Default::default(),
         }
     }
 
@@ -292,6 +297,7 @@ mod tests {
                 canvas_cache: Some(cache),
                 sheet_catalog: Some(catalog),
                 review_markers: SchematicReviewMarkerVisibility::All,
+                parameter_labels: Default::default(),
             }
             .nearest_junction_candidate(Point::new(20, 20), 4)
         };
@@ -319,6 +325,7 @@ mod tests {
             canvas_cache: Some(session.canvas_cache(2).expect("rebuilt")),
             sheet_catalog: Some(&catalog),
             review_markers: SchematicReviewMarkerVisibility::All,
+            parameter_labels: Default::default(),
         };
         assert_eq!(
             view.nearest_junction_candidate(Point::new(20, 20), 4),

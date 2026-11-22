@@ -5,6 +5,7 @@ use super::documentation_shapes::documentation_shape_at;
 use super::drawing::{
     bus_tap_at, conductor_width_pt, nearest_bus_hit, nearest_wire_screen_hit, probe_at_screen,
 };
+use super::instance_text::instance_texts_at;
 use super::lod;
 use super::net_labels::net_label_at;
 use super::{design_view::DesignView, symbol_context::SchematicSymbolContext, viewport::Viewport};
@@ -198,16 +199,34 @@ fn collect_targets(
         // Borrowed: a hover frame picks over every instance on the sheet,
         // and copying them was a third of the pick's cost.
         let components = view.visible_objects(&view.document.components, |item| item.id);
-        targets.extend(
-            hits(
+        // A part's name and value are the part's own: a click on either
+        // takes the part, before the drawn extent of any other.
+        let mut parts: Vec<u64> = instance_texts_at(
+            view,
+            &components,
+            symbol_context,
+            viewport,
+            ctx.pixels_per_point(),
+            pointer_pos,
+            all,
+        )
+        .into_iter()
+        .map(|hit| hit.component)
+        .collect();
+        parts.dedup();
+        if parts.is_empty() || all {
+            for id in hits(
                 &components,
                 all,
                 |item| item.id,
                 |rest| symbol_context.component_at_resolved_symbol(rest, hit.grid),
-            )
-            .into_iter()
-            .map(PointerTarget::Component),
-        );
+            ) {
+                if !parts.contains(&id) {
+                    parts.push(id);
+                }
+            }
+        }
+        targets.extend(parts.into_iter().map(PointerTarget::Component));
         if settled(&targets) {
             return targets;
         }
@@ -497,6 +516,7 @@ mod tests {
             canvas_cache: None,
             sheet_catalog: None,
             review_markers: SchematicReviewMarkerVisibility::All,
+            parameter_labels: Default::default(),
         }
     }
 

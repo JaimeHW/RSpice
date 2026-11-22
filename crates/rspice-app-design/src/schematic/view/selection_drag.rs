@@ -9,7 +9,11 @@ use super::{
     viewport::Viewport,
 };
 use crate::state::DragRubberBand;
+use crate::state::Point;
 use crate::workbench::app_state::DragType;
+use rspice_design::schematic::label_position::InstanceText;
+use rspice_schematic_editor::view::instance_text::{self, InstanceTextHit};
+use rspice_schematic_editor::view::pointer_target::PointerTarget;
 use rspice_schematic_editor::view::selection_drag::{
     self, SelectionDragAction, SelectionDragRequest, SelectionDragView, select_drag_can_start,
     select_drag_is_authorized, select_drag_target,
@@ -115,6 +119,22 @@ pub fn apply(
             }
             state.begin_schematic_drag((position.x, position.y), DragType::MoveSelection, ctx);
         }
+        // The text's part is selected, as a click on the text selects it; the
+        // drag moves the text alone.
+        SelectionDragAction::BeginText { hit, position } => {
+            select_drag_target(
+                &mut state.model.schematic.session.editor.selection,
+                PointerTarget::Component(hit.component),
+            );
+            if state.deny_read_only_edit() {
+                return;
+            }
+            state.begin_schematic_drag(
+                (position.x, position.y),
+                DragType::MoveText(hit.component, hit.text),
+                ctx,
+            );
+        }
         SelectionDragAction::BeginWireVertex(position) => {
             if state.deny_read_only_edit() {
                 return;
@@ -167,6 +187,30 @@ pub fn apply(
                     .update((position.x, position.y));
             }
         }
+        SelectionDragAction::MoveText {
+            operation_id,
+            hit,
+            from,
+            delta,
+            position,
+        } => {
+            if !owns_operation(
+                state,
+                ctx,
+                operation_id,
+                Some(DragType::MoveText(hit.component, hit.text)),
+            ) || state.design.interaction.drag.last_pos != Some((from.x, from.y))
+            {
+                return;
+            }
+            if move_instance_text(state, symbols, hit, delta) {
+                state
+                    .design
+                    .interaction
+                    .drag
+                    .update((position.x, position.y));
+            }
+        }
         SelectionDragAction::MoveSelection {
             operation_id,
             from,
@@ -211,27 +255,33 @@ pub fn apply(
             if !owns_operation(state, ctx, operation_id, None) {
                 return;
             }
-            let automatic_junctions = state.model.schematic.session.editor.automatic_junctions;
-            let moved = state
-                .model
-                .schematic
-                .session
-                .editor
-                .selection
-                .components
-                .clone();
-            with_active_wire_topology(state.model, |schematic, scope| {
-                // A pin dropped inside a wire is connected there; the vertex
-                // it gets is what lets the next move carry the wire. A pin
-                // dragged off a pin it touched keeps the connection with a
-                // wire.
-                schematic.connect_moved_pins(
-                    &moved,
-                    |component| symbols.terminal_points(component),
-                    scope,
-                );
-                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope)
-            });
+            // A moved name or value leaves every pin and wire where it was.
+            if !matches!(
+                state.design.interaction.drag.drag_type,
+                DragType::MoveText(..)
+            ) {
+                let automatic_junctions = state.model.schematic.session.editor.automatic_junctions;
+                let moved = state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .components
+                    .clone();
+                with_active_wire_topology(state.model, |schematic, scope| {
+                    // A pin dropped inside a wire is connected there; the vertex
+                    // it gets is what lets the next move carry the wire. A pin
+                    // dragged off a pin it touched keeps the connection with a
+                    // wire.
+                    schematic.connect_moved_pins(
+                        &moved,
+                        |component| symbols.terminal_points(component),
+                        scope,
+                    );
+                    schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope)
+                });
+            }
             // One undo entry for the whole gesture (no-ops deduplicate).
             if state.model.schematic.end_operation() {
                 state.sync_active_schematic_to_workspace();
@@ -254,6 +304,40 @@ pub fn apply(
             select_in_rect_on_active_sheet(state, symbols, window, additive);
         }
     }
+}
+
+/// Move one part's name or value by `delta` inside the drag's operation: the
+/// text starts from where the canvas lettered it, and the part stays put.
+fn move_instance_text(
+    state: &mut CanvasParts<'_>,
+    symbols: &SchematicSymbolContext,
+    hit: InstanceTextHit,
+    delta: Point,
+) -> bool {
+    let Some(part) = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|part| part.id == hit.component)
+        .cloned()
+    else {
+        return false;
+    };
+    let placed = instance_text::placement(&part, symbols, hit.text);
+    let mut moved = part.clone();
+    *hit.text.position_mut(&mut moved) = hit.text.position(&part).moved(placed, part.pos, delta);
+    let description = match hit.text {
+        InstanceText::Name => "move name",
+        InstanceText::Value => "move value",
+    };
+    crate::state::bulk_edit::replace_components(
+        &mut state.model.schematic,
+        vec![(part, moved)],
+        description,
+    )
+    .is_ok()
 }
 
 fn owns_operation(

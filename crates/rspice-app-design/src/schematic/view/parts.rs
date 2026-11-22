@@ -130,6 +130,15 @@ pub fn canvas_parts_lent<'a>(
 /// feature's context: the fact the shell lent it, a modal dialog of the
 /// feature's own that has opened since, or a dialog the surface asked for
 /// that waits.
+/// The design the canvas shows: `model`'s, with the review markers and the
+/// instance names and values `design`'s display options ask for.
+pub(crate) fn canvas_design_view<'m>(model: &'m Model, design: &DesignState) -> DesignView<'m> {
+    DesignView {
+        parameter_labels: design.schematic_visibility.parameter_labels,
+        ..model_design_view(model, design.schematic_visibility.review_markers)
+    }
+}
+
 pub(crate) fn canvas_application_modal_open_in(cx: &Cx<'_, DesignFeature>) -> bool {
     cx.application_modal_open()
         || own_modal_dialog_open(cx.state, false)
@@ -378,9 +387,9 @@ impl<'a> CanvasFacts<'a> {
     }
 
     /// The design the canvas shows: the model's, with the review markers
-    /// the design slot asks for.
+    /// and the names and values the design slot asks for.
     pub(crate) fn design_view(&self) -> DesignView<'a> {
-        model_design_view(self.model, self.design.schematic_visibility.review_markers)
+        canvas_design_view(self.model, self.design)
     }
 
     pub(crate) fn veriloga_master_of_component(&self, component_id: u64) -> Option<CellViewRef> {
@@ -469,9 +478,9 @@ impl CanvasParts<'_> {
     }
 
     /// The design the canvas shows: the model's, with the review markers
-    /// the design slot asks for.
+    /// and the names and values the design slot asks for.
     pub(crate) fn design_view(&self) -> DesignView<'_> {
-        model_design_view(self.model, self.design.schematic_visibility.review_markers)
+        canvas_design_view(self.model, self.design)
     }
 
     pub(crate) fn hierarchy_master_for_component(

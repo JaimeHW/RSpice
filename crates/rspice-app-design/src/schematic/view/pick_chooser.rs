@@ -4,8 +4,8 @@
 //! a chooser that lists them in pick order.
 
 use super::{
-    DesignState, Model, SchematicSymbolContext, model_design_view,
-    parts::{CanvasFacts, CanvasParts},
+    DesignState, Model, SchematicSymbolContext,
+    parts::{CanvasFacts, CanvasParts, canvas_design_view},
     viewport::Viewport,
 };
 use crate::state::Point;
@@ -63,7 +63,7 @@ pub(super) fn candidates_at(
     viewport: &Viewport,
 ) -> Vec<PointerTarget> {
     pointer_target::pointer_targets_all(
-        &model_design_view(model, design.schematic_visibility.review_markers),
+        &canvas_design_view(model, design),
         query,
         design.schematic_selection_filter,
         symbol_context,

@@ -3,6 +3,7 @@
 use super::{
     coordinates::screen_to_schematic,
     design_view::DesignView,
+    instance_text::{InstanceTextHit, instance_texts_at},
     mobile_controls::touch_latches,
     pointer_target::{PointerHit, PointerQuery, PointerTarget, canvas_touch_mode, pointer_target},
     snap_resolution::{resolve_grid_pointer, resolve_target_pointer, target_acquisition_radius},
@@ -43,6 +44,12 @@ pub enum SelectionDragAction {
         target: PointerTarget,
         position: Point,
     },
+    /// A drag that began on a part's name or value: it moves that text and
+    /// leaves the part, and anything else selected, where they are.
+    BeginText {
+        hit: InstanceTextHit,
+        position: Point,
+    },
     BeginWireVertex(Point),
     BeginMarquee(Point),
     /// A finger's drag that pans the sheet: it began on empty canvas or on
@@ -58,6 +65,13 @@ pub enum SelectionDragAction {
     MoveWireVertex {
         operation_id: u64,
         from: Point,
+        position: Point,
+    },
+    MoveText {
+        operation_id: u64,
+        hit: InstanceTextHit,
+        from: Point,
+        delta: Point,
         position: Point,
     },
     UpdateMarquee(Point),
@@ -155,7 +169,38 @@ pub fn start(
     );
     // The rubber band follows the pointer, not the grid.
     let band = screen_to_schematic(viewport, position);
+    // A press on a part's name or value takes the part, as a click does,
+    // and the drag carries the text alone.
+    let text = match target {
+        Some(PointerTarget::Component(id)) => {
+            let components = view
+                .design
+                .visible_objects(&view.design.document.components, |item| item.id);
+            instance_texts_at(
+                &view.design,
+                &components,
+                symbols,
+                viewport,
+                ui.ctx().pixels_per_point(),
+                position,
+                false,
+            )
+            .into_iter()
+            .find(|hit| hit.component == id)
+        }
+        _ => None,
+    };
     if canvas_touch_mode(ui.ctx()) {
+        // A finger moves only what is selected; elsewhere it pans.
+        if let Some(hit) = text
+            && !read_only
+            && view.editor.selection.has_component(hit.component)
+        {
+            return Some(SelectionDragAction::BeginText {
+                hit,
+                position: grid,
+            });
+        }
         let start = TouchDragStart {
             grid,
             wire: wire(),
@@ -168,6 +213,12 @@ pub fn start(
     // On a read-only view a drag that starts on an object still asks to
     // move it, so the owner can select it and say why it stays put; a drag
     // from empty canvas draws the selection box as anywhere else.
+    if let Some(hit) = text {
+        return Some(SelectionDragAction::BeginText {
+            hit,
+            position: grid,
+        });
+    }
     Some(match target {
         Some(
             target @ (PointerTarget::Component(_)
@@ -299,6 +350,23 @@ pub fn update(
             from,
             position,
         }),
+        Some(ActiveSelectionDrag {
+            kind: DragType::MoveText(component, text),
+            last_position: Some(last),
+            operation_id,
+        }) => {
+            let delta = Point::new(
+                position.x.saturating_sub(last.x),
+                position.y.saturating_sub(last.y),
+            );
+            (delta.x != 0 || delta.y != 0).then_some(SelectionDragAction::MoveText {
+                operation_id,
+                hit: InstanceTextHit { component, text },
+                from: last,
+                delta,
+                position,
+            })
+        }
         Some(ActiveSelectionDrag {
             kind: DragType::MoveSelection,
             last_position: Some(last),

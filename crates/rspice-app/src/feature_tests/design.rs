@@ -34,6 +34,7 @@ mod hierarchy_net_highlight;
 mod import_workflow;
 mod inline_instance;
 mod inline_instance_drawn;
+mod instance_text_drawn;
 mod inspector;
 mod inspector_drawn;
 mod inspector_form_drawn;

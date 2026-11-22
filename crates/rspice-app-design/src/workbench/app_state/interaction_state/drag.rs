@@ -8,6 +8,7 @@
 use super::{DragState, DragType, SchematicDragOwner};
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
+use rspice_design::schematic::label_position::InstanceText;
 
 impl DragState {
     /// A press on the canvas copies the undo baseline of the drag it may
@@ -34,7 +35,9 @@ impl DragState {
         let description = match kind {
             DragType::MoveSelection => "move selection",
             DragType::WireVertex => "drag wire vertex",
-            _ => return false,
+            DragType::MoveText(_, InstanceText::Name) => "move name",
+            DragType::MoveText(_, InstanceText::Value) => "move value",
+            DragType::None => return false,
         };
         let prepared = self.prepared.take();
         // A new pointer edit cannot leave another window's transaction

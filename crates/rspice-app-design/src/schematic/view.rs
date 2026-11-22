@@ -242,8 +242,11 @@ fn set_canvas_cursor(
         pan_armed: pan_modifier && !any_down,
         zoom_box: editor.zoom_box.armed || editor.zoom_box.drag.is_some(),
         shelf_drop,
-        moving_selection: state.design.interaction.drag.drag_type
-            == rspice_schematic_editor::session::drag::DragType::MoveSelection,
+        moving_selection: matches!(
+            state.design.interaction.drag.drag_type,
+            rspice_schematic_editor::session::drag::DragType::MoveSelection
+                | rspice_schematic_editor::session::drag::DragType::MoveText(..)
+        ),
         tool: editor.tool,
     };
     ui.ctx().set_cursor_icon(context.cursor());

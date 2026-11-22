@@ -29,6 +29,7 @@ pub fn model_design_view(
             .design_management
             .sheet_catalog(&key),
         review_markers,
+        parameter_labels: Default::default(),
     }
 }
 
@@ -75,6 +76,7 @@ pub fn model_location_anchor(
                     .design_management
                     .sheet_catalog(&key),
                 review_markers,
+                parameter_labels: Default::default(),
             };
             markers::placement(&view, location)?
         };

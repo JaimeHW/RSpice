@@ -25,6 +25,7 @@ pub mod symbol_context;
 pub mod keyboard_navigation;
 
 pub mod design_view;
+pub mod instance_text;
 pub mod pick_chooser;
 pub mod pointer_target;
 pub mod selection_drag;
