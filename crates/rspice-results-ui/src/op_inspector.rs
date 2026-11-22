@@ -1188,8 +1188,10 @@ pub fn summary_panel(
     }
 }
 
-/// The baseline select: the width of a run's number and a short label.
-const BASELINE_WIDTH: f32 = 168.0;
+/// The baseline select: the width of a run's number and a short label, at
+/// which the bar still holds the filter, the select and the reading switch
+/// clear of Export on the narrowest sheet.
+const BASELINE_WIDTH: f32 = 140.0;
 
 /// The sheet's controls in its bar: the other run's operating point to
 /// compare against, and whether each value reads as itself or as its change.
@@ -1229,7 +1231,7 @@ pub fn domain_bar(
         if rspice_ui_kit::widgets::segmented(
             ui,
             "rspice.results.op.reading",
-            &["Value", "\u{394} from baseline"],
+            &["Value", "\u{394}"],
             &mut reading,
             rspice_ui_kit::widgets::SegmentedWidth::Natural,
         ) {
