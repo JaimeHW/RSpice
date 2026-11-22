@@ -1309,3 +1309,22 @@ fn a_design_placing_a_cell_of_a_missing_library_names_the_library() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Refresh with nothing changed on disk opens no review with nothing in it:
+/// it says so on the status line, and that is all.
+#[test]
+fn refresh_with_nothing_changed_says_so_without_a_dialog() {
+    let (mut app, _folders) = kept_in_a_folder("library-refresh-nothing");
+    focus(&mut app);
+    with_cx(&mut app, |cx| {
+        run_library_file_intent(cx, LibraryFileIntent::Refresh);
+    });
+    assert!(
+        !app.state.project.library_files.is_open(),
+        "no review opens"
+    );
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("No cellview has changed on disk since this session read it.")
+    );
+}

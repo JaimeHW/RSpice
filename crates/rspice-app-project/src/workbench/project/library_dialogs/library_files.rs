@@ -324,8 +324,14 @@ pub fn run_library_file_intent(cx: &mut Cx<'_, ProjectFeature>, intent: LibraryF
         }
         LibraryFileIntent::Refresh => {
             cx.model.check_library_files();
-            cx.state.library_files.show(LibraryFilesDialog::Refresh);
-            preselect_refresh(cx);
+            // Nothing to choose from is an answer, not a review: it goes on
+            // the status line, as Virtuoso's Refresh says so in its CIW.
+            if cx.model.refresh_rows().is_empty() {
+                cx.wb.prompt(NOTHING_TO_REFRESH);
+            } else {
+                cx.state.library_files.show(LibraryFilesDialog::Refresh);
+                preselect_refresh(cx);
+            }
         }
         LibraryFileIntent::Detach(library) => {
             let drawings = cx.model.library_placements_outside(&library);
@@ -687,6 +693,9 @@ fn cellview_table(
         });
 }
 
+/// What Refresh says when no cellview changed on disk.
+const NOTHING_TO_REFRESH: &str = "No cellview has changed on disk since this session read it.";
+
 /// Narrower than this, a list of cellviews takes three columns, not six.
 const NARROW_LIST: f32 = 560.0;
 
@@ -864,25 +873,23 @@ fn refresh_dialog(cx: &mut Cx<'_, ProjectFeature>, ctx: &Context) {
                 .to_owned()
         })
     });
-    let empty = rows.is_empty();
-    let mut dialog = Dialog::new(
-        "Refresh cellviews",
-        if empty { "Close" } else { "Reload picked" },
+    // Every change went while the review was open: say so and close it.
+    if rows.is_empty() {
+        cx.state.library_files.close();
+        cx.wb.prompt(NOTHING_TO_REFRESH);
+        return;
+    }
+    let mut dialog = Dialog::new("Refresh cellviews", "Reload picked")
+    .description(
+        "These cellviews changed on disk since this session read them. The picked ones are read again; the rest keep what is loaded.",
     )
-    .description(if empty {
-        "No cellview has changed on disk since this session read it."
-    } else {
-        "These cellviews changed on disk since this session read them. The picked ones are read again; the rest keep what is loaded."
-    })
     .size(DialogSize::Transaction)
     .flush_body()
     .overlay_scrollbar()
     .primary_on_enter(false)
     .initial_focus(DialogInitialFocus::BodyControl)
-    .primary_enabled(empty || (!picked_rows.is_empty() && !edited_picked));
-    if !empty {
-        dialog = dialog.ghost("Cancel");
-    }
+    .primary_enabled(!picked_rows.is_empty() && !edited_picked)
+    .ghost("Cancel");
     if any_edited {
         dialog = dialog.secondary("Changed on disk\u{2026}");
     }
@@ -891,21 +898,18 @@ fn refresh_dialog(cx: &mut Cx<'_, ProjectFeature>, ctx: &Context) {
     }
     let table = &mut cx.state.library_files.table;
     let choice = dialog.show(ctx, |ui| {
-        if !empty {
-            let width = last_column_width(ui, rows.iter().map(|row| (changed_words(row).0, true)));
-            cellview_table(
-                ui,
-                "workbench.project.library-files.refresh",
-                &rows,
-                table,
-                ("Loaded", "On disk", "Status"),
-                width,
-                changed_status,
-            );
-        }
+        let width = last_column_width(ui, rows.iter().map(|row| (changed_words(row).0, true)));
+        cellview_table(
+            ui,
+            "workbench.project.library-files.refresh",
+            &rows,
+            table,
+            ("Loaded", "On disk", "Status"),
+            width,
+            changed_status,
+        );
     });
     match choice {
-        DialogChoice::Primary if empty => cx.state.library_files.close(),
         DialogChoice::Primary => {
             let picked = picked(&cx.state.library_files.table, &rows)
                 .into_iter()
