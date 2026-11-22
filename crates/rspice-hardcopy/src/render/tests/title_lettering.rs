@@ -740,3 +740,34 @@ fn sheet_one_of_several_on_the_asme_form_plots_the_same_revision_note() {
     assert!(note_lines("2 of 3").is_empty());
     assert!(note_lines("1 of 1").is_empty());
 }
+
+/// A Title typed with the sheet's number and count plots this sheet's, as
+/// the canvas letters it.
+#[test]
+fn a_title_naming_the_sheet_number_plots_the_sheets_own() {
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .entry(DrawingSheetTitleFieldId::SheetTitle)
+                .or_default()
+                .value = "Sheet ${#} of ${##}".to_owned();
+        })
+        .unwrap();
+    let values = BTreeMap::from([(
+        DrawingSheetTitleFieldId::Page,
+        rspice_design_model::design_management::drawing_sheet_page_label(2, 5),
+    )]);
+    let lines = plotted_lines_of(&blank_schematic_titled(&format, values));
+    assert!(
+        lines
+            .iter()
+            .any(|(_, _, text)| text.contains("Sheet 2 of 5")),
+        "the Title plots the sheet's number: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|(_, _, text)| !text.contains("${")),
+        "no variable plots by name: {lines:?}"
+    );
+}

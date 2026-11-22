@@ -353,20 +353,32 @@ pub struct ResolvedDrawingSheetTitleField {
 
 /// Resolve the exact visible title fields for canvas and publication.
 /// `authority_values` supplies automatic values plus canonical project-owned
-/// authored values; ordinary authored values remain in the sheet format.
+/// authored values; ordinary authored values remain in the sheet format. A
+/// value naming a [`SheetTextVariable`], such as `Sheet ${#} of ${##}`,
+/// letters its value.
 #[must_use]
 pub fn resolve_drawing_sheet_title_fields(
     format: &SchematicSheetFormat,
     authority_values: &BTreeMap<DrawingSheetTitleFieldId, String>,
 ) -> Vec<ResolvedDrawingSheetTitleField> {
+    // Read only when a field names one, as most blocks never do.
+    let mut variables = None;
     format
         .title_block_field_order()
         .into_iter()
         .filter_map(|id| {
             let authored = format.title_block.fields.get(&id)?;
-            format
-                .title_field_shown(id)
-                .then(|| lettered_title_field(format, authority_values, id, &authored.value))
+            format.title_field_shown(id).then(|| {
+                let mut field = lettered_title_field(format, authority_values, id, &authored.value);
+                if field.value.contains("${") {
+                    let variables = variables
+                        .get_or_insert_with(|| SheetTextVariables::new(format, authority_values));
+                    if let Some(value) = variables.value(SheetTextVariable::Field(id)) {
+                        value.clone_into(&mut field.value);
+                    }
+                }
+                field
+            })
         })
         .collect()
 }

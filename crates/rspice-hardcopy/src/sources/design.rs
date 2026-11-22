@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use rspice_design_model::cell_view::CellViewRef;
-use rspice_design_model::design_management::{DrawingSheetTitleFieldId, SheetCatalog, SheetId};
+use rspice_design_model::design_management::{
+    DrawingSheetTitleFieldId, SheetCatalog, SheetId, drawing_sheet_page_label,
+};
 
 use super::*;
 
@@ -27,12 +29,12 @@ pub fn drawing_sheet_title_values(
     let sheet_title =
         CellViewRef::from_key(source_view).map_or_else(|| source_view.to_owned(), |view| view.cell);
     let page = governed.map_or_else(
-        || "1 of 1".to_owned(),
+        || drawing_sheet_page_label(1, 1),
         |(catalog, sheet_id)| {
             let (page, count) = catalog
                 .page_number_and_count(sheet_id)
                 .unwrap_or((1, u32::try_from(catalog.sheets().len()).unwrap_or(1)));
-            format!("{page} of {count}")
+            drawing_sheet_page_label(page, count)
         },
     );
     values.insert(DrawingSheetTitleFieldId::Project, project.to_owned());

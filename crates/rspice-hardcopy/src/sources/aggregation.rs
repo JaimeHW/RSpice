@@ -92,7 +92,12 @@ pub fn resolve_hardcopy_source_set_with(
                         == Some(rspice_design_model::design_management::SheetPageNumbering::PerPrintSet)
             ) {
                 page += 1;
-                child.publication_page_label = Some(format!("{page} of {per_print_set_count}"));
+                child.publication_page_label = Some(
+                    rspice_design_model::design_management::drawing_sheet_page_label(
+                        page,
+                        per_print_set_count,
+                    ),
+                );
             }
         }
     }

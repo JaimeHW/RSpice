@@ -12,18 +12,28 @@ use super::*;
 pub enum SheetTextVariable {
     /// A title-block field, as the sheet's block letters it.
     Field(DrawingSheetTitleFieldId),
+    /// The sheet's number among its drawing's sheets.
+    SheetNumber,
+    /// How many sheets the drawing has.
+    SheetCount,
 }
 
 impl SheetTextVariable {
     /// Every variable, in the order a list offers them: the title block's
-    /// own order.
-    pub const ALL: [Self; DrawingSheetTitleFieldId::ALL.len()] = {
-        let mut all =
-            [Self::Field(DrawingSheetTitleFieldId::Project); DrawingSheetTitleFieldId::ALL.len()];
-        let mut index = 0;
-        while index < all.len() {
-            all[index] = Self::Field(DrawingSheetTitleFieldId::ALL[index]);
+    /// own order, with the sheet's number and count after its Sheet.
+    pub const ALL: [Self; DrawingSheetTitleFieldId::ALL.len() + 2] = {
+        let mut all = [Self::SheetNumber; DrawingSheetTitleFieldId::ALL.len() + 2];
+        let (mut field, mut index) = (0, 0);
+        while field < DrawingSheetTitleFieldId::ALL.len() {
+            let id = DrawingSheetTitleFieldId::ALL[field];
+            all[index] = Self::Field(id);
             index += 1;
+            if matches!(id, DrawingSheetTitleFieldId::Page) {
+                all[index] = Self::SheetNumber;
+                all[index + 1] = Self::SheetCount;
+                index += 2;
+            }
+            field += 1;
         }
         all
     };
@@ -34,6 +44,8 @@ impl SheetTextVariable {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            Self::SheetNumber => "#",
+            Self::SheetCount => "##",
             Self::Field(field) => match field {
                 DrawingSheetTitleFieldId::Project => "PROJECTNAME",
                 DrawingSheetTitleFieldId::CellView => "CELLVIEW",
@@ -63,11 +75,13 @@ impl SheetTextVariable {
         }
     }
 
-    /// What a list calls the variable: the field's own caption.
+    /// What a list calls the variable: a field's own caption.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Field(field) => field.display_label(),
+            Self::SheetNumber => "Sheet number",
+            Self::SheetCount => "Sheet count",
         }
     }
 
@@ -90,13 +104,19 @@ impl SheetTextVariables {
     /// The values on a sheet of `format` whose automatic and project values
     /// are `authority_values`, as [`resolve_drawing_sheet_title_fields`]
     /// takes them. Each field reads as the block letters it, whether or not
-    /// the block shows it.
+    /// the block shows it, and the sheet's number and count are those its
+    /// Sheet letters. A value that names another, such as a Title typed as
+    /// `Sheet ${#} of ${##}`, reads with that value in its place.
     #[must_use]
     pub fn new(
         format: &SchematicSheetFormat,
         authority_values: &BTreeMap<DrawingSheetTitleFieldId, String>,
     ) -> Self {
-        let values = SheetTextVariable::ALL
+        let (number, count) = authority_values
+            .get(&DrawingSheetTitleFieldId::Page)
+            .and_then(|page| page_number_and_count(page))
+            .unwrap_or((1, 1));
+        let typed: BTreeMap<SheetTextVariable, String> = SheetTextVariable::ALL
             .into_iter()
             .map(|variable| {
                 let value = match variable {
@@ -108,8 +128,23 @@ impl SheetTextVariables {
                             .map_or("", |state| state.value.as_str());
                         lettered_title_field(format, authority_values, field, authored).value
                     }
+                    SheetTextVariable::SheetNumber => number.to_string(),
+                    SheetTextVariable::SheetCount => count.to_string(),
                 };
                 (variable, value)
+            })
+            .collect();
+        // One level: a value naming one that names another letters the
+        // second's name, so nothing can name itself round in a loop.
+        let values = typed
+            .iter()
+            .map(|(variable, value)| {
+                let expanded = expand_text_variables(value, |name| {
+                    SheetTextVariable::from_name(name)
+                        .and_then(|named| typed.get(&named))
+                        .map(|named| Cow::Borrowed(named.as_str()))
+                });
+                (*variable, expanded.into_owned())
             })
             .collect();
         Self { values }
@@ -120,6 +155,22 @@ impl SheetTextVariables {
     pub fn value(&self, variable: SheetTextVariable) -> Option<&str> {
         self.values.get(&variable).map(String::as_str)
     }
+}
+
+/// What a sheet's Sheet box letters: its `number` among its drawing's
+/// `count` sheets. Its number and count are also `${#}` and `${##}`.
+#[must_use]
+pub fn drawing_sheet_page_label(
+    number: impl std::fmt::Display,
+    count: impl std::fmt::Display,
+) -> String {
+    format!("{number} of {count}")
+}
+
+/// The number and count a [`drawing_sheet_page_label`] letters.
+fn page_number_and_count(label: &str) -> Option<(u32, u32)> {
+    let (number, count) = label.split_once(" of ")?;
+    Some((number.parse().ok()?, count.parse().ok()?))
 }
 
 /// A `${` without its closing `}`.
@@ -225,5 +276,43 @@ mod tests {
         );
         assert_eq!(field(DrawingSheetTitleFieldId::Revision), Some("B"));
         assert_eq!(field(DrawingSheetTitleFieldId::Date), Some("—"));
+        // A sheet with no Sheet value is the one sheet of its drawing.
+        assert_eq!(variables.value(SheetTextVariable::SheetNumber), Some("1"));
+        assert_eq!(variables.value(SheetTextVariable::SheetCount), Some("1"));
+    }
+
+    /// A title-block field typed with the sheet's number and count letters
+    /// them, on the canvas and in print alike, since both resolve the block
+    /// through here; a value naming another reads with it in place.
+    #[test]
+    fn a_title_field_letters_the_variables_it_names() {
+        let mut format = SchematicSheetFormat::default();
+        format
+            .title_block
+            .fields
+            .entry(DrawingSheetTitleFieldId::SheetTitle)
+            .or_default()
+            .value = "Sheet ${#} of ${##}, rev ${REVISION}".to_owned();
+        let authority = BTreeMap::from([
+            (
+                DrawingSheetTitleFieldId::Page,
+                drawing_sheet_page_label(2, 5),
+            ),
+            (DrawingSheetTitleFieldId::Revision, "B".to_owned()),
+        ]);
+        let title = resolve_drawing_sheet_title_fields(&format, &authority)
+            .into_iter()
+            .find(|field| field.id == DrawingSheetTitleFieldId::SheetTitle)
+            .expect("the block letters a Title")
+            .value;
+        assert_eq!(title, "Sheet 2 of 5, rev B");
+        let variables = SheetTextVariables::new(&format, &authority);
+        assert_eq!(
+            variables.value(SheetTextVariable::Field(
+                DrawingSheetTitleFieldId::SheetTitle
+            )),
+            Some("Sheet 2 of 5, rev B")
+        );
+        assert_eq!(variables.value(SheetTextVariable::SheetNumber), Some("2"));
     }
 }

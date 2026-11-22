@@ -4,7 +4,7 @@
 
 use super::Model;
 use crate::state::{DesignSheet, DrawingSheetTitleFieldId, SchematicSheetFormat, SheetId};
-use rspice_design_model::design_management::SheetTextVariables;
+use rspice_design_model::design_management::{SheetTextVariables, drawing_sheet_page_label};
 use rspice_schematic_editor::view::drawing_sheet::{
     ActiveDrawingSheet, DrawingSheetGeometry, zone_on_format,
 };
@@ -27,7 +27,7 @@ impl Model {
                 geometry: DrawingSheetGeometry::from_format(&format),
                 format,
                 design_name: self.workspace.content.active_view.cell.clone(),
-                page_label: format!("{page} of {page_count}"),
+                page_label: drawing_sheet_page_label(page, page_count),
             };
         }
 
@@ -42,7 +42,7 @@ impl Model {
             geometry: DrawingSheetGeometry::from_format(&format),
             format,
             design_name: self.workspace.content.active_view.cell.clone(),
-            page_label: "1 of 1".to_owned(),
+            page_label: drawing_sheet_page_label(1, 1),
         }
     }
 
