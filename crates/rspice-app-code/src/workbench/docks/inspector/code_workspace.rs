@@ -498,9 +498,10 @@ fn deck_file_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
     };
     let encoding = messages.text(MessageId::NetlistEncoding);
     let line_endings = messages.text(MessageId::CodeSourceLineEndings);
+    let line_ending = file.line_ending.label(messages);
     let save = [
         Fact::new(&encoding, file.encoding.label()),
-        Fact::new(&line_endings, file.line_ending.label()),
+        Fact::new(&line_endings, &line_ending),
     ];
     if let Some(facts) = reads.deck_facts {
         // The rows every deck page's inspector lists, then how Save writes

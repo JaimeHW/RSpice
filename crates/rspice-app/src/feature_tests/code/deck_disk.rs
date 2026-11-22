@@ -154,8 +154,13 @@ fn reload_takes_the_file_on_disk_for_the_edits() {
     let path = folder.write("amp.cir", DECK);
     let mut state = edited_then_changed_on_disk(&path);
 
-    deck_files::reload_from_disk(&mut state.model, &mut state.code.netlist, None)
-        .expect("reloaded");
+    deck_files::reload_from_disk(
+        &mut state.model,
+        &mut state.code.netlist,
+        None,
+        state.workbench.messages(),
+    )
+    .expect("reloaded");
 
     assert_eq!(state.model.simulation.source.netlist_content, ON_DISK);
     assert_eq!(root(&state).text, ON_DISK);
@@ -171,7 +176,8 @@ fn keep_mine_keeps_the_edits_and_save_writes_them_over_the_file() {
     let mut state = edited_then_changed_on_disk(&path);
 
     deck_files::keep_mine(&mut state.code.netlist, None);
-    deck_files::save_shown_file(&mut state.code.netlist).expect("saved");
+    deck_files::save_shown_file(&mut state.code.netlist, state.workbench.messages())
+        .expect("saved");
 
     assert_eq!(std::fs::read_to_string(&path).expect("the deck"), EDITED);
     assert!(!root(&state).dirty);
@@ -185,8 +191,13 @@ fn compare_shows_the_file_on_disk_against_the_tab() {
     let path = folder.write("amp.cir", DECK);
     let mut state = edited_then_changed_on_disk(&path);
 
-    deck_files::compare_with_disk(&mut state.model, &mut state.code.netlist, None)
-        .expect("compared");
+    deck_files::compare_with_disk(
+        &mut state.model,
+        &mut state.code.netlist,
+        None,
+        state.workbench.messages(),
+    )
+    .expect("compared");
 
     assert!(
         state.code.netlist.front.is_comparison(),
@@ -246,8 +257,13 @@ fn comparing_an_include_with_its_file_names_the_include_on_the_tab() {
         .map(str::to_owned)
         .expect("the include is in front");
 
-    deck_files::compare_with_disk(&mut state.model, &mut state.code.netlist, Some(&key))
-        .expect("compared");
+    deck_files::compare_with_disk(
+        &mut state.model,
+        &mut state.code.netlist,
+        Some(&key),
+        state.workbench.messages(),
+    )
+    .expect("compared");
 
     let labels =
         rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(&app.state)
@@ -324,6 +340,7 @@ fn a_deck_whose_file_is_gone_is_found_again_with_locate() {
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
         &mut state.runs,
+        state.workbench.messages(),
     );
     let missing =
         deck_files::missing_deck(&state.model, &state.code.netlist).expect("the deck is missing");
@@ -337,6 +354,7 @@ fn a_deck_whose_file_is_gone_is_found_again_with_locate() {
         &mut state.runs,
         id,
         &moved,
+        state.workbench.messages(),
     )
     .expect("located");
 
@@ -366,17 +384,20 @@ fn remove_from_project_leaves_the_file() {
             &mut state.model,
             &mut state.code.netlist,
             &mut state.code.netlist_open_documents,
-            id
+            id,
+            state.workbench.messages(),
         ),
         Err("Save amp.cir before removing amp.cir from the project.".to_owned())
     );
-    deck_files::save_shown_file(&mut state.code.netlist).expect("saved");
+    deck_files::save_shown_file(&mut state.code.netlist, state.workbench.messages())
+        .expect("saved");
 
     let removed = deck_files::remove_deck(
         &mut state.model,
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
         id,
+        state.workbench.messages(),
     );
 
     assert_eq!(removed, Ok("amp.cir".to_owned()));
@@ -502,7 +523,8 @@ fn a_new_deck_with_a_relative_and_an_absolute_include_runs() {
         &mut app.state.code.netlist,
         text.clone()
     ));
-    deck_files::save_shown_file(&mut app.state.code.netlist).expect("saved");
+    deck_files::save_shown_file(&mut app.state.code.netlist, app.state.workbench.messages())
+        .expect("saved");
     frame(&themed_context(), &mut app, DESKTOP);
 
     assert_eq!(std::fs::read_to_string(&path).expect("the deck"), text);

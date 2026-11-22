@@ -402,10 +402,13 @@ fn a_deck_kept_as_text_exports_alone_or_as_a_zip_of_it_and_its_files() {
     let mut state = AppState::default();
     assert!(state.import_deck_files(vec![("amp.zip".to_owned(), testbench_zip())]));
 
+    let messages = state.workbench.messages();
     let (name, alone) =
-        deck_files::export_stored_deck(&state.model, &state.code.netlist, false).expect("the deck");
-    let (zip_name, zip) = deck_files::export_stored_deck(&state.model, &state.code.netlist, true)
-        .expect("the deck and its files");
+        deck_files::export_stored_deck(&state.model, &state.code.netlist, false, messages)
+            .expect("the deck");
+    let (zip_name, zip) =
+        deck_files::export_stored_deck(&state.model, &state.code.netlist, true, messages)
+            .expect("the deck and its files");
 
     assert_eq!(name, "amp_tb.cir");
     assert_eq!(alone, TESTBENCH.as_bytes());

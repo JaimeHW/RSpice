@@ -20,11 +20,11 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use crate::state::{DeckId, NetlistDocumentId, StoredDeck, StoredDeckFile, TextEncoding};
-use crate::workbench::MessageId;
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, NetlistRoot, NetlistTab, OwnedNetlistReplacement,
 };
 use crate::workbench::state::WorkspaceDocumentId;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// The line separators a file was read with, which the inspector shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -40,14 +40,14 @@ pub enum LineEnding {
 impl LineEnding {
     /// The separators' name, as the inspector shows it.
     #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::None => "None",
-            Self::Lf => "LF",
-            Self::CrLf => "CRLF",
-            Self::Cr => "CR",
-            Self::Mixed => "Mixed",
-        }
+    pub fn label(self, messages: MessageCatalog) -> String {
+        messages.text(match self {
+            Self::None => MessageId::CodeSourceLineEndingsNone,
+            Self::Lf => MessageId::CodeSourceLineEndingsLf,
+            Self::CrLf => MessageId::CodeSourceLineEndingsCrLf,
+            Self::Cr => MessageId::CodeSourceLineEndingsCr,
+            Self::Mixed => MessageId::CodeSourceLineEndingsMixedAny,
+        })
     }
 
     /// The separators `text` uses.
@@ -143,9 +143,13 @@ pub struct DiskChange {
 
 impl OpenFile {
     /// The file at `path` whose content is `bytes`.
-    pub fn from_bytes(path: PathBuf, bytes: &[u8]) -> Result<Self, String> {
+    pub fn from_bytes(
+        path: PathBuf,
+        bytes: &[u8],
+        messages: MessageCatalog,
+    ) -> Result<Self, String> {
         let (text, encoding) = TextEncoding::decode(bytes)
-            .map_err(|error| format!("{} could not be read: {error}", file_name(&path)))?;
+            .map_err(|error| unreadable(messages, &file_name(&path), &error))?;
         let (text, line_ending) = LineEnding::read(text);
         Ok(Self {
             line_ending,
@@ -295,12 +299,48 @@ fn file_name(path: &Path) -> String {
     )
 }
 
+/// Why the file `name` was not read.
+fn unreadable(messages: MessageCatalog, name: &str, error: &dyn std::fmt::Display) -> String {
+    messages.format(
+        MessageId::NetlistFileUnreadable,
+        &[("name", name), ("error", &error.to_string())],
+    )
+}
+
+/// Why the file `name` was not saved.
+#[cfg(not(target_arch = "wasm32"))]
+fn not_saved(messages: MessageCatalog, name: &str, error: &dyn std::fmt::Display) -> String {
+    messages.format(
+        MessageId::NetlistFileNotSaved,
+        &[("name", name), ("error", &error.to_string())],
+    )
+}
+
+/// The file `include` names (the deck for `None`) is not open.
+fn not_open(messages: MessageCatalog, include: Option<&str>) -> String {
+    match include {
+        Some(key) => messages.format(
+            MessageId::NetlistIncludeNotOpen,
+            &[("file", &file_name(Path::new(key)))],
+        ),
+        None => messages.text(MessageId::NetlistNoDeckOpen),
+    }
+}
+
+/// `file` holds no change on disk to reload or compare.
+fn nothing_newer(messages: MessageCatalog, file: &OpenFile) -> String {
+    messages.format(
+        MessageId::NetlistDiskNothingNewer,
+        &[("name", &file.name())],
+    )
+}
+
 /// Read the file at `path`.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn read_file(path: &Path) -> Result<OpenFile, String> {
+pub fn read_file(path: &Path, messages: MessageCatalog) -> Result<OpenFile, String> {
     let bytes = std::fs::read(path)
-        .map_err(|error| format!("{} could not be read: {error}", path.display()))?;
-    let mut file = OpenFile::from_bytes(path.to_path_buf(), &bytes)?;
+        .map_err(|error| unreadable(messages, &path.display().to_string(), &error))?;
+    let mut file = OpenFile::from_bytes(path.to_path_buf(), &bytes, messages)?;
     file.disk = Some(disk_stamp(path, &file.text));
     Ok(file)
 }
@@ -333,7 +373,7 @@ enum OnDisk {
 /// Look at the file on disk: same length and time means unchanged, else its
 /// text decides.
 #[cfg(not(target_arch = "wasm32"))]
-fn look_at_disk(file: &OpenFile) -> OnDisk {
+fn look_at_disk(file: &OpenFile, messages: MessageCatalog) -> OnDisk {
     let Some(stamp) = &file.disk else {
         return OnDisk::Same;
     };
@@ -343,7 +383,7 @@ fn look_at_disk(file: &OpenFile) -> OnDisk {
     if metadata.len() == stamp.len && metadata.modified().ok() == stamp.modified {
         return OnDisk::Same;
     }
-    let Ok(read) = read_file(&file.path) else {
+    let Ok(read) = read_file(&file.path, messages) else {
         return OnDisk::Gone;
     };
     let Some(now) = read.disk else {
@@ -395,7 +435,7 @@ pub fn check_disk(
         else {
             continue;
         };
-        match look_at_disk(file) {
+        match look_at_disk(file, messages) {
             OnDisk::Same | OnDisk::Gone => {}
             OnDisk::Touched(stamp) => file.disk = Some(stamp),
             OnDisk::Changed(change) if file.dirty => file.disk_change = Some(Box::new(change)),
@@ -465,13 +505,17 @@ pub fn reload_from_disk(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     include: Option<&str>,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
-    let change = netlist
+    let file = netlist
         .open_deck
         .as_mut()
         .and_then(|deck| deck.file_mut(include))
-        .and_then(|file| file.disk_change.take())
-        .ok_or_else(|| "Nothing on disk is newer than the tab.".to_owned())?;
+        .ok_or_else(|| not_open(messages, include))?;
+    let change = file
+        .disk_change
+        .take()
+        .ok_or_else(|| nothing_newer(messages, file))?;
     take_disk_text(model, netlist, include, *change);
     Ok(())
 }
@@ -495,24 +539,25 @@ pub fn compare_with_disk(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     include: Option<&str>,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     let file = netlist
         .open_deck
         .as_ref()
         .and_then(|deck| deck.file(include))
-        .ok_or_else(|| "The file is no longer open.".to_owned())?;
+        .ok_or_else(|| not_open(messages, include))?;
     let change = file
         .disk_change
         .as_deref()
-        .ok_or_else(|| "Nothing on disk is newer than the tab.".to_owned())?;
+        .ok_or_else(|| nothing_newer(messages, file))?;
     let name = file.name();
     let deck = netlist
         .open_deck
         .as_ref()
         .map(|deck| deck.id)
-        .ok_or_else(|| "The file is no longer open.".to_owned())?;
-    let disk = format!("{name} on disk");
-    let yours = format!("{name} in RSpice");
+        .ok_or_else(|| not_open(messages, include))?;
+    let disk = messages.format(MessageId::NetlistDiffOnDisk, &[("name", &name)]);
+    let yours = messages.format(MessageId::NetlistDiffInRSpice, &[("name", &name)]);
     let diff = similar::TextDiff::from_lines(change.text.as_str(), file.text.as_str())
         .unified_diff()
         .context_radius(3)
@@ -536,7 +581,7 @@ pub fn compare_with_disk(
 /// with, in its encoding, through a temporary file beside it renamed over
 /// it. A file something else changed since it was read is not overwritten.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
+pub fn save_file(file: &mut OpenFile, messages: MessageCatalog) -> Result<(), String> {
     let name = file.name();
     // A file that had one line and no separator takes the editor's.
     if file.line_ending == LineEnding::None {
@@ -545,26 +590,23 @@ pub fn save_file(file: &mut OpenFile) -> Result<(), String> {
     let bytes = file
         .encoding
         .encode(&file.line_ending.write(&file.text))
-        .map_err(|error| format!("{name} was not saved: {error}"))?;
+        .map_err(|error| not_saved(messages, &name, &error))?;
     if file.disk_change.is_none() {
-        match look_at_disk(file) {
+        match look_at_disk(file, messages) {
             OnDisk::Changed(change) => file.disk_change = Some(Box::new(change)),
             OnDisk::Touched(stamp) => file.disk = Some(stamp),
             OnDisk::Same | OnDisk::Gone => {}
         }
     }
     if file.disk_change.is_some() {
-        return Err(format!(
-            "{name} changed on disk since you opened it, so it was not saved: reload it, \
-             keep yours or compare the two."
-        ));
+        return Err(messages.format(MessageId::NetlistSaveChangedOnDisk, &[("name", &name)]));
     }
     let temporary = file.path.with_file_name(format!(".{name}.saving"));
     std::fs::write(&temporary, &bytes)
         .and_then(|()| std::fs::rename(&temporary, &file.path))
         .map_err(|error| {
             let _ = std::fs::remove_file(&temporary);
-            format!("{name} was not saved: {error}")
+            not_saved(messages, &name, &error)
         })?;
     file.disk = Some(disk_stamp(&file.path, &file.text));
     file.dirty = false;
@@ -584,6 +626,7 @@ pub fn save_deck_as(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     path: &Path,
+    messages: MessageCatalog,
 ) -> Result<String, String> {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let folder = model
@@ -593,16 +636,16 @@ pub fn save_deck_as(
         .data_root()
         .map(Path::to_path_buf);
     if netlist.open_deck.as_ref().is_some_and(OpenDeck::is_stored) {
-        return save_stored_deck_as_files(model, netlist, open_documents, runs, &path);
+        return save_stored_deck_as_files(model, netlist, open_documents, runs, &path, messages);
     }
     let deck = netlist
         .open_deck
         .as_mut()
-        .ok_or_else(|| "Open a deck to save it as another.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistNoDeckOpen))?;
     let was = (deck.root.path.clone(), deck.root.disk.take());
     deck.root.path = path.clone();
     deck.root.disk_change = None;
-    if let Err(error) = save_file(&mut deck.root) {
+    if let Err(error) = save_file(&mut deck.root, messages) {
         (deck.root.path, deck.root.disk) = was;
         return Err(error);
     }
@@ -632,18 +675,19 @@ fn save_stored_deck_as_files(
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     path: &Path,
+    messages: MessageCatalog,
 ) -> Result<String, String> {
     let deck = netlist
         .open_deck
         .as_ref()
-        .ok_or_else(|| "No deck is open.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistNoDeckOpen))?;
     let mut writes = vec![(
         path.to_path_buf(),
         deck.root
             .encoding
             .encode(&deck.root.line_ending.write(&deck.root.text))?,
     )];
-    for (at, key) in stored_file_places(model, deck, path)? {
+    for (at, key) in stored_file_places(model, deck, path, messages)? {
         let Some(file) = deck
             .stored_files
             .iter()
@@ -657,28 +701,46 @@ fn save_stored_deck_as_files(
             if *other == bytes {
                 continue;
             }
-            return Err(format!(
-                "{} would be written twice, with other text: {} cannot be saved as files.",
-                at.display(),
-                deck.root.name()
+            return Err(messages.format(
+                MessageId::NetlistSaveAsFilesTwice,
+                &[
+                    ("name", &deck.root.name()),
+                    ("path", &at.display().to_string()),
+                ],
             ));
         }
         if std::fs::read(&at).is_ok_and(|there| there != bytes) {
-            return Err(format!(
-                "{} is already there, with other text: choose another folder for {}.",
-                at.display(),
-                deck.root.name()
+            return Err(messages.format(
+                MessageId::NetlistSaveAsFilesTaken,
+                &[
+                    ("path", &at.display().to_string()),
+                    ("name", &deck.root.name()),
+                ],
             ));
         }
         writes.push((at, bytes));
     }
     for (at, bytes) in &writes {
         if let Some(parent) = at.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("{} could not be made: {error}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|error| {
+                messages.format(
+                    MessageId::NetlistFolderNotCreated,
+                    &[
+                        ("path", &parent.display().to_string()),
+                        ("error", &error.to_string()),
+                    ],
+                )
+            })?;
         }
-        std::fs::write(at, bytes)
-            .map_err(|error| format!("{} could not be written: {error}", at.display()))?;
+        std::fs::write(at, bytes).map_err(|error| {
+            messages.format(
+                MessageId::NetlistFileNotWritten,
+                &[
+                    ("path", &at.display().to_string()),
+                    ("error", &error.to_string()),
+                ],
+            )
+        })?;
     }
     let id = deck.id;
     let project_folder = model
@@ -692,11 +754,11 @@ fn save_stored_deck_as_files(
         .decks
         .iter_mut()
         .find(|entry| entry.id == id)
-        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistDeckNotInProject))?;
     entry.source = crate::state::ProjectDeck::for_file(path, project_folder.as_deref()).source;
     content.decks_dirty = true;
     let entry = entry.clone();
-    let open = read_project_deck(&entry, project_folder.as_deref())?;
+    let open = read_project_deck(&entry, project_folder.as_deref(), messages)?;
     let name = open.root.name();
     close_open_deck(model, netlist, open_documents);
     install_open_deck(model, netlist, open_documents, runs, open);
@@ -713,6 +775,7 @@ fn stored_file_places(
     model: &Model,
     deck: &OpenDeck,
     path: &Path,
+    messages: MessageCatalog,
 ) -> Result<Vec<(PathBuf, String)>, String> {
     let files = deck.stored_files.as_deref().unwrap_or_default();
     let name = deck.root.name();
@@ -748,11 +811,15 @@ fn stored_file_places(
         for owner_at in owners {
             let folder = owner_at.parent().unwrap_or(Path::new("."));
             let at = disk_join(folder, requested).ok_or_else(|| {
-                format!(
-                    "Line {} of {owner} reads {requested}, above the top of the disk from {}: \
-                     save {name} in a folder further down.",
-                    dependency.directive_line(),
-                    folder.display()
+                messages.format(
+                    MessageId::NetlistSaveAsFilesAboveTop,
+                    &[
+                        ("line", &dependency.directive_line().to_string()),
+                        ("file", &owner),
+                        ("path", requested),
+                        ("folder", &folder.display().to_string()),
+                        ("name", &name),
+                    ],
                 )
             })?;
             let place = (at.clone(), key.clone());
@@ -1029,13 +1096,14 @@ pub fn export_stored_deck(
     model: &Model,
     netlist: &NetlistDocumentState,
     with_files: bool,
+    messages: MessageCatalog,
 ) -> Result<(String, Vec<u8>), String> {
     let id = netlist
         .open_deck
         .as_ref()
         .filter(|deck| deck.is_stored())
         .map(|deck| deck.id)
-        .ok_or_else(|| "Open a deck kept in the project to export it.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistExportNeedsStoredDeck))?;
     let deck = model
         .workspace
         .content
@@ -1043,7 +1111,7 @@ pub fn export_stored_deck(
         .iter()
         .find(|deck| deck.id == id)
         .and_then(crate::state::ProjectDeck::stored_deck)
-        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistDeckNotInProject))?;
     if !with_files {
         return Ok((deck.name.clone(), deck.encoding.encode(&deck.text)?));
     }
@@ -1108,7 +1176,7 @@ pub fn sync_before_run(
         }
         for file in std::iter::once(&mut deck.root).chain(deck.includes.iter_mut()) {
             if file.dirty {
-                save_file(file)?;
+                save_file(file, messages)?;
             }
         }
         Ok(notices)
@@ -1230,6 +1298,7 @@ pub fn remove_deck(
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     id: DeckId,
+    messages: MessageCatalog,
 ) -> Result<String, String> {
     let name = model
         .workspace
@@ -1238,12 +1307,12 @@ pub fn remove_deck(
         .iter()
         .find(|deck| deck.id == id)
         .map(crate::state::ProjectDeck::name)
-        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistDeckNotInProject))?;
     if let Some(open) = netlist.open_deck.as_ref().filter(|deck| deck.id == id) {
         if let Some(unsaved) = open.unsaved() {
-            return Err(format!(
-                "Save {} before removing {name} from the project.",
-                unsaved.name()
+            return Err(messages.format(
+                MessageId::NetlistSaveBeforeRemoving,
+                &[("file", &unsaved.name()), ("name", &name)],
             ));
         }
         close_open_deck(model, netlist, open_documents);
@@ -1295,9 +1364,10 @@ pub fn locate_deck(
     runs: &mut RunsState,
     id: DeckId,
     path: &Path,
+    messages: MessageCatalog,
 ) -> Result<(), String> {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let root = read_file(&path)?;
+    let root = read_file(&path, messages)?;
     let folder = model
         .workspace
         .content
@@ -1309,7 +1379,7 @@ pub fn locate_deck(
         .decks
         .iter_mut()
         .find(|deck| deck.id == id)
-        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistDeckNotInProject))?;
     deck.source = crate::state::ProjectDeck::for_file(&path, folder.as_deref()).source;
     content.decks_dirty = true;
     install_open_deck(
@@ -1330,18 +1400,22 @@ pub fn locate_deck(
 /// Save the file in front of the Netlist workspace: the deck, or the
 /// include on its tab.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn save_shown_file(netlist: &mut NetlistDocumentState) -> Result<(), String> {
+pub fn save_shown_file(
+    netlist: &mut NetlistDocumentState,
+    messages: MessageCatalog,
+) -> Result<(), String> {
     if !netlist.front.shows_deck() {
-        return Err("Only a deck or an include it reads is saved to its file.".to_owned());
+        return Err(messages.text(MessageId::NetlistSaveNotADeckFile));
     }
     let include = netlist.front.include().map(str::to_owned);
     let file = netlist
         .open_deck
         .as_mut()
         .filter(|deck| !deck.is_stored())
-        .and_then(|deck| deck.file_mut(include.as_deref()))
-        .ok_or_else(|| "The file is no longer open.".to_owned())?;
-    save_file(file)
+        .ok_or_else(|| messages.text(MessageId::NetlistSaveNotADeckFile))?
+        .file_mut(include.as_deref())
+        .ok_or_else(|| not_open(messages, include.as_deref()))?;
+    save_file(file, messages)
 }
 
 /// For a deck the project keeps as text, in front of the page with `shown`
@@ -1513,7 +1587,7 @@ pub fn add_stored_decks(
         content.decks.push(entry);
     }
     let Some(open) = first else {
-        return Err("No deck was found to add.".to_owned());
+        return Err(messages.text(MessageId::NetlistNoDeckToAdd));
     };
     content.decks_dirty = true;
     install_open_deck(model, netlist, open_documents, runs, open);
@@ -1564,7 +1638,7 @@ pub fn open_deck(
             return Err(save_first(messages, unsaved));
         }
     }
-    let root = read_file(&path)?;
+    let root = read_file(&path, messages)?;
     let folder = model
         .workspace
         .content
@@ -1609,6 +1683,7 @@ pub fn open_deck(
 fn read_project_deck(
     deck: &crate::state::ProjectDeck,
     project_folder: Option<&Path>,
+    messages: MessageCatalog,
 ) -> Result<OpenDeck, String> {
     if let Some(stored) = deck.stored_deck() {
         return Ok(OpenDeck::from_stored(deck.id, stored));
@@ -1616,7 +1691,7 @@ fn read_project_deck(
     let path = deck.file_path(project_folder).unwrap_or_default();
     #[cfg(not(target_arch = "wasm32"))]
     {
-        read_file(&path).map(|root| OpenDeck {
+        read_file(&path, messages).map(|root| OpenDeck {
             id: deck.id,
             root,
             includes: Vec::new(),
@@ -1624,10 +1699,12 @@ fn read_project_deck(
         })
     }
     #[cfg(target_arch = "wasm32")]
-    Err(format!(
-        "{} is a file on the desktop ({}). Open the project on the desktop to edit or run it.",
-        deck.name(),
-        path.display()
+    Err(messages.format(
+        MessageId::NetlistDeckOnDesktop,
+        &[
+            ("name", &deck.name()),
+            ("path", &path.display().to_string()),
+        ],
     ))
 }
 
@@ -1655,8 +1732,8 @@ pub fn open_deck_by_id(
         .decks
         .iter()
         .find(|deck| deck.id == id)
-        .ok_or_else(|| "The deck is no longer in the project.".to_owned())?;
-    match read_project_deck(deck, model.workspace.content.project.data_root()) {
+        .ok_or_else(|| messages.text(MessageId::NetlistDeckNotInProject))?;
+    match read_project_deck(deck, model.workspace.content.project.data_root(), messages) {
         Ok(open) => {
             install_open_deck(model, netlist, open_documents, runs, open);
             Ok(())
@@ -1678,6 +1755,7 @@ pub fn show_project_deck(
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
+    messages: MessageCatalog,
 ) {
     if show_deck(model, netlist) {
         return;
@@ -1686,7 +1764,7 @@ pub fn show_project_deck(
         show_missing_deck(model, netlist, id);
         return;
     }
-    open_project_deck(model, netlist, open_documents, runs);
+    open_project_deck(model, netlist, open_documents, runs, messages);
 }
 
 /// The deck Run runs away from the Netlist workspace, while the project's
@@ -1731,6 +1809,7 @@ pub fn open_project_deck(
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
+    messages: MessageCatalog,
 ) {
     if netlist.open_deck.is_some() {
         return;
@@ -1742,7 +1821,7 @@ pub fn open_project_deck(
         return;
     }
     let id = deck.id;
-    match read_project_deck(deck, model.workspace.content.project.data_root()) {
+    match read_project_deck(deck, model.workspace.content.project.data_root(), messages) {
         Ok(open) => install_open_deck(model, netlist, open_documents, runs, open),
         Err(error) => {
             netlist.unreadable_deck = Some(id);
@@ -1852,7 +1931,7 @@ pub fn show_include(
             });
         } else {
             #[cfg(not(target_arch = "wasm32"))]
-            deck.includes.push(read_file(path)?);
+            deck.includes.push(read_file(path, messages)?);
             #[cfg(target_arch = "wasm32")]
             return Err(messages.format(
                 MessageId::NetlistIncludeNotOpen,

@@ -2112,13 +2112,15 @@ fn every_submenu_row_draws_the_workbench_chevron() {
 
 /// The source editor's own words, its completion list over a deck, the
 /// words of Rename, Find references and Format document over a deck or a
-/// Verilog-A source, and a deck import's refusals come from the message
+/// Verilog-A source, a deck import's refusals, and why a deck or one of its
+/// files was not read, saved, exported or removed come from the message
 /// catalogue: a reader in another language, or in the pseudo-locale that
 /// stands for one, sees none of them in English.
 ///
 /// A string literal in these files' production code that reads as words (a
 /// capitalised word, or two words) is a sentence the catalogue does not
-/// hold. Identifiers, test code and panic messages are not read.
+/// hold. Identifiers, test code, panic messages and the comment lines a deck
+/// is written with are not read.
 #[test]
 fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue() {
     const FILES: &[&str] = &[
@@ -2147,6 +2149,7 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         "rspice-app-code/src/workbench/surfaces/netlist/deck_bands.rs",
         "rspice-app-code/src/workbench/surfaces/netlist/transfer.rs",
         "rspice-app-code/src/workbench/workflows/deck_import.rs",
+        "rspice-app-code/src/workbench/documents/deck_files.rs",
     ];
     // A literal on a line that names an id, a panic, an assertion or a debug
     // dump is never shown to a reader.
@@ -2173,7 +2176,12 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         let lines = code.lines().collect::<Vec<_>>();
         for (line, text) in string_literals(&code) {
             let written = lines.get(line - 1).copied().unwrap_or_default();
-            if reads_as_words(&text) && !NOT_SHOWN.iter().any(|mark| written.contains(mark)) {
+            // A SPICE comment card is a line of the deck's own file.
+            let deck_text = text.starts_with("* ");
+            if reads_as_words(&text)
+                && !deck_text
+                && !NOT_SHOWN.iter().any(|mark| written.contains(mark))
+            {
                 offenders.push(format!("{file}:{line}: {text:?}"));
             }
         }

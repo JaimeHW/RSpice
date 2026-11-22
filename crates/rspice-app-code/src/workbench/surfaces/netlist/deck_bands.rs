@@ -76,20 +76,24 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
         });
         let include = cx.state.netlist.front.include().map(str::to_owned);
         let answered = match pressed {
-            Some(DiskAnswer::Reload) => {
-                deck_files::reload_from_disk(cx.model, &mut cx.state.netlist, include.as_deref())
-                    .map(|()| messages.format(MessageId::NetlistDeckReloaded, &[("name", &name)]))
-            }
+            Some(DiskAnswer::Reload) => deck_files::reload_from_disk(
+                cx.model,
+                &mut cx.state.netlist,
+                include.as_deref(),
+                messages,
+            )
+            .map(|()| messages.format(MessageId::NetlistDeckReloaded, &[("name", &name)])),
             Some(DiskAnswer::KeepMine) => {
                 deck_files::keep_mine(&mut cx.state.netlist, include.as_deref());
                 Ok(messages.format(MessageId::NetlistDeckKeptMine, &[("name", &name)]))
             }
-            Some(DiskAnswer::Compare) => {
-                deck_files::compare_with_disk(cx.model, &mut cx.state.netlist, include.as_deref())
-                    .map(|()| {
-                        messages.format(MessageId::NetlistDeckComparedWithDisk, &[("name", &name)])
-                    })
-            }
+            Some(DiskAnswer::Compare) => deck_files::compare_with_disk(
+                cx.model,
+                &mut cx.state.netlist,
+                include.as_deref(),
+                messages,
+            )
+            .map(|()| messages.format(MessageId::NetlistDeckComparedWithDisk, &[("name", &name)])),
             None => return,
         };
         match answered {
@@ -206,6 +210,7 @@ fn answer_missing(
             &mut cx.state.netlist,
             &mut cx.state.netlist_open_documents,
             missing.id,
+            messages,
         ) {
             Ok(name) => cx
                 .wb
@@ -224,6 +229,7 @@ fn answer_missing(
             cx.runs,
             missing.id,
             &path,
+            messages,
         ) {
             Ok(()) => cx.wb.prompt(messages.format(
                 MessageId::NetlistDeckLocated,

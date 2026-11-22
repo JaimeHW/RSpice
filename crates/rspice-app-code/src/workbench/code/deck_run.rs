@@ -143,6 +143,7 @@ fn bring_project_deck(cx: &mut Cx<'_, CodeFeature>) -> bool {
         &mut cx.state.netlist,
         &mut cx.state.netlist_open_documents,
         cx.runs,
+        cx.wb.messages(),
     );
     if cx.state.netlist.open_deck.is_some() {
         return true;

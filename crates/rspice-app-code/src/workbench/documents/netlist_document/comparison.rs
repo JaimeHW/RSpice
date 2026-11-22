@@ -190,7 +190,10 @@ fn disk_text(
             &[("name", &deck.root.name()), ("error", &error.to_string())],
         )
     })?;
-    Ok(super::super::deck_files::OpenFile::from_bytes(deck.root.path.clone(), &bytes)?.text)
+    Ok(
+        super::super::deck_files::OpenFile::from_bytes(deck.root.path.clone(), &bytes, messages)?
+            .text,
+    )
 }
 
 /// A deck in the browser is kept in the project, with no file to read.

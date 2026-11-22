@@ -103,6 +103,7 @@ pub(super) fn open_deck(cx: &mut Cx<'_, CodeFeature>) {
         &mut cx.state.netlist,
         &mut cx.state.netlist_open_documents,
         cx.runs,
+        cx.wb.messages(),
     );
     #[cfg(target_arch = "wasm32")]
     let _ = cx;

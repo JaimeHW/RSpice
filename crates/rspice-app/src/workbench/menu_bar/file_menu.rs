@@ -102,6 +102,7 @@ pub(crate) fn dispatch_file_menu_action(
                 if let Err(error) =
                     rspice_app_code::workbench::documents::deck_files::save_shown_file(
                         &mut state.code.netlist,
+                        state.workbench.messages(),
                     )
                 {
                     state.prompt(error);

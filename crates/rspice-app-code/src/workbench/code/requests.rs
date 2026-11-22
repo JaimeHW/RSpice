@@ -216,9 +216,10 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         }
         CodeRequest::SaveDeckFile => {
             #[cfg(not(target_arch = "wasm32"))]
-            if let Err(error) =
-                crate::workbench::documents::deck_files::save_shown_file(&mut cx.state.netlist)
-            {
+            if let Err(error) = crate::workbench::documents::deck_files::save_shown_file(
+                &mut cx.state.netlist,
+                cx.wb.messages(),
+            ) {
                 cx.wb.prompt(error);
             }
         }

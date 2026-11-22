@@ -778,6 +778,7 @@ impl CodeFeature {
             &mut cx.state.netlist,
             &mut cx.state.netlist_open_documents,
             cx.runs,
+            cx.wb.messages(),
         );
     }
 

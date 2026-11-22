@@ -325,6 +325,7 @@ impl AppState {
                 &self.model,
                 &self.code.netlist,
                 with_files,
+                self.workbench.messages(),
             ) {
                 Ok(export) => export,
                 Err(error) => {
@@ -385,6 +386,7 @@ impl AppState {
             &mut self.code.netlist_open_documents,
             &mut self.runs,
             path,
+            self.workbench.messages(),
         ) {
             Ok(name) => {
                 self.prompt(format!(
