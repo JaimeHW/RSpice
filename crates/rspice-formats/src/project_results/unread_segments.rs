@@ -113,6 +113,7 @@ fn damaged(
         column: reference.column,
         column_digest: reference.stated_column_digest()?,
         rows: reference.column_rows,
+        ascending: reference.ascending,
     };
     WaveformValues::stored(Arc::new(source), window)
 }
@@ -129,6 +130,8 @@ struct DamagedSegment {
     column_digest: Option<[u8; 32]>,
     /// The rows the saved result stated.
     rows: u64,
+    /// Whether the rows ascend strictly, as the saved result stated it.
+    ascending: bool,
 }
 
 impl ColumnSource for DamagedSegment {
@@ -149,6 +152,10 @@ impl ColumnSource for DamagedSegment {
 
     fn read(&self, _first: u64, _out: &mut [f64]) -> Result<(), String> {
         Err(self.failure.clone())
+    }
+
+    fn ascending(&self) -> bool {
+        self.ascending
     }
 
     fn identity(&self) -> Option<([u8; 32], u64)> {

@@ -152,6 +152,7 @@ impl ColumnReference {
                 digest,
                 self.column,
                 self.column_rows,
+                self.ascending,
                 column_digest,
                 format!("column {} of a missing results store", self.column),
             ),

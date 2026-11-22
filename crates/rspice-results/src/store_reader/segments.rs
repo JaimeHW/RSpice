@@ -259,6 +259,8 @@ pub struct MissingSegment {
     len: u64,
     /// A column's digest, as the saved result stated it.
     column_digest: Option<[u8; 32]>,
+    /// Whether a column's rows ascend strictly, as the saved result stated it.
+    ascending: bool,
     name: String,
 }
 
@@ -269,15 +271,18 @@ impl MissingSegment {
             index,
             len,
             column_digest: None,
+            ascending: false,
             name,
         })
     }
 
-    /// A column of a missing segment, keeping the column digest its result was saved with.
+    /// A column of a missing segment, keeping the column digest and the ascent its result was
+    /// saved with, so the result saves again as it was.
     pub fn column(
         digest: Digest,
         column: u64,
         rows: u64,
+        ascending: bool,
         column_digest: Option<[u8; 32]>,
         name: String,
     ) -> Arc<Self> {
@@ -286,6 +291,7 @@ impl MissingSegment {
             index: column,
             len: rows,
             column_digest,
+            ascending,
             name,
         })
     }
@@ -347,6 +353,10 @@ impl ColumnSource for MissingSegment {
 
     fn read(&self, _first: u64, _out: &mut [f64]) -> Result<(), String> {
         Err(self.failure())
+    }
+
+    fn ascending(&self) -> bool {
+        self.ascending
     }
 
     fn identity(&self) -> Option<([u8; 32], u64)> {
