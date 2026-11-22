@@ -31,7 +31,14 @@ use std::sync::Arc;
 /// Display preferences captured for one stack frame.
 #[derive(Clone, Copy)]
 pub struct StackOptions {
+    /// Whether the stack is the Results sheet, with each strip's header row
+    /// and the controls that arrange panes. Without it the stack is the plot
+    /// pane beside a document: each strip is its panes alone, the first row
+    /// of which also carries the pane's own controls.
     pub pane_chrome: bool,
+    /// Window places every row keeps free at its right end, in the first
+    /// row for controls the host draws over it.
+    pub lead_slots: usize,
     pub readout: ReadoutPolicy,
     pub quantity: QuantityPresentationPolicy,
     /// Stroke of the active run's traces, in points.
@@ -740,7 +747,9 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                             // control the strips drawn against time carry
                             // beside their close one, so every scale chip
                             // ends on one rule.
-                            let slots = 1 + usize::from(pane_chrome && !maximized && n > 1);
+                            let slots = 1
+                                + usize::from(pane_chrome && !maximized && n > 1)
+                                + options.lead_slots;
                             if show_xy_strip(
                                 ui,
                                 host,
@@ -767,103 +776,108 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_min_height(strip_height);
-                        // Analysis identity remains in the strip header.
-                        // Unit-owned signal legends live in the pane headers;
-                        // only unitless expressions remain alongside the
-                        // analysis identity here.
-                        let strip_exprs: Vec<ExprTrace> = host
-                            .session()
-                            .analysis_exprs
-                            .get(&model.analysis_key)
-                            .cloned()
-                            .unwrap_or_default();
-                        let expr_labels: Vec<String> = strip_exprs
-                            .iter()
-                            .map(|expr| {
-                                let complex =
-                                    host.expression_is_complex(model.analysis_key, &expr.text);
-                                expression_label(expr, complex)
-                            })
-                            .collect();
-                        let legend: Vec<LegendChip<'_>> = strip_exprs
-                            .iter()
-                            .enumerate()
-                            .map(|(i, expr)| LegendChip {
-                                name: &expr_labels[i],
-                                color: expr_color(&t, expr_palette_slot(model, i)),
-                                on: expr.visible,
-                            })
-                            .collect();
-
-                        let zoomed = host
-                            .session()
-                            .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
-                        let mut conversions = |ui: &mut Ui, index: usize| {
-                            if let Some(expr) = strip_exprs.get(index) {
-                                expression_conversions(ui, host, model, index, expr, &t);
-                            }
-                        };
                         // The window controls the header keeps: maximize,
                         // and close beside it when several strips are shown.
                         // Each pane's row ends under them.
                         let closable = pane_chrome && !maximized && n > 1;
-                        let window_slots = 1 + usize::from(closable);
-                        let header =
-                            StripHeader::new(&model.kind_tag, strip_subtitle(model), &legend)
-                                .id_salt(model.analysis_key)
-                                .incomplete(model.incomplete)
-                                .maximized(maximized)
-                                .closable(closable)
-                                .zoomed(zoomed)
-                                .expr_action(pane_chrome)
-                                .removable_from(0)
-                                .chip_menu(&mut conversions)
-                                .pane_actions(pane_chrome)
-                                .x_scale(true)
-                                .show(ui);
-                        // The strip header owns the shared X axis, and with
-                        // it the axis' scale toggle.
-                        if let Some(rect) = header.scale_rect
-                            && crate::strip::x_scale_chip(
-                                ui,
-                                egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
-                                rect,
-                                (
-                                    model.x_scale == XScale::Log10,
-                                    log_x_refusal(model).as_deref(),
-                                ),
-                            )
-                        {
-                            let scale = match model.x_scale {
-                                XScale::Log10 => XScale::Linear,
-                                XScale::Linear => XScale::Log10,
+                        let window_slots = 1 + usize::from(closable) + options.lead_slots;
+                        // Beside a document the strip is its panes alone:
+                        // the pane's axis names the analysis, and the
+                        // Results sheet is where strips are told apart.
+                        if pane_chrome {
+                            // Analysis identity remains in the strip header.
+                            // Unit-owned signal legends live in the pane headers;
+                            // only unitless expressions remain alongside the
+                            // analysis identity here.
+                            let strip_exprs: Vec<ExprTrace> = host
+                                .session()
+                                .analysis_exprs
+                                .get(&model.analysis_key)
+                                .cloned()
+                                .unwrap_or_default();
+                            let expr_labels: Vec<String> = strip_exprs
+                                .iter()
+                                .map(|expr| {
+                                    let complex =
+                                        host.expression_is_complex(model.analysis_key, &expr.text);
+                                    expression_label(expr, complex)
+                                })
+                                .collect();
+                            let legend: Vec<LegendChip<'_>> = strip_exprs
+                                .iter()
+                                .enumerate()
+                                .map(|(i, expr)| LegendChip {
+                                    name: &expr_labels[i],
+                                    color: expr_color(&t, expr_palette_slot(model, i)),
+                                    on: expr.visible,
+                                })
+                                .collect();
+
+                            let zoomed = host
+                                .session()
+                                .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
+                            let mut conversions = |ui: &mut Ui, index: usize| {
+                                if let Some(expr) = strip_exprs.get(index) {
+                                    expression_conversions(ui, host, model, index, expr, &t);
+                                }
                             };
-                            let session = host.session_mut();
-                            session.x_scales.insert(model.analysis_key, scale);
-                            // A range read on one scale is no viewport on the
-                            // other.
-                            set_shared_x_view(session, model.analysis_key, None);
-                        }
-                        if let Some(chip_index) = header.legend_clicked {
-                            toggle_expr = Some((model.analysis_key, chip_index));
-                        }
-                        if let Some(chip_index) = header.legend_visibility_clicked {
-                            toggle_expr = Some((model.analysis_key, chip_index));
-                        }
-                        if let Some(chip_index) = header.legend_removed {
-                            remove_expr = Some((model.analysis_key, chip_index));
-                        }
-                        if header.maximize_clicked {
-                            toggle_maximize = Some(model.analysis_key);
-                        }
-                        if header.close_clicked {
-                            close_strip = Some(model.analysis_key);
-                        }
-                        if header.fit_clicked {
-                            fit_strip = Some(model.analysis_key);
-                        }
-                        if header.add_expr_clicked {
-                            open_editor = Some(model.analysis_key);
+                            let header =
+                                StripHeader::new(&model.kind_tag, strip_subtitle(model), &legend)
+                                    .id_salt(model.analysis_key)
+                                    .incomplete(model.incomplete)
+                                    .maximized(maximized)
+                                    .closable(closable)
+                                    .zoomed(zoomed)
+                                    .expr_action(pane_chrome)
+                                    .removable_from(0)
+                                    .chip_menu(&mut conversions)
+                                    .pane_actions(pane_chrome)
+                                    .x_scale(true)
+                                    .show(ui);
+                            // The strip header owns the shared X axis, and with
+                            // it the axis' scale toggle.
+                            if let Some(rect) = header.scale_rect
+                                && crate::strip::x_scale_chip(
+                                    ui,
+                                    egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
+                                    rect,
+                                    (
+                                        model.x_scale == XScale::Log10,
+                                        log_x_refusal(model).as_deref(),
+                                    ),
+                                )
+                            {
+                                let scale = match model.x_scale {
+                                    XScale::Log10 => XScale::Linear,
+                                    XScale::Linear => XScale::Log10,
+                                };
+                                let session = host.session_mut();
+                                session.x_scales.insert(model.analysis_key, scale);
+                                // A range read on one scale is no viewport on the
+                                // other.
+                                set_shared_x_view(session, model.analysis_key, None);
+                            }
+                            if let Some(chip_index) = header.legend_clicked {
+                                toggle_expr = Some((model.analysis_key, chip_index));
+                            }
+                            if let Some(chip_index) = header.legend_visibility_clicked {
+                                toggle_expr = Some((model.analysis_key, chip_index));
+                            }
+                            if let Some(chip_index) = header.legend_removed {
+                                remove_expr = Some((model.analysis_key, chip_index));
+                            }
+                            if header.maximize_clicked {
+                                toggle_maximize = Some(model.analysis_key);
+                            }
+                            if header.close_clicked {
+                                close_strip = Some(model.analysis_key);
+                            }
+                            if header.fit_clicked {
+                                fit_strip = Some(model.analysis_key);
+                            }
+                            if header.add_expr_clicked {
+                                open_editor = Some(model.analysis_key);
+                            }
                         }
 
                         host.edit_expression(ui, model);

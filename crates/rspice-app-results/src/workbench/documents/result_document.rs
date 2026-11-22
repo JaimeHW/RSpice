@@ -1784,13 +1784,62 @@ pub fn show_compact_split(
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
 ) {
-    show_with_chrome(ui, state, run_controller, ResultChrome::CompactSplit);
+    // The pane plots; the run's other sheets (its table, spectrum, eye and
+    // manifest) are in Results, a press of the pane's Open in Results away.
+    let sheets = pane_sheets(state.results_reads());
+    if let Some(&first) = sheets.first()
+        && !sheets.contains(&state.results.session.viewer)
+    {
+        state.results.session.viewer = first;
+    }
+    let pane = ui.available_rect_before_wrap();
+    let lead_slots = chrome::bars::compact_pane_control_slots(sheets.len());
+    if sheets.is_empty() && state.model.simulation.retained.has_results() {
+        let t = Tokens::get(ui.ctx());
+        ui.painter().rect_filled(pane, 0.0, t.color.canvas_bg);
+        well_hint(
+            ui,
+            "Nothing to plot from this run: its values are on the drawing, and Open in Results shows every sheet",
+        );
+    } else {
+        show_with_chrome(
+            ui,
+            state,
+            run_controller,
+            ResultChrome::CompactSplit { lead_slots },
+        );
+    }
+    show_compact_controls(ui, state, pane, &sheets);
+}
+
+/// The sheets the plot pane beside a document can show for the active run:
+/// the ones that plot it against time, a sweep or frequency.
+pub(crate) fn pane_sheets(state: ResultsReads<'_>) -> Vec<ResultViewer> {
+    ResultViewer::all()
+        .filter(|&viewer| pane_sheet(viewer) && viewer_availability(state, viewer).available)
+        .collect()
+}
+
+/// Whether the plot pane beside a document draws `viewer`: the sheets that
+/// plot a run against time, a sweep or frequency.
+const fn pane_sheet(viewer: ResultViewer) -> bool {
+    matches!(
+        viewer,
+        ResultViewer::Waves
+            | ResultViewer::DcSweep
+            | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ResultChrome {
     Full,
-    CompactSplit,
+    /// The plot pane beside a document, whose rows keep `lead_slots` window
+    /// places free for the pane's own controls.
+    CompactSplit {
+        lead_slots: usize,
+    },
 }
 
 fn show_with_chrome(
@@ -1821,7 +1870,7 @@ fn show_with_chrome(
                 show_sheet_bar(ui, state);
             }
         }
-        ResultChrome::CompactSplit => show_compact_docbar(ui, state),
+        ResultChrome::CompactSplit { .. } => {}
     }
     crate::ui::plot::set_interaction_mode(
         ui.ctx(),
@@ -1843,7 +1892,7 @@ fn show_with_chrome(
     // gives the whole area back to the document.
     let strip_height = match chrome {
         ResultChrome::Full => readout_strip_height(state),
-        ResultChrome::CompactSplit => 0.0,
+        ResultChrome::CompactSplit { .. } => 0.0,
     };
     let available = ui.available_rect_before_wrap();
     let well_height = (available.height() - strip_height).max(0.0);
@@ -2238,11 +2287,14 @@ fn show_viewer_well(
         return;
     }
 
+    if let ResultChrome::CompactSplit { lead_slots } = chrome
+        && pane_sheet(viewer)
+    {
+        waves::show_compact(ui, state, lead_slots);
+        return;
+    }
     match viewer {
-        ResultViewer::Waves | ResultViewer::DcSweep => match chrome {
-            ResultChrome::Full => waves::show(ui, state),
-            ResultChrome::CompactSplit => waves::show_compact(ui, state),
-        },
+        ResultViewer::Waves | ResultViewer::DcSweep => waves::show(ui, state),
         ResultViewer::Bode => waves::show_bode(ui, state),
         ResultViewer::SParameters => s_parameters::show(ui, state),
         ResultViewer::Fft => {
@@ -2301,20 +2353,20 @@ const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
     !matches!(viewer, ResultViewer::Manifest)
 }
 
-/// Split projection of the mockup's viewer-tab row. Run binding, output
-/// controls, result-document creation and properties remain owned by the full
-/// Results workspace; every compatible existing viewer stays reachable here.
-/// The plot pane's header, and what its controls ask of the pane: another
+/// The plot pane's controls, over the right end of its first row: another
 /// sheet, the run opened in Results, the pane moved to the document's other
 /// side, or closed.
-fn show_compact_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+fn show_compact_controls(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    pane: egui::Rect,
+    sheets: &[ResultViewer],
+) {
     use rspice_app_workbench::workbench::state::workbench_session::ResultsSplitAxis;
 
-    let available = ResultViewer::all()
-        .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
     let beside = state.workbench.results_split.axis == ResultsSplitAxis::Beside;
     let actions =
-        chrome::bars::compact_document_bar(ui, state.results.session.viewer, available, beside);
+        chrome::bars::compact_pane_controls(ui, pane, state.results.session.viewer, sheets, beside);
     if let Some(viewer) = actions.viewer {
         state.results.session.viewer = viewer;
     }

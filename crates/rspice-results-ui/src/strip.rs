@@ -29,7 +29,7 @@ pub const HEADER_PADDING_X: f32 = 10.0;
 const HEADER_ACTION_GAP: f32 = 6.0;
 const HEADER_METADATA_GAP: f32 = 8.0;
 const HEADER_LEGEND_GAP: f32 = 4.0;
-const HEADER_ICON_SIDE: f32 = 22.0;
+pub(crate) const HEADER_ICON_SIDE: f32 = 22.0;
 const HEADER_ACTION_ITEM_GAP: f32 = 1.0;
 /// The gap between a header's window controls and the scale chip beside
 /// them. It is the same in every header, so the strip's X toggle and each

@@ -284,6 +284,67 @@ fn full_crosshair_at(
     )
 }
 
+/// A canvas that changes size keeps the drawing in sight. The view is pinned
+/// at its top-left corner, so a plot pane opening below the drawing, or a
+/// narrower window, would cut off what the view showed: instead the middle of
+/// the view stays where it was, and a drawing the old view showed whole that
+/// the new one would cut is framed whole again.
+fn keep_the_drawing_in_sight(
+    ui: &Ui,
+    canvas: &mut CanvasFrame<'_>,
+    symbol_context: &SchematicSymbolContext,
+    available: egui::Rect,
+    min_zoom: f64,
+) {
+    let size_key = egui::Id::new((
+        "rspice.schematic.canvas-size",
+        canvas.model.active_sheet_id(),
+    ));
+    let size = available.size();
+    let last = ui.ctx().data_mut(|data| {
+        let last = data.get_temp::<egui::Vec2>(size_key);
+        data.insert_temp(size_key, size);
+        last
+    });
+    let Some(last) =
+        last.filter(|last| last.x > 0.0 && last.y > 0.0 && (*last - size).abs().max_elem() > 0.5)
+    else {
+        return;
+    };
+    let bounds = symbol_context.sheet_content_bounds(canvas.model.schematic.document(), |id| {
+        sheet_visibility::object_is_on_active_sheet(&*canvas.model, id)
+    });
+    let editor = &mut canvas.model.schematic.session.editor;
+    let zoom = editor.zoom;
+    let shown = |(width, height): (f32, f32),
+                 pan: (f64, f64),
+                 (min_x, min_y, max_x, max_y): (i32, i32, i32, i32)| {
+        let x = |world: i32| pan.0 + f64::from(world) * zoom;
+        let y = |world: i32| pan.1 + f64::from(world) * zoom;
+        x(min_x) >= 0.0
+            && y(min_y) >= 0.0
+            && x(max_x) <= f64::from(width)
+            && y(max_y) <= f64::from(height)
+    };
+    let before = editor.pan;
+    editor.pan = (
+        before.0 + f64::from(size.x - last.x) * 0.5,
+        before.1 + f64::from(size.y - last.y) * 0.5,
+    );
+    let after = editor.pan;
+    if let Some(bounds) = bounds
+        && shown((last.x, last.y), before, bounds)
+        && !shown((size.x, size.y), after, bounds)
+    {
+        canvas.model.schematic.zoom_to_fit_bounds(
+            bounds,
+            f64::from(size.x),
+            f64::from(size.y),
+            min_zoom,
+        );
+    }
+}
+
 pub fn render_schematic_view(
     ui: &mut Ui,
     canvas: &mut CanvasFrame<'_>,
@@ -306,6 +367,9 @@ pub fn render_schematic_view(
     let editor = &mut canvas.model.schematic.session.editor;
     let fit_content = std::mem::take(&mut editor.needs_fit);
     let fit_sheet = std::mem::take(&mut editor.needs_drawing_sheet_fit);
+    if !(fit_content || fit_sheet) {
+        keep_the_drawing_in_sight(ui, canvas, &symbol_context, available, min_zoom);
+    }
     // Each sheet is its own page: a content fit frames the open one's
     // objects, never those the cell view's other sheets hold.
     let content_bounds = fit_content

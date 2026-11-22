@@ -68,7 +68,7 @@ pub const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
     matches!(viewer, ResultViewer::Op | ResultViewer::Table)
 }
 
-/// What the plot pane's header asked of the pane beside the document.
+/// What the plot pane's controls asked of the pane beside the document.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CompactBarActions {
     pub viewer: Option<ResultViewer>,
@@ -81,61 +81,85 @@ pub struct CompactBarActions {
     pub close: bool,
 }
 
-/// The plot pane's header: its sheets on the left, and on the right the way
-/// into Results, the side the pane takes, and its close button. `beside`
-/// says the pane is to the document's right, so the side control offers
-/// below.
-pub fn compact_document_bar(
+/// How many window places the plot pane's controls take at the right end of
+/// the pane's first row: Close, the side and Open in Results, and the sheet
+/// when the run has more than one to plot.
+pub const fn compact_pane_control_slots(sheets: usize) -> usize {
+    if sheets > 1 { 4 } else { 3 }
+}
+
+/// The plot pane's controls, at the right end of the pane's first row in
+/// the window places that row keeps free for them, so the pane spends no
+/// row of its own on them: Close, the side the pane takes, Open in Results,
+/// and the sheet when the run has more than one to plot. `beside` says the
+/// pane is to the document's right, so the side control offers below.
+pub fn compact_pane_controls(
     ui: &mut Ui,
+    pane: egui::Rect,
     current: ResultViewer,
-    available: impl IntoIterator<Item = ResultViewer>,
+    sheets: &[ResultViewer],
     beside: bool,
 ) -> CompactBarActions {
     let mut actions = CompactBarActions::default();
-    docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let size = egui::vec2(
-                ResultBarMetrics::of(ui).viewer_tab,
-                ResultBarMetrics::of(ui).viewer_tab,
-            );
-            actions.close = rspice_ui_kit::panels::icon_button(
-                ui,
-                WorkbenchIcon::Close,
-                "Close plot",
-                false,
-                size,
-            )
-            .on_hover_text("Close plot")
-            .clicked();
-            let (icon, side) = if beside {
-                (WorkbenchIcon::Console, "Plot below the drawing")
-            } else {
-                (WorkbenchIcon::Inspector, "Plot beside the drawing")
-            };
-            actions.turn = rspice_ui_kit::panels::icon_button(ui, icon, side, false, size)
-                .on_hover_text(side)
-                .clicked();
-            viewer_picker_separator(ui);
-            actions.open_in_results = viewer_picker(
-                ui,
-                WorkbenchIcon::Results,
-                "Open in Results",
-                "Open in Results",
-            );
-            viewer_picker_separator(ui);
-            let tabs_size = ui.available_size();
-            ui.allocate_ui_with_layout(
-                tabs_size,
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    viewer_tab_scroller(ui, "rspice.results.split.viewer-tabs", |ui| {
-                        actions.viewer = viewer_tabs(ui, current, available);
-                    });
-                },
-            );
+    let row = egui::Rect::from_min_size(
+        pane.min,
+        egui::vec2(pane.width(), crate::waves::header::WAVE_PANE_HEADER_HEIGHT),
+    );
+    let side = crate::strip::HEADER_ICON_SIDE;
+    let place = |ui: &mut Ui, slot: usize, salt: &str, draw: &mut dyn FnMut(&mut Ui)| {
+        let cell = crate::strip::window_control_rect(row, slot);
+        let rect = egui::Rect::from_center_size(cell.center(), egui::vec2(side, side));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect).id_salt(salt), |ui| {
+            draw(ui)
         });
+    };
+    let size = egui::vec2(side, side);
+    place(ui, 0, "plot-pane-close", &mut |ui| {
+        actions.close =
+            rspice_ui_kit::panels::icon_button(ui, WorkbenchIcon::Close, "Close plot", false, size)
+                .on_hover_text("Close plot")
+                .clicked();
     });
+    let (icon, label) = if beside {
+        (WorkbenchIcon::Console, "Plot below the drawing")
+    } else {
+        (WorkbenchIcon::Inspector, "Plot beside the drawing")
+    };
+    place(ui, 1, "plot-pane-side", &mut |ui| {
+        actions.turn = rspice_ui_kit::panels::icon_button(ui, icon, label, false, size)
+            .on_hover_text(label)
+            .clicked();
+    });
+    place(ui, 2, "plot-pane-results", &mut |ui| {
+        actions.open_in_results = rspice_ui_kit::panels::icon_button(
+            ui,
+            WorkbenchIcon::Results,
+            "Open in Results",
+            false,
+            size,
+        )
+        .on_hover_text("Open in Results: measurements, cursors and every sheet")
+        .clicked();
+    });
+    if sheets.len() > 1 {
+        place(ui, 3, "plot-pane-sheet", &mut |ui| {
+            let label = format!("Sheet: {}", current.tab_label());
+            let button =
+                rspice_ui_kit::panels::icon_button(ui, WorkbenchIcon::Layers, &label, false, size)
+                    .on_hover_text(&label);
+            egui::Popup::menu(&button).show(|ui| {
+                for &sheet in sheets {
+                    if ui
+                        .selectable_label(sheet == current, sheet.tab_label())
+                        .clicked()
+                    {
+                        actions.viewer = Some(sheet);
+                        ui.close();
+                    }
+                }
+            });
+        });
+    }
     actions
 }
 

@@ -233,6 +233,61 @@ fn a_run_from_the_drawing_plots_below_it_and_stays_on_the_drawing() {
     assert_eq!(active_run(&user), Some(newest_run(&user)));
 }
 
+/// The plot pane is for looking at the run's waveforms beside the drawing:
+/// it spends no row on sheet tabs or on the analysis' name, its own controls
+/// end the row that names its traces, and a drawing the view showed whole
+/// stays whole above it.
+#[test]
+fn the_plot_pane_is_one_row_over_its_plot_and_the_drawing_stays_in_sight() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    user.settle();
+    run_to_its_end(&mut user);
+
+    let pane = user.expect("Results split pane");
+    for tab in ["Waves", "FFT", "Table", "Eye", "Manifest", "TR"] {
+        assert!(
+            !user
+                .named
+                .iter()
+                .any(|(name, rect)| name == tab && pane.intersects(*rect)),
+            "the pane spends no row on {tab}"
+        );
+    }
+    let row = egui::Rect::from_min_size(pane.min, egui::vec2(pane.width(), 25.0));
+    for control in [
+        "V(out)",
+        "Open in Results",
+        "Plot beside the drawing",
+        "Close plot",
+    ] {
+        let rect = user.expect(control);
+        assert!(
+            row.contains(rect.center()),
+            "{control} is on the pane's first row: {rect:?} in {row:?}"
+        );
+    }
+
+    let canvas = user.expect("Schematic canvas");
+    let state = &user.app.state;
+    let (min_x, min_y, max_x, max_y) =
+        rspice_app_design::schematic::view::schematic_symbol_context(state)
+            .sheet_content_bounds(state.model.schematic.document(), |_| true)
+            .expect("the example draws a circuit");
+    let editor = &state.model.schematic.session.editor;
+    let screen = |x: i32, y: i32| {
+        egui::pos2(
+            canvas.left() + (editor.pan.0 + f64::from(x) * editor.zoom) as f32,
+            canvas.top() + (editor.pan.1 + f64::from(y) * editor.zoom) as f32,
+        )
+    };
+    let drawing = egui::Rect::from_two_pos(screen(min_x, min_y), screen(max_x, max_y));
+    assert!(
+        canvas.contains_rect(drawing),
+        "the drawing stays whole above the pane: {drawing:?} in {canvas:?}"
+    );
+}
+
 /// A pane the reader closed stays closed through the next run: the status
 /// bar states the run, and the window's corner offers its plot, which opens
 /// the pane again.

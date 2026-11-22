@@ -104,10 +104,6 @@ fn show_split_with_results(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     let stage = stage_response.rect;
     let layout = app.workbench().results_split;
     let (primary_rect, divider_rect, results_rect) = split_stage_rects(stage, layout);
-    let divider = split_divider(ui, stage, divider_rect, layout);
-    if let Some(share) = divider {
-        app.workbench_mut().results_split.document_share = share;
-    }
 
     let mut primary = ui.new_child(
         UiBuilder::new()
@@ -130,6 +126,13 @@ fn show_split_with_results(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     results.set_min_size(results_rect.size());
     results.set_max_size(results_rect.size());
     app.contribute(Point::SplitResults, &mut results);
+
+    // The divider comes last, so it is drawn over the edges of both panes
+    // and its grip, which reaches a few points into each, is above what
+    // they draw there and takes the pointer first.
+    if let Some(share) = split_divider(ui, stage, divider_rect, layout) {
+        app.workbench_mut().results_split.document_share = share;
+    }
 }
 
 /// Draw the divider between the document and its plot and take a drag of
