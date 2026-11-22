@@ -22,6 +22,7 @@ pub enum SheetsCommand {
     NextSheet,
     PreviousSheet,
     NewSheet,
+    DuplicateSheet,
     DeleteSheet,
 }
 
@@ -64,7 +65,7 @@ const DRAWING_EDIT: CommandFlags = PROJECT_COMMAND
 
 impl SheetsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::SheetProperties,
         Self::SheetFormatManager,
         Self::SheetDefaults,
@@ -72,6 +73,7 @@ impl SheetsCommand {
         Self::NextSheet,
         Self::PreviousSheet,
         Self::NewSheet,
+        Self::DuplicateSheet,
         Self::DeleteSheet,
     ];
 
@@ -88,6 +90,7 @@ impl SheetsCommand {
             Self::NextSheet => CommandKey::new("next-sheet"),
             Self::PreviousSheet => CommandKey::new("previous-sheet"),
             Self::NewSheet => CommandKey::new("new-sheet"),
+            Self::DuplicateSheet => CommandKey::new("duplicate-sheet"),
             Self::DeleteSheet => CommandKey::new("delete-sheet"),
         }
     }
@@ -144,6 +147,13 @@ impl SheetsCommand {
                 DRAWING_EDIT,
                 ShortcutContext::EngineeringCanvas,
                 NEW_SHEET,
+            ),
+            Self::DuplicateSheet => (
+                "Duplicate sheet",
+                "Design",
+                DRAWING_EDIT,
+                ShortcutContext::EngineeringCanvas,
+                NONE,
             ),
             Self::DeleteSheet => (
                 "Delete active sheet",

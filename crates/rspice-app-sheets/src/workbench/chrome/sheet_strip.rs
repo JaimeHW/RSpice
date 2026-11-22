@@ -128,6 +128,7 @@ pub enum StripAction {
     None,
     Activate(crate::state::SheetId),
     NewSheetAfter(Option<crate::state::SheetId>),
+    Duplicate(crate::state::SheetId),
     Delete(crate::state::SheetId),
     MoveSelection(crate::state::SheetId),
     SheetProperties(crate::state::SheetId),
@@ -154,6 +155,9 @@ pub fn apply(strip: &mut SheetStrip<'_>, action: StripAction, entries: &[SheetEn
         }
         StripAction::NewSheetAfter(after) => {
             let _ = sheet_actions::new_sheet_after(model, workbench, gesture, after);
+        }
+        StripAction::Duplicate(id) => {
+            let _ = sheet_actions::duplicate_sheet(model, workbench, gesture, Some(id));
         }
         // The menu row the delete was chosen from named its outcome.
         StripAction::Delete(id) => {
@@ -327,6 +331,7 @@ fn sheet_chips(
                 ChipMenu::Delete => action = StripAction::Delete(entry.id),
                 ChipMenu::MoveSelection => action = StripAction::MoveSelection(entry.id),
                 ChipMenu::NewAfter => action = StripAction::NewSheetAfter(Some(entry.id)),
+                ChipMenu::Duplicate => action = StripAction::Duplicate(entry.id),
                 ChipMenu::SheetProperties => action = StripAction::SheetProperties(entry.id),
             }
         }
@@ -359,6 +364,7 @@ enum ChipMenu {
     Delete,
     MoveSelection,
     NewAfter,
+    Duplicate,
     SheetProperties,
 }
 
@@ -464,6 +470,10 @@ fn sheet_chip(ui: &mut Ui, entry: &SheetEntry, selected: bool, height: f32) -> C
         }
         if ui.button("New sheet after this").clicked() {
             menu = Some(ChipMenu::NewAfter);
+            ui.close();
+        }
+        if ui.button("Duplicate").clicked() {
+            menu = Some(ChipMenu::Duplicate);
             ui.close();
         }
         if ui.button("Move selection here").clicked() {

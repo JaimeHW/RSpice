@@ -30,6 +30,12 @@ fn go_to_sheet(
 /// One cell view with two governed sheets, and one component on each.
 fn two_sheet_state() -> (AppState, SheetId, SheetId) {
     let mut state = AppState::default();
+    let (first, second) = two_sheets_on(&mut state);
+    (state, first, second)
+}
+
+/// [`two_sheet_state`] on `state`.
+fn two_sheets_on(state: &mut AppState) -> (SheetId, SheetId) {
     state.model.schematic.document_mut_for_test().components = vec![
         Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         Component::new(20, ComponentType::Capacitor, Point::new(40, 10)),
@@ -68,7 +74,7 @@ fn two_sheet_state() -> (AppState, SheetId, SheetId) {
         .assign_objects(catalog.revision(), second, [20])
         .expect("second sheet assignment");
     catalog.set_active(first).expect("active sheet");
-    (state, first, second)
+    (first, second)
 }
 
 fn delete_behavior(state: &mut AppState, behavior: SheetDeleteBehavior) {
@@ -886,4 +892,24 @@ fn an_off_sheet_connector_names_its_partners_sheet_and_zone() {
         Some(format!("[p1 {first_zone}]").as_str())
     );
     assert_eq!(references.len(), 1, "{references:?}");
+}
+
+/// Sheet, Duplicate sheet copies the sheet in view: the copy follows it as
+/// the next free sheet and becomes the sheet in view.
+#[test]
+fn the_duplicate_sheet_command_copies_the_sheet_in_view() {
+    use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let (first, second) = two_sheets_on(&mut app.state);
+
+    app.execute_command_key(SheetsCommand::DuplicateSheet.key());
+
+    let entries = sheet_entries(&app.state);
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0].id, first);
+    assert_eq!(entries[2].id, second);
+    assert_eq!(active_sheet_id(&app.state), Some(entries[1].id));
+    assert_eq!(entries[1].name, "Sheet 3");
 }

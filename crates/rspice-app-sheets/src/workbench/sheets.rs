@@ -261,9 +261,9 @@ impl CommandSet for SheetsCommand {
                     CommandAvailability::Disabled("open a schematic or testbench")
                 },
             ),
-            Self::NewSheet | Self::DeleteSheet => {
+            Self::NewSheet | Self::DuplicateSheet | Self::DeleteSheet => {
                 let enabled =
-                    editor && !read_only && (self == Self::NewSheet || sheet_count(model) > 1);
+                    editor && !read_only && (self != Self::DeleteSheet || sheet_count(model) > 1);
                 available_or(
                     enabled,
                     if !editor {
@@ -312,6 +312,10 @@ impl CommandSet for SheetsCommand {
             }
             Self::NewSheet => {
                 let _ = sheet_actions::new_sheet(cx.model, cx.wb, &mut cx.peers);
+            }
+            Self::DuplicateSheet => {
+                let active = cx.model.active_sheet_id();
+                let _ = sheet_actions::duplicate_sheet(cx.model, cx.wb, &mut cx.peers, active);
             }
             Self::DeleteSheet => {
                 if let Some(id) = cx.model.active_sheet_id() {

@@ -528,6 +528,7 @@ const SHEET_MENU: &[MenuEntry] = &[
     sheets(SheetsCommand::PreviousSheet).access('P'),
     sheets(SheetsCommand::NextSheet).access('N'),
     sheets(SheetsCommand::NewSheet).access('E'),
+    sheets(SheetsCommand::DuplicateSheet).access('U'),
     MenuEntry::command_as(SheetsCommand::DeleteSheet.key(), "Delete\u{2026}").access('D'),
     Separator,
     sheets(SheetsCommand::SheetProperties).access('S'),

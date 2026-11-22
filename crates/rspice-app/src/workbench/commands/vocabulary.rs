@@ -528,6 +528,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SheetsCommand::NextSheet.key(),
     SheetsCommand::PreviousSheet.key(),
     SheetsCommand::NewSheet.key(),
+    SheetsCommand::DuplicateSheet.key(),
     SheetsCommand::DeleteSheet.key(),
     DesignCommand::SymbolPinTool.key(),
     DesignCommand::SymbolPolylineTool.key(),

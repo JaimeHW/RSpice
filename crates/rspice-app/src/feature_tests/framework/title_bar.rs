@@ -455,10 +455,11 @@ const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 6] = [
     DesignCommand::RuleSetup.key(),
     DesignCommand::ReviewComments.key(),
 ];
-const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
+const DESIGN_SHEET_COMMANDS: [SheetsCommand; 5] = [
     SheetsCommand::PreviousSheet,
     SheetsCommand::NextSheet,
     SheetsCommand::NewSheet,
+    SheetsCommand::DuplicateSheet,
     SheetsCommand::DeleteSheet,
 ];
 
