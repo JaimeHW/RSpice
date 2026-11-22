@@ -180,6 +180,51 @@ fn route_destinations_are_named_nets_and_pins_nearest_first_without_a_cut_off() 
     );
 }
 
+/// An op-amp's output drives the net it is on and a resistor there is
+/// passive, as their pins declare, where every pin but a source's used to
+/// count as a load.
+#[test]
+fn a_device_output_drives_its_net_and_a_resistor_is_passive() {
+    use crate::state::ComponentType;
+    let mut state = DesignTestHost::default();
+    let amp = state
+        .model
+        .schematic
+        .add_component(ComponentType::OpAmp, Point::new(0, 0));
+    let resistor = state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(200, 0));
+    let pins = |id: u64| {
+        state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .unwrap()
+            .terminal_positions()
+    };
+    let out = pins(amp)
+        .into_iter()
+        .find_map(|(name, point)| (name == "out").then_some(point))
+        .unwrap();
+    let end = pins(resistor)[0].1;
+    let mut path = vec![out, Point::new(end.x, out.y), end];
+    path.dedup();
+    state.model.schematic.add_wire(path).unwrap();
+    state.sync_active_schematic_to_workspace();
+
+    let report = build_report(&state.model, &ConnectivityPolicy::default()).unwrap();
+    let row = report
+        .nets
+        .iter()
+        .find(|net| net.component_ids.contains(&amp) && net.component_ids.contains(&resistor))
+        .expect("the output net");
+    assert_eq!((row.drivers, row.loads, row.passive), (1, 0, 1));
+}
+
 /// A supply symbol declares its rail global, so the Global nets tab lists
 /// it, beside a `!` label of the same rail, as one resolved global with
 /// nothing to rename.

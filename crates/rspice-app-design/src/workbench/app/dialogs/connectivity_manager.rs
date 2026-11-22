@@ -160,6 +160,7 @@ struct ConnectivityNetRow {
     endpoints: usize,
     drivers: usize,
     loads: usize,
+    passive: usize,
     discipline: String,
     issue: String,
     wire_ids: Vec<u64>,
@@ -532,7 +533,12 @@ fn build_net_row(
     schematic: &impl AsRef<SchematicDocument>,
     drc: &DrcResult,
 ) -> ConnectivityNetRow {
-    let (drivers, loads, discipline) = endpoint_contract(net, schematic);
+    let NetDrive {
+        drivers,
+        loads,
+        passive,
+        discipline,
+    } = endpoint_contract(net, schematic);
     let issues = drc
         .violations()
         .iter()
@@ -551,6 +557,7 @@ fn build_net_row(
         endpoints: net.terminals.len(),
         drivers,
         loads,
+        passive,
         discipline,
         issue: if issues.is_empty() {
             "None".to_owned()
@@ -566,12 +573,14 @@ fn build_net_row(
     }
 }
 
-fn endpoint_contract(
-    net: &DesignNet,
-    schematic: &impl AsRef<SchematicDocument>,
-) -> (usize, usize, String) {
-    let mut drivers = 0;
-    let mut loads = 0;
+/// How a net is driven, counted pin by pin from what each pin declares: an
+/// interface port's direction, a source, or the direction a device's pin
+/// has (an op-amp or controlled source output drives, its inputs load). A
+/// pin that declares none, a resistor's or a transistor's, is passive and
+/// neither drives nor loads, as KiCad and Altium count pin types. The
+/// discipline is each pin's own.
+fn endpoint_contract(net: &DesignNet, schematic: &impl AsRef<SchematicDocument>) -> NetDrive {
+    let mut drive = NetDrive::default();
     let mut disciplines = BTreeSet::new();
     for terminal in &net.terminals {
         let Some(component) = schematic
@@ -582,33 +591,55 @@ fn endpoint_contract(
         else {
             continue;
         };
-        if let Some(contract) = component.port_contract() {
+        let direction = if let Some(contract) = component.port_contract() {
             disciplines.insert(contract.discipline.keyword());
-            match contract.direction {
-                crate::state::PortDirection::Out => drivers += 1,
-                crate::state::PortDirection::In => loads += 1,
-                crate::state::PortDirection::InOut | crate::state::PortDirection::Supply => {
-                    drivers += 1;
-                    loads += 1;
-                }
-            }
-        } else if matches!(
-            component.kind,
-            crate::state::ComponentType::VoltageSource | crate::state::ComponentType::CurrentSource
-        ) {
-            drivers += 1;
-            disciplines.insert("electrical");
+            Some(contract.direction)
         } else {
-            loads += 1;
-            disciplines.insert("electrical");
+            disciplines.insert(
+                rspice_design::schematic::hierarchy::hierarchy_terminal_discipline(
+                    component,
+                    &terminal.pin,
+                )
+                .keyword(),
+            );
+            if matches!(
+                component.kind,
+                crate::state::ComponentType::VoltageSource
+                    | crate::state::ComponentType::CurrentSource
+            ) {
+                Some(crate::state::PortDirection::Out)
+            } else {
+                rspice_design::schematic::hierarchy::hierarchy_terminal_direction(
+                    component,
+                    &terminal.pin,
+                )
+            }
+        };
+        match direction {
+            Some(crate::state::PortDirection::Out) => drive.drivers += 1,
+            Some(crate::state::PortDirection::In) => drive.loads += 1,
+            Some(crate::state::PortDirection::InOut | crate::state::PortDirection::Supply) => {
+                drive.drivers += 1;
+                drive.loads += 1;
+            }
+            None => drive.passive += 1,
         }
     }
-    let discipline = if disciplines.is_empty() {
+    drive.discipline = if disciplines.is_empty() {
         "electrical".to_owned()
     } else {
         disciplines.into_iter().collect::<Vec<_>>().join(" / ")
     };
-    (drivers, loads, discipline)
+    drive
+}
+
+/// What drives a net and what it drives, by pin.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct NetDrive {
+    drivers: usize,
+    loads: usize,
+    passive: usize,
+    discipline: String,
 }
 
 fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
@@ -1868,7 +1899,7 @@ fn connectivity_table(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityB
                             "Signal",
                             "Kind",
                             "Endpoints",
-                            "Drivers / loads",
+                            "Drive / load / passive",
                             "Discipline",
                             "Issue",
                             "Repair",
@@ -1885,7 +1916,7 @@ fn connectivity_table(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityB
                         ui.monospace(&net.name);
                         ui.label(&net.kind);
                         ui.monospace(net.endpoints.to_string());
-                        ui.monospace(format!("{} / {}", net.drivers, net.loads));
+                        ui.monospace(format!("{} / {} / {}", net.drivers, net.loads, net.passive));
                         ui.monospace(&net.discipline);
                         ui.label(&net.issue);
                         if Button::new("Reveal").show(ui).clicked() {
