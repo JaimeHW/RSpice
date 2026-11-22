@@ -13,9 +13,10 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey, Tone};
+use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey, Tone};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
 
+use crate::fft::view::columns::{Fitting, fitted};
 use crate::presentation::well_hint;
 use crate::requirement_lines::{self, PlotWithRequirements, RequirementLine};
 use crate::strip::{self, LegendChip};
@@ -928,33 +929,47 @@ fn brushed_table(
         column_head(x_column),
         column_head(y_column),
     ];
-    // Each column as wide as its widest words, so nothing is cut short.
-    let head_font = theme::sans(tokens::FS_0, FontWeight::Medium);
-    let number_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let measure = |text: &str, font: &egui::FontId| {
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
-            .size()
-            .x
-    };
-    let pad = 2.0 * rspice_ui_kit::widgets::table::CELL_PAD + 2.0;
-    let width = |index: usize| {
+    // The details pane's own table: each column as wide as its widest
+    // words, the first and last on the pane's inset, so the table runs the
+    // pane's width flush to its edges and nothing is cut short.
+    let numbers = |index: usize| {
         rows.iter()
-            .map(|row| measure(&row.text[index], &number_font))
-            .fold(measure(&heads[index], &head_font), f32::max)
-            + pad
+            .map(|row| (row.text[index].clone(), true))
+            .collect::<Vec<_>>()
     };
-    let status_width = ["Status", "no requirement"]
-        .iter()
-        .map(|text| measure(text, &head_font))
-        .fold(0.0, f32::max)
-        + pad;
-    let columns = [
-        Column::number(heads[0].clone(), width(0)),
-        Column::number(heads[1].clone(), width(1)),
-        Column::number(heads[2].clone(), width(2)),
-        Column::name("Status", status_width),
-    ];
+    let [trial_head, x_head, y_head] = heads;
+    let columns = fitted(
+        ui,
+        vec![
+            Fitting {
+                head: trial_head,
+                tooltip: Some("Monte Carlo trial".to_owned()),
+                align: Align::Right,
+                cells: numbers(0),
+            },
+            Fitting {
+                head: x_head,
+                tooltip: None,
+                align: Align::Right,
+                cells: numbers(1),
+            },
+            Fitting {
+                head: y_head,
+                tooltip: None,
+                align: Align::Right,
+                cells: numbers(2),
+            },
+            Fitting {
+                head: "Status".to_owned(),
+                tooltip: None,
+                align: Align::Left,
+                cells: rows
+                    .iter()
+                    .map(|row| (row.status.to_owned(), false))
+                    .collect(),
+            },
+        ],
+    );
     let revision = egui::Id::new((
         "scatter-brushed",
         &x_column.name,
