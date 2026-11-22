@@ -1123,7 +1123,7 @@ pub fn right_panel(
         let interval = interval_label(count, digits).unwrap_or_else(|| "\u{2014}".to_owned());
         let rows = [
             ("Yield", yield_label(count, digits), true),
-            ("95 % CI", interval, false),
+            ("95 % CI (Wilson)", interval, false),
             ("Passing", evaluated_label(count), false),
             (
                 "Cp",

@@ -1002,7 +1002,7 @@ fn statistics_rows(
         ("Yield", yield_row, true),
     ];
     if let Some(interval) = interval {
-        rows.push(("95 % CI", interval, false));
+        rows.push(("95 % CI (Wilson)", interval, false));
     }
     rows.extend([
         (
@@ -1166,7 +1166,7 @@ mod tests {
         );
         assert!(
             rows.iter()
-                .any(|row| row.0 == "95 % CI" && row.1 == "20.77 to 93.85 %")
+                .any(|row| row.0 == "95 % CI (Wilson)" && row.1 == "20.77 to 93.85 %")
         );
         specs.clear();
         let plan = population::build(
@@ -1337,7 +1337,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {needle} row"))
         };
 
-        assert!(by_name("95 % CI").ends_with(" %"), "{}", by_name("95 % CI"));
+        assert!(by_name("95 % CI (Wilson)").ends_with(" %"), "{}", by_name("95 % CI (Wilson)"));
         assert!(
             by_name("Worst trial").starts_with("Trial 0 \u{b7} seed 29604"),
             "{}",
