@@ -186,6 +186,9 @@ impl crate::AbortSignal for ModelRunSignal<'_> {
     fn observe_progress(&self, fraction: f64) {
         self.parent.observe_progress(fraction);
     }
+    fn observe_phase(&self, phase: crate::abort_signal::EnginePhase) {
+        self.parent.observe_phase(phase);
+    }
     fn observe_transient_sample(&self, sample: crate::abort_signal::TransientSample<'_>) {
         self.parent.observe_transient_sample(sample);
     }

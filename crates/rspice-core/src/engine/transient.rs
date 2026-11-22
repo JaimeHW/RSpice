@@ -5289,6 +5289,7 @@ impl Engine {
                     None,
                 )
             } else {
+                abort.observe_phase(crate::abort_signal::EnginePhase::OperatingPoint);
                 let operating_point_timer = self.operating_point_timer();
                 let initial = self.solve_transient_initial_solution(
                     netlist,
@@ -7392,6 +7393,7 @@ impl Engine {
             log::log_enabled!(log::Level::Debug) || phase_timings.is_some();
         // The operating point's solves were timed with it.
         let _ = matrix.take_phase_times();
+        abort.observe_phase(crate::abort_signal::EnginePhase::Analysis);
         let transient_wall_start = DiagnosticTimer::start(diagnostic_timing_enabled);
         let newton_iterations_at_start = self.convergence_quality().total_iterations;
         let mut total_output_nanos: u128 = 0;

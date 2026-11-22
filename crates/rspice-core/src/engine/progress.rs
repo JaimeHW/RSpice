@@ -78,6 +78,9 @@ impl AbortSignal for StudyStage<'_, '_> {
     fn observe_transient_sample(&self, sample: TransientSample<'_>) {
         self.study.parent.observe_transient_sample(sample);
     }
+    fn observe_phase(&self, phase: crate::abort_signal::EnginePhase) {
+        self.study.parent.observe_phase(phase);
+    }
     fn observe_progress(&self, fraction: f64) {
         if fraction.is_finite() {
             self.study.publish(

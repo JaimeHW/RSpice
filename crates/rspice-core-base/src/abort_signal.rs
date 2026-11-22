@@ -280,6 +280,22 @@ impl AbortReason {
     }
 }
 
+/// The stage a run has reached, as the engine reports it on entering it, for a host to say what
+/// the run is doing while it waits: flattening a hierarchy and building a million devices take
+/// long enough to need naming before the first solve reports any progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnginePhase {
+    /// Expanding subcircuit instances into the devices they hold.
+    Flattening,
+    /// Building the circuit of `devices` flattened devices.
+    Preparing { devices: usize },
+    /// Solving the DC operating point.
+    OperatingPoint,
+    /// The requested analysis itself, once its operating point stands: a transient's stepping,
+    /// whose progress the engine then reports.
+    Analysis,
+}
+
 //=============================================================================
 // AbortSignal Trait
 //=============================================================================
@@ -327,6 +343,9 @@ pub trait AbortSignal: Send + Sync {
     /// implementations may update UI state directly. The default ignores
     /// progress, keeping existing implementors unchanged.
     fn observe_progress(&self, _fraction: f64) {}
+
+    /// Observe the run entering `phase`. The default ignores it, as it does progress.
+    fn observe_phase(&self, _phase: EnginePhase) {}
 
     /// Observe one fully accepted transient sample.
     ///
@@ -456,6 +475,10 @@ impl<T: AbortSignal + ?Sized> AbortSignal for &T {
         (*self).observe_progress(fraction);
     }
 
+    fn observe_phase(&self, phase: EnginePhase) {
+        (*self).observe_phase(phase);
+    }
+
     fn observe_transient_sample(&self, sample: TransientSample<'_>) {
         (*self).observe_transient_sample(sample);
     }
@@ -479,6 +502,10 @@ impl AbortSignal for Box<dyn AbortSignal + '_> {
         self.as_ref().observe_progress(fraction);
     }
 
+    fn observe_phase(&self, phase: EnginePhase) {
+        self.as_ref().observe_phase(phase);
+    }
+
     fn observe_transient_sample(&self, sample: TransientSample<'_>) {
         self.as_ref().observe_transient_sample(sample);
     }
@@ -500,6 +527,10 @@ impl AbortSignal for Arc<dyn AbortSignal + '_> {
 
     fn observe_progress(&self, fraction: f64) {
         self.as_ref().observe_progress(fraction);
+    }
+
+    fn observe_phase(&self, phase: EnginePhase) {
+        self.as_ref().observe_phase(phase);
     }
 
     fn observe_transient_sample(&self, sample: TransientSample<'_>) {

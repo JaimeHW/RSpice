@@ -1513,6 +1513,7 @@ impl Engine {
 
         let mut matrix = matrix;
 
+        abort.observe_phase(crate::abort_signal::EnginePhase::OperatingPoint);
         let operating_point_timer = engine.operating_point_timer();
         let solution = engine.solve_dc_operating_point_with_startup_and_abort(
             netlist,
@@ -1522,6 +1523,7 @@ impl Engine {
             abort,
         );
         engine.record_operating_point_time(operating_point_timer);
+        abort.observe_phase(crate::abort_signal::EnginePhase::Analysis);
         // A loop through the mixed boundary with no consistent value is a
         // property of the deck, which no aid could have solved.
         #[cfg(feature = "veriloga")]

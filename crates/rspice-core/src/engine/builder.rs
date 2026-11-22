@@ -6782,6 +6782,7 @@ impl Engine {
         let (flattened, parameter_direction) = match reused {
             Some(reused) => reused,
             None => {
+                abort.observe_phase(crate::abort_signal::EnginePhase::Flattening);
                 let flatten_started = self
                     .phase_timings()
                     .map(|_| crate::time_compat::Instant::now());
@@ -6819,6 +6820,9 @@ impl Engine {
         circuit.parameter_direction = parameter_direction;
         *instance_cards = flattened.external_instance_origins;
         let mut flat_elements = flattened.elements;
+        abort.observe_phase(crate::abort_signal::EnginePhase::Preparing {
+            devices: flat_elements.len(),
+        });
         let requires_statistical_materialization =
             !netlist.spectre_statistics.variations.is_empty();
         let mut effective_model_netlist;
