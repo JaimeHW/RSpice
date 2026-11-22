@@ -742,6 +742,87 @@ fn a_net_row_announces_the_meta_column_it_paints() {
     );
 }
 
+/// A net row unfolds into the pins on it, and a pin row selects and centres
+/// the part that pin belongs to, the way KiCad's net navigator lists a net's
+/// pads. The row used to stop at the net: the pin count was there, but which
+/// parts made it up took a trip to the canvas.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_net_row_unfolds_into_its_pins_and_a_pin_row_selects_its_part() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    let schematic = &mut app.state.model.schematic;
+    let resistor = schematic.add_component(
+        ComponentType::Resistor,
+        rspice_app_state::state::Point::new(200, 200),
+    );
+    let pin = schematic.document().components[0].terminal_positions()[1].1;
+    let far = rspice_app_state::state::Point::new(pin.x + 100, pin.y);
+    let document = schematic.document_mut_for_test();
+    document
+        .wires
+        .push(rspice_app_state::state::Wire::segment(901, pin, far));
+    document
+        .net_labels
+        .push(rspice_app_state::state::NetLabel::new(902, far, "VOUT"));
+    app.state.sync_active_schematic_to_workspace();
+    let mut panel = NavigatorPanel::open(app);
+
+    let net_row = |panel: &NavigatorPanel| {
+        panel
+            .controls
+            .iter()
+            .find(|(label, _, _)| label == "VOUT, 1")
+            .map(|(_, rect, expanded)| (*rect, *expanded))
+            .unwrap_or_else(|| {
+                panic!(
+                    "the nets rail announces: {:#?}",
+                    panel.announced_rows(|_| true)
+                )
+            })
+    };
+    let (row, expanded) = net_row(&panel);
+    assert_eq!(expanded, Some(false), "a net with pins on it starts folded");
+    let caret = panel
+        .controls
+        .iter()
+        .find(|(label, rect, _)| {
+            label == "Expand" && (rect.center().y - row.center().y).abs() < 1.0
+        })
+        .map(|(_, rect, _)| rect.center())
+        .expect("the net row carries its own disclosure control");
+    panel.pass(click_events(caret));
+    panel.pass(Vec::new());
+    assert_eq!(net_row(&panel).1, Some(true), "the caret unfolds the net");
+    assert!(
+        panel
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .is_empty(),
+        "unfolding a net reads it; it selects nothing"
+    );
+
+    let pins = panel.announced_rows(|label| label.starts_with("R1, "));
+    assert_eq!(pins.len(), 1, "one pin of R1 is on VOUT: {pins:?}");
+    panel.click(&pins[0]);
+
+    let editor = &panel.app.state.model.schematic.session.editor;
+    assert!(
+        editor.selection.has_component(resistor),
+        "the pin row selects the part the pin belongs to"
+    );
+    assert_eq!(
+        editor.center_request,
+        Some(rspice_app_state::state::Point::new(200, 200)),
+        "and centres it"
+    );
+}
+
 /// The object menu answers the same key on the navigator's own rails. A
 /// keyboard open has no pointer position for the menu to sit at, so the row
 /// anchors it — on every frame it stays open, not only the one that opened it,

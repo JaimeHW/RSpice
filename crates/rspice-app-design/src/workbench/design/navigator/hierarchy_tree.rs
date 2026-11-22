@@ -531,6 +531,10 @@ pub(super) struct TreeRow<'a> {
     /// The meta states a condition rather than a name or a count, so it is
     /// painted as one.
     pub alert: bool,
+    /// The meta is half of what the row says (a net's pin count), so a reader
+    /// working by ear is told it with the name, as the object rails' own rows
+    /// announce theirs.
+    pub announce_meta: bool,
     pub selected: bool,
     /// The row is where the canvas stands (the occurrence or the sheet in
     /// front), which is told apart from what is selected.
@@ -564,7 +568,10 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             row.selected,
-            row.label,
+            match row.meta {
+                Some(meta) if row.announce_meta => format!("{}, {meta}", row.label),
+                _ => row.label.to_owned(),
+            },
         )
     });
     let unfolded = row
@@ -766,6 +773,7 @@ pub(super) fn masters_section(
                 mono: false,
                 meta: Some(cell_count.as_str()),
                 alert: false,
+                announce_meta: false,
                 selected: false,
                 current: false,
             },
@@ -795,6 +803,7 @@ pub(super) fn masters_section(
                     mono: false,
                     meta: Some(view_count.as_str()),
                     alert: false,
+                    announce_meta: false,
                     selected: false,
                     current: false,
                 },
@@ -826,6 +835,7 @@ pub(super) fn masters_section(
                         mono: false,
                         meta: Some(meta),
                         alert: master.condition.is_some(),
+                        announce_meta: false,
                         selected: model.workspace.content.active_view == reference,
                         current: false,
                     },
@@ -995,6 +1005,7 @@ pub fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                         mono: false,
                         meta: Some(note.as_str()),
                         alert: row.state.note().is_some(),
+                        announce_meta: false,
                         selected: selected.as_ref() == Some(&row.path),
                         current: active.as_ref() == Some(&row.path),
                     },
@@ -1044,6 +1055,7 @@ pub fn occurrences_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                         // sheet, on every sheet row there is.
                         meta: None,
                         alert: false,
+                        announce_meta: false,
                         selected: false,
                         current: active.as_ref() == Some(occurrence) && active_sheet == Some(*id),
                     },

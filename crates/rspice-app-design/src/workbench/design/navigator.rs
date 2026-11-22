@@ -687,25 +687,68 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                     .highlighted_wires
         };
         let connection_count = net.pin_count().to_string();
-        let response = nav_row_indented_mono_response(
+        let ground = net.class == rspice_design::connectivity::summary::NetClass::Ground;
+        // A net row unfolds into the pins on it, as KiCad's net navigator
+        // and Virtuoso's Navigator list a net's terminals.
+        let fold = ui.make_persistent_id(("navigator-net", net.name.to_ascii_lowercase()));
+        let unfolded = !net.terminals.is_empty()
+            && ui.data_mut(|data| data.get_persisted::<bool>(fold).unwrap_or(false));
+        let rows = hierarchy_tree::tree_row(
             ui,
-            if net.class == rspice_design::connectivity::summary::NetClass::Ground {
-                WorkbenchIcon::Supply
-            } else {
-                WorkbenchIcon::Design
-            },
-            &net.name,
-            selected,
-            Some(
-                if net.class == rspice_design::connectivity::summary::NetClass::Ground {
-                    "gnd"
+            hierarchy_tree::TreeRow {
+                id: ui.id().with(("navigator-net-row", net.name.as_str())),
+                level: 1,
+                disclosure: (!net.terminals.is_empty()).then_some(RailDisclosure {
+                    unfolded,
+                    fold: RailFold::Persisted(fold),
+                }),
+                icon: if ground {
+                    WorkbenchIcon::Supply
                 } else {
-                    &connection_count
+                    WorkbenchIcon::Design
                 },
-            ),
-            1,
-        )
-        .on_hover_text(net.domain.label());
+                label: net.name.as_str(),
+                mono: true,
+                meta: Some(if ground { "gnd" } else { &connection_count }),
+                alert: false,
+                announce_meta: true,
+                selected,
+                current: false,
+            },
+        );
+        if rows.disclosure.is_some_and(|caret| caret.clicked()) {
+            ui.data_mut(|data| data.insert_persisted(fold, !unfolded));
+        }
+        let response = rows.row.on_hover_text(net.domain.label());
+        if unfolded {
+            for terminal in &net.terminals {
+                let pin = nav_row_indented_mono_response(
+                    ui,
+                    WorkbenchIcon::Pin,
+                    &terminal.reference,
+                    cx.model
+                        .schematic
+                        .session
+                        .editor
+                        .selection
+                        .has_component(terminal.component_id),
+                    Some(&terminal.pin),
+                    3,
+                );
+                if pin.clicked()
+                    && let Some(position) = cx
+                        .model
+                        .schematic
+                        .document()
+                        .components
+                        .iter()
+                        .find(|component| component.id == terminal.component_id)
+                        .map(|component| component.pos)
+                {
+                    show_navigator_component(cx, terminal.component_id, position);
+                }
+            }
+        }
         if response.clicked() {
             select_navigator_design_net(cx, &net);
         }
@@ -952,6 +995,7 @@ fn port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                 mono: true,
                 meta: Some(meta.as_str()),
                 alert: port.duplicated,
+                announce_meta: false,
                 selected: cx
                     .model
                     .schematic
