@@ -1091,11 +1091,11 @@ fn unique_probe_output_name(outputs: &[SavedOutput], preferred: &str) -> String 
 
 /// The active analysis's trace of `probe_name`, when the last run holds it.
 fn materialized_probe_trace(
-    state: &CanvasParts<'_>,
+    model: &Model,
     probe_name: &str,
 ) -> Option<rspice_results_ui::selection::SelectedResultTrace> {
-    let run = state.model.simulation.active_run()?;
-    let analysis = state.model.simulation.active_analysis()?;
+    let run = model.simulation.active_run()?;
+    let analysis = model.simulation.active_analysis()?;
     let analysis_index = run
         .analyses
         .iter()
@@ -1119,7 +1119,7 @@ fn plot_materialized_trace(
     spelling: &OccurrenceProbeSpelling,
     plot: ProbePlot,
 ) -> Option<ProbeSignalOutcome> {
-    let trace = materialized_probe_trace(state, spelling.engine())?;
+    let trace = materialized_probe_trace(state.model, spelling.engine())?;
     state.workbench.outbox.push(PlotProbedTrace {
         trace,
         plot,
@@ -1339,6 +1339,32 @@ fn request_retained_probe_signal(
         .unwrap_or(ProbeSignalOutcome::NotInLastRun)
 }
 
+/// Whether the last run's trace of `display`, the voltage or current of the
+/// local `name`, is on the plot now, as the results workspace shows it.
+pub(crate) fn probe_trace_plotted(
+    model: &Model,
+    results: &dyn crate::workbench::framework::ports::ResultsPort,
+    name: &str,
+    display: &str,
+) -> bool {
+    let Ok(spelling) = probe_spelling_for(model, name, display) else {
+        return false;
+    };
+    let Some((trace, run)) =
+        materialized_probe_trace(model, spelling.engine()).zip(model.simulation.active_run())
+    else {
+        return false;
+    };
+    let Some((.., waveform)) = trace.resolve(run) else {
+        return false;
+    };
+    let key = rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+        trace.analysis_key(),
+        trace.source_name(),
+    );
+    results.waveform_visibility(&key, waveform.visible)
+}
+
 /// Re-spell a probe request at the occurrence the active tab is editing.
 ///
 /// `display` is the expression the caller means and `name` is the local leaf
@@ -1346,7 +1372,7 @@ fn request_retained_probe_signal(
 /// `I(name)`; anything else — a marker's stored expression, an authored
 /// quantity — already names an exact node and is used as written.
 fn probe_spelling_for(
-    state: &CanvasParts<'_>,
+    model: &Model,
     name: &str,
     display: &str,
 ) -> Result<OccurrenceProbeSpelling, String> {
@@ -1356,7 +1382,7 @@ fn probe_spelling_for(
     }) else {
         return Ok(OccurrenceProbeSpelling::verbatim(display));
     };
-    let occurrence = state.model.workspace.content.occurrence_path();
+    let occurrence = model.workspace.content.occurrence_path();
     OccurrenceProbeSpelling::for_leaf(&occurrence, quantity, name)
         .ok_or_else(|| unspellable_occurrence(&occurrence))
 }
@@ -1401,7 +1427,7 @@ fn commit_probe_request(
     display: &str,
     request: ProbeRequest,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
-    match probe_spelling_for(state, name, display) {
+    match probe_spelling_for(state.model, name, display) {
         Ok(spelling) => {
             let outcome = request(state, &spelling);
             (spelling, outcome)
@@ -1451,7 +1477,7 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let spelling = match probe_spelling_for(state, name, display) {
+    let spelling = match probe_spelling_for(state.model, name, display) {
         Ok(spelling) => spelling,
         Err(reason) => {
             report_probe_outcome(state, display, ProbeSignalOutcome::Rejected { reason });

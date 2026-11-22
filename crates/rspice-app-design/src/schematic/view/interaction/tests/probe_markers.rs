@@ -124,13 +124,13 @@ fn probe_placed_while_descended_names_the_occurrence() {
         ViewType::Schematic,
     );
 
-    let spelling = probe_spelling_for(&canvas_parts(&mut state), "n1", "V(n1)")
-        .expect("an ASCII occurrence spells");
+    let spelling =
+        probe_spelling_for(&state.model, "n1", "V(n1)").expect("an ASCII occurrence spells");
 
     assert_eq!(spelling.display(), "V(/X1/n1)");
     assert_eq!(spelling.engine(), "V(x1.n1)");
     assert_eq!(
-        probe_spelling_for(&canvas_parts(&mut state), "V(x1.n1)", "V(x1.n1)")
+        probe_spelling_for(&state.model, "V(x1.n1)", "V(x1.n1)")
             .expect("an exact expression is not re-scoped")
             .display(),
         "V(x1.n1)",

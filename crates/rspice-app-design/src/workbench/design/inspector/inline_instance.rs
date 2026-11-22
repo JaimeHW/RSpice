@@ -829,7 +829,20 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
         action_stack(ui, |ui| {
             for &quantity in probes {
                 let display = format!("{quantity}({net_name})");
-                let label = format!("Plot {display}");
+                // The button says whether the trace is on the plot; a press
+                // puts it there or takes it off.
+                let plotted = quantity == 'V'
+                    && crate::schematic::view::probe_trace_plotted(
+                        cx.model,
+                        cx.peers.results(),
+                        &net_name,
+                        &display,
+                    );
+                let label = if plotted {
+                    format!("Plotted: {display}")
+                } else {
+                    format!("Plot {display}")
+                };
                 if !Button::new(&label).icon(Icon::Results).show(ui).clicked() {
                     continue;
                 }

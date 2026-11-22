@@ -583,3 +583,29 @@ fn probing_a_net_the_run_holds_plots_its_trace() {
         Some("V(out) is already in the plot.")
     );
 }
+
+/// The net inspector's Plot button says whether the net's trace is on the
+/// plot, and a press takes it off or puts it back.
+#[test]
+fn the_net_inspector_plot_button_reads_and_toggles_the_plot() {
+    let mut user = results_after_a_run();
+    let name = "V(out)";
+    assert!(plotted(&user, name), "a first run plots the named net");
+    let (wire, _) = out_wire(&user);
+    user.app.state.workbench.activate(Workspace::Design);
+    user.app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire_segment(wire, 0);
+    user.settle();
+
+    user.click("Plotted: V(out)");
+    assert!(!plotted(&user, name), "a press takes it off the plot");
+    user.click("Plot V(out)");
+    assert!(plotted(&user, name), "and a second puts it back");
+    assert!(user.find("Plotted: V(out)").is_some());
+}
