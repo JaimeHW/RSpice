@@ -544,7 +544,8 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
                     },
                 ],
                 None => vec![
-                    Cell::text(&row.name).hint("Measured by the netlist's .MEAS"),
+                    Cell::text(&row.name)
+                        .hint("Measured in the run, by a .MEAS statement or by its analysis"),
                     Cell::absent(),
                     Cell::absent(),
                 ],
