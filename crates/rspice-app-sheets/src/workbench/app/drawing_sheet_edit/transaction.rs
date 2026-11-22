@@ -63,6 +63,11 @@ pub enum DrawingSheetEdit {
     /// sheet, on the project for the values every sheet shares, or in the
     /// document control for the revision and its date.
     TitleField(DrawingSheetTitleFieldId, String),
+    /// One of this sheet's title values, as typed here, lettered on every
+    /// sheet: a signer's name becomes the project's, which every sheet
+    /// letters until it types its own, and any other value is written onto
+    /// every sheet of the drawing.
+    ApplyToAllSheets(DrawingSheetTitleFieldId, String),
     /// Where the document stands in its release.
     Status(DrawingSheetReleaseStatus),
     /// The change order, ticket or release record the document's revision
@@ -85,6 +90,9 @@ pub fn apply_drawing_sheet_edit_on(
     if !drawing_sheet_editable(workbench, model) {
         return Err("The sheet can only be edited on a writable schematic.".to_owned());
     }
+    if let DrawingSheetEdit::ApplyToAllSheets(field, value) = edit {
+        return apply_title_value_to_all_sheets(model, field, &entered_text(&value));
+    }
     let paper = model.active_drawing_sheet().geometry.paper;
     let mut transaction = SheetTransaction::open(model);
     transaction.stage(model, edit)?;
@@ -98,6 +106,106 @@ pub fn apply_drawing_sheet_edit_on(
         editor.needs_fit = false;
     }
     Ok(outcome)
+}
+
+/// Letter `value` in `field` on every sheet, as one undo step. A signer's
+/// name becomes the project's (an empty one keeps the project's name) and
+/// every sheet's own name for that signer is cleared, so each letters the
+/// project's until it types another; any other value is written onto every
+/// sheet of the open drawing.
+fn apply_title_value_to_all_sheets(
+    model: &mut Model,
+    field: DrawingSheetTitleFieldId,
+    value: &str,
+) -> Result<String, String> {
+    if field == DrawingSheetTitleFieldId::SheetTitle
+        || field.is_project_owned()
+        || field.policy().value_authority
+            != crate::state::DrawingSheetTitleFieldValueAuthority::Authored
+    {
+        return Err(format!(
+            "{} is not one sheet's own value.",
+            field.display_label()
+        ));
+    }
+    let before = (*model.workspace.content.design_management).clone();
+    let mut candidate = before.clone();
+    let (sheet_value, catalogs) = if field.is_project_defaulted() {
+        // A sheet that types no name of its own applies the project's.
+        let mut settings = candidate.drawing_sheet_settings().clone();
+        if !value.is_empty() {
+            settings
+                .title_block_field_values
+                .insert(field, value.to_owned());
+        }
+        if settings
+            .title_block_field_values
+            .get(&field)
+            .is_none_or(|name| name.trim().is_empty())
+        {
+            return Err(format!(
+                "Type the name for {} first.",
+                field.display_label()
+            ));
+        }
+        if &settings != candidate.drawing_sheet_settings() {
+            candidate
+                .update_drawing_sheet_settings(candidate.revision(), settings)
+                .map_err(|error| error.to_string())?;
+        }
+        (
+            String::new(),
+            candidate
+                .sheet_catalogs()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        (value.to_owned(), vec![model.workspace.content.active_key()])
+    };
+    for key in catalogs {
+        let Some(catalog) = candidate.sheet_catalog(&key) else {
+            continue;
+        };
+        let mut updates = Vec::new();
+        for sheet in catalog.sheets() {
+            let format = sheet.page_format();
+            if format
+                .title_block
+                .fields
+                .get(&field)
+                .is_none_or(|authored| authored.value == sheet_value)
+            {
+                continue;
+            }
+            let updated = format
+                .try_update(|draft| {
+                    if let Some(authored) = draft.title_block.fields.get_mut(&field) {
+                        authored.value.clone_from(&sheet_value);
+                    }
+                })
+                .map_err(|error| error.to_string())?;
+            updates.push((sheet.id(), sheet.revision(), updated));
+        }
+        let catalog = candidate
+            .sheet_catalog_mut(&key)
+            .ok_or_else(|| "The drawing's sheets are unavailable.".to_owned())?;
+        for (id, revision, format) in updates {
+            catalog
+                .update_sheet_page_format(id, revision, format)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    if candidate == before {
+        return Ok(format!(
+            "Every sheet already letters that {}.",
+            field.display_label()
+        ));
+    }
+    let personal = model.preferences.drawing_sheet_personal_preferences();
+    commit_sheet_candidate(model, before, candidate, personal.clone(), personal)?;
+    Ok(format!("{} applied to all sheets.", field.display_label()))
 }
 
 /// The governed sheet an edit lands on, as it stood when the edit began.
@@ -261,6 +369,9 @@ impl SheetTransaction {
             }
             DrawingSheetEdit::Status(status) => {
                 self.stage_document_control(model, |control| control.status = status);
+            }
+            DrawingSheetEdit::ApplyToAllSheets(..) => {
+                return Err("Apply to all sheets reaches beyond one sheet's draft.".to_owned());
             }
             DrawingSheetEdit::ChangeReference(reference) => {
                 self.stage_document_control(model, |control| {

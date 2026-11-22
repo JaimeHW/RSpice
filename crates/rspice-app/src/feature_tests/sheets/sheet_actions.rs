@@ -1,7 +1,9 @@
 //! What the sheet actions promise the strip, the chords and the menus.
 
+use super::apply_drawing_sheet_edit;
 use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::actions::sheets::*;
+use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use rspice_app_state::state::{
     Component, ComponentType, DrawingSheetTitleFieldId, Point, SheetDefinition,
     SheetDeleteBehavior, SheetId, SheetPortPolicy,
@@ -638,4 +640,101 @@ fn under_ask_a_new_sheet_opens_the_format_step_first() {
     let dialog = &app.state.project.design_management;
     assert!(dialog.open);
     assert_eq!(dialog.page, DesignManagementPage::NewSheet);
+}
+
+/// What the open sheet's block letters for `field`.
+fn lettered(state: &AppState, field: DrawingSheetTitleFieldId) -> String {
+    let sheet = state.model.active_drawing_sheet();
+    state
+        .model
+        .title_block_fields(&sheet)
+        .into_iter()
+        .find(|lettered| lettered.id == field)
+        .map(|lettered| lettered.value)
+        .unwrap_or_default()
+}
+
+/// A sheet's own value for `field`, as the catalog keeps it.
+fn own_value(state: &AppState, id: SheetId, field: DrawingSheetTitleFieldId) -> String {
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    state
+        .model
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog(&key)
+        .and_then(|catalog| catalog.find(id))
+        .map(|sheet| sheet.page_format().title_block.fields[&field].value.clone())
+        .expect("the sheet is in the catalog")
+}
+
+/// A signer's name applied to all sheets becomes the project's: every sheet
+/// letters it, a sheet added afterwards too, until a sheet types its own,
+/// which stands on that sheet alone.
+#[test]
+fn a_projects_created_by_shows_on_every_sheet_until_a_sheet_overrides_it() {
+    let (mut state, first, second) = two_sheet_state();
+    let created_by = DrawingSheetTitleFieldId::DrawnBy;
+    for edit in [
+        DrawingSheetEdit::TitleField(created_by, "J. Whitfield".to_owned()),
+        DrawingSheetEdit::ApplyToAllSheets(created_by, "J. Whitfield".to_owned()),
+    ] {
+        apply_drawing_sheet_edit(&mut state, edit).unwrap();
+    }
+    assert_eq!(lettered(&state, created_by), "J. Whitfield");
+    assert_eq!(own_value(&state, first, created_by), "");
+
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        second,
+    )
+    .unwrap();
+    assert_eq!(lettered(&state, created_by), "J. Whitfield");
+    apply_drawing_sheet_edit(
+        &mut state,
+        DrawingSheetEdit::TitleField(created_by, "A. Checker".to_owned()),
+    )
+    .unwrap();
+    assert_eq!(lettered(&state, created_by), "A. Checker");
+
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        first,
+    )
+    .unwrap();
+    assert_eq!(lettered(&state, created_by), "J. Whitfield");
+    new_sheet(&mut state.model, &mut state.workbench, &mut *state.design).unwrap();
+    assert_eq!(
+        lettered(&state, created_by),
+        "J. Whitfield",
+        "a sheet added afterwards"
+    );
+}
+
+/// Apply to all sheets writes one sheet's value onto every sheet of the
+/// drawing, and one undo takes it off them all.
+#[test]
+fn apply_to_all_sheets_letters_a_value_on_every_sheet_in_one_undo_step() {
+    let (mut state, first, second) = two_sheet_state();
+    let document_type = DrawingSheetTitleFieldId::DocumentType;
+    apply_drawing_sheet_edit(
+        &mut state,
+        DrawingSheetEdit::ApplyToAllSheets(document_type, "Wiring diagram".to_owned()),
+    )
+    .unwrap();
+    assert_eq!(own_value(&state, first, document_type), "Wiring diagram");
+    assert_eq!(own_value(&state, second, document_type), "Wiring diagram");
+
+    assert!(state.undo_project_design().unwrap().is_some());
+    assert_eq!(own_value(&state, first, document_type), "");
+    assert_eq!(own_value(&state, second, document_type), "");
 }

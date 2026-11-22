@@ -133,12 +133,17 @@ impl Model {
                 .status
                 .label()
                 .to_owned(),
+            // The project's own values, and its names for the people who
+            // sign, which a sheet's own names stand in for.
             DrawingSheetTitleFieldId::Organization
             | DrawingSheetTitleFieldId::DocumentId
             | DrawingSheetTitleFieldId::Classification
             | DrawingSheetTitleFieldId::Language
             | DrawingSheetTitleFieldId::CageCode
-            | DrawingSheetTitleFieldId::ContractNumber => self
+            | DrawingSheetTitleFieldId::ContractNumber
+            | DrawingSheetTitleFieldId::DrawnBy
+            | DrawingSheetTitleFieldId::CheckedBy
+            | DrawingSheetTitleFieldId::ApprovedBy => self
                 .workspace
                 .content
                 .design_management
@@ -147,10 +152,7 @@ impl Model {
                 .get(&field)
                 .cloned()
                 .unwrap_or_default(),
-            DrawingSheetTitleFieldId::DrawnBy
-            | DrawingSheetTitleFieldId::CheckedBy
-            | DrawingSheetTitleFieldId::ApprovedBy
-            | DrawingSheetTitleFieldId::Engineer
+            DrawingSheetTitleFieldId::Engineer
             | DrawingSheetTitleFieldId::DrawnDate
             | DrawingSheetTitleFieldId::CheckedDate
             | DrawingSheetTitleFieldId::EngineerDate

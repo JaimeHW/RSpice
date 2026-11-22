@@ -811,7 +811,9 @@ pub struct DrawingSheetProjectSettings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transaction_receipts: Vec<DrawingSheetTransactionReceipt>,
     /// Canonical project-owned title-block values. Sheets own visibility for
-    /// these fields, but never duplicate their values.
+    /// these fields, but never duplicate their values. Beside them, the
+    /// names the project gives every sheet that types none of its own
+    /// ([`DrawingSheetTitleFieldId::PROJECT_DEFAULTED`]), once one is given.
     #[serde(default = "default_project_title_block_field_values")]
     pub title_block_field_values: BTreeMap<DrawingSheetTitleFieldId, String>,
     #[serde(default)]
@@ -1065,17 +1067,16 @@ impl DrawingSheetProjectSettings {
 pub fn validate_project_drawing_sheet_title_field_values(
     values: &BTreeMap<DrawingSheetTitleFieldId, String>,
 ) -> Result<(), DesignManagementError> {
-    if values.len() != DrawingSheetTitleFieldId::PROJECT_OWNED.len()
-        || DrawingSheetTitleFieldId::PROJECT_OWNED
-            .into_iter()
-            .any(|field| !values.contains_key(&field))
+    if DrawingSheetTitleFieldId::PROJECT_OWNED
+        .into_iter()
+        .any(|field| !values.contains_key(&field))
     {
         return Err(DesignManagementError::NumericRange(
             "project drawing sheet title field set",
         ));
     }
     for (field, value) in values {
-        if !field.is_project_owned() {
+        if !field.is_project_owned() && !field.is_project_defaulted() {
             return Err(DesignManagementError::NumericRange(
                 "project drawing sheet title field ownership",
             ));

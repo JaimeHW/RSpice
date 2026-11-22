@@ -1644,7 +1644,7 @@ pub fn property_row_input_action(
     action: PropertyRowAction<'_>,
     shorter: &[String],
 ) -> (Response, Response) {
-    input_action_row(ui, label, value, "", invalid, action, shorter)
+    input_action_row(ui, label, value, None, invalid, action, shorter)
 }
 
 /// [`property_row_input_action`] whose empty value shows `hint`, the form a
@@ -1658,14 +1658,44 @@ pub fn property_row_input_action_with_hint(
     invalid: bool,
     action: PropertyRowAction<'_>,
 ) -> (Response, Response) {
-    input_action_row(ui, label, value, hint, invalid, action, &[])
+    input_action_row(
+        ui,
+        label,
+        value,
+        Some((hint, StandIn::Form)),
+        invalid,
+        action,
+        &[],
+    )
+}
+
+/// [`property_row_input_action`] whose empty value shows `default`, the
+/// value that applies while the field is empty, a step below an authored
+/// value, as [`property_row_input_with_default`] does.
+pub fn property_row_input_action_with_default(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    default: &str,
+    invalid: bool,
+    action: PropertyRowAction<'_>,
+) -> (Response, Response) {
+    input_action_row(
+        ui,
+        label,
+        value,
+        Some((default, StandIn::Default)),
+        invalid,
+        action,
+        &[],
+    )
 }
 
 fn input_action_row(
     ui: &mut Ui,
     label: &str,
     value: &mut String,
-    hint: &str,
+    stand_in: Option<(&str, StandIn)>,
     invalid: bool,
     action: PropertyRowAction<'_>,
     shorter: &[String],
@@ -1701,11 +1731,16 @@ fn input_action_row(
     } else {
         ui.visuals().override_text_color.unwrap_or(t.color.text)
     };
+    let (hint, stand_in_tone) = match stand_in {
+        Some((hint, StandIn::Default)) => (hint, t.color.text_dim),
+        Some((hint, StandIn::Form)) => (hint, t.color.text_faint),
+        None => ("", t.color.text_faint),
+    };
     let edit = hinted_edit(value, hint)
         .font(theme::field_mono())
         .desired_width(value_rect.width())
         .margin(field_margin(ui, value_rect, 7));
-    let restored = ui.visuals_mut().weak_text_color.replace(t.color.text_faint);
+    let restored = ui.visuals_mut().weak_text_color.replace(stand_in_tone);
     let (edit_response, elided) = ui
         .scope_builder(
             egui::UiBuilder::new()

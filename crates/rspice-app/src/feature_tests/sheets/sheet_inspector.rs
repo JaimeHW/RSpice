@@ -1273,7 +1273,8 @@ fn a_value_the_block_cuts_short_says_so_under_its_row() {
     panel.enter("Created by", "Christopher Featherstones");
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
     assert!(
-        painted.contains(&format!("Created by\nChristopher Featherstones\n{CUT}\n")),
+        painted.contains("Created by\nChristopher Featherstones\n")
+            && painted.contains(&format!("Christopher Featherstones\n{CUT}\n")),
         "{painted}"
     );
     assert_eq!(painted.matches(CUT).count(), 1, "{painted}");

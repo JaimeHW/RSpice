@@ -46,8 +46,8 @@ use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_schematic_editor::view::drawing_sheet::ActiveDrawingSheet;
 use rspice_ui_kit::panels::{
-    PropertyRowAction, WorkbenchIcon, property_row_input_action_with_hint, section_header,
-    section_header_explained,
+    PropertyRowAction, WorkbenchIcon, property_row_input_action_with_default,
+    property_row_input_action_with_hint, section_header, section_header_explained,
 };
 
 /// The sheet's inspector section over the parts it reads and writes: the
@@ -97,7 +97,15 @@ pub fn sheet_panel(ui: &mut Ui, mut panel: SheetInspector<'_>) {
     let mut edit = None;
     let mut schematic_edit = None;
     format::sheet_section(ui, &mut panel, &sheet, &identity, editable, &mut edit);
-    title_block_section(ui, &sheet, &identity, editable, &cut, &mut edit);
+    title_block_section(
+        ui,
+        panel.model,
+        &sheet,
+        &identity,
+        editable,
+        &cut,
+        &mut edit,
+    );
     document_section(
         ui,
         panel.model,
@@ -270,6 +278,7 @@ pub fn apply_schematic_edit(
 /// optional, and the values this sheet letters in it.
 fn title_block_section(
     ui: &mut Ui,
+    model: &Model,
     sheet: &ActiveDrawingSheet,
     identity: &SheetIdentity,
     editable: bool,
@@ -331,28 +340,37 @@ fn title_block_section(
         {
             continue;
         }
-        // What the block letters while the sheet leaves the value empty.
+        // What the block letters while the sheet leaves the value empty: a
+        // signer's name is the project's until the sheet types its own.
+        let project_name = project_signer(model, field);
         let fallback = match field {
             DrawingSheetTitleFieldId::SheetTitle => sheet.design_name.as_str(),
+            _ if field.is_project_defaulted() => project_name.as_str(),
             _ => field.default_value(),
         };
         if editable && !locked_by_organization(format, field) {
             // An empty date shows the form it is written in, with Today
             // beside it; any other empty field shows what the block letters
-            // in its place.
-            let typed = if field.is_signature_date() {
-                date_row(ui, identity, field, &authored.value)
-            } else {
-                text_row(
-                    ui,
-                    identity,
-                    SheetText::Field(field),
-                    field.display_label(),
-                    &authored.value,
-                    Empty::Prints(fallback),
-                )
-            };
-            if let Some(typed) = typed {
+            // in its place, with Apply to all sheets beside it where there
+            // are other sheets to letter it.
+            if field.is_signature_date() {
+                if let Some(typed) = date_row(ui, identity, field, &authored.value) {
+                    *edit = Some(Ok(DrawingSheetEdit::TitleField(field, typed)));
+                }
+            } else if let Some(applies) = applies_to_all_sheets(model, field, fallback) {
+                if let Some(asked) =
+                    applying_row(ui, identity, field, &authored.value, fallback, applies)
+                {
+                    *edit = Some(Ok(asked));
+                }
+            } else if let Some(typed) = text_row(
+                ui,
+                identity,
+                SheetText::Field(field),
+                field.display_label(),
+                &authored.value,
+                Empty::Prints(fallback),
+            ) {
                 *edit = Some(Ok(DrawingSheetEdit::TitleField(field, typed)));
             }
         } else {
@@ -364,6 +382,84 @@ fn title_block_section(
         }
         cut_advisory(ui, cut, field);
     }
+}
+
+/// The project's name for the signer `field` names, or nothing for any other
+/// field or a signer the project names no one for.
+fn project_signer(model: &Model, field: DrawingSheetTitleFieldId) -> String {
+    if !field.is_project_defaulted() {
+        return String::new();
+    }
+    model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .title_block_field_values
+        .get(&field)
+        .map(|name| name.trim().to_owned())
+        .unwrap_or_default()
+}
+
+/// Whether the row for `field` offers Apply to all sheets, and if it does,
+/// why it is unavailable, if it is. A signer's name goes to every sheet in
+/// the project, so the row offers it whenever it shows a name, its own or,
+/// in `project`, the project's; any other value of a sheet's own goes to the
+/// other sheets of the drawing, so a drawing of one sheet has none to offer
+/// it to. The title is each sheet's own.
+fn applies_to_all_sheets(
+    model: &Model,
+    field: DrawingSheetTitleFieldId,
+    project: &str,
+) -> Option<Option<&'static str>> {
+    if field == DrawingSheetTitleFieldId::SheetTitle {
+        None
+    } else if field.is_project_defaulted() {
+        Some(
+            project
+                .is_empty()
+                .then_some("Type a name to give it to every sheet."),
+        )
+    } else {
+        model.multi_sheet_catalog().map(|_| None)
+    }
+}
+
+/// A sheet's own title value with Apply to all sheets beside it. Returns the
+/// edit the row asks for: the value typed, landing when the field is left,
+/// or Apply to all sheets with the value as it stands.
+fn applying_row(
+    ui: &mut Ui,
+    sheet: &SheetIdentity,
+    field: DrawingSheetTitleFieldId,
+    stored: &str,
+    fallback: &str,
+    unavailable: Option<&'static str>,
+) -> Option<DrawingSheetEdit> {
+    let mut apply = false;
+    let mut shown = stored.to_owned();
+    let typed = text_row_showing(ui, sheet, SheetText::Field(field), stored, |ui, typed| {
+        let (value, action) = property_row_input_action_with_default(
+            ui,
+            field.display_label(),
+            typed,
+            fallback,
+            false,
+            PropertyRowAction {
+                icon: WorkbenchIcon::Copy,
+                label: "Apply to all sheets",
+                enabled: unavailable.is_none() || !typed.trim().is_empty(),
+                disabled_reason: unavailable,
+            },
+        );
+        apply = action.clicked();
+        shown.clone_from(typed);
+        value
+    });
+    if apply {
+        return Some(DrawingSheetEdit::ApplyToAllSheets(field, shown));
+    }
+    typed.map(|typed| DrawingSheetEdit::TitleField(field, typed))
 }
 
 /// The boxes on the sheet's form that the form leaves optional, which a sheet

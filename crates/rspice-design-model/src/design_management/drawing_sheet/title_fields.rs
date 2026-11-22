@@ -134,6 +134,18 @@ impl DrawingSheetTitleFieldId {
         )
     }
 
+    /// The people who sign a sheet, whose names the project gives every
+    /// sheet that types none of its own. A sheet's own name stands in for
+    /// the project's on that sheet alone. The names are kept in
+    /// [`DrawingSheetProjectSettings::title_block_field_values`] beside the
+    /// project-owned values.
+    pub const PROJECT_DEFAULTED: [Self; 3] = [Self::DrawnBy, Self::CheckedBy, Self::ApprovedBy];
+
+    #[must_use]
+    pub const fn is_project_defaulted(self) -> bool {
+        matches!(self, Self::DrawnBy | Self::CheckedBy | Self::ApprovedBy)
+    }
+
     /// Whether the field is one of block E's signature dates, a calendar
     /// date written `YYYY-MM-DD` and checked as the document's date is.
     #[must_use]

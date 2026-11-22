@@ -73,7 +73,10 @@ pub fn drawing_sheet_title_values(
             .unwrap_or_default(),
     );
     if let Some(project_values) = project_title_block_field_values {
-        for id in DrawingSheetTitleFieldId::PROJECT_OWNED {
+        for id in DrawingSheetTitleFieldId::PROJECT_OWNED
+            .into_iter()
+            .chain(DrawingSheetTitleFieldId::PROJECT_DEFAULTED)
+        {
             if let Some(value) = project_values.get(&id) {
                 values.insert(id, value.clone());
             }
