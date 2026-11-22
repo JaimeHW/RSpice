@@ -71,6 +71,9 @@ use super::super::design_system::{
 };
 use crate::workbench::simulate::commands::SimulateCommand;
 
+/// The window width at and under which the Analyses route stacks its list
+/// over the editor: a phone's. A desktop window keeps the list a column
+/// beside the editor however much of the centre the docks take.
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
 const TITLE_ACTION_SPACING: f32 = 6.0;
@@ -333,10 +336,9 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         let gutter = ui.spacing().scroll.allocated_width();
         let surface_width = (track - gutter).max(1.0);
         let page = cx.state.simulation_page;
-        let responsive_width = ui.ctx().content_rect().width().min(surface_width);
-        if page == SimulationPage::Analyses
-            && analysis_workspace_is_split(responsive_width, surface_width)
-        {
+        let window_width = ui.ctx().content_rect().width();
+        let responsive_width = window_width.min(surface_width);
+        if page == SimulationPage::Analyses && analysis_workspace_is_split(window_width) {
             split_analysis_route(ui, cx, surface_width, responsive_width);
             return;
         }
@@ -517,17 +519,25 @@ fn split_analysis_route(
     ui.advance_cursor_after_rect(body);
 }
 
-fn analysis_workspace_is_split(viewport_width: f32, surface_width: f32) -> bool {
-    viewport_width > SIMULATION_STACK_BREAKPOINT
-        && surface_width >= analysis_split_min_width(viewport_width)
+/// Whether the Analyses route puts its list beside the editor: on every
+/// window wider than a phone's. The centre's own width does not decide it:
+/// docks open at 1440 leave a centre a phone's width, and stacking the list
+/// over the options there made one long page of what is two columns.
+fn analysis_workspace_is_split(window_width: f32) -> bool {
+    window_width > SIMULATION_STACK_BREAKPOINT
 }
 
+/// The list's and the editor's widths out of `available`. Each keeps its
+/// least while the room allows; under both, the editor keeps its least and
+/// the list narrows to what its rows' content needs, and the editor takes
+/// the rest, its fields falling to one column where they no longer fit two.
 pub fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
     let usable = (available - 1.0).max(1.0);
     let (left_fraction, left_min, right_min) = analysis_column_constraints(viewport_width);
     let left = (usable * left_fraction)
         .max(left_min)
-        .min((usable - right_min).max(left_min));
+        .min((usable - right_min).max(analysis_row_content_min_width()))
+        .min(usable);
     (left, (usable - left).max(1.0))
 }
 
@@ -545,11 +555,6 @@ fn analysis_column_constraints(viewport_width: f32) -> (f32, f32, f32) {
             ANALYSIS_EDITOR_DESKTOP_MIN_WIDTH,
         )
     }
-}
-
-fn analysis_split_min_width(viewport_width: f32) -> f32 {
-    let (_, rail_min, editor_min) = analysis_column_constraints(viewport_width);
-    rail_min + 1.0 + editor_min
 }
 
 const fn analysis_row_content_min_width() -> f32 {
@@ -1238,7 +1243,32 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
     let actions_width =
         title_action_group_width(ui, &open_prior_label, split_label, TITLE_ACTION_SPACING);
     let heading_width = ui.available_width() - actions_width - chip_reserve - TITLE_ACTION_SPACING;
-    if surface_width > TITLE_ACTION_STACK_BREAKPOINT && heading_width >= TITLE_HEADING_MIN_WIDTH {
+    // The actions at their own widths, in one row, as the wide title row
+    // and the row under a narrow centre's heading both draw them.
+    let mut natural_actions = |ui: &mut Ui| {
+        if let Some(chip) = &chip {
+            rerun_preflight = chip.show(ui);
+        }
+        open_prior = prior_run_button(ui, &open_prior_label, prior.is_some());
+        toggle_split = split_button(ui, split_label, split_enabled, split_reason);
+        manage_plans = Button::new("Plans")
+            .enabled(plan_available)
+            .show(ui)
+            .clicked();
+        clone_plan = Button::new("Clone plan")
+            .icon(Icon::Copy)
+            .enabled(plan_available)
+            .show(ui)
+            .clicked();
+        validate = Button::new("Validate plan")
+            .icon(Icon::Check)
+            .accent()
+            .enabled(plan_available)
+            .show(ui)
+            .clicked();
+    };
+    let desktop = surface_width > TITLE_ACTION_STACK_BREAKPOINT;
+    if desktop && heading_width >= TITLE_HEADING_MIN_WIDTH {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
             ui.allocate_ui_with_layout(
@@ -1259,32 +1289,25 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
                     heading(ui, &plan_name, None);
                 },
             );
-            if let Some(chip) = &chip {
-                rerun_preflight = chip.show(ui);
-            }
-            open_prior = prior_run_button(ui, &open_prior_label, prior.is_some());
-            toggle_split = split_button(ui, split_label, split_enabled, split_reason);
-            manage_plans = Button::new("Plans")
-                .enabled(plan_available)
-                .show(ui)
-                .clicked();
-            clone_plan = Button::new("Clone plan")
-                .icon(Icon::Copy)
-                .enabled(plan_available)
-                .show(ui)
-                .clicked();
-            validate = Button::new("Validate plan")
-                .icon(Icon::Check)
-                .accent()
-                .enabled(plan_available)
-                .show(ui)
-                .clicked();
+            natural_actions(ui);
         });
         // Under the whole title row, not in the heading's column: the column
         // is what the actions leave, which on a tablet is too narrow for the
         // configuration's name.
         ui.add_space(CONFIGURATION_ROW_GAP);
         picked_configuration = plan_configuration::configuration_row(ui, &configuration_choices);
+    } else if desktop && actions_width + chip_reserve <= ui.available_width() {
+        // A centre the docks narrowed keeps the actions in one row under the
+        // heading, at their own widths: wrapped, the last of them dropped
+        // to a line of its own under four of unequal widths.
+        heading(ui, &plan_name, None);
+        ui.add_space(CONFIGURATION_ROW_GAP);
+        picked_configuration = plan_configuration::configuration_row(ui, &configuration_choices);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
+            natural_actions(ui);
+        });
     } else {
         heading(ui, &plan_name, None);
         ui.add_space(CONFIGURATION_ROW_GAP);

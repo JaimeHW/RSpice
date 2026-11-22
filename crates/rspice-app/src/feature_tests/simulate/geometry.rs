@@ -375,3 +375,67 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
         "the stack scrolled down to the new row: its first group stayed at {moved:?}"
     );
 }
+
+/// The Analyses route drawn in a 1440-point window whose docks leave the
+/// centre `centre` points wide, at the window's right edge.
+fn analyses_route_in_centre(centre: f32) -> Vec<PaintedLine> {
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulate.simulation_page = rspice_app_state::state::SimulationPage::Analyses;
+    let mut run = || {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(ROUTE_WIDTH, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        let rect = Rect::from_min_max(
+                            egui::pos2(ROUTE_WIDTH - centre, 0.0),
+                            egui::pos2(ROUTE_WIDTH, 900.0),
+                        );
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                            show_on_stage(ui, &mut app);
+                        });
+                    });
+            },
+        )
+    };
+    let _ = run();
+    painted_lines(&run().shapes)
+}
+
+/// On a desktop window the analyses list stays a column left of the
+/// editor, however narrow the docks leave the centre: at 1440 with a centre
+/// narrower than a phone's window the list's group stands beside the
+/// editor's first field, not over it.
+#[test]
+fn a_desktop_window_keeps_the_analyses_list_beside_the_editor() {
+    for centre in [800.0, 560.0, 480.0] {
+        let lines = analyses_route_in_centre(centre);
+        let group = lines
+            .iter()
+            .find(|line| line.text == FIRST_GROUP)
+            .unwrap_or_else(|| panic!("{FIRST_GROUP:?} is painted at {centre}"));
+        let field = lines
+            .iter()
+            .find(|line| line.text == "Stop time")
+            .unwrap_or_else(|| panic!("the editor's first field is painted at {centre}"));
+        assert!(
+            field.left > group.right,
+            "centre {centre}: the editor's field starts right of the list ({} > {})",
+            field.left,
+            group.right
+        );
+        assert!(
+            field.top < group.top + 400.0,
+            "centre {centre}: the editor is beside the list, not under it"
+        );
+    }
+}
