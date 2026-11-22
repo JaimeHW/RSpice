@@ -78,10 +78,9 @@ fn plotted_lines_of(source: &ResolvedHardcopyDocument) -> Vec<(SceneFont, u64, S
         .collect()
 }
 
-/// The scene of `source`'s title block alone, so every monospace line is
-/// one of its lines.
-pub(super) fn title_block_scene(source: &ResolvedHardcopyDocument) -> HardcopyScene {
-    let schematic = SchematicHardcopySetup::new(
+/// A print of the drawing sheet and its title block alone.
+pub(super) fn title_block_setup() -> SchematicHardcopySetup {
+    SchematicHardcopySetup::new(
         SchematicHardcopyExtent::AuthoredDrawingSheet,
         OutsideSheetContentPolicy::Ask,
         false,
@@ -90,11 +89,16 @@ pub(super) fn title_block_scene(source: &ResolvedHardcopyDocument) -> HardcopySc
         true,
         false,
         false,
-    );
+    )
+}
+
+/// The scene of `source`'s title block alone, so every monospace line is
+/// one of its lines.
+pub(super) fn title_block_scene(source: &ResolvedHardcopyDocument) -> HardcopyScene {
     scene_from_resolved(
         source,
         source.default_print_mapping(),
-        schematic,
+        title_block_setup(),
         resolved_metadata(),
     )
     .unwrap()

@@ -29,7 +29,8 @@ base64.workspace = true
 # Keep system font discovery disabled; rendering uses the pinned workspace fonts.
 usvg.workspace = true
 krilla = { version = "0.8.2", default-features = false, features = ["raster-images"] }
-resvg = { version = "0.48", default-features = false, features = ["text"] }
+# Raster output draws the embedded figures and owner logos the page carries.
+resvg = { version = "0.48", default-features = false, features = ["text", "raster-images"] }
 tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
 ttf-parser = "0.25.1"
 # Print shapes each run and lays right-to-left text out in display order.
