@@ -542,18 +542,37 @@ fn handle_bus_tap_click(state: &mut CanvasParts<'_>, requested: Point, hit_radiu
         &configured,
     ) {
         Ok(_) => {
-            let target = if pending.slice.is_scalar() {
-                format!("scalar net {}", pending.slice)
-            } else {
-                format!("bus slice {}", pending.slice)
+            // One bit taps the next on the following click, so a bus is
+            // fanned out one click per bit; a range stays armed as it is.
+            let following = pending.following();
+            let message = match &following {
+                Some(next) => format!(
+                    "Placed tap {}. The next click taps {}.",
+                    pending.slice, next.slice
+                ),
+                None if pending.slice.is_scalar() => format!(
+                    "Placed tap {}, the last bit of {}.",
+                    pending.slice, pending.bus_declaration
+                ),
+                None => format!("Placed tap {}.", pending.slice),
             };
-            state.prompt(format!(
-                "Placed {target} from ({}, {}) to ({}, {}).",
-                candidate.bus_point.x,
-                candidate.bus_point.y,
-                candidate.connection_point.x,
-                candidate.connection_point.y
-            ));
+            match following {
+                Some(next) => {
+                    if let Some(placement) = state
+                        .model
+                        .schematic
+                        .session
+                        .editor
+                        .pending_bus_tap
+                        .as_mut()
+                    {
+                        placement.configuration = next;
+                    }
+                }
+                None if pending.slice.is_scalar() => state.model.schematic.cancel_tool(),
+                None => {}
+            }
+            state.prompt(message);
         }
         Err(error) => state.prompt(format!("Bus tap not placed: {error}")),
     }

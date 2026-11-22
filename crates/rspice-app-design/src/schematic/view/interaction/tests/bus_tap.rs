@@ -53,13 +53,13 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
     for sheets in [false, true] {
         let mut state = armed_bus_tap_state(sheets);
         let source = requests::editor_request_source(&state);
-        for x in [20, 60] {
+        for (x, bits) in [(20, "DATA[3]"), (60, "DATA[2]")] {
             handle_bus_tap_click(&mut canvas_parts(&mut state), Point::new(x, 0), 6);
             let tap = state.model.schematic.document().bus_taps.last().unwrap();
             assert_eq!(tap.bus_point, Point::new(x, 0));
             assert_eq!(tap.connection_point, Point::new(x, 20));
             assert_eq!(tap.orientation, BusTapOrientation::Down);
-            assert_eq!(tap.slice.to_string(), "DATA[3]");
+            assert_eq!(tap.slice.to_string(), bits);
             state.sync_active_schematic_to_workspace();
         }
         assert_eq!(state.model.schematic.document().bus_taps.len(), 2);
@@ -114,6 +114,59 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
         );
         assert!(!state.model.schematic.can_undo());
     }
+}
+
+/// A bus fans out one click per bit: each single-bit tap arms the next bit
+/// down the bus, and the last bit puts the tool down.
+#[test]
+fn each_tap_arms_the_next_bit_and_the_last_bit_ends_the_tool() {
+    let mut state = DesignTestHost::default();
+    state
+        .model
+        .schematic
+        .add_bus(vec![Point::new(0, 0), Point::new(120, 0)], None)
+        .unwrap();
+    let stubs = [10, 40, 70, 100];
+    for x in stubs {
+        state
+            .model
+            .schematic
+            .add_wire(vec![Point::new(x - 5, 20), Point::new(x + 5, 20)])
+            .unwrap();
+    }
+    state.model.schematic.clear_undo_history();
+    state.sync_active_schematic_to_workspace();
+    let configuration = crate::state::PendingBusTap::new(
+        BusDeclaration::parse("DATA[3:0]").unwrap(),
+        BusSlice::parse("DATA[3]").unwrap(),
+        BusTapOrientation::Automatic,
+    )
+    .unwrap();
+    state.model.schematic.session.editor.pending_bus_tap = Some(
+        rspice_schematic_editor::session::bus::PendingBusTapPlacement::new(
+            configuration,
+            requests::editor_request_source(&state),
+        ),
+    );
+    state.model.schematic.arm_tool(Tool::BusTap);
+
+    for (x, bits) in stubs
+        .into_iter()
+        .zip(["DATA[3]", "DATA[2]", "DATA[1]", "DATA[0]"])
+    {
+        assert_eq!(
+            state.model.schematic.session.editor.tool,
+            Tool::BusTap,
+            "{bits}"
+        );
+        handle_bus_tap_click(&mut canvas_parts(&mut state), Point::new(x, 0), 6);
+        let tap = state.model.schematic.document().bus_taps.last().unwrap();
+        assert_eq!(tap.slice.to_string(), bits);
+        assert_eq!(tap.connection_point, Point::new(x, 20));
+        state.sync_active_schematic_to_workspace();
+    }
+    assert_eq!(state.model.schematic.document().bus_taps.len(), 4);
+    assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
 }
 
 #[test]

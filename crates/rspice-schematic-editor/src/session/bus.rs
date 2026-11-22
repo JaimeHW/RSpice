@@ -27,6 +27,32 @@ impl PendingBusTap {
             orientation,
         })
     }
+
+    /// The tap the next click places once this one is down: a single bit
+    /// steps to the bus's next member in its declared order (`DATA[7]`, then
+    /// `DATA[6]` on `DATA[7:0]`), as Virtuoso's expanded wire names drop one
+    /// member per click. A range taps the same bits again, and the last bit
+    /// has no next one.
+    pub fn following(&self) -> Option<Self> {
+        if !self.slice.is_scalar() {
+            return None;
+        }
+        let (msb, lsb, bit) = (
+            self.bus_declaration.msb,
+            self.bus_declaration.lsb,
+            self.slice.msb,
+        );
+        let next = if msb >= lsb {
+            (bit > lsb).then(|| bit - 1)
+        } else {
+            (bit < lsb).then(|| bit + 1)
+        }?;
+        let slice = BusSlice::new(self.slice.name.clone(), next, next, self.slice.notation).ok()?;
+        Some(Self {
+            slice,
+            ..self.clone()
+        })
+    }
 }
 
 /// A tap configuration and the document context that owns its placement batch.
@@ -132,6 +158,29 @@ impl BusDrawing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tap(bus: &str, bits: &str) -> PendingBusTap {
+        let bus = BusDeclaration::parse(bus).unwrap();
+        let slice = bus.slice(bits).unwrap();
+        PendingBusTap::new(bus, slice, BusTapOrientation::Automatic).unwrap()
+    }
+
+    /// One bit steps to the next in the bus's own order, both ways round;
+    /// the last bit and a range have no next tap.
+    #[test]
+    fn a_single_bit_tap_steps_to_the_next_member_in_declared_order() {
+        let next = |bus: &str, bits: &str| {
+            tap(bus, bits)
+                .following()
+                .map(|following| following.slice.to_string())
+        };
+        assert_eq!(next("DATA[7:0]", "7").as_deref(), Some("DATA[6]"));
+        assert_eq!(next("DATA[7:0]", "1").as_deref(), Some("DATA[0]"));
+        assert_eq!(next("DATA[7:0]", "0"), None);
+        assert_eq!(next("ADDR<0:3>", "2").as_deref(), Some("ADDR<3>"));
+        assert_eq!(next("ADDR<0:3>", "3"), None);
+        assert_eq!(next("DATA[7:0]", "7:4"), None);
+    }
 
     /// Backspace takes back the last bus point the user placed, with the
     /// corner routed to reach it, as it does on a wire; the first point
