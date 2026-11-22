@@ -690,6 +690,44 @@ fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
     );
 }
 
+/// A selection box dragged to the canvas edge pans the view while the
+/// button is held, and the box keeps growing across what comes into view.
+#[test]
+fn a_selection_box_held_at_the_canvas_edge_pans_the_view() {
+    let mut fixture = Fixture::new(false);
+    let press = fixture.origin + egui::vec2(300.0, 300.0);
+    let near_right_edge = fixture.origin + egui::vec2(590.0, 300.0);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: press,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    fixture.frame(vec![egui::Event::PointerMoved(press), button(true)], true);
+    fixture.frame(
+        vec![egui::Event::PointerMoved(press + egui::vec2(40.0, 0.0))],
+        true,
+    );
+    fixture.frame(vec![egui::Event::PointerMoved(near_right_edge)], true);
+    let editor = &fixture.app.state.model.schematic.session.editor;
+    assert!(editor.selection_rect.is_active(), "no selection box began");
+    let (first_pan, first_reach) = (editor.pan, editor.selection_rect.current.x);
+    for _ in 0..5 {
+        fixture.frame(vec![], true);
+    }
+    let editor = &fixture.app.state.model.schematic.session.editor;
+    assert!(
+        editor.pan.0 < first_pan.0,
+        "the view did not pan right: {first_pan:?} -> {:?}",
+        editor.pan
+    );
+    assert!(
+        editor.selection_rect.current.x > first_reach,
+        "the box did not grow with the pan: {first_reach} -> {}",
+        editor.selection_rect.current.x
+    );
+}
+
 /// Esc lets a floating paste go and the drawing never changed.
 #[test]
 fn escape_lets_a_floating_paste_go() {

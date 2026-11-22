@@ -1,9 +1,11 @@
 //! The view pans by itself while a gesture carries something to the canvas
-//! edge: a move, a stretch, a wire or bus route, a held drag or a floating
-//! paste. Every reference editor does this; without it a part cannot be
-//! carried past what is on screen.
+//! edge: a move, a stretch, a wire or bus route, a held drag, a selection
+//! box, a floating paste, or the ghost of a part or label being placed.
+//! Every reference editor does this; without it a part cannot be carried,
+//! nor a box drawn, past what is on screen.
 
 use super::parts::{CanvasFacts, CanvasParts};
+use crate::state::Tool;
 use egui::{Popup, Rect, Response, Ui};
 use rspice_schematic_editor::view::navigation::apply_edge_pan;
 
@@ -42,6 +44,11 @@ fn carrying(state: &CanvasFacts<'_>) -> bool {
         || state.schematic_drag_in_progress()
         || editor.wire_drawing.active
         || editor.bus_drawing.active
+        || editor.selection_rect.is_active()
+        || matches!(
+            editor.tool,
+            Tool::Place(_) | Tool::Label | Tool::OffSheetConnector
+        )
         || (move_draft.armed && move_draft.canvas.anchor.is_some())
         || (stretch_draft.armed && stretch_draft.canvas.gesture.anchor.is_some())
 }
