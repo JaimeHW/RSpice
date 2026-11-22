@@ -552,13 +552,10 @@ fn pattern_cells(row: &PatternRow) -> Vec<Cell> {
     ]
 }
 
-/// A view list as a cell: Inherited in words, views as identifiers.
+/// A view list as a cell: Inherited, or the views. The column holds both,
+/// so it reads in one face, the interface's, as its words do.
 pub(super) fn view_list(views: &str) -> Cell {
-    if views == INHERITED {
-        Cell::text(views)
-    } else {
-        ident(views)
-    }
+    Cell::text(views)
 }
 
 /// The short reason a row is not bound, or `None` when it is.
@@ -606,9 +603,7 @@ fn instance_cells(
     } else {
         Cell::absent()
     };
-    let to_use = tables
-        .instance_to_use(&row.path)
-        .map_or_else(|| Cell::text(INHERITED), ident);
+    let to_use = view_list(tables.instance_to_use(&row.path).unwrap_or(INHERITED));
     let missing = unbound_reason(binding.status)
         .and_then(|_| unread.get(&reference.library))
         .map(|unread| Cell::problem(unread.short, Problem::Failure).hint(unread.sentence.as_str()));
