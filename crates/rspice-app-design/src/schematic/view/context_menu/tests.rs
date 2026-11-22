@@ -310,7 +310,10 @@ fn each_target_gets_the_catalog_its_kind_calls_for() {
             ("Place net label", Some(DesignCommand::PlaceLabel.key())),
             ("Place text or note…", Some(DesignCommand::PlaceText.key())),
             ("New Verilog-A device…", Some(ids::NEW_VERILOGA_DEVICE)),
-            ("Create symbol from schematic ports…", None),
+            (
+                "Create symbol from schematic…",
+                Some(ids::CREATE_SYMBOL_FROM_SCHEMATIC)
+            ),
             ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
             (
                 "Fit content",

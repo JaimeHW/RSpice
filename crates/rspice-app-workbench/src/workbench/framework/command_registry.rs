@@ -659,6 +659,7 @@ pub mod ids {
         COMPILE_VERILOG_A = "veriloga";
         CONFIGURATION_SETS = "configuration-sets";
         COPY = "copy-selection";
+        CREATE_SYMBOL_FROM_SCHEMATIC = "create-symbol-from-schematic";
         CUT = "cut-selection";
         CYCLE_GRID = "cycle-grid";
         DELETE = "delete-selection";

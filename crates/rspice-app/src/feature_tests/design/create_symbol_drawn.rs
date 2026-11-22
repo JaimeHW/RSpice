@@ -12,7 +12,7 @@ use rspice_app_project::workbench::project::library_dialogs::new_view::{
 use rspice_app_state::state::{CellViewRef, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
 
-use super::super::replay::{Control, Replay};
+use super::super::replay::{Control, Replay, only};
 
 /// A project just created under the defaults New project offers, holding
 /// only its top cell's schematic, with the Design workspace in front.
@@ -188,5 +188,49 @@ fn create_symbol_opens_the_symbol_the_cell_already_has() {
             .and_then(|library| library.get_cell(&top.cell))
             .map(|cell| cell.views.len()),
         views_before
+    );
+}
+
+/// The canvas's right-click menu names Create symbol from schematic as the
+/// Design menu does, and opens the same form for the cell in front. Its row
+/// was "Create symbol from schematic ports…", which opened the model-bound
+/// symbol dialog: on a project holding a model, that started from the
+/// model, not from the schematic's ports.
+#[test]
+fn the_canvas_menu_creates_the_cells_symbol_as_the_design_menu_does() {
+    let mut replay = new_project();
+    let controls = replay.frames(Vec::new());
+    let canvas = controls
+        .iter()
+        .find(|control| {
+            control.role == Role::Canvas && control.label.starts_with("Schematic canvas")
+        })
+        .expect("the schematic canvas is drawn")
+        .center;
+    let right = |pressed| egui::Event::PointerButton {
+        pos: canvas,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frames(vec![egui::Event::PointerMoved(canvas), right(true)]);
+    let menu = replay.frames(vec![right(false)]);
+
+    let label = ProjectCommand::CreateSymbol.declared_spec().label;
+    let row = only(&menu, label, Role::MenuItem);
+    assert!(row.description.is_empty(), "{label}: {}", row.description);
+    let controls = replay.click(label, Role::MenuItem);
+
+    let dialogs = controls
+        .iter()
+        .filter(|control| control.role == Role::Dialog)
+        .map(|control| control.label.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(dialogs, [CREATE_SYMBOL_TITLE]);
+    assert!(
+        controls.iter().any(|control| control.role == Role::Label
+            && control.label == "Cell"
+            && control.value == "top"),
+        "the form names the cell in front"
     );
 }

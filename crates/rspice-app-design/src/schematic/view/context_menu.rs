@@ -270,10 +270,12 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         DesignCommand::CreateHierarchy,
         None,
     ),
+    // The Design menu's row of the same name, whose command is the project
+    // feature's.
     named_row(
-        ContextAction::CreateSymbolFromPorts,
-        "Create symbol from schematic ports…",
-        None,
+        ContextAction::CreateSymbolFromSchematic,
+        "Create symbol from schematic…",
+        Some(ids::CREATE_SYMBOL_FROM_SCHEMATIC),
     ),
     ContextEntry::Separator,
     named_row(
@@ -521,7 +523,7 @@ fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
         | ContextAction::PlaceText
         | ContextAction::Paste
         | ContextAction::NewVerilogADevice
-        | ContextAction::CreateSymbolFromPorts
+        | ContextAction::CreateSymbolFromSchematic
         | ContextAction::SheetProperties
         | ContextAction::FitContent
         | ContextAction::ZoomBox => subject == S::Canvas,
@@ -1669,16 +1671,10 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             state.model.create_hierarchy_available(),
             "Select one or more editable instances, with no port, bus, note or piece of a wire",
         ),
-        ContextAction::CreateSymbolFromPorts => (
-            writable
-                && !state.model.schematic.interface_ports().is_empty()
-                && state
-                    .model
-                    .library_manager
-                    .libraries_sorted()
-                    .iter()
-                    .any(|library| !library.read_only),
-            "Add at least one schematic port and make a writable design library available",
+        // The command's own test, on the schematic in front: a project open.
+        ContextAction::CreateSymbolFromSchematic => (
+            state.model.project_open.is_open(),
+            "Open a project to create the cell's symbol",
         ),
         ContextAction::SheetProperties => (
             writable
@@ -1866,12 +1862,6 @@ pub fn execute_context_action(
                 .outbox
                 .push(DesignSurfaceRequest::NewVerilogADevice);
         }
-        ContextAction::CreateSymbolFromPorts => {
-            state
-                .workbench
-                .outbox
-                .push(DesignSurfaceRequest::CreateSymbolFromPorts);
-        }
         ContextAction::SheetProperties => show_sheet_properties(state, None),
         ContextAction::ShowInNetlist => show_in_netlist(state),
         ContextAction::Probe => {
@@ -1901,6 +1891,7 @@ pub fn execute_context_action(
         | ContextAction::UpdateAllInstanceInterfaces
         | ContextAction::ReplaceInstance
         | ContextAction::CreateHierarchy
+        | ContextAction::CreateSymbolFromSchematic
         | ContextAction::FitContent
         | ContextAction::HighlightNet
         | ContextAction::Choose(_) => {}
@@ -1933,6 +1924,7 @@ const fn row_command(action: ContextAction) -> Option<CommandKey> {
         }
         ContextAction::ReplaceInstance => DesignCommand::ReplaceInstance.key(),
         ContextAction::CreateHierarchy => DesignCommand::CreateHierarchy.key(),
+        ContextAction::CreateSymbolFromSchematic => ids::CREATE_SYMBOL_FROM_SCHEMATIC,
         ContextAction::FitContent => DesignCommand::FitSchematicContent.key(),
         ContextAction::HighlightNet => DesignCommand::HighlightNet.key(),
         _ => return None,

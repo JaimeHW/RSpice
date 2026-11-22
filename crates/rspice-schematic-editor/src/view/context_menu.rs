@@ -81,7 +81,8 @@ pub enum ContextAction {
     UpdateAllInstanceInterfaces,
     ReplaceInstance,
     CreateHierarchy,
-    CreateSymbolFromPorts,
+    /// Make the cell's symbol from its schematic, as the Design menu does.
+    CreateSymbolFromSchematic,
     /// Show the sheet's properties in the inspector.
     SheetProperties,
     FitContent,

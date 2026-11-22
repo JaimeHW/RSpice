@@ -31,13 +31,6 @@ pub(in crate::workbench) fn answer_surface_request(
         DesignSurfaceRequest::NewVerilogADevice => {
             open_new_veriloga_device_form_in(&state.model, &mut state.code.new_veriloga_device);
         }
-        DesignSurfaceRequest::CreateSymbolFromPorts => {
-            state.design.open_create_model_bound_symbol(
-                &state.model,
-                &mut state.workbench,
-                state.models.selected_model.as_deref(),
-            );
-        }
         // The command's own route, which generates the netlist before it
         // locates; the code feature answers it straight after this.
         DesignSurfaceRequest::ShowInNetlist => state

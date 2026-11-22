@@ -65,10 +65,6 @@ pub enum DesignSurfaceRequest {
     /// Open the code feature's New Verilog-A device form, for the canvas
     /// menu's New Verilog-A device.
     NewVerilogADevice,
-    /// Open Create model-bound symbol, starting from the models feature's
-    /// selected model if there is one, for the canvas menu's Create symbol
-    /// from ports.
-    CreateSymbolFromPorts,
     /// Open the generated deck at the selected instance's card, for the
     /// canvas menu's Show in netlist. The canvas has opened the Netlist
     /// workspace already.
@@ -85,9 +81,7 @@ impl DesignSurfaceRequest {
     pub(crate) const fn opens_dialog(&self) -> bool {
         matches!(
             self,
-            Self::NewVerilogADevice
-                | Self::CreateSymbolFromPorts
-                | Self::CopyToEditableLibrary { .. }
+            Self::NewVerilogADevice | Self::CopyToEditableLibrary { .. }
         )
     }
 }
