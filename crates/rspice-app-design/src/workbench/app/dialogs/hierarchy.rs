@@ -2,4 +2,4 @@
 
 pub mod create;
 pub mod descend;
-pub mod subcircuit_source;
+pub(crate) mod subcircuit_source;
