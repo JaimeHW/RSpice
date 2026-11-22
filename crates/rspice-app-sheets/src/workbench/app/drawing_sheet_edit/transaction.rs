@@ -129,14 +129,7 @@ impl SheetTransaction {
                 sheet_id: sheet.id(),
                 sheet_revision: sheet.revision(),
             });
-        let mut draft = DrawingSheetDraft::from_format(&resolved.format);
-        let sheet_title = draft
-            .title_fields
-            .entry(DrawingSheetTitleFieldId::SheetTitle)
-            .or_default();
-        if sheet_title.value.trim().is_empty() {
-            sheet_title.value.clone_from(&resolved.sheet_name);
-        }
+        let draft = DrawingSheetDraft::from_format(&resolved.format);
         Self {
             governed,
             sheet_name: resolved.sheet_name,

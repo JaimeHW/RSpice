@@ -192,9 +192,11 @@ fn manager_partially_applies_and_names_organization_managed_skips() {
     let ordinary_format = catalog.find(ordinary).unwrap().page_format();
     assert_eq!(ordinary_format.authored_size, source.authored_size);
     assert_eq!(ordinary_format.orientation, source.orientation);
+    // The source's Title stays on its own sheet: the untitled target keeps
+    // lettering its name.
     assert_eq!(
         ordinary_format.title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
-        "Ordinary"
+        ""
     );
     assert!(message.contains("Managed"));
     let receipt = app

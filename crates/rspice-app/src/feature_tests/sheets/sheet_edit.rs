@@ -208,10 +208,13 @@ fn a_refused_edit_leaves_nothing_behind() {
     let (mut app, _, _) = governed_app_with_sheets(1);
     let error = apply_drawing_sheet_edit(
         &mut app.state,
-        DrawingSheetEdit::TitleField(DrawingSheetTitleFieldId::SheetTitle, String::new()),
+        DrawingSheetEdit::CustomSize {
+            width_um: 10_000,
+            height_um: 10_000,
+        },
     )
     .unwrap_err();
-    assert!(error.contains("Title is required"), "{error}");
+    assert!(error.contains("between 50.8 mm and 2540 mm"), "{error}");
     assert!(!app.state.model.can_undo_project_design());
 }
 

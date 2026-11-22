@@ -1448,28 +1448,6 @@ impl SchematicSheetFormat {
         Ok(())
     }
 
-    /// Validate the title value required by a durable authored sheet.
-    ///
-    /// Reusable defaults and presets intentionally carry no sheet-owned
-    /// values, so this contract is applied by `DesignSheet`, not by generic
-    /// format validation.
-    pub fn validate_authored_sheet_title(&self) -> Result<(), DesignManagementError> {
-        let title = self
-            .title_block
-            .fields
-            .get(&DrawingSheetTitleFieldId::SheetTitle)
-            .ok_or(DesignManagementError::NumericRange(
-                "authored drawing sheet title field",
-            ))?;
-        if !title.visible || title.value.trim().is_empty() {
-            return Err(DesignManagementError::InvalidText {
-                field: "authored drawing sheet title",
-                value: title.value.clone(),
-            });
-        }
-        Ok(())
-    }
-
     #[must_use]
     pub const fn portrait_dimensions_um(&self) -> (u64, u64) {
         self.authored_size.portrait_dimensions_um()

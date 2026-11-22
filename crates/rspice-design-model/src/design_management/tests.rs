@@ -100,7 +100,7 @@ fn governed_sheet_page_format_is_revisioned_and_legacy_safe() {
     let restored: SheetCatalog = serde_json::from_value(legacy).unwrap();
     assert_eq!(
         restored.find(id).unwrap().page_format(),
-        &authored_format(SchematicSheetFormat::default(), "Input")
+        &SchematicSheetFormat::default()
     );
 }
 
@@ -1032,10 +1032,7 @@ fn governed_sheet_bootstrap_inherits_the_project_drawing_sheet_default() {
 
     assert_eq!(
         sheet.page_format(),
-        &authored_format(
-            catalog.drawing_sheet_settings().default_format.clone(),
-            "Main"
-        )
+        &catalog.drawing_sheet_settings().default_format
     );
     assert_eq!(
         sheet.page_format().inheritance,
@@ -1055,6 +1052,13 @@ fn project_default_changes_refresh_inherited_fallbacks_without_authored_sheet_re
     );
     let (explicit_id, explicit_snapshot, inherited_revision, sheet_catalog_revision) = {
         let sheets = catalog.sheet_catalog_mut("work/top/schematic").unwrap();
+        let titled = authored_format(
+            sheets.find(inherited_id).unwrap().page_format().clone(),
+            "Main amplifier",
+        );
+        sheets
+            .update_sheet_page_format(inherited_id, 1, titled)
+            .unwrap();
         let explicit_id = sheets
             .create_sheet_with_page_format(
                 sheet("Detail", 2),
@@ -1087,7 +1091,7 @@ fn project_default_changes_refresh_inherited_fallbacks_without_authored_sheet_re
     );
     assert_eq!(
         inherited.page_format().title_block.fields[&DrawingSheetTitleFieldId::SheetTitle].value,
-        "Main"
+        "Main amplifier"
     );
     assert_eq!(inherited.revision(), inherited_revision);
     assert_eq!(sheets.revision(), sheet_catalog_revision);
@@ -1346,27 +1350,24 @@ fn legacy_scale_mirror_and_missing_preset_references_normalize_safely() {
 }
 
 #[test]
-fn durable_sheet_title_rejects_blank_updates_and_migrates_legacy_records() {
+fn a_sheet_title_may_be_cleared_and_is_read_back_as_stored() {
     let mut catalog = SheetCatalog::default();
     let id = catalog.create_sheet(sheet("Control", 1), None).unwrap();
+    let titled = authored_format(SchematicSheetFormat::default(), "Loop control");
+    catalog.update_sheet_page_format(id, 1, titled).unwrap();
+    // Clearing the Title is an edit like any other: the block letters the
+    // sheet name again.
     let revision = catalog.find(id).unwrap().revision();
-    assert!(matches!(
-        catalog.update_sheet_page_format(id, revision, SchematicSheetFormat::default()),
-        Err(DesignManagementError::InvalidText {
-            field: "authored drawing sheet title",
-            ..
-        })
-    ));
-
-    let mut legacy = serde_json::to_value(&catalog).unwrap();
-    legacy["sheets"][0]["page_format"]["title_block"]["fields"]["sheet-title"]["value"] =
-        serde_json::Value::String(String::new());
-    let restored: SheetCatalog = serde_json::from_value(legacy).unwrap();
+    catalog
+        .update_sheet_page_format(id, revision, SchematicSheetFormat::default())
+        .unwrap();
+    let stored = serde_json::to_value(&catalog).unwrap();
+    let restored: SheetCatalog = serde_json::from_value(stored).unwrap();
     assert_eq!(
         restored.find(id).unwrap().page_format().title_block.fields
             [&DrawingSheetTitleFieldId::SheetTitle]
             .value,
-        "Control"
+        ""
     );
 }
 

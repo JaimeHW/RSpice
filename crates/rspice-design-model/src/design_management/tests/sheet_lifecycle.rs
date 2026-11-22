@@ -56,10 +56,19 @@ fn port_id(catalog: &SheetCatalog, net_name: &str) -> CrossSheetPortId {
 }
 
 #[test]
-fn sheet_rename_moves_the_name_and_the_sheet_owned_title_together() {
+fn sheet_rename_leaves_the_typed_title_alone() {
     let mut catalog = SheetCatalog::default();
     let input = catalog.create_sheet(sheet("Input", 1), None).unwrap();
     let bias = catalog.create_sheet(sheet("Bias", 2), Some(input)).unwrap();
+    // A new sheet has no Title of its own: its block letters the sheet name.
+    assert_eq!(sheet_title(catalog.find(input).unwrap()), "");
+    let titled = authored_format(
+        catalog.find(input).unwrap().page_format().clone(),
+        "5 V buck converter",
+    );
+    catalog
+        .update_sheet_page_format(input, catalog.find(input).unwrap().revision(), titled)
+        .unwrap();
     let sheet_revision = catalog.find(input).unwrap().revision();
     let catalog_revision = catalog.revision();
 
@@ -75,7 +84,6 @@ fn sheet_rename_moves_the_name_and_the_sheet_owned_title_together() {
         })
     ));
     assert_eq!(catalog.find(input).unwrap().name(), "Input");
-    assert_eq!(sheet_title(catalog.find(input).unwrap()), "Input");
     assert_eq!(catalog.revision(), catalog_revision);
 
     let committed = catalog
@@ -85,7 +93,7 @@ fn sheet_rename_moves_the_name_and_the_sheet_owned_title_together() {
     assert_eq!(catalog.revision(), catalog_revision + 1);
     let renamed = catalog.find(input).unwrap();
     assert_eq!(renamed.name(), "AFE core");
-    assert_eq!(sheet_title(renamed), "AFE core");
+    assert_eq!(sheet_title(renamed), "5 V buck converter");
     assert_eq!(catalog.find(bias).unwrap().revision(), 1);
     catalog.validate().unwrap();
 
@@ -93,6 +101,24 @@ fn sheet_rename_moves_the_name_and_the_sheet_owned_title_together() {
         catalog.rename_sheet(input, committed, "AFE core".to_owned()),
         Err(DesignManagementError::NoChanges("sheet name"))
     ));
+    // An untitled sheet's rename writes no Title either.
+    catalog
+        .rename_sheet(bias, 1, "Bias network".to_owned())
+        .unwrap();
+    assert_eq!(sheet_title(catalog.find(bias).unwrap()), "");
+}
+
+/// A sheet made from a copy of another sheet's format, as "match the
+/// current sheet" makes it, does not take that sheet's Title with it.
+#[test]
+fn a_new_sheet_starts_untitled_whatever_format_it_copies() {
+    let mut catalog = SheetCatalog::default();
+    let input = catalog.create_sheet(sheet("Input", 1), None).unwrap();
+    let copied = authored_format(SchematicSheetFormat::default(), "5 V buck converter");
+    let output = catalog
+        .create_sheet_with_page_format(sheet("Output", 2), Some(input), copied)
+        .unwrap();
+    assert_eq!(sheet_title(catalog.find(output).unwrap()), "");
 }
 
 #[test]

@@ -270,16 +270,6 @@ impl DrawingSheetDraft {
                     .to_owned(),
             );
         }
-        if self
-            .title_fields
-            .get(&DrawingSheetTitleFieldId::SheetTitle)
-            .is_none_or(|field| !field.visible || field.value.trim().is_empty())
-        {
-            problems.push(format!(
-                "{} is required and cannot be empty.",
-                DrawingSheetTitleFieldId::SheetTitle.display_label()
-            ));
-        }
         if self.size == SheetSizeChoice::Custom && self.save_custom_preset {
             let name = self.custom_name.trim();
             if name.is_empty() || name == ONE_OFF_CUSTOM_SIZE {
@@ -694,16 +684,27 @@ mod tests {
     fn validation_states_every_reason_a_draft_is_refused() {
         let mut draft = valid_draft();
         draft.width_um = 10_000;
+        draft.size = SheetSizeChoice::Custom;
+        draft.save_custom_preset = true;
+        draft.custom_name = String::new();
+
+        let refused = draft.validate().unwrap_err();
+
+        assert!(refused.contains("between 50.8 mm and 2540 mm"), "{refused}");
+        assert!(refused.contains("Name the custom size"), "{refused}");
+    }
+
+    /// The Title is the sheet's own to type or leave empty: an empty one
+    /// letters the sheet name, so it refuses nothing.
+    #[test]
+    fn an_empty_title_is_a_valid_draft() {
+        let mut draft = valid_draft();
         draft
             .title_fields
             .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
             .unwrap()
             .value
             .clear();
-
-        let refused = draft.validate().unwrap_err();
-
-        assert!(refused.contains("between 50.8 mm and 2540 mm"), "{refused}");
-        assert!(refused.contains("Title is required"), "{refused}");
+        assert!(draft.validate().is_ok());
     }
 }

@@ -115,25 +115,12 @@ impl<'de> Deserialize<'de> for DesignSheet {
         D: Deserializer<'de>,
     {
         let wire = DesignSheetWire::deserialize(deserializer)?;
-        let mut page_format = wire.page_format;
-        let title = page_format
-            .title_block
-            .fields
-            .entry(DrawingSheetTitleFieldId::SheetTitle)
-            .or_default();
-        // Legacy sheets predate the required authored Sheet title. Their
-        // stable sheet name is the only non-invented, deterministic migration
-        // value and keeps old projects loadable without weakening validation.
-        if title.value.trim().is_empty() {
-            title.value.clone_from(&wire.definition.name);
-        }
-        title.visible = true;
         let value = Self {
             id: wire.id,
             revision: wire.revision,
             semantic_digest: wire.semantic_digest,
             definition: wire.definition,
-            page_format,
+            page_format: wire.page_format,
         };
         value.validate().map_err(serde::de::Error::custom)?;
         Ok(value)
@@ -176,7 +163,6 @@ impl DesignSheet {
         require_nonzero_revision(self.revision, "sheet", self.id.to_string())?;
         validate_sheet_definition(&self.definition)?;
         self.page_format.validate()?;
-        self.page_format.validate_authored_sheet_title()?;
         require_digest(
             self.semantic_digest,
             digest("rspice-design-sheet-semantic/v1", &self.definition)?,
@@ -640,8 +626,8 @@ impl SheetCatalog {
 
     /// Create a sheet with an already-resolved authored drawing-sheet
     /// format. Callers that own project default policy resolve it before this
-    /// catalog-local transaction; the sheet receives an exact snapshot and a
-    /// sheet-owned title.
+    /// catalog-local transaction; the sheet receives an exact snapshot, but
+    /// no Title: its block letters the sheet name until someone types one.
     ///
     /// A sheet inserted before the end of the catalog changes the order the
     /// set prints in, as deleting and reordering do, so every printed page
@@ -691,14 +677,16 @@ impl SheetCatalog {
                     .map_err(|_| DesignManagementError::NumericRange("sheet page number"))?,
             );
         }
+        // A new sheet starts untitled: a Title that came with a format copied
+        // from another sheet is that sheet's own.
         let page_format = page_format.try_update(|draft| {
-            draft
+            if let Some(title) = draft
                 .title_block
                 .fields
-                .entry(DrawingSheetTitleFieldId::SheetTitle)
-                .or_default()
-                .value
-                .clone_from(&definition.name);
+                .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+            {
+                title.value.clear();
+            }
         })?;
         let id = SheetId::new();
         let sheet = DesignSheet {
@@ -722,10 +710,10 @@ impl SheetCatalog {
 
     /// Rename one sheet.
     ///
-    /// The sheet name and the sheet-owned title-block value are one authored
-    /// fact printed in two places, so a rename moves both in the same
-    /// candidate. Splitting them would let the drawing print a name the
-    /// navigator no longer shows.
+    /// The name is what the navigator and the sheet strip call the sheet; the
+    /// Title is what its block letters. A rename leaves a typed Title as it
+    /// is, as KiCad and Virtuoso keep a sheet's name apart from its title
+    /// block. An empty Title letters the new name.
     pub fn rename_sheet(
         &mut self,
         id: SheetId,
@@ -760,23 +748,13 @@ impl SheetCatalog {
             "sheet",
             id.to_string(),
         )?;
-        let page_format = sheet.page_format.try_update(|draft| {
-            let title = draft
-                .title_block
-                .fields
-                .entry(DrawingSheetTitleFieldId::SheetTitle)
-                .or_default();
-            title.visible = true;
-            title.value.clone_from(&name);
-        })?;
-        if sheet.definition.name == name && sheet.page_format == page_format {
+        if sheet.definition.name == name {
             return Err(DesignManagementError::NoChanges("sheet name"));
         }
         let mut definition = sheet.definition.clone();
         definition.name = name;
         sheet.semantic_digest = digest("rspice-design-sheet-semantic/v1", &definition)?;
         sheet.definition = definition;
-        sheet.page_format = page_format;
         sheet.revision = next_revision(sheet.revision, "sheet", id.to_string())?;
         let committed_revision = sheet.revision;
         candidate.bump_revision("sheet catalog")?;
@@ -953,7 +931,6 @@ impl SheetCatalog {
     ) -> Result<u64, DesignManagementError> {
         self.validate()?;
         page_format.validate()?;
-        page_format.validate_authored_sheet_title()?;
         let mut candidate = self.clone();
         let sheet = candidate
             .sheets

@@ -268,31 +268,81 @@ fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
     assert_eq!(state.model.schematic.document().components.len(), 2);
 }
 
+/// A sheet's name and its Title are its own two facts: a rename leaves a
+/// typed Title on the block, and an untitled sheet's block letters the new
+/// name.
 #[test]
-fn renaming_a_sheet_moves_the_printed_title_with_it() {
-    let (mut state, first, _) = two_sheet_state();
+fn renaming_a_sheet_leaves_its_typed_title_on_the_block() {
+    let (mut state, first, second) = two_sheet_state();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let catalog = state
+        .model
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("sheet catalog");
+    let sheet = catalog.find(first).expect("first sheet");
+    let revision = sheet.revision();
+    let titled = sheet
+        .page_format()
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
+                .unwrap()
+                .value = "5 V buck converter".to_owned();
+        })
+        .unwrap();
+    catalog
+        .update_sheet_page_format(first, revision, titled)
+        .unwrap();
+    let lettered_title = |state: &AppState| {
+        let sheet = state.model.active_drawing_sheet();
+        state
+            .model
+            .title_block_fields(&sheet)
+            .into_iter()
+            .find(|field| field.id == DrawingSheetTitleFieldId::SheetTitle)
+            .map(|field| field.value)
+    };
 
     rename_sheet(
         &mut state.model,
         &mut state.workbench,
         first,
-        "  Input stage  ".to_owned(),
+        "  PSU  ".to_owned(),
     )
     .expect("rename publishes");
 
     let catalog = active_sheet_catalog(&state).expect("catalog");
-    let sheet = catalog.find(first).expect("renamed sheet");
-    assert_eq!(sheet.name(), "Input stage");
+    assert_eq!(catalog.find(first).expect("renamed sheet").name(), "PSU");
     assert_eq!(
-        sheet
-            .page_format()
-            .title_block
-            .fields
-            .get(&DrawingSheetTitleFieldId::SheetTitle)
-            .map(|field| field.value.as_str()),
-        Some("Input stage"),
-        "the sheet name and the printed title are one authored fact"
+        lettered_title(&state).as_deref(),
+        Some("5 V buck converter")
     );
+
+    rename_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        second,
+        "Output".to_owned(),
+    )
+    .expect("rename publishes");
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        second,
+    )
+    .expect("activation publishes");
+    assert_eq!(lettered_title(&state).as_deref(), Some("Output"));
 }
 
 #[test]
