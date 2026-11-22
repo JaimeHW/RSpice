@@ -255,12 +255,22 @@ fn size_rows(
         }
     }
     action_stack(ui, |ui| {
-        if Button::new("Save as project size").show(ui).clicked() {
+        if Button::new("Save as project size")
+            .show(ui)
+            .on_hover_text("Adds this size to the project's list, for every sheet in the project.")
+            .clicked()
+        {
             *edit = Some(Ok(DrawingSheetEdit::SaveCustomSize(
                 DrawingSheetPresetScope::Project,
             )));
         }
-        if Button::new("Save as personal size").show(ui).clicked() {
+        if Button::new("Save as personal size")
+            .show(ui)
+            .on_hover_text(
+                "Adds this size to your own list, for any project. This sheet keeps it as its own size.",
+            )
+            .clicked()
+        {
             *edit = Some(Ok(DrawingSheetEdit::SaveCustomSize(
                 DrawingSheetPresetScope::User,
             )));
@@ -270,7 +280,9 @@ fn size_rows(
 
 /// The saved custom sizes the Size menu offers: the project's, and the
 /// person's own while a menu is open to show them. Reading the personal ones
-/// parses preferences, which a closed menu has no use for every frame.
+/// parses preferences, which a closed menu has no use for every frame. A
+/// personal size the project already carries, because a sheet picked it, is
+/// offered once, as the project's.
 fn saved_sizes(ui: &Ui, model: &Model) -> Vec<DrawingSheetPreset> {
     let mut saved = model
         .workspace
@@ -280,12 +292,14 @@ fn saved_sizes(ui: &Ui, model: &Model) -> Vec<DrawingSheetPreset> {
         .presets
         .clone();
     if egui::Popup::is_any_open(ui.ctx()) {
-        saved.extend(
-            model
-                .preferences
-                .drawing_sheet_personal_preferences()
-                .presets,
-        );
+        let personal = model
+            .preferences
+            .drawing_sheet_personal_preferences()
+            .presets
+            .into_iter()
+            .filter(|preset| !Model::project_carries_personal_preset(&saved, preset))
+            .collect::<Vec<_>>();
+        saved.extend(personal);
     }
     saved.retain(|preset| {
         !matches!(

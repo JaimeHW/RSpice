@@ -481,6 +481,17 @@ fn apply_governed_sheet_edit(
     let project_settings_changed =
         candidate.drawing_sheet_settings() != before.drawing_sheet_settings();
     if unchanged && !project_settings_changed {
+        // Saving a personal size changes the person's list and nothing in
+        // the project, so it is no step to undo.
+        if personal != personal_before {
+            model
+                .preferences
+                .set_drawing_sheet_personal_preferences(personal)?;
+            return Ok(format!(
+                "Saved \"{}\" to your personal sizes.",
+                transaction.draft.custom_name.trim()
+            ));
+        }
         return Ok("The sheet already had that format.".to_owned());
     }
     if !unchanged {
@@ -506,7 +517,8 @@ fn apply_governed_sheet_edit(
         vec![governed.sheet_id],
         applied,
         unchanged_ids,
-        transaction.draft.save_custom_preset,
+        transaction.draft.save_custom_preset
+            && transaction.draft.custom_preset_scope == DrawingSheetPresetScope::Project,
         project_settings_changed,
     )?;
     commit_sheet_candidate(model, before, candidate, personal_before, personal)?;
@@ -554,7 +566,8 @@ fn apply_first_sheet_edit(
         vec![sheet_id],
         vec![sheet_id],
         Vec::new(),
-        transaction.draft.save_custom_preset,
+        transaction.draft.save_custom_preset
+            && transaction.draft.custom_preset_scope == DrawingSheetPresetScope::Project,
         project_settings_changed,
     )?;
     commit_sheet_candidate(model, before, candidate, personal_before, personal)?;
@@ -826,10 +839,12 @@ fn save_one_off_custom_preset(
                 name: name.to_owned(),
                 scope: DrawingSheetPresetScope::User,
             };
-            personal.presets.push(source.clone());
+            personal.presets.push(source);
             personal.validate()?;
-            let captured = Model::capture_personal_preset_into_project(candidate, &source)?;
-            *sheet_format = attach_project_preset(sheet_format, &captured)?;
+            // A sheet refers only to the project's sizes, so this one keeps
+            // the size as its own under the name it was saved by, and the
+            // project's list gains nothing: a personal size is the person's
+            // until a sheet picks it from their list.
             Ok(())
         }
     }

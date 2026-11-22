@@ -39,6 +39,9 @@ struct SheetPanel {
     /// Every text the last pass painted, in paint order: its words and where
     /// it stands.
     painted: Vec<(String, egui::Rect)>,
+    /// What the last pass named for assistive technology, scrolled out of
+    /// sight or not: an open menu's every entry.
+    named: Vec<String>,
 }
 
 impl SheetPanel {
@@ -51,6 +54,7 @@ impl SheetPanel {
             app: RSpiceApp::test_instance(),
             controls: HashMap::new(),
             painted: Vec::new(),
+            named: Vec::new(),
         }
     }
 
@@ -100,6 +104,11 @@ impl SheetPanel {
             collect_painted(&clipped.shape, &mut self.painted);
         }
         if let Some(update) = output.platform_output.accesskit_update {
+            self.named = update
+                .nodes
+                .iter()
+                .filter_map(|(_, node)| node.label().map(str::to_owned))
+                .collect();
             for (_, node) in update.nodes {
                 if matches!(
                     node.role(),
@@ -843,6 +852,95 @@ fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
         "{painted}"
     );
     assert!(!painted.contains("Width (mm)"), "{painted}");
+}
+
+fn project_sizes(state: &AppState) -> Vec<String> {
+    state
+        .model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .presets
+        .iter()
+        .map(|preset| preset.name.clone())
+        .collect()
+}
+
+/// Saving a one-off size as a personal size adds it to the person's own list
+/// and nothing to the project's, and the sheet keeps the size under the name
+/// it was saved by. Once a sheet picks it, the project carries a copy, and
+/// the Size menu offers that size once rather than as both the project's and
+/// the person's.
+#[test]
+fn save_as_personal_size_saves_only_that_and_the_menu_lists_each_size_once() {
+    let mut panel = SheetPanel::new();
+    for edit in [
+        DrawingSheetEdit::CustomSize {
+            width_um: 250_000,
+            height_um: 400_000,
+        },
+        DrawingSheetEdit::CustomSizeName("Lab panel".to_owned()),
+        DrawingSheetEdit::SaveCustomSize(rspice_app_state::state::DrawingSheetPresetScope::User),
+    ] {
+        apply_drawing_sheet_edit(&mut panel.app.state, edit).unwrap();
+    }
+    let personal = panel
+        .app
+        .state
+        .model
+        .preferences
+        .drawing_sheet_personal_preferences()
+        .presets;
+    assert_eq!(
+        personal
+            .iter()
+            .map(|preset| preset.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Lab panel"]
+    );
+    assert!(project_sizes(&panel.app.state).is_empty());
+    assert_eq!(
+        sheet_format(&panel.app.state).authored_size.label(),
+        "Lab panel"
+    );
+
+    // Back on a standard size, the menu offers the person's size once.
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::IsoA4),
+    )
+    .unwrap();
+    panel.open("Size");
+    let offered = |panel: &SheetPanel| {
+        panel
+            .named
+            .iter()
+            .filter(|name| name.contains("Lab panel"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(offered(&panel), ["Lab panel \u{00b7} personal"]);
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::Preset(Box::new(personal[0].clone())),
+    )
+    .unwrap();
+    assert_eq!(project_sizes(&panel.app.state), ["Lab panel"]);
+    assert_eq!(
+        sheet_format(&panel.app.state).authored_size.label(),
+        "Lab panel"
+    );
+
+    // The project's copy and the person's are one size, listed once.
+    apply_drawing_sheet_edit(
+        &mut panel.app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::IsoA4),
+    )
+    .unwrap();
+    panel.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    panel.open("Size");
+    assert_eq!(offered(&panel), ["Lab panel \u{00b7} project"]);
 }
 
 /// An edge the sheet cannot have is refused in the words that say why, and

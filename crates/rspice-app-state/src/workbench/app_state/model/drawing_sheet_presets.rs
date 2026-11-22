@@ -66,6 +66,19 @@ impl Model {
         Ok(captured)
     }
 
+    /// Whether one of the project's sizes `project` already draws the sheet
+    /// the personal size `personal` draws, whatever either is named: the
+    /// copy a sheet took when it picked that personal size.
+    #[must_use]
+    pub fn project_carries_personal_preset(
+        project: &[DrawingSheetPreset],
+        personal: &DrawingSheetPreset,
+    ) -> bool {
+        project
+            .iter()
+            .any(|preset| same_preset_content(&preset.format, &personal.format))
+    }
+
     /// `base`, or the first `base 2`, `base 3`, ... that no preset in
     /// `visible` is named, ignoring case.
     pub fn unique_preset_copy_name(base: &str, visible: &[DrawingSheetPreset]) -> String {
