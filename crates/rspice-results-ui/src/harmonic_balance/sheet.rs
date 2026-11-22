@@ -15,7 +15,7 @@ use rspice_results::harmonic_spectrum::settings::{
     CoefficientQuantity, CoefficientScale, CoefficientSettings,
 };
 use rspice_results::visualization_document::{SignalForm, Strip, StripAxis, StripMember};
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, DrawMode, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
@@ -299,8 +299,10 @@ fn show_strip(
     });
     spec.left_margin = 64.0;
     if form != SignalForm::Value {
-        // The lines are discrete: a stem from the strip's floor (zero for a
-        // magnitude or a phase) to each line says so.
+        // The lines are discrete, drawn as a spectrum analyser draws them:
+        // a stem to each line, from the strip's floor on a decibel scale and
+        // from zero on a magnitude or a phase, under the line's dot, with
+        // nothing joining one line to the next.
         let floor = if logarithmic { y0 } else { 0.0 };
         let stems = curves
             .iter()
@@ -317,10 +319,11 @@ fn show_strip(
             for (x, y, color) in &stems {
                 for (&x, &y) in x.iter().zip(y.iter()) {
                     if y.is_finite() {
+                        let tip = if logarithmic { y.max(floor) } else { y };
                         painter.line_segment(
                             [
                                 egui::pos2(mapper.x(x), baseline),
-                                egui::pos2(mapper.x(x), mapper.y(y.max(floor))),
+                                egui::pos2(mapper.x(x), mapper.y(tip)),
                             ],
                             egui::Stroke::new(1.0, *color),
                         );
@@ -332,34 +335,44 @@ fn show_strip(
             spec.ref_lines.push(plot::RefLine { y: 0.0 });
         }
     }
-    for (index, curve) in curves.iter().enumerate() {
+    for curve in &curves {
         let trace = Trace::new(&curve.x, &curve.y, curve.trace.color)
             .thin()
             .cache_key(curve_key(curve.trace, form, settings));
         spec.traces.push(if form == SignalForm::Value {
             trace
         } else {
-            trace.marker_style(index)
+            trace.draw(DrawMode::Points)
         });
     }
-    let x_name = if form == SignalForm::Value { "t" } else { "f" };
     let readout = |x: f64| -> Vec<(String, String)> {
+        if form == SignalForm::Value {
+            let mut rows = vec![("t".to_owned(), fmt_si_significant(x, "s", digits))];
+            for curve in &curves {
+                rows.push((
+                    curve.trace.name.clone(),
+                    fmt_si_significant(
+                        presentation.cursor_sample(&curve.x, &curve.y, x),
+                        unit,
+                        digits,
+                    ),
+                ));
+            }
+            return rows;
+        }
+        // Nothing lies between two lines: the cursor reads the nearest.
+        let line = curves
+            .first()
+            .and_then(|curve| super::nearest_line(&curve.x, x).map(|index| curve.x[index]));
         let mut rows = vec![(
-            x_name.to_owned(),
-            if form == SignalForm::Value {
-                fmt_si_significant(x, "s", digits)
-            } else {
-                frequency_readout(quantity_policy, x, digits)
-            },
+            "f".to_owned(),
+            frequency_readout(quantity_policy, line.unwrap_or(x), digits),
         )];
         for curve in &curves {
+            let level = super::nearest_line(&curve.x, x).map_or(f64::NAN, |index| curve.y[index]);
             rows.push((
                 curve.trace.name.clone(),
-                fmt_si_significant(
-                    presentation.cursor_sample(&curve.x, &curve.y, x),
-                    unit,
-                    digits,
-                ),
+                fmt_si_significant(level, unit, digits),
             ));
         }
         rows

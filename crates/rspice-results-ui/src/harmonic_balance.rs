@@ -14,7 +14,7 @@ use rspice_results::harmonic_spectrum::lines::CoefficientLine;
 use rspice_results::harmonic_spectrum::settings::{CoefficientQuantity, CoefficientSettings};
 use rspice_results::waveform::HeldColumn;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, DrawMode, PlotSpec, Trace, XScale, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
@@ -297,31 +297,39 @@ fn show_recorded(
             }
         }
     }));
+    // A recorded FFT is a transform of a waveform and stays a curve; lines
+    // kept without their phase are still lines, each a dot on its stem.
+    let lines = model.fft.is_none();
     for (index, trace) in model.traces.iter().enumerate() {
-        spec.traces.push(
-            Trace::new(&trace.frequency, &trace.magnitude, trace.color)
-                .thin()
-                .marker_style(index)
-                .cache_key(trace.cache_key),
-        );
+        let curve = Trace::new(&trace.frequency, &trace.magnitude, trace.color)
+            .thin()
+            .cache_key(trace.cache_key);
+        spec.traces.push(if lines {
+            curve.draw(DrawMode::Points)
+        } else {
+            curve.marker_style(index)
+        });
     }
 
     // Every trace reads at the cursor: the panel the readout sits in
-    // scrolls, so no signal is left off.
+    // scrolls, so no signal is left off. Between two lines the cursor reads
+    // the nearest, for nothing lies between them.
     let readout = |frequency: f64| -> Vec<(String, String)> {
+        let line = model.traces.first().filter(|_| lines).and_then(|trace| {
+            nearest_line(&trace.frequency, frequency).map(|index| trace.frequency[index])
+        });
         let mut rows = vec![(
             "f".to_owned(),
-            frequency_readout(quantity_policy, frequency, digits),
+            frequency_readout(quantity_policy, line.unwrap_or(frequency), digits),
         )];
         for trace in &model.traces {
-            rows.push((
-                trace.name.clone(),
-                fmt_si_significant(
-                    presentation.cursor_sample(&trace.frequency, &trace.magnitude, frequency),
-                    "",
-                    digits,
-                ),
-            ));
+            let level = if lines {
+                nearest_line(&trace.frequency, frequency)
+                    .map_or(f64::NAN, |index| trace.magnitude[index])
+            } else {
+                presentation.cursor_sample(&trace.frequency, &trace.magnitude, frequency)
+            };
+            rows.push((trace.name.clone(), fmt_si_significant(level, "", digits)));
         }
         rows
     };
@@ -330,6 +338,23 @@ fn show_recorded(
     SpectrumResponse {
         plots: vec![(0, response)],
         ..requested
+    }
+}
+
+/// The line of a spectrum whose lines stand at ascending `frequencies`
+/// nearest `frequency`.
+fn nearest_line(frequencies: &[f64], frequency: f64) -> Option<usize> {
+    let after = frequencies.partition_point(|line| *line < frequency);
+    let before = after.checked_sub(1);
+    match (before, (after < frequencies.len()).then_some(after)) {
+        (Some(before), Some(after)) => Some(
+            if frequency - frequencies[before] <= frequencies[after] - frequency {
+                before
+            } else {
+                after
+            },
+        ),
+        (before, after) => before.or(after),
     }
 }
 
