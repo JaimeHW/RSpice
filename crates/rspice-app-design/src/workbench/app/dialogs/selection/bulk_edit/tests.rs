@@ -52,6 +52,45 @@ fn wildcard_filter_is_case_insensitive_and_anchored_when_requested() {
     assert!(!wildcard_match("*189", "OPA189/tt"));
 }
 
+/// A pattern without `*` is the whole text, so `value = 1k` does not tick
+/// 5.1k, 11k or 1k5; with `*`, a piece is found wherever it falls, so `R*0`
+/// finds R100 though R's first 0 is not its last character.
+#[test]
+fn a_pattern_is_exact_unless_a_star_is_typed_and_a_star_finds_any_run() {
+    assert!(wildcard_match("1k", "1K"));
+    for other in ["5.1k", "11k", "1k5"] {
+        assert!(!wildcard_match("1k", other), "{other}");
+    }
+    assert!(wildcard_match("R*0", "R100"));
+    assert!(wildcard_match("1*0", "100"));
+    assert!(wildcard_match("*0", "100"));
+    assert!(wildcard_match("a*b*c", "abc"));
+    assert!(wildcard_match("*", "anything"));
+    assert!(!wildcard_match("R*0", "R101"));
+    assert!(!wildcard_match("ab*ba", "aba"), "the ends do not overlap");
+
+    let mut state = DesignTestHost::default();
+    let mut parts = Vec::new();
+    for (id, value) in [(1, "1k"), (2, "5.1k"), (3, "11k")] {
+        let mut part = Component::new(id, ComponentType::Resistor, Point::new(id as i32 * 100, 0));
+        part.name = format!("R{id}");
+        part.value = value.to_owned();
+        parts.push(part);
+    }
+    state.model.schematic.document_mut_for_test().components = parts;
+    let filter = SelectionBulkFilter {
+        current_property: "value = 1k".to_owned(),
+        ..SelectionBulkFilter::default()
+    };
+    let rows = build_rows(&state.model, &filter, SelectionBulkProperty::Tolerance);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.object.as_str())
+            .collect::<Vec<_>>(),
+        vec!["R1"]
+    );
+}
+
 #[test]
 fn free_text_query_searches_hidden_instance_parameters_and_binding_fields() {
     let mut state = DesignTestHost::default();

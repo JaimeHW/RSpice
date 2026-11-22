@@ -1754,38 +1754,50 @@ fn component_named_property(component: &Component, name: &str) -> Option<String>
 fn row_matches_query(row: &SelectionBulkRow, filter: &SelectionBulkFilter) -> bool {
     let query = filter.query.trim();
     query.is_empty()
-        || wildcard_match(query, &row.object)
-        || wildcard_match(query, &row.path)
-        || wildcard_match(query, &row.value)
-        || wildcard_match(query, &row.search_text)
+        || [&row.object, &row.path, &row.value, &row.search_text]
+            .into_iter()
+            .any(|text| search_match(query, text))
 }
 
+/// The result search finds as it is typed: a query without `*` is found
+/// anywhere in the text, and one with `*` is a pattern.
+fn search_match(query: &str, text: &str) -> bool {
+    if query.contains('*') {
+        wildcard_match(query, text)
+    } else {
+        text.to_ascii_lowercase()
+            .contains(&query.trim().to_ascii_lowercase())
+    }
+}
+
+/// Whether `candidate` matches `pattern`, ignoring case: exactly, unless the
+/// pattern holds a `*`, which stands for any run of characters. `value = 1k`
+/// finds 1k and not 5.1k; `R*0` finds R100, `*0` anything ending in 0.
 fn wildcard_match(pattern: &str, candidate: &str) -> bool {
     let pattern = pattern.trim().to_ascii_lowercase();
     let candidate = candidate.to_ascii_lowercase();
     if pattern.is_empty() {
         return true;
     }
-    if !pattern.contains('*') {
-        return candidate.contains(&pattern);
-    }
-    let mut remainder = candidate.as_str();
-    let anchored_start = !pattern.starts_with('*');
-    let anchored_end = !pattern.ends_with('*');
-    let parts = pattern
-        .split('*')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    for (index, part) in parts.iter().enumerate() {
-        let Some(position) = remainder.find(part) else {
+    let mut pieces = pattern.split('*');
+    let head = pieces.next().unwrap_or_default();
+    let Some(mut rest) = candidate.strip_prefix(head) else {
+        return false;
+    };
+    let pieces = pieces.collect::<Vec<_>>();
+    let Some((tail, middle)) = pieces.split_last() else {
+        // No `*`: the whole text is the pattern.
+        return rest.is_empty();
+    };
+    // Each middle piece at its first place after the last; the tail is held
+    // to the end, so a later occurrence of it is the one that counts.
+    for piece in middle {
+        let Some(position) = rest.find(piece) else {
             return false;
         };
-        if index == 0 && anchored_start && position != 0 {
-            return false;
-        }
-        remainder = &remainder[position + part.len()..];
+        rest = &rest[position + piece.len()..];
     }
-    !anchored_end || remainder.is_empty()
+    rest.ends_with(tail)
 }
 
 #[cfg(any(test, feature = "test-support"))]
