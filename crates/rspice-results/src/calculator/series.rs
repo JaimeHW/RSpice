@@ -58,6 +58,23 @@ impl<'a> Series<'a> {
         }
     }
 
+    /// What `x` a pass interpolates in between two samples: X itself, or
+    /// log X on a sweep spaced by a constant ratio, as the trace is drawn,
+    /// judged on the whole axis' ends as `yval` judges a wave's.
+    fn along(&self) -> fn(f64) -> f64 {
+        let n = self.len();
+        let ends = n.checked_sub(2).filter(|_| n >= 3).and_then(|penultimate| {
+            Some((
+                [self.x_at(0)?, self.x_at(1)?],
+                [self.x_at(penultimate)?, self.x_at(penultimate + 1)?],
+            ))
+        });
+        match ends {
+            Some((first, last)) if crate::plot_axis::spaced_by_ratio(first, last) => f64::ln,
+            _ => |x| x,
+        }
+    }
+
     fn x_at(&self, index: usize) -> Option<f64> {
         match self.source {
             Source::Memory { x, .. } => x.get(index).copied(),
@@ -158,6 +175,7 @@ impl<'a> Series<'a> {
     /// sample at or past `at` and the one before it. A stored time axis is searched by
     /// bisection, so only the samples around `at` are read.
     pub(super) fn value_at(&self, at: f64) -> Option<f64> {
+        let along = if at > 0.0 { self.along() } else { |x| x };
         if let Source::Stored { x, y } = self.source
             && self.window.is_none()
             && x.is_ascending_axis()
@@ -174,11 +192,11 @@ impl<'a> Series<'a> {
                 return Some(y1);
             }
             let (x0, y0) = (x.sample(after - 1)?, y.sample(after - 1)?);
-            let dx = x1 - x0;
+            let dx = along(x1) - along(x0);
             return Some(if dx == 0.0 {
                 y1
             } else {
-                y0 + (y1 - y0) * (at - x0) / dx
+                y0 + (y1 - y0) * (along(at) - along(x0)) / dx
             });
         }
         let (first, last) = self.ends()?;
@@ -190,11 +208,11 @@ impl<'a> Series<'a> {
             match previous {
                 None if before(at, x1) => return Some(y1),
                 Some((x0, y0)) if before(at, x1) => {
-                    let dx = x1 - x0;
+                    let dx = along(x1) - along(x0);
                     return Some(if dx == 0.0 {
                         y1
                     } else {
-                        y0 + (y1 - y0) * (at - x0) / dx
+                        y0 + (y1 - y0) * (along(at) - along(x0)) / dx
                     });
                 }
                 _ => {}

@@ -642,6 +642,12 @@ fn pp(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 /// in-range query with the first stored sample. The arithmetic itself needs
 /// no mirroring — `dx` is signed — so only the comparisons flip.
 pub(super) fn interpolate(x: &[f64], y: &[f64], at: f64) -> f64 {
+    interpolate_along(x, y, at, |x| x)
+}
+
+/// [`interpolate`] straight in `along(x)` between the two samples around
+/// `at`.
+fn interpolate_along(x: &[f64], y: &[f64], at: f64, along: impl Fn(f64) -> f64) -> f64 {
     let descending = x.len() > 1 && x[0] > x[x.len() - 1];
     let before = |a: f64, b: f64| if descending { a >= b } else { a <= b };
     if before(at, x[0]) {
@@ -649,11 +655,11 @@ pub(super) fn interpolate(x: &[f64], y: &[f64], at: f64) -> f64 {
     }
     for i in 1..x.len() {
         if before(at, x[i]) {
-            let dx = x[i] - x[i - 1];
+            let dx = along(x[i]) - along(x[i - 1]);
             if dx == 0.0 {
                 return y[i];
             }
-            return y[i - 1] + (y[i] - y[i - 1]) * (at - x[i - 1]) / dx;
+            return y[i - 1] + (y[i] - y[i - 1]) * (along(at) - along(x[i - 1])) / dx;
         }
     }
     y[y.len() - 1]
@@ -699,7 +705,19 @@ fn yval(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
             "yval position {at} lies outside the swept range {low} to {high}"
         )));
     }
-    Ok(CalcValue::Scalar(interpolate(x, y, at)))
+    Ok(CalcValue::Scalar(interpolate_drawn(x, y, at)))
+}
+
+/// The value of `y` at `at` as the trace is drawn: straight in X between
+/// two samples, or straight in log X on a sweep spaced by a constant ratio,
+/// as a decade sweep is drawn on its log axis and its cursor reads it.
+pub(super) fn interpolate_drawn(x: &[f64], y: &[f64], at: f64) -> f64 {
+    let n = x.len();
+    if at > 0.0 && n >= 3 && crate::plot_axis::spaced_by_ratio([x[0], x[1]], [x[n - 2], x[n - 1]]) {
+        interpolate_along(x, y, at, f64::ln)
+    } else {
+        interpolate(x, y, at)
+    }
 }
 
 // =============================================================================
@@ -1363,6 +1381,29 @@ mod tests {
             call("yval", vec![wave(x, y), CalcValue::Scalar(9.0)]).is_err(),
             "yval never extrapolates"
         );
+    }
+
+    /// On a decade sweep `yval` reads the line drawn between two points on
+    /// the log axis, where the cursor reads it, not the chord in X.
+    #[test]
+    fn yval_on_a_decade_sweep_reads_the_line_drawn_in_log_x() {
+        let x = vec![1.0, 10.0, 100.0, 1000.0];
+        let y = vec![0.0, 20.0, 40.0, 60.0];
+        for (at, want) in [
+            (10f64.sqrt(), 10.0),
+            (50.0, 20.0 + 20.0 * 5f64.log10()),
+            (100.0, 40.0),
+        ] {
+            assert_close(
+                scalar_of(
+                    "yval",
+                    vec![wave(x.clone(), y.clone()), CalcValue::Scalar(at)],
+                ),
+                want,
+                1.0e-12,
+                &format!("yval at {at} on a decade sweep"),
+            );
+        }
     }
 
     #[test]

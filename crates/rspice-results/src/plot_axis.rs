@@ -365,6 +365,23 @@ pub fn minor_grid_values(scale: XScale, ticks: &[(f64, String)], min: f64, max: 
     }
 }
 
+/// Whether an axis is spaced by a constant ratio rather than a constant
+/// step, as a decade or octave sweep is and as its log axis draws it,
+/// judged from its first two and last two samples. An axis that does not
+/// start positive, or does not rise, is not.
+#[must_use]
+pub fn spaced_by_ratio(first: [f64; 2], last: [f64; 2]) -> bool {
+    if !(first[0].is_finite() && first[0] > 0.0 && last.iter().all(|x| x.is_finite())) {
+        return false;
+    }
+    let (first_ratio, last_ratio) = (first[1] / first[0], last[1] / last[0]);
+    let (first_step, last_step) = (first[1] - first[0], last[1] - last[0]);
+    let geometric =
+        (first_ratio - last_ratio).abs() <= 1e-6 * first_ratio && first_ratio > 1.0 + 1e-9;
+    let arithmetic = (first_step - last_step).abs() <= 1e-6 * first_step.abs();
+    geometric && !arithmetic
+}
+
 /// The chrome an offset axis states once: its anchor, with the unit.
 pub fn anchor_label(series: &TickSeries, unit: &str) -> Option<String> {
     series

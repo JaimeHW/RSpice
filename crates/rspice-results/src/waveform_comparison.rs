@@ -374,12 +374,8 @@ impl AxisWarp {
         if count < 3 || axis.iter().any(|x| !(x.is_finite() && *x > 0.0)) {
             return Self::Linear;
         }
-        let (first_ratio, last_ratio) = (axis[1] / axis[0], axis[count - 1] / axis[count - 2]);
-        let (first_step, last_step) = (axis[1] - axis[0], axis[count - 1] - axis[count - 2]);
-        let geometric =
-            (first_ratio - last_ratio).abs() <= 1e-6 * first_ratio && first_ratio > 1.0 + 1e-9;
-        let arithmetic = (first_step - last_step).abs() <= 1e-6 * first_step.abs();
-        if geometric && !arithmetic {
+        let (first, last) = ([axis[0], axis[1]], [axis[count - 2], axis[count - 1]]);
+        if crate::plot_axis::spaced_by_ratio(first, last) {
             Self::Log
         } else {
             Self::Linear
