@@ -164,6 +164,52 @@ impl NavigationParts<'_> {
             .prompt(format!("Entered {}.", reference.display_path()));
     }
 
+    /// Descend into `instance` to look at it without editing: the occurrence
+    /// step is recorded as Edit in place records it, so Return goes back up,
+    /// and the master's document refuses edits. A master already open and
+    /// editable keeps its marking, as an open document keeps the one it was
+    /// opened with: the descent shows that tab at this occurrence and never
+    /// turns the reader's own editing tab read-only.
+    pub fn descend_read_only(&mut self, instance: String, reference: CellViewRef) {
+        let open_for_editing = self
+            .model
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .any(|open| open.reference == reference && !open.read_only_reference);
+        self.descend_into_instance(Some(instance), reference.clone());
+        if self.model.workspace.content.active_view != reference {
+            // Refused, and the refusal is on the status bar.
+            return;
+        }
+        let path = reference.display_path();
+        if open_for_editing {
+            self.wb.prompt(format!(
+                "Entered {path}. It is already open for editing, so it stays editable."
+            ));
+            return;
+        }
+        self.model
+            .workspace
+            .content
+            .set_active_read_only_reference(true);
+        self.wb.prompt(format!("Entered {path} read-only."));
+    }
+
+    /// Open `reference` on its own, editable: a design root reached through
+    /// nothing, whatever occurrence or read-only marking its document carried
+    /// when it was opened before. This is the isolated way into a block.
+    pub fn open_isolated(&mut self, reference: CellViewRef) {
+        self.descend_into_instance(None, reference.clone());
+        if self.model.workspace.content.active_view == reference {
+            self.wb.prompt(format!(
+                "Opened {} as its own root.",
+                reference.display_path()
+            ));
+        }
+    }
+
     /// Ascend one hierarchy level (the U gesture / pathbar action).
     pub fn ascend_workspace_level(&mut self) {
         let depth = self.model.workspace.content.occurrence_depth();
@@ -239,7 +285,7 @@ impl NavigationParts<'_> {
         if hierarchical_edit_in_place_enabled(self.model) {
             self.descend_into_instance(Some(instance_name), reference);
         } else {
-            self.open_workspace_view(reference);
+            self.open_isolated(reference);
         }
     }
 

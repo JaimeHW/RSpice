@@ -262,7 +262,9 @@ pub fn descend_request(
         .authority
         .as_ref()
         .ok_or_else(|| "The hierarchy edit authority is missing.".to_owned())?;
-    authority.validate(model, "Descend into hierarchy")?;
+    // Descending is navigation, so a read-only drawing descends as the
+    // direct gesture does; each way in that writes checks its own target.
+    authority.validate_presentation(model, "Descend into hierarchy")?;
     // The symbol is edited on this sheet rather than descended into, so the
     // instance it is edited at is the whole target.
     if draft.edit_mode == HierarchyDescendEditMode::EditSymbolInPlace {
@@ -305,28 +307,16 @@ pub fn answer_descend_hierarchy(mut navigation: NavigationParts<'_>, request: De
             edit_mode,
             instance,
             reference,
-        } => {
-            match edit_mode {
-                HierarchyDescendEditMode::EditInPlace => {
-                    navigation.descend_into_instance(Some(instance), reference);
-                }
-                HierarchyDescendEditMode::OpenIsolated => {
-                    navigation.open_workspace_view(reference);
-                }
-                HierarchyDescendEditMode::ReadOnlyReference => {
-                    navigation.open_workspace_view(reference);
-                    navigation
-                        .model
-                        .workspace
-                        .content
-                        .set_active_read_only_reference(true);
-                }
-                HierarchyDescendEditMode::EditSymbolInPlace => {}
+        } => match edit_mode {
+            HierarchyDescendEditMode::EditInPlace => {
+                navigation.descend_into_instance(Some(instance), reference);
             }
-            navigation
-                .wb
-                .prompt("Descended into the instance; the parent's unsaved changes are kept.");
-        }
+            HierarchyDescendEditMode::OpenIsolated => navigation.open_isolated(reference),
+            HierarchyDescendEditMode::ReadOnlyReference => {
+                navigation.descend_read_only(instance, reference);
+            }
+            HierarchyDescendEditMode::EditSymbolInPlace => {}
+        },
     }
 }
 
@@ -340,7 +330,13 @@ fn descend_rows(
     occurrence_path: &str,
     target: Result<&str, &str>,
 ) -> Option<egui::Id> {
-    rows.value_mono("Instance", occurrence_path);
+    // An isolated view is reached through no instance, so it carries no
+    // occurrence path to show.
+    if draft.edit_mode == HierarchyDescendEditMode::OpenIsolated {
+        rows.value("Instance", "Opens as its own root");
+    } else {
+        rows.value_mono("Instance", occurrence_path);
+    }
     match target {
         Ok(target) => rows.value_mono("Cell view", target),
         Err(reason) => rows.value("Cell view", reason),
@@ -451,6 +447,133 @@ pub(crate) mod tests {
             descend_target_path(&state.model.workspace, "X BIAS").contains("X BIAS"),
             "an unspellable instance is reported, not silently truncated"
         );
+    }
+
+    /// Open the form over the selected instance, pick `mode` and answer the
+    /// checked choice as the shell does.
+    fn descend_with(
+        state: &mut DesignTestHost,
+        mode: HierarchyDescendEditMode,
+    ) -> Result<(), String> {
+        assert!(open_descend_hierarchy_dialog(
+            &mut state.design.descend_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        ));
+        state.design.descend_hierarchy.edit_mode = mode;
+        let request = descend_request(&state.design.descend_hierarchy, &state.model);
+        state.design.descend_hierarchy.close();
+        answer_descend_hierarchy(state.navigation(), request?);
+        Ok(())
+    }
+
+    fn back_to_parent_with_the_instance_selected(state: &mut DesignTestHost, parent: CellViewRef) {
+        state.open_workspace_view(parent);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(91);
+    }
+
+    #[test]
+    fn a_read_only_reference_descends_and_return_goes_back_to_the_parent() {
+        let (mut state, parent, child) = hierarchy_state();
+        descend_with(&mut state, HierarchyDescendEditMode::ReadOnlyReference)
+            .expect("a read-only look is navigation");
+
+        assert_eq!(state.model.workspace.content.active_view, child);
+        assert_eq!(
+            state.model.workspace.content.occurrence_labels().last(),
+            Some(&"XAFE".to_owned()),
+            "the block is shown at the instance it was reached through"
+        );
+        assert_eq!(state.model.workspace.content.hierarchy_stack.len(), 2);
+        assert!(state.model.active_view_read_only());
+        assert!(
+            state
+                .prompt_text()
+                .is_some_and(|text| text.contains("read-only")),
+            "{:?}",
+            state.prompt_text()
+        );
+
+        state.navigation().ascend_workspace_level();
+        assert_eq!(state.model.workspace.content.active_view, parent);
+        assert!(!state.model.active_view_read_only());
+    }
+
+    #[test]
+    fn a_read_only_reference_leaves_an_editable_tab_of_the_block_editable() {
+        let (mut state, parent, child) = hierarchy_state();
+        state.open_workspace_view(child.clone());
+        assert!(!state.model.active_view_read_only());
+        back_to_parent_with_the_instance_selected(&mut state, parent);
+
+        descend_with(&mut state, HierarchyDescendEditMode::ReadOnlyReference)
+            .expect("a read-only look is navigation");
+
+        assert_eq!(state.model.workspace.content.active_view, child);
+        assert_eq!(state.model.workspace.content.hierarchy_stack.len(), 2);
+        assert!(
+            !state.model.active_view_read_only(),
+            "the reader's own editing tab is not turned read-only"
+        );
+        assert!(
+            state
+                .prompt_text()
+                .is_some_and(|text| text.contains("stays editable")),
+            "{:?}",
+            state.prompt_text()
+        );
+    }
+
+    #[test]
+    fn open_isolated_opens_the_block_editable_as_its_own_root() {
+        let (mut state, parent, child) = hierarchy_state();
+        descend_with(&mut state, HierarchyDescendEditMode::ReadOnlyReference)
+            .expect("a read-only look is navigation");
+        back_to_parent_with_the_instance_selected(&mut state, parent);
+
+        descend_with(&mut state, HierarchyDescendEditMode::OpenIsolated)
+            .expect("an isolated view opens");
+
+        assert_eq!(state.model.workspace.content.active_view, child);
+        assert_eq!(
+            state.model.workspace.content.occurrence_labels(),
+            ["afe_core"],
+            "the occurrence the document was opened at before is dropped"
+        );
+        assert!(
+            !state.model.active_view_read_only(),
+            "the earlier read-only look no longer holds"
+        );
+        assert!(
+            state
+                .prompt_text()
+                .is_some_and(|text| text.contains("its own root")),
+            "{:?}",
+            state.prompt_text()
+        );
+    }
+
+    #[test]
+    fn a_read_only_drawing_descends_with_options_as_it_does_directly() {
+        let (mut state, _, child) = hierarchy_state();
+        state
+            .model
+            .workspace
+            .content
+            .set_active_read_only_reference(true);
+        assert!(state.model.active_view_read_only());
+
+        descend_with(&mut state, HierarchyDescendEditMode::ReadOnlyReference)
+            .expect("descending is navigation, not an edit of the parent");
+
+        assert_eq!(state.model.workspace.content.active_view, child);
+        assert_eq!(state.model.workspace.content.hierarchy_stack.len(), 2);
     }
 
     #[test]

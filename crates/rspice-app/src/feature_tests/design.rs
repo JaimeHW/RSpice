@@ -502,7 +502,7 @@ fn a_descent_is_carried_out_in_the_frame_it_is_chosen() {
     assert!(!app.state.design.descend_hierarchy.open);
     assert_eq!(
         app.state.prompt_text(),
-        Some("Descended into the instance; the parent's unsaved changes are kept.")
+        Some("Entered hierarchy_test/afe_core/schematic.")
     );
 }
 
