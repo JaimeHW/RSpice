@@ -212,12 +212,23 @@ pub fn select_with_details(
     .0
 }
 
+/// The width a [`select`] needs to say each of `options` whole: the widest in
+/// the field face, with the room before it and the chevron's after.
+#[must_use]
+pub fn select_width(ui: &Ui, options: &[String]) -> f32 {
+    widest_option(ui, options, &theme::field_sans()) + VALUE_INSET + CHEVRON_ROOM
+}
+
 /// The width a [`compact_select_mono_with_response`] needs to say each of
 /// `options` whole: the widest in the face it prints them in, with the room
 /// before it and the chevron's after.
 #[must_use]
 pub fn compact_select_mono_width(ui: &Ui, options: &[String]) -> f32 {
-    let font = theme::chip_mono();
+    widest_option(ui, options, &theme::chip_mono()) + VALUE_INSET + CHEVRON_ROOM
+}
+
+/// The widest of `options` in `font`, rounded up to a whole point.
+fn widest_option(ui: &Ui, options: &[String], font: &egui::FontId) -> f32 {
     let widest = options
         .iter()
         .map(|option| {
@@ -227,7 +238,7 @@ pub fn compact_select_mono_width(ui: &Ui, options: &[String]) -> f32 {
                 .x
         })
         .fold(0.0, f32::max);
-    widest.ceil() + VALUE_INSET + CHEVRON_ROOM
+    widest.ceil()
 }
 
 /// [`select_with_details`] at the height of a compact button, printing its

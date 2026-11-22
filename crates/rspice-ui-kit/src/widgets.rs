@@ -34,6 +34,7 @@ mod measurement_table;
 mod menu_button;
 pub mod notice;
 mod ordered_chips;
+mod page_bar;
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub mod painted_runs;
 mod pane;
@@ -69,6 +70,7 @@ pub use form::{
 pub use measurement_table::measurement_table;
 pub use menu_button::menu_button;
 pub use ordered_chips::{OrderedChipsEdit, ordered_chips, required_ordered_chips};
+pub use page_bar::{PAGE_BAR_GAP, PageBar, PageBarFilter, page_bar_height, page_bar_kind};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_INSET, PANE_RAIL_W, PaneSide, pane_footer,
     pane_footer_inset, pane_header, pane_header_height, pane_header_inset, two_pane,
@@ -78,7 +80,7 @@ pub use segmented::{SegmentedWidth, segmented};
 pub use select::{
     EditableSelectOutput, SelectSwitch, compact_select_mono_width,
     compact_select_mono_with_details, compact_select_mono_with_response,
-    compact_select_with_response, editable_select_mono, select_mono_with_response,
+    compact_select_with_response, editable_select_mono, select_mono_with_response, select_width,
     select_with_details, select_with_disabled, select_with_response, select_with_switch,
 };
 pub use select::{SelectOutput, select};
