@@ -236,9 +236,12 @@ fn a_region_column_appears_only_where_a_row_has_one() {
             .expect("the family has a section")
     };
     assert!(family("MOSFET").region);
-    assert_eq!(family("MOSFET").slots(), 2);
     assert!(!family("BJT").region);
-    assert_eq!(family("BJT").slots(), 1);
+    // One grid for the sheet: the BJT section leaves the region column
+    // blank, so its first value stands under the MOSFET's first value.
+    assert!(plan.region_slot);
+    assert_eq!(plan.slots(family("MOSFET")), 2);
+    assert_eq!(plan.slots(family("BJT")), 2);
 }
 
 #[test]
@@ -809,6 +812,10 @@ fn only_a_whole_column_is_painted_and_the_last_one_can_always_be_reached() {
         visible,
         name_w: 200.0,
         advance: 7.0,
+        values: ValueGrid {
+            width: VALUE_W,
+            unit_slot: UNIT_SLOT_W,
+        },
     };
     let cell = |grid: &Grid, slot: usize| {
         grid.value_cell(grid.values_left(8, VALUE_W), 0.0, ROW_H, slot, VALUE_W)
