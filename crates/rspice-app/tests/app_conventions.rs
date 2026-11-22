@@ -1341,6 +1341,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/design/inspector.rs", "stimulus"),
             ("workbench/design/inspector.rs", "symbol"),
             ("workbench/design/inspector.rs", "tests"),
+            ("workbench/design/inspector.rs", "variant"),
             ("workbench/design/navigator.rs", "hierarchy_tree"),
             ("workbench/design/navigator.rs", "shelf"),
             ("workbench/design/navigator.rs", "stimulus"),
