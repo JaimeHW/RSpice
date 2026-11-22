@@ -280,3 +280,57 @@ fn every_bus_drawn_takes_the_name_the_strip_holds() {
         );
     }
 }
+
+/// Undo while a wire is being drawn takes back its last point, as
+/// Backspace does, from the Edit menu and the touch strip alike, and keeps
+/// the edit made before the route. It undid that edit underneath the live
+/// route instead. Redo waits for the route to end.
+#[test]
+fn undo_while_routing_takes_back_the_last_point_and_keeps_the_edit_before_it() {
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.sync_active_schematic_to_workspace();
+    app.state.model.schematic.init_undo_history();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .clear();
+    app.state.model.schematic.arm_tool(Tool::Wire);
+    app.state.model.schematic.start_wire(Point::new(0, 200));
+    app.state.model.schematic.extend_wire(Point::new(200, 200));
+    let earlier = app
+        .state
+        .model
+        .schematic
+        .finish_wire(|_| false)
+        .expect("the first wire is laid down");
+    assert!(app.state.model.schematic.can_undo(), "the wire is one edit");
+    app.state.model.schematic.start_wire(Point::new(0, 0));
+    app.state.model.schematic.extend_wire(Point::new(100, 0));
+    app.state.model.schematic.extend_wire(Point::new(100, 80));
+    assert!(app.command_key_enabled(ids::UNDO));
+    assert!(!app.command_key_enabled(ids::REDO));
+
+    app.execute_command_key(ids::UNDO);
+
+    let drawing = &app.state.model.schematic.session.editor.wire_drawing;
+    assert!(drawing.active, "the route is still being drawn");
+    assert_eq!(drawing.points, vec![Point::new(0, 0), Point::new(100, 0)]);
+    assert!(
+        app.state
+            .model
+            .schematic
+            .document()
+            .wires
+            .iter()
+            .any(|wire| wire.id == earlier),
+        "the edit before the route stands"
+    );
+    assert!(app.state.model.schematic.can_undo());
+}

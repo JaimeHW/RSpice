@@ -12,7 +12,9 @@
 //! Navigator's search from anywhere but a Verilog-A cell view.
 //!
 //! Undo and Redo step the design's histories everywhere the shell lets the
-//! key through: the shell steps the netlist page's own history first.
+//! key through: the shell steps the netlist page's own history first. While
+//! a wire or bus is being drawn, Undo takes back its last point, as
+//! Backspace does, and Redo waits for the route to end.
 //!
 //! Cancel lets go of the innermost thing the design workspace holds, from
 //! any workspace: the shell asks the design feature first, Results after it.
@@ -530,15 +532,23 @@ fn steps_a_design_history(reads: &Reads<'_, DesignFeature>) -> bool {
     reads.wb.workspace != Workspace::Results
 }
 
+/// Whether a wire or bus is being drawn on the schematic in front.
+fn routing(reads: &Reads<'_, DesignFeature>) -> bool {
+    let editor = &reads.model.schematic.session.editor;
+    in_schematic(reads) && (editor.wire_drawing.active || editor.bus_drawing.active)
+}
+
 /// Whether Undo would take a step: on a Simulate page or a Verify view, where
-/// the setup's own history holds one; elsewhere never while the project is
-/// read-only or a schematic edit is under way, and otherwise where the
-/// project's history, the symbol editor's or an editable schematic's holds
-/// one.
+/// the setup's own history holds one; while a route is being drawn, its last
+/// point; elsewhere never while the project is read-only or a schematic edit
+/// is under way, and otherwise where the project's history, the symbol
+/// editor's or an editable schematic's holds one.
 fn can_undo(reads: &Reads<'_, DesignFeature>) -> bool {
     let model = reads.model;
     if steps_the_setup(reads.wb.workspace) {
         model.can_undo_simulation_setup()
+    } else if routing(reads) {
+        true
     } else if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
         false
     } else if model.can_undo_project_design() {
@@ -554,12 +564,16 @@ fn can_undo(reads: &Reads<'_, DesignFeature>) -> bool {
     }
 }
 
-/// Whether Redo would take a step, as [`can_undo`] answers for Undo.
+/// Whether Redo would take a step, as [`can_undo`] answers for Undo. A route
+/// being drawn holds the document still until it ends.
 fn can_redo(reads: &Reads<'_, DesignFeature>) -> bool {
     let model = reads.model;
     if steps_the_setup(reads.wb.workspace) {
         model.can_redo_simulation_setup()
-    } else if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
+    } else if routing(reads)
+        || model.safe_mode.project_read_only()
+        || reads.state.schematic_edit_in_progress(model)
+    {
         false
     } else if model.can_redo_project_design() {
         true
@@ -577,6 +591,12 @@ fn can_redo(reads: &Reads<'_, DesignFeature>) -> bool {
 }
 
 fn undo(cx: &mut Cx<'_, DesignFeature>) {
+    if !steps_the_setup(cx.wb.workspace)
+        && schematic_editor(cx.wb.workspace, cx.model)
+        && cx.model.schematic.retract_route()
+    {
+        return;
+    }
     take_history_step(cx, history_parts, None, HistoryDirection::Undo);
 }
 
