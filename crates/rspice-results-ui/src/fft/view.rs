@@ -569,22 +569,48 @@ pub fn right_panel(
         ("DC", dc, false),
     ];
     crate::presentation::stat_table(ui, &rows);
-    // A figure withheld says why in a few words, and in full on hover.
-    let withheld = ui
+    // A figure withheld says why in a few words, and in full on hover; THD
+    // names on hover the harmonics under the floor it leaves out.
+    let thd = ui
         .scope(|ui| {
             crate::presentation::stat_table(
                 ui,
                 &[
                     ("THD", short(analysis.thd_percent, "%"), true),
                     ("THD", short(analysis.thd_db, "dB"), false),
+                ],
+            );
+        })
+        .response;
+    let noise = ui
+        .scope(|ui| {
+            crate::presentation::stat_table(
+                ui,
+                &[
                     ("SNR", short(analysis.snr_db, "dB"), false),
                     ("SINAD", short(analysis.sinad_db, "dB"), false),
                 ],
             );
         })
         .response;
-    if let Some((_, reason)) = &absent {
-        withheld.on_hover_text(reason.as_str());
+    let left_out = analysis
+        .harmonics
+        .iter()
+        .filter(|harmonic| !harmonic.above_floor)
+        .map(|harmonic| format!("HD{}", harmonic.order))
+        .collect::<Vec<_>>();
+    match &absent {
+        Some((_, reason)) => {
+            thd.on_hover_text(reason.as_str());
+            noise.on_hover_text(reason.as_str());
+        }
+        None if !left_out.is_empty() => {
+            thd.on_hover_text(format!(
+                "{} below the floor, not counted",
+                left_out.join(", ")
+            ));
+        }
+        None => {}
     }
     crate::presentation::stat_table(
         ui,
@@ -723,11 +749,9 @@ fn harmonic_table(
             },
         ],
     );
-    let height = (ui.available_height() * 0.5).max(96.0);
     with_table_state(ui, "fft.harmonics", |ui, state| {
         DataTable::new("rspice.results.fft.harmonics", &columns, harmonics.len())
             .state(state)
-            .max_height(height)
             .show(ui, |index| {
                 let harmonic = &harmonics[index];
                 #[allow(clippy::cast_precision_loss)]
@@ -815,11 +839,9 @@ fn peak_table(
             },
         ],
     );
-    let height = ui.available_height().max(96.0);
     with_table_state(ui, "fft.peaks", |ui, state| {
         DataTable::new("rspice.results.fft.peaks", &columns, peaks.len())
             .state(state)
-            .max_height(height)
             .show(ui, |index| {
                 let (at, level_db) = peaks[index];
                 let cell = |cells: &[Option<String>], key: f64| {

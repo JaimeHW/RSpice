@@ -100,10 +100,8 @@ pub(super) fn show(
 ) {
     distortion(ui, model, quantity_policy, digits);
     intermodulation(ui, model, settings, quantity_policy, digits);
-    for (index, trace) in model.traces.iter().enumerate() {
-        #[allow(clippy::cast_precision_loss)]
-        let share = (model.traces.len() - index) as f32;
-        lines(ui, trace, settings, quantity_policy, digits, share);
+    for trace in &model.traces {
+        lines(ui, trace, settings, quantity_policy, digits);
     }
 }
 
@@ -114,15 +112,13 @@ pub(super) fn show(
 /// bar's scale, a decibel to its hundredth and an amplitude to the reader's
 /// digits of the strongest line, and its phase to the hundredth of a
 /// degree. Copy takes every column, the frequency and the level under the
-/// carrier too. `share` is how many tables still stand in the height left,
-/// this one among them.
+/// carrier too. The pane scrolls, so the table shows every line.
 fn lines(
     ui: &mut Ui,
     trace: &HarmonicTrace,
     settings: &CoefficientSettings,
     quantity_policy: &QuantityPresentationPolicy,
     digits: usize,
-    share: f32,
 ) {
     let rows = rows(trace, settings);
     if section_header_action(
@@ -198,12 +194,10 @@ fn lines(
             },
         ],
     );
-    let height = (ui.available_height() / share).max(120.0);
     let id = format!("rspice.results.harmonic-balance.lines.{}", trace.name);
     with_table_state(ui, &id, |ui, state| {
         DataTable::new(&id, &columns, rows.len())
             .state(state)
-            .max_height(height)
             .show(ui, |index| {
                 let row = &rows[index];
                 let printed = |cells: &[Option<String>]| cells[index].clone().unwrap_or_default();

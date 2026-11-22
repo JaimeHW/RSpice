@@ -69,9 +69,22 @@ use state::{Line, Step, TYPE_AHEAD_PAUSE, TreeStep, arrange, step, tree_step, ty
 pub const TABLE_HEAD_H: f32 = 24.0;
 /// Height of one table row at the compact density under a fine pointer.
 pub const TABLE_ROW_H: f32 = 24.0;
-/// The fewest whole rows a table in a panel body shows when it scrolls: the
-/// least that reads as a list to scroll rather than a row cut short.
+/// The fewest whole rows a table in a panel body that does not scroll shows
+/// when it must scroll itself: the least that reads as a list to scroll
+/// rather than a row cut short.
 const LEAST_SCROLLED_ROWS: f32 = 3.0;
+
+/// How a table in a panel body is as tall as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PanelFit {
+    /// Not in a panel body: as tall as the page lets it be.
+    Free,
+    /// In a panel body that does not scroll: whole rows in the room left.
+    WholeRows,
+    /// In a pane that scrolls: every row, for the pane scrolls and nothing
+    /// scrolls inside it.
+    EveryRow,
+}
 /// Where the first column's words start and the last column's end: the panel
 /// inset, so a table's text lines up with the toolbar title over it.
 pub const TABLE_EDGE_INSET: f32 = crate::panels::PANEL_INSET;
@@ -555,10 +568,8 @@ pub struct DataTable<'a> {
     selected: Option<usize>,
     clickable: bool,
     max_height: f32,
-    /// Whether a body too short for its rows shows whole rows only, its
-    /// last one ending on the table's edge: a table in a panel body, where
-    /// the next section's rule meets that edge.
-    whole_rows: bool,
+    /// How a table in a panel body is as tall as it is.
+    panel: PanelFit,
     editor: Option<CellEditor<'a>>,
     state: Option<&'a mut TableState>,
     keys: Option<&'a [RowKey]>,
@@ -833,7 +844,7 @@ impl<'a> DataTable<'a> {
             selected: None,
             clickable: false,
             max_height: f32::INFINITY,
-            whole_rows: false,
+            panel: PanelFit::Free,
             editor: None,
             state: None,
             keys: None,
@@ -996,7 +1007,15 @@ impl<'a> DataTable<'a> {
                     .max_rect(bled.with_min_y(top))
                     .layout(*ui.layout()),
             );
-            self.whole_rows = true;
+            let scrolls = ui
+                .stack()
+                .iter()
+                .any(|node| node.kind() == Some(egui::UiKind::ScrollArea));
+            self.panel = if scrolls {
+                PanelFit::EveryRow
+            } else {
+                PanelFit::WholeRows
+            };
             let response = self.show(&mut edge, row_at);
             let height = edge.min_rect().height();
             ui.advance_cursor_after_rect(Rect::from_min_size(
@@ -1176,21 +1195,29 @@ impl<'a> DataTable<'a> {
         let bands_h = band_h * self.bands.len() as f32;
         let mut body_max = (self.max_height - bands_h - head_h).max(row_h);
         let lines_h = row_h * lines.len() as f32;
-        // A table in a panel body is as tall as its rows when they fit in
-        // what the page gave it and the panel leaves it; when they do not,
-        // it shows whole rows, at least the fewest a reader scrolls, so its
+        // A table in a pane that scrolls shows every row. One in a panel
+        // body that does not is as tall as its rows when they fit in what
+        // the page gave it and the panel leaves it; when they do not, it
+        // shows whole rows, at least the fewest a reader scrolls, so its
         // last row ends on its edge, where the next section's rule meets it.
-        let whole_rows = self.whole_rows.then(|| {
-            let room = (ui.available_height() - bands_h - head_h)
-                .max(LEAST_SCROLLED_ROWS * row_h)
-                .min(body_max);
-            if lines_h > room + 0.5 {
-                body_max = (room / row_h).floor().max(1.0) * row_h;
-                body_max
-            } else {
-                lines_h
+        let panel_body_h = match self.panel {
+            PanelFit::Free => None,
+            PanelFit::EveryRow => {
+                body_max = lines_h.max(row_h);
+                Some(lines_h)
             }
-        });
+            PanelFit::WholeRows => {
+                let room = (ui.available_height() - bands_h - head_h)
+                    .max(LEAST_SCROLLED_ROWS * row_h)
+                    .min(body_max);
+                if lines_h > room + 0.5 {
+                    body_max = (room / row_h).floor().max(1.0) * row_h;
+                    Some(body_max)
+                } else {
+                    Some(lines_h)
+                }
+            }
+        };
         // A floating bar rides the last column's edge inset, which holds no
         // words, so the columns keep their width whether it shows or not.
         let scroll_style = ui.spacing().scroll;
@@ -1396,9 +1423,10 @@ impl<'a> DataTable<'a> {
             .id_salt((self.id, "rows"))
             .max_height(body_max)
             .auto_shrink([false, true]);
-        if let Some(shown) = whole_rows {
+        if let Some(shown) = panel_body_h {
             scroll = scroll.min_scrolled_height(shown);
         }
+        let every_row = self.panel == PanelFit::EveryRow;
         if !scrolls_x {
             scroll = scroll.horizontal_scroll_offset(0.0);
         } else if let Some(offset) = scroll_x {
@@ -1435,6 +1463,17 @@ impl<'a> DataTable<'a> {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
             ui.set_min_width(geometry.content_width());
             ui.set_height(lines_h);
+            // A table that shows every row in a pane that scrolls lays out
+            // only those the pane shows: it may hold thousands.
+            let viewport = if every_row {
+                let top = ui.max_rect().top();
+                let clip = ui.clip_rect();
+                let shown_top = (clip.top() - top).clamp(viewport.min.y, viewport.max.y);
+                let shown_bottom = (clip.bottom() - top).clamp(shown_top, viewport.max.y);
+                Rect::from_x_y_ranges(viewport.x_range(), shown_top..=shown_bottom)
+            } else {
+                viewport
+            };
             let total = lines.len();
             let mut first = (viewport.min.y / row_h).floor() as usize;
             let mut last = (viewport.max.y / row_h).ceil() as usize + 1;
