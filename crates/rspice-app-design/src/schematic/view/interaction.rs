@@ -364,6 +364,7 @@ pub fn handle_tool_interactions(
                     pos,
                 );
             }
+            SelectDoubleClickAction::ShowNet(target) => show_conductor_net(state, target),
             SelectDoubleClickAction::EditText(id, text) => {
                 let selection = &mut state.model.schematic.session.editor.selection;
                 selection.select_only_component(id);
@@ -427,6 +428,8 @@ enum SelectDoubleClickAction {
     OpenVerilogA(u64),
     ActivateRequirement(u64),
     OpenProperties,
+    /// Show the net of a wire or junction in the inspector.
+    ShowNet(PointerTarget),
     /// Edit a part's name or value where it stands.
     EditText(u64, InstanceText),
     EditSheetTitle,
@@ -449,6 +452,9 @@ fn select_double_click_action(
             SelectDoubleClickAction::OpenVerilogA(id)
         }
         Some(PointerTarget::DesignNote(id)) => SelectDoubleClickAction::ActivateRequirement(id),
+        Some(target @ (PointerTarget::Wire(_) | PointerTarget::Junction(_))) => {
+            SelectDoubleClickAction::ShowNet(target)
+        }
         Some(_) => SelectDoubleClickAction::OpenProperties,
         // Ascend belongs to the document under the pointer, so the depth read
         // is the open document's own occurrence rather than the session-global
@@ -2399,6 +2405,43 @@ fn handle_component_probe(
         let (spelling, outcome) = commit_signal(state, &probe, probe_request(read_only));
         finish_probe(state, grid_pos, &spelling, outcome, read_only);
     }
+}
+
+/// A double-click on a wire or a junction shows its net: every conductor of
+/// the net is selected and lit, as a Navigator net row selects it, and the
+/// inspector opens on the net where it was closed. The net is the one the
+/// deck gives the conductor, so two wire groups a label joins show as one.
+fn show_conductor_net(state: &mut CanvasParts<'_>, target: PointerTarget) {
+    let document = state.model.schematic.document();
+    let wire_ids: Vec<u64> = match target {
+        PointerTarget::Wire(id) => vec![id],
+        PointerTarget::Junction(at) => document
+            .wires
+            .iter()
+            .filter(|wire| wire.contains_point(at))
+            .map(|wire| wire.id)
+            .collect(),
+        _ => return,
+    };
+    let nets = live_design_nets(state.model);
+    let Some(net) = nets
+        .iter()
+        .find(|net| net.wire_ids.iter().any(|id| wire_ids.contains(id)))
+    else {
+        state.prompt("The design resolves no net for that wire.");
+        return;
+    };
+    let editor = &mut state.model.schematic.session.editor;
+    editor.selection.clear();
+    for wire in &net.wire_ids {
+        editor.selection.select_wire(*wire);
+    }
+    editor
+        .net_highlight
+        .highlight_named_wires(&net.name, net.wire_ids.iter().copied().collect());
+    state.workbench.inspector_visible = true;
+    state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
+    state.prompt(format!("Net {} is in the inspector.", net.name));
 }
 
 fn open_object_properties(

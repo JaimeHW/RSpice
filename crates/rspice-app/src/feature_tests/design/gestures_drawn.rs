@@ -728,6 +728,38 @@ fn a_selection_box_held_at_the_canvas_edge_pans_the_view() {
     );
 }
 
+/// A double-click on a wire shows its whole net in the inspector: every wire
+/// of the net is selected and lit, and a closed inspector opens.
+#[test]
+fn a_double_click_on_a_wire_shows_its_net_in_the_inspector() {
+    let mut fixture = Fixture::new(true);
+    fixture.app.state.workbench.inspector_visible = false;
+    let on_wire = fixture.origin + egui::vec2(150.0, 100.0);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: on_wire,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    fixture.frame(vec![egui::Event::PointerMoved(on_wire), button(true)], true);
+    fixture.frame(vec![button(false)], true);
+    fixture.frame(vec![button(true)], true);
+    fixture.frame(vec![button(false)], true);
+
+    let editor = &fixture.app.state.model.schematic.session.editor;
+    let selected: std::collections::BTreeSet<u64> =
+        editor.selection.wires.iter().copied().collect();
+    assert_eq!(selected, [1, 2].into(), "the whole net is selected");
+    assert!(
+        editor.net_highlight.selected_net_name.is_some(),
+        "the net is lit"
+    );
+    assert!(
+        fixture.app.state.workbench.inspector_visible,
+        "the inspector opened"
+    );
+}
+
 /// Esc lets a floating paste go and the drawing never changed.
 #[test]
 fn escape_lets_a_floating_paste_go() {
