@@ -1129,3 +1129,78 @@ fn a_flat_cell_with_several_sheets_lists_its_sheets() {
     assert!(rows.iter().any(|row| row == "Input stage"), "{rows:?}");
     assert!(rows.iter().any(|row| row == "Output stage"), "{rows:?}");
 }
+
+// ------------------------------------------------- a master cell's housekeeping
+
+/// One right-click at `at`.
+#[cfg(not(target_arch = "wasm32"))]
+fn secondary_click_events(at: egui::Pos2) -> Vec<egui::Event> {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    vec![egui::Event::PointerMoved(at), button(true), button(false)]
+}
+
+/// Rename, Copy, Move and Delete cell are offered where the reader is
+/// drawing: each row of a Masters cell's menu opens the project's own dialog
+/// for that cell, over the Design workspace, which stays where it was. A
+/// master no library holds has no cell to act on, so its row offers none of
+/// them.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_master_cells_menu_opens_that_cells_dialog_over_the_design() {
+    use egui::accesskit::Role;
+
+    for (choice, title) in [
+        ("Rename cell\u{2026}", "Rename cell"),
+        ("Copy cell\u{2026}", "Copy cell"),
+        ("Move cell\u{2026}", "Move cell"),
+        ("Delete cell\u{2026}", "Delete cell"),
+    ] {
+        let mut app = design_with_a_broken_master();
+        app.state.open_project_session();
+        app.state.workbench.activate(Workspace::Design);
+        // Somewhere for Move to take the cell.
+        add_master(
+            &mut app.state.model,
+            "spare",
+            "other",
+            SchematicState::default(),
+        );
+        let mut panel = NavigatorPanel::open(app);
+        panel.click("work");
+
+        let missing = panel.band("missing").0.center();
+        panel.pass(secondary_click_events(missing));
+        panel.pass(Vec::new());
+        assert!(
+            !panel.painted().lines().any(|line| line == choice),
+            "a master that did not resolve offers no {choice}: {}",
+            panel.painted()
+        );
+        panel.press(egui::Key::Escape);
+
+        let child = panel.band("child").0.center();
+        panel.pass(secondary_click_events(child));
+        panel.pass(Vec::new());
+        panel.click(choice);
+
+        let mut app = panel.app;
+        app.after_contribution();
+        let nodes = super::frame_nodes(&mut app);
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.role() == Role::Dialog && node.label() == Some(title)),
+            "{choice} draws {title:?} over the Design workspace"
+        );
+        assert!(
+            nodes.iter().any(|node| node.value() == Some("work/child")),
+            "{title:?} names the cell whose row was right-clicked"
+        );
+        assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    }
+}

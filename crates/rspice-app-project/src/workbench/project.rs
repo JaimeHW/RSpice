@@ -229,6 +229,29 @@ const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
 ];
 
 impl ProjectFeature {
+    /// Open the reviewed transaction that renames, copies, moves or deletes
+    /// cell `cell` of `library`, wherever the reader asked for it: the same
+    /// dialogs the Library page opens, or the status bar says why not.
+    pub fn cell_housekeeping(
+        cx: &mut Cx<'_, Self>,
+        library: &str,
+        cell: &str,
+        action: crate::workbench::framework::requests::CellHousekeepingAction,
+    ) {
+        use crate::workbench::framework::requests::CellHousekeepingAction as Action;
+        let opened = match action {
+            Action::Rename => cx.state.open_rename_cell_dialog(cx.model, library, cell),
+            Action::Copy => cx.state.open_copy_cell_dialog(cx.model, library, cell),
+            Action::Move => cx.state.open_move_cell_dialog(cx.model, library, cell),
+            Action::Delete => cx
+                .state
+                .open_library_cell_deletion_review(cx.model, library, cell),
+        };
+        if let Err(refusal) = opened {
+            cx.wb.prompt(refusal);
+        }
+    }
+
     /// Keep browser-restored manager routes and the transient egui dialog
     /// owner synchronized. Commands open both in one transaction; this hook
     /// covers deep links, Back/Forward, and restored application sessions.

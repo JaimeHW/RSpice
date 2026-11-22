@@ -630,6 +630,30 @@ impl Request for ConfirmPackAttach {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// What is done to one cell from where the reader is drawing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellHousekeepingAction {
+    Rename,
+    Copy,
+    Move,
+    Delete,
+}
+
+/// Rename, copy, move or delete cell `cell` of `library`, through the
+/// project's own reviewed transactions, which remap or count every
+/// placement. Raised by the Design navigator's Masters rows, and taken
+/// straight after the call that raised it.
+#[derive(Clone, Debug)]
+pub struct CellHousekeeping {
+    pub library: String,
+    pub cell: String,
+    pub action: CellHousekeepingAction,
+}
+
+impl Request for CellHousekeeping {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Show the catalog model `model` of `library` on the Models workspace's
 /// catalog. Raised by the schematic's component inspector, and taken
 /// straight after the call that raised it.

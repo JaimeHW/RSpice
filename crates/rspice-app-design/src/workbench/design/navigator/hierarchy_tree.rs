@@ -811,6 +811,7 @@ pub(super) fn masters_section(
             if response.row.clicked() || response.disclosure.is_some_and(|caret| caret.clicked()) {
                 tree.toggle(cell_node);
             }
+            cell_context_menu(&response.row, model, wb, library, cell);
             if !unfolded {
                 continue;
             }
@@ -881,6 +882,56 @@ pub(super) fn masters_section(
             .navigation_parts(model, wb, runs)
             .open_workspace_view(reference);
     }
+}
+
+/// A Masters cell row's housekeeping, where the reader is drawing: rename,
+/// copy, move or delete the cell through the project's reviewed
+/// transactions, which remap or count every placement. A library the
+/// project may not write offers only Copy, and a master no library holds
+/// (one that did not resolve, or a built-in device) has no cell to act on,
+/// so its row offers nothing.
+fn cell_context_menu(
+    row: &Response,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+    library: &str,
+    cell: &str,
+) {
+    use crate::workbench::framework::requests::{CellHousekeeping, CellHousekeepingAction};
+    let Some(held) = model
+        .library_manager
+        .get_library(library)
+        .filter(|held| held.get_cell(cell).is_some())
+    else {
+        return;
+    };
+    let writable = !held.read_only;
+    let (popup, _) = crate::workbench::docks::navigator::row_context_menu(row);
+    popup.show(|ui| {
+        for (label, action, enabled) in [
+            (
+                "Rename cell\u{2026}",
+                CellHousekeepingAction::Rename,
+                writable,
+            ),
+            ("Copy cell\u{2026}", CellHousekeepingAction::Copy, true),
+            ("Move cell\u{2026}", CellHousekeepingAction::Move, writable),
+            (
+                "Delete cell\u{2026}",
+                CellHousekeepingAction::Delete,
+                writable,
+            ),
+        ] {
+            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                wb.outbox.push(CellHousekeeping {
+                    library: library.to_owned(),
+                    cell: cell.to_owned(),
+                    action,
+                });
+                ui.close();
+            }
+        }
+    });
 }
 
 /// What the Occurrences band states beside its title.

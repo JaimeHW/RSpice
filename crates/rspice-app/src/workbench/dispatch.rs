@@ -53,6 +53,7 @@ use rspice_app_design::workbench::design::inspector::CommitSheetSection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::hardcopy;
 use rspice_app_models::workbench::models::ModelsFeature;
+use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_results::workbench::results::ResultsFeature;
 use rspice_app_simulate::workbench::simulate::SimulateFeature;
@@ -65,12 +66,12 @@ use rspice_app_workbench::workbench::framework::feature::{Execute, held_back};
 use rspice_app_workbench::workbench::framework::host::{Host, InspectorScope};
 use rspice_app_workbench::workbench::framework::requests::{
     self, ApplyPathVariables, ApplyWaveformDefaults, ArmPartPlacement, AskNewSheetFormat,
-    BindComponentModel, ClearSelectedModel, CloseForLiveMirror, ConfirmPackAttach, ExportDataset,
-    FollowSchematicGrid, MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor,
-    OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
-    PromptAfterCommands, RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter,
-    ShowOnSchematic, ShowProjectDeck, ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms,
-    VoidVerilogAEvidence,
+    BindComponentModel, CellHousekeeping, ClearSelectedModel, CloseForLiveMirror,
+    ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
+    OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
+    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
+    SelectAnalysisInstance, SetFamilyFilter, ShowOnSchematic, ShowProjectDeck, ShowProjectModels,
+    ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
 };
 
 /// Whether the command `key` names runs at once while the focused source
@@ -332,7 +333,8 @@ impl RSpiceApp {
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
     /// results failure banner marks there, the close that makes room for a
-    /// live session's mirror, the selected model and the Verilog-A compile
+    /// live session's mirror, the cell a navigator Masters row asked to
+    /// rename, copy, move or delete, the selected model and the Verilog-A compile
     /// evidence a history step left standing on nothing, what a code command
     /// still needs of the whole application, the descent Descend into
     /// hierarchy checked, and last what the project feature hands over and
@@ -620,6 +622,18 @@ impl RSpiceApp {
                 ) {
                     app.execute_command_key(ids::MODELS_CATALOG);
                 }
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app,
+             CellHousekeeping {
+                 library,
+                 cell,
+                 action,
+             }| {
+                ProjectFeature::cell_housekeeping(&mut features::cx(app), &library, &cell, action);
             },
         );
         requests::drain(
