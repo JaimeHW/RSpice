@@ -21,6 +21,22 @@ fn corpus(relative: &str) -> PathBuf {
         .join(relative)
 }
 
+/// The inspector row a placed part's value is typed into: for a source, the
+/// row of the sheet property that holds it, as the inspector names it; the
+/// Value row for every other part.
+fn value_row(row: &str) -> &'static str {
+    match row {
+        "Voltage Source" => "DC voltage, V",
+        "Current Source" => "DC current, A",
+        "Pulse Voltage Source" => "Initial value (V1), V",
+        "PWL Voltage Source" => "PWL data",
+        "Resistor" => "Resistance, Ω",
+        "Capacitor" => "Capacitance, F",
+        "Inductor" => "Inductance, H",
+        _ => "Value",
+    }
+}
+
 fn corpus_text(relative: &str) -> String {
     std::fs::read_to_string(corpus(relative)).unwrap_or_else(|error| panic!("{relative}: {error}"))
 }
@@ -229,7 +245,7 @@ mod c04 {
                 "voltage source",
                 "Voltage Source",
                 (x, 100),
-                &[("Instance", name), ("Value", value)],
+                &[("Instance", name), (value_row("Voltage Source"), value)],
             );
             e.connect(&pins, &[net, "0"]);
         };
@@ -243,7 +259,7 @@ mod c04 {
                 (x, 100),
                 &[
                     ("Instance", name),
-                    ("Value", levels.0),
+                    (value_row("Pulse Voltage Source"), levels.0),
                     ("Pulsed value (V2), V", levels.1),
                     ("Delay time (TD), s", td),
                     ("Rise time (TR), s", "1n"),
@@ -262,7 +278,7 @@ mod c04 {
             (850, 100),
             &[
                 ("Instance", "vin"),
-                ("Value", &format!("PWL({})", staircase())),
+                (value_row("PWL Voltage Source"), &staircase()),
             ],
         );
         e.connect(&input, &["vin", "0"]);
@@ -289,14 +305,14 @@ mod c04 {
             "resistor",
             "Resistor",
             (1150, 100),
-            &[("Instance", "rsd"), ("Value", "1k")],
+            &[("Instance", "rsd"), (value_row("Resistor"), "1k")],
         );
         e.connect(&rsd, &["samp", "samp_d"]);
         let csd = e.place(
             "capacitor",
             "Capacitor",
             (1300, 100),
-            &[("Instance", "csd"), ("Value", "1p")],
+            &[("Instance", "csd"), (value_row("Capacitor"), "1p")],
         );
         e.connect(&csd, &["samp_d", "0"]);
 
@@ -322,7 +338,10 @@ mod c04 {
                 "capacitor",
                 "Capacitor",
                 (x, 300),
-                &[("Instance", &format!("ctop{k}")), ("Value", value)],
+                &[
+                    ("Instance", &format!("ctop{k}")),
+                    (value_row("Capacitor"), value),
+                ],
             );
             e.connect(&cap, &["top", &plate]);
             switch(
@@ -358,7 +377,7 @@ mod c04 {
             "capacitor",
             "Capacitor",
             (x, 300),
-            &[("Instance", "ctopd"), ("Value", "20f")],
+            &[("Instance", "ctopd"), (value_row("Capacitor"), "20f")],
         );
         e.connect(&dummy, &["top", "btd"]);
         switch(e, (x, 460), "svd", &["btd", "vin", "samp_d", "0"]);
@@ -539,12 +558,12 @@ mod c06 {
                 query,
                 row,
                 at,
-                &[("Instance", name), ("Value", value)],
+                &[("Instance", name), (value_row(row), value)],
                 nets,
             );
         };
         let pwl = |e: &mut Engineer, at, name: &str, table: &str, net: &str| {
-            let value = format!("PWL({table})");
+            let value = table.to_owned();
             two(
                 e,
                 "pwl",
@@ -796,7 +815,7 @@ mod c12 {
                 query,
                 row,
                 at,
-                &[("Instance", name), ("Value", value)],
+                &[("Instance", name), (value_row(row), value)],
                 nets,
             );
         };
@@ -804,7 +823,7 @@ mod c12 {
             let model = if row == "NMOS" { "NBSIM4" } else { "PBSIM4" };
             let mut fields = vec![
                 ("Instance", name),
-                ("Value", model),
+                ("Model", model),
                 ("Width, m", size[0]),
                 ("Length, m", size[1]),
             ];
@@ -1020,7 +1039,12 @@ mod c12 {
 
         // The supply and C5's static load.
         let part = |e: &mut Engineer, query, row, at, name: &str, value: &str, nets: &[&str]| {
-            let pins = e.place(query, row, at, &[("Instance", name), ("Value", value)]);
+            let pins = e.place(
+                query,
+                row,
+                at,
+                &[("Instance", name), (value_row(row), value)],
+            );
             e.connect(&pins, nets);
         };
         part(
@@ -1151,14 +1175,14 @@ mod c02 {
                 query,
                 row,
                 at,
-                &[("Instance", name), ("Value", value)],
+                &[("Instance", name), (value_row(row), value)],
                 nets,
             );
         };
         let capacitor = |e: &mut Engineer, at, name: &str, value: &str, nets: &[&str]| {
             let fields = [
                 ("Instance", name),
-                ("Value", value),
+                (value_row("Capacitor"), value),
                 ("Initial voltage, V", "2.5"),
             ];
             part(e, "capacitor", "Capacitor", at, &fields, nets);
@@ -1167,7 +1191,7 @@ mod c02 {
             let model = if row == "NMOS" { "N1" } else { "P1" };
             let fields = [
                 ("Instance", name),
-                ("Value", model),
+                ("Model", model),
                 ("Width, m", size[0]),
                 ("Length, m", "0.35u"),
                 ("Source area, m\u{b2}", size[1]),
@@ -1289,7 +1313,7 @@ mod c02 {
             (100, 150),
             &[
                 ("Instance", "vref"),
-                ("Value", "0"),
+                (value_row("Pulse Voltage Source"), "0"),
                 ("Pulsed value (V2), V", "{vcc}"),
                 ("Delay time (TD), s", "10n"),
                 ("Rise time (TR), s", "1n"),

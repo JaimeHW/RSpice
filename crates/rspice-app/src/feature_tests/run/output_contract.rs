@@ -192,7 +192,7 @@ fn edge(e: &mut Engineer) {
         (100, 100),
         &[
             ("Instance", "vin"),
-            ("Value", "0"),
+            ("Initial value (V1), V", "0"),
             ("Pulsed value (V2), V", "1"),
             ("Delay time (TD), s", "1u"),
             ("Rise time (TR), s", "1n"),
@@ -206,14 +206,14 @@ fn edge(e: &mut Engineer) {
         "resistor",
         "Resistor",
         (250, 100),
-        &[("Instance", "r1"), ("Value", "1k")],
+        &[("Instance", "r1"), ("Resistance, Ω", "1k")],
     );
     e.connect(&pins, &["in", "out"]);
     let pins = e.place(
         "capacitor",
         "Capacitor",
         (400, 100),
-        &[("Instance", "c1"), ("Value", "10p")],
+        &[("Instance", "c1"), ("Capacitance, F", "10p")],
     );
     e.connect(&pins, &["out", "0"]);
     e.transient("1u", "10u");
