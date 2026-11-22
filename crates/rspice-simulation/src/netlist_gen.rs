@@ -1385,6 +1385,21 @@ mod tests {
         }));
     }
 
+    /// A no-connect mark is for the drawing and the check only: the deck
+    /// writes the marked pin as the node of its own it always was.
+    #[test]
+    fn a_no_connect_mark_leaves_the_deck_unchanged() {
+        let mut state = Schematic::default();
+        state.document_mut_for_test().components.extend([
+            Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+                .with_name_value("R1", "1k"),
+            Component::new(2, ComponentType::Ground, Point::new(20, 0)),
+        ]);
+        let plain = generate_netlist(&state).netlist;
+        assert!(state.set_pin_no_connect(1, "+", true));
+        assert_eq!(generate_netlist(&state).netlist, plain);
+    }
+
     #[test]
     fn identical_scalar_bus_members_merge_disjoint_wire_nets() {
         let mut state = Schematic::default();

@@ -124,10 +124,13 @@ pub struct PinInfo {
     /// Whether anything else in the drawing meets this terminal. Decided by
     /// the extraction, which is the only thing that knows the geometry.
     pub attached: bool,
-    /// The terminal may legally be left open: the netlister writes `null` for
-    /// it when nothing meets it, as it does for the set and reset inputs of
-    /// the built-in XSPICE flip-flops and latches.
+    /// The terminal may be left open: the netlister writes `null` for it
+    /// when nothing meets it, as it does for the set and reset inputs of the
+    /// built-in XSPICE flip-flops and latches, or the author marked it
+    /// no-connect and nothing meets it.
     pub optional: bool,
+    /// The author marked this terminal no-connect: it is meant to stay open.
+    pub no_connect: bool,
     /// The node this terminal stands on is a global the deck declares, so it
     /// continues into every other cellview that names it.
     pub on_global: bool,

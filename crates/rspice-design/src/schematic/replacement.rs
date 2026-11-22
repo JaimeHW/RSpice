@@ -350,6 +350,8 @@ pub struct SchematicReplacementImpact {
     pub relocated_wire_points: usize,
     pub preserved_parameters: usize,
     pub dropped_parameters: usize,
+    /// No-connect marks that went with pins the new master does not have.
+    pub dropped_no_connects: usize,
     pub topology_changed: bool,
 }
 

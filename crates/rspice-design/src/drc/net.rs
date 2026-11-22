@@ -25,8 +25,9 @@ pub(super) struct NetInfo {
     /// terminal is alone on a node of its own, and the open-pin rule already
     /// names it.
     pub(super) unattached_count: usize,
-    /// How many of the unattached terminals may legally be left open. The
-    /// netlister writes `null` for such a terminal, so its node never exists.
+    /// How many of the unattached terminals may be left open: the netlister
+    /// writes `null` for such a terminal, so its node never exists, or the
+    /// author marked it no-connect.
     pub(super) optional_open_count: usize,
     /// The node continues outside this cellview: an interface port stands on
     /// it, or it is a global the deck declares. That is a connection no

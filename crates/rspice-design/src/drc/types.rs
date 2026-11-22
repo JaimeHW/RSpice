@@ -90,6 +90,9 @@ pub enum DrcViolationType {
     /// voltage source's `+` terminal — which no conductor reaches: it drives
     /// nothing.
     UnloadedOutput,
+    /// A pin the author marked no-connect, meant to stay open, that a
+    /// conductor, a net label, a bus or another pin reaches.
+    ConnectedNoConnect,
     /// Net label with no matching connections
     OrphanNetLabel,
     /// Wire segment not connected to anything
@@ -210,11 +213,12 @@ impl DrcViolationType {
     /// The array's fixed length does not make it exhaustive — a variant added
     /// to the enum and not here still compiles — so a test in `rules` holds it
     /// to the variants serde's derive declares.
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 41] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
         Self::UndrivenInput,
         Self::UnloadedOutput,
+        Self::ConnectedNoConnect,
         Self::OrphanNetLabel,
         Self::DanglingWire,
         Self::MalformedBus,
@@ -260,6 +264,7 @@ impl DrcViolationType {
             | Self::UnconnectedPin
             | Self::UndrivenInput
             | Self::UnloadedOutput
+            | Self::ConnectedNoConnect
             | Self::OrphanNetLabel
             | Self::DanglingWire
             | Self::MalformedBus
@@ -348,6 +353,7 @@ impl DrcViolationType {
             Self::UnconnectedPin => "Component pin is not connected",
             Self::UndrivenInput => "Declared input pin has no driver",
             Self::UnloadedOutput => "Declared output pin drives nothing",
+            Self::ConnectedNoConnect => "Pin marked no-connect is connected",
             Self::OrphanNetLabel => "Net label has no connections",
             Self::DanglingWire => "Wire segment is not connected to anything",
             Self::MalformedBus => "Bus geometry or declaration is malformed",
@@ -393,11 +399,12 @@ impl DrcViolationType {
     pub fn suggested_fix(&self) -> &'static str {
         match self {
             Self::FloatingNode => "Connect the node to another component or remove it",
-            Self::UnconnectedPin => "Connect this pin or verify that it is intentionally open",
+            Self::UnconnectedPin => "Connect this pin, or mark it no-connect if it stays open",
             Self::UndrivenInput => {
                 "Connect a driver to this input, or declare the pin bidirectional"
             }
             Self::UnloadedOutput => "Connect this output or verify that it is intentionally open",
+            Self::ConnectedNoConnect => "Remove the connection, or clear the pin's no-connect mark",
             Self::OrphanNetLabel => "Connect wires to both ends of the net or remove the label",
             Self::DanglingWire => "Complete the wire connection or delete the segment",
             Self::MalformedBus => "Repair or redraw the invalid bus geometry and declaration",

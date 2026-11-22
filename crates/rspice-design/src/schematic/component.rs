@@ -3,6 +3,7 @@
 //! A placed component on the schematic with position, rotation, and properties.
 
 mod card_names;
+mod no_connect;
 mod variant;
 mod written_name;
 pub use card_names::{
@@ -625,6 +626,13 @@ pub struct Component {
     /// Purchasing data for the bill of materials.
     #[serde(default, skip_serializing_if = "super::bom::BomFields::is_empty")]
     pub bom: super::bom::BomFields,
+
+    /// The pins the author marked as meant to stay open, by terminal name.
+    ///
+    /// Drawing and design check only: the deck writes each such pin as the
+    /// node of its own it always was. See [`Component::is_no_connect`].
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    no_connect_pins: std::collections::BTreeSet<String>,
 }
 
 /// Component fields exactly as a project file on disk spells them.
@@ -670,6 +678,8 @@ struct PersistedComponent {
     stimulus_provenance: Option<super::stimulus_provenance::StimulusProvenance>,
     #[serde(default)]
     bom: super::bom::BomFields,
+    #[serde(default)]
+    no_connect_pins: std::collections::BTreeSet<String>,
 }
 
 fn source_symbol(document: SymbolDocument) -> Arc<ResolvedCellSymbol> {
@@ -711,6 +721,7 @@ impl From<PersistedComponent> for Component {
             multiplicity: persisted.multiplicity,
             stimulus_provenance: persisted.stimulus_provenance,
             bom: persisted.bom,
+            no_connect_pins: persisted.no_connect_pins,
         };
         component.adopt_params_multiplicity();
         component.adopt_engine_source_parameter_spellings();
@@ -749,6 +760,7 @@ impl Component {
             stimulus_provenance: None,
             execution_terminal_layout: None,
             bom: super::bom::BomFields::default(),
+            no_connect_pins: std::collections::BTreeSet::new(),
         }
     }
 

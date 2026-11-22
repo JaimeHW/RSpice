@@ -229,7 +229,8 @@ pub fn extract(
 }
 
 /// Each placed terminal that nothing else in the drawing meets, an open pin,
-/// as its component and its point, in drawing order.
+/// as its component and its point, in drawing order. A pin the author marked
+/// no-connect is meant to be open and is not one.
 ///
 /// The judgement is [`ExtractedTerminal::attached`], made by the pass
 /// [`extract`] makes: every phase that can join a terminal's net runs as it
@@ -240,10 +241,21 @@ pub fn open_terminals(
     resolve_symbol: impl Fn(&LibraryCellInstance) -> Option<ResolvedCellSymbol>,
     promote_label: impl Fn(&str) -> Option<String>,
 ) -> Vec<(u64, Point)> {
+    let marked: FastMap<u64, &Component> = schematic
+        .components
+        .iter()
+        .filter(|component| component.has_no_connects())
+        .map(|component| (component.id, component))
+        .collect();
     let mut pass = joined(schematic, &resolve_symbol, &promote_label);
     pass.bind_terminals()
         .into_iter()
         .filter(|terminal| !terminal.attached)
+        .filter(|terminal| {
+            marked
+                .get(&terminal.component_id)
+                .is_none_or(|component| !component.is_no_connect(&terminal.pin))
+        })
         .map(|terminal| (terminal.component_id, terminal.point))
         .collect()
 }

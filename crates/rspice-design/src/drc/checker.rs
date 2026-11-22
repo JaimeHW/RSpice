@@ -484,10 +484,15 @@ impl DrcChecker {
     /// other than its source's is deliberate body bias, and nothing here
     /// judges it.
     ///
-    /// Two terminals are not open pins at all. An input the netlister writes
-    /// `null` for when nothing meets it may legally stay open. And an
-    /// interface port's own terminal is where the node leaves for the parent,
-    /// so nothing inside the cellview has to meet it.
+    /// Three terminals are not open pins at all. An input the netlister
+    /// writes `null` for when nothing meets it may legally stay open. A pin
+    /// the author marked no-connect is meant to. And an interface port's own
+    /// terminal is where the node leaves for the parent, so nothing inside
+    /// the cellview has to meet it.
+    ///
+    /// A pin marked no-connect that something does meet is a finding of its
+    /// own, as KiCad's and Virtuoso's checks make it: the mark says the pin
+    /// stays open and the drawing says otherwise.
     fn check_unconnected_pins(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut ordered_components = components
             .iter()
@@ -503,6 +508,24 @@ impl DrcChecker {
                     .then_with(|| left.point.y.cmp(&right.point.y))
             });
             for pin in pins {
+                if pin.attached && pin.no_connect {
+                    let id = self.next_id();
+                    let message = format!(
+                        "Pin {}.{} is marked no-connect but is connected",
+                        component_identity(component),
+                        pin.name
+                    );
+                    self.add_violation(
+                        result,
+                        DrcViolation::new(
+                            id,
+                            DrcViolationType::ConnectedNoConnect,
+                            message,
+                            pin_location(component, pin),
+                        ),
+                    );
+                    continue;
+                }
                 if pin.attached || pin.optional {
                     continue;
                 }
@@ -539,17 +562,7 @@ impl DrcChecker {
                 };
                 self.add_violation(
                     result,
-                    DrcViolation::new(
-                        id,
-                        violation_type,
-                        message,
-                        DrcLocation::Terminal {
-                            component_id: component.id,
-                            component_name: component.name.clone(),
-                            pin_name: pin.name.clone(),
-                            point: pin.point,
-                        },
-                    ),
+                    DrcViolation::new(id, violation_type, message, pin_location(component, pin)),
                 );
             }
         }
@@ -1386,6 +1399,16 @@ pub(super) fn component_identity(component: &ComponentInfo) -> String {
         format!("component #{}", component.id)
     } else {
         component.name.clone()
+    }
+}
+
+/// Where a finding about one terminal of `component` points.
+fn pin_location(component: &ComponentInfo, pin: &super::input::PinInfo) -> DrcLocation {
+    DrcLocation::Terminal {
+        component_id: component.id,
+        component_name: component.name.clone(),
+        pin_name: pin.name.clone(),
+        point: pin.point,
     }
 }
 

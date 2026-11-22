@@ -2167,6 +2167,7 @@ fn a_controlling_reference_must_name_one_instance() {
 
 mod electrical_rules;
 mod ground_rules;
+mod no_connect_rules;
 
 /// A label exactly on a crossing of two wires with no junction names neither
 /// wire. The check blocks the run and marks the crossing.

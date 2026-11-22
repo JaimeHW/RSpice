@@ -1289,6 +1289,7 @@ fn drc_violation_type_tag(violation_type: DrcViolationType) -> u8 {
         DrcViolationType::SymbolPinDirection => 38,
         DrcViolationType::SymbolModelFamily => 39,
         DrcViolationType::SymbolOverlappingPin => 40,
+        DrcViolationType::ConnectedNoConnect => 41,
     }
 }
 

@@ -60,6 +60,20 @@ impl Schematic {
         }
         changed
     }
+    /// Mark one pin of a placed part as meant to stay open, or clear the
+    /// mark. Says whether that changed anything.
+    pub fn set_pin_no_connect(&mut self, component_id: u64, pin: &str, flagged: bool) -> bool {
+        // Found and checked before the document is written, so a request
+        // that changes nothing leaves the drawing's stamp alone.
+        let Some(index) = self.document.components.iter().position(|component| {
+            component.id == component_id && component.is_no_connect(pin) != flagged
+        }) else {
+            return false;
+        };
+        self.document.components[index].set_no_connect(pin, flagged);
+        self.invalidate_topology();
+        true
+    }
     pub fn add_junction(&mut self, pos: Point) -> (u64, bool) {
         let (id, inserted) =
             junction_edit::add_junction(&mut self.document, &mut self.identity, pos);

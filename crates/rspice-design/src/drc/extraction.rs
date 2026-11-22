@@ -811,6 +811,7 @@ fn extract_components(
                 point: terminal.point,
                 attached: terminal.attached,
                 optional: false,
+                no_connect: comp.is_no_connect(&terminal.pin),
                 on_global: context
                     .globals
                     .contains(&terminal.net_name.to_ascii_lowercase()),
@@ -821,6 +822,13 @@ fn extract_components(
             });
         }
         mark_optional_inputs(comp, &mut pins);
+        // A pin marked no-connect and left open is what its mark says.
+        for pin in pins
+            .iter_mut()
+            .filter(|pin| pin.no_connect && !pin.attached)
+        {
+            pin.optional = true;
+        }
 
         let is_voltage_source = is_voltage_source(comp.kind);
         let reference_required = !comp.kind.spice_prefix().is_empty();

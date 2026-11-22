@@ -23,6 +23,7 @@ fn pin(name: &str, net: &str) -> PinInfo {
         point: Point::origin(),
         attached: true,
         optional: false,
+        no_connect: false,
         on_global: false,
         bulk: false,
     }
@@ -37,6 +38,7 @@ fn open_pin(name: &str, net: &str, point: Point) -> PinInfo {
         point,
         attached: false,
         optional: false,
+        no_connect: false,
         on_global: false,
         bulk: false,
     }
@@ -153,6 +155,7 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
             point,
             attached,
             optional: false,
+            no_connect: false,
             on_global: false,
             bulk: false,
         }],

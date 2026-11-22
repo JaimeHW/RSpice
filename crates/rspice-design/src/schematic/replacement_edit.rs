@@ -238,6 +238,17 @@ fn build_instance_replacement(
         &target_terminals,
         &terminal_map,
     )?;
+    // A no-connect mark stays on its pin under the name the new master gives
+    // it, and goes with a pin the new master does not have.
+    let dropped_no_connects = replacement
+        .carry_no_connects(|pin| {
+            let pin = normalized(pin);
+            terminal_mappings
+                .iter()
+                .find(|mapping| normalized(&mapping.source) == pin)
+                .and_then(|mapping| mapping.target.clone())
+        })
+        .len();
 
     let source_params = parse_replacement_parameters_strict(&source.params)?;
     let target_defaults = parse_replacement_parameters_strict(target.default_params())?;
@@ -293,6 +304,7 @@ fn build_instance_replacement(
         relocated_wire_points: wire_result.relocated_points,
         preserved_parameters: parameter_result.preserved_value_count,
         dropped_parameters: parameter_result.dropped_value_count,
+        dropped_no_connects,
         topology_changed: replacement != *source
             || !wire_result.edits.is_empty()
             || connections_changed,
@@ -1337,5 +1349,44 @@ mod tests {
 
         drop(InstanceInterfaceRepair::prepare(&mut document, 1, &new_ports, |_| None).unwrap());
         assert!(before.is_equal_document(&document));
+    }
+
+    /// The part that results from a replacement, with how many marks went.
+    fn replaced(
+        source: Component,
+        target: ComponentType,
+    ) -> (Component, SchematicReplacementImpact) {
+        let mut document = SchematicDocument::default();
+        document.components.push(source);
+        let context = ReplacementContext {
+            selected_component: Some(1),
+            topology_version: 0,
+        };
+        let spec = SchematicReplacementSourceSpec::from_component(&document.components[0]).unwrap();
+        let authority = replacement_authority_with_spec(&document, context, spec).unwrap();
+        let target = SchematicReplacementTargetSpec::primitive(target);
+        let replacement =
+            InstanceReplacement::prepare(&mut document, context, &authority, &target).unwrap();
+        let impact = replacement.impact();
+        replacement.commit();
+        (document.components.remove(0), impact)
+    }
+
+    #[test]
+    fn a_no_connect_mark_stays_on_a_pin_the_new_master_has_and_goes_with_one_it_lacks() {
+        let mut resistor = Component::new(1, ComponentType::Resistor, Point::origin());
+        resistor.name = "R1".to_owned();
+        resistor.set_no_connect("-", true);
+        let (capacitor, impact) = replaced(resistor, ComponentType::Capacitor);
+        assert!(capacitor.is_no_connect("-"));
+        assert_eq!(impact.dropped_no_connects, 0);
+
+        let mut mosfet = Component::new(1, ComponentType::Nmos, Point::origin());
+        mosfet.name = "M1".to_owned();
+        mosfet.set_no_connect("G", true);
+        mosfet.set_no_connect("B", true);
+        let (jfet, impact) = replaced(mosfet, ComponentType::Njfet);
+        assert_eq!(jfet.no_connect_pins().collect::<Vec<_>>(), ["G"]);
+        assert_eq!(impact.dropped_no_connects, 1, "a JFET has no bulk");
     }
 }

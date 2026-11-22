@@ -117,8 +117,8 @@ impl DrcViolationType {
                 title: "Unconnected pin",
                 explanation: "A terminal no conductor reaches, on a pin no interface gives a \
                     direction: a passive leg, a primitive device terminal, or a pin declared \
-                    inout. The deck gives it a node of its own. Connect it, or waive the finding \
-                    where the terminal is meant to be left open.",
+                    inout. The deck gives it a node of its own. Connect it, or mark the pin \
+                    no-connect where it is meant to be left open.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
                 max_severity: DrcSeverity::Critical,
@@ -144,6 +144,18 @@ impl DrcViolationType {
                     independent voltage source's positive terminal, drives nothing. The circuit \
                     still solves; the design just loses the signal it drew. Connect the output, \
                     or waive the finding where it is meant to be open.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
+                max_severity: DrcSeverity::Critical,
+                waivable: true,
+            },
+            Self::ConnectedNoConnect => &DrcRule {
+                code: "DRC-CONNECTED-NO-CONNECT",
+                title: "Connected no-connect pin",
+                explanation: "A pin marked no-connect, which says it is meant to stay open, is \
+                    reached by a conductor, a net label, a bus or another pin. The mark and the \
+                    drawing disagree, and the deck follows the drawing. Remove the connection, \
+                    or clear the mark if the pin is meant to be connected.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
                 max_severity: DrcSeverity::Critical,
@@ -621,6 +633,7 @@ mod tests {
             DrcViolationType::UnconnectedPin => "DRC-UNCONNECTED-PIN",
             DrcViolationType::UndrivenInput => "DRC-UNDRIVEN-INPUT",
             DrcViolationType::UnloadedOutput => "DRC-UNLOADED-OUTPUT",
+            DrcViolationType::ConnectedNoConnect => "DRC-CONNECTED-NO-CONNECT",
             DrcViolationType::OrphanNetLabel => "DRC-ORPHAN-NET-LABEL",
             DrcViolationType::DanglingWire => "DRC-DANGLING-WIRE",
             DrcViolationType::MalformedBus => "DRC-MALFORMED-BUS",
