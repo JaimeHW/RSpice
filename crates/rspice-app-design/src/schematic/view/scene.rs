@@ -760,12 +760,14 @@ fn occurrence_net_points<'a>(
 /// The analysis whose operating point the canvas annotates, with what it
 /// retained about annotation, or `None` when the canvas shows no badges.
 ///
-/// Annotations come only from the explicitly selected analysis, and only for
-/// the occurrence the active tab is editing. The retained cross-probe point map
-/// is replaced for each dispatch, so pairing it with any other result would
-/// falsely attach values to a different solve. Transient voltages are the
-/// selected run's transient read at one instant ([`transient_operating_point`]),
-/// annotated as an operating point is.
+/// Annotations come only from the selected run, and only for the occurrence
+/// the active tab is editing. The retained cross-probe point map is replaced
+/// for each dispatch, so pairing it with another run's result would falsely
+/// attach values to a different solve. The operating point is the selected
+/// analysis's, else the one the run solved beside it, else the transient's
+/// first time point: the solution the transient started from. Transient
+/// voltages are the selected run's transient read at one instant
+/// ([`transient_operating_point`]), annotated as an operating point is.
 fn annotated_operating_point<'a>(
     state: &CanvasFacts<'a>,
 ) -> Option<(
@@ -791,7 +793,28 @@ fn annotated_operating_point<'a>(
         let (dc_op, _) = transient_operating_point(state)?;
         return Some((std::borrow::Cow::Owned(dc_op), None, None));
     }
-    let analysis = state.model.simulation.active_analysis()?;
+    // The selected analysis's operating point, else the one its run solved
+    // beside it; a run that solved none still started its transient from
+    // one, which is what the canvas shows then.
+    let selected = state.model.simulation.active_analysis()?;
+    let solved = selected.dc_op.is_some().then_some(selected).or_else(|| {
+        state
+            .model
+            .simulation
+            .active_run()?
+            .analyses
+            .iter()
+            .find(|analysis| analysis.dc_op.is_some() && analysis.family_metadata.is_none())
+    });
+    let Some(analysis) = solved else {
+        let transient = annotated_transient(state.model)?;
+        let (start, _) = transient.waveforms.first()?.x.ends()?;
+        return Some((
+            std::borrow::Cow::Owned(transient_values_at(transient, start)),
+            None,
+            None,
+        ));
+    };
     let dc_op = std::borrow::Cow::Borrowed(analysis.dc_op.as_ref()?);
     let retained = match analysis.result_payload.as_ref() {
         Some(crate::state::AnalysisResultPayload::OperatingPoint { annotation, .. }) => {
@@ -850,6 +873,15 @@ fn transient_annotation_time(
 fn transient_operating_point(state: &CanvasFacts<'_>) -> Option<(crate::state::DcOpResult, f64)> {
     let analysis = annotated_transient(state.model)?;
     let (time, _) = transient_annotation_time(analysis, state.results.cursors().a)?;
+    Some((transient_values_at(analysis, time), time))
+}
+
+/// Every voltage, current and power a transient retained, read at `time`
+/// and linearly interpolated between the time points either side.
+fn transient_values_at(
+    analysis: &crate::state::AnalysisResult,
+    time: f64,
+) -> crate::state::DcOpResult {
     let mut dc_op = crate::state::DcOpResult::default();
     for trace in &analysis.waveforms {
         let (values, unit) = if wrapped_signal_name(&trace.name, 'V').is_some() {
@@ -871,7 +903,7 @@ fn transient_operating_point(state: &CanvasFacts<'_>) -> Option<(crate::state::D
             unit: trace.unit.clone().unwrap_or_else(|| unit.to_owned()),
         });
     }
-    Some((dc_op, time))
+    dc_op
 }
 
 /// What the status bar says as transient voltages are turned on: the instant
@@ -1640,6 +1672,51 @@ pub mod tests {
         assert_eq!(annotations.len(), 2, "voltage plus selected device OP");
         assert!(text(&annotations[1]).contains("VBIAS [SOURCE]"));
         assert!(text(&annotations[1]).contains("id=2mA"));
+    }
+
+    /// A selected analysis that solved no operating point shows the one its
+    /// run solved beside it; a run that solved none shows the solution its
+    /// transient started from, at the first time point, on the default
+    /// display, rather than nothing.
+    #[test]
+    fn badges_fall_back_to_the_runs_operating_point_then_the_transients_start() {
+        let mut state = state_with_operating_point();
+        let read = |state: &DesignTestHost| {
+            operating_point_annotations(&canvas_facts(state))
+                .iter()
+                .map(text)
+                .collect::<Vec<_>>()
+        };
+        state.model.simulation.retained.runs[0].add_analysis(AnalysisResult::new(
+            2,
+            AnalysisType::Ac,
+            "AC",
+        ));
+        state.model.simulation.view.active_analysis_idx = Some(1);
+        assert_eq!(read(&state), ["out 1.25 V", "I(vbias) = 2 mA"]);
+
+        state.model.simulation.retained.runs[0].analyses = vec![
+            AnalysisResult::new(3, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                crate::state::RetainedTrace::new(
+                    "V(out)",
+                    vec![0.0, 1.0e-3],
+                    vec![0.5, 3.0],
+                    "#ffbd2e",
+                ),
+                crate::state::RetainedTrace::new(
+                    "I(vbias)",
+                    vec![0.0, 1.0e-3],
+                    vec![-1.0e-3, -3.0e-3],
+                    "#4fc1ff",
+                ),
+            ]),
+        ];
+        state.model.simulation.view.active_analysis_idx = Some(0);
+        assert_eq!(
+            state.design.schematic_visibility.annotations,
+            SchematicAnnotationVisibility::OperatingPoint
+        );
+        assert_eq!(read(&state), ["out 500 mV", "I(vbias) = -1 mA"]);
     }
 
     /// A device with a region and three parameters shows the power the
