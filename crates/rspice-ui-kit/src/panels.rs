@@ -93,6 +93,9 @@ pub enum WorkbenchIcon {
     Arc,
     /// An irregular closed outline, the symbol editor's polygon tool.
     Polygon,
+    /// A box with a leader to the point it remarks on: the schematic's
+    /// callout shape.
+    Callout,
     /// A magnet: snap to grid.
     Snap,
     /// A sheet with a part placed on it: preview as placed.
@@ -490,6 +493,11 @@ impl WorkbenchIcon {
                     (7.0, 20.0),
                     (4.0, 10.0),
                 ]);
+            }
+            Self::Callout => {
+                closed(&[(9.0, 4.0), (20.0, 4.0), (20.0, 13.0), (9.0, 13.0)]);
+                line(&[(11.0, 13.0), (4.0, 20.0)]);
+                painter.circle_filled(p(4.0, 20.0), 1.6 * scale, color);
             }
             Self::Snap => {
                 let mut magnet = vec![p(6.0, 4.0)];

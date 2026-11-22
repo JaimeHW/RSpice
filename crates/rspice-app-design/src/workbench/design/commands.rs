@@ -90,8 +90,16 @@ pub enum DesignCommand {
     PlacePin,
     /// Open Place text or note.
     PlaceText,
-    /// Open Draw documentation shape.
-    PlaceShape,
+    /// Arm the rectangle shape tool.
+    PlaceRectangle,
+    /// Arm the line shape tool.
+    PlaceLine,
+    /// Arm the polygon shape tool.
+    PlacePolygon,
+    /// Arm the arc shape tool.
+    PlaceArc,
+    /// Arm the callout shape tool.
+    PlaceCallout,
     /// Arm the resistor placement.
     PlaceResistor,
     /// Arm the capacitor placement.
@@ -438,7 +446,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 106] = [
+    pub const ALL: [Self; 110] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -471,7 +479,11 @@ impl DesignCommand {
         Self::PlaceProbe,
         Self::PlacePin,
         Self::PlaceText,
-        Self::PlaceShape,
+        Self::PlaceRectangle,
+        Self::PlaceLine,
+        Self::PlacePolygon,
+        Self::PlaceArc,
+        Self::PlaceCallout,
         Self::PlaceResistor,
         Self::PlaceCapacitor,
         Self::PlaceInductor,
@@ -582,7 +594,11 @@ impl DesignCommand {
             Self::PlaceProbe => CommandKey::new("place-probe"),
             Self::PlacePin => CommandKey::new("place-pin"),
             Self::PlaceText => CommandKey::new("place-text"),
-            Self::PlaceShape => CommandKey::new("place-shape"),
+            Self::PlaceRectangle => CommandKey::new("place-rectangle"),
+            Self::PlaceLine => CommandKey::new("place-line"),
+            Self::PlacePolygon => CommandKey::new("place-polygon"),
+            Self::PlaceArc => CommandKey::new("place-arc"),
+            Self::PlaceCallout => CommandKey::new("place-callout"),
             Self::PlaceResistor => CommandKey::new("place-resistor"),
             Self::PlaceCapacitor => CommandKey::new("place-capacitor"),
             Self::PlaceInductor => CommandKey::new("place-inductor"),
@@ -665,6 +681,19 @@ impl DesignCommand {
         }
     }
 
+    /// The documentation shape the command arms, if it arms one.
+    pub const fn documentation_shape(self) -> Option<crate::state::DocumentationShapeKind> {
+        use crate::state::DocumentationShapeKind as Kind;
+        match self {
+            Self::PlaceRectangle => Some(Kind::Rectangle),
+            Self::PlaceLine => Some(Kind::Line),
+            Self::PlacePolygon => Some(Kind::Polygon),
+            Self::PlaceArc => Some(Kind::Arc),
+            Self::PlaceCallout => Some(Kind::Callout),
+            _ => None,
+        }
+    }
+
     /// Whether the command arms a placement on the schematic.
     pub(crate) const fn places(self) -> bool {
         matches!(
@@ -679,7 +708,11 @@ impl DesignCommand {
                 | Self::PlaceProbe
                 | Self::PlacePin
                 | Self::PlaceText
-                | Self::PlaceShape
+                | Self::PlaceRectangle
+                | Self::PlaceLine
+                | Self::PlacePolygon
+                | Self::PlaceArc
+                | Self::PlaceCallout
                 | Self::PlaceResistor
                 | Self::PlaceCapacitor
                 | Self::PlaceInductor
@@ -857,13 +890,13 @@ impl DesignCommand {
                 canvas,
                 PLACE_TEXT,
             ),
-            Self::PlaceShape => (
-                "Draw documentation shape\u{2026}",
-                "Design",
-                place,
-                canvas,
-                NONE,
-            ),
+            // Each shape is a tool of its own, drawn by a drag, as KiCad's and
+            // Altium's are; none takes a key by default.
+            Self::PlaceRectangle => ("Draw rectangle", "Design", place, canvas, NONE),
+            Self::PlaceLine => ("Draw line", "Design", place, canvas, NONE),
+            Self::PlacePolygon => ("Draw polygon", "Design", place, canvas, NONE),
+            Self::PlaceArc => ("Draw arc", "Design", place, canvas, NONE),
+            Self::PlaceCallout => ("Draw callout", "Design", place, canvas, NONE),
             Self::PlaceResistor => ("Place resistor", "Design", place, canvas, PLACE_RESISTOR),
             Self::PlaceCapacitor => ("Place capacitor", "Design", place, canvas, PLACE_CAPACITOR),
             Self::PlaceInductor => ("Place inductor", "Design", place, canvas, PLACE_INDUCTOR),

@@ -186,16 +186,6 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.design_note")),
     },
     DialogSpec {
-        key: DialogKey("design.documentation_shape"),
-        modality: Modality::Dialog,
-        is_open: Some(|state| {
-            features::dialog_open(state, DialogKey("design.documentation_shape"))
-        }),
-        render: |app, ctx| {
-            features::render_dialog(app, ctx, DialogKey("design.documentation_shape"))
-        },
-    },
-    DialogSpec {
         key: DialogKey("design.array_selection"),
         modality: Modality::Dialog,
         is_open: Some(|state| features::dialog_open(state, DialogKey("design.array_selection"))),

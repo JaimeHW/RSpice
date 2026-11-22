@@ -120,7 +120,6 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
     ("design.schematic_visibility", DocsTopic::SchematicEntry),
     ("design.pin_port", DocsTopic::SchematicEntry),
     ("design.design_note", DocsTopic::SchematicEntry),
-    ("design.documentation_shape", DocsTopic::SchematicEntry),
     ("design.array_selection", DocsTopic::SchematicEntry),
     ("design.replace_instance", DocsTopic::SchematicEntry),
     ("design.create_hierarchy", DocsTopic::SchematicEntry),

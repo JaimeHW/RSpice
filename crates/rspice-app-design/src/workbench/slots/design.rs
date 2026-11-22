@@ -71,10 +71,6 @@ pub struct DesignState {
     pub design_note:
         crate::workbench::app::dialogs::placement::design_note::DesignNoteDialogState,
 
-    /// Non-electrical typed documentation-shape placement transaction.
-    pub documentation_shape:
-        crate::workbench::app::dialogs::placement::documentation_shape::DocumentationShapeDialogState,
-
     /// Connectivity-aware selected-object movement transaction.
     pub move_selection:
         crate::workbench::app::dialogs::selection::move_selection::MoveSelectionDialogState,

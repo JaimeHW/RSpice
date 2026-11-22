@@ -12,7 +12,7 @@ use crate::state::{ComponentType, GridStyle, Tool};
 use crate::ui::tokens::Tokens;
 use crate::workbench::app::in_place_session;
 use crate::workbench::chrome::toolbar::toolbar_icon_button_size;
-use crate::workbench::design_system::{WorkbenchIcon, icon_button};
+use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{
     Cx, Reads, ToolbarControl, ToolbarEntry, ToolbarIcon, ToolbarId, ToolbarTool,
@@ -223,6 +223,16 @@ const SCHEMATIC: &[ToolbarEntry<DesignFeature>] = &[
     direct::<8>(),
     direct::<9>(),
     direct::<10>(),
+    // A narrow row sets the flyout aside as its first shape.
+    ToolbarEntry::Control(ToolbarControl {
+        show: shape_flyout,
+        overflow: Some(ToolbarIcon {
+            key: DesignCommand::PlaceRectangle.key(),
+            icon: WorkbenchIcon::Rectangle,
+            label: None,
+            pressed: Some(shape_armed),
+        }),
+    }),
     ToolbarEntry::Separator,
     icon(DesignCommand::RotateSelection.key(), WorkbenchIcon::Rotate),
     icon(
@@ -293,7 +303,93 @@ pub fn design_toolbar_command_selected(tool: Tool, key: CommandKey) -> bool {
         Some(DesignCommand::PlaceProbe) => tool == Tool::Probe,
         Some(DesignCommand::PlacePin) => tool == Tool::Place(ComponentType::Port),
         Some(DesignCommand::PlaceText) => tool == Tool::DesignNote,
+        Some(
+            DesignCommand::PlaceRectangle
+            | DesignCommand::PlaceLine
+            | DesignCommand::PlacePolygon
+            | DesignCommand::PlaceArc
+            | DesignCommand::PlaceCallout,
+        ) => tool == Tool::DocumentationShape,
         _ => false,
+    }
+}
+
+/// The shapes the Shape flyout lists, in the order Place, Shape lists them.
+const SHAPES: [(DesignCommand, WorkbenchIcon); 5] = [
+    (DesignCommand::PlaceRectangle, WorkbenchIcon::Rectangle),
+    (DesignCommand::PlaceLine, WorkbenchIcon::Line),
+    (DesignCommand::PlacePolygon, WorkbenchIcon::Polygon),
+    (DesignCommand::PlaceArc, WorkbenchIcon::Arc),
+    (DesignCommand::PlaceCallout, WorkbenchIcon::Callout),
+];
+
+/// What the flyout's button is called, on hover and to a screen reader.
+const SHAPE_FLYOUT: &str = "Draw shape";
+
+fn shape_armed(reads: &Reads<'_, DesignFeature>) -> bool {
+    reads.model.schematic.session.editor.tool == Tool::DocumentationShape
+}
+
+/// The Shape flyout: one button, wearing the armed shape or else the
+/// rectangle, that opens the five shapes; a pick arms its shape at once
+/// through its Place, Shape command, as KiCad's and Altium's drawing tools
+/// arm.
+fn shape_flyout(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+    let editor = &cx.model.schematic.session.editor;
+    let armed = (editor.tool == Tool::DocumentationShape)
+        .then(|| {
+            editor
+                .pending_documentation_shape
+                .as_ref()
+                .map(|pending| pending.kind)
+        })
+        .flatten();
+    let shown = SHAPES
+        .into_iter()
+        .find(|(command, _)| armed.is_some() && command.documentation_shape() == armed)
+        .map_or(WorkbenchIcon::Rectangle, |(_, icon)| icon);
+    let editable = !cx.model.schematic_edit_read_only();
+    let popup_id = ui.id().with("shape-flyout");
+    let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let size = toolbar_icon_button_size(layout);
+    let response = ui
+        .add_enabled_ui(editable, |ui| {
+            icon_button(ui, shown, SHAPE_FLYOUT, armed.is_some() || open, size)
+        })
+        .inner;
+    // A notch in the corner says the button opens a list.
+    let t = Tokens::get(ui.ctx());
+    let corner = response.rect.right_bottom() + Vec2::new(-4.0, -6.0);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![
+            corner,
+            corner + Vec2::new(-4.0, 0.0),
+            corner + Vec2::new(0.0, -4.0),
+        ],
+        if editable {
+            t.color.text_dim
+        } else {
+            t.color.text_faint
+        },
+        egui::Stroke::NONE,
+    ));
+    let mut picked = None;
+    egui::Popup::menu(&response).id(popup_id).show(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        for (command, icon) in SHAPES {
+            let kind = command
+                .documentation_shape()
+                .expect("every flyout row names its shape");
+            let selected = armed == Some(kind);
+            if labeled_icon_button(ui, icon, kind.label(), selected, 160.0).clicked() {
+                picked = Some(command);
+                ui.close();
+            }
+        }
+    });
+    if let Some(command) = picked {
+        cx.execute(command.key());
+        crate::workbench::app_state::return_engineering_canvas_focus(ui.ctx());
     }
 }
 

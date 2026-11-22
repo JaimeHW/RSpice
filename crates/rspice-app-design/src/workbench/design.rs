@@ -638,7 +638,11 @@ impl CommandSet for DesignCommand {
             | Self::PlaceOffSheetConnector
             | Self::PlaceProbe
             | Self::PlaceText
-            | Self::PlaceShape
+            | Self::PlaceRectangle
+            | Self::PlaceLine
+            | Self::PlacePolygon
+            | Self::PlaceArc
+            | Self::PlaceCallout
             | Self::PlacePin
             | Self::PlaceResistor
             | Self::PlaceCapacitor
@@ -859,11 +863,20 @@ impl CommandSet for DesignCommand {
                 let source = schematic_editor_request_source(&*cx.model);
                 cx.state.design_note.open(source);
             }
-            Self::PlaceShape => {
-                cx.wb.activate(Workspace::Design);
-                let source = schematic_editor_request_source(&*cx.model);
-                let expected_shapes = cx.model.schematic.document().documentation_shapes.clone();
-                cx.state.documentation_shape.open(source, expected_shapes);
+            Self::PlaceRectangle
+            | Self::PlaceLine
+            | Self::PlacePolygon
+            | Self::PlaceArc
+            | Self::PlaceCallout => {
+                let kind = self
+                    .documentation_shape()
+                    .expect("every shape command names its shape");
+                match placement::documentation_shape::arm_documentation_shape(cx.model, kind) {
+                    // Arming again as every tool arms lets go of a Move,
+                    // Stretch or Array in progress and keeps the shape.
+                    Ok(()) => arm_tool(cx, Tool::DocumentationShape),
+                    Err(refusal) => cx.wb.prompt(refusal),
+                }
             }
             Self::PlacePin => {
                 cx.wb.activate(Workspace::Design);
@@ -1448,11 +1461,6 @@ const DIALOGS: &[FeatureDialog<DesignFeature>] = &[
         render: DesignFeature::render_design_note_dialog,
     },
     FeatureDialog {
-        key: DialogKey("design.documentation_shape"),
-        is_open: |design| design.documentation_shape.open,
-        render: DesignFeature::render_documentation_shape_dialog,
-    },
-    FeatureDialog {
         key: DialogKey("design.array_selection"),
         is_open: |design| design.array_selection.open,
         render: DesignFeature::render_array_selection_dialog,
@@ -1760,15 +1768,6 @@ impl DesignFeature {
     /// Place text or design note.
     fn render_design_note_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         placement::design_note::render_design_note_dialog(&mut cx.state.design_note, cx.model, ctx);
-    }
-
-    /// Draw documentation shape.
-    fn render_documentation_shape_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
-        placement::documentation_shape::render_documentation_shape_dialog(
-            &mut cx.state.documentation_shape,
-            cx.model,
-            ctx,
-        );
     }
 
     /// Create array.

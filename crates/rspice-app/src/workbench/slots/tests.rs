@@ -101,14 +101,6 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             ));
     });
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.design.documentation_shape.open(
-            rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
-                &crate::workbench::app_state::AppState::default(),
-            ),
-            Vec::new(),
-        );
-    });
-    assert_blocks_shortcuts(|dialogs| {
         dialogs.design.array_selection.open(
             edit_authority(),
             "8 \u{00d7} 1".to_owned(),
@@ -365,14 +357,6 @@ const DIALOG_GATE: &[DialogRow] = &[
             .open(rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ));
-    }),
-    ("documentation_shape", |dialogs| {
-        dialogs.design.documentation_shape.open(
-            rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
-                &crate::workbench::app_state::AppState::default(),
-            ),
-            Vec::new(),
-        );
     }),
     ("array_selection", |dialogs| {
         dialogs.design.array_selection.open(

@@ -2,24 +2,27 @@
 //! drag lays down, where it lands, and what the shape keeps.
 
 use super::gestures_drawn::Fixture;
-use rspice_app_design::schematic::view::requests::editor_request_source;
-use rspice_app_state::state::{
-    DocumentationShapeGeometry, DocumentationShapeKind, PendingDocumentationShapePlacement, Point,
-    Tool,
-};
+use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_state::state::{DocumentationShapeGeometry, DocumentationShapeKind, Point, Tool};
 
+/// Arm `kind` as the reader does, by its Place, Shape command: the tool is
+/// armed at once, with nothing asked first.
 fn arm(fixture: &mut Fixture, kind: DocumentationShapeKind) {
-    let state = &mut fixture.app.state;
-    let pending = PendingDocumentationShapePlacement::new(
-        kind,
-        state.model.schematic.topology_version(),
-        &state.model.schematic.document().documentation_shapes,
-    )
-    .with_source(editor_request_source(&*state));
-    let editor = &mut state.model.schematic.session.editor;
-    editor.pending_documentation_shape = Some(pending);
-    editor.documentation_shape_drawing.clear();
-    state.model.schematic.arm_tool(Tool::DocumentationShape);
+    let command = DesignCommand::ALL
+        .into_iter()
+        .find(|command| command.documentation_shape() == Some(kind))
+        .expect("every shape has its command");
+    fixture.app.execute_command_key(command.key());
+    let editor = &fixture.app.state.model.schematic.session.editor;
+    assert_eq!(editor.tool, Tool::DocumentationShape, "{command:?}");
+    assert_eq!(
+        editor
+            .pending_documentation_shape
+            .as_ref()
+            .map(|pending| pending.kind),
+        Some(kind),
+        "{command:?} arms its own shape"
+    );
 }
 
 fn screen(fixture: &Fixture, x: f32, y: f32) -> egui::Pos2 {

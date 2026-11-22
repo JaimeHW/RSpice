@@ -427,7 +427,7 @@ fn the_view_menu_lists_each_viewport_row_exactly_once() {
     }
 }
 
-const DESIGN_PLACEMENT_COMMANDS: [CommandKey; 10] = [
+const DESIGN_PLACEMENT_COMMANDS: [CommandKey; 14] = [
     DesignCommand::PlaceInstance.key(),
     DesignCommand::PlaceWire.key(),
     DesignCommand::PlaceBus.key(),
@@ -437,7 +437,11 @@ const DESIGN_PLACEMENT_COMMANDS: [CommandKey; 10] = [
     DesignCommand::PlaceProbe.key(),
     DesignCommand::PlacePin.key(),
     DesignCommand::PlaceText.key(),
-    DesignCommand::PlaceShape.key(),
+    DesignCommand::PlaceRectangle.key(),
+    DesignCommand::PlaceLine.key(),
+    DesignCommand::PlacePolygon.key(),
+    DesignCommand::PlaceArc.key(),
+    DesignCommand::PlaceCallout.key(),
 ];
 const SELECTION_EDIT_COMMANDS: [CommandKey; 6] = [
     DesignCommand::MoveSelection.key(),

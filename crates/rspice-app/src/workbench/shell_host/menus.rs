@@ -491,11 +491,7 @@ const PLACE_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(DesignCommand::PlacePin.key(), "Pins\u{2026}").access('P'),
     MenuEntry::command_as(DesignCommand::PlaceJunction.key(), "Junction").access('J'),
     MenuEntry::command_as(DesignCommand::PlaceText.key(), "Text or note\u{2026}").access('N'),
-    MenuEntry::command_as(
-        DesignCommand::PlaceShape.key(),
-        "Documentation shape\u{2026}",
-    )
-    .access('S'),
+    MenuEntry::submenu("Shape", SHAPE_MENU).access('S'),
     Separator,
     MenuEntry::command_as(DesignCommand::PlaceResistor.key(), "Resistor").access('R'),
     MenuEntry::command_as(DesignCommand::PlaceCapacitor.key(), "Capacitor").access('A'),
@@ -504,6 +500,15 @@ const PLACE_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(DesignCommand::PlaceVoltageSource.key(), "Voltage source").access('V'),
     MenuEntry::command_as(DesignCommand::PlaceCurrentSource.key(), "Current source").access('C'),
     MenuEntry::command_as(DesignCommand::PlaceGround.key(), "Ground").access('G'),
+];
+
+/// The documentation shapes, each a tool that draws its shape by a drag.
+const SHAPE_MENU: &[MenuEntry] = &[
+    MenuEntry::command_as(DesignCommand::PlaceRectangle.key(), "Rectangle").access('R'),
+    MenuEntry::command_as(DesignCommand::PlaceLine.key(), "Line").access('L'),
+    MenuEntry::command_as(DesignCommand::PlacePolygon.key(), "Polygon").access('P'),
+    MenuEntry::command_as(DesignCommand::PlaceArc.key(), "Arc").access('A'),
+    MenuEntry::command_as(DesignCommand::PlaceCallout.key(), "Callout").access('C'),
 ];
 
 /// What a symbol view places: its drawing tools, then its pins from the
@@ -1002,6 +1007,11 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             DesignCommand::PlaceOffSheetConnector => Some(WorkbenchIcon::ArrowRight),
             DesignCommand::PlaceProbe => Some(WorkbenchIcon::Probe),
             DesignCommand::PlaceText => Some(WorkbenchIcon::Text),
+            DesignCommand::PlaceRectangle => Some(WorkbenchIcon::Rectangle),
+            DesignCommand::PlaceLine => Some(WorkbenchIcon::Line),
+            DesignCommand::PlacePolygon => Some(WorkbenchIcon::Polygon),
+            DesignCommand::PlaceArc => Some(WorkbenchIcon::Arc),
+            DesignCommand::PlaceCallout => Some(WorkbenchIcon::Callout),
             DesignCommand::PlacePin => Some(WorkbenchIcon::Pin),
             DesignCommand::DescendHierarchyDirect => Some(WorkbenchIcon::Layers),
             DesignCommand::AscendHierarchy => Some(WorkbenchIcon::ArrowUp),

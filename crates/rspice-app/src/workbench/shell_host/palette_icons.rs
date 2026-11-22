@@ -56,7 +56,12 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             DesignCommand::PlaceOffSheetConnector => Some(Icon::ChevronRight),
             DesignCommand::PlaceWire => Some(Icon::Wire),
             DesignCommand::PlaceBus | DesignCommand::PlaceBusTap => Some(Icon::Bus),
-            DesignCommand::PlaceJunction | DesignCommand::PlaceShape => Some(Icon::Grid),
+            DesignCommand::PlaceJunction
+            | DesignCommand::PlaceRectangle
+            | DesignCommand::PlaceLine
+            | DesignCommand::PlacePolygon
+            | DesignCommand::PlaceArc
+            | DesignCommand::PlaceCallout => Some(Icon::Grid),
             DesignCommand::PlaceLabel | DesignCommand::PlaceText => Some(Icon::NetLabel),
             DesignCommand::PlaceProbe => Some(Icon::Probe),
             DesignCommand::PlacePin => Some(Icon::Pin),

@@ -329,12 +329,43 @@ fn place_text_opens_and_draws_in_the_frame() {
     assert!(app.state.design.design_note.open);
 }
 
+/// Each Place, Shape command arms its shape at once: the frame draws no
+/// dialog to ask which, and the toolbar carries the Shape flyout.
 #[test]
-fn draw_documentation_shape_opens_and_draws_in_the_frame() {
-    let mut app = design_app();
-    app.execute_command_key(DesignCommand::PlaceShape.key());
-    assert!(draws_dialog(&mut app, "Draw documentation shape"));
-    assert!(app.state.design.documentation_shape.open);
+fn each_shape_command_arms_its_shape_with_no_dialog() {
+    for command in [
+        DesignCommand::PlaceRectangle,
+        DesignCommand::PlaceLine,
+        DesignCommand::PlacePolygon,
+        DesignCommand::PlaceArc,
+        DesignCommand::PlaceCallout,
+    ] {
+        let mut app = design_app();
+        app.execute_command_key(command.key());
+        let editor = &app.state.model.schematic.session.editor;
+        assert_eq!(
+            editor.tool,
+            rspice_app_state::state::Tool::DocumentationShape,
+            "{command:?}"
+        );
+        assert_eq!(
+            editor
+                .pending_documentation_shape
+                .as_ref()
+                .map(|pending| pending.kind),
+            command.documentation_shape(),
+            "{command:?}"
+        );
+        let nodes = frame_nodes(&mut app);
+        assert!(
+            !nodes.iter().any(|node| node.role() == Role::Dialog),
+            "{command:?} opens no dialog"
+        );
+        assert!(
+            nodes.iter().any(|node| node.label() == Some("Draw shape")),
+            "the toolbar carries the Shape flyout"
+        );
+    }
 }
 
 #[test]

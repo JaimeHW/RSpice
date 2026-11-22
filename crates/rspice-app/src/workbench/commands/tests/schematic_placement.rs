@@ -137,46 +137,56 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
     assert!(!app.state.model.schematic.can_undo());
 }
 
+/// Each shape command arms its shape and changes nothing in the document
+/// until the shape is drawn.
 #[test]
-fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = Workspace::Design;
-    let shapes = app
-        .state
-        .model
-        .schematic
-        .document()
-        .documentation_shapes
-        .clone();
-    let topology = app.state.model.schematic.topology_version();
-    let dirty = app.state.model.schematic.session.is_dirty;
-    let tool = app.state.model.schematic.session.editor.tool;
-
-    app.execute_command_key(DesignCommand::PlaceShape.key());
-
-    assert!(app.state.design.documentation_shape.open);
-    assert_eq!(
-        app.state.design.documentation_shape.kind,
-        rspice_app_state::state::DocumentationShapeKind::Rectangle
-    );
-    assert_eq!(
-        app.state.model.schematic.document().documentation_shapes,
-        shapes
-    );
-    assert_eq!(app.state.model.schematic.topology_version(), topology);
-    assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
-    assert_eq!(app.state.model.schematic.session.editor.tool, tool);
-    assert!(
-        app.state
+fn shape_commands_arm_their_shape_without_mutating_the_document() {
+    for command in SHAPE_COMMANDS {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = Workspace::Design;
+        let shapes = app
+            .state
             .model
             .schematic
-            .session
-            .editor
-            .pending_documentation_shape
-            .is_none()
-    );
-    assert!(!app.state.model.schematic.can_undo());
+            .document()
+            .documentation_shapes
+            .clone();
+        let topology = app.state.model.schematic.topology_version();
+        let dirty = app.state.model.schematic.session.is_dirty;
+
+        app.execute_command_key(command.key());
+
+        let editor = &app.state.model.schematic.session.editor;
+        assert_eq!(
+            editor.tool,
+            rspice_app_state::state::Tool::DocumentationShape,
+            "{command:?}"
+        );
+        assert_eq!(
+            editor
+                .pending_documentation_shape
+                .as_ref()
+                .map(|pending| pending.kind),
+            command.documentation_shape(),
+            "{command:?}"
+        );
+        assert_eq!(
+            app.state.model.schematic.document().documentation_shapes,
+            shapes
+        );
+        assert_eq!(app.state.model.schematic.topology_version(), topology);
+        assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
+        assert!(!app.state.model.schematic.can_undo());
+    }
 }
+
+const SHAPE_COMMANDS: [DesignCommand; 5] = [
+    DesignCommand::PlaceRectangle,
+    DesignCommand::PlaceLine,
+    DesignCommand::PlacePolygon,
+    DesignCommand::PlaceArc,
+    DesignCommand::PlaceCallout,
+];
 
 #[test]
 fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
@@ -247,19 +257,25 @@ fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
     assert!(app.command_key_enabled(DesignCommand::PlaceBusTap.key()));
     assert!(app.command_key_enabled(DesignCommand::PlacePin.key()));
     assert!(app.command_key_enabled(DesignCommand::PlaceText.key()));
-    assert!(app.command_key_enabled(DesignCommand::PlaceShape.key()));
+    for command in SHAPE_COMMANDS {
+        assert!(app.command_key_enabled(command.key()), "{command:?}");
+    }
 
     app.state.model.schematic.session.read_only = true;
     assert!(!app.command_key_enabled(DesignCommand::PlaceBus.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceBusTap.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlacePin.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceText.key()));
-    assert!(!app.command_key_enabled(DesignCommand::PlaceShape.key()));
+    for command in SHAPE_COMMANDS {
+        assert!(!app.command_key_enabled(command.key()), "{command:?}");
+    }
     app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
     assert!(!app.command_key_enabled(DesignCommand::PlacePin.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceText.key()));
-    assert!(!app.command_key_enabled(DesignCommand::PlaceShape.key()));
+    for command in SHAPE_COMMANDS {
+        assert!(!app.command_key_enabled(command.key()), "{command:?}");
+    }
 }
 
 #[test]

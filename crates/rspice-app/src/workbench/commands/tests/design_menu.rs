@@ -22,7 +22,11 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         DesignCommand::PlaceLabel,
         DesignCommand::PlacePin,
         DesignCommand::PlaceText,
-        DesignCommand::PlaceShape,
+        DesignCommand::PlaceRectangle,
+        DesignCommand::PlaceLine,
+        DesignCommand::PlacePolygon,
+        DesignCommand::PlaceArc,
+        DesignCommand::PlaceCallout,
         DesignCommand::ReplaceInstance,
         DesignCommand::CreateHierarchy,
     ];

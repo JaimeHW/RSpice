@@ -845,7 +845,7 @@ fn handle_documentation_shape_click(
         .pending_documentation_shape
         .as_ref()
     else {
-        state.prompt("No shape is armed. Reopen Draw documentation shape.");
+        state.prompt("No shape is armed. Choose one from Place, Shape.");
         state.model.schematic.cancel_tool();
         return;
     };
@@ -854,9 +854,7 @@ fn handle_documentation_shape_click(
         .as_ref()
         .is_some_and(|source| *source == super::requests::editor_request_source(state));
     if state.schematic_edit_read_only() || !authority_matches {
-        state.prompt(
-            "Shape not placed: the active schematic changed. Reopen Draw documentation shape.",
-        );
+        state.prompt("Shape not placed: the active schematic changed. Choose the shape again.");
         state.model.schematic.cancel_tool();
         return;
     }
