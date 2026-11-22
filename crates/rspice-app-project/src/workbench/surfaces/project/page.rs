@@ -287,7 +287,7 @@ fn card_link_row(ui: &mut Ui, title: &str, link: &CardLink<'_>, height: f32) -> 
     );
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, tokens.color.border),
     );
     let font = theme::sans(tokens::FS_0, FontWeight::Medium);
@@ -368,7 +368,7 @@ fn card_title_row(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>
     );
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, tokens.color.border),
     );
     let meta_font = theme::mono(tokens::FS_0, FontWeight::Medium);

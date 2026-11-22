@@ -2694,7 +2694,7 @@ fn card_with_body_margin(ui: &mut Ui, title: &str, body_margin: i8, body: impl F
     );
     ui.painter().hline(
         head_rect.x_range(),
-        head_rect.bottom(),
+        head_rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
     let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);

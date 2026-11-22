@@ -803,7 +803,7 @@ fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, problem: O
     );
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, tokens.color.border),
     );
     let content = rect.shrink2(vec2(11.0, 0.0));
