@@ -6,8 +6,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_design::workbench::app::actions::workspace::inline_edit_authority;
 use rspice_app_design::workbench::design::inspector::component::{
     TEMPERATURE_PARAM, apply_bound_model_choice, apply_bound_model_section, bound_model_choices,
-    component_checks, component_panel, editing_identity_field, editing_parameter_field,
-    terminals_section,
+    component_checks, component_panel, terminals_section,
 };
 use rspice_app_design::workbench::design::inspector::inline_instance::{
     begin_edit, field_value, net_panel, update_edit,
@@ -56,29 +55,6 @@ fn state_with_two_components() -> AppState {
     let mut state = AppState::default();
     seed_two_components(&mut state.model);
     state
-}
-
-#[test]
-fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
-    let (mut app, id) = app_with_model_bound_instance();
-    assert!(!editing_identity_field(&app.state.workbench, id));
-    assert!(!editing_parameter_field(&app.state.workbench, id));
-
-    assert!(begin_edit(&mut app.design_cx(), id, InlineEditField::Value));
-    assert!(editing_identity_field(&app.state.workbench, id));
-    assert!(!editing_parameter_field(&app.state.workbench, id));
-
-    assert!(begin_edit(
-        &mut app.design_cx(),
-        id,
-        InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
-    ));
-    assert!(!editing_identity_field(&app.state.workbench, id));
-    assert!(editing_parameter_field(&app.state.workbench, id));
-
-    app.state.commit_inline_component_edit().unwrap();
-    assert!(!editing_identity_field(&app.state.workbench, id));
-    assert!(!editing_parameter_field(&app.state.workbench, id));
 }
 
 /// The Terminals header counts only open pins, since the rows count

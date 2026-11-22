@@ -856,7 +856,15 @@ fn fresh_standard_instances_project_their_complete_typed_parameter_contract() {
     assert!(keys.contains(&"m"));
     assert!(keys.contains(&"tc1"));
     assert!(keys.contains(&"noisy"));
-    assert!(!keys.contains(&"r"), "the primary value is owned by Value");
+    // The resistance is the part's value, edited in its own row under its
+    // own name.
+    let resistance = contract
+        .iter()
+        .find(|parameter| parameter.key == "r")
+        .expect("the resistance row");
+    assert!(resistance.primary, "{resistance:?}");
+    assert_eq!(resistance.field(), InlineEditField::Value);
+    assert_eq!(resistance.label, "Resistance");
     assert!(
         contract
             .iter()

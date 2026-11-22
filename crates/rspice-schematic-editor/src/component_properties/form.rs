@@ -1090,7 +1090,7 @@ const GROUP_HEADING_GAP: f32 = 5.0;
 ///
 /// It was a switch row reading "Show advanced properties" at the foot of the
 /// form, which turned on fields scattered through the categories above it.
-fn advanced_disclosure(ui: &mut Ui, count: usize, open: &mut bool) {
+pub fn advanced_disclosure(ui: &mut Ui, count: usize, open: &mut bool) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let (rect, mut response) =

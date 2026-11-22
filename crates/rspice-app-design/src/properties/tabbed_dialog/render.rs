@@ -98,51 +98,74 @@ impl ComponentPropertyServices for ComponentDialogServices<'_> {
                 }
             }
             PropertyBrowseRequest::Model => {
-                let Some(kind) = draft.component_type else {
-                    return;
-                };
-                let text = |name: &str| {
-                    draft
-                        .get_value(name)
-                        .map(PropertyValue::display_string)
-                        .map(|value| value.trim().to_owned())
-                        .filter(|value| !value.is_empty())
-                };
-                // The designator as the draft holds it, so a rename typed
-                // before Browse is the name the browser speaks to.
-                let reference = text("name")
-                    .or_else(|| self.reference.map(str::to_owned))
-                    .unwrap_or_else(|| kind.display_name().to_owned());
-                // The drawn size as the draft holds it, which selects the bin
-                // of a binned family. An expression of design variables is
-                // not evaluated here, and selects none.
-                let dimension = |name: &str| {
-                    let value = draft.get_value(name)?;
-                    value.as_number().or_else(|| {
-                        let text = value.display_string();
-                        let text = text.trim();
-                        let literal = text
-                            .strip_prefix('{')
-                            .and_then(|text| text.strip_suffix('}'))
-                            .unwrap_or(text);
-                        crate::quantity::parse_engineering_value(literal).ok()
-                    })
-                };
-                self.model_browser.open_for_instance(
-                    &reference,
-                    kind,
-                    text("model"),
-                    text("model_library"),
-                    rspice_app_workbench::workbench::app::dialogs::model_browser::InstanceGeometry {
-                        length: dimension("l"),
-                        width: dimension("w"),
-                    },
-                );
+                open_model_browser(self.model_browser, self.reference, draft);
             }
         }
     }
     fn preview_source(&mut self, ui: &mut Ui, draft: &ComponentPropertyDraft) {
         source_preview_card(ui, draft, &self.preview);
+    }
+}
+
+/// Open the model browser for the instance `draft` edits, as the editor's
+/// Browse beside a model's name does: speaking to the designator and size the
+/// draft holds, so a rename or a resize typed first is what the browser
+/// reads.
+fn open_model_browser(
+    model_browser: &mut ModelBrowserState,
+    reference: Option<&str>,
+    draft: &ComponentPropertyDraft,
+) {
+    let Some(kind) = draft.component_type else {
+        return;
+    };
+    let text = |name: &str| {
+        draft
+            .get_value(name)
+            .map(PropertyValue::display_string)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    // The designator as the draft holds it, so a rename typed
+    // before Browse is the name the browser speaks to.
+    let reference = text("name")
+        .or_else(|| reference.map(str::to_owned))
+        .unwrap_or_else(|| kind.display_name().to_owned());
+    // The drawn size as the draft holds it, which selects the bin
+    // of a binned family. An expression of design variables is
+    // not evaluated here, and selects none.
+    let dimension = |name: &str| {
+        let value = draft.get_value(name)?;
+        value.as_number().or_else(|| {
+            let text = value.display_string();
+            let text = text.trim();
+            let literal = text
+                .strip_prefix('{')
+                .and_then(|text| text.strip_suffix('}'))
+                .unwrap_or(text);
+            crate::quantity::parse_engineering_value(literal).ok()
+        })
+    };
+    model_browser.open_for_instance(
+        &reference,
+        kind,
+        text("model"),
+        text("model_library"),
+        rspice_app_workbench::workbench::app::dialogs::model_browser::InstanceGeometry {
+            length: dimension("l"),
+            width: dimension("w"),
+        },
+    );
+}
+
+impl TabbedPropertyDialogState {
+    /// Open the model browser over the open editor, as its own Browse does.
+    pub fn browse_model(&mut self) {
+        open_model_browser(
+            &mut self.model_browser,
+            self.component_name.as_deref(),
+            &self.draft,
+        );
     }
 }
 

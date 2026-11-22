@@ -36,6 +36,7 @@ mod inline_instance;
 mod inline_instance_drawn;
 mod inspector;
 mod inspector_drawn;
+mod inspector_form_drawn;
 mod inspector_veriloga_modules;
 mod inspector_veriloga_modules_drawn;
 mod layout_editor_drawn;

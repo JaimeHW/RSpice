@@ -14,7 +14,7 @@ pub use dialog::{
 pub use evidence::provenance_colour;
 pub use form::{
     InstanceIdentity, ParametersPane, PropertyBrowseRequest, PropertyForm, PropertyGroup,
-    property_form, render_component_parameters, section_band,
+    advanced_disclosure, property_form, render_component_parameters, section_band,
 };
 
 use rspice_design::schematic::component_type::ComponentType;

@@ -1953,6 +1953,26 @@ pub fn property_row_pair_input(
     }
 }
 
+/// A property row whose value column holds a control its caller draws, such
+/// as a check box: the label in the row's label column, and `control` laid
+/// out in the field the row's value column gives it, so the row lines up
+/// with the typed and chosen rows around it.
+pub fn property_row_control<R>(ui: &mut Ui, label: &str, control: impl FnOnce(&mut Ui) -> R) -> R {
+    let (slot, _) = row_slot(ui, None, Sense::hover());
+    row_label(ui, slot.label, label);
+    let field = slot.field();
+    let inner = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(field)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            control,
+        )
+        .inner;
+    slot.close(ui);
+    inner
+}
+
 /// Selectable twin of [`property_row`], with the same fixed label/value
 /// columns as read-only rows and text inputs. `options` carries a durable
 /// value and its presentation label; the returned flag is true only when the

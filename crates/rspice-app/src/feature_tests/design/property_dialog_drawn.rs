@@ -13,7 +13,7 @@ use rspice_schematic_editor::component_properties::ComponentPropertyDialogResult
 
 /// Draw the editor as its dialog step does, over the application's parts,
 /// then answer what it raised as the shell does straight after.
-fn render_property_dialog(
+pub(super) fn render_property_dialog(
     ctx: &egui::Context,
     state: &mut AppState,
 ) -> ComponentPropertyDialogResult {
@@ -34,7 +34,7 @@ fn render_property_dialog(
     result
 }
 
-fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
+pub(super) fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,

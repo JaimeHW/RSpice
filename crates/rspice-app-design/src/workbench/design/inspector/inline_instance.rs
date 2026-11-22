@@ -11,6 +11,12 @@ use crate::workbench::framework::command_registry::ids;
 use rspice_design::schematic::bom::BomField;
 use rspice_vocabulary::property::{deck_number_spelling, list_elements};
 
+/// Whether `key` is the choice of symbol a family part is drawn with, which
+/// the part holds as its symbol variant.
+fn is_symbol_choice(component: &Component, key: &str) -> bool {
+    key == "symbol" && component.kind != ComponentType::CellInstance
+}
+
 pub fn field_value(component: &Component, field: &InlineEditField) -> String {
     match field {
         InlineEditField::Instance => component.name.clone(),
@@ -24,6 +30,10 @@ pub fn field_value(component: &Component, field: &InlineEditField) -> String {
                 .multiplicity
                 .map(|multiplicity| multiplicity.to_string())
                 .unwrap_or_default()
+        }
+        // The symbol a part is drawn with is its typed variant, never text.
+        InlineEditField::Parameter(key) if is_symbol_choice(component, key) => {
+            component.symbol_variant.clone().unwrap_or_default()
         }
         // Parameter text is keyed case-insensitively, and stored lower-case.
         // A purchasing field is read from the typed BOM record instead.
@@ -326,6 +336,17 @@ fn edited_component(
                     .filter(|multiplicity| multiplicity.value() != 1.0)
             };
         }
+        InlineEditField::Parameter(key) if is_symbol_choice(&component, key) => {
+            let chosen = candidate.trim();
+            let variant = (!chosen.is_empty() && chosen != "default").then(|| chosen.to_owned());
+            // A chosen skin replaces the glyph a ground was imported with, as
+            // the component editor's choice does.
+            if variant != component.symbol_variant {
+                component.ground_glyph =
+                    rspice_design::schematic::ground_glyph::GroundGlyph::Native;
+            }
+            component.symbol_variant = variant;
+        }
         InlineEditField::Parameter(key) => match BomField::from_key(key) {
             Some(bom) => candidate.trim().clone_into(component.bom.get_mut(bom)),
             None => {
@@ -424,6 +445,23 @@ pub fn update_edit(cx: &mut Cx<'_, DesignFeature>, text: String) {
     cx.wb.inline_edit.set_draft(text, candidate);
 }
 
+/// Commit `text` to `field` at once, as one undo step: what a check box or a
+/// drop-down does when it is clicked. A value the gate refuses is set aside
+/// in its row with its reason, as a typed field's is when the reader moves
+/// on.
+pub fn commit_field_now(
+    cx: &mut Cx<'_, DesignFeature>,
+    component: u64,
+    field: InlineEditField,
+    text: String,
+) {
+    if !begin_edit(cx, component, field) {
+        return;
+    }
+    update_edit(cx, text);
+    let _ = leave_inline_field(cx.model, cx.wb);
+}
+
 fn restore_edit_focus(ctx: &egui::Context, cx: &Cx<'_, DesignFeature>) {
     if let Some(widget) = cx
         .wb
@@ -483,6 +521,42 @@ pub fn edit_row_with_hint(
     hint: &str,
     caption: PropertyRowCaption<'_>,
 ) -> Option<String> {
+    edit_row_in(ui, cx, component, field, label, hint, caption, None).0
+}
+
+/// An editable row with one action beside its field, such as Browse beside a
+/// model's name. Returns the row's refusal and whether the action was taken;
+/// a read-only document shows the value alone.
+pub fn edit_row_with_action(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, DesignFeature>,
+    component: &Component,
+    field: InlineEditField,
+    label: &str,
+    action: crate::workbench::design_system::PropertyRowAction<'_>,
+) -> (Option<String>, bool) {
+    edit_row_in(
+        ui,
+        cx,
+        component,
+        field,
+        label,
+        "",
+        PropertyRowCaption::default(),
+        Some(action),
+    )
+}
+
+fn edit_row_in(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, DesignFeature>,
+    component: &Component,
+    field: InlineEditField,
+    label: &str,
+    hint: &str,
+    caption: PropertyRowCaption<'_>,
+    action: Option<crate::workbench::design_system::PropertyRowAction<'_>>,
+) -> (Option<String>, bool) {
     let captioned = caption.unit.is_some() || caption.description.is_some();
     let editable = !cx.model.schematic_edit_read_only();
     if !editable {
@@ -493,7 +567,7 @@ pub fn edit_row_with_hint(
         } else {
             property_row(ui, label, shown);
         }
-        return None;
+        return (None, false);
     }
 
     let mut buffer = cx
@@ -514,19 +588,32 @@ pub fn edit_row_with_hint(
             })
     }) && ui.input(|input| input.key_pressed(egui::Key::Escape));
 
-    let response = ui
+    let (response, acted) = ui
         .push_id((component.id, &field), |ui| {
-            if captioned {
-                property_row_input_captioned(
+            if let Some(action) = action {
+                let (response, action) = crate::workbench::design_system::property_row_input_action(
+                    ui,
+                    label,
+                    &mut buffer,
+                    rejection.is_some(),
+                    action,
+                    &[],
+                );
+                (response, action.clicked())
+            } else if captioned {
+                let response = property_row_input_captioned(
                     ui,
                     label,
                     &mut buffer,
                     hint,
                     rejection.is_some(),
                     caption,
-                )
+                );
+                (response, false)
             } else {
-                property_row_input_with_hint(ui, label, &mut buffer, hint, rejection.is_some())
+                let response =
+                    property_row_input_with_hint(ui, label, &mut buffer, hint, rejection.is_some());
+                (response, false)
             }
         })
         .inner;
@@ -546,12 +633,12 @@ pub fn edit_row_with_hint(
             input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
         });
         response.surrender_focus();
-        return None;
+        return (None, acted);
     }
     if response.gained_focus() || response.changed() || stepped {
         if !begin_edit(cx, component.id, field.clone()) {
             restore_edit_focus(ui.ctx(), cx);
-            return None;
+            return (None, acted);
         }
         cx.wb.inline_edit.set_widget(response.id);
         if response.changed() || stepped {
@@ -588,7 +675,7 @@ pub fn edit_row_with_hint(
             node.set_invalid(egui::accesskit::Invalid::True);
         });
     }
-    rejection
+    (rejection, acted)
 }
 
 pub(super) const INLINE_VALIDATION_SLOT_H: f32 = 18.0;
