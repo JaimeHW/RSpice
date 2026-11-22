@@ -14,7 +14,7 @@ use crate::workbench::app_state::model::{LibraryFile, OnDisk};
 use crate::workbench::design_system::{property_row, property_row_path, property_row_problem};
 use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
 use crate::workbench::project::dependency_status::{
-    DependencyLibrary, library_status, view_exception,
+    DependencyLibrary, PROJECT_FILE_SOURCE, library_status, view_exception,
 };
 use crate::workbench::project::library_dialogs::library_files::{LibraryFileIntent, lock_holder};
 
@@ -42,16 +42,15 @@ pub fn project_library(
     }
     let model = inspector.model;
     let library = model.library_manager.current_library();
+    // A library kept in a folder of its own is sourced from a path; one the
+    // project file holds says so in words.
     let library_path = library
         .and_then(|item| model.library_manager.reference(&item.name))
-        .map_or_else(
-            || "Project file".to_owned(),
-            |reference| {
-                reference
-                    .path
-                    .shown(rspice_design::library::folder::HostPlatform::current())
-            },
-        );
+        .map(|reference| {
+            reference
+                .path
+                .shown(rspice_design::library::folder::HostPlatform::current())
+        });
     // What the page's find hides is not the page's selection: the band
     // asks for a view, and so does this panel.
     let cell = model
@@ -174,7 +173,10 @@ pub fn project_library(
     // Cut from the middle, so the folder the library is kept in stays in
     // view however narrow the panel: as written, then where that resolves
     // here, its access and its technology.
-    property_row_path(ui, "Source", &library_path);
+    match &library_path {
+        Some(path) => property_row_path(ui, "Source", path),
+        None => property_row(ui, "Source", PROJECT_FILE_SOURCE),
+    };
     if let Some(item) = library {
         design_facts(ui, model, &item.name);
     }

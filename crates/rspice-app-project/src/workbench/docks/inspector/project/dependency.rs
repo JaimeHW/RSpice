@@ -12,7 +12,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::model::LibraryMode;
 use crate::workbench::design_system::{property_row, property_row_path, property_row_problem};
 use crate::workbench::project::dependency_status::{
-    DependencyKind, LibraryStatus, UNSET, dependency_rows, shown_path,
+    DependencyKind, LibraryStatus, PROJECT_FILE_SOURCE, UNSET, dependency_rows, shown_path,
 };
 use crate::workbench::project::library_dialogs::library_files::{
     LibraryFileIntent, library_file_blocker, library_file_label,
@@ -37,7 +37,11 @@ pub(super) fn project_dependency(
         section_header(ui, row.library.kind.label(), None);
         property_row(ui, "Name", &row.library.name);
         status_rows(ui, "Status", &row.status);
-        if row.source != UNSET {
+        // A path is cut from the middle in mono; a library the project file
+        // holds is sourced in words.
+        if row.source == PROJECT_FILE_SOURCE {
+            property_row(ui, "Source", &row.source);
+        } else if row.source != UNSET {
             property_row_path(ui, "Source", &row.source);
         }
         if row.version != UNSET {

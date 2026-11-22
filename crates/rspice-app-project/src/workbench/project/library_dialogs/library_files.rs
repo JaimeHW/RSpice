@@ -798,7 +798,7 @@ fn attach_dialog(
         ))
         .show(ctx, |rows| {
             if let Ok(preview) = preview {
-                rows.value_mono("Library", &preview.library);
+                rows.value("Library", &preview.library);
                 rows.value(
                     "Cells",
                     &format!(

@@ -431,6 +431,10 @@ fn file_name(path: &Path) -> String {
     )
 }
 
+/// The source a library the project file holds is listed with: words, not
+/// a path.
+pub const PROJECT_FILE_SOURCE: &str = "Project file";
+
 /// A path as the reader knows it. Canonicalising a Windows drive path adds
 /// the verbatim `\\?\` prefix, which is no part of the name they gave it.
 pub(crate) fn shown_path(path: &Path) -> String {
@@ -569,7 +573,7 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
                 // drawn for is the inspector's to state.
                 version: UNSET.to_owned(),
                 source: model.library_manager.reference(&library.name).map_or_else(
-                    || "Project file".to_owned(),
+                    || PROJECT_FILE_SOURCE.to_owned(),
                     |reference| {
                         reference
                             .path
