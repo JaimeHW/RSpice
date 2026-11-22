@@ -116,10 +116,21 @@ impl<'a> HierarchySource<'a> {
         libraries: &'a LibraryCatalog,
         projection: &'a DesignProjection,
     ) -> Self {
-        let mut source = Self::from_workspace(libraries, projection.schematic_buffers())
-            .with_connectivity(projection.connectivity());
+        let mut source = Self::from_design_projection_as_drawn(libraries, projection);
         source.execution_plan = Some(projection.plan().clone());
         source
+    }
+
+    /// A frozen design projection's buffers and connectivity without its
+    /// plan, for netlisting one cell view as drawn, as its own top. The
+    /// plan's instance paths run from the configured root, so they name none
+    /// of another cell view's own placements.
+    pub fn from_design_projection_as_drawn(
+        libraries: &'a LibraryCatalog,
+        projection: &'a DesignProjection,
+    ) -> Self {
+        Self::from_workspace(libraries, projection.schematic_buffers())
+            .with_connectivity(projection.connectivity())
     }
 
     /// Seal a resolved plan onto buffers indexed without a projection, for a

@@ -311,11 +311,10 @@ impl CheckAndSaveValidationReport {
         // reach has no binding in it at all: checked under the plan, each of
         // its instances would read as unresolved.
         let document_hierarchy = execution_projection.as_ref().ok().map(|projection| {
-            HierarchySource::from_workspace(
+            HierarchySource::from_design_projection_as_drawn(
                 reads.model.library_manager.catalog(),
-                projection.schematic_buffers(),
+                projection,
             )
-            .with_connectivity(projection.connectivity())
         });
 
         // A stale instance is the one netlist blocker with a one-click remedy,
