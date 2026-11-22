@@ -180,6 +180,13 @@ impl Schematic {
                     VariantObjectOverride::DoNotPopulate { .. } => {
                         // Removed before reference preparation.
                     }
+                    VariantObjectOverride::Fitted { value_override } => {
+                        // The authored part with another value: its binding
+                        // and its pins stay exactly as drawn.
+                        if let Some(value) = value_override {
+                            component.value.clone_from(value);
+                        }
+                    }
                     VariantObjectOverride::Substitute { replacement } => {
                         crate::parameters::validate_parameter_text(&component.params).map_err(
                             |reason| DesignManagementError::InvalidReplacementParameters {

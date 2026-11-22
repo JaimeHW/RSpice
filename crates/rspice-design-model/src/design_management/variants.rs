@@ -1,6 +1,7 @@
 //! Assembly-variant definitions, resolution, comparison, and catalog authority.
 
 use super::*;
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -80,11 +81,45 @@ pub struct ComponentSubstitution {
     pub qualification: VariantQualificationState,
 }
 
+/// What one variant does to one part of the base design.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum VariantObjectOverride {
+    /// The part is replaced by another library cell.
     Substitute { replacement: ComponentSubstitution },
+    /// The part is left off the board and out of the netlist. The reason is
+    /// optional and may be empty.
     DoNotPopulate { approval_reference: String },
+    /// The authored part, fitted. With no value it restores a part an
+    /// ancestor variant leaves off or replaces; with a value it changes the
+    /// part's value and nothing else, so its binding, its pins and the cell
+    /// the base design names for it all stay as authored.
+    Fitted { value_override: Option<String> },
+}
+
+impl VariantObjectOverride {
+    /// Whether this override leaves the part exactly as the base design has
+    /// it: an explicit Fitted with no value, which only matters for undoing
+    /// what an ancestor variant does.
+    #[must_use]
+    pub const fn is_plain_fitted(&self) -> bool {
+        matches!(
+            self,
+            Self::Fitted {
+                value_override: None
+            }
+        )
+    }
+
+    /// The value this override gives the part, where it gives one.
+    #[must_use]
+    pub fn value_override(&self) -> Option<&str> {
+        match self {
+            Self::Substitute { replacement } => replacement.value_override.as_deref(),
+            Self::Fitted { value_override } => value_override.as_deref(),
+            Self::DoNotPopulate { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,13 +227,15 @@ pub struct VariantDifference {
     pub comparison: Option<VariantObjectOverride>,
 }
 
+/// Two choices compared part by part. A side with no id is the base design,
+/// which overrides nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VariantComparison {
-    pub reference_id: AssemblyVariantId,
-    pub comparison_id: AssemblyVariantId,
-    pub reference_digest: ContentDigest,
-    pub comparison_digest: ContentDigest,
+    pub reference_id: Option<AssemblyVariantId>,
+    pub comparison_id: Option<AssemblyVariantId>,
+    pub reference_digest: Option<ContentDigest>,
+    pub comparison_digest: Option<ContentDigest>,
     pub differences: Vec<VariantDifference>,
     pub semantic_digest: ContentDigest,
 }
@@ -316,19 +353,14 @@ impl AssemblyVariantCatalog {
                 });
             }
         }
-        match self.active_variant_id {
-            Some(id) if !ids.contains(&id) => {
-                return Err(DesignManagementError::MissingReference {
-                    domain: "active assembly variant",
-                    identity: id.to_string(),
-                });
-            }
-            None if !self.variants.is_empty() => {
-                return Err(DesignManagementError::ActiveSelectionRequired(
-                    "assembly variant",
-                ));
-            }
-            _ => {}
+        // No active variant is the base design, a choice like any other.
+        if let Some(id) = self.active_variant_id
+            && !ids.contains(&id)
+        {
+            return Err(DesignManagementError::MissingReference {
+                domain: "active assembly variant",
+                identity: id.to_string(),
+            });
         }
         for variant in &self.variants {
             if let Some(parent) = &variant.definition.parent {
@@ -428,15 +460,6 @@ impl AssemblyVariantCatalog {
             "assembly variant",
             id.to_string(),
         )?;
-        if self.variants.iter().any(|variant| {
-            variant
-                .definition
-                .parent
-                .as_ref()
-                .is_some_and(|parent| parent.id == id)
-        }) {
-            return Err(DesignManagementError::VariantHasDependents(id));
-        }
         let definition = self.materialize_draft(draft)?;
         validate_variant_definition(&definition)?;
         if self.variants.iter().any(|variant| {
@@ -450,19 +473,190 @@ impl AssemblyVariantCatalog {
         if current.definition == definition {
             return Err(DesignManagementError::NoChanges("assembly variant"));
         }
-        let revision = next_revision(current.revision, "assembly variant", id.to_string())?;
         let mut candidate = self.clone();
-        let target = candidate
+        let revision = candidate.publish_definition(id, definition)?;
+        candidate.validate()?;
+        *self = candidate;
+        Ok(revision)
+    }
+
+    /// Change what variant `id` does to some parts, as one revision of it.
+    ///
+    /// Each edit names a part and its new override; `None` removes the
+    /// variant's own override, so the part reads as the parent variant, or
+    /// the base design, has it. Variants derived from this one are re-pinned
+    /// to its new revision in the same step (see
+    /// [`Self::publish_definition`]).
+    pub fn set_overrides(
+        &mut self,
+        id: AssemblyVariantId,
+        expected_revision: u64,
+        edits: BTreeMap<SchematicObjectKey, Option<VariantObjectOverride>>,
+    ) -> Result<u64, DesignManagementError> {
+        self.validate()?;
+        if edits.is_empty() {
+            return Err(DesignManagementError::EmptySelection);
+        }
+        let current = self
+            .find(id)
+            .ok_or_else(|| DesignManagementError::MissingReference {
+                domain: "assembly variant",
+                identity: id.to_string(),
+            })?;
+        require_revision(
+            expected_revision,
+            current.revision,
+            "assembly variant",
+            id.to_string(),
+        )?;
+        let mut definition = current.definition.clone();
+        for (object, change) in edits {
+            object.validate()?;
+            match change {
+                Some(change) => {
+                    definition.overrides.insert(object, change);
+                }
+                None => {
+                    definition.overrides.remove(&object);
+                }
+            }
+        }
+        let definition = normalize_variant_definition(definition);
+        validate_variant_definition(&definition)?;
+        if current.definition == definition {
+            return Err(DesignManagementError::NoChanges("assembly variant"));
+        }
+        let mut candidate = self.clone();
+        let revision = candidate.publish_definition(id, definition)?;
+        candidate.validate()?;
+        *self = candidate;
+        Ok(revision)
+    }
+
+    /// Give variant `id` its new `definition` at the next revision, then
+    /// re-pin every variant derived from it, parents before children.
+    ///
+    /// A child keeps its own overrides. Where it substitutes a part whose
+    /// state in its parent this step changed, its substitute turns
+    /// [`VariantQualificationState::ReviewRequired`]: it was chosen against
+    /// what the parent did before. Returns the new revision of `id`. The
+    /// caller validates the catalog afterwards.
+    fn publish_definition(
+        &mut self,
+        id: AssemblyVariantId,
+        definition: AssemblyVariantDefinition,
+    ) -> Result<u64, DesignManagementError> {
+        let before = self
+            .variants
+            .iter()
+            .map(|variant| (variant.id, self.layered_overrides(variant.id)))
+            .collect::<BTreeMap<_, _>>();
+        let revision = self.republish(id, definition)?;
+        let mut seen = HashSet::from([id]);
+        let mut parents = VecDeque::from([id]);
+        while let Some(parent_id) = parents.pop_front() {
+            let parent = self.find(parent_id).expect("variant was validated");
+            let pin = VariantParentRef {
+                id: parent_id,
+                revision: parent.revision,
+                semantic_digest: parent.semantic_digest,
+            };
+            let after = self.layered_overrides(parent_id);
+            let empty = BTreeMap::new();
+            let prior = before.get(&parent_id).unwrap_or(&empty);
+            let touched = prior
+                .keys()
+                .chain(after.keys())
+                .filter(|object| prior.get(*object) != after.get(*object))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let children = self
+                .variants
+                .iter()
+                .filter(|variant| {
+                    variant
+                        .definition
+                        .parent
+                        .as_ref()
+                        .is_some_and(|parent| parent.id == parent_id)
+                })
+                .map(|variant| variant.id)
+                .collect::<Vec<_>>();
+            for child in children {
+                // A cycle is refused by the validation that follows; here it
+                // must only not loop.
+                if !seen.insert(child) {
+                    continue;
+                }
+                let mut definition = self
+                    .find(child)
+                    .expect("child variant was listed")
+                    .definition
+                    .clone();
+                definition.parent = Some(pin.clone());
+                for (object, change) in &mut definition.overrides {
+                    if let VariantObjectOverride::Substitute { replacement } = change
+                        && touched.contains(object)
+                    {
+                        replacement.qualification = VariantQualificationState::ReviewRequired;
+                    }
+                }
+                self.republish(child, definition)?;
+                parents.push_back(child);
+            }
+        }
+        Ok(revision)
+    }
+
+    /// Store `definition` as variant `id`'s next revision.
+    fn republish(
+        &mut self,
+        id: AssemblyVariantId,
+        definition: AssemblyVariantDefinition,
+    ) -> Result<u64, DesignManagementError> {
+        let target = self
             .variants
             .iter_mut()
             .find(|variant| variant.id == id)
             .expect("variant was validated");
-        target.revision = revision;
+        target.revision = next_revision(target.revision, "assembly variant", id.to_string())?;
         target.semantic_digest = digest("rspice-assembly-variant-semantic/v1", &definition)?;
         target.definition = definition;
-        candidate.validate()?;
-        *self = candidate;
-        Ok(revision)
+        Ok(target.revision)
+    }
+
+    /// What variant `id` does to each part once its ancestors are layered
+    /// beneath it, leaving out the parts it leaves as the base design has
+    /// them. Reads the chain as stored, without validating it first.
+    fn layered_overrides(
+        &self,
+        id: AssemblyVariantId,
+    ) -> BTreeMap<SchematicObjectKey, VariantObjectOverride> {
+        let mut chain = Vec::new();
+        let mut seen = HashSet::new();
+        let mut cursor = self.find(id);
+        while let Some(variant) = cursor {
+            if !seen.insert(variant.id) {
+                break;
+            }
+            chain.push(variant);
+            cursor = variant
+                .definition
+                .parent
+                .as_ref()
+                .and_then(|parent| self.find(parent.id));
+        }
+        let mut overrides = BTreeMap::new();
+        for variant in chain.into_iter().rev() {
+            if variant.definition.inheritance == VariantInheritance::IndependentReviewedCopy {
+                overrides.clear();
+            }
+            overrides.extend(variant.definition.overrides.clone());
+        }
+        // A plain Fitted has done its work once it has hidden what an
+        // ancestor did: the part is as the base design has it.
+        overrides.retain(|_, change: &mut VariantObjectOverride| !change.is_plain_fitted());
+        overrides
     }
 
     pub fn remove(
@@ -503,14 +697,22 @@ impl AssemblyVariantCatalog {
     }
 
     pub fn set_active(&mut self, id: AssemblyVariantId) -> Result<(), DesignManagementError> {
+        self.choose(Some(id))
+    }
+
+    /// Make `id` the variant the design is netlisted, drawn and inspected
+    /// as, or with `None` the base design.
+    pub fn choose(&mut self, id: Option<AssemblyVariantId>) -> Result<(), DesignManagementError> {
         self.validate()?;
-        if self.find(id).is_none() {
+        if let Some(id) = id
+            && self.find(id).is_none()
+        {
             return Err(DesignManagementError::MissingReference {
                 domain: "assembly variant",
                 identity: id.to_string(),
             });
         }
-        self.active_variant_id = Some(id);
+        self.active_variant_id = id;
         Ok(())
     }
 
@@ -544,13 +746,7 @@ impl AssemblyVariantCatalog {
                 semantic_digest: variant.semantic_digest,
             })
             .collect::<Vec<_>>();
-        let mut overrides = BTreeMap::new();
-        for variant in chain {
-            if variant.definition.inheritance == VariantInheritance::IndependentReviewedCopy {
-                overrides.clear();
-            }
-            overrides.extend(variant.definition.overrides.clone());
-        }
+        let overrides = self.layered_overrides(id);
         #[derive(Serialize)]
         struct Material<'a> {
             variant_id: AssemblyVariantId,
@@ -576,27 +772,32 @@ impl AssemblyVariantCatalog {
         })
     }
 
+    /// Compare two choices part by part; `None` on either side is the base
+    /// design, which overrides nothing.
     pub fn compare(
         &self,
-        reference_id: AssemblyVariantId,
-        comparison_id: AssemblyVariantId,
+        reference_id: Option<AssemblyVariantId>,
+        comparison_id: Option<AssemblyVariantId>,
     ) -> Result<VariantComparison, DesignManagementError> {
         if reference_id == comparison_id {
             return Err(DesignManagementError::SameVariantComparison);
         }
-        let reference = self.resolve(reference_id)?;
-        let comparison = self.resolve(comparison_id)?;
-        let objects = reference
-            .overrides
+        self.validate()?;
+        let reference = reference_id.map(|id| self.resolve(id)).transpose()?;
+        let comparison = comparison_id.map(|id| self.resolve(id)).transpose()?;
+        let empty = BTreeMap::new();
+        let reference_overrides = reference.as_ref().map_or(&empty, |side| &side.overrides);
+        let comparison_overrides = comparison.as_ref().map_or(&empty, |side| &side.overrides);
+        let objects = reference_overrides
             .keys()
-            .chain(comparison.overrides.keys())
+            .chain(comparison_overrides.keys())
             .cloned()
             .collect::<BTreeSet<_>>();
         let differences = objects
             .into_iter()
             .filter_map(|object| {
-                let left = reference.overrides.get(&object);
-                let right = comparison.overrides.get(&object);
+                let left = reference_overrides.get(&object);
+                let right = comparison_overrides.get(&object);
                 if left == right {
                     return None;
                 }
@@ -616,27 +817,29 @@ impl AssemblyVariantCatalog {
             .collect::<Vec<_>>();
         #[derive(Serialize)]
         struct Material<'a> {
-            reference_id: AssemblyVariantId,
-            comparison_id: AssemblyVariantId,
-            reference_digest: ContentDigest,
-            comparison_digest: ContentDigest,
+            reference_id: Option<AssemblyVariantId>,
+            comparison_id: Option<AssemblyVariantId>,
+            reference_digest: Option<ContentDigest>,
+            comparison_digest: Option<ContentDigest>,
             differences: &'a [VariantDifference],
         }
+        let reference_digest = reference.as_ref().map(|side| side.semantic_digest);
+        let comparison_digest = comparison.as_ref().map(|side| side.semantic_digest);
         let semantic_digest = digest(
             "rspice-assembly-variant-comparison-semantic/v1",
             &Material {
                 reference_id,
                 comparison_id,
-                reference_digest: reference.semantic_digest,
-                comparison_digest: comparison.semantic_digest,
+                reference_digest,
+                comparison_digest,
                 differences: &differences,
             },
         )?;
         Ok(VariantComparison {
             reference_id,
             comparison_id,
-            reference_digest: reference.semantic_digest,
-            comparison_digest: comparison.semantic_digest,
+            reference_digest,
+            comparison_digest,
             differences,
             semantic_digest,
         })

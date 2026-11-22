@@ -99,6 +99,9 @@ pub(super) fn normalize_variant_definition(
             VariantObjectOverride::DoNotPopulate { approval_reference } => {
                 *approval_reference = normalize_text(approval_reference);
             }
+            VariantObjectOverride::Fitted { value_override } => {
+                *value_override = value_override.take().map(|value| normalize_text(&value));
+            }
         }
     }
     definition
@@ -212,7 +215,12 @@ pub(super) fn validate_variant_definition(
                 validate_substitution(replacement)?;
             }
             VariantObjectOverride::DoNotPopulate { approval_reference } => {
-                validate_value("DNP approval reference", approval_reference, false)?;
+                validate_value("do-not-populate reason", approval_reference, true)?;
+            }
+            VariantObjectOverride::Fitted { value_override } => {
+                if let Some(value) = value_override {
+                    validate_value("variant value", value, false)?;
+                }
             }
         }
     }

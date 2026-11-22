@@ -417,7 +417,8 @@ pub(super) fn variants_manager_body(
                 crate::state::VariantObjectOverride::Substitute { replacement } => {
                     Some(replacement)
                 }
-                crate::state::VariantObjectOverride::DoNotPopulate { .. } => None,
+                crate::state::VariantObjectOverride::DoNotPopulate { .. }
+                | crate::state::VariantObjectOverride::Fitted { .. } => None,
             })
             .collect::<Vec<_>>();
         let equivalent = substitutions

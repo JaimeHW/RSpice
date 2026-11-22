@@ -922,6 +922,45 @@ fn a_primitive_replacement_uses_the_requested_schematic_views_ports() {
 }
 
 #[test]
+fn a_value_override_changes_the_parts_value_and_keeps_the_part() {
+    let (mut workspace, libraries, mut top) = fixture(false);
+    connect_testbench(&mut top, &workspace, &libraries);
+    let owner = CellViewRef::new("work", "div", "schematic");
+    let source_id = workspace.content.schematic_buffers[&owner.key()]
+        .document()
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::Resistor)
+        .unwrap()
+        .id;
+    activate(
+        &mut workspace,
+        &owner,
+        source_id,
+        VariantObjectOverride::Fitted {
+            value_override: Some("4k".to_owned()),
+        },
+    );
+    let projection = workspace
+        .design_projection(&libraries, &workspace.content.active_view, &top)
+        .unwrap();
+    let placed = projection.schematic_buffers()[&owner.key()]
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == source_id)
+        .unwrap();
+    assert_eq!(
+        placed.kind,
+        ComponentType::Resistor,
+        "the part is not rebound"
+    );
+    assert!(placed.library_cell.is_none());
+    assert_eq!(placed.value, "4k");
+    assert!((source_current(&projection, &libraries) + 5.0 / 4000.0).abs() < 1e-12);
+}
+
+#[test]
 fn a_variant_replacement_owns_the_plan_and_emitted_master() {
     for configured in [false, true] {
         let (mut workspace, libraries, top) = fixture(configured);

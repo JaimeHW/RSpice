@@ -1743,20 +1743,211 @@ fn variant_resolution_is_immutable_and_comparison_does_not_mutate() {
     let resolved = catalog.resolve(child).unwrap();
     assert_eq!(resolved.lineage.len(), 2);
     assert_eq!(resolved.overrides.len(), 2);
-    let comparison = catalog.compare(base, child).unwrap();
+    let comparison = catalog.compare(Some(base), Some(child)).unwrap();
     assert_eq!(comparison.differences.len(), 1);
     assert_eq!(catalog, before, "comparison must be read-only");
+}
 
-    let base_revision = catalog.find(base).unwrap().revision();
+#[test]
+fn the_base_design_can_be_chosen_once_variants_exist() {
+    let mut catalog = AssemblyVariantCatalog::default();
+    let industrial = catalog
+        .create(variant_draft(
+            "Industrial",
+            None,
+            BTreeMap::from([(
+                object_key(10),
+                VariantObjectOverride::DoNotPopulate {
+                    approval_reference: String::new(),
+                },
+            )]),
+        ))
+        .unwrap();
+    assert_eq!(catalog.active_variant_id(), Some(industrial));
+
+    catalog.choose(None).unwrap();
+    assert_eq!(catalog.active_variant_id(), None);
+    assert!(catalog.active().is_none());
+    let decoded: AssemblyVariantCatalog =
+        serde_json::from_str(&serde_json::to_string(&catalog).unwrap())
+            .expect("a catalog with variants and the base design chosen loads");
+    assert_eq!(decoded.active_variant_id(), None);
+
+    // Compared with the base design, the variant's one change is listed.
+    let comparison = catalog.compare(None, Some(industrial)).unwrap();
+    assert_eq!(comparison.differences.len(), 1);
+    assert_eq!(comparison.differences[0].object, object_key(10));
+    assert_eq!(comparison.differences[0].reference, None);
     assert!(matches!(
-        catalog.update(
-            base,
-            base_revision,
-            variant_draft("Industrial revised", None, BTreeMap::new()),
+        catalog.compare(None, None),
+        Err(DesignManagementError::SameVariantComparison)
+    ));
+}
+
+#[test]
+fn a_parent_edit_repins_its_children_and_flags_their_substitutes_it_touched() {
+    let mut catalog = AssemblyVariantCatalog::default();
+    let industrial = catalog
+        .create(variant_draft("Industrial", None, BTreeMap::new()))
+        .unwrap();
+    let automotive = catalog
+        .create(variant_draft(
+            "Automotive",
+            Some(industrial),
+            BTreeMap::from([
+                (
+                    object_key(10),
+                    VariantObjectOverride::Substitute {
+                        replacement: substitution(
+                            "resistor_aecq",
+                            VariantQualificationState::Current,
+                        ),
+                    },
+                ),
+                (
+                    object_key(11),
+                    VariantObjectOverride::Substitute {
+                        replacement: substitution(
+                            "capacitor_aecq",
+                            VariantQualificationState::Current,
+                        ),
+                    },
+                ),
+            ]),
+        ))
+        .unwrap();
+    let racing = catalog
+        .create(variant_draft("Racing", Some(automotive), BTreeMap::new()))
+        .unwrap();
+
+    let revision = catalog.find(industrial).unwrap().revision();
+    let new_revision = catalog
+        .set_overrides(
+            industrial,
+            revision,
+            BTreeMap::from([(
+                object_key(10),
+                Some(VariantObjectOverride::DoNotPopulate {
+                    approval_reference: String::new(),
+                }),
+            )]),
+        )
+        .expect("a variant with children can be edited");
+    assert_eq!(new_revision, revision + 1);
+    catalog
+        .validate()
+        .expect("every child is pinned to its parent's new revision");
+
+    let parent = catalog.find(industrial).unwrap();
+    let child = catalog.find(automotive).unwrap();
+    let pin = child.definition().parent.as_ref().unwrap();
+    assert_eq!(
+        (pin.revision, pin.semantic_digest),
+        (parent.revision(), parent.semantic_digest())
+    );
+    let qualification = |object| match &child.definition().overrides[&object_key(object)] {
+        VariantObjectOverride::Substitute { replacement } => replacement.qualification,
+        other => panic!("expected a substitute, found {other:?}"),
+    };
+    assert_eq!(
+        qualification(10),
+        VariantQualificationState::ReviewRequired,
+        "the parent's edit touched this part"
+    );
+    assert_eq!(
+        qualification(11),
+        VariantQualificationState::Current,
+        "the parent's edit left this part alone"
+    );
+    let grandchild = catalog.find(racing).unwrap();
+    assert_eq!(
+        grandchild.definition().parent.as_ref().unwrap().revision,
+        child.revision(),
+        "re-pinning reaches every generation"
+    );
+}
+
+#[test]
+fn a_child_can_fit_a_part_its_parent_leaves_off() {
+    let mut catalog = AssemblyVariantCatalog::default();
+    let industrial = catalog
+        .create(variant_draft(
+            "Industrial",
+            None,
+            BTreeMap::from([(
+                object_key(10),
+                VariantObjectOverride::DoNotPopulate {
+                    approval_reference: "ECO-7".to_owned(),
+                },
+            )]),
+        ))
+        .unwrap();
+    let automotive = catalog
+        .create(variant_draft(
+            "Automotive",
+            Some(industrial),
+            BTreeMap::from([(
+                object_key(10),
+                VariantObjectOverride::Fitted {
+                    value_override: None,
+                },
+            )]),
+        ))
+        .unwrap();
+    assert!(
+        catalog.resolve(automotive).unwrap().overrides.is_empty(),
+        "the child has the part as the base design has it"
+    );
+    assert_eq!(catalog.resolve(industrial).unwrap().overrides.len(), 1);
+}
+
+#[test]
+fn a_value_override_changes_the_value_alone() {
+    let mut catalog = AssemblyVariantCatalog::default();
+    let id = catalog
+        .create(variant_draft("Low power", None, BTreeMap::new()))
+        .unwrap();
+    let revision = catalog.find(id).unwrap().revision();
+    catalog
+        .set_overrides(
+            id,
+            revision,
+            BTreeMap::from([(
+                object_key(10),
+                Some(VariantObjectOverride::Fitted {
+                    value_override: Some(" 2k ".to_owned()),
+                }),
+            )]),
+        )
+        .unwrap();
+    let resolved = catalog.resolve(id).unwrap();
+    assert_eq!(
+        resolved.overrides[&object_key(10)].value_override(),
+        Some("2k"),
+        "the value is stored as entered, trimmed"
+    );
+
+    let before = catalog.clone();
+    let revision = catalog.find(id).unwrap().revision();
+    assert!(matches!(
+        catalog.set_overrides(
+            id,
+            revision,
+            BTreeMap::from([(
+                object_key(10),
+                Some(VariantObjectOverride::Fitted {
+                    value_override: Some(String::new()),
+                }),
+            )]),
         ),
-        Err(DesignManagementError::VariantHasDependents(id)) if id == base
+        Err(DesignManagementError::InvalidText { .. })
     ));
     assert_eq!(catalog, before);
+
+    catalog
+        .set_overrides(id, revision, BTreeMap::from([(object_key(10), None)]))
+        .unwrap();
+    assert!(catalog.resolve(id).unwrap().overrides.is_empty());
 }
 
 #[test]

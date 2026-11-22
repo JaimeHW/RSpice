@@ -230,7 +230,7 @@ pub(super) fn commit_design_management_subflow(
                 .as_ref()
                 .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?
                 .variants()
-                .compare(reference, comparison)
+                .compare(Some(reference), Some(comparison))
                 .map_err(|error| error.to_string())?;
             let (difference_count, class_label) = match inputs.difference_classes {
                 VariantDifferenceClasses::DevicesValuesDnpModels => {
@@ -278,18 +278,20 @@ pub(super) fn commit_design_management_subflow(
                             let in_scope = inputs.matrix_scope
                                 == VariantMatrixScope::AllControlledInstances
                                 || object.cell_view_key() == owner_key;
+                            let replacement = match value {
+                                crate::state::VariantObjectOverride::Substitute { replacement } => {
+                                    Some(replacement.clone())
+                                }
+                                crate::state::VariantObjectOverride::DoNotPopulate { .. } => None,
+                                crate::state::VariantObjectOverride::Fitted { .. } => {
+                                    return None;
+                                }
+                            };
                             in_scope.then(|| VariantMatrixEdit {
                                 variant_id: variant.id(),
                                 expected_revision: variant.revision(),
                                 object: object.clone(),
-                                replacement: match value {
-                                    crate::state::VariantObjectOverride::Substitute {
-                                        replacement,
-                                    } => Some(replacement.clone()),
-                                    crate::state::VariantObjectOverride::DoNotPopulate {
-                                        ..
-                                    } => None,
-                                },
+                                replacement,
                             })
                         })
                 })
