@@ -135,7 +135,6 @@ impl HardcopyPreviewPage {
     }
 
     #[must_use]
-    #[cfg(test)]
     pub const fn dpi(&self) -> u16 {
         self.dpi
     }
@@ -143,6 +142,33 @@ impl HardcopyPreviewPage {
     #[must_use]
     pub fn rgba(&self) -> &[u8] {
         &self.rgba
+    }
+
+    /// The box around every pixel of this preview that is not bare paper,
+    /// in its own pixels; the paper is `plan`'s, as the preview shows it.
+    /// `None` for a page with no ink or no opaque paper, and in the browser,
+    /// which prints through its own dialog.
+    #[must_use]
+    pub fn ink(&self, plan: &HardcopyPlan) -> Option<InkBounds> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let paper = background_color(plan)?;
+            let paper = if self.soft_proof_applied {
+                let mut pixel = [paper.red, paper.green, paper.blue, u8::MAX];
+                apply_soft_proof_preview(&mut pixel);
+                Rgb8::new(pixel[0], pixel[1], pixel[2])
+            } else {
+                paper
+            };
+            opaque_page_ink(&self.rgba, self.width, paper)
+                .ok()
+                .flatten()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = plan;
+            None
+        }
     }
 
     #[must_use]

@@ -13,6 +13,7 @@ use super::*;
 use crate::workbench::hardcopy_adapters::print::{
     PrinterCapabilitySnapshot, PrinterPaperCapability,
 };
+use rspice_hardcopy::render::{PrinterMarginShortfall, printer_margin_shortfall};
 use rspice_hardcopy_contract::PrinterRasterGeometry;
 
 /// A sheet's paper and a printer's are the same paper within this, as the
@@ -88,6 +89,93 @@ impl HardcopyDialogState {
             return;
         };
         self.lay_out_unsaved_sheet(&inside);
+    }
+
+    /// How far the ink of the page in preview reaches into the strip the
+    /// selected printer cannot print, measured on the preview against the
+    /// printable area the platform states for the paper. `None` when every
+    /// mark prints, when no printer is the target, or when nothing states
+    /// the printer's area.
+    pub(crate) fn preview_printer_shortfall(&self) -> Option<PrinterMarginShortfall> {
+        if self.format != OutputFormat::NativePrinter {
+            return None;
+        }
+        let job = self.printer_job.as_ref()?;
+        if !self
+            .printer_capabilities
+            .as_ref()?
+            .states_printable_area(job.selected_paper_id())
+        {
+            return None;
+        }
+        let preview = self.preview.as_ref()?;
+        let ink = preview.ink(self.preview_plan.as_ref()?)?;
+        // The printer's rectangle, in the preview's pixels: its margins grow
+        // to whole preview pixels, so a mark the preview shows inside them is
+        // inside them on paper too.
+        let geometry = job.raster_geometry();
+        let (width, height) = geometry.physical_size_px();
+        let (x, y, printable_width, printable_height) = geometry.printable_rect_px();
+        let across = |pixels: u32, from: u32, to: u32| {
+            u32::try_from((u64::from(pixels) * u64::from(to)).div_ceil(u64::from(from.max(1))))
+                .unwrap_or(u32::MAX)
+        };
+        let (preview_width, preview_height) = (preview.width(), preview.height());
+        let left = across(x, width, preview_width);
+        let top = across(y, height, preview_height);
+        let right = across(
+            width.saturating_sub(x.saturating_add(printable_width)),
+            width,
+            preview_width,
+        );
+        let bottom = across(
+            height.saturating_sub(y.saturating_add(printable_height)),
+            height,
+            preview_height,
+        );
+        printer_margin_shortfall(
+            Some(ink),
+            (preview_width, preview_height),
+            (
+                left,
+                top,
+                preview_width.saturating_sub(left.saturating_add(right)),
+                preview_height.saturating_sub(top.saturating_add(bottom)),
+            ),
+            preview.dpi(),
+        )
+    }
+
+    /// Whether a 1:1 page goes to a printer that states no printable area,
+    /// so nothing can check the page against what it can print.
+    pub(crate) fn printer_area_unstated(&self) -> bool {
+        self.format == OutputFormat::NativePrinter
+            && self.scale == ScaleMode::EngineeringOneToOne
+            && self.printer_job.as_ref().is_some_and(|job| {
+                self.printer_capabilities
+                    .as_ref()
+                    .is_some_and(|capabilities| {
+                        !capabilities.states_printable_area(job.selected_paper_id())
+                    })
+            })
+    }
+
+    /// Fit the page to what the selected printer can print: the widest strip
+    /// it cannot print becomes the margin on every side, so the sheet stays
+    /// centred on its paper, and the content is scaled to fit inside it.
+    pub(crate) fn fit_to_printer_printable_area(&mut self) {
+        let Some(job) = self.printer_job.as_ref() else {
+            return;
+        };
+        let margin = format_length(
+            widest_unprintable_margin(job.raster_geometry(), job.resolution_dpi()),
+            self.display_unit,
+        );
+        self.margin_top.clone_from(&margin);
+        self.margin_right.clone_from(&margin);
+        self.margin_bottom.clone_from(&margin);
+        self.margin_left = margin;
+        self.scale = ScaleMode::FitPrintableArea;
     }
 
     /// The unsaved sheet, while the page is still as the dialog last laid it.

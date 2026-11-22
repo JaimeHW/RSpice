@@ -347,6 +347,33 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
             };
         });
     });
+    // A page sent to a printer is checked against what the printer can
+    // print, and the remedy is one click away.
+    if let Some(shortfall) = draft.preview_printer_shortfall() {
+        let unit = match draft.display_unit {
+            LengthUnit::Inches => "in",
+            LengthUnit::Millimetres => "mm",
+        };
+        let length = |micrometres: u64| {
+            format_length_local(Length::from_micrometres(micrometres), draft.display_unit)
+        };
+        if action_row(
+            ui,
+            "Fit to printable area",
+            &format!(
+                "marks {} {unit} from the paper's edge · this printer can't print within {} {unit}",
+                length(shortfall.ink_um()),
+                length(shortfall.margin_um())
+            ),
+        ) {
+            draft.fit_to_printer_printable_area();
+        }
+    } else if draft.printer_area_unstated() {
+        panel_note(
+            ui,
+            "This printer does not state the area it can print, so a 1:1 page cannot be checked against it.",
+        );
+    }
     form_row(ui, |row| {
         row.narrow(|ui| {
             length_field(ui, "Tile overlap", &mut draft.overlap, draft.display_unit);
@@ -1298,6 +1325,136 @@ mod tests {
         // reachable everywhere and its row is always there to prove the panel
         // was drawn at all.
         assert!(row("Layer, trace, and marker mapping…"));
+    }
+
+    /// A 1:1 sheet sent to a printer is checked against what the printer can
+    /// print: with its frame inside the strip the printer cannot reach, the
+    /// page section offers "Fit to printable area", and that one click
+    /// leaves a page whose every mark prints.
+    #[test]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    fn a_one_to_one_print_offers_to_fit_what_the_printer_can_print() {
+        use crate::workbench::hardcopy_adapters::print::{
+            PaperEdges, PrinterCapabilityDescriptor, PrinterCapabilitySnapshot,
+            PrinterPaperCapability, PrinterResolutionCapability,
+        };
+        use rspice_hardcopy_contract::{
+            DuplexMode, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry,
+        };
+
+        let mut draft = sheet_draft();
+        draft.workflow = HardcopyWorkflow::Print;
+        draft.format = OutputFormat::NativePrinter;
+        draft.embed_fonts = false;
+        draft.searchable_text = false;
+        draft.scale = ScaleMode::EngineeringOneToOne;
+        // A printer that cannot print within 12 mm of the edge of its paper.
+        let margin_um = 12_000;
+        let paper = PrinterPaperCapability::try_new(1, "A4", 210_000, 297_000)
+            .unwrap()
+            .with_unprintable_edges(PaperEdges {
+                left: margin_um,
+                top: margin_um,
+                right: margin_um,
+                bottom: margin_um,
+            })
+            .unwrap();
+        let capabilities =
+            PrinterCapabilitySnapshot::try_from_descriptor(PrinterCapabilityDescriptor {
+                device_id: "studio-inkjet".to_owned(),
+                display_name: "Studio inkjet".to_owned(),
+                driver_name: "RSpice test driver".to_owned(),
+                port_name: "TESTPORT:".to_owned(),
+                driver_spec_version: 1,
+                driver_version: 1,
+                papers: vec![paper],
+                trays: Vec::new(),
+                resolutions: vec![PrinterResolutionCapability::try_new(100, 100).unwrap()],
+                duplex_modes: vec![DuplexMode::Off],
+                maximum_copies: 1,
+                supports_collation: false,
+                supports_color: true,
+            })
+            .unwrap();
+        let preview_plan = draft.preview_plan.clone().expect("the sheet previews");
+        let page = &preview_plan.pagination().pages()[0];
+        let (paper_width, paper_height) = page.geometry().physical_size();
+        let (width_um, height_um) = (paper_width.micrometres(), paper_height.micrometres());
+        let pixels = |um: u64| u32::try_from(um * 100 / 25_400).unwrap();
+        let (width, height, margin) = (pixels(width_um), pixels(height_um), pixels(margin_um));
+        let job = PrinterJobSettings::try_new(
+            capabilities.content_digest(),
+            "1",
+            PrinterRasterGeometry::try_new(
+                width,
+                height,
+                margin,
+                margin,
+                width - 2 * margin,
+                height - 2 * margin,
+            )
+            .unwrap(),
+            PrinterMediaSource::AutomaticCompatibleTray,
+            100,
+            DuplexMode::Off,
+            1,
+            false,
+        )
+        .unwrap();
+        draft.printer_capabilities = Some(capabilities);
+        draft.set_printer("studio-inkjet".to_owned(), job);
+        let preview = |draft: &mut HardcopyDialogState| {
+            draft.refresh_preview();
+            let plan = draft.preview_plan.clone().expect("the page previews");
+            let document = draft.resolved_document.as_ref().expect("resolved source");
+            let page = HardcopyRenderer::render_preview_pages_resolved(
+                &plan,
+                document,
+                metadata(false),
+                &[0],
+                100,
+                || false,
+            )
+            .expect("the page renders")
+            .remove(0);
+            draft.preview = Some(std::sync::Arc::new(page));
+        };
+        preview(&mut draft);
+        let shortfall = draft
+            .preview_printer_shortfall()
+            .expect("the 1:1 frame reaches into the printer's margin");
+        assert!(shortfall.ink_um() < margin_um, "{shortfall:?}");
+
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let pass = |draft: &mut HardcopyDialogState, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(620.0, 900.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = page_panel(ui, draft);
+                },
+            )
+        };
+        let fit = |output: &egui::FullOutput| {
+            controls(output)
+                .into_iter()
+                .find(|(role, name, _)| *role == Role::Button && name == "Fit to printable area")
+                .map(|(_, _, rect)| rect)
+        };
+        let output = pass(&mut draft, Vec::new());
+        let button = fit(&output).expect("the page section offers to fit");
+        let _ = pass(&mut draft, click(button.center()));
+        assert_eq!(draft.scale, ScaleMode::FitPrintableArea);
+
+        preview(&mut draft);
+        assert_eq!(draft.preview_printer_shortfall(), None);
+        let output = pass(&mut draft, Vec::new());
+        assert_eq!(fit(&output), None, "nothing left to fit");
     }
 
     /// `RenderSetup::validate` accepts embedded fonts on their own, refuses
