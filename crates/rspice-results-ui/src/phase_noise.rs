@@ -6,7 +6,7 @@ use crate::waves::ReadoutPolicy;
 use egui::Ui;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::phase_noise::{
-    exact_retained_value_at, retained_device_noise_shares, retained_measurement,
+    retained_device_noise_shares, retained_measurement, spot_level_at,
 };
 use rspice_results::waveform::RetainedTrace;
 use rspice_ui_kit::panels::section_header;
@@ -113,7 +113,7 @@ pub fn show(
         Trace::new(model.offset_hz, model.level_dbc_per_hz, colors.traces[0])
             .cache_key(model.cache_key),
     );
-    if let Some(level) = exact_retained_value_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6) {
+    if let Some(level) = spot_level_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6) {
         spec.markers.push(plot::Marker {
             x: 1.0e6,
             y: level,
@@ -189,7 +189,7 @@ pub fn right_panel(
             true,
         ));
     }
-    if let Some(level) = exact_retained_value_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6) {
+    if let Some(level) = spot_level_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6) {
         rows.push((
             "Spot L(f) at 1 MHz",
             fmt_si_significant(level, "dBc/Hz", digits),
