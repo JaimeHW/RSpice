@@ -114,10 +114,17 @@ pub(crate) fn answer_surface_requests(state: &mut AppState) {
 
 /// Show the generated netlist at the first card that connects `net`, with
 /// the manager closed; a net no card names lands on the first mapped line.
-/// Nothing is typed into a filter: the jump is the answer. The caller has put
-/// the generated netlist in front the way every jump to it does.
+/// Nothing is typed into a filter: the jump is the answer, and a filter left
+/// in the Netlist workspace's navigator is cleared, so the navigator lists
+/// the schematic source of the line it lands on. The caller has put the
+/// generated netlist in front the way every jump to it does.
 pub(in crate::workbench) fn open_connectivity_source_map(state: &mut AppState, net: &str) {
     state.design.connectivity_manager.close();
+    state
+        .workbench
+        .navigator_trees
+        .filter_mut(Workspace::Netlist)
+        .clear();
     let source_map = state
         .model
         .netlist_artifacts

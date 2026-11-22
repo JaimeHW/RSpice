@@ -192,3 +192,36 @@ fn the_connectivity_source_map_lands_on_the_nets_first_card() {
     assert_eq!(app.state.workbench.navigator_filter(), "");
     assert_generated_in_front(&mut app, ".param rmodel=1k", "from the source map");
 }
+
+/// A filter left in the Netlist workspace's navigator would hide the
+/// schematic source of the line the jump lands on: the jump clears it, and
+/// the navigator lists that source.
+#[test]
+fn the_connectivity_source_map_clears_a_filter_left_in_the_netlist_navigator() {
+    let mut app = include_in_front_app();
+    app.state
+        .workbench
+        .set_navigator_filter("no card is named this");
+    app.state.workbench.activate(Workspace::Design);
+
+    app.answer_design_request(DesignRequest::OpenSourceMap(String::new()));
+
+    assert_eq!(
+        app.state
+            .workbench
+            .navigator_trees
+            .filter(Workspace::Netlist),
+        "",
+        "the jump leaves no filter in the Netlist navigator"
+    );
+    app.state.workbench.navigator_visible = true;
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    let output = frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    let painted = painted(&output).to_lowercase();
+    assert!(
+        painted.contains("schematic source"),
+        "the navigator lists the line's schematic source:\n{painted}"
+    );
+}
