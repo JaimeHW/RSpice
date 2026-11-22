@@ -205,8 +205,8 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 }
 /// Put the stepping cursor on `time` on the active analysis' waveform
 /// strip, scrolled into view, and turn to the Waves sheet when `show_waves`
-/// asks. An analysis Waves does not plot keeps the cursor for the sheet
-/// that does.
+/// asks and Waves plots the analysis. One it does not plot keeps the cursor
+/// on its own strip, and the sheet stays.
 pub(super) fn jump_to_time(
     state: &mut ResultsParts<'_>,
     tokens: &Tokens,
@@ -222,6 +222,8 @@ pub(super) fn jump_to_time(
     }) else {
         return;
     };
+    let waves_plots_it =
+        super::viewer_availability(state.results_reads(), ResultViewer::Waves).available;
     let presentation = state.results_reads().presentation_policy();
     let models = super::waves::cached_models(
         &state.model.simulation,
@@ -233,6 +235,9 @@ pub(super) fn jump_to_time(
     match models.iter().find(|model| model.analysis_key == key) {
         Some(model) => {
             rspice_results_ui::waves::navigation::place_stepping_cursor(session, model, time);
+            if show_waves && waves_plots_it {
+                session.viewer = ResultViewer::Waves;
+            }
         }
         None => {
             let id = session.stepping_cursor;
@@ -244,9 +249,6 @@ pub(super) fn jump_to_time(
             session.arm_cursor_tool();
             session.cursors.set(id, time);
         }
-    }
-    if show_waves {
-        session.viewer = ResultViewer::Waves;
     }
 }
 

@@ -837,6 +837,17 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
 /// widest of its rows.
 const SIZING_ROWS: usize = 32;
 
+/// The tone a message's severity is set in: errors and fatal ends in the
+/// error tone, warnings and unchecked outputs in the warning tone.
+fn severity_tone(severity: &str) -> rspice_ui_kit::widgets::table::Tone {
+    use rspice_ui_kit::widgets::table::Tone;
+    match severity {
+        "Error" | "Fatal" | "Assertion error" => Tone::Error,
+        "Warning" | "Assertion" | "Unchecked" => Tone::Caution,
+        _ => Tone::Neutral,
+    }
+}
+
 /// The Messages list: every record and violation of the run's checks the
 /// search and the window keep. A click puts the cursor on its time; opening
 /// a row, or Show in Waves, goes there on the waveform sheet.
@@ -895,7 +906,7 @@ fn show_messages<W: AsRef<RetainedWaveform>>(
                 Cell::number(numbers.shown(message.time, "s"))
                     .hint(numbers.exact(message.time, "s"))
                     .sort_by(SortKey::Number(message.time)),
-                Cell::text(message.severity),
+                Cell::text(message.severity).toned(severity_tone(message.severity)),
                 words(&message.text),
                 words(&message.scope),
                 if message.source.is_empty() {
@@ -1069,16 +1080,16 @@ pub fn domain_bar(ui: &mut Ui, bar: EventBar<'_>) -> EventBarResponse {
             };
         }
     }
-    let field = ui.add(
+    // The field stands at the bar's control height, its words on its centre.
+    let height = crate::chrome::ResultBarMetrics::of(ui).instrument_control;
+    ui.add_sized(
+        [SEARCH_WIDTH, height],
         egui::TextEdit::singleline(&mut filter.search)
             .id(egui::Id::new("rspice.results.events.search"))
-            .desired_width(SEARCH_WIDTH)
             .font(theme::field_mono())
+            .vertical_align(egui::Align::Center)
             .hint_text("Search…"),
     );
-    if field.changed() {
-        filter.search = filter.search.replace('\n', "");
-    }
     let messages_shown = bar.messages > 0 && filter.page == EventPage::Messages;
     display_menu(ui, filter, if messages_shown { None } else { bar.radix });
     if messages_shown

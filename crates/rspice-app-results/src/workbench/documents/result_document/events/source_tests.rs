@@ -1066,10 +1066,39 @@ fn the_event_tables_state_their_numbers_at_the_readers_digits() {
 }
 
 /// A message row's time is where the stepping cursor goes, on the
-/// analysis' strip; Show in Waves also turns to the waveform sheet.
+/// analysis' strip; Show in Waves also turns to the waveform sheet, when
+/// Waves plots the analysis, and leaves an events-only one on its sheet.
 #[test]
 fn a_message_row_puts_the_cursor_on_its_time_and_shows_it_in_waves() {
-    let mut state = mixed_event_state();
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 5.0e-9, 10.0e-9],
+                vec![0.0, 1.0, 0.0],
+                "#ffffff",
+            ),
+        ]);
+    analysis.result_payload = Some(AnalysisResultPayload::TransientEvents {
+        voltage_impulses: None,
+        current_impulses: None,
+        digital_traces: vec![crate::state::DigitalEventTraceEvidence {
+            node_name: "clk".to_owned(),
+            points: [(0.0, 0), (5.0e-9, 1), (10.0e-9, 0)]
+                .iter()
+                .map(
+                    |(time_s, value_code)| crate::state::DigitalEventPointEvidence {
+                        time_s: *time_s,
+                        value_code: *value_code,
+                    },
+                )
+                .collect(),
+        }],
+        digital_buses: vec![],
+        real_traces: vec![],
+        hdl_sources: Vec::new(),
+    });
+    let mut state = state_with(analysis);
     state.results.results.session.viewer = ResultViewer::Events;
     let tokens = Tokens::default();
     jump_to_time(&mut state.results_parts(), &tokens, 5.0e-9, false);
@@ -1082,4 +1111,11 @@ fn a_message_row_puts_the_cursor_on_its_time_and_shows_it_in_waves() {
     let session = &state.results.results.session;
     assert_eq!(session.cursors.get(session.stepping_cursor), Some(7.5e-9));
     assert_eq!(session.viewer, ResultViewer::Waves);
+
+    let mut events_only = mixed_event_state();
+    events_only.results.results.session.viewer = ResultViewer::Events;
+    jump_to_time(&mut events_only.results_parts(), &tokens, 7.5e-9, true);
+    let session = &events_only.results.results.session;
+    assert_eq!(session.cursors.get(session.stepping_cursor), Some(7.5e-9));
+    assert_eq!(session.viewer, ResultViewer::Events);
 }
