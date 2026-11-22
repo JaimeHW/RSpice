@@ -89,9 +89,6 @@ pub struct SelectionBulkFilterSession {
 }
 
 impl SelectionBulkFilterSession {
-    const MAX_SAVED_FILTERS: usize = 32;
-    const MAX_FILTER_NAME_BYTES: usize = 96;
-
     pub fn saved(&self) -> &[SavedSelectionBulkFilter] {
         &self.saved
     }
@@ -101,8 +98,11 @@ impl SelectionBulkFilterSession {
         if name.is_empty() {
             return Err("A saved filter name is required.".to_owned());
         }
-        if name.len() > Self::MAX_FILTER_NAME_BYTES || name.chars().any(char::is_control) {
-            return Err("The saved filter name is invalid or too long.".to_owned());
+        // The list scrolls and a long name is elided in it, so neither the
+        // count nor the length is held to a number; only a name the list
+        // could not show on one line is refused.
+        if name.chars().any(char::is_control) {
+            return Err("A saved filter name is one line of text.".to_owned());
         }
         if let Some(existing) = self
             .saved
@@ -112,12 +112,6 @@ impl SelectionBulkFilterSession {
             existing.name = name.to_owned();
             existing.filter = self.active.clone();
             return Ok(());
-        }
-        if self.saved.len() >= Self::MAX_SAVED_FILTERS {
-            return Err(format!(
-                "At most {} selection filters may be saved.",
-                Self::MAX_SAVED_FILTERS
-            ));
         }
         self.saved.push(SavedSelectionBulkFilter {
             name: name.to_owned(),
@@ -165,5 +159,26 @@ mod symbol_selection_tests {
         assert_eq!(filters.active.query, "C*");
         assert!(filters.remove("pAsSiVeS"));
         assert!(filters.saved().is_empty());
+    }
+
+    /// Filters are kept however many there are and however long their
+    /// names; they were held to 32, of at most 96 bytes each.
+    #[test]
+    fn any_number_of_filters_with_names_of_any_length_are_kept() {
+        let mut filters = SelectionBulkFilterSession::default();
+        let long = "Passives on the output stage, sorted by tolerance, ".repeat(4);
+        for index in 0..40 {
+            filters.active.query = format!("R{index}");
+            filters
+                .save_active(&format!("{long}{index:02}"))
+                .expect("the filter is kept");
+        }
+        assert_eq!(filters.saved().len(), 40);
+        assert!(filters.load(&format!("{long}39")));
+        assert_eq!(filters.active.query, "R39");
+        assert_eq!(
+            filters.save_active("two\nlines"),
+            Err("A saved filter name is one line of text.".to_owned())
+        );
     }
 }
