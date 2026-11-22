@@ -75,7 +75,7 @@ impl PropertyCatalog {
                 .with_description("Primary winding series resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
-                .with_unit("Ohm")
+                .with_unit("Ω")
                 .with_order(20)
                 .with_category("Primary"),
         );
@@ -95,7 +95,7 @@ impl PropertyCatalog {
                 .with_description("Secondary winding series resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
-                .with_unit("Ohm")
+                .with_unit("Ω")
                 .with_order(30)
                 .with_category("Secondary"),
         );
