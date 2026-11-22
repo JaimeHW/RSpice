@@ -2,7 +2,24 @@
 
 /// Format a count with correct singular/plural grammar.
 pub fn counted(count: usize, singular: &str, plural: &str) -> String {
-    format!("{count} {}", if count == 1 { singular } else { plural })
+    format!(
+        "{} {}",
+        grouped(count),
+        if count == 1 { singular } else { plural }
+    )
+}
+
+/// `count` with its thousands grouped, as a count is read: 1,082,401.
+pub fn grouped(count: usize) -> String {
+    let digits = count.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
 }
 
 /// A count of findings as every place that states one says it: errors

@@ -11,6 +11,7 @@
 //! selected rows' bindings in one edit.
 
 use super::*;
+use crate::ui::accessibility::counted;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -145,16 +146,15 @@ fn tab_header(
     let meta = match tab {
         ConfigurationTab::Instances => {
             let count = resolution.tables.instance_rows;
-            format!("{count} instance{}", plural_suffix(count))
+            counted(count, "instance", "instances")
         }
         ConfigurationTab::Cells => {
-            let count = resolution.cells.len();
-            let cells = format!("{count} cell{}", plural_suffix(count));
+            let cells = counted(resolution.cells.len(), "cell", "cells");
             match resolution.tables.bindings_not_in_design {
                 0 => cells,
                 unused => format!(
-                    "{cells} \u{b7} {unused} binding{} not in this design",
-                    plural_suffix(unused)
+                    "{cells} \u{b7} {} not in this design",
+                    counted(unused, "binding", "bindings")
                 ),
             }
         }

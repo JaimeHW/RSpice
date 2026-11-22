@@ -13,6 +13,7 @@ mod instances;
 mod menu;
 
 use super::*;
+use crate::ui::accessibility::{counted, grouped};
 
 use crate::workbench::app::dialogs::project::configuration::ConfigurationTransaction;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{
@@ -470,17 +471,19 @@ fn binding_status(resolution: &ConfigurationResolution) -> BindingStatus {
     let tables = &resolution.tables;
     let total = tables.total_instances;
     let unbound = tables.unbound_instances;
+    // A count is read as a magnitude: 1,082,401, grouped.
+    let of_total = counted(total, "instance", "instances");
     let mut text = if unbound == 0 {
-        format!("{total} of {total} instance{} bound", plural_suffix(total))
+        format!("{} of {of_total} bound", grouped(total))
     } else {
-        format!(
-            "{unbound} of {total} instance{} unbound",
-            plural_suffix(total)
-        )
+        format!("{} of {of_total} unbound", grouped(unbound))
     };
     let fallback = tables.fallback_instances;
     if fallback > 0 {
-        text.push_str(&format!(" \u{00b7} {fallback} bound by fallback"));
+        text.push_str(&format!(
+            " \u{00b7} {} bound by fallback",
+            grouped(fallback)
+        ));
     }
     BindingStatus {
         text,
