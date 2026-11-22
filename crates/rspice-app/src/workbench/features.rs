@@ -738,14 +738,17 @@ mod tests {
     }
 
     /// A lend for anything but an open menu, the deck page's while its menu
-    /// is closed among them, asks the dispatcher for the code feature's three
-    /// answers, the toolbar's every frame among them; the page's lend while
-    /// its menu is open asks for its menu's eight after them, and holds each
-    /// as the dispatcher gives it.
+    /// is closed among them, asks the dispatcher only for the code feature's
+    /// standing answers (none since one Run runs the deck in front or the
+    /// plan); the page's lend while its menu is open asks for every menu
+    /// answer after them, and holds each as the dispatcher gives it.
     #[test]
-    fn a_plain_lend_takes_three_answers_and_a_menu_lend_eleven() {
+    fn a_plain_lend_takes_the_standing_answers_and_a_menu_lend_adds_the_menu() {
         use rspice_app_code::workbench::code::CodeFeature;
+        use rspice_app_workbench::workbench::framework::feature::Feature;
 
+        let standing = <CodeFeature as Feature>::FOREIGN_AVAILABILITY.len();
+        let menu = <CodeFeature as Feature>::MENU_AVAILABILITY.len();
         let mut app = RSpiceApp::test_instance();
         let menu_answers: Vec<_> = CodeFeature::MENU_AVAILABILITY
             .iter()
@@ -753,14 +756,14 @@ mod tests {
             .collect();
         assert_eq!(
             cx_with_foreign_answers::<CodeFeature>(&mut app, |_| true).foreign_answers_taken(),
-            3
+            standing
         );
         assert_eq!(
             cx_with_menu_answers::<CodeFeature>(&mut app, |_| false).foreign_answers_taken(),
-            3
+            standing
         );
         let cx = cx_with_menu_answers::<CodeFeature>(&mut app, |_| true);
-        assert_eq!(cx.foreign_answers_taken(), 11);
+        assert_eq!(cx.foreign_answers_taken(), standing + menu);
         for (key, answer) in menu_answers {
             assert_eq!(cx.foreign_availability(key), answer, "{key:?}");
         }
