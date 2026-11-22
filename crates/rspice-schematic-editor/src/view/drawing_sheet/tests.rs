@@ -18,7 +18,7 @@ fn test_sheet() -> ActiveDrawingSheet {
     ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
         format,
-        sheet_name: "top".to_owned(),
+        design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
     }
 }
@@ -105,7 +105,7 @@ fn a_frame_without_zones_letters_no_references_and_quotes_none() {
     let sheet = ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
         format,
-        sheet_name: "top".to_owned(),
+        design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
     };
     let point = (
@@ -150,7 +150,7 @@ fn active(format: SchematicSheetFormat) -> ActiveDrawingSheet {
     ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
         format,
-        sheet_name: "top".to_owned(),
+        design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
     }
 }
@@ -212,7 +212,7 @@ fn cursor_status_uses_the_configured_unit_and_explicit_sheet_context() {
     let sheet = ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
         format,
-        sheet_name: "top".to_owned(),
+        design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
     };
     let one_inch = 25.4 * DRAWING_SHEET_UNITS_PER_MM;
@@ -361,7 +361,7 @@ fn sheet_one_of_several_on_the_asme_form_paints_the_same_revision_note() {
         let sheet = ActiveDrawingSheet {
             geometry: DrawingSheetGeometry::from_format(&format),
             format: format.clone(),
-            sheet_name: "top".to_owned(),
+            design_name: "top".to_owned(),
             page_label: page.to_owned(),
         };
         let viewport = Viewport {

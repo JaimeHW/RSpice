@@ -121,7 +121,7 @@ mod tests {
         let sheet = ActiveDrawingSheet {
             geometry: DrawingSheetGeometry::from_format(&format),
             format,
-            sheet_name: "top".to_owned(),
+            design_name: "top".to_owned(),
             page_label: "1 of 1".to_owned(),
         };
         assert_eq!(sheet.geometry.physical.drawing_area.x_um, 20_000);

@@ -121,18 +121,20 @@ impl SheetTransaction {
         let cell_view_key = model.workspace.content.active_key();
         let resolved = model.active_drawing_sheet();
         let designs = &model.workspace.content.design_management;
-        let governed = designs
+        let active = designs
             .sheet_catalog(&cell_view_key)
-            .and_then(|catalog| catalog.active())
-            .map(|sheet| GovernedSheet {
-                cell_view_key: cell_view_key.clone(),
-                sheet_id: sheet.id(),
-                sheet_revision: sheet.revision(),
-            });
+            .and_then(|catalog| catalog.active());
+        let governed = active.map(|sheet| GovernedSheet {
+            cell_view_key: cell_view_key.clone(),
+            sheet_id: sheet.id(),
+            sheet_revision: sheet.revision(),
+        });
+        // A schematic drawn without sheets is one sheet named for its cell.
+        let sheet_name = active.map_or(resolved.design_name, |sheet| sheet.name().to_owned());
         let draft = DrawingSheetDraft::from_format(&resolved.format);
         Self {
             governed,
-            sheet_name: resolved.sheet_name,
+            sheet_name,
             project_default: designs.drawing_sheet_settings().default_format.clone(),
             baseline: draft.clone(),
             draft,

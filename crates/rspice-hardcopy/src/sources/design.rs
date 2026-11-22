@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use rspice_design_model::cell_view::CellViewRef;
 use rspice_design_model::design_management::{DrawingSheetTitleFieldId, SheetCatalog, SheetId};
 
 use super::*;
@@ -21,17 +22,17 @@ pub fn drawing_sheet_title_values(
         .publication
         .as_ref()
         .map_or("Project", |publication| publication.project_name.as_str());
-    let (sheet_title, page) = governed.map_or_else(
-        || (identity.display_name.clone(), "1 of 1".to_owned()),
+    // An untitled block letters the design's (cell's) name, the same on
+    // every sheet of the drawing, as the canvas does.
+    let sheet_title =
+        CellViewRef::from_key(source_view).map_or_else(|| source_view.to_owned(), |view| view.cell);
+    let page = governed.map_or_else(
+        || "1 of 1".to_owned(),
         |(catalog, sheet_id)| {
-            let title = catalog.find(sheet_id).map_or_else(
-                || identity.display_name.clone(),
-                |sheet| sheet.name().to_owned(),
-            );
             let (page, count) = catalog
                 .page_number_and_count(sheet_id)
                 .unwrap_or((1, u32::try_from(catalog.sheets().len()).unwrap_or(1)));
-            (title, format!("{page} of {count}"))
+            format!("{page} of {count}")
         },
     );
     values.insert(DrawingSheetTitleFieldId::Project, project.to_owned());

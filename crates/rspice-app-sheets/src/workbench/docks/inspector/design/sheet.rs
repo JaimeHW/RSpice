@@ -325,7 +325,7 @@ fn title_block_section(
         }
         // What the block letters while the sheet leaves the value empty.
         let fallback = match field {
-            DrawingSheetTitleFieldId::SheetTitle => sheet.sheet_name.as_str(),
+            DrawingSheetTitleFieldId::SheetTitle => sheet.design_name.as_str(),
             _ => field.default_value(),
         };
         if editable && !locked_by_organization(format, field) {

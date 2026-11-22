@@ -436,7 +436,7 @@ impl Drawing {
         objects.extend(document.net_labels.iter().map(|object| object.id));
         let owner = model.workspace.content.active_key();
         let drawn = model.active_drawing_sheet();
-        let name = drawn.sheet_name;
+        let name = drawn.design_name;
         let format = drawn
             .format
             .try_update(|draft| {

@@ -269,8 +269,8 @@ fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
 }
 
 /// A sheet's name and its Title are its own two facts: a rename leaves a
-/// typed Title on the block, and an untitled sheet's block letters the new
-/// name.
+/// typed Title on the block, and an untitled sheet's block keeps lettering
+/// the design's name through a rename.
 #[test]
 fn renaming_a_sheet_leaves_its_typed_title_on_the_block() {
     let (mut state, first, second) = two_sheet_state();
@@ -303,16 +303,6 @@ fn renaming_a_sheet_leaves_its_typed_title_on_the_block() {
     catalog
         .update_sheet_page_format(first, revision, titled)
         .unwrap();
-    let lettered_title = |state: &AppState| {
-        let sheet = state.model.active_drawing_sheet();
-        state
-            .model
-            .title_block_fields(&sheet)
-            .into_iter()
-            .find(|field| field.id == DrawingSheetTitleFieldId::SheetTitle)
-            .map(|field| field.value)
-    };
-
     rename_sheet(
         &mut state.model,
         &mut state.workbench,
@@ -323,10 +313,7 @@ fn renaming_a_sheet_leaves_its_typed_title_on_the_block() {
 
     let catalog = active_sheet_catalog(&state).expect("catalog");
     assert_eq!(catalog.find(first).expect("renamed sheet").name(), "PSU");
-    assert_eq!(
-        lettered_title(&state).as_deref(),
-        Some("5 V buck converter")
-    );
+    assert_eq!(lettered_title(&state), "5 V buck converter");
 
     rename_sheet(
         &mut state.model,
@@ -342,7 +329,51 @@ fn renaming_a_sheet_leaves_its_typed_title_on_the_block() {
         second,
     )
     .expect("activation publishes");
-    assert_eq!(lettered_title(&state).as_deref(), Some("Output"));
+    assert_eq!(
+        lettered_title(&state),
+        state.model.workspace.content.active_view.cell
+    );
+}
+
+/// The title block lettered by the open sheet.
+fn lettered_title(state: &AppState) -> String {
+    let sheet = state.model.active_drawing_sheet();
+    state
+        .model
+        .title_block_fields(&sheet)
+        .into_iter()
+        .find(|field| field.id == DrawingSheetTitleFieldId::SheetTitle)
+        .map(|field| field.value)
+        .expect("the block letters a Title")
+}
+
+/// An untitled block letters the design's name on every sheet, as ISO 7200
+/// titles a multi-sheet drawing: adding a second sheet changes nothing on the
+/// first sheet's block, and the new sheet reads the same Title.
+#[test]
+fn an_untitled_block_reads_the_design_name_on_every_sheet() {
+    let mut state = AppState::default();
+    state.model.schematic.document_mut_for_test().components = vec![Component::new(
+        10,
+        ComponentType::Resistor,
+        Point::new(10, 10),
+    )];
+    let design = state.model.workspace.content.active_view.cell.clone();
+    assert_eq!(lettered_title(&state), design);
+
+    new_sheet(&mut state.model, &mut state.workbench, &mut *state.design)
+        .expect("the first new sheet creates the catalog");
+    assert_eq!(lettered_title(&state), design, "the new sheet");
+
+    let first = sheet_entries(&state)[0].id;
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        first,
+    )
+    .expect("activation publishes");
+    assert_eq!(lettered_title(&state), design, "the first sheet");
 }
 
 /// Delete asks nothing: a sheet that holds objects goes at once with them,

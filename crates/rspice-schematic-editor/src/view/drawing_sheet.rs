@@ -194,7 +194,9 @@ impl DrawingSheetGeometry {
 pub struct ActiveDrawingSheet {
     pub format: SchematicSheetFormat,
     pub geometry: DrawingSheetGeometry,
-    pub sheet_name: String,
+    /// The design (cell) the sheet draws. An untitled block letters it, so
+    /// every sheet of a multi-sheet drawing reads the same Title.
+    pub design_name: String,
     pub page_label: String,
 }
 

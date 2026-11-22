@@ -486,6 +486,8 @@ fn a_governed_selection_prints_only_the_active_sheet() {
     assert_eq!(semantic.drawing_sheet, None);
 }
 
+/// Every sheet letters the drawing's place in the set, and an untitled block
+/// letters the design's name on all of them: adding a sheet changes no Title.
 #[test]
 fn a_sheet_inserted_mid_catalog_prints_its_place_in_the_set() {
     let numbered = |name: &str, page: u32| SheetDefinition {
@@ -522,7 +524,18 @@ fn a_sheet_inserted_mid_catalog_prints_its_place_in_the_set() {
 
     let all = resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
         parameter_labels: Default::default(),
-        identity: identity("governed-schematic"),
+        identity: identity("governed-schematic")
+            .with_publication(
+                HardcopyPublicationIdentity::try_new(
+                    "Lab",
+                    "analog/amp/schematic",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
         schematic: &schematic,
         expected_topology_version: schematic.topology_version(),
         symbol_resolver: None,
@@ -550,6 +563,7 @@ fn a_sheet_inserted_mid_catalog_prints_its_place_in_the_set() {
                     .unwrap_or_default()
             };
             (
+                child.display_name.rsplit(" · ").next().unwrap().to_owned(),
                 field(DrawingSheetTitleFieldId::SheetTitle),
                 field(DrawingSheetTitleFieldId::Page),
             )
@@ -558,11 +572,11 @@ fn a_sheet_inserted_mid_catalog_prints_its_place_in_the_set() {
     assert_eq!(
         printed,
         [
-            ("Input", "1 of 4"),
-            ("Bias", "2 of 4"),
-            ("Filter", "3 of 4"),
-            ("Output", "4 of 4"),
+            ("Input", "amp", "1 of 4"),
+            ("Bias", "amp", "2 of 4"),
+            ("Filter", "amp", "3 of 4"),
+            ("Output", "amp", "4 of 4"),
         ]
-        .map(|(title, page)| (title.to_owned(), page.to_owned()))
+        .map(|(sheet, title, page)| (sheet.to_owned(), title.to_owned(), page.to_owned()))
     );
 }

@@ -8,8 +8,8 @@ use rspice_schematic_editor::view::drawing_sheet::{ActiveDrawingSheet, DrawingSh
 
 impl Model {
     /// The sheet the active cell view's catalog has active, with the format
-    /// it prints on; the project's default format, named for the cell, where
-    /// the cell view has no catalog.
+    /// it prints on; the project's default format where the cell view has no
+    /// catalog. Either way the sheet carries the cell's name for its block.
     pub fn active_drawing_sheet(&self) -> ActiveDrawingSheet {
         let key = self.workspace.content.active_schematic_reference().key();
         if let Some(catalog) = self.workspace.content.design_management.sheet_catalog(&key)
@@ -32,7 +32,7 @@ impl Model {
             return ActiveDrawingSheet {
                 geometry: DrawingSheetGeometry::from_format(&format),
                 format,
-                sheet_name: sheet.name().to_owned(),
+                design_name: self.workspace.content.active_view.cell.clone(),
                 page_label: format!("{page} of {page_count}"),
             };
         }
@@ -47,7 +47,7 @@ impl Model {
         ActiveDrawingSheet {
             geometry: DrawingSheetGeometry::from_format(&format),
             format,
-            sheet_name: self.workspace.content.active_view.cell.clone(),
+            design_name: self.workspace.content.active_view.cell.clone(),
             page_label: "1 of 1".to_owned(),
         }
     }
@@ -99,7 +99,7 @@ impl Model {
             DrawingSheetTitleFieldId::CellView => {
                 self.workspace.content.active_view.display_path().to_owned()
             }
-            DrawingSheetTitleFieldId::SheetTitle => sheet.sheet_name.clone(),
+            DrawingSheetTitleFieldId::SheetTitle => sheet.design_name.clone(),
             DrawingSheetTitleFieldId::Page => sheet.page_label.clone(),
             DrawingSheetTitleFieldId::Revision => self
                 .workspace
