@@ -107,6 +107,7 @@ pub(super) fn expr_editor_row(
             }
             let sample_selection = state.results.session.sample_selection.clone();
             let (baseline, pin) = pinned(state.results_reads());
+            let places = Places::of(state, (analysis_key, analysis_index), None);
             let series = evaluate_expression_reading(
                 &state.model.simulation,
                 (analysis_index, baseline),
@@ -114,6 +115,7 @@ pub(super) fn expr_editor_row(
                 sample_selection.as_ref(),
                 ComplexExpressionPolicy::Rectangular,
                 state.results.session.event_lanes.get(&analysis_key),
+                &places,
             );
             match series {
                 Ok(series) => {
@@ -205,6 +207,11 @@ pub(super) fn resolve_strip_exprs(
     // reader's own buses, so a change to either evaluates again.
     let bus_reading = lanes.as_ref().map_or(0, bus_reading_fingerprint);
     let (baseline, pin) = pinned(state.results_reads());
+    let places = Places::of(
+        state,
+        (model.analysis_key, model.analysis_index),
+        Some(model),
+    );
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
@@ -212,7 +219,8 @@ pub(super) fn resolve_strip_exprs(
             sample_selection.as_ref(),
             expr.complex_policy,
         ) ^ bus_reading.rotate_left(41)
-            ^ pin;
+            ^ pin
+            ^ places.version_for(&expr.text).rotate_left(7);
         let key = (model.analysis_key, expr.text.clone());
         let fresh = state
             .results
@@ -227,6 +235,7 @@ pub(super) fn resolve_strip_exprs(
                 sample_selection.as_ref(),
                 expr.complex_policy,
                 lanes.as_ref(),
+                &places,
             );
             if let Err(error) = &series {
                 state.record(
@@ -346,12 +355,18 @@ pub(super) fn resolve_abscissa_expression(
     let lanes = session.event_lanes.get(&model.analysis_key).cloned();
     let bus_reading = lanes.as_ref().map_or(0, bus_reading_fingerprint);
     let (baseline, pin) = pinned(state.results_reads());
+    let places = Places::of(
+        state,
+        (model.analysis_key, model.analysis_index),
+        Some(model),
+    );
     let version = expression_version(
         state.model.simulation.view.data_version,
         sample_selection.as_ref(),
         complex_policy,
     ) ^ bus_reading.rotate_left(41)
-        ^ pin;
+        ^ pin
+        ^ places.version_for(text).rotate_left(7);
     let key = (model.analysis_key, text.to_owned());
     let fresh = state
         .results
@@ -366,6 +381,7 @@ pub(super) fn resolve_abscissa_expression(
             sample_selection.as_ref(),
             complex_policy,
             lanes.as_ref(),
+            &places,
         );
         state
             .results

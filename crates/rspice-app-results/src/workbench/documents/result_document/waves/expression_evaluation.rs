@@ -20,7 +20,106 @@ pub(super) fn evaluate_expression(
         selection,
         ComplexExpressionPolicy::Rectangular,
         None,
+        &Places::default(),
     )
+}
+
+/// Where the reader's cursors and markers stand on the strip an expression
+/// is drawn on, for `xA`, `xB`, `m1.x` and `m1.y`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct Places {
+    /// A and B, when they stand on this strip.
+    pub cursors: [Option<f64>; 2],
+    /// Each marker on the strip: its number, X and Y.
+    pub markers: Vec<(u64, f64, f64)>,
+}
+
+impl Places {
+    /// Where the cursors and markers stand on `model`'s strip, its analysis
+    /// `analysis` at `index` in the run: the cursors only when they stand on
+    /// it, a marker at its found X with its trace's reading there.
+    pub(super) fn of(
+        state: &ResultsParts<'_>,
+        (analysis, index): (AnalysisPresentationKey, usize),
+        model: Option<&StripModel>,
+    ) -> Self {
+        let session = &state.results.session;
+        let cursors = if session.cursor_strip.is_none_or(|strip| strip == index) {
+            [session.cursors.a, session.cursors.b]
+        } else {
+            [None, None]
+        };
+        let model = model.or_else(|| {
+            state
+                .results
+                .models
+                .last_built()
+                .and_then(|models| models.iter().find(|model| model.analysis_key == analysis))
+        });
+        let interpolation = rspice_results_ui::waves::cursor_interpolation(
+            state
+                .model
+                .preferences
+                .result_presentation_policy()
+                .cursor_interpolation(),
+        );
+        let markers = model.map_or_else(Vec::new, |model| {
+            session
+                .strip_markers(analysis)
+                .filter_map(|marker| {
+                    let x = rspice_results_ui::waves::cursor_values::marker_position(
+                        model,
+                        marker.anchor(),
+                        marker.x(),
+                        marker.kind(),
+                    )
+                    .ok()?;
+                    let trace = model.traces.iter().find(|trace| {
+                        !trace.overlay
+                            && rspice_results_ui::waves::anchor_key(model, trace)
+                                == *marker.anchor()
+                    })?;
+                    let y = model.trace_value(trace, x, interpolation);
+                    Some((marker.0.retained_id.get(), x, y))
+                })
+                .collect()
+        });
+        Self { cursors, markers }
+    }
+
+    /// What of these places `text` reads, folded into its version, so an
+    /// expression that names a cursor or a marker evaluates again when it
+    /// moves and one that names none never does.
+    pub(super) fn version_for(&self, text: &str) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for word in text.split(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '.'))) {
+            match word {
+                "xA" => self.cursors[0].map(f64::to_bits).hash(&mut hasher),
+                "xB" => self.cursors[1].map(f64::to_bits).hash(&mut hasher),
+                _ => {
+                    if let Some(reading) =
+                        rspice_results::calculator::ast::MarkerReading::parse(word)
+                    {
+                        word.hash(&mut hasher);
+                        self.marker(reading).map(f64::to_bits).hash(&mut hasher);
+                    }
+                }
+            }
+        }
+        hasher.finish()
+    }
+
+    fn marker(&self, reading: rspice_results::calculator::ast::MarkerReading) -> Option<f64> {
+        use rspice_results::calculator::ast::MarkerAxis;
+        self.markers
+            .iter()
+            .find(|(number, _, _)| *number == reading.number)
+            .map(|&(_, x, y)| match reading.axis {
+                MarkerAxis::X => x,
+                MarkerAxis::Y => y,
+            })
+    }
 }
 
 /// The retained runs an expression over `analysis` of `run` can read with
@@ -64,6 +163,7 @@ pub(super) fn evaluate_expression_reading(
     selection: Option<&SourceSampleSelection>,
     complex_policy: ComplexExpressionPolicy,
     lanes: Option<&EventLaneLayout>,
+    places: &Places,
 ) -> ExpressionSeriesResult {
     let run = simulation.active_run().ok_or("analysis no longer exists")?;
     let analysis = run
@@ -82,7 +182,7 @@ pub(super) fn evaluate_expression_reading(
         coordinate_unit: analysis.waveform_coordinate_unit(),
         runs: other_runs(simulation, run, analysis, baseline),
     };
-    let lanes = (lanes, &datasets);
+    let lanes = (lanes, &datasets, places);
     if let Some(selection) = selection {
         if selection.source_indices.is_empty() {
             return Err("the expression selection contains no samples".to_owned());
@@ -131,11 +231,12 @@ pub(super) fn evaluate_expression_reading(
 }
 
 fn evaluate_scope(
-    (analysis, (lanes, datasets)): (
+    (analysis, (lanes, datasets, places)): (
         &AnalysisResult,
         (
             Option<&EventLaneLayout>,
             &RunDatasets<'_, crate::state::RetainedTrace>,
+            &Places,
         ),
     ),
     text: &str,
@@ -179,6 +280,7 @@ fn evaluate_scope(
         values: ctx,
         analysis,
         lanes,
+        places,
     };
     let value = calculator::evaluator::evaluate(expr, &ctx).map_err(|error| error.to_string())?;
     let scalar_axis = rspice_results::waveform::WaveformValues::from(scalar_axis);
@@ -205,6 +307,7 @@ struct EventWords<'a, C> {
     values: C,
     analysis: &'a AnalysisResult,
     lanes: Option<&'a EventLaneLayout>,
+    places: &'a Places,
 }
 
 impl<C: calculator::evaluator::EvaluationContext> calculator::evaluator::EvaluationContext
@@ -232,6 +335,18 @@ impl<C: calculator::evaluator::EvaluationContext> calculator::evaluator::Evaluat
         _dataset: Option<&str>,
     ) -> Result<calculator::functions::EventWord, calculator::evaluator::EvaluationError> {
         event_word(self.analysis, self.lanes, signal)
+    }
+
+    fn cursor(&self, cursor: rspice_results::calculator::ast::Cursor) -> Option<f64> {
+        use rspice_results::calculator::ast::Cursor;
+        match cursor {
+            Cursor::A => self.places.cursors[0],
+            Cursor::B => self.places.cursors[1],
+        }
+    }
+
+    fn marker(&self, reading: rspice_results::calculator::ast::MarkerReading) -> Option<f64> {
+        self.places.marker(reading)
     }
 }
 

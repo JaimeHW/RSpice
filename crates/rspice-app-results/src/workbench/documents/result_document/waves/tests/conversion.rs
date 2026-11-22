@@ -129,6 +129,7 @@ fn the_code_bus_staircase_follows_the_dac() {
             None,
             ComplexExpressionPolicy::Rectangular,
             lanes.as_ref(),
+            &super::super::Places::default(),
         )
         .expect("the code bus reads as a staircase");
         let x = outputs[0].waveform.data.x.read_whole().unwrap();

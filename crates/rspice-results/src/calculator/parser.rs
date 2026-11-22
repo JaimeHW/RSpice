@@ -581,6 +581,13 @@ impl<'a> Parser<'a> {
                     Cursor::B,
                 )));
             }
+            // A placed marker's coordinate, `m1.x` or `m1.y`, as ADS reads
+            // a marker by its name.
+            if let Some(reading) = super::ast::MarkerReading::parse(name) {
+                return Ok(CalculatorExpr::Constant(CalculatorConstant::Marker(
+                    reading,
+                )));
+            }
         }
 
         // 3. Function Calls

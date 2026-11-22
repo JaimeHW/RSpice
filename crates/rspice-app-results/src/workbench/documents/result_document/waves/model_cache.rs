@@ -243,6 +243,7 @@ fn add_logic_lanes(
                 None,
                 expr.complex_policy,
                 layouts.get(&model.analysis_key),
+                &super::Places::default(),
             ) else {
                 continue;
             };

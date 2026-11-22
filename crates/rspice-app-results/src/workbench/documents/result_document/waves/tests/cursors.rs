@@ -469,6 +469,80 @@ fn the_cursors_are_saved_with_the_project() {
     );
 }
 
+/// A plotted expression reads the cursors and the markers by name: `xB - xA`
+/// is the cursors' span, and `m<n>.y` follows its marker when it moves.
+#[test]
+fn a_plotted_expression_reads_the_cursors_and_a_marker_by_name() {
+    let mut state = host_on(damped_run());
+    state.quick_frame();
+    place_cursors(&mut state, Some(1.0e-3), Some(2.5e-3));
+    let selector = state
+        .place_marker("V(out)", 1.0e-3)
+        .expect("a marker on V(out)");
+    state.quick_frame();
+    let number = state
+        .results
+        .results
+        .session
+        .document_markers
+        .last()
+        .expect("the marker")
+        .retained_id
+        .get();
+    let key = {
+        let run = state.model.simulation.active_run().expect("the run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    };
+    for text in ["xB - xA".to_owned(), format!("m{number}.y")] {
+        state
+            .results
+            .results
+            .add_expression_trace(&state.model.simulation, key, text)
+            .expect("the strip takes the expression");
+    }
+    let read = |state: &mut ResultsTestHost| -> Vec<f64> {
+        state.quick_frame();
+        let models = strip(state);
+        super::super::expressions::resolve_strip_exprs(
+            &mut state.results_parts(),
+            &models[0],
+            &Tokens::default(),
+        )
+        .iter()
+        .map(|curve| curve.y.read_whole().expect("in memory")[0])
+        .collect()
+    };
+    let values = read(&mut state);
+    assert_eq!(values.len(), 2, "both expressions evaluate: {values:?}");
+    assert!(
+        (values[0] - 1.5e-3).abs() < 1e-15,
+        "xB - xA reads {}",
+        values[0]
+    );
+    assert!(
+        (values[1] - damped(1.0e-3)).abs() < 1e-6,
+        "m{number}.y reads {} where V(out) is {}",
+        values[1],
+        damped(1.0e-3)
+    );
+
+    super::super::super::move_marker(
+        &mut state.results_parts(),
+        rspice_results_ui::waves::dock::MarkerMove {
+            selector,
+            x: 2.0e-3,
+            nearest_sample: None,
+        },
+    );
+    let values = read(&mut state);
+    assert!(
+        (values[1] - damped(2.0e-3)).abs() < 1e-6,
+        "m{number}.y follows the marker to {} where V(out) is {}",
+        values[1],
+        damped(2.0e-3)
+    );
+}
+
 /// With Snap on, a cursor put between samples stands on the nearest one.
 #[test]
 fn snap_stands_a_cursor_on_the_nearest_sample() {

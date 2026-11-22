@@ -44,6 +44,13 @@ pub trait EvaluationContext {
         None
     }
 
+    /// The X or Y of the placed marker `reading` names, for `m1.x` and
+    /// `m1.y`; `None` when no such marker stands on this result. A context
+    /// with no markers places none.
+    fn marker(&self, _reading: super::ast::MarkerReading) -> Option<f64> {
+        None
+    }
+
     /// The exact event history of a bus or logic net, `D(name)`, for
     /// `analog()`. A context without event histories names none.
     fn get_event_word(
@@ -119,6 +126,16 @@ pub fn evaluate(
                         "{}: cursor {} is not placed",
                         cursor.name(),
                         cursor.letter()
+                    ))
+                }),
+            CalculatorConstant::Marker(reading) => ctx
+                .marker(*reading)
+                .map(|value| CalcValue::Real(RealValue::Scalar(value)))
+                .ok_or_else(|| {
+                    EvaluationError::IdentifierNotFound(format!(
+                        "{}: no marker M{} stands on this result",
+                        reading.name(),
+                        reading.number
                     ))
                 }),
         },
@@ -201,6 +218,11 @@ pub trait UnitContext {
     /// The unit of the coordinate the expression's waveforms run over: `s`
     /// for a transient, `Hz` for a frequency sweep, the swept source's unit.
     fn x_unit(&self) -> String;
+    /// The unit a placed marker's Y reads in: the unit of the trace it
+    /// rides. `None` when nothing states one.
+    fn marker_unit(&self, _reading: super::ast::MarkerReading) -> Option<String> {
+        None
+    }
 }
 
 /// The unit an expression's value reads in, by unit algebra over the units of
@@ -252,6 +274,17 @@ fn infer(expr: &CalculatorExpr, ctx: &impl UnitContext) -> Result<Inferred, Stri
         CalculatorExpr::Constant(CalculatorConstant::Cursor(_)) => {
             Inferred::Unit(read_unit(&ctx.x_unit(), "The x-axis")?)
         }
+        // A marker's X reads on the x-axis, its Y in its trace's unit.
+        CalculatorExpr::Constant(CalculatorConstant::Marker(reading)) => match reading.axis {
+            super::ast::MarkerAxis::X => Inferred::Unit(read_unit(&ctx.x_unit(), "The x-axis")?),
+            super::ast::MarkerAxis::Y => {
+                let name = reading.name();
+                let text = ctx
+                    .marker_unit(*reading)
+                    .ok_or_else(|| format!("{name} states no unit"))?;
+                Inferred::Unit(read_unit(&text, &name)?)
+            }
+        },
         CalculatorExpr::WaveformRef { signal, dataset } => {
             let text = ctx
                 .signal_unit(signal, dataset.as_deref())
@@ -1067,6 +1100,52 @@ mod tests {
         assert!(error.contains("cursor B is not placed"), "{error}");
         // Without a cursor pair, as in a saved expression, neither is placed.
         assert!(evaluated(&placed.0, "xA").is_err());
+    }
+
+    /// Traces and one placed marker, M3, at (0.2 ms, 0.2).
+    struct Marked(Traces);
+
+    impl EvaluationContext for Marked {
+        fn get_waveform(
+            &self,
+            signal: &str,
+            dataset: Option<&str>,
+        ) -> Result<super::CalcValue, EvaluationError> {
+            self.0.get_waveform(signal, dataset)
+        }
+
+        fn marker(&self, reading: super::super::ast::MarkerReading) -> Option<f64> {
+            use super::super::ast::MarkerAxis;
+            (reading.number == 3).then_some(match reading.axis {
+                MarkerAxis::X => 2e-4,
+                MarkerAxis::Y => 0.2,
+            })
+        }
+    }
+
+    /// `m3.x` and `M3.y` read a placed marker's coordinates in any
+    /// expression; a marker that is not placed is refused by its name, and a
+    /// name that only looks like one still names a signal.
+    #[test]
+    fn a_marker_name_reads_its_coordinates() {
+        let x: Vec<f64> = (0..=100).map(|i| f64::from(i) * 1e-5).collect();
+        let ramp: Vec<f64> = x.iter().map(|t| 1e3 * t).collect();
+        let marked = Marked(Traces(vec![("V(r)", x, ramp)]));
+        let parse = |text: &str| {
+            super::super::parser::try_parse(text, |n| n.parse().map_err(|_| n.to_owned())).unwrap()
+        };
+        let scalar = |text: &str| -> f64 {
+            match evaluate(&parse(text), &marked) {
+                Ok(super::CalcValue::Real(CalcValue::Scalar(value))) => value,
+                other => panic!("{text}: {other:?}"),
+            }
+        };
+        assert_eq!(scalar("m3.y - M3.x"), 0.2 - 2e-4);
+        assert!(scalar("yval(V(r), m3.x) - m3.y").abs() <= 1e-12);
+        let error = evaluate(&parse("m4.y"), &marked).unwrap_err().to_string();
+        assert!(error.contains("no marker M4"), "{error}");
+        let error = evaluated(&marked.0, "m3.z").unwrap_err();
+        assert!(error.contains("not found: m3.z"), "{error}");
     }
 
     /// A comparison reads 1 where it holds and 0 where it does not, and

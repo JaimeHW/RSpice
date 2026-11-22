@@ -41,7 +41,7 @@ mod viewport;
 
 #[cfg(test)]
 use expression_evaluation::evaluate_expression;
-use expression_evaluation::evaluate_expression_reading;
+use expression_evaluation::{Places, evaluate_expression_reading};
 pub(crate) use expressions::*;
 pub use expressions::{toggle_visibility, waveform_plotted};
 pub(crate) use readout::*;

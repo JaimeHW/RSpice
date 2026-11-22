@@ -83,6 +83,54 @@ pub enum CalculatorConstant {
     Frequency,
     /// Where a cursor of the A/B pair stands on the x-axis: `xA` or `xB`.
     Cursor(Cursor),
+    /// A placed marker's X or Y, by the name the cursor table gives it:
+    /// `m1.x`, `M1.y`.
+    Marker(MarkerReading),
+}
+
+/// One coordinate of a placed marker, as an expression names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkerReading {
+    /// The number the marker is shown by: 1 for M1.
+    pub number: u64,
+    pub axis: MarkerAxis,
+}
+
+/// Which coordinate of a marker an expression reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MarkerAxis {
+    X,
+    Y,
+}
+
+impl MarkerReading {
+    /// The reading `name` spells: `m` or `M`, the marker's number, a point,
+    /// then `x` or `y`. `None` for any other name.
+    pub fn parse(name: &str) -> Option<Self> {
+        let rest = name.strip_prefix(['m', 'M'])?;
+        let (number, axis) = rest.split_once('.')?;
+        if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        let axis = match axis {
+            "x" => MarkerAxis::X,
+            "y" => MarkerAxis::Y,
+            _ => return None,
+        };
+        Some(Self {
+            number: number.parse().ok()?,
+            axis,
+        })
+    }
+
+    /// The name an expression reads it by.
+    pub fn name(self) -> String {
+        let axis = match self.axis {
+            MarkerAxis::X => "x",
+            MarkerAxis::Y => "y",
+        };
+        format!("M{}.{axis}", self.number)
+    }
 }
 
 /// One cursor of the A/B pair.
