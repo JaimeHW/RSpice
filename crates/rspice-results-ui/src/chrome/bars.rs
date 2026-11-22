@@ -375,6 +375,7 @@ fn show_structured_result_strip(ui: &mut Ui, host: &mut impl SheetBarHost) {
                                     .color(t.color.text),
                             );
                             result_viewer_actions(ui, host);
+                            host.domain_controls(ui);
                         });
                     });
             },
