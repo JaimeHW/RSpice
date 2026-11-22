@@ -265,18 +265,26 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
             },
         );
         // A value keeps one line: when it is wider than its column, the
-        // name's column gives way to it rather than the value wrapping.
+        // name's column gives way to it rather than the value wrapping, down
+        // to the name's own width. Only a value wider still wraps; a name
+        // squeezed to nothing would stand one letter to a line.
         let natural = ui
             .painter()
             .layout_no_wrap(value.clone(), value_font.clone(), c.text)
             .size()
             .x;
+        let name_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+        let name_natural = ui
+            .painter()
+            .layout_no_wrap((*name).to_owned(), name_font.clone(), c.text_dim)
+            .size()
+            .x;
         let content = name_width + value_width;
-        let value_width = natural.clamp(value_width, content);
+        let value_width = natural.clamp(value_width, (content - name_natural).max(value_width));
         let name_width = content - value_width;
         let name_galley = ui.painter().layout(
             (*name).to_owned(),
-            theme::sans(tokens::FS_1, FontWeight::Regular),
+            name_font,
             if *highlight { c.text } else { c.text_dim },
             name_width,
         );
