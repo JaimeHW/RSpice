@@ -523,10 +523,15 @@ impl DesignState {
             ));
         }
 
-        // Finish the complete candidate before mutating any owner. `Free` disables
-        // snapping while retaining the governed document pitch for later reuse.
+        // Finish the complete candidate before mutating any owner. `Free` snaps
+        // to no grid, retaining the governed document pitch for later reuse;
+        // the pins, junctions and wires ticked as targets still catch the
+        // pointer, so a wire drawn to a pin still lands on it.
         let mut snap_engine = transaction.draft.snap_engine.clone();
-        snap_engine.enabled = requested_pitch.is_some();
+        snap_engine.enabled = true;
+        if requested_pitch.is_none() {
+            snap_engine.snap_to_grid = false;
+        }
         snap_engine.grid_size = requested_pitch
             .unwrap_or(model.schematic.document().document_policy.grid_pitch)
             .canvas_grid_size();

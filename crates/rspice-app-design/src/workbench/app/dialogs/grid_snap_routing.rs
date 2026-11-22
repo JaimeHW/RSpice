@@ -126,7 +126,8 @@ pub fn open_grid_snap_routing_dialog(
         return false;
     }
 
-    let spacing = if model.schematic.session.editor.snap_engine.enabled {
+    let snap = &model.schematic.session.editor.snap_engine;
+    let spacing = if snap.enabled && snap.snap_to_grid {
         GridSnapSpacingChoice::from_pitch(model.schematic.document().document_policy.grid_pitch)
     } else {
         GridSnapSpacingChoice::Free
@@ -257,7 +258,10 @@ fn grid_snap_routing_rows(
     );
     if let Some(index) = spacing.picked {
         transaction.draft.snap_spacing = GridSnapSpacingChoice::ALL[index];
-        transaction.draft.snap_engine.enabled =
+        // A pitch is a grid to snap to; Free is no grid. The object targets
+        // are kept either way.
+        transaction.draft.snap_engine.enabled = true;
+        transaction.draft.snap_engine.snap_to_grid =
             transaction.draft.snap_spacing != GridSnapSpacingChoice::Free;
         transaction.validation_error = None;
     }
@@ -279,7 +283,7 @@ fn grid_snap_routing_rows(
         transaction.validation_error = None;
     }
     if transaction.draft.snap_spacing == GridSnapSpacingChoice::Free {
-        rows.derived("Free spacing turns snapping off; these apply once a pitch is chosen.");
+        rows.derived("Free snaps to no grid; the pins, junctions and wires ticked here still catch the pointer.");
     }
 
     // The two square bends are always offered; the angled routes only where
@@ -649,11 +653,16 @@ pub(crate) mod tests {
         );
         assert_eq!(state.model.schematic.topology_version(), topology);
         assert!(!state.model.schematic.can_undo());
-        assert!(!state.model.schematic.session.editor.snap_engine.enabled);
+        let snap = &state.model.schematic.session.editor.snap_engine;
+        assert!(!snap.snap_to_grid, "Free snaps to no grid");
+        assert!(
+            snap.enabled && snap.snap_to_terminals,
+            "Free keeps the object targets"
+        );
         assert_eq!(
-            state.model.schematic.session.editor.snap_engine.grid_size,
+            snap.grid_size,
             pitch.canvas_grid_size(),
-            "Free keeps the active document pitch ready without enabling snapping"
+            "Free keeps the active document pitch ready without snapping to it"
         );
         assert_eq!(state.design.grid, GridStyle::Off);
         assert_eq!(
@@ -665,6 +674,60 @@ pub(crate) mod tests {
                 .wire_drawing
                 .routing_mode,
             WireRoutingMode::Diagonal
+        );
+    }
+
+    /// Free turned every snap off, so a wire end drawn at a pin had to hit
+    /// the pin's exact point to connect. Free drops the grid only: a point
+    /// off the grid stays where it is, and a point near a pin lands on it.
+    #[test]
+    fn free_spacing_still_lands_a_wire_end_on_a_pin() {
+        use crate::state::{Component, ComponentType, Point};
+
+        let mut state = DesignTestHost::default();
+        let part = Component::new(1, ComponentType::Resistor, Point::origin());
+        let pin = part.terminal_positions()[0].1;
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(part);
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
+        state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Free;
+        assert!(commit_grid_snap_routing(&mut state).is_ok());
+
+        let snap = state.model.schematic.session.editor.snap_engine.clone();
+        let document = state.model.schematic.document();
+        let near_the_pin = Point::new(pin.x + 1, pin.y + 1);
+        assert_eq!(
+            snap.find_snap_target_resolved(
+                near_the_pin,
+                &document.components,
+                &document.wires,
+                &document.junctions,
+                |_| None,
+            )
+            .snapped_position,
+            pin
+        );
+        let off_grid = Point::new(pin.x + 1000 + 3, pin.y + 1000 + 7);
+        assert_eq!(
+            snap.find_snap_target_resolved(
+                off_grid,
+                &document.components,
+                &document.wires,
+                &document.junctions,
+                |_| None,
+            )
+            .snapped_position,
+            off_grid,
+            "nothing near: the point is exact, not on a grid"
         );
     }
 
