@@ -25,7 +25,7 @@ fn sequence(key: Key, primary: bool) -> ShortcutSequence {
 }
 
 /// The labels are read as Windows and Linux write them on every host; a
-/// Mac writes the same chords `⌥4` and `⌥5`.
+/// Mac writes the same chords `⌥5` and `⌥6`.
 #[test]
 fn immutable_workspace_ownership_projects_to_results_and_verify() {
     let preferences = ShortcutPreferences::default();
@@ -36,7 +36,7 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
         )[0]
         .sequence()
         .display_label_for(OperatingSystem::Windows),
-        "Alt+4"
+        "Alt+5"
     );
     assert_eq!(
         preferences.resolved_bindings(
@@ -45,7 +45,7 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
         )[0]
         .sequence()
         .display_label_for(OperatingSystem::Windows),
-        "Alt+5"
+        "Alt+6"
     );
     assert!(
         preferences

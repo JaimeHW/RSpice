@@ -115,25 +115,18 @@ const NEW_APPLICATION_WINDOW: &[ShortcutBinding] = &[
     alternate(chord(Key::W, true, true, true, "Ctrl+Shift+Alt+W"), HOST),
 ];
 const HELP_CENTER: &[ShortcutBinding] = &[primary(chord(Key::F1, false, false, false, "F1"), ALL)];
-const PROJECT_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num1, false, true, false, "Alt+1"), ALL)];
-const DESIGN_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num2, false, true, false, "Alt+2"), ALL)];
-const SIMULATION_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num3, false, true, false, "Alt+3"), ALL)];
-const RESULTS_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num4, false, true, false, "Alt+4"), ALL)];
-const VERIFICATION_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num5, false, true, false, "Alt+5"), ALL)];
-const MODELS_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num6, false, true, false, "Alt+6"), ALL)];
-const NETLIST_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num7, false, true, false, "Alt+7"), ALL)];
-/// The library reads fourth on the rail and eighth on the keyboard. Alt+8 is
-/// the mockup's chord for it, and taking Alt+4 for rail order would have moved
-/// the four chords under it — a shortcut every reader has already learned.
-const STIMULUS_WORKSPACE: &[ShortcutBinding] =
-    &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
+/// Each workspace's chord, by its place on the rail: Alt+1 for the first,
+/// down to Alt+8 for the last. A workspace's key is where the reader sees it.
+const WORKSPACE_CHORDS: [&[ShortcutBinding]; Workspace::ALL.len()] = [
+    &[primary(chord(Key::Num1, false, true, false, "Alt+1"), ALL)],
+    &[primary(chord(Key::Num2, false, true, false, "Alt+2"), ALL)],
+    &[primary(chord(Key::Num3, false, true, false, "Alt+3"), ALL)],
+    &[primary(chord(Key::Num4, false, true, false, "Alt+4"), ALL)],
+    &[primary(chord(Key::Num5, false, true, false, "Alt+5"), ALL)],
+    &[primary(chord(Key::Num6, false, true, false, "Alt+6"), ALL)],
+    &[primary(chord(Key::Num7, false, true, false, "Alt+7"), ALL)],
+    &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)],
+];
 
 impl ShellCommand {
     /// Commands whose owning surface or dialog has no valid lifecycle without
@@ -197,14 +190,7 @@ impl ShellCommand {
 
     pub const fn shortcut_bindings(self) -> &'static [ShortcutBinding] {
         match self {
-            Self::OpenWorkspace(Workspace::Project) => PROJECT_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Design) => DESIGN_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Simulate) => SIMULATION_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Results) => RESULTS_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Verify) => VERIFICATION_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Models) => MODELS_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Stimulus) => STIMULUS_WORKSPACE,
-            Self::OpenWorkspace(Workspace::Netlist) => NETLIST_WORKSPACE,
+            Self::OpenWorkspace(workspace) => WORKSPACE_CHORDS[workspace.rail_index()],
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::Exit => EXIT,
             Self::RepeatLastCommand => REPEAT_LAST_COMMAND,
@@ -330,36 +316,6 @@ mod tests {
 
     #[test]
     fn workspace_surface_shortcuts_have_one_canonical_owner() {
-        for platform in CommandPlatform::ALL {
-            assert_eq!(
-                binding_owners(RESULTS_WORKSPACE[0].chord, platform),
-                vec![ShellCommand::OpenWorkspace(Workspace::Results)]
-            );
-            assert_eq!(
-                ShellCommand::OpenWorkspace(Workspace::Results).default_shortcut_label(platform),
-                "Alt+4"
-            );
-            assert_eq!(
-                binding_owners(VERIFICATION_WORKSPACE[0].chord, platform),
-                vec![ShellCommand::OpenWorkspace(Workspace::Verify)]
-            );
-            assert_eq!(
-                ShellCommand::OpenWorkspace(Workspace::Verify).default_shortcut_label(platform),
-                "Alt+5"
-            );
-            // The eighth workspace reads fourth on the rail, so the chord it
-            // would have taken there belongs to Results. Alt+8 has to be
-            // unclaimed for that to hold.
-            assert_eq!(
-                binding_owners(STIMULUS_WORKSPACE[0].chord, platform),
-                vec![ShellCommand::OpenWorkspace(Workspace::Stimulus)]
-            );
-            assert_eq!(
-                ShellCommand::OpenWorkspace(Workspace::Stimulus).default_shortcut_label(platform),
-                "Alt+8"
-            );
-        }
-
         assert!(
             crate::workbench::commands::vocabulary::CommandRegistry
                 .default_bindings(ResultsCommand::ResultViewer(ResultViewer::Waves).key())
@@ -372,31 +328,24 @@ mod tests {
         );
     }
 
-    /// A workspace's chord is its place on the rail, Alt+1 down to Alt+7
-    /// for the seven that came first, the Netlist workspace last of them;
-    /// the Stimulus Library, added fourth, kept Alt+8 so the chords under it
-    /// did not move.
+    /// A workspace's chord is its place on the rail, Alt+1 for the first
+    /// down to Alt+8 for the last, and no other command binds it.
     #[test]
     fn each_workspace_chord_is_its_place_on_the_rail() {
         for platform in CommandPlatform::ALL {
-            let mut place = 0;
-            for workspace in Workspace::ALL {
-                let expected = if workspace == Workspace::Stimulus {
-                    "Alt+8".to_owned()
-                } else {
-                    place += 1;
-                    format!("Alt+{place}")
-                };
+            for (index, workspace) in Workspace::ALL.into_iter().enumerate() {
+                let command = ShellCommand::OpenWorkspace(workspace);
                 assert_eq!(
-                    ShellCommand::OpenWorkspace(workspace).default_shortcut_label(platform),
-                    expected,
+                    command.default_shortcut_label(platform),
+                    format!("Alt+{}", index + 1),
+                    "{workspace:?} on {platform:?}"
+                );
+                assert_eq!(
+                    binding_owners(command.shortcut_bindings()[0].chord, platform),
+                    vec![command],
                     "{workspace:?} on {platform:?}"
                 );
             }
-            assert_eq!(
-                binding_owners(NETLIST_WORKSPACE[0].chord, platform),
-                vec![ShellCommand::OpenWorkspace(Workspace::Netlist)]
-            );
         }
     }
 

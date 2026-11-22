@@ -881,21 +881,21 @@ const MOVE_DOCUMENT_MENU: &[MenuEntry] = &[
     command_as(ShellCommand::MoveDocumentToWindow, "Another window\u{2026}").access('A'),
 ];
 
-/// The eight workspaces in the order of their keys, Alt+1 to Alt+8: the
-/// Stimulus library, fourth on the rail, kept the key it was given last.
+/// The eight workspaces in the order of the rail and of their keys, Alt+1
+/// to Alt+8.
 const WORKSPACE_MENU: &[MenuEntry] = &[
     command_as(ShellCommand::OpenWorkspace(Workspace::Project), "Project").access('P'),
     command_as(ShellCommand::OpenWorkspace(Workspace::Design), "Design").access('D'),
     command_as(ShellCommand::OpenWorkspace(Workspace::Simulate), "Simulate").access('S'),
-    command_as(ShellCommand::OpenWorkspace(Workspace::Results), "Results").access('R'),
-    command_as(ShellCommand::OpenWorkspace(Workspace::Verify), "Verify").access('V'),
-    command_as(ShellCommand::OpenWorkspace(Workspace::Models), "Models").access('M'),
-    command_as(ShellCommand::OpenWorkspace(Workspace::Netlist), "Netlist").access('N'),
     command_as(
         ShellCommand::OpenWorkspace(Workspace::Stimulus),
         "Stimulus library",
     )
     .access('L'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Results), "Results").access('R'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Verify), "Verify").access('V'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Models), "Models").access('M'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Netlist), "Netlist").access('N'),
 ];
 
 /// The saved panel layouts, chosen in their dialog, and the way back to

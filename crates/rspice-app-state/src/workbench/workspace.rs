@@ -17,9 +17,7 @@ pub enum Workspace {
     Design,
     Simulate,
     /// The stimulus definitions this project owns. It reads beside the studio
-    /// that consumes them rather than at the end of the rail, which is where
-    /// its chord — kept at Alt+8 so the seven older chords do not move — would
-    /// otherwise put it.
+    /// that consumes them.
     Stimulus,
     Results,
     Verify,
@@ -38,6 +36,19 @@ impl Workspace {
         Self::Models,
         Self::Netlist,
     ];
+
+    /// Where the workspace stands on the rail, from 0: its place in
+    /// [`Self::ALL`], which its keyboard chord is numbered by.
+    pub const fn rail_index(self) -> usize {
+        let mut index = 0;
+        while index < Self::ALL.len() {
+            if Self::ALL[index] as u8 == self as u8 {
+                return index;
+            }
+            index += 1;
+        }
+        unreachable!()
+    }
 
     pub const PHONE_PRIMARY: [Self; 4] =
         [Self::Design, Self::Simulate, Self::Results, Self::Verify];
