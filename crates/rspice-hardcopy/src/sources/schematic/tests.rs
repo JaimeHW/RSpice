@@ -414,6 +414,48 @@ fn a_printed_part_marks_the_pins_nothing_on_its_sheet_meets() {
     );
 }
 
+/// A pin marked no-connect prints its cross where the canvas draws it, and
+/// is no longer an open pin to mark.
+#[test]
+fn a_printed_part_carries_its_no_connect_pins() {
+    let mut resistor = Component::new(3, ComponentType::Resistor, Point::new(0, 0));
+    resistor.set_no_connect("-", true);
+    let minus = resistor
+        .terminal_positions()
+        .into_iter()
+        .find(|(pin, _)| *pin == "-")
+        .map(|(_, point)| point)
+        .unwrap();
+    let mut document = SchematicDocument::default();
+    document.components.push(resistor);
+    let schematic = Schematic::from_document(document);
+    let resolved = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
+        identity: identity("schematic"),
+        schematic: &schematic,
+        selection: None,
+        expected_topology_version: schematic.topology_version(),
+        symbol_resolver: None,
+        sheet_catalog: None,
+        sheet_id: None,
+        project_default_drawing_sheet: None,
+        project_title_block_field_values: None,
+        project_owner_logo: None,
+        scope: HardcopyScope::CurrentSheet,
+    })
+    .unwrap();
+    let HardcopySemanticDocument::Schematic(semantic) = resolved.semantic_document() else {
+        panic!("expected schematic")
+    };
+    assert_eq!(semantic.no_connect_terminals, [minus]);
+    assert_eq!(
+        semantic.open_terminals.len(),
+        1,
+        "only the plus pin is open"
+    );
+    assert!(!semantic.open_terminals.contains(&minus));
+}
+
 #[test]
 fn stale_schematic_authority_is_rejected_before_digesting() {
     let schematic = Schematic::default();

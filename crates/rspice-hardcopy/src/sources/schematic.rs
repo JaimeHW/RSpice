@@ -326,6 +326,7 @@ pub fn resolve_schematic_source(
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        no_connect_terminals: Vec::new(),
         parameter_labels: source.parameter_labels,
     };
     let open_terminals = sheet_open_terminals(&source, &object_is_in_scope);
@@ -349,6 +350,16 @@ pub fn resolve_schematic_source(
                 .filter(|(id, _)| *id == component.id)
                 .map(|(_, terminal)| *terminal),
         );
+        if component.has_no_connects() {
+            let resolved = component.library_cell.as_ref().and_then(|binding| {
+                source
+                    .symbol_resolver
+                    .and_then(|resolver| resolver.resolve_binding(binding))
+            });
+            semantic
+                .no_connect_terminals
+                .extend(component.no_connect_terminals(resolved.as_ref()));
+        }
         semantic.components.push(SemanticComponent {
             component: component.clone(),
             resolved_symbol,

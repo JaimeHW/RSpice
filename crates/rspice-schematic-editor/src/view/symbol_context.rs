@@ -129,6 +129,12 @@ impl SchematicSymbolContext {
             .collect()
     }
 
+    /// Where `component`'s no-connect crosses stand: the end of each pin it
+    /// marks, resolved as its terminals are.
+    pub fn no_connect_points(&self, component: &Component) -> Vec<Point> {
+        component.no_connect_terminals(self.resolved_symbol(component))
+    }
+
     pub fn named_terminal_points(&self, component: &Component) -> Vec<(String, Point)> {
         component
             .terminal_positions_resolved(self.resolved_symbol(component))

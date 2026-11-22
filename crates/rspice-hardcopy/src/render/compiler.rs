@@ -494,6 +494,11 @@ impl<'a> SemanticSceneCompiler<'a> {
         for terminal in &schematic.open_terminals {
             self.open_pin_mark(*terminal, component_stroke)?;
         }
+        // A pin marked no-connect carries the canvas's cross, in the wire ink
+        // at a wire's weight.
+        for terminal in &schematic.no_connect_terminals {
+            self.no_connect_mark(*terminal, wire_stroke)?;
+        }
 
         let annotation_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,

@@ -177,6 +177,11 @@ pub struct SemanticSchematic {
     /// on screen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub open_terminals: Vec<Point>,
+    /// The end of each printed part's pin marked no-connect, where the
+    /// canvas draws its cross, with the pins resolved as the canvas resolves
+    /// them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_connect_terminals: Vec<Point>,
     /// What the canvas lettered on a part that inherits its labels when the
     /// page was made: names and values, values alone, or neither. The page
     /// keeps it, so it letters what the canvas showed.

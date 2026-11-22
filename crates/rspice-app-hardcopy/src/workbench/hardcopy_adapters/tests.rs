@@ -233,6 +233,7 @@ fn the_canvas_and_the_plot_letter_a_title_in_any_script_alike() {
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        no_connect_terminals: Vec::new(),
         parameter_labels: Default::default(),
     };
     let digest =

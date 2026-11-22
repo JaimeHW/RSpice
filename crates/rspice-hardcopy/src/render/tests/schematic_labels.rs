@@ -400,6 +400,7 @@ pub(super) fn sheet(components: Vec<Component>) -> SemanticSchematic {
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        no_connect_terminals: Vec::new(),
         parameter_labels: Default::default(),
     }
 }
@@ -876,6 +877,42 @@ fn a_placed_part_prints_the_pin_marks_the_canvas_draws() {
             } if stroke.color == SemanticColor::Accent
         )),
         "no ring stands on every terminal"
+    );
+}
+
+/// A pin marked no-connect prints the canvas's cross at its end: two
+/// strokes at a wire's weight in the wire's ink, crossing on the pin.
+#[test]
+fn a_no_connect_pin_prints_a_cross_at_its_end() {
+    let mut printed = sheet(vec![part(1, ComponentType::Resistor, (40, 40), "R1", "1k")]);
+    printed.no_connect_terminals = vec![SchematicPoint::new(60, 40)];
+    let compiled = compile(&printed);
+    let um = |point: &ScenePoint| (point.x.micrometres() as i64, point.y.micrometres() as i64);
+    let half = f64::from(rspice_design::schematic::drawing_metrics::NO_CONNECT_HALF_WORLD);
+    // A wire's 1.1 wu is 275 um; the resistor's own strokes are a symbol's.
+    let crossing = compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Line { from, to, stroke } if stroke.width.micrometres() == 275 => {
+                Some((um(from), um(to)))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        crossing,
+        [
+            (
+                compiled.at(60.0 - half, 40.0 - half),
+                compiled.at(60.0 + half, 40.0 + half)
+            ),
+            (
+                compiled.at(60.0 - half, 40.0 + half),
+                compiled.at(60.0 + half, 40.0 - half)
+            ),
+        ],
+        "two wire-weight strokes cross on the pin's end"
     );
 }
 

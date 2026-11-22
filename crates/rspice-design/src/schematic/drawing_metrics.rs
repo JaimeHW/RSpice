@@ -17,6 +17,9 @@ pub const SYMBOL_WIDTH_WORLD: f32 = 1.0;
 pub const JUNCTION_RADIUS_WORLD: f32 = 1.5;
 /// The side of the hollow square that marks a pin nothing meets.
 pub const OPEN_PIN_SIDE_WORLD: f32 = 3.0;
+/// How far each stroke of a no-connect cross reaches from the pin's end,
+/// along both axes. The cross is drawn at a wire's weight.
+pub const NO_CONNECT_HALF_WORLD: f32 = 3.5;
 /// How much of its outline's ink a symbol shape's background fill takes
 /// over the ground under it: the canvas's background on screen, the paper
 /// on a page. A light tint, so every line and letter drawn over it reads.

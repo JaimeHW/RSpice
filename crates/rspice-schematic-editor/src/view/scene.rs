@@ -11,8 +11,8 @@ use super::{
         ConductorInk, JunctionPaint, ProbeEmphasis, ProbeVisualStatus, VariantMark,
         bus_band_width_pt, bus_tap_width_pt, chain_conductors, draw_bus, draw_bus_tap,
         draw_component, draw_conductor, draw_hover_halo, draw_hover_outline, draw_junction,
-        draw_open_pin_marks, draw_probe, draw_varied_component, draw_wire_bridge,
-        probe_world_bounds, stale_instance_palette,
+        draw_no_connect_marks, draw_open_pin_marks, draw_probe, draw_varied_component,
+        draw_wire_bridge, probe_world_bounds, stale_instance_palette,
     },
     net_labels::{NetLabelPaint, draw_net_label_attached, world_bounds as net_label_world_bounds},
     pointer_target::PointerTarget,
@@ -347,6 +347,14 @@ pub fn draw_content(
                 } else {
                     palette.symbol
                 },
+            );
+        }
+        if component.has_no_connects() {
+            draw_no_connect_marks(
+                painter,
+                viewport,
+                &symbol_context.no_connect_points(component),
+                palette.wire,
             );
         }
         // The hover outline is the pick bounds the click tests.
@@ -789,6 +797,7 @@ mod hover_tests {
     use crate::session::visibility::SchematicReviewMarkerVisibility;
     use rspice_design::schematic::{
         component::Component, component_type::ComponentType, document::SchematicDocument,
+        rotation::Rotation,
     };
 
     /// Every shape a scene paints, in paint order.
@@ -917,5 +926,47 @@ mod hover_tests {
             squares(&paint_with_open_pins(&document, &selected, None, &open))[0].1,
             palette.canvas_select
         );
+    }
+
+    /// A pin marked no-connect takes a cross at its end in the wire ink, and
+    /// keeps it on that pin when the part turns.
+    #[test]
+    fn a_no_connect_pin_takes_a_cross_at_its_end_that_turns_with_the_part() {
+        let palette = Tokens::default().color;
+        let editor = EditorSession::default();
+        let crosses = |document: &SchematicDocument| -> Vec<egui::Pos2> {
+            let strokes = paint(document, &editor, None)
+                .into_iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::LineSegment { points, stroke } if stroke.color == palette.wire => {
+                        Some(points)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(strokes.len() % 2, 0, "a cross is two strokes");
+            strokes
+                .chunks(2)
+                .map(|pair| {
+                    let centre = pair[0][0].lerp(pair[0][1], 0.5);
+                    assert_eq!(pair[1][0].lerp(pair[1][1], 0.5), centre, "one centre");
+                    centre
+                })
+                .collect()
+        };
+        let minus_end = |document: &SchematicDocument| {
+            let (_, end) = SchematicSymbolContext::default()
+                .named_terminal_points(&document.components[0])
+                .into_iter()
+                .find(|(pin, _)| pin == "-")
+                .expect("a resistor has a minus pin");
+            egui::pos2(end.x as f32 + 50.0, end.y as f32 + 100.0)
+        };
+        let mut document = resistor();
+        assert!(crosses(&document).is_empty(), "an unmarked part has none");
+        document.components[0].set_no_connect("-", true);
+        assert_eq!(crosses(&document), [minus_end(&document)]);
+        document.components[0].rotation = Rotation::R90;
+        assert_eq!(crosses(&document), [minus_end(&document)]);
     }
 }

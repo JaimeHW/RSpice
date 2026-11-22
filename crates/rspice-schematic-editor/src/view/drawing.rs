@@ -14,6 +14,7 @@ use rspice_design::schematic::{
     component::Component,
     component_display::SchematicParameterLabelVisibility,
     component_type::ComponentType,
+    drawing_metrics,
     label_layout::{self, LayoutPoint, TextEdge},
     probe::SchematicProbe,
     wire::{Wire, WireBridge},
@@ -1701,6 +1702,32 @@ pub fn draw_open_pin_marks(
             stroke,
             egui::StrokeKind::Middle,
         );
+    }
+}
+
+/// A pin marked no-connect: a cross centred on its end, in the drawing's
+/// wire ink at a wire's weight, reaching
+/// [`drawing_metrics::NO_CONNECT_HALF_WORLD`] each way, so it scales with the
+/// pin it sits on. Print draws the same cross.
+pub fn draw_no_connect_marks(
+    painter: &Painter,
+    viewport: &Viewport,
+    terminals: &[Point],
+    colour: egui::Color32,
+) {
+    let half = drawing_metrics::NO_CONNECT_HALF_WORLD * viewport.zoom.max(0.0);
+    let stroke = Stroke::new(
+        conductor_width_pt(viewport.zoom, painter.pixels_per_point(), false),
+        colour,
+    );
+    for terminal in terminals {
+        let centre = viewport.schematic_to_screen(*terminal);
+        for (from, to) in [
+            (Vec2::new(-half, -half), Vec2::new(half, half)),
+            (Vec2::new(half, -half), Vec2::new(-half, half)),
+        ] {
+            painter.line_segment([centre + from, centre + to], stroke);
+        }
     }
 }
 

@@ -228,6 +228,24 @@ impl SemanticSceneCompiler<'_> {
         Ok(())
     }
 
+    /// The cross the canvas marks a pin no-connect with, centred on its
+    /// `terminal` and drawn in `stroke`.
+    pub(super) fn no_connect_mark(
+        &mut self,
+        terminal: SchematicPoint,
+        stroke: StrokeStyle,
+    ) -> Result<(), HardcopyRenderError> {
+        let half = drawing_metrics::NO_CONNECT_HALF_WORLD;
+        let (x, y) = (terminal.x as f32, terminal.y as f32);
+        for (dx, dy) in [(half, half), (half, -half)] {
+            let from = self.layout_point(LayoutPoint::new(x - dx, y - dy))?;
+            let to = self.layout_point(LayoutPoint::new(x + dx, y + dy))?;
+            self.primitives
+                .push(ScenePrimitive::Line { from, to, stroke });
+        }
+        Ok(())
+    }
+
     /// A port's direction arrow over its body, turned and mirrored with the
     /// symbol variant the body was drawn from, as the canvas draws it.
     pub(super) fn port_direction_marks(

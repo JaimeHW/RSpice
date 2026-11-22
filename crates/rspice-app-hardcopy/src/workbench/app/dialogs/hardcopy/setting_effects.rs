@@ -86,6 +86,7 @@ fn sheet_with(
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        no_connect_terminals: Vec::new(),
         parameter_labels: Default::default(),
     };
     let paper = authored_sheet_bounds(&format).unwrap();
