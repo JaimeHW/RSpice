@@ -153,6 +153,8 @@ pub enum WorkbenchIcon {
     WholeWord,
     /// Find: a regular expression. A dot and a star.
     RegularExpression,
+    /// A calendar page: fill in today's date.
+    Calendar,
 }
 
 /// The kit's status marks, under the name every workbench surface already
@@ -786,6 +788,13 @@ impl WorkbenchIcon {
                 line(&[(11.1, 6.25), (18.9, 10.75)]);
                 line(&[(11.1, 10.75), (18.9, 6.25)]);
                 painter.circle_filled(p(7.0, 17.5), 2.0 * scale, color);
+            }
+            Self::Calendar => {
+                closed(&[(4.0, 6.0), (20.0, 6.0), (20.0, 20.0), (4.0, 20.0)]);
+                line(&[(4.0, 10.0), (20.0, 10.0)]);
+                line(&[(8.0, 4.0), (8.0, 8.0)]);
+                line(&[(16.0, 4.0), (16.0, 8.0)]);
+                painter.circle_filled(p(9.0, 15.0), 1.4 * scale, color);
             }
             Self::Star | Self::StarFilled => {
                 let points = STAR_POINTS.map(|(x, y)| p(x, y)).to_vec();
@@ -1635,6 +1644,32 @@ pub fn property_row_input_action(
     action: PropertyRowAction<'_>,
     shorter: &[String],
 ) -> (Response, Response) {
+    input_action_row(ui, label, value, "", invalid, action, shorter)
+}
+
+/// [`property_row_input_action`] whose empty value shows `hint`, the form a
+/// value is written in, in the faintest tone, as
+/// [`property_row_input_with_hint`] does.
+pub fn property_row_input_action_with_hint(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    hint: &str,
+    invalid: bool,
+    action: PropertyRowAction<'_>,
+) -> (Response, Response) {
+    input_action_row(ui, label, value, hint, invalid, action, &[])
+}
+
+fn input_action_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    hint: &str,
+    invalid: bool,
+    action: PropertyRowAction<'_>,
+    shorter: &[String],
+) -> (Response, Response) {
     let PropertyRowAction {
         icon: action_icon,
         label: action_label,
@@ -1666,10 +1701,11 @@ pub fn property_row_input_action(
     } else {
         ui.visuals().override_text_color.unwrap_or(t.color.text)
     };
-    let edit = egui::TextEdit::singleline(value)
+    let edit = hinted_edit(value, hint)
         .font(theme::field_mono())
         .desired_width(value_rect.width())
         .margin(field_margin(ui, value_rect, 7));
+    let restored = ui.visuals_mut().weak_text_color.replace(t.color.text_faint);
     let (edit_response, elided) = ui
         .scope_builder(
             egui::UiBuilder::new()
@@ -1692,17 +1728,22 @@ pub fn property_row_input_action(
                 let width = output.text_clip_rect.width();
                 let shown = at_rest_text(ui, full, shorter, &font, text_color, width);
                 let elided = (shown != full).then(|| full.to_owned());
-                ui.painter().with_clip_rect(output.text_clip_rect).text(
-                    output.galley_pos,
-                    Align2::LEFT_TOP,
-                    shown,
-                    font,
-                    text_color,
-                );
+                // An empty field paints nothing of its own: the form a value
+                // is written in, when there is one, stands in its place.
+                if !shown.is_empty() {
+                    ui.painter().with_clip_rect(output.text_clip_rect).text(
+                        output.galley_pos,
+                        Align2::LEFT_TOP,
+                        shown,
+                        font,
+                        text_color,
+                    );
+                }
                 (output.response.response, elided)
             },
         )
         .inner;
+    ui.visuals_mut().weak_text_color = restored;
     slot.close(ui);
     let edit_response = match elided {
         Some(full) => edit_response.on_hover_text(full),

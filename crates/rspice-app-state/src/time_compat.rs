@@ -121,6 +121,18 @@ pub fn local_date_time(unix_ms: u64) -> Option<time::OffsetDateTime> {
     Some(utc.to_offset(offset))
 }
 
+/// Today's date on the reader's own calendar, written `YYYY-MM-DD` as a
+/// drawing's date of issue is. `None` when the clock cannot be read.
+pub fn local_iso_date() -> Option<String> {
+    let today = local_date_time(checked_unix_time_ms().ok()?)?;
+    Some(format!(
+        "{:04}-{:02}-{:02}",
+        today.year(),
+        u8::from(today.month()),
+        today.day()
+    ))
+}
+
 /// The local zone's offset from UTC at one instant, in seconds east.
 ///
 /// Asked of the platform once per quarter hour of timestamps, because the

@@ -45,7 +45,10 @@ use crate::workbench::framework::requests::FollowSchematicGrid;
 use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_schematic_editor::view::drawing_sheet::ActiveDrawingSheet;
-use rspice_ui_kit::panels::{section_header, section_header_explained};
+use rspice_ui_kit::panels::{
+    PropertyRowAction, WorkbenchIcon, property_row_input_action_with_hint, section_header,
+    section_header_explained,
+};
 
 /// The sheet's inspector section over the parts it reads and writes: the
 /// model it inspects and edits, the session it reports to, and two of the
@@ -334,21 +337,22 @@ fn title_block_section(
             _ => field.default_value(),
         };
         if editable && !locked_by_organization(format, field) {
-            // An empty date shows the form it is written in; any other empty
-            // field shows what the block letters in its place.
-            let empty = if field.is_signature_date() {
-                Empty::Form(field.entry_hint())
+            // An empty date shows the form it is written in, with Today
+            // beside it; any other empty field shows what the block letters
+            // in its place.
+            let typed = if field.is_signature_date() {
+                date_row(ui, identity, field, &authored.value)
             } else {
-                Empty::Prints(fallback)
+                text_row(
+                    ui,
+                    identity,
+                    SheetText::Field(field),
+                    field.display_label(),
+                    &authored.value,
+                    Empty::Prints(fallback),
+                )
             };
-            if let Some(typed) = text_row(
-                ui,
-                identity,
-                SheetText::Field(field),
-                field.display_label(),
-                &authored.value,
-                empty,
-            ) {
+            if let Some(typed) = typed {
                 *edit = Some(Ok(DrawingSheetEdit::TitleField(field, typed)));
             }
         } else {
@@ -472,20 +476,20 @@ fn document_section(
         let stored = stored_title_value(model, format, field);
         if writable {
             // The date is refused unless it is written the one way the
-            // document control reads it.
-            let empty = if field == DrawingSheetTitleFieldId::Date {
-                Empty::Form("YYYY-MM-DD")
+            // document control reads it, and Today writes it so.
+            let typed = if field == DrawingSheetTitleFieldId::Date {
+                date_row(ui, identity, field, &stored)
             } else {
-                Empty::Blank
+                text_row(
+                    ui,
+                    identity,
+                    SheetText::Field(field),
+                    field.display_label(),
+                    &stored,
+                    Empty::Blank,
+                )
             };
-            if let Some(typed) = text_row(
-                ui,
-                identity,
-                SheetText::Field(field),
-                field.display_label(),
-                &stored,
-                empty,
-            ) {
+            if let Some(typed) = typed {
                 *edit = Some(Ok(DrawingSheetEdit::TitleField(field, typed)));
             }
         } else {
@@ -742,21 +746,60 @@ fn text_row(
     stored: &str,
     empty: Empty<'_>,
 ) -> Option<String> {
+    text_row_showing(ui, sheet, text, stored, |ui, typed| match empty {
+        Empty::Blank => property_row_input_with_hint(ui, label, typed, "", false),
+        Empty::Prints(printed) => property_row_input_with_default(ui, label, typed, printed, false),
+        Empty::Form(form) => property_row_input_with_hint(ui, label, typed, form, false),
+    })
+}
+
+/// A date typed as `YYYY-MM-DD`, with Today beside it, which writes today's
+/// date at once as one undo step.
+fn date_row(
+    ui: &mut Ui,
+    sheet: &SheetIdentity,
+    field: DrawingSheetTitleFieldId,
+    stored: &str,
+) -> Option<String> {
+    let mut today = false;
+    let typed = text_row_showing(ui, sheet, SheetText::Field(field), stored, |ui, typed| {
+        let (value, action) = property_row_input_action_with_hint(
+            ui,
+            field.display_label(),
+            typed,
+            "YYYY-MM-DD",
+            false,
+            PropertyRowAction {
+                icon: WorkbenchIcon::Calendar,
+                label: "Today",
+                enabled: true,
+                disabled_reason: None,
+            },
+        );
+        today = action.clicked();
+        value
+    });
+    if today {
+        return rspice_app_state::time_compat::local_iso_date().filter(|date| date != stored);
+    }
+    typed
+}
+
+/// [`text_row`] over the field `field` draws for the value being typed.
+fn text_row_showing(
+    ui: &mut Ui,
+    sheet: &SheetIdentity,
+    text: SheetText,
+    stored: &str,
+    field: impl FnOnce(&mut Ui, &mut String) -> egui::Response,
+) -> Option<String> {
     let draft = ui
         .data_mut(|data| take_text_draft(data, text))
         .filter(|draft| draft.sheet == *sheet);
     let mut typed = draft
         .as_ref()
         .map_or_else(|| stored.to_owned(), |draft| draft.text.clone());
-    let response = ui
-        .push_id(text.label(), |ui| match empty {
-            Empty::Blank => property_row_input_with_hint(ui, label, &mut typed, "", false),
-            Empty::Prints(printed) => {
-                property_row_input_with_default(ui, label, &mut typed, printed, false)
-            }
-            Empty::Form(form) => property_row_input_with_hint(ui, label, &mut typed, form, false),
-        })
-        .inner;
+    let response = ui.push_id(text.label(), |ui| field(ui, &mut typed)).inner;
     if ui.data(|data| data.get_temp::<SheetText>(focus_request_id())) == Some(text) {
         ui.data_mut(|data| data.remove::<SheetText>(focus_request_id()));
         response.request_focus();

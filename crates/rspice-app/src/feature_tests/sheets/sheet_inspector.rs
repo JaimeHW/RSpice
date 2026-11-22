@@ -943,6 +943,37 @@ fn save_as_personal_size_saves_only_that_and_the_menu_lists_each_size_once() {
     assert_eq!(offered(&panel), ["Lab panel \u{00b7} project"]);
 }
 
+/// Today beside the date of issue writes today's date there at once, in the
+/// one form the document control reads, as one undo step.
+#[test]
+fn today_fills_the_date_of_issue_with_todays_date() {
+    use rspice_app_state::time_compat::{local_iso_date, with_unix_epoch};
+    let mut panel = SheetPanel::new();
+    panel.pass(Vec::new());
+    let field = panel.controls["Date of issue"];
+    let today = egui::pos2(field.right() + 4.0 + field.height() / 2.0, field.center().y);
+    // 2026-03-14 12:00 UTC: the 14th or the 15th on the reader's calendar.
+    let epoch = Ok(std::time::Duration::from_secs(1_773_489_600));
+    with_unix_epoch(epoch, || panel.click_at(today));
+    let expected = with_unix_epoch(epoch, local_iso_date).unwrap();
+    assert!(
+        ["2026-03-14", "2026-03-15"].contains(&expected.as_str()),
+        "{expected}"
+    );
+    let stored = |panel: &SheetPanel| {
+        stored_title_value(
+            &panel.app.state.model,
+            &sheet_format(&panel.app.state),
+            DrawingSheetTitleFieldId::Date,
+        )
+    };
+    assert_eq!(stored(&panel), expected);
+    panel.pass(Vec::new());
+    assert!(panel.words().contains(&format!("{expected}\n")));
+    assert!(panel.app.state.undo_project_design().unwrap().is_some());
+    assert_eq!(stored(&panel), "");
+}
+
 /// An edge the sheet cannot have is refused in the words that say why, and
 /// changes nothing.
 #[test]
