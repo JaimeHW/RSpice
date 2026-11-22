@@ -19,6 +19,8 @@ pub struct ShapeInputView<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShapeInputAction {
     PlacePoint(Point),
+    /// A point the pointer laid down by dragging.
+    PointerPoint(Point),
     FinishPolygon,
 }
 
@@ -62,6 +64,44 @@ pub fn pointer_motion(
         expected: view.drawing.clone(),
         next,
         action: None,
+    })
+}
+
+/// A press-drag-release draws the shape as it is dragged: the press is its
+/// first point when none is placed yet, and the release is the next one. One
+/// drag finishes a rectangle or a line; the other shapes take their remaining
+/// points by click. A drag a pan modifier owns pans instead.
+pub fn pointer_drag(
+    ui: &Ui,
+    response: &Response,
+    viewport: &Viewport,
+    view: ShapeInputView<'_>,
+) -> Option<ShapeInputTransition> {
+    let snapped = |position| {
+        resolve_grid_pointer(view.snap_engine, view.grid_size, viewport, position).snapped_position
+    };
+    let mut next = view.drawing.clone();
+    let action = if response.drag_started_by(egui::PointerButton::Primary)
+        && !super::navigation::primary_pan_modifier_down(ui)
+    {
+        let origin = ui.input(|input| input.pointer.press_origin())?;
+        next.pointer_drag = true;
+        view.drawing
+            .points
+            .is_empty()
+            .then(|| ShapeInputAction::PointerPoint(snapped(origin)))
+    } else if response.drag_stopped_by(egui::PointerButton::Primary) && view.drawing.pointer_drag {
+        next.pointer_drag = false;
+        response
+            .interact_pointer_pos()
+            .map(|release| ShapeInputAction::PointerPoint(snapped(release)))
+    } else {
+        return None;
+    };
+    Some(ShapeInputTransition {
+        expected: view.drawing.clone(),
+        next,
+        action,
     })
 }
 

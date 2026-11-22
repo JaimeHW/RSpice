@@ -139,6 +139,13 @@ pub fn handle_tool_interactions(
         let request = capture_shape_input(state, transition);
         apply_shape_input(state, request);
     }
+    if current_tool == Tool::DocumentationShape
+        && let Some(transition) =
+            documentation_shape_input::pointer_drag(ui, response, viewport, shape_input_view(state))
+    {
+        let request = capture_shape_input(state, transition);
+        apply_shape_input(state, request);
+    }
 
     if matches!(current_tool, Tool::Select) {
         handle_select_dragging(ui, response, state, viewport, symbol_context);
@@ -910,6 +917,9 @@ pub fn apply_shape_input(state: &mut CanvasParts<'_>, request: ShapeInputRequest
                     .documentation_shape_drawing
                     .keyboard_active = true;
             }
+        }
+        Some(ShapeInputAction::PointerPoint(point)) => {
+            handle_documentation_shape_click(state, point, false);
         }
         Some(ShapeInputAction::FinishPolygon) => finish_documentation_polygon(state),
         None => {}

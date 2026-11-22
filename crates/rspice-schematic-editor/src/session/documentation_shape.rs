@@ -48,6 +48,9 @@ pub struct DocumentationShapeDrawing {
     /// without a pointing device.
     pub keyboard_cursor: Option<Point>,
     pub keyboard_active: bool,
+    /// A primary drag that lays the shape down is in progress: its release
+    /// places the next point.
+    pub pointer_drag: bool,
 }
 
 impl DocumentationShapeDrawing {
@@ -56,6 +59,7 @@ impl DocumentationShapeDrawing {
         self.points.clear();
         self.keyboard_cursor = None;
         self.keyboard_active = false;
+        self.pointer_drag = false;
     }
 
     pub fn add_point(

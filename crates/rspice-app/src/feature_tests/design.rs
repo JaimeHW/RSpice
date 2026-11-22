@@ -22,6 +22,7 @@ mod design_checks;
 mod design_note_placement_drawn;
 mod design_review_comments;
 mod design_surface_drawn;
+mod documentation_shapes_drawn;
 mod drag_work;
 mod engineering_table_drawn;
 mod find_replace;
