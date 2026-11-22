@@ -200,6 +200,10 @@ pub enum DesignCommand {
     /// it sits beside [`Self::ReplaceInstance`] rather than in a repair
     /// vocabulary of its own.
     UpdateInstanceInterface,
+    /// Re-place every stale instance of the open drawing on its own master,
+    /// as one undo step: the update above, for each instance whose master's
+    /// interface moved on, without selecting them one by one.
+    UpdateAllInstanceInterfaces,
     /// Light the net the selection is on.
     HighlightNet,
     /// The symbol canvas's pin tool.
@@ -431,7 +435,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 104] = [
+    pub const ALL: [Self; 105] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -521,6 +525,7 @@ impl DesignCommand {
         Self::ArraySelection,
         Self::SwapToRSpiceSymbols,
         Self::UpdateInstanceInterface,
+        Self::UpdateAllInstanceInterfaces,
         Self::HighlightNet,
         Self::SymbolPinTool,
         Self::SymbolPolylineTool,
@@ -636,6 +641,7 @@ impl DesignCommand {
             Self::ArraySelection => CommandKey::new("array-selection"),
             Self::SwapToRSpiceSymbols => CommandKey::new("swap-to-rspice-symbols"),
             Self::UpdateInstanceInterface => CommandKey::new("update-instance-interface"),
+            Self::UpdateAllInstanceInterfaces => CommandKey::new("update-all-instances"),
             Self::HighlightNet => CommandKey::new("highlight-net"),
             Self::SymbolPinTool => CommandKey::new("symbol-pin-tool"),
             Self::SymbolPolylineTool => CommandKey::new("symbol-line-tool"),
@@ -713,7 +719,7 @@ impl DesignCommand {
     /// chord of the design workspace.
     /// Selecting by kind and Properties are chords of the edit context, and
     /// Highlight net of the design workspace. Move, Stretch, Create array,
-    /// the symbol swap and the interface update edit the drawing and are
+    /// the symbol swap and the interface updates edit the drawing and are
     /// chords of the canvas; Move and Stretch have chords and are ones Repeat
     /// last command runs again.
     /// The symbol editor's commands change only the symbol canvas's own
@@ -1017,6 +1023,9 @@ impl DesignCommand {
             Self::SwapToRSpiceSymbols => ("Swap to RSpice symbols", "Edit", edits, canvas, NONE),
             Self::UpdateInstanceInterface => {
                 ("Update instance interface", "Design", edits, canvas, NONE)
+            }
+            Self::UpdateAllInstanceInterfaces => {
+                ("Update all instances", "Design", edits, canvas, NONE)
             }
             Self::HighlightNet => ("Highlight net", "Design", palette, design, NONE),
             Self::SymbolPinTool => (

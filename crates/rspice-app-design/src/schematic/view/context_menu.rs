@@ -229,6 +229,12 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         shortcut_command: Some(DesignCommand::UpdateInstanceInterface.key()),
     }),
     ContextEntry::Command(ContextCommand {
+        action: ContextAction::UpdateAllInstanceInterfaces,
+        icon: ContextIcon::Hierarchy,
+        label: "Update all instances",
+        shortcut_command: Some(DesignCommand::UpdateAllInstanceInterfaces.key()),
+    }),
+    ContextEntry::Command(ContextCommand {
         action: ContextAction::ReplaceInstance,
         icon: ContextIcon::Hierarchy,
         label: "Replace instance…",
@@ -502,6 +508,15 @@ fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
     }
 }
 
+/// The open drawing's instances whose master's interface moved on, by the
+/// answer the deck and the Design command give.
+fn stale_instances(state: &CanvasFacts<'_>) -> Vec<String> {
+    state.model.schematic.stale_instance_interfaces(
+        &state.model.library_manager,
+        &state.model.workspace.content.schematic_buffers,
+    )
+}
+
 /// Whether the selection holds a part whose value a series rounds: a menu
 /// opened on anything else has no use for the row.
 fn selection_holds_a_standard_value(state: &CanvasFacts<'_>) -> bool {
@@ -557,6 +572,12 @@ pub fn menu_entries(state: &CanvasFacts<'_>, target: ContextTarget) -> Vec<Conte
                 if command.action == ContextAction::ResetLabelPosition =>
             {
                 super::label_reset::selection_holds_placed_text(state.model)
+            }
+            // A repair, so offered only where there is something to repair.
+            ContextEntry::Command(command)
+                if command.action == ContextAction::UpdateAllInstanceInterfaces =>
+            {
+                !stale_instances(state).is_empty()
             }
             ContextEntry::Command(command) => master_slot_shows(command.action, subject),
         };
@@ -1483,6 +1504,10 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
                 ),
             "Select one instance whose master interface changed after it was placed",
         ),
+        ContextAction::UpdateAllInstanceInterfaces => (
+            writable && !stale_instances(state).is_empty(),
+            "Every instance matches its master's current interface",
+        ),
         // The command owns whether a replacement can be made at all — one
         // instance, editable, and a different ready master that preserves the
         // connected terminal contract. Restating any of that here would offer
@@ -1691,6 +1716,13 @@ pub fn execute_context_action(
                 Ok(summary) => summary,
                 Err(error) => error.to_string(),
             });
+        }
+        ContextAction::UpdateAllInstanceInterfaces => {
+            let outcome = state.model.schematic.update_all_instance_interfaces(
+                &state.model.library_manager,
+                &state.model.workspace.content.schematic_buffers,
+            );
+            state.prompt(outcome.unwrap_or_else(|refusal| refusal));
         }
         ContextAction::ReplaceInstance => open_replace_instance_dialog(
             &mut state.design.replace_instance,

@@ -403,6 +403,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "Edit symbol in place | edit-symbol-in-place | Shift+X | off: select one instance",
             "Create hierarchy… | create-hierarchy |  | off: select an editable object",
             "Create symbol from schematic… | create-symbol-from-schematic |  | on",
+            "Update all instances | update-all-instances |  | off: every instance matches its master's current interface",
             "---",
             "Place >",
             "  Instance… | place-instance | Shift+I | on",

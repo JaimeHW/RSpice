@@ -463,6 +463,7 @@ impl CommandSet for DesignCommand {
             | Self::ArraySelection
             | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
+            | Self::UpdateAllInstanceInterfaces
                 if !schematic =>
             {
                 Some("open an editable schematic or testbench")
@@ -472,6 +473,7 @@ impl CommandSet for DesignCommand {
             | Self::ArraySelection
             | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
+            | Self::UpdateAllInstanceInterfaces
                 if reads.model.schematic_edit_read_only() =>
             {
                 Some("the active schematic is read-only")
@@ -507,6 +509,17 @@ impl CommandSet for DesignCommand {
                 ))
                 .then_some("select one instance whose master interface changed after it was placed")
             }
+            // The same staleness answer the deck and Check and save give, for
+            // every instance of the drawing at once.
+            Self::UpdateAllInstanceInterfaces => reads
+                .model
+                .schematic
+                .stale_instance_interfaces(
+                    &reads.model.library_manager,
+                    &reads.model.workspace.content.schematic_buffers,
+                )
+                .is_empty()
+                .then_some("every instance matches its master's current interface"),
             Self::HighlightNet if !schematic => Some("open a schematic or testbench"),
             // What the command would refuse with is the reason.
             Self::HighlightNet => selected_net(
@@ -1106,6 +1119,13 @@ impl CommandSet for DesignCommand {
                     Ok(summary) => summary,
                     Err(error) => error.to_string(),
                 });
+            }
+            Self::UpdateAllInstanceInterfaces => {
+                let outcome = cx.model.schematic.update_all_instance_interfaces(
+                    &cx.model.library_manager,
+                    &cx.model.workspace.content.schematic_buffers,
+                );
+                cx.wb.prompt(outcome.unwrap_or_else(|refusal| refusal));
             }
             Self::HighlightNet => {
                 let highlighting = cx.state.schematic_visibility.net_highlighting;

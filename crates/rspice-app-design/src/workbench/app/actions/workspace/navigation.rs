@@ -244,7 +244,31 @@ impl NavigationParts<'_> {
             self.bump_active_schematic_epoch();
             self.refresh_active_design_check_projection();
             self.enter_occurrence_net_highlight(carried);
+            self.announce_stale_instances();
         }
+    }
+
+    /// A block whose ports changed below leaves its instances up here
+    /// behind; the level the author arrives at says which, and names the
+    /// step that brings them all up to date.
+    fn announce_stale_instances(&mut self) {
+        let stale = self.model.schematic.stale_instance_interfaces(
+            &self.model.library_manager,
+            &self.model.workspace.content.schematic_buffers,
+        );
+        let notice = match stale.as_slice() {
+            [] => return,
+            [one] => format!(
+                "{one} no longer presents its master's interface; \
+                 Update all instances brings it up to date."
+            ),
+            many => format!(
+                "{} no longer present their masters' interfaces; \
+                 Update all instances brings them up to date.",
+                many.join(", ")
+            ),
+        };
+        self.wb.prompt(notice);
     }
 
     /// Open the exact Verilog-A source owned by a bound schematic instance.

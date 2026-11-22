@@ -509,6 +509,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::ReplaceInstance.key(),
     DesignCommand::SwapToRSpiceSymbols.key(),
     DesignCommand::UpdateInstanceInterface.key(),
+    DesignCommand::UpdateAllInstanceInterfaces.key(),
     DesignCommand::CreateHierarchy.key(),
     ProjectCommand::CreateSymbol.key(),
     ProjectCommand::DesignManagement.key(),

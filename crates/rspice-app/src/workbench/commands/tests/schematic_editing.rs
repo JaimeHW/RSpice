@@ -1279,6 +1279,71 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
     );
 }
 
+/// Update all instances repairs every stale placement of the drawing without
+/// selecting them, and the whole repair is one step of the history: one undo
+/// puts every placement back.
+#[test]
+fn updating_all_instances_repairs_every_stale_placement_as_one_undo_step() {
+    let (mut app, master_key) = app_with_a_placed_cell_instance();
+    let first = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::CellInstance)
+        .expect("the fixture places one bound cell instance")
+        .clone();
+    let binding = first
+        .library_cell
+        .clone()
+        .expect("the fixture binds the instance");
+    app.state
+        .model
+        .schematic
+        .add_library_cell_component(rspice_app_state::state::Point::new(100, 200), binding);
+    app.state.model.schematic.session.editor.selection.clear();
+    let update_all = DesignCommand::UpdateAllInstanceInterfaces.key();
+    assert!(
+        !app.command_availability(update_all).is_available(),
+        "nothing is stale before the master changes"
+    );
+
+    rename_master_port(
+        &mut app
+            .state
+            .model
+            .workspace
+            .schematic_editor_mut(&master_key)
+            .expect("the fixture registers the master")
+            .editor,
+        "a",
+        "ain",
+    );
+    let interfaces = |app: &RSpiceApp| {
+        app.state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .filter_map(|component| component.library_cell.as_ref())
+            .map(|binding| binding.terminal_order.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(app.command_availability(update_all).is_available());
+
+    app.execute_command_key(update_all);
+
+    assert_eq!(interfaces(&app), [["ain", "b"], ["ain", "b"]]);
+    assert!(!app.command_availability(update_all).is_available());
+
+    assert!(app.state.model.schematic.undo());
+    assert_eq!(interfaces(&app), [["a", "b"], ["a", "b"]]);
+    assert!(app.command_availability(update_all).is_available());
+}
+
 /// The repair exists so the deck emits the instance again. Asserting the
 /// binding alone would pass on a repair that left the generator refusing.
 #[test]

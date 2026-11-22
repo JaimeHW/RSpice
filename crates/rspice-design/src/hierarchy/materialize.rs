@@ -124,7 +124,8 @@ pub fn materialize_authoritative_source_binding(
         };
         return Err(format!(
             "placed interface for {}/{} does not match authoritative source view '{}': {}; \
-             {symbol_step}select the instance and run \"Update instance interface\"",
+             {symbol_step}select the instance and run \"Update instance interface\", \
+             or run \"Update all instances\" for every such instance at once",
             placed.library,
             placed.cell,
             view.name,

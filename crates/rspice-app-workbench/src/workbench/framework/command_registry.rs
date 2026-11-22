@@ -713,6 +713,7 @@ pub mod ids {
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";
         TOGGLE_SPLIT_VIEW = "toggle-split-view";
         UNDO = "undo";
+        UPDATE_ALL_INSTANCES = "update-all-instances";
         UPDATE_INSTANCE_INTERFACE = "update-instance-interface";
         VERIFY_SPECIFICATIONS = "verify-specifications";
         VERIFY_WORKSPACE = "verify";

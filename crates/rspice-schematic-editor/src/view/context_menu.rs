@@ -78,6 +78,8 @@ pub enum ContextAction {
     /// The empty canvas's verb in the instance-master slot.
     NewVerilogADevice,
     UpdateInstanceInterface,
+    /// Every stale instance of the drawing, in one step.
+    UpdateAllInstanceInterfaces,
     ReplaceInstance,
     CreateHierarchy,
     CreateSymbolFromPorts,

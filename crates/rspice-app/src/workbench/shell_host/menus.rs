@@ -422,6 +422,12 @@ const DESIGN_MENU: &[MenuEntry] = &[
     ),
     design(DesignCommand::CreateHierarchy).access('H'),
     project(ProjectCommand::CreateSymbol).access('F'),
+    // A symbol places no instances, so it has none to bring up to date.
+    // No letter of "Update all instances" is left on this menu.
+    MenuEntry::Only(
+        MenuContext::NotSymbolView,
+        &[design(DesignCommand::UpdateAllInstanceInterfaces)],
+    ),
     Separator,
     MenuEntry::Only(
         MenuContext::NotSymbolView,

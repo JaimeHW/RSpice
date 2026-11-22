@@ -333,7 +333,8 @@ impl CheckAndSaveValidationReport {
                 instance,
                 format!(
                     "Instance '{instance}' no longer presents its master's interface; \
-                     select it and run \"Update instance interface\"."
+                     select it and run \"Update instance interface\", or run \
+                     \"Update all instances\"."
                 ),
                 reads
                     .model

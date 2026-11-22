@@ -66,7 +66,9 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             DesignCommand::JoinCollinearWires => Some(Icon::Wire),
             DesignCommand::MoveSelection | DesignCommand::StretchSelection => Some(Icon::Select),
             DesignCommand::ArraySelection => Some(Icon::Grid),
-            DesignCommand::SwapToRSpiceSymbols => Some(Icon::Refresh),
+            DesignCommand::SwapToRSpiceSymbols | DesignCommand::UpdateAllInstanceInterfaces => {
+                Some(Icon::Refresh)
+            }
             _ => None,
         };
     }
