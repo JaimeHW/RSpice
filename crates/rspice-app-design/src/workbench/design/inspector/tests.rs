@@ -154,6 +154,72 @@ fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
     assert_eq!(subject(&state.model, &[]), DesignSubject::Multi);
 }
 
+/// One bus or one bus tap fell through to the multi-selection panel,
+/// "1 selected" and "No instances selected.", and said nothing about it.
+#[test]
+fn one_bus_and_one_tap_have_inspectors_of_their_own() {
+    use crate::state::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation};
+    let mut state = DesignTestHost::default();
+    let bus = Bus::segment(
+        5,
+        Point::new(0, 60),
+        Point::new(80, 60),
+        Some(BusDeclaration::parse("DATA[3:0]").unwrap()),
+    )
+    .unwrap();
+    let tap = BusTap::new(
+        6,
+        &bus,
+        Point::new(40, 60),
+        Point::new(40, 80),
+        BusSlice::parse("DATA[1:0]").unwrap(),
+        BusTapOrientation::Down,
+    )
+    .unwrap();
+    let document = state.model.schematic.document_mut_for_test();
+    document.buses.push(bus);
+    document.bus_taps.push(tap);
+
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_bus(5);
+    assert_eq!(subject(&state.model, &[]), DesignSubject::Bus(5));
+    let painted = painted_panel(|ui| bus_panel(ui, &state.model, 5));
+    // The title is one line: the bus's name, then its kind.
+    assert_eq!(painted.lines().next(), Some("DATABus"), "{painted}");
+    for shown in ["Declaration", "DATA[3:0]", "Width", "4 bits", "Taps", "1"] {
+        assert!(
+            painted.lines().any(|line| line == shown),
+            "{shown}: {painted}"
+        );
+    }
+
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_bus_tap(6);
+    assert_eq!(subject(&state.model, &[]), DesignSubject::BusTap(6));
+    let painted = painted_panel(|ui| bus_tap_panel(ui, &state.model, 6));
+    assert_eq!(
+        painted.lines().next(),
+        Some("DATA[1:0]Bus tap"),
+        "{painted}"
+    );
+    for shown in ["DATA[3:0]", "DATA[1:0]", "2 bits", "Orientation", "Down"] {
+        assert!(
+            painted.lines().any(|line| line == shown),
+            "{shown}: {painted}"
+        );
+    }
+}
+
 #[test]
 fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
     let mut state = DesignTestHost::default();

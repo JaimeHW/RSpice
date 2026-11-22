@@ -80,6 +80,10 @@ pub(super) enum DesignSubject {
     Shape(u64),
     /// Exactly one retained schematic probe marker.
     Probe(u64),
+    /// Exactly one bus.
+    Bus(u64),
+    /// Exactly one bus tap.
+    BusTap(u64),
     /// A conductor selection that resolves to exactly one named net.
     Net(String),
     /// Several objects, or conductors spanning several nets.
@@ -156,6 +160,12 @@ pub(super) fn subject(model: &Model, nets: &[DesignNet]) -> DesignSubject {
     }
     if let Some(id) = selection.single_probe() {
         return DesignSubject::Probe(id);
+    }
+    if let Some(id) = selection.single_bus() {
+        return DesignSubject::Bus(id);
+    }
+    if let Some(id) = selection.single_bus_tap() {
+        return DesignSubject::BusTap(id);
     }
     if conductors_only(model)
         && let Some(name) = selected_net_name(model, nets)
@@ -422,6 +432,8 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         DesignSubject::Note(id) => note_panel(ui, cx, id),
         DesignSubject::Shape(id) => shape_panel(ui, cx, id),
         DesignSubject::Probe(id) => probe_panel(ui, cx, id),
+        DesignSubject::Bus(id) => bus_panel(ui, cx.model, id),
+        DesignSubject::BusTap(id) => bus_tap_panel(ui, cx.model, id),
         DesignSubject::Multi => multi_panel(ui, cx),
         DesignSubject::Sheet => cx.state.inspector_yields_to_sheet = true,
     }
@@ -769,6 +781,78 @@ fn shape_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
     section_block_gap(ui);
     property_row(ui, "Layer", shape.layer.label());
     sheet_row(ui, cx.model, id);
+}
+
+/// One bus: what it is declared as, how many bits it carries and how many
+/// taps leave it. Its declaration is edited through Properties, as a
+/// label's name is.
+fn bus_panel(ui: &mut Ui, model: &Model, id: u64) {
+    let document = model.schematic.document();
+    let Some(bus) = document.buses.iter().find(|bus| bus.id == id) else {
+        return;
+    };
+    let declaration = bus.declaration.as_ref();
+    object_title(
+        ui,
+        declaration.map_or("Bus", |declaration| declaration.name.as_str()),
+        Some("Bus"),
+        None,
+    );
+    section_block_gap(ui);
+    property_row(
+        ui,
+        "Declaration",
+        &declaration.map_or_else(|| "Not declared".to_owned(), ToString::to_string),
+    );
+    if let Some(declaration) = declaration {
+        property_row(ui, "Width", &bit_count(declaration.width()));
+    }
+    let taps = document
+        .bus_taps
+        .iter()
+        .filter(|tap| tap.bus_id == id)
+        .count();
+    property_row(ui, "Taps", &taps.to_string());
+    sheet_row(ui, model, id);
+}
+
+/// One bus tap: the bits it takes, the bus it takes them from, and which
+/// way it leaves the bus.
+fn bus_tap_panel(ui: &mut Ui, model: &Model, id: u64) {
+    let document = model.schematic.document();
+    let Some(tap) = document.bus_taps.iter().find(|tap| tap.id == id) else {
+        return;
+    };
+    let slice = tap.slice.to_string();
+    object_title(ui, &slice, Some("Bus tap"), None);
+    section_block_gap(ui);
+    let source = document
+        .buses
+        .iter()
+        .find(|bus| bus.id == tap.bus_id)
+        .and_then(|bus| bus.declaration.as_ref())
+        .map_or_else(|| "Not declared".to_owned(), ToString::to_string);
+    property_row(ui, "Bus", &source);
+    property_row(ui, "Bits", &slice);
+    property_row(ui, "Width", &bit_count(tap.slice.width()));
+    property_row(ui, "Orientation", tap_orientation_label(tap.orientation));
+    sheet_row(ui, model, id);
+}
+
+fn bit_count(width: usize) -> String {
+    format!("{width} bit{}", if width == 1 { "" } else { "s" })
+}
+
+/// The orientation as Properties names it.
+const fn tap_orientation_label(orientation: crate::state::BusTapOrientation) -> &'static str {
+    use crate::state::BusTapOrientation;
+    match orientation {
+        BusTapOrientation::Automatic => "Automatic",
+        BusTapOrientation::Left => "Left",
+        BusTapOrientation::Right => "Right",
+        BusTapOrientation::Up => "Up",
+        BusTapOrientation::Down => "Down",
+    }
 }
 
 pub fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
