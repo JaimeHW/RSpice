@@ -10,6 +10,7 @@ use egui::{Context, Response};
 
 use crate::state::command_catalog::CommandKey;
 use crate::state::{Point, Tool, ViewType};
+use crate::workbench::app::dialogs::hierarchy::subcircuit_source;
 use crate::workbench::app_state::ContextTarget;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
@@ -1481,8 +1482,9 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             "Select at least one editable component, wire, bus, tap, junction, net label, probe, or design note",
         ),
         ContextAction::DescendHierarchy => (
-            state.selected_hierarchy_master().is_some(),
-            "Select one instance with a resolved schematic master",
+            state.selected_hierarchy_master().is_some()
+                || subcircuit_source::selected_instance_subcircuit(state.model).is_some(),
+            "Select one instance with a resolved schematic or subcircuit master",
         ),
         ContextAction::OpenVerilogAView => (
             state.selected_veriloga_source().is_some(),
@@ -1696,7 +1698,26 @@ pub fn execute_context_action(
             delete_schematic_selection(state.model, state.workbench);
         }
         ContextAction::DescendHierarchy | ContextAction::OpenVerilogAView => {
-            state.open_selected_instance_master();
+            // A subcircuit has no drawing to descend into; its text opens.
+            let subcircuit = (action == ContextAction::DescendHierarchy
+                && crate::workbench::app::actions::workspace::selected_hierarchy_master(
+                    state.model,
+                )
+                .is_none())
+            .then(|| subcircuit_source::selected_instance_subcircuit(state.model))
+            .flatten();
+            match subcircuit {
+                Some(instance) => {
+                    if let Err(refusal) = subcircuit_source::open_subcircuit_source(
+                        &mut state.design.subcircuit_source,
+                        state.model,
+                        instance,
+                    ) {
+                        state.prompt(refusal);
+                    }
+                }
+                None => state.open_selected_instance_master(),
+            }
         }
         ContextAction::EditSymbolInPlace => {
             state.edit_selected_symbol_in_place();

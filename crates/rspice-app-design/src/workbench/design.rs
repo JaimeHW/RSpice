@@ -68,6 +68,7 @@ use crate::workbench::app::dialogs::hierarchy::create::{
     CreateHierarchy, commit_create_hierarchy, open_create_hierarchy_dialog,
 };
 use crate::workbench::app::dialogs::hierarchy::descend::{self, DescendHierarchy};
+use crate::workbench::app::dialogs::hierarchy::subcircuit_source;
 use crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacement;
 use crate::workbench::app::dialogs::placement::bus_tap::open_bus_tap;
 use crate::workbench::app::dialogs::placement::pin_port::open_create_pins;
@@ -343,10 +344,11 @@ impl CommandSet for DesignCommand {
             .then_some("select one hierarchical or Verilog-A instance"),
             // The direct route opens what the instance is an instance of, as
             // its context-menu row does: a Verilog-A instance's module opens
-            // as its cell view.
+            // as its cell view, and a subcircuit's text opens to read.
             Self::DescendHierarchyDirect => (selected_hierarchy_master(reads.model).is_none()
-                && selected_instance_veriloga_source(reads.model).is_none())
-            .then_some("select one hierarchical or Verilog-A instance"),
+                && selected_instance_veriloga_source(reads.model).is_none()
+                && subcircuit_source::selected_instance_subcircuit(reads.model).is_none())
+            .then_some("select one hierarchical, Verilog-A or subcircuit instance"),
             Self::ClearChecks => (!check_results_stand(reads)).then_some("no check has run"),
             Self::NextViolation | Self::PreviousViolation => violation_tour_refusal(reads),
             Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
@@ -900,7 +902,7 @@ impl CommandSet for DesignCommand {
                     cx.wb,
                 );
             }
-            Self::DescendHierarchyDirect => navigation(cx).open_selected_instance_master(),
+            Self::DescendHierarchyDirect => descend_direct(cx),
             Self::ClearChecks => {
                 if routed::symbol_editor(cx.wb.workspace, cx.model) {
                     clear_active_symbol_pin_checks(cx.model);
@@ -1178,6 +1180,26 @@ impl CommandSet for DesignCommand {
     }
 }
 
+/// Descend into what the one selected instance is an instance of. A
+/// schematic or Verilog-A master opens as its view; a subcircuit has no
+/// drawing, so its text opens to read.
+fn descend_direct(cx: &mut Cx<'_, DesignFeature>) {
+    if selected_hierarchy_master(cx.model).is_none()
+        && selected_instance_veriloga_source(cx.model).is_none()
+        && let Some(instance) = subcircuit_source::selected_instance_subcircuit(cx.model)
+    {
+        if let Err(refusal) = subcircuit_source::open_subcircuit_source(
+            &mut cx.state.subcircuit_source,
+            cx.model,
+            instance,
+        ) {
+            cx.wb.prompt(refusal);
+        }
+        return;
+    }
+    navigation(cx).open_selected_instance_master();
+}
+
 /// What moving the canvas to another view or occurrence reads and writes,
 /// lent from the feature's context.
 fn navigation<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> NavigationParts<'a> {
@@ -1414,6 +1436,11 @@ const DIALOGS: &[FeatureDialog<DesignFeature>] = &[
         key: DialogKey("design.array_selection"),
         is_open: |design| design.array_selection.open,
         render: DesignFeature::render_array_selection_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.subcircuit_source"),
+        is_open: |design| design.subcircuit_source.open,
+        render: DesignFeature::render_subcircuit_source_dialog,
     },
     FeatureDialog {
         key: DialogKey("design.replace_instance"),
@@ -1910,6 +1937,11 @@ impl DesignFeature {
             workbench: cx.wb,
         }
         .render_create_hierarchy_dialog(ctx);
+    }
+
+    /// The text of the subcircuit an instance stands on.
+    fn render_subcircuit_source_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        subcircuit_source::render_subcircuit_source_dialog(&mut cx.state.subcircuit_source, ctx);
     }
 
     /// Replace instance, over its draft, the property sheets its catalog reads,

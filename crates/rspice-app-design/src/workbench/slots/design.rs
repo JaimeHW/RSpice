@@ -91,6 +91,11 @@ pub struct DesignState {
     pub array_selection:
         Box<crate::workbench::app::dialogs::selection::array::ArraySelectionDialogState>,
 
+    /// The text of the `.subckt` an instance stands on, read where Descend
+    /// on that instance leads.
+    pub subcircuit_source:
+        crate::workbench::app::dialogs::hierarchy::subcircuit_source::SubcircuitSourceDialogState,
+
     /// Pin-, parameter-, model-, and netlist-compatible instance replacement.
     pub replace_instance:
         Box<crate::workbench::app::dialogs::replace_instance::ReplaceInstanceDialogState>,
