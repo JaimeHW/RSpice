@@ -70,3 +70,76 @@ fn a_check_that_finds_errors_warns_and_opens_problems() {
     assert_eq!(state.workbench.console_page, page);
     assert!(state.workbench.toasts.activity().is_empty());
 }
+
+/// The finding badges painted on the canvas: three-cornered fills in a
+/// severity's colour, inside the drawing.
+fn badges(user: &crate::workbench::app::veriloga_flow_tests::User) -> usize {
+    let palette = rspice_app_workbench::ui::tokens::Tokens::get(&user.ctx).color;
+    let canvas = user.expect("Schematic canvas");
+    user.shapes
+        .iter()
+        .filter(|clipped| match &clipped.shape {
+            egui::Shape::Path(path) => {
+                path.closed
+                    && path.points.len() == 3
+                    && (path.fill == palette.err || path.fill == palette.warn)
+                    && path.points.iter().all(|point| canvas.contains(*point))
+            }
+            _ => false,
+        })
+        .count()
+}
+
+/// A check marks what it found on the drawing in the default display, over
+/// the operating point, without a trip to the display options; only Hidden
+/// hides the marks.
+#[test]
+fn a_check_marks_its_findings_over_the_operating_point() {
+    use crate::workbench::RSpiceApp;
+    use crate::workbench::session::project_transactions::create_example_project;
+    use rspice_app_design::workbench::design::commands::DesignCommand;
+    use rspice_app_state::state::{ComponentType, Point, SchematicAnnotationVisibility};
+    use rspice_app_state::workbench::examples::EXAMPLES;
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+
+    let mut app = RSpiceApp::test_instance();
+    create_example_project(&mut app.state, EXAMPLES[0]).expect("the example opens as a project");
+    let mut user = crate::workbench::app::veriloga_flow_tests::User::new(app);
+    user.app.state.workbench.activate(Workspace::Design);
+    let r1 = user
+        .app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::Resistor)
+        .expect("the example draws a resistor")
+        .pos;
+    // A resistor of its own inside the loop the circuit draws, on the sheet
+    // and connected to nothing.
+    user.app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(r1.x, r1.y + 150));
+    user.app.state.sync_active_schematic_to_workspace();
+    user.app.execute_command_key(ids::ZOOM_FIT);
+    user.settle();
+    assert_eq!(
+        user.app.state.design.schematic_visibility.annotations,
+        SchematicAnnotationVisibility::OperatingPoint,
+        "the default display"
+    );
+
+    user.app
+        .execute_command_key(DesignCommand::CheckCellview.key());
+    user.settle();
+    assert!(badges(&user) > 0, "the check's findings are marked");
+
+    user.app.state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
+    user.settle();
+    assert_eq!(badges(&user), 0, "Hidden hides them");
+}

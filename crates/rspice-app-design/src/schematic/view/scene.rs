@@ -210,10 +210,11 @@ pub(super) fn draw_scene(
         drawing_sheet,
     );
 
-    // Check results last — violation badges annotate everything below.
-    if state.design.schematic_visibility.annotations
-        == SchematicAnnotationVisibility::ViolationsOnly
-    {
+    // Check results last — violation badges annotate everything below,
+    // over whichever annotation layer is on, as KiCad's ERC markers and
+    // Virtuoso's check markers stand apart from what the simulator shows.
+    // Only Hidden hides them.
+    if state.design.schematic_visibility.annotations != SchematicAnnotationVisibility::Hidden {
         super::violations::draw_violation_markers(painter, viewport, state);
     }
 
