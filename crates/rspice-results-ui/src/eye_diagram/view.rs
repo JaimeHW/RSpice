@@ -372,7 +372,7 @@ fn show_bathtub(
         })
         .unwrap_or_default();
     let mut spec = PlotSpec::new(
-        Axis::linear_with(0.0, 1.0, "UI", 6).with_label("Sampling phase from the crossing"),
+        Axis::linear_with(0.0, 1.0, "UI", 6),
         XScale::Linear,
         Axis::log_decades(floor, 1.0, ""),
     )
@@ -740,7 +740,7 @@ fn metric_rows(m: &EyeMeasurements, rate: f64, significant_digits: usize) -> Vec
         "BER from Q".to_owned(),
         match m.ber {
             BerEstimate::FromQ(ber) => value(ber, ""),
-            BerEstimate::NoRandomNoise => "none: no random noise".to_owned(),
+            BerEstimate::NoRandomNoise => "none: spread is not Gaussian".to_owned(),
             BerEstimate::Unmeasured => "—".to_owned(),
         },
     ));

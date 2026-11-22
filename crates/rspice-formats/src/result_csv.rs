@@ -186,7 +186,7 @@ pub fn encode_eye_measurements_csv(
             "estimated_ber_basis".into(),
             match m.ber {
                 BerEstimate::FromQ(_) => "gaussian tail of q_factor",
-                BerEstimate::NoRandomNoise => "none: no random noise",
+                BerEstimate::NoRandomNoise => "none: spread is not Gaussian",
                 BerEstimate::Unmeasured => "",
             }
             .to_owned(),
@@ -302,7 +302,7 @@ mod tests {
         // empty and say why.
         assert!(text.contains("\njitter_rj,,s\njitter_dj,,s\nopening_ber,1e-12,\njitter_tj,,s\n"));
         assert!(text.contains(
-            "\nsnr,inf,dB\nq_factor,inf,\nestimated_ber,,\nestimated_ber_basis,none: no random noise,\n"
+            "\nsnr,inf,dB\nq_factor,inf,\nestimated_ber,,\nestimated_ber_basis,none: spread is not Gaussian,\n"
         ));
     }
 }

@@ -1,8 +1,8 @@
 //! The eye sheet's bar: the signal, the clock that folds it, its levels and
 //! the error rate it is read at, with the mask behind Display, as ViVA's eye
 //! diagram assistant and ADS's eye probe set them. A bar too narrow for every
-//! control folds the error rate, then the levels, into the Display menu, so
-//! nothing runs under the export button.
+//! control folds the error rate, then the levels, then the clock into the
+//! Display menu, so nothing runs under the mask verdict or the export button.
 
 use egui::Ui;
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -71,8 +71,11 @@ pub fn domain_bar(
         settings.fold.source = (picked > 0).then(|| names[picked].clone());
     }
 
-    ui.add_space(GROUP_GAP);
-    clock_controls(ui, &mut settings, sources, significant_digits);
+    if !fold.clock {
+        ui.add_space(GROUP_GAP);
+        bar_label(ui, "Clock");
+        clock_controls(ui, &mut settings, sources, significant_digits);
+    }
 
     if !fold.levels {
         ui.add_space(GROUP_GAP);
@@ -86,7 +89,7 @@ pub fn domain_bar(
     }
 
     ui.add_space(GROUP_GAP);
-    display_menu(ui, eye, &mut settings, fold);
+    display_menu(ui, eye, &mut settings, sources, significant_digits, fold);
     settings.mask.clear_test();
     let mut held = before;
     held.mask.clear_test();
@@ -105,10 +108,11 @@ pub fn outputs(ui: &mut Ui, eye: &EyeDiagramState, significant_digits: usize) {
         || "—".to_owned(),
         |clearance| format!("{} %", significant(100.0 * clearance, significant_digits)),
     );
-    let verdict = format!(
-        "Mask {} of {} samples · clearance {clearance}",
-        mask.violation_count, mask.total_samples
-    );
+    let verdict = if mask.violation_count > 0 {
+        format!("{} in mask · {clearance}", mask.violation_count)
+    } else {
+        format!("Mask clear · {clearance}")
+    };
     let tone = if mask.violation_count > 0 {
         tokens::Tokens::get(ui.ctx()).color.err
     } else {
@@ -118,7 +122,11 @@ pub fn outputs(ui: &mut Ui, eye: &EyeDiagramState, significant_digits: usize) {
         egui::RichText::new(verdict)
             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
             .color(tone),
-    );
+    )
+    .on_hover_text(format!(
+        "{} of {} samples fall inside the mask; it clears the eye by {clearance}",
+        mask.violation_count, mask.total_samples
+    ));
 }
 
 fn significant(value: f64, digits: usize) -> String {
@@ -135,7 +143,6 @@ fn clock_controls(
     sources: &[String],
     significant_digits: usize,
 ) {
-    bar_label(ui, "Clock");
     let kind = if settings.fold.clock.is_some() {
         2
     } else if matches!(settings.fold.timebase, EyeTimebase::Explicit { .. }) {
@@ -259,6 +266,7 @@ fn rate_select(ui: &mut Ui, settings: &mut EyeSettings) {
 /// Which of the bar's groups stand in the Display menu for want of room.
 #[derive(Debug, Clone, Copy, Default)]
 struct Fold {
+    clock: bool,
     levels: bool,
     rate: bool,
 }
@@ -291,8 +299,10 @@ impl Fold {
                 .unwrap_or(DISPLAY_WIDTH_GUESS);
         let room = ui.available_width();
         let rate_folds = room < source + clock + levels + rate + display;
+        let levels_fold = rate_folds && room < source + clock + levels + display;
         Self {
-            levels: rate_folds && room < source + clock + levels + display,
+            clock: levels_fold && room < source + clock + display,
+            levels: levels_fold,
             rate: rate_folds,
         }
     }
@@ -302,7 +312,14 @@ fn display_width_id(ui: &Ui) -> egui::Id {
     ui.id().with("rspice.eye.display-width")
 }
 
-fn display_menu(ui: &mut Ui, eye: &EyeDiagramState, settings: &mut EyeSettings, fold: Fold) {
+fn display_menu(
+    ui: &mut Ui,
+    eye: &EyeDiagramState,
+    settings: &mut EyeSettings,
+    sources: &[String],
+    significant_digits: usize,
+    fold: Fold,
+) {
     let display = Button::new("Display")
         .menu()
         .accessible_label("Eye display options")
@@ -316,6 +333,13 @@ fn display_menu(ui: &mut Ui, eye: &EyeDiagramState, settings: &mut EyeSettings, 
                 .num_columns(2)
                 .spacing([12.0, 6.0])
                 .show(ui, |ui| {
+                    if fold.clock {
+                        bar_label(ui, "Clock");
+                        ui.horizontal(|ui| {
+                            clock_controls(ui, settings, sources, significant_digits);
+                        });
+                        ui.end_row();
+                    }
                     if fold.levels {
                         bar_label(ui, "Levels");
                         levels_control(ui, settings);
