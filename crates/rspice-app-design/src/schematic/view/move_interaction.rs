@@ -1,8 +1,12 @@
 //! Validate move canvas requests and retain the app-owned undo transaction.
 
 use super::{
-    SchematicSymbolContext, parts::CanvasParts, requests::editor_request_source,
-    sheet_visibility::with_active_wire_topology, viewport::Viewport,
+    SchematicSymbolContext,
+    parts::CanvasParts,
+    requests::editor_request_source,
+    selection_transform::{SelectionTransform, turn_selection_in_scope},
+    sheet_visibility::with_active_wire_topology,
+    viewport::Viewport,
 };
 use crate::state::{Component, MoveSelectionMode, Point, Tool};
 use crate::workbench::app::{armed_move_selection_authority, cancel_armed_move_selection_in};
@@ -84,6 +88,38 @@ pub fn apply(
     }
 }
 
+/// Carry the selection by `delta`, then make the turns pressed while Move
+/// carried it, each about the middle of the selection where it lands. The
+/// preview and the commit both take this one route, so what floats under
+/// the pointer is what lands. Returns whether anything moved or turned.
+///
+/// The turns are made after the translation so that a pin turned into a
+/// wire joins it where the Move drops it, never where it was picked up.
+pub(super) fn carry_selection(
+    schematic: &mut crate::state::SchematicState,
+    scope: &crate::state::ActiveSheetTopology,
+    symbol_context: &SchematicSymbolContext,
+    delta: Point,
+    mode: MoveSelectionMode,
+    turns: &[SelectionTransform],
+) -> Result<bool, rspice_design::schematic::movement::MoveSelectionError> {
+    let moved = if delta == Point::origin() {
+        false
+    } else {
+        schematic.move_selection_with_mode_resolved(
+            delta,
+            mode,
+            |component| symbol_context.terminal_points(component),
+            scope,
+        )?
+    };
+    let mut turned = false;
+    for &turn in turns {
+        turned |= turn_selection_in_scope(schematic, scope, symbol_context, turn);
+    }
+    Ok(moved || turned)
+}
+
 pub(super) fn commit_armed_move_selection(
     state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
@@ -96,7 +132,8 @@ pub(super) fn commit_armed_move_selection(
     }
     let delta = state.design.move_selection.canvas.preview_delta;
     let mode = state.design.move_selection.mode;
-    if delta == Point::origin() {
+    let turns = state.design.move_selection.turns.clone();
+    if delta == Point::origin() && turns.is_empty() {
         state.prompt("Nothing moved.");
         cancel_armed_move_selection_in(&mut state.design.move_selection, state.model);
         return;
@@ -105,12 +142,7 @@ pub(super) fn commit_armed_move_selection(
     // A wire end on another sheet can share a selected pin's coordinates;
     // the rubber band and its cleanup must not reach it.
     let movement = with_active_wire_topology(state.model, |schematic, scope| {
-        let movement = schematic.move_selection_with_mode_resolved(
-            delta,
-            mode,
-            |component| symbol_context.terminal_points(component),
-            scope,
-        );
+        let movement = carry_selection(schematic, scope, symbol_context, delta, mode, &turns);
         if matches!(movement, Ok(true)) {
             let automatic_junctions = schematic.session.editor.automatic_junctions;
             // A pin moved inside a wire is connected there and owns a vertex.
@@ -131,16 +163,25 @@ pub(super) fn commit_armed_move_selection(
         Ok(true) => {
             let recorded = state.model.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
-            state.prompt(if recorded {
+            let count = state.model.schematic.live_movable_selection_count();
+            state.prompt(if !recorded {
+                "Nothing moved.".to_owned()
+            } else if delta == Point::origin() {
                 format!(
-                    "Moved {} objects by ({}, {}) in {} mode.",
-                    state.model.schematic.live_movable_selection_count(),
+                    "Turned {} in place.",
+                    if count == 1 {
+                        "1 object".to_owned()
+                    } else {
+                        format!("{count} objects")
+                    }
+                )
+            } else {
+                format!(
+                    "Moved {count} objects by ({}, {}) in {} mode.",
                     delta.x,
                     delta.y,
                     mode.label(),
                 )
-            } else {
-                "Nothing moved.".to_owned()
             });
             cancel_armed_move_selection_in(&mut state.design.move_selection, state.model);
         }
@@ -460,6 +501,131 @@ mod tests {
 
         assert_eq!(result, Ok(true));
         assert_eq!(candidate.document().wires, vec![hidden]);
+    }
+
+    /// R1 alone at the origin, selected, with Move armed and the undo
+    /// history at its start.
+    fn carried_resistor() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(1);
+        state.model.schematic.init_undo_history();
+        arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
+        state
+    }
+
+    /// R pressed while Move carries a part turns what floats and leaves
+    /// the sheet alone, so the move carries on; the turn lands with the move,
+    /// where the preview showed it, and one undo puts the part back where it
+    /// was, unturned.
+    #[test]
+    fn a_turn_made_while_move_carries_lands_with_the_move_as_one_undo_step() {
+        use crate::schematic::view::shelf_drag::{PlacementTransform, turn_what_floats};
+        use crate::state::Rotation;
+
+        let mut state = carried_resistor();
+        let before = state.model.schematic.document().components[0].clone();
+
+        assert!(turn_what_floats(
+            &mut canvas_parts(&mut state),
+            PlacementTransform::RotateClockwise
+        ));
+
+        assert_eq!(
+            state.model.schematic.document().components[0],
+            before,
+            "the sheet is not touched while the turn floats"
+        );
+        assert!(!state.model.schematic.can_undo());
+        assert!(state.design.move_selection.armed, "the move carries on");
+        assert!(
+            armed_move_selection_authority(&state.design.move_selection, &state.model).is_ok(),
+            "the next frame does not cancel the move"
+        );
+
+        state.design.move_selection.canvas.preview_delta = Point::new(40, 20);
+        let symbols = schematic_symbol_context(&state);
+        let (preview, result) = crate::schematic::view::preview::move_preview_candidate(
+            &canvas_facts(&state),
+            &symbols,
+            Point::new(40, 20),
+            crate::state::MoveSelectionMode::Connected,
+        );
+        assert_eq!(result, Ok(true));
+        commit_armed_move_selection(&mut canvas_parts(&mut state), &symbols);
+
+        let landed = &state.model.schematic.document().components[0];
+        assert_eq!(landed.rotation, Rotation::R90);
+        assert_ne!(landed.pos, before.pos);
+        assert_eq!(
+            landed,
+            &preview.document().components[0],
+            "the part lands where the preview showed it"
+        );
+        assert!(!state.design.move_selection.armed);
+        assert!(state.model.schematic.undo());
+        assert_eq!(state.model.schematic.document().components[0], before);
+        assert!(
+            !state.model.schematic.can_undo(),
+            "the move and its turn are one undo step"
+        );
+    }
+
+    /// A turn with no travel still lands, in place, as the Move's one step.
+    #[test]
+    fn a_move_that_only_turned_lands_the_turn() {
+        use crate::state::Rotation;
+
+        let mut state = carried_resistor();
+        state
+            .design
+            .move_selection
+            .turns
+            .push(crate::schematic::view::selection_transform::SelectionTransform::RotateClockwise);
+        let symbols = schematic_symbol_context(&state);
+
+        commit_armed_move_selection(&mut canvas_parts(&mut state), &symbols);
+
+        assert_eq!(
+            state.model.schematic.document().components[0].rotation,
+            Rotation::R90
+        );
+        assert_eq!(
+            state.model.schematic.undo_description(),
+            Some("move selection")
+        );
+    }
+
+    /// Esc during a Move puts everything back as it was: the place and the
+    /// turn the Move carried. Nothing reaches the undo history.
+    #[test]
+    fn cancelling_a_move_drops_the_turns_it_carried() {
+        use crate::schematic::view::shelf_drag::{PlacementTransform, turn_what_floats};
+
+        let mut state = carried_resistor();
+        let before = state.model.schematic.document().components[0].clone();
+        assert!(turn_what_floats(
+            &mut canvas_parts(&mut state),
+            PlacementTransform::ToggleHorizontalMirror
+        ));
+        state.design.move_selection.canvas.preview_delta = Point::new(40, 10);
+
+        cancel_armed_move_selection_in(&mut state.design.move_selection, &mut state.model);
+
+        assert_eq!(state.model.schematic.document().components[0], before);
+        assert!(!state.model.schematic.can_undo());
+        assert!(state.design.move_selection.turns.is_empty());
     }
 
     #[test]

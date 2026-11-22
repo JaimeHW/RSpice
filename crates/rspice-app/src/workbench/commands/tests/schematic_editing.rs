@@ -356,19 +356,15 @@ fn rotate_and_mirror_have_their_keys_on_the_canvas() {
 }
 
 /// While Move is carrying the selection, plain R turns what is being moved
-/// instead of arming the resistor tool, and the move carries on.
+/// instead of arming the resistor tool, and the move carries on. The turn
+/// floats with the move: the sheet is untouched until the move lands.
 #[test]
 fn plain_r_turns_the_selection_while_move_carries_it() {
+    use rspice_app_design::schematic::view::selection_transform::SelectionTransform;
+
     let (mut app, _) = app_with_selected_resistor_pair();
-    rspice_app_design::workbench::app::dialogs::selection::move_selection::arm_move_selection_in(
-        &mut app.state.design.move_selection,
-        &mut app.state.design.stretch_selection,
-        &mut app.state.design.array_selection,
-        &mut app.state.model,
-    );
-    assert!(app.state.design.move_selection.armed);
-    let before = app.state.model.schematic.document().components[1].pos
-        - app.state.model.schematic.document().components[0].pos;
+    arm_move(&mut app);
+    let before = app.state.model.schematic.document().clone();
 
     let ctx = egui::Context::default();
     let mut handled = false;
@@ -393,10 +389,27 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
     );
 
     assert!(handled, "R belonged to the floating selection");
-    let after = app.state.model.schematic.document().components[1].pos
-        - app.state.model.schematic.document().components[0].pos;
-    assert_eq!(after, rotated_cw(before));
+    assert_eq!(
+        app.state.design.move_selection.turns,
+        vec![SelectionTransform::RotateClockwise]
+    );
+    let after = app.state.model.schematic.document();
+    assert_eq!(
+        (&after.components, &after.wires),
+        (&before.components, &before.wires),
+        "the sheet is untouched while the turn floats"
+    );
     assert!(app.state.design.move_selection.armed, "the move carries on");
+}
+
+fn arm_move(app: &mut RSpiceApp) {
+    rspice_app_design::workbench::app::dialogs::selection::move_selection::arm_move_selection_in(
+        &mut app.state.design.move_selection,
+        &mut app.state.design.stretch_selection,
+        &mut app.state.design.array_selection,
+        &mut app.state.model,
+    );
+    assert!(app.state.design.move_selection.armed);
 }
 
 fn app_with_every_complete_schematic_object() -> RSpiceApp {

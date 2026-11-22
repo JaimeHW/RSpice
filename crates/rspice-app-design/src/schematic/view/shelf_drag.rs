@@ -13,7 +13,7 @@ use crate::state::{
     ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point, functional_part,
 };
 
-use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
+use super::selection_transform::SelectionTransform;
 
 /// Typed payload shared by component-shelf drag sources and the schematic
 /// canvas drop target.
@@ -271,8 +271,8 @@ pub fn handle_pre_render_placement_transform(
     }
     let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
     // A floating paste, or the selection Move carries, turns about its own
-    // middle and keeps floating. A turn of what Move carries is its own undo
-    // step; the floating copy is not on the sheet until it lands.
+    // middle and keeps floating. Neither is on the sheet until it lands, and
+    // a turn of what Move carries lands with the move.
     let carried = state.design.floating_paste.is_some() || state.design.move_selection.armed;
     if carried && (canvas_has_focus || pointer_over_canvas) {
         let Some(transform) = ctx.input_mut(consume_placement_transform) else {
@@ -296,19 +296,16 @@ pub fn handle_pre_render_placement_transform(
     true
 }
 
-/// While Move carries the selection, a turn applies about its own middle,
-/// and the move carries on from where the pointer is.
+/// While Move carries the selection, a turn floats with it about its own
+/// middle and the move carries on from where the pointer is. The sheet is
+/// not touched: the turn lands with the move as one undo step, and Esc
+/// drops it with the move.
 fn turn_the_move(state: &mut CanvasParts<'_>, transform: PlacementTransform) {
-    let transform = selection_transform(transform);
-    let symbol_context = state.model.schematic_symbol_context();
-    if transform_selection_on_active_sheet(state.model, state.workbench, &symbol_context, transform)
-    {
-        // The move was armed against the drawing as it stood; it now
-        // carries the turned selection.
-        state.design.move_selection.authority = Some(
-            crate::workbench::app::SchematicEditAuthority::capture(state),
-        );
-    }
+    state
+        .design
+        .move_selection
+        .turns
+        .push(selection_transform(transform));
 }
 
 /// Handle the mockup's direct R/M placement gestures.

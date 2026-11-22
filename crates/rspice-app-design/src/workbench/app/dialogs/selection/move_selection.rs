@@ -11,6 +11,7 @@
 //! drag is a modal the reader dismisses without reading.
 
 use crate::state::Tool;
+use rspice_design::schematic::component_edit::SelectionTransform;
 
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::dialogs::selection::array::{
@@ -23,7 +24,9 @@ use crate::workbench::app_state::Model;
 
 /// Authority and interaction state of the armed Move tool. The design
 /// snapshot remains immutable while the tool is armed; pointer and keyboard
-/// movement is accumulated as a preview delta and committed only once.
+/// movement is accumulated as a preview delta, turns and flips pressed while
+/// it carries the selection are accumulated beside it, and both are
+/// committed only once, as one undo step. Cancel drops both.
 ///
 /// `mode` outlives one command on purpose: it is a tool option on the canvas
 /// strip, and a tool option a reader set two commands ago is still the one
@@ -34,6 +37,9 @@ pub struct MoveSelectionDialogState {
     pub mode: crate::state::MoveSelectionMode,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
+    /// The turns and flips pressed while Move carries the selection, in
+    /// order. They float with it and land with it.
+    pub turns: Vec<SelectionTransform>,
     pub generation: u64,
 }
 
@@ -44,6 +50,7 @@ impl MoveSelectionDialogState {
             mode: self.mode,
             authority: Some(authority),
             canvas: Default::default(),
+            turns: Vec::new(),
             generation: self.generation.wrapping_add(1),
         };
     }

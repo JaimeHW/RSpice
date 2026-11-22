@@ -139,7 +139,7 @@ fn draw_move_selection_preview(
         return;
     }
     let delta = state.design.move_selection.canvas.preview_delta;
-    if delta == Point::origin() {
+    if delta == Point::origin() && state.design.move_selection.turns.is_empty() {
         return;
     }
     let mode = state.design.move_selection.mode;
@@ -279,6 +279,7 @@ pub(super) fn move_preview_diff(
     let key = TransformPreviewKey::Move {
         delta,
         mode,
+        turns: state.design.move_selection.turns.clone(),
         selection: Box::new(state.model.schematic.session.editor.selection.clone()),
         drawing: state.model.drawing_inputs(symbol_context),
     };
@@ -333,15 +334,18 @@ pub(super) fn move_preview_candidate(
     Result<bool, rspice_design::schematic::movement::MoveSelectionError>,
 ) {
     let mut candidate = state.model.schematic.clone();
+    let turns = &state.design.move_selection.turns;
     let result = super::sheet_visibility::with_active_wire_topology_in(
         &state.model.workspace,
         &mut candidate,
         |candidate, scope| {
-            candidate.move_selection_with_mode_resolved(
+            super::move_interaction::carry_selection(
+                candidate,
+                scope,
+                symbol_context,
                 delta,
                 mode,
-                |component| symbol_context.terminal_points(component),
-                scope,
+                turns,
             )
         },
     );

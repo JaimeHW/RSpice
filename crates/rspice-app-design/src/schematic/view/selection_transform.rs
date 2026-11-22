@@ -1,12 +1,13 @@
 //! Turn or flip the selection on the active sheet.
 //!
-//! The Rotate and Mirror commands, the canvas context menu and the R and M
-//! keys during a move share this one route, so the pivot, the sheet scope and
-//! the undo step cannot differ by how the edit was asked for.
+//! The Rotate and Mirror commands and the canvas context menu share this one
+//! route, so the pivot, the sheet scope and the undo step cannot differ by
+//! how the edit was asked for. The turns the Move tool carries land about
+//! the same pivot, inside the Move's own undo step.
 
 use super::sheet_visibility::with_active_wire_topology_in;
 use super::{Model, SchematicSymbolContext, WorkbenchSession, sync_active_schematic};
-use crate::state::Point;
+use crate::state::{ActiveSheetTopology, Point, SchematicState};
 pub use rspice_design::schematic::component_edit::SelectionTransform;
 
 /// The middle of `bounds`, snapped to the nearest point of a `grid` pitch.
@@ -18,6 +19,37 @@ fn snapped_middle((min_x, min_y, max_x, max_y): (i32, i32, i32, i32), grid: i32)
     Point::new(
         snap((f64::from(min_x) + f64::from(max_x)) / 2.0),
         snap((f64::from(min_y) + f64::from(max_y)) / 2.0),
+    )
+}
+
+/// The point a turn of the selection is made about: the grid-snapped
+/// middle of what is selected, or `None` when nothing is.
+fn selection_pivot(
+    schematic: &SchematicState,
+    symbol_context: &SchematicSymbolContext,
+) -> Option<Point> {
+    let bounds = symbol_context
+        .selection_bounds(schematic.document(), &schematic.session.editor.selection)?;
+    Some(snapped_middle(bounds, schematic.document().grid_size))
+}
+
+/// Turn or flip the selection about its middle within the undo step and
+/// sheet scope the caller holds. The Move tool lands the turns it carries
+/// through this, after its translation, so they are part of the Move.
+pub(crate) fn turn_selection_in_scope(
+    schematic: &mut SchematicState,
+    scope: &ActiveSheetTopology,
+    symbol_context: &SchematicSymbolContext,
+    transform: SelectionTransform,
+) -> bool {
+    let Some(pivot) = selection_pivot(schematic, symbol_context) else {
+        return false;
+    };
+    schematic.transform_selection(
+        transform,
+        pivot,
+        |component| symbol_context.terminal_points(component),
+        scope,
     )
 }
 
@@ -34,27 +66,16 @@ pub fn transform_selection_on_active_sheet(
         return false;
     }
     model.retain_selection_on_active_sheet();
-    let Some(bounds) = symbol_context.selection_bounds(
-        model.schematic.document(),
-        &model.schematic.session.editor.selection,
-    ) else {
+    if selection_pivot(&model.schematic, symbol_context).is_none() {
         return false;
-    };
-    let pivot = snapped_middle(bounds, model.schematic.document().grid_size);
+    }
     // The undo step opens with every sheet present; the other sheets step
     // out of reach only while the wires are rerouted and tidied.
     model.schematic.begin_operation(transform.description());
     with_active_wire_topology_in(
         &model.workspace,
         &mut model.schematic,
-        |schematic, scope| {
-            schematic.transform_selection(
-                transform,
-                pivot,
-                |component| symbol_context.terminal_points(component),
-                scope,
-            )
-        },
+        |schematic, scope| turn_selection_in_scope(schematic, scope, symbol_context, transform),
     );
     let recorded = model.schematic.end_operation();
     if recorded {

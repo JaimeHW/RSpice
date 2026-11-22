@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use rspice_design::schematic::{
+    component_edit::SelectionTransform,
     movement::MoveSelectionMode,
     selection::Selection,
     stretch::{StretchOrthogonalPolicy, StretchTarget},
@@ -34,6 +35,8 @@ pub enum TransformPreviewKey {
     Move {
         delta: Point,
         mode: MoveSelectionMode,
+        /// The turns and flips the Move carries, in the order pressed.
+        turns: Vec<SelectionTransform>,
         /// Boxed: a selection is many times the size of a stretch target.
         selection: Box<Selection>,
         drawing: DrawingInputs,
