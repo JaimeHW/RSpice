@@ -675,18 +675,21 @@ const DENSEST_Y_LADDER: usize = 6;
 /// nudged inside it as they are drawn. A pane too short even for the
 /// sparsest coarsens a linear ladder further, to two ticks, and names what
 /// still crowds at even strides from the top: a short pane reads even steps,
-/// never a scale with a value missing from its middle.
+/// never a scale with a value missing from its middle. A ladder of one tick
+/// names no scale at all, so it is never taken while a ladder of two is to
+/// be had.
 pub(crate) fn labelled_y_axis(
     column: plot::LabelColumn,
     axis_with: impl Fn(usize) -> Axis,
 ) -> Axis {
     const SPARSEST: usize = 2;
     let fits = |axis: &Axis| {
-        column.holds(
-            axis.ticks
-                .iter()
-                .map(|(value, _)| (value - axis.min) / (axis.max - axis.min)),
-        )
+        axis.ticks.len() >= 2
+            && column.holds(
+                axis.ticks
+                    .iter()
+                    .map(|(value, _)| (value - axis.min) / (axis.max - axis.min)),
+            )
     };
     (SPARSEST..=DENSEST_Y_LADDER)
         .rev()

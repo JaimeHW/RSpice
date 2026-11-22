@@ -290,6 +290,10 @@ fn wave_left_margin(results: &ResultViewerState) -> f32 {
     }
 }
 const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
+/// The least height a strip's plot is given: room for two clear labels on
+/// its axis wherever its ladder falls, so a strip is never a blank well or
+/// a scale of one value.
+const LEAST_PLOT_HEIGHT: f32 = 40.0;
 
 /// Between two strips: a gap of canvas, then a hairline in border ink on top
 /// of the next strip's header. A strip's overview track then plainly ends its
@@ -300,8 +304,9 @@ const STRIP_DIVIDER: f32 = 1.0;
 /// shared X axis under them.
 const STRIP_BLOCK_CHROME: f32 = 76.0;
 /// The least height a strip of an analysis' block is given before the
-/// stack scrolls rather than squeeze it further.
-const STRIP_MIN_HEIGHT: f32 = 64.0;
+/// stack scrolls rather than squeeze it further: its legend row and the
+/// least plot.
+const STRIP_MIN_HEIGHT: f32 = WAVE_PANE_HEADER_HEIGHT + LEAST_PLOT_HEIGHT;
 /// The least height of an analysis' block, or of a strip drawn against a
 /// signal.
 const BLOCK_MIN_HEIGHT: f32 = 140.0;
@@ -630,6 +635,51 @@ struct WaveStackGeometry {
     shared_x_height: f32,
 }
 
+/// Each strip's share of `total` by its weight, `None` for a strip that
+/// keeps only its header. None is given less than `least` while `total`
+/// holds that much for each: a strip the reader sized down keeps room for
+/// its plot and two labels on its axis, and the others give it that room.
+fn weighted_heights(total: f32, weights: &[Option<f32>], least: f32) -> Vec<f32> {
+    let expanded = weights.iter().flatten().count();
+    let mut heights = vec![0.0; weights.len()];
+    if expanded == 0 {
+        return heights;
+    }
+    let least = least.min(total / expanded as f32);
+    let mut floored = vec![false; weights.len()];
+    loop {
+        let held = floored.iter().filter(|floored| **floored).count();
+        let left = total - held as f32 * least;
+        let shared: Vec<(usize, f32)> = weights
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !floored[*index])
+            .filter_map(|(index, weight)| weight.map(|weight| (index, weight.max(0.0))))
+            .collect();
+        let weight_sum: f32 = shared.iter().map(|(_, weight)| weight).sum();
+        let mut changed = false;
+        for &(index, weight) in &shared {
+            heights[index] = if weight_sum > 0.0 {
+                left * weight / weight_sum
+            } else {
+                left / shared.len() as f32
+            };
+            if heights[index] < least {
+                floored[index] = true;
+                changed = true;
+            }
+        }
+        for (index, floored) in floored.iter().enumerate() {
+            if *floored {
+                heights[index] = least;
+            }
+        }
+        if !changed {
+            return heights;
+        }
+    }
+}
+
 fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeometry {
     if pane_count == 0 || !available_height.is_finite() {
         return WaveStackGeometry {
@@ -800,8 +850,11 @@ pub fn show(
             let needed = if xy.is_some() {
                 BLOCK_MIN_HEIGHT
             } else {
+                // Its logic lanes and event markers stand above its strips
+                // and take their height first.
                 let strips = model.unit_panes().len() as f32;
-                BLOCK_MIN_HEIGHT.max(strips.mul_add(STRIP_MIN_HEIGHT, STRIP_BLOCK_CHROME))
+                let lanes = host.event_lane_height(model) + host.event_marker_height(model);
+                BLOCK_MIN_HEIGHT.max(strips.mul_add(STRIP_MIN_HEIGHT, STRIP_BLOCK_CHROME + lanes))
             };
             share.max(needed)
         })
@@ -1383,26 +1436,23 @@ fn show_strip_plot(
     // them; a divider being dragged moves the line between two of them
     // until it is let go.
     let expanded_total = geometry.pane_height * expanded_count as f32;
-    let weight_sum: f32 = panes
-        .iter()
-        .zip(&collapsed)
-        .filter(|(_, collapsed)| !**collapsed)
-        .map(|(pane, _)| pane.weight)
-        .sum();
-    let mut heights: Vec<f32> = panes
-        .iter()
-        .zip(&collapsed)
-        .map(|(pane, collapsed)| {
-            if *collapsed || weight_sum <= 0.0 {
-                0.0
-            } else {
-                expanded_total * pane.weight / weight_sum
-            }
-        })
-        .collect();
+    let least = WAVE_PANE_HEADER_HEIGHT + LEAST_PLOT_HEIGHT;
+    let mut heights = weighted_heights(
+        expanded_total,
+        &panes
+            .iter()
+            .zip(&collapsed)
+            .map(|(pane, collapsed)| (!*collapsed).then_some(pane.weight))
+            .collect::<Vec<_>>(),
+        least,
+    );
     for index in 0..count.saturating_sub(1) {
         let offset = super::strip_drag::divider_offset(ui.ctx(), model, index);
         if offset != 0.0 && !collapsed[index] && !collapsed[index + 1] {
+            // A divider dragged stops where either strip would lose the
+            // room its plot needs.
+            let floor = least.min(heights[index]).min(heights[index + 1]);
+            let offset = offset.clamp(floor - heights[index], heights[index + 1] - floor);
             heights[index] += offset;
             heights[index + 1] -= offset;
         }

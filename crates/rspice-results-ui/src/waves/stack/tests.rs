@@ -126,3 +126,22 @@ fn a_pane_is_offered_each_signal_once_its_own_units_first() {
     let again = abscissa_menu(&ResultViewerState::default(), &model, &pane, None);
     assert!(std::sync::Arc::ptr_eq(&menu.signals, &again.signals));
 }
+
+/// A strip the reader sized down keeps room for its plot and two labels on
+/// its axis, the others sharing what is left by their weights; with too
+/// little for that, the strips share what there is evenly.
+#[test]
+fn a_strip_sized_down_keeps_room_for_its_plot() {
+    assert_eq!(
+        weighted_heights(300.0, &[Some(1.0), Some(0.05), None, Some(1.0)], 40.0),
+        vec![130.0, 40.0, 0.0, 130.0]
+    );
+    assert_eq!(
+        weighted_heights(300.0, &[Some(1.0), Some(2.0)], 40.0),
+        vec![100.0, 200.0]
+    );
+    assert_eq!(
+        weighted_heights(60.0, &[Some(1.0), Some(0.05)], 40.0),
+        vec![30.0, 30.0]
+    );
+}
