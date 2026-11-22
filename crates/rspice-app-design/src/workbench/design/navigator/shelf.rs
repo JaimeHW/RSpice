@@ -1815,19 +1815,29 @@ fn catalog_group_row(
         ),
         t.color.text_faint,
     );
-    ui.painter().text(
-        egui::pos2(rect.left() + 60.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    ui.painter().text(
+    // The count keeps its place at the row's end; a title too long for what
+    // is left is elided before it, never painted under it.
+    let count_rect = ui.painter().text(
         egui::pos2(rect.right() - 8.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
+    );
+    let label_left = rect.left() + 60.0;
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        label.to_owned(),
+        theme::sans(tokens::FS_1, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    job.wrap.max_width = (count_rect.left() - 8.0 - label_left).max(1.0);
+    job.wrap.max_rows = 1;
+    job.wrap.overflow_character = Some('\u{2026}');
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    ui.painter().galley(
+        egui::pos2(label_left, rect.center().y - galley.size().y * 0.5),
+        galley,
+        t.color.text_dim,
     );
     theme::paint_focus_ring(ui, &response, rect);
 
