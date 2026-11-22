@@ -122,8 +122,8 @@ fn the_page_names_the_deck_and_its_two_ways_on_and_lists_nothing_of_it() {
     let mut app = netlist_first_app();
     let text = painted_text(vec2(1440.0, 900.0), |ui| landing(&mut app, ui)).join("\n");
     for expected in [
-        "NETLIST-FIRST PROJECT",
-        "front_end.sp",
+        "No schematic",
+        "front_end.sp runs as written.",
         "Open in Netlist",
         "Create schematic\u{2026}",
     ] {
