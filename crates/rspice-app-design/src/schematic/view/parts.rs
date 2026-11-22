@@ -506,12 +506,6 @@ impl CanvasParts<'_> {
             .open_veriloga_source_for_component(component_id)
     }
 
-    pub(crate) fn edit_selected_symbol_in_place(&mut self) -> bool {
-        self.design
-            .navigation_parts(self.model, self.workbench, self.runs)
-            .edit_selected_symbol_in_place()
-    }
-
     pub(crate) fn ascend_workspace_level(&mut self) {
         self.design
             .navigation_parts(self.model, self.workbench, self.runs)

@@ -1046,11 +1046,10 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
 }
 
 /// Reset label position is a row only in the menu of a selection that holds
-/// a part whose name or value was moved. It puts that part's texts back
-/// where the layout places them, leaves the rest of the part and an unmoved
-/// part alone, and one undo moves them back.
+/// a part whose name or value was moved, and it raises the command the
+/// Design menu runs.
 #[test]
-fn reset_label_position_puts_a_moved_name_and_value_back_as_one_undo_step() {
+fn reset_label_position_is_offered_for_a_moved_name_and_raises_its_command() {
     use rspice_design::schematic::label_layout::TextEdge;
     use rspice_design::schematic::label_position::LabelPosition;
 
@@ -1068,8 +1067,7 @@ fn reset_label_position_puts_a_moved_name_and_value_back_as_one_undo_step() {
     moved.value_label_pos = placed;
     let unmoved =
         Component::new(2, ComponentType::Resistor, Point::new(200, 0)).with_name_value("R2", "2k");
-    state.model.schematic.document_mut_for_test().components = vec![moved.clone(), unmoved];
-    state.model.schematic.init_undo_history();
+    state.model.schematic.document_mut_for_test().components = vec![moved, unmoved];
     let reset = "Reset label position";
 
     state
@@ -1101,21 +1099,12 @@ fn reset_label_position_puts_a_moved_name_and_value_back_as_one_undo_step() {
         Point::new(0, 0),
         &symbol_context,
     );
-
-    let parts = &state.model.schematic.document().components;
-    assert_eq!(parts[0].name_label_pos, LabelPosition::Auto);
-    assert_eq!(parts[0].value_label_pos, LabelPosition::Auto);
     assert_eq!(
-        (parts[0].pos, parts[0].value.as_str()),
-        (moved.pos, "1k"),
-        "the part itself stays put"
+        state
+            .workbench
+            .outbox
+            .take::<Execute>()
+            .map(|Execute(command)| command),
+        Some(DesignCommand::ResetLabelPosition.key())
     );
-    assert!(
-        !labels_of(&menu_entries(&state, ContextTarget::Component(1))).contains(&reset),
-        "nothing is left to put back"
-    );
-
-    assert!(state.model.schematic.undo());
-    assert_eq!(state.model.schematic.document().components[0], moved);
-    assert!(!state.model.schematic.can_undo(), "the reset was one step");
 }

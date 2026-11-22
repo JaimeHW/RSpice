@@ -530,7 +530,7 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
 fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     const MASTER: &str = "work/div/schematic";
 
-    let mut state = AppState::default();
+    let mut app = design_app();
     let mut master = rspice_app_state::state::SchematicState::default();
     let port = master.add_component(ComponentType::Port, Point::new(20, 0));
     master
@@ -542,15 +542,16 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
         .value = "a".to_owned();
     let mut binding = LibraryCellInstance::new("work", "div", "schematic");
     binding.bind_interface(&master.interface_ports());
-    state
+    app.state
         .model
         .workspace
         .insert_schematic_editor(MASTER.to_owned(), master);
-    let instance = state
+    let instance = app
+        .state
         .model
         .schematic
         .add_library_cell_component(Point::new(100, 0), binding);
-    state
+    app.state
         .model
         .schematic
         .session
@@ -559,11 +560,11 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
         .select_only_component(instance);
 
     assert!(
-        !action_availability(ContextAction::UpdateInstanceInterface, &state).0,
+        !action_availability(ContextAction::UpdateInstanceInterface, &app.state).0,
         "a placement that still matches its master is not stale"
     );
 
-    state
+    app.state
         .model
         .workspace
         .schematic_editor_mut(MASTER)
@@ -576,25 +577,25 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
         .expect("the master declares port a")
         .value = "ain".to_owned();
 
-    assert!(action_availability(ContextAction::UpdateInstanceInterface, &state).0);
+    assert!(action_availability(ContextAction::UpdateInstanceInterface, &app.state).0);
 
-    let symbol_context = schematic_symbol_context(&state);
-    execute_context_action(
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
         ContextAction::UpdateInstanceInterface,
-        &mut state,
         Point::origin(),
         &symbol_context,
     );
 
     assert_eq!(
-        state.model.schematic.document().components[0]
+        app.state.model.schematic.document().components[0]
             .library_cell
             .as_ref()
             .expect("the instance stays bound")
             .terminal_order,
         ["ain"]
     );
-    assert!(!action_availability(ContextAction::UpdateInstanceInterface, &state).0);
+    assert!(!action_availability(ContextAction::UpdateInstanceInterface, &app.state).0);
 }
 
 /// The replacement row is offered exactly where the command is, and opens
@@ -602,35 +603,37 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
 /// replacement the dialog would immediately refuse.
 #[test]
 fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instance() {
-    let mut state = AppState::default();
+    let mut app = design_app();
     assert!(
-        !action_availability(ContextAction::ReplaceInstance, &state).0,
+        !action_availability(ContextAction::ReplaceInstance, &app.state).0,
         "no selection is not one replaceable instance"
     );
 
-    let first = state
+    let first = app
+        .state
         .model
         .schematic
         .add_component(ComponentType::VoltageSource, Point::new(40, 0));
-    let second = state
+    let second = app
+        .state
         .model
         .schematic
         .add_component(ComponentType::VoltageSource, Point::new(120, 0));
-    state
+    app.state
         .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(first);
-    assert!(action_availability(ContextAction::ReplaceInstance, &state).0);
+    assert!(action_availability(ContextAction::ReplaceInstance, &app.state).0);
     assert_eq!(
-        action_availability(ContextAction::ReplaceInstance, &state).0,
-        replace_instance_available(&state.design.property_registry, &state.model),
+        action_availability(ContextAction::ReplaceInstance, &app.state).0,
+        replace_instance_available(&app.state.design.property_registry, &app.state.model),
         "the row must answer with the command's own predicate"
     );
 
-    state
+    app.state
         .model
         .schematic
         .session
@@ -638,27 +641,27 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
         .selection
         .select_component(second);
     assert!(
-        !action_availability(ContextAction::ReplaceInstance, &state).0,
+        !action_availability(ContextAction::ReplaceInstance, &app.state).0,
         "two selected instances are not one replaceable instance"
     );
 
-    state
+    app.state
         .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(first);
-    let symbol_context = schematic_symbol_context(&state);
-    execute_context_action(
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
         ContextAction::ReplaceInstance,
-        &mut state,
         Point::origin(),
         &symbol_context,
     );
 
-    assert!(state.design.replace_instance.open);
-    assert_eq!(state.design.replace_instance.source_component_id, first);
+    assert!(app.state.design.replace_instance.open);
+    assert_eq!(app.state.design.replace_instance.source_component_id, first);
 }
 
 /// One reported device, selected on the canvas.
@@ -957,8 +960,8 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
 /// it was copied from stays as it was.
 #[test]
 fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
-    let mut state = AppState::default();
-    state
+    let mut app = design_app();
+    app.state
         .model
         .schematic
         .document_mut_for_test()
@@ -966,15 +969,15 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
         .clear();
     let mut part = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     part.name = "R1".to_owned();
-    state
+    app.state
         .model
         .schematic
         .document_mut_for_test()
         .components
         .push(part);
-    state.sync_active_schematic_to_workspace();
-    state.model.schematic.init_undo_history();
-    state
+    app.state.sync_active_schematic_to_workspace();
+    app.state.model.schematic.init_undo_history();
+    app.state
         .model
         .schematic
         .session
@@ -982,27 +985,28 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
         .selection
         .select_only_component(41);
     assert!(duplicate_schematic_selection_at(
-        state.design.floating_copy_parts(),
-        &mut state.model,
-        &mut state.workbench,
+        app.state.design.floating_copy_parts(),
+        &mut app.state.model,
+        &mut app.state.workbench,
         Point::new(60, 30)
     ));
-    let symbol_context = schematic_symbol_context(&state);
+    let symbol_context = schematic_symbol_context(&app.state);
 
-    assert!(action_availability(ContextAction::Rotate, &state).0);
-    execute_context_action(
+    assert!(action_availability(ContextAction::Rotate, &app.state).0);
+    run_context_action(
+        &mut app,
         ContextAction::Rotate,
-        &mut state,
         Point::new(60, 30),
         &symbol_context,
     );
     assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
-        &mut state.design.floating_paste,
-        &mut state.model,
-        &mut state.workbench
+        &mut app.state.design.floating_paste,
+        &mut app.state.model,
+        &mut app.state.workbench
     ));
     let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
-    let turned: Vec<_> = state
+    let turned: Vec<_> = app
+        .state
         .model
         .schematic
         .document()
@@ -1028,32 +1032,37 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
 fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     use rspice_app_design::schematic::view::selection_transform::SelectionTransform;
 
-    let mut state = AppState::default();
-    state
+    let mut app = design_app();
+    app.state
         .model
         .schematic
         .document_mut_for_test()
         .components
         .clear();
-    state.model.schematic.document_mut_for_test().wires.clear();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .clear();
     let mut part = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     part.name = "R1".to_owned();
-    state
+    app.state
         .model
         .schematic
         .document_mut_for_test()
         .components
         .push(part);
-    state.sync_active_schematic_to_workspace();
-    state.model.schematic.init_undo_history();
-    state
+    app.state.sync_active_schematic_to_workspace();
+    app.state.model.schematic.init_undo_history();
+    app.state
         .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(41);
-    let symbol_context = schematic_symbol_context(&state);
+    let symbol_context = schematic_symbol_context(&app.state);
 
     let actions = |state: &AppState, target| -> Vec<ContextAction> {
         menu_entries(state, target)
@@ -1064,43 +1073,43 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
             })
             .collect()
     };
-    let part_menu = actions(&state, ContextTarget::Component(41));
+    let part_menu = actions(&app.state, ContextTarget::Component(41));
     for action in [ContextAction::Cut, ContextAction::MirrorVertical] {
         assert!(
             part_menu.contains(&action),
             "the part's menu lacks {action:?}"
         );
     }
-    assert!(action_availability(ContextAction::Cut, &state).0);
+    assert!(action_availability(ContextAction::Cut, &app.state).0);
     assert!(
-        !action_availability(ContextAction::Paste, &state).0,
+        !action_availability(ContextAction::Paste, &app.state).0,
         "nothing has been copied yet"
     );
 
-    execute_context_action(
+    run_context_action(
+        &mut app,
         ContextAction::Cut,
-        &mut state,
         Point::origin(),
         &symbol_context,
     );
-    assert!(state.model.schematic.document().components.is_empty());
-    assert_eq!(state.design.schematic_clipboard.components.len(), 1);
-    assert!(actions(&state, ContextTarget::Canvas).contains(&ContextAction::Paste));
-    assert!(action_availability(ContextAction::Paste, &state).0);
+    assert!(app.state.model.schematic.document().components.is_empty());
+    assert_eq!(app.state.design.schematic_clipboard.components.len(), 1);
+    assert!(actions(&app.state, ContextTarget::Canvas).contains(&ContextAction::Paste));
+    assert!(action_availability(ContextAction::Paste, &app.state).0);
 
     let click = Point::new(200, 100);
-    let offset = click - state.design.schematic_clipboard.origin;
-    execute_context_action(ContextAction::Paste, &mut state, click, &symbol_context);
+    let offset = click - app.state.design.schematic_clipboard.origin;
+    run_context_action(&mut app, ContextAction::Paste, click, &symbol_context);
     assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
-        &mut state.design.floating_paste,
-        &mut state.model,
-        &mut state.workbench
+        &mut app.state.design.floating_paste,
+        &mut app.state.model,
+        &mut app.state.workbench
     ));
-    let pasted = state.model.schematic.document().components.clone();
+    let pasted = app.state.model.schematic.document().components.clone();
     assert_eq!(pasted.len(), 1);
     assert_eq!(pasted[0].pos, Point::new(20, 30) + offset);
     assert!(
-        state
+        app.state
             .model
             .schematic
             .session
@@ -1109,21 +1118,21 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
             .has_component(pasted[0].id)
     );
 
-    assert!(action_availability(ContextAction::MirrorVertical, &state).0);
-    execute_context_action(
+    assert!(action_availability(ContextAction::MirrorVertical, &app.state).0);
+    run_context_action(
+        &mut app,
         ContextAction::MirrorVertical,
-        &mut state,
         click,
         &symbol_context,
     );
-    let mirrored = &state.model.schematic.document().components[0];
+    let mirrored = &app.state.model.schematic.document().components[0];
     assert_ne!(
         (mirrored.mirror_v, mirrored.mirror_h, mirrored.rotation),
         (pasted[0].mirror_v, pasted[0].mirror_h, pasted[0].rotation),
         "the part was not flipped"
     );
     assert_eq!(
-        state.model.schematic.undo_description(),
+        app.state.model.schematic.undo_description(),
         Some(SelectionTransform::MirrorVertical.description())
     );
 }
@@ -1134,15 +1143,20 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
 /// so without the row a finger could not snap at all.
 #[test]
 fn the_arrange_page_snaps_the_selection_to_the_grid() {
-    let mut state = AppState::default();
-    state
+    let mut app = design_app();
+    app.state
         .model
         .schematic
         .document_mut_for_test()
         .components
         .clear();
-    state.model.schematic.document_mut_for_test().wires.clear();
-    state
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .clear();
+    app.state
         .model
         .schematic
         .document_mut_for_test()
@@ -1152,9 +1166,9 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
             ComponentType::Resistor,
             Point::new(323, 367),
         ));
-    state.sync_active_schematic_to_workspace();
-    state.model.schematic.init_undo_history();
-    let symbol_context = schematic_symbol_context(&state);
+    app.state.sync_active_schematic_to_workspace();
+    app.state.model.schematic.init_undo_history();
+    let symbol_context = schematic_symbol_context(&app.state);
     let snap = ARRANGE_ENTRIES
         .iter()
         .find_map(|entry| match entry {
@@ -1171,31 +1185,31 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
         DesignCommand::SnapSelectionToGrid.declared_spec().label
     );
     assert!(
-        !action_availability(snap.action, &state).0,
+        !action_availability(snap.action, &app.state).0,
         "nothing is selected to snap"
     );
 
-    state
+    app.state
         .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(41);
-    assert!(action_availability(snap.action, &state).0);
-    execute_context_action(snap.action, &mut state, Point::origin(), &symbol_context);
+    assert!(action_availability(snap.action, &app.state).0);
+    run_context_action(&mut app, snap.action, Point::origin(), &symbol_context);
 
-    assert_eq!(state.model.schematic.document().grid_size, 10);
+    assert_eq!(app.state.model.schematic.document().grid_size, 10);
     assert_eq!(
-        state.model.schematic.document().components[0].pos,
+        app.state.model.schematic.document().components[0].pos,
         Point::new(320, 370)
     );
     assert_ne!(
-        state.model.schematic.document().components[0].pos,
+        app.state.model.schematic.document().components[0].pos,
         Point::new(323, 367)
     );
     assert_eq!(
-        state.model.schematic.undo_description(),
+        app.state.model.schematic.undo_description(),
         Some("snap selection to grid")
     );
 }
@@ -1407,4 +1421,107 @@ fn the_properties_row_opens_the_shared_form_for_several_parts() {
 
     assert!(app.state.design.shared_properties.open);
     assert!(!app.state.design.object_properties.open);
+}
+
+/// A row runs through the dispatcher as its menu-bar command does, so "."
+/// repeats it: Rotate from the right-click menu, then ".", turns the part a
+/// second quarter. "." repeated whatever had last run from a key, a menu or
+/// the toolbar instead.
+#[test]
+fn repeat_runs_again_what_a_right_click_row_ran() {
+    use crate::workbench::commands::vocabulary::ShellCommand;
+
+    let mut app = design_app();
+    let document = app.state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document.components.push(Component::new(
+        41,
+        ComponentType::Resistor,
+        Point::new(20, 30),
+    ));
+    app.state.sync_active_schematic_to_workspace();
+    app.state.model.schematic.init_undo_history();
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(41);
+    let rotation = |app: &crate::workbench::RSpiceApp| {
+        app.state.model.schematic.document().components[0].rotation
+    };
+    let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
+
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
+        ContextAction::Rotate,
+        Point::new(20, 30),
+        &symbol_context,
+    );
+    assert_eq!(rotation(&app), quarter);
+
+    app.execute_command_key(ShellCommand::RepeatLastCommand.key());
+    app.after_contribution();
+    assert_eq!(rotation(&app), quarter.rotate_cw());
+}
+
+/// Reset label position, run from a part's menu, puts its moved name and
+/// value back where the layout places them, leaves the part itself and an
+/// unmoved part alone, and one undo moves them back.
+#[test]
+fn the_reset_label_row_puts_a_moved_name_and_value_back_as_one_undo_step() {
+    use rspice_design::schematic::label_layout::TextEdge;
+    use rspice_design::schematic::label_position::LabelPosition;
+
+    let placed = LabelPosition::Placed {
+        offset: Point::new(60, -40),
+        horizontal: TextEdge::Start,
+        vertical: TextEdge::End,
+        upward: false,
+        size_percent: 100,
+    };
+    let mut app = design_app();
+    let mut moved =
+        Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
+    moved.name_label_pos = placed;
+    moved.value_label_pos = placed;
+    let unmoved =
+        Component::new(2, ComponentType::Resistor, Point::new(200, 0)).with_name_value("R2", "2k");
+    app.state.model.schematic.document_mut_for_test().components =
+        vec![moved.clone(), unmoved.clone()];
+    app.state.sync_active_schematic_to_workspace();
+    app.state.model.schematic.init_undo_history();
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(1);
+
+    let symbol_context = schematic_symbol_context(&app.state);
+    run_context_action(
+        &mut app,
+        ContextAction::ResetLabelPosition,
+        Point::origin(),
+        &symbol_context,
+    );
+
+    let parts = &app.state.model.schematic.document().components;
+    assert_eq!(parts[0].name_label_pos, LabelPosition::Auto);
+    assert_eq!(parts[0].value_label_pos, LabelPosition::Auto);
+    assert_eq!(
+        (parts[0].pos, parts[0].value.as_str()),
+        (moved.pos, "1k"),
+        "the part itself stays put"
+    );
+    assert_eq!(parts[1], unmoved);
+    assert!(app.state.model.schematic.undo());
+    assert_eq!(app.state.model.schematic.document().components[0], moved);
+    assert!(
+        !app.state.model.schematic.can_undo(),
+        "the reset was one step"
+    );
 }

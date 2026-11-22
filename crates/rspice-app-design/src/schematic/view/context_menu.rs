@@ -9,7 +9,7 @@
 use egui::{Context, Response};
 
 use crate::state::command_catalog::CommandKey;
-use crate::state::{Point, Tool, ViewType};
+use crate::state::{Point, ViewType};
 use crate::workbench::app::dialogs::hierarchy::subcircuit_source;
 use crate::workbench::app::dialogs::selection::shared_properties;
 use crate::workbench::app_state::ContextTarget;
@@ -17,9 +17,9 @@ use crate::workbench::state::Workspace;
 use crate::workbench::{
     app::{
         StimulusLinkMode, copy_active_schematic_selection, cut_schematic_selection,
-        delete_schematic_selection, duplicate_schematic_selection_at, open_replace_instance_dialog,
-        open_stimulus_link, paste_schematic_clipboard_at, replace_instance_available,
-        replace_instance_refusal, schematic_grid_step, show_stimulus_definition,
+        delete_schematic_selection, duplicate_schematic_selection_at, open_stimulus_link,
+        paste_schematic_clipboard_at, replace_instance_available, replace_instance_refusal,
+        schematic_grid_step, show_stimulus_definition,
     },
     design::commands::DesignCommand,
     framework::command_registry::ids,
@@ -32,13 +32,10 @@ use super::coordinates::{screen_to_grid, screen_to_schematic};
 use super::interaction::{PointerHit, PointerTarget, pointer_target};
 use super::parts::{CanvasFacts, CanvasParts};
 use super::requests::DesignSurfaceRequest;
-use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
 use super::viewport::Viewport;
 
-use super::selection_layout::{
-    SelectionLayoutCommand, apply_selection_layout, selection_layout_availability,
-};
-use super::shelf_drag::{PlacementTransform, something_floats, turn_what_floats};
+use super::selection_layout::{SelectionLayoutCommand, selection_layout_availability};
+use super::shelf_drag::something_floats;
 use rspice_schematic_editor::view::context_menu::{
     self as context_surface, ArrangeAction, ContextAction, ContextIcon, ContextMenuBinding,
     ContextMenuRequest, ContextMenuView,
@@ -464,49 +461,6 @@ fn arrange_layout(action: ArrangeAction) -> Option<SelectionLayoutCommand> {
         | ArrangeAction::MirrorVertical
         | ArrangeAction::SnapToGrid => return None,
     })
-}
-
-/// The turn an Arrange row asks for, when it is not a layout.
-const fn arrange_turn(action: ArrangeAction) -> Option<(SelectionTransform, PlacementTransform)> {
-    Some(match action {
-        ArrangeAction::RotateClockwise => (
-            SelectionTransform::RotateClockwise,
-            PlacementTransform::RotateClockwise,
-        ),
-        ArrangeAction::MirrorHorizontal => (
-            SelectionTransform::MirrorHorizontal,
-            PlacementTransform::ToggleHorizontalMirror,
-        ),
-        ArrangeAction::MirrorVertical => (
-            SelectionTransform::MirrorVertical,
-            PlacementTransform::ToggleVerticalMirror,
-        ),
-        ArrangeAction::RotateCounterClockwise => (
-            SelectionTransform::RotateCounterClockwise,
-            PlacementTransform::RotateCounterClockwise,
-        ),
-        _ => return None,
-    })
-}
-
-/// Turn what floats, the placement ghost or what Move carries, as R and M
-/// would; with nothing floating, turn the selection on the sheet.
-fn turn(
-    state: &mut CanvasParts<'_>,
-    symbol_context: &SchematicSymbolContext,
-    action: ArrangeAction,
-) {
-    let Some((selection, floating)) = arrange_turn(action) else {
-        return;
-    };
-    if !turn_what_floats(state, floating) {
-        transform_selection_on_active_sheet(
-            state.model,
-            state.workbench,
-            symbol_context,
-            selection,
-        );
-    }
 }
 
 /// Whether the row `action` belongs to a menu about `subject`: the verbs that
@@ -1670,67 +1624,16 @@ pub fn execute_context_action(
     symbol_context: &SchematicSymbolContext,
 ) {
     state.model.retain_selection_on_active_sheet();
+    if let Some(command) = row_command(action) {
+        state.workbench.outbox.push(Execute(command));
+        return;
+    }
     match action {
-        ContextAction::Properties => {
-            state
-                .workbench
-                .outbox
-                .push(Execute(DesignCommand::ObjectProperties.key()));
-        }
-        ContextAction::Rotate => {
-            turn(state, symbol_context, ArrangeAction::RotateClockwise);
-        }
-        ContextAction::Mirror => {
-            turn(state, symbol_context, ArrangeAction::MirrorHorizontal);
-        }
-        ContextAction::MirrorVertical => {
-            turn(state, symbol_context, ArrangeAction::MirrorVertical);
-        }
         // A page turn, which the menu takes itself.
         ContextAction::Arrange => {}
-        ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => {
-            super::grid_snap_selection::run_snap_selection_to_grid(
-                state.model,
-                state.workbench,
-                symbol_context,
-            );
-        }
-        ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
-            Some(layout) => match apply_selection_layout(
-                state.model,
-                state.workbench,
-                state.design.schematic_visibility.review_markers,
-                symbol_context,
-                layout,
-            ) {
-                Ok(true) => {}
-                Ok(false) => {
-                    state.prompt(format!("{} produced no geometry change.", layout.label()));
-                }
-                Err(error) => {
-                    state.prompt(format!("{} was not applied: {error}.", layout.label()));
-                }
-            },
-            None => turn(state, symbol_context, arrangement),
-        },
         ContextAction::ZoomBox => {
             state.model.schematic.session.editor.zoom_box.arm();
             state.prompt("Drag a box to zoom to it.");
-        }
-        ContextAction::PlaceInstance => {
-            state.workbench.navigator_visible = true;
-            state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
-            state.design.show_component_shelf();
-            state
-                .workbench
-                .outbox
-                .push(crate::workbench::framework::requests::FocusPlacementSearch);
-        }
-        ContextAction::PlaceWire => state.model.schematic.arm_tool(Tool::Wire),
-        ContextAction::PlaceLabel => state.model.schematic.arm_tool(Tool::Label),
-        ContextAction::PlaceText => {
-            let source = crate::workbench::app::schematic_editor_request_source(state);
-            state.design.design_note.open(source);
         }
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
@@ -1795,44 +1698,11 @@ pub fn execute_context_action(
                 None => state.open_selected_instance_master(),
             }
         }
-        ContextAction::EditSymbolInPlace => {
-            state.edit_selected_symbol_in_place();
-        }
         ContextAction::NewVerilogADevice => {
             state
                 .workbench
                 .outbox
                 .push(DesignSurfaceRequest::NewVerilogADevice);
-        }
-        ContextAction::UpdateInstanceInterface => {
-            let outcome = state.model.schematic.update_selected_instance_interface(
-                &state.model.library_manager,
-                &state.model.workspace.content.schematic_buffers,
-            );
-            state.prompt(match outcome {
-                Ok(summary) => summary,
-                Err(error) => error.to_string(),
-            });
-        }
-        ContextAction::UpdateAllInstanceInterfaces => {
-            let outcome = state.model.schematic.update_all_instance_interfaces(
-                &state.model.library_manager,
-                &state.model.workspace.content.schematic_buffers,
-            );
-            state.prompt(outcome.unwrap_or_else(|refusal| refusal));
-        }
-        ContextAction::ReplaceInstance => open_replace_instance_dialog(
-            &mut state.design.replace_instance,
-            &state.design.property_registry,
-            state.model,
-            state.workbench,
-        ),
-        ContextAction::CreateHierarchy => {
-            crate::workbench::app::open_create_hierarchy_dialog(
-                &mut state.design.create_hierarchy,
-                state.model,
-                state.workbench,
-            );
         }
         ContextAction::CreateSymbolFromPorts => {
             state
@@ -1841,10 +1711,6 @@ pub fn execute_context_action(
                 .push(DesignSurfaceRequest::CreateSymbolFromPorts);
         }
         ContextAction::SheetProperties => show_sheet_properties(state, None),
-        ContextAction::FitContent => {
-            state.model.schematic.session.editor.needs_fit = true;
-            state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
-        }
         ContextAction::ShowInNetlist => show_in_netlist(state),
         ContextAction::Probe => {
             let target = state
@@ -1855,14 +1721,58 @@ pub fn execute_context_action(
             super::interaction::probe_context_target(state, target, click_pos, symbol_context);
         }
         ContextAction::OperatingPoint => open_operating_point(state),
-        ContextAction::SnapToStandardValue => {
-            super::standard_value_snap::run_snap_to_standard_value(state.model, state.workbench);
-        }
-        ContextAction::ResetLabelPosition => {
-            super::label_reset::run_reset_label_position(state.model, state.workbench);
-        }
-        ContextAction::Choose(_) => {}
+        // A row its command runs, raised above, or a choice, which
+        // `choose_target` takes.
+        ContextAction::Properties
+        | ContextAction::Rotate
+        | ContextAction::Mirror
+        | ContextAction::MirrorVertical
+        | ContextAction::ArrangeCommand(_)
+        | ContextAction::SnapToStandardValue
+        | ContextAction::ResetLabelPosition
+        | ContextAction::PlaceInstance
+        | ContextAction::PlaceWire
+        | ContextAction::PlaceLabel
+        | ContextAction::PlaceText
+        | ContextAction::EditSymbolInPlace
+        | ContextAction::UpdateInstanceInterface
+        | ContextAction::UpdateAllInstanceInterfaces
+        | ContextAction::ReplaceInstance
+        | ContextAction::CreateHierarchy
+        | ContextAction::FitContent
+        | ContextAction::Choose(_) => {}
     }
+}
+
+/// The command a row runs where the menus, the toolbar and the keys run the
+/// same one. The row raises it, so it goes through the dispatcher as theirs
+/// do: an open inspector field is committed first, a read-only view refuses
+/// it in the same words, and "." repeats it. The rows that move the view
+/// (Descend, Show in netlist, Sheet properties, the zoom box) and the rows
+/// that act at the click (Paste here, Duplicate, Probe) keep their own.
+const fn row_command(action: ContextAction) -> Option<CommandKey> {
+    Some(match action {
+        ContextAction::Properties => DesignCommand::ObjectProperties.key(),
+        ContextAction::Rotate => DesignCommand::RotateSelection.key(),
+        ContextAction::Mirror => DesignCommand::MirrorSelectionHorizontal.key(),
+        ContextAction::MirrorVertical => DesignCommand::MirrorSelectionVertical.key(),
+        ContextAction::ArrangeCommand(arrangement) => arrange_command(arrangement).key(),
+        ContextAction::SnapToStandardValue => DesignCommand::SnapToStandardValue.key(),
+        ContextAction::ResetLabelPosition => DesignCommand::ResetLabelPosition.key(),
+        ContextAction::PlaceInstance => DesignCommand::PlaceInstance.key(),
+        ContextAction::PlaceWire => DesignCommand::PlaceWire.key(),
+        ContextAction::PlaceLabel => DesignCommand::PlaceLabel.key(),
+        ContextAction::PlaceText => DesignCommand::PlaceText.key(),
+        ContextAction::EditSymbolInPlace => DesignCommand::EditSymbolInPlace.key(),
+        ContextAction::UpdateInstanceInterface => DesignCommand::UpdateInstanceInterface.key(),
+        ContextAction::UpdateAllInstanceInterfaces => {
+            DesignCommand::UpdateAllInstanceInterfaces.key()
+        }
+        ContextAction::ReplaceInstance => DesignCommand::ReplaceInstance.key(),
+        ContextAction::CreateHierarchy => DesignCommand::CreateHierarchy.key(),
+        ContextAction::FitContent => DesignCommand::FitSchematicContent.key(),
+        _ => return None,
+    })
 }
 
 /// Show the selected instance's card in the generated deck. The Netlist
