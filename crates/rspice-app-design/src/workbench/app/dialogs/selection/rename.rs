@@ -255,7 +255,7 @@ pub(in crate::workbench) fn render_rename_selection_dialog(
         .show(ctx, |rows| {
             rows.value("Object", &object);
             let field = Id::new(FIELD_ID);
-            let response = rows.text("New name", field, &mut dialog.draft, "A SPICE-safe name");
+            let response = rows.text("New name", field, &mut dialog.draft, name_hint(target));
             // A prior publication error belongs to an older candidate;
             // the live validation now owns what is typed.
             edited = response.changed();
@@ -329,6 +329,16 @@ pub fn object_context(target: &RenameSelectionTarget) -> String {
             || "Undeclared bus".to_owned(),
             |declaration| format!("Bus {declaration}"),
         ),
+    }
+}
+
+/// The New name field's hint: an unnamed bus takes its width with its name.
+fn name_hint(target: &RenameSelectionTarget) -> &'static str {
+    match target {
+        RenameSelectionTarget::Bus(bus) if bus.declaration.is_none() => {
+            rspice_schematic_editor::bus_tap_placement::BUS_SHAPE
+        }
+        _ => "A SPICE-safe name",
     }
 }
 
@@ -492,22 +502,33 @@ pub fn validate_draft(
             if current != expected {
                 return stale("The selected bus changed while Rename was open.");
             }
-            let Some(original) = expected.declaration.as_ref() else {
-                return RenameValidation::Invalid(
-                    "Only a declared bus owns a stable user-facing bus name.".to_owned(),
-                );
-            };
-            if candidate == original.name {
-                return RenameValidation::Unchanged;
-            }
-            let declaration =
-                match BusDeclaration::new(candidate, original.msb, original.lsb, original.notation)
-                {
+            // A bus drawn without a name is named with its width, as Bus
+            // properties names it; a named bus keeps its width under a new
+            // name.
+            let declaration = match expected.declaration.as_ref() {
+                None => match BusDeclaration::parse(candidate) {
+                    Ok(declaration) => declaration,
+                    Err(error) => {
+                        return RenameValidation::Invalid(format!(
+                            "Name the bus with its width, NAME[msb:lsb]: {error}."
+                        ));
+                    }
+                },
+                Some(original) if candidate == original.name => {
+                    return RenameValidation::Unchanged;
+                }
+                Some(original) => match BusDeclaration::new(
+                    candidate,
+                    original.msb,
+                    original.lsb,
+                    original.notation,
+                ) {
                     Ok(declaration) => declaration,
                     Err(error) => {
                         return RenameValidation::Invalid(format!("Bus name: {error}."));
                     }
-                };
+                },
+            };
             match schematic.validate_bus_properties(expected, Some(&declaration), on_sheet) {
                 Ok(_) => RenameValidation::Valid(Box::new(RenameCommit::Bus {
                     expected: expected.clone(),
@@ -686,6 +707,34 @@ pub mod tests {
             "DATA[7:0]"
         );
         assert!(!schematic.undo());
+    }
+
+    /// A bus drawn without a name is named by Rename with its width; a bare
+    /// name, which says nothing of the width, is refused with what to type.
+    #[test]
+    fn rename_names_an_unnamed_bus_with_its_width() {
+        let mut schematic = SchematicState::default();
+        let bus = Bus::segment(72, Point::new(0, 0), Point::new(10, 0), None).unwrap();
+        schematic.document_mut_for_test().buses.push(bus.clone());
+        let target = RenameSelectionTarget::Bus(bus);
+        match validate_draft(&schematic, &target, "DATA", &|_| true) {
+            RenameValidation::Invalid(message) => {
+                assert!(message.contains("NAME[msb:lsb]"), "{message}");
+            }
+            other => panic!("a bare name was not refused: {other:?}"),
+        }
+        let commit = match validate_draft(&schematic, &target, "DATA[3:0]", &|_| true) {
+            RenameValidation::Valid(commit) => commit,
+            other => panic!("expected a valid bus naming, got {other:?}"),
+        };
+
+        let mut state = DesignTestHost::default();
+        state.model.schematic = schematic;
+        assert!(apply_commit(&mut state, *commit).unwrap());
+        assert_eq!(
+            bus_by_id(&state, 72).declaration.map(|d| d.to_string()),
+            Some("DATA[3:0]".to_owned())
+        );
     }
 
     #[cfg(test)]
