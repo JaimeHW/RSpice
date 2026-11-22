@@ -521,24 +521,68 @@ pub const VIEW_GESTURE_GAP_SECONDS: f64 = 0.5;
 /// The canvas reports the view each frame ends on. The first change after a
 /// pause keeps the view it left; the changes that follow it closely are the
 /// same gesture and keep nothing.
+///
+/// A canvas that pages through a document, as a schematic pages through its
+/// sheets, names the page `P` each frame shows: each page keeps its own
+/// views, so stepping back never puts one page's camera on another.
 #[derive(Debug, Clone)]
-pub struct ViewHistory<V> {
+pub struct ViewHistory<V, P = ()> {
     earlier: Vec<V>,
     shown: Option<V>,
     last_change: f64,
+    page: Option<P>,
+    /// The views of the pages shown before, each kept as it was left.
+    parked: Vec<ParkedViews<V, P>>,
 }
 
-impl<V> Default for ViewHistory<V> {
+#[derive(Debug, Clone)]
+struct ParkedViews<V, P> {
+    page: P,
+    earlier: Vec<V>,
+    shown: Option<V>,
+}
+
+impl<V, P> Default for ViewHistory<V, P> {
     fn default() -> Self {
         Self {
             earlier: Vec::new(),
             shown: None,
             last_change: f64::NEG_INFINITY,
+            page: None,
+            parked: Vec::new(),
         }
     }
 }
 
-impl<V: Clone + PartialEq> ViewHistory<V> {
+impl<V: Clone + PartialEq, P: PartialEq> ViewHistory<V, P> {
+    /// Note that a frame showing page `page` ended on `view`. A page other
+    /// than the one noted last puts the views kept so far away with their
+    /// page and takes up `page`'s own, as it was left.
+    pub fn observe_on(&mut self, page: P, view: V, time: f64) {
+        if self.page.as_ref() != Some(&page) {
+            let (earlier, shown) = self
+                .parked
+                .iter()
+                .position(|parked| parked.page == page)
+                .map(|index| self.parked.swap_remove(index))
+                .map_or_else(Default::default, |parked| (parked.earlier, parked.shown));
+            let left_earlier = std::mem::replace(&mut self.earlier, earlier);
+            let left_shown = std::mem::replace(&mut self.shown, shown);
+            if let Some(left) = self.page.replace(page) {
+                self.parked.push(ParkedViews {
+                    page: left,
+                    earlier: left_earlier,
+                    shown: left_shown,
+                });
+            }
+            // Turning the page is not part of the gesture before it.
+            self.last_change = f64::NEG_INFINITY;
+        }
+        self.observe(view, time);
+    }
+}
+
+impl<V: Clone + PartialEq, P> ViewHistory<V, P> {
     /// Note that a frame at `time` seconds ended on `view`.
     pub fn observe(&mut self, view: V, time: f64) {
         if self.shown.as_ref() == Some(&view) {
@@ -580,7 +624,7 @@ mod tests {
 
     #[test]
     fn view_history_keeps_the_view_each_gesture_left() {
-        let mut history = ViewHistory::default();
+        let mut history = ViewHistory::<i32>::default();
         history.observe(1, 0.0);
         assert!(!history.can_step_back());
         // A wheel burst: one gesture, one step back.
@@ -601,8 +645,26 @@ mod tests {
     }
 
     #[test]
-    fn view_history_holds_a_bounded_number_of_views() {
+    fn view_history_keeps_each_page_s_own_views() {
         let mut history = ViewHistory::default();
+        history.observe_on('a', 1, 0.0);
+        history.observe_on('a', 2, 1.0);
+        // Another page shows its own first view: nothing to step back to.
+        history.observe_on('b', 7, 2.0);
+        assert!(!history.can_step_back());
+        history.observe_on('b', 8, 3.0);
+        assert_eq!(history.step_back(), Some(7));
+        // Back on the first page, its framing is a change from where it
+        // was left, and the views before that follow.
+        history.observe_on('a', 3, 4.0);
+        assert_eq!(history.step_back(), Some(2));
+        assert_eq!(history.step_back(), Some(1));
+        assert_eq!(history.step_back(), None);
+    }
+
+    #[test]
+    fn view_history_holds_a_bounded_number_of_views() {
+        let mut history = ViewHistory::<i32>::default();
         for view in 0..40 {
             history.observe(view, f64::from(view));
         }

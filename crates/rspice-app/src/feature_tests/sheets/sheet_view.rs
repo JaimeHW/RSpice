@@ -5,6 +5,7 @@
 
 use egui::{Rect, Vec2};
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_sheets::workbench::app::actions::sheets::activate_sheet;
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -14,6 +15,7 @@ use rspice_app_state::state::{
     SheetDefinition, SheetId, SheetPortPolicy,
 };
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 
 const CANVAS: Vec2 = Vec2::new(1_200.0, 800.0);
 
@@ -193,5 +195,54 @@ fn fit_content_frames_the_open_sheet_only() {
     assert!(
         !canvas.contains(far),
         "Sheet 1's part {far:?} plays no part in Sheet 2's fit"
+    );
+}
+
+/// The open camera, as Zoom previous keeps it.
+fn camera(state: &AppState) -> (f64, (f64, f64)) {
+    let editor = &state.model.schematic.session.editor;
+    (editor.zoom, editor.pan)
+}
+
+fn open_sheet(app: &mut RSpiceApp, sheet: SheetId) {
+    let state = &mut app.state;
+    activate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        sheet,
+    )
+    .expect("activation publishes");
+}
+
+/// Zoom previous steps back through the views of the sheet in front. Right
+/// after a switch it has nothing earlier to show on the new sheet, so it
+/// never paints the old sheet's camera onto it; back on the first sheet it
+/// returns the view that sheet was left at.
+#[test]
+fn zoom_previous_steps_back_through_its_own_sheet() {
+    let (mut app, first, second) = two_sheet_app(&[20]);
+    open_sheet(&mut app, first);
+    draw_canvas(&mut app.state, 0.0);
+    let left_at = (2.0, (-300.0, -100.0));
+    let editor = &mut app.state.model.schematic.session.editor;
+    (editor.zoom, editor.pan) = left_at;
+    draw_canvas(&mut app.state, 2.0);
+
+    open_sheet(&mut app, second);
+    draw_canvas(&mut app.state, 4.0);
+    let framed = camera(&app.state);
+    app.execute_command_key(WorkbenchCommand::ZoomPrevious.key());
+    draw_canvas(&mut app.state, 6.0);
+    assert_eq!(camera(&app.state), framed, "Sheet 2 has no earlier view");
+
+    open_sheet(&mut app, first);
+    draw_canvas(&mut app.state, 8.0);
+    app.execute_command_key(WorkbenchCommand::ZoomPrevious.key());
+    draw_canvas(&mut app.state, 10.0);
+    assert_eq!(
+        camera(&app.state),
+        left_at,
+        "Sheet 1 goes back to where it was left"
     );
 }

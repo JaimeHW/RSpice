@@ -140,8 +140,11 @@ pub struct EditorSession {
     pub zoom_box: crate::view::navigation::ZoomBox,
 
     /// The views the canvas showed before this one, as `(zoom, pan)`, for
-    /// Zoom previous (runtime state, not persisted).
-    pub view_history: crate::view::navigation::ViewHistory<(f64, (f64, f64))>,
+    /// Zoom previous, each sheet's apart (runtime state, not persisted).
+    pub view_history: crate::view::navigation::ViewHistory<
+        (f64, (f64, f64)),
+        Option<rspice_design_model::design_management::SheetId>,
+    >,
 
     /// Snap engine configuration (runtime state, not persisted)
     /// Controls cursor snapping behavior during wire drawing

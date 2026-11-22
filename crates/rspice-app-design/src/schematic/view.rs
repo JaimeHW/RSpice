@@ -369,10 +369,13 @@ pub fn render_schematic_view(
         canvas_navigation,
     );
     edge_pan::edge_pan(ui, &response, available, &mut canvas.parts());
+    let sheet = canvas.model.active_sheet_id();
     let editor = &mut canvas.model.schematic.session.editor;
-    editor
-        .view_history
-        .observe((editor.zoom, editor.pan), ui.input(|input| input.time));
+    editor.view_history.observe_on(
+        sheet,
+        (editor.zoom, editor.pan),
+        ui.input(|input| input.time),
+    );
     let viewport = viewport_from_camera(
         canvas.model.schematic.session.editor.pan,
         canvas.model.schematic.session.editor.zoom,
