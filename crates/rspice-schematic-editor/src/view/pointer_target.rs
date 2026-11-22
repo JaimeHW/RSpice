@@ -199,30 +199,28 @@ fn collect_targets(
         // Borrowed: a hover frame picks over every instance on the sheet,
         // and copying them was a third of the pick's cost.
         let components = view.visible_objects(&view.document.components, |item| item.id);
-        // A part's name and value are the part's own: a click on either
-        // takes the part, before the drawn extent of any other.
-        let mut parts: Vec<u64> = instance_texts_at(
-            view,
+        // The part drawn under the pointer takes the click. A part's name
+        // and value are the part's own and take it where no part is drawn,
+        // so a neighbour's long value lettered across a part never takes a
+        // click meant for that part.
+        let mut parts: Vec<u64> = hits(
             &components,
-            symbol_context,
-            viewport,
-            ctx.pixels_per_point(),
-            pointer_pos,
             all,
-        )
-        .into_iter()
-        .map(|hit| hit.component)
-        .collect();
-        parts.dedup();
+            |item| item.id,
+            |rest| symbol_context.component_at_resolved_symbol(rest, hit.grid),
+        );
         if parts.is_empty() || all {
-            for id in hits(
+            for text in instance_texts_at(
+                view,
                 &components,
+                symbol_context,
+                viewport,
+                ctx.pixels_per_point(),
+                pointer_pos,
                 all,
-                |item| item.id,
-                |rest| symbol_context.component_at_resolved_symbol(rest, hit.grid),
             ) {
-                if !parts.contains(&id) {
-                    parts.push(id);
+                if !parts.contains(&text.component) {
+                    parts.push(text.component);
                 }
             }
         }

@@ -232,3 +232,47 @@ fn a_double_click_on_a_name_renames_the_part_and_escape_leaves_it() {
         "one undo puts the name back"
     );
 }
+
+/// A long value lettered across a neighbouring part never takes the click
+/// meant for that part: the part drawn under the pointer takes it.
+#[test]
+fn a_click_on_a_part_under_a_neighbours_value_selects_that_part() {
+    let mut fixture = Fixture::new(false);
+    let schematic = &mut fixture.app.state.model.schematic;
+    schematic.document_mut_for_test().components[0].value =
+        "V = v(b0)*(1.8-v(samp_d))/1.8".to_owned();
+    let first = part(&fixture);
+    let placed = label_layout::instance_text_placement(&first, None, InstanceText::Value);
+    let text = label_layout::text_box(placed, &first.value, INSTANCE_VALUE_WORLD);
+    let under = rspice_app_state::state::Point::new(
+        (text.min.x + 0.7 * text.width()).round() as i32,
+        text.center().y.round() as i32,
+    );
+    assert!(
+        (text.min.x..=text.max.x).contains(&(under.x as f32))
+            && (text.min.y..=text.max.y).contains(&(under.y as f32)),
+        "the second part stands under the first's value: {under:?} in {text:?}"
+    );
+    let schematic = &mut fixture.app.state.model.schematic;
+    schematic.add_component(rspice_app_state::state::ComponentType::Resistor, under);
+    schematic.document_mut_for_test().components[1].pos = under;
+    schematic.recalculate_runtime_state();
+    schematic.clear_undo_history();
+    schematic.session.editor.snap_engine.enabled = false;
+    schematic.session.editor.selection.clear();
+    fixture.app.state.sync_active_schematic_to_workspace();
+    fixture.frame(vec![], true);
+    let second = fixture.app.state.model.schematic.document().components[1].clone();
+    let at = screen(&fixture, under.x as f32, under.y as f32);
+
+    fixture.frame(vec![Event::PointerMoved(at), button(at, true)], true);
+    fixture.frame(vec![button(at, false)], true);
+
+    let selection = &fixture.app.state.model.schematic.session.editor.selection;
+    assert!(
+        selection.has_component(second.id),
+        "the part under the pointer is selected, not {}",
+        first.name
+    );
+    assert_eq!(selection.components.len(), 1);
+}
