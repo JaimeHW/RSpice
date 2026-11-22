@@ -73,3 +73,14 @@ fn fit_request_remains_a_reset() {
     assert!(change.x.is_none());
     assert!(change.y.is_none());
 }
+
+/// A fixed-place column prints every row at its one precision, so the
+/// decimal points align, with a true minus sign and never a negative zero.
+#[test]
+fn a_fixed_place_figure_keeps_its_places_and_its_sign() {
+    assert_eq!(fixed_places(41.0, SHARE_PLACES), "41.0");
+    assert_eq!(fixed_places(28.24, SHARE_PLACES), "28.2");
+    assert_eq!(fixed_places(-79.99566, DECIBEL_PLACES), "\u{2212}80.00");
+    assert_eq!(fixed_places(-1.938_200_26, DECIBEL_PLACES), "\u{2212}1.94");
+    assert_eq!(fixed_places(-0.004, DECIBEL_PLACES), "0.00");
+}

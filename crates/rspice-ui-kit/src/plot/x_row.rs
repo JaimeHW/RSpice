@@ -37,7 +37,8 @@ pub fn x_axis_caption(quantity: &str, unit: &str) -> String {
     let name = match unit {
         "s" => "TIME".to_owned(),
         "Hz" => "FREQ".to_owned(),
-        _ => quantity.trim().to_uppercase(),
+        // ASCII only: an uppercase σ is Σ, the summation sign.
+        _ => quantity.trim().to_ascii_uppercase(),
     };
     match (name.is_empty(), unit.is_empty()) {
         (true, _) => unit.to_owned(),
@@ -169,6 +170,7 @@ mod tests {
         assert_eq!(x_axis_caption("Ibias", "A"), "IBIAS \u{b7} A");
         assert_eq!(x_axis_caption("temp", "\u{b0}C"), "TEMP \u{b7} \u{b0}C");
         assert_eq!(x_axis_caption("iteration", ""), "ITERATION");
+        assert_eq!(x_axis_caption("σ", "rad/s"), "σ · rad/s");
         // An axis with a unit but no quantity states the unit alone, and an
         // axis with neither says nothing.
         assert_eq!(x_axis_caption("", "UI"), "UI");

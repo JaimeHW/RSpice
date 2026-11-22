@@ -55,6 +55,52 @@ pub fn xy_screen_pos(
     )
 }
 
+/// `value` to `decimals` places with a true minus sign and no negative
+/// zero, so every row of a column stands at one precision and its decimal
+/// points align: a decibel to its hundredth, a share to its tenth of a
+/// percent.
+#[must_use]
+pub fn fixed_places(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    let unsigned = text.trim_start_matches('-');
+    if unsigned
+        .chars()
+        .all(|character| matches!(character, '0' | '.'))
+    {
+        return unsigned.to_owned();
+    }
+    text.replace('-', "\u{2212}")
+}
+
+/// A decibel figure's places: to the hundredth of a decibel.
+pub const DECIBEL_PLACES: usize = 2;
+
+/// A share's places: to the tenth of a percent.
+pub const SHARE_PLACES: usize = 1;
+
+/// The most of a sheet's height the table under a plane takes; a short
+/// table takes only its rows.
+pub const TABLE_SHARE_UNDER_PLANE: f32 = 0.42;
+
+/// A plane over the table listing what it draws, both across the sheet's
+/// full width: the table shows whole rows, all it has up to its share of the
+/// height, and scrolls the rest; the plane takes exactly what is left. The
+/// table's head stands on the plane's X row and its last rule on `avail`'s
+/// bottom edge, with nothing between.
+pub fn plane_over_table(ui: &Ui, avail: egui::Rect, rows: usize) -> (egui::Rect, egui::Rect) {
+    let lines = rspice_ui_kit::widgets::table::LineHeights::grid(&Tokens::get(ui.ctx()));
+    let room = ((avail.height() * TABLE_SHARE_UNDER_PLANE - lines.head) / lines.row)
+        .floor()
+        .max(1.0);
+    #[allow(clippy::cast_precision_loss)]
+    let shown = (rows as f32).min(room);
+    let split = avail.bottom() - (lines.head + lines.row * shown);
+    (
+        egui::Rect::from_min_max(avail.min, egui::pos2(avail.right(), split)),
+        egui::Rect::from_min_max(egui::pos2(avail.left(), split), avail.max),
+    )
+}
+
 /// Couple an equal-aspect XY viewer's navigation ranges so wheel zoom,
 /// axis-constrained pan, and zoom boxes cannot distort circles or root maps.
 pub fn square_xy_view_change(

@@ -202,14 +202,15 @@ const ROOT_FIGURE_WIDTH: f32 = 128.0;
 
 /// The name, then five figure columns of one width that share what the
 /// sheet leaves, so no column takes the spare and none is narrower than its
-/// widest value.
-fn root_columns() -> [Column; 6] {
+/// widest value. Each head states its unit, in the one `frequency_unit` the
+/// reader shows frequencies in for f₀, and the cells are bare.
+fn root_columns(frequency_unit: &str) -> [Column; 6] {
     let figure = |head: &str| Column::name(head, ROOT_FIGURE_WIDTH).align(Align::Right);
     [
         Column::words("Root", ROOT_NAME_WIDTH),
-        figure("σ"),
-        figure("jω"),
-        figure("f₀"),
+        figure("σ (rad/s)"),
+        figure("jω (rad/s)"),
+        figure(&format!("f₀ ({frequency_unit})")),
         figure("ζ"),
         figure("Q"),
     ]
@@ -233,15 +234,15 @@ fn root_cells(
     digits: usize,
 ) -> Vec<Cell> {
     let natural = root.natural_frequency();
+    let (scale, offset, frequency_unit) = quantity_policy.frequency_axis_transform();
+    let plain = crate::phase_noise::plain;
     let mut cells = vec![
         Cell::text(name).sort_by(SortKey::Text(name.to_owned())),
-        Cell::number(fmt_si_significant(root.real, "rad/s", digits))
-            .sort_by(SortKey::Number(root.real)),
-        Cell::number(fmt_si_significant(root.imag, "rad/s", digits))
-            .sort_by(SortKey::Number(root.imag)),
-        Cell::number(frequency_readout(
-            quantity_policy,
-            natural / std::f64::consts::TAU,
+        Cell::number(plain(root.real, "rad/s", digits)).sort_by(SortKey::Number(root.real)),
+        Cell::number(plain(root.imag, "rad/s", digits)).sort_by(SortKey::Number(root.imag)),
+        Cell::number(plain(
+            natural / std::f64::consts::TAU * scale + offset,
+            frequency_unit,
             digits,
         ))
         .sort_by(SortKey::Number(natural)),
@@ -306,12 +307,6 @@ fn root_card_rows(
     }
     rows
 }
-
-/// The least width beside the square map the root table takes, every
-/// column at its least; on a narrower sheet the table goes under the map.
-const TABLE_BESIDE_MIN_WIDTH: f32 = ROOT_NAME_WIDTH + 5.0 * ROOT_FIGURE_WIDTH;
-/// The share of a narrow sheet's height the map takes above the table.
-const MAP_SHARE_ABOVE_TABLE: f32 = 0.58;
 
 /// Render the s-plane map, on logarithmic radial axes when `logarithmic`,
 /// and the table of every root beside or under it; the root card and the
@@ -440,22 +435,12 @@ pub fn show(
         }
     }));
 
-    // The map's region, and the table beside it, or under it on a narrow
-    // sheet.
-    let avail = ui.available_rect_before_wrap();
-    let (map_area, table_area) = if avail.width() - avail.height() >= TABLE_BESIDE_MIN_WIDTH {
-        let map = egui::Rect::from_min_size(avail.min, egui::vec2(avail.height(), avail.height()));
-        (
-            map,
-            egui::Rect::from_min_max(egui::pos2(map.right(), avail.top()), avail.max),
-        )
-    } else {
-        let split = avail.top() + (avail.height() * MAP_SHARE_ABOVE_TABLE).round();
-        (
-            egui::Rect::from_min_max(avail.min, egui::pos2(avail.right(), split)),
-            egui::Rect::from_min_max(egui::pos2(avail.left(), split), avail.max),
-        )
-    };
+    // The map across the sheet, and the root table under it.
+    let (map_area, table_area) = crate::presentation::plane_over_table(
+        ui,
+        ui.available_rect_before_wrap(),
+        data.roots.len(),
+    );
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(map_area)
@@ -565,7 +550,7 @@ fn root_table(
     digits: usize,
 ) -> bool {
     let names = root_names(data);
-    let columns = root_columns();
+    let columns = root_columns(quantity_policy.frequency_axis_transform().2);
     let revision = egui::Id::new(("pole-zero-roots", &data.name, data.roots.len(), digits)).value();
     with_table_state(ui, "pole-zero-roots", |ui, state| {
         let pinned = pin
@@ -674,16 +659,17 @@ mod tests {
         let kilohertz = std::f64::consts::TAU * 1.0e3;
         assert_eq!(
             row_text("z1", &ComplexRoot::zero(kilohertz, 0.0))[1],
-            "6.283 krad/s"
+            "6.283 k"
         );
         assert_eq!(
             row_text("z2", &ComplexRoot::zero(-kilohertz, 0.0))[1],
-            "\u{2212}6.283 krad/s"
+            "\u{2212}6.283 k"
         );
     }
 
     /// Every root lists, each of a conjugate pair on its own row, with σ
-    /// and jω in rad/s, f₀ in Hz, and ζ and Q off the real axis.
+    /// and jω in rad/s, f₀ in Hz, and ζ and Q off the real axis: each unit
+    /// in its column's head, and the cells bare.
     #[test]
     fn every_root_lists_with_its_units() {
         let mut data = PoleZeroData::new("forty roots");
@@ -706,14 +692,11 @@ mod tests {
         let pair = ComplexRoot::pole(-0.1 * natural, natural * 0.99f64.sqrt());
         assert_eq!(
             row_text("p1", &pair),
-            [
-                "p1",
-                "\u{2212}628.3 rad/s",
-                "6.252 krad/s",
-                "1 kHz",
-                "0.1",
-                "5"
-            ]
+            ["p1", "\u{2212}628.3", "6.252 k", "1 k", "0.1", "5"]
+        );
+        assert_eq!(
+            root_columns("Hz").each_ref().map(Column::head),
+            ["Root", "σ (rad/s)", "jω (rad/s)", "f₀ (Hz)", "ζ", "Q"]
         );
         let real = row_text("p2", &ComplexRoot::pole(-natural, 0.0));
         assert_eq!(real[4..], ["", ""], "a real root has no ζ or Q");

@@ -11,7 +11,7 @@ use rspice_results::floquet::{
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights, SortKey, Tone};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey, Tone};
 use rspice_vocabulary::quantity::{AngleDisplay, QuantityPresentationPolicy};
 
 /// One Floquet mode of the orbit.
@@ -166,13 +166,6 @@ pub struct FloquetResponse {
     pub pin_changed: bool,
 }
 
-/// The table goes beside the plane when the sheet leaves this much width
-/// past a square plane.
-const TABLE_BESIDE_MIN_WIDTH: f32 = 560.0;
-/// The most of the height the table takes when it goes under the plane;
-/// a spectrum with fewer modes takes only the rows it lists.
-const TABLE_SHARE_UNDER_PLANE: f32 = 0.42;
-
 /// Draw the multipliers on the plane with the unit circle, and the table
 /// beside it. A mode selected in the table or clicked on the plane is
 /// `pin`.
@@ -311,25 +304,11 @@ pub fn show(
         }
     }));
 
-    let avail = ui.available_rect_before_wrap();
-    let (plane_area, table_area) = if avail.width() - avail.height() >= TABLE_BESIDE_MIN_WIDTH {
-        let plane =
-            egui::Rect::from_min_size(avail.min, egui::vec2(avail.height(), avail.height()));
-        (
-            plane,
-            egui::Rect::from_min_max(egui::pos2(plane.right(), avail.top()), avail.max),
-        )
-    } else {
-        let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
-        // The head, every row and the frame's two rules.
-        let rows = lines.head + lines.row * data.modes.len() as f32 + 2.0;
-        let table = rows.min(avail.height() * TABLE_SHARE_UNDER_PLANE).round();
-        let split = avail.bottom() - table;
-        (
-            egui::Rect::from_min_max(avail.min, egui::pos2(avail.right(), split)),
-            egui::Rect::from_min_max(egui::pos2(avail.left(), split), avail.max),
-        )
-    };
+    let (plane_area, table_area) = crate::presentation::plane_over_table(
+        ui,
+        ui.available_rect_before_wrap(),
+        data.modes.len(),
+    );
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(plane_area)
@@ -436,13 +415,9 @@ fn imaginary_axis(range: (f64, f64)) -> Axis {
 }
 
 /// A margin to the hundredth of a decibel, as every decibel column of the
-/// Results details reads, with a true minus sign.
+/// Results details reads.
 fn hundredths(decibels: f64) -> String {
-    let text = format!("{decibels:.2}");
-    if text == "-0.00" {
-        return "0.00".to_owned();
-    }
-    text.replace('-', "\u{2212}")
+    crate::presentation::fixed_places(decibels, crate::presentation::DECIBEL_PLACES)
 }
 
 /// A cell holding a number whose column head carries its unit.
