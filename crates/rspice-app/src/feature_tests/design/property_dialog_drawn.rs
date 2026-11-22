@@ -804,3 +804,68 @@ fn a_level_1_mosfet_editor_offers_only_the_fields_its_card_reads() {
         );
     }
 }
+
+/// On a read-only view a part's Properties still opens, so its values can be
+/// read: every field is read-only, nothing typed reaches the draft, and the
+/// one button closes the editor without touching the design.
+#[test]
+fn properties_open_read_only_on_a_read_only_view() {
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut state = state_with_resistor();
+    state.model.schematic.session.read_only = true;
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(44);
+    assert!(
+        rspice_app_design::workbench::app::actions::property_edit::selected_object_properties_available_in(
+            &state.design.property_registry,
+            &state.model,
+        ),
+        "Properties is offered for the part"
+    );
+    let before = state.model.schematic.document().components.clone();
+    state.open_property_editor(44);
+    assert!(state.design.tabbed_property_dialog.open);
+
+    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+        render_property_dialog(ctx, &mut state);
+    });
+    let output = ctx.run_ui(
+        dialog_input(vec![
+            key_event(egui::Key::End),
+            egui::Event::Text("9".to_owned()),
+        ]),
+        |ctx| {
+            render_property_dialog(ctx, &mut state);
+        },
+    );
+    let painted: Vec<String> = super::raster_review::painted_text(&output.shapes)
+        .into_iter()
+        .map(|text| text.text)
+        .collect();
+    assert!(painted.iter().any(|text| text == "Close"), "{painted:?}");
+    assert!(
+        !painted.iter().any(|text| text == "Apply" || text == "OK"),
+        "nothing can be applied: {painted:?}"
+    );
+    let draft = &state.design.tabbed_property_dialog.draft;
+    assert!(
+        !draft.has_modifications(),
+        "a read-only field takes no text: {:?} {:?}",
+        draft.values.get("r"),
+        draft.numeric_text_draft("r")
+    );
+
+    // Escape closes it, as Close does.
+    let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
+        render_property_dialog(ctx, &mut state);
+    });
+    assert!(!state.design.tabbed_property_dialog.open);
+    assert_eq!(state.model.schematic.document().components, before);
+    assert!(!state.model.schematic.can_undo());
+}

@@ -54,6 +54,10 @@ impl PropertyDialog<'_> {
             &self.model.model_library_manager,
             quantity_policy,
             number_locale,
+            // Opened on a read-only view, the editor shows the part's values
+            // read-only. A draft made before the view became read-only stays
+            // as it was typed, with the reason it cannot be applied.
+            self.model.schematic_edit_read_only() && !self.dialog.draft.has_modifications(),
         );
 
         // Handle dialog result - apply changes back to component

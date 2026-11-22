@@ -28,6 +28,9 @@ pub struct ComponentPropertyDialogView<'a> {
     /// The instance parameters the bound model reads, when the host knows
     /// them, so the form offers the rows the inspector offers.
     pub model_reads: Option<&'a [&'a str]>,
+    /// The document cannot be edited: every field is shown read-only, and
+    /// the one button closes the editor.
+    pub read_only: bool,
 }
 
 /// Services called at their original position within the component dialog.
@@ -86,11 +89,17 @@ pub fn render_component_property_dialog(
         quantity_policy,
         number_locale,
         model_reads,
+        read_only,
     } = view;
     let mut result = ComponentPropertyDialogResult::None;
     draft.sync_pwl_validation_error();
     let dirty = draft.has_modifications();
     let (footer_hint, footer_tone) = match session_error.clone() {
+        // A read-only document is the state of the view, not a failure.
+        _ if read_only => (
+            Some("Read-only: the schematic cannot be edited here".to_owned()),
+            DialogHintTone::Neutral,
+        ),
         Some(error) => (Some(error), DialogHintTone::Error),
         None => (
             dirty.then(|| "Unapplied changes".to_owned()),
@@ -108,7 +117,7 @@ pub fn render_component_property_dialog(
     );
     let evidence = has_evidence(context, show_source_preview);
     let title = dialog_title(component_name);
-    let mut dialog = Dialog::new(&title, "OK")
+    let mut dialog = Dialog::new(&title, if read_only { "Close" } else { "OK" })
         .description(&described)
         .size(if evidence {
             DIALOG_SIZE
@@ -116,12 +125,23 @@ pub fn render_component_property_dialog(
             FORM_ALONE_SIZE
         })
         .flush_body()
-        .ghost("Cancel")
-        .secondary("Apply")
-        .secondary_enabled(dirty && draft.can_apply() && session_error.is_none())
-        .primary_enabled(session_error.is_none() && (!dirty || draft.can_apply()))
         .interaction_enabled(!model_browser_open)
-        .initial_focus(DialogInitialFocus::BodyControl);
+        // A read-only form has no field to type into; its one button takes
+        // the keys.
+        .initial_focus(if read_only {
+            DialogInitialFocus::Primary
+        } else {
+            DialogInitialFocus::BodyControl
+        });
+    dialog = if read_only {
+        dialog
+    } else {
+        dialog
+            .ghost("Cancel")
+            .secondary("Apply")
+            .secondary_enabled(dirty && draft.can_apply() && session_error.is_none())
+            .primary_enabled(session_error.is_none() && (!dirty || draft.can_apply()))
+    };
     if let Some(hint) = footer_hint.as_deref() {
         dialog = dialog.hint(hint).hint_tone(footer_tone);
     }
@@ -153,6 +173,9 @@ pub fn render_component_property_dialog(
 
     let mut side_action = ComponentPropertyDialogResult::None;
     let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        if read_only {
+            ui.disable();
+        }
         // With nothing to show beside them, the parameters are the whole body,
         // on the dialog's own surface, narrowed to them rather than one with a
         // pane that holds a divider and no content.
@@ -238,6 +261,9 @@ pub fn render_component_property_dialog(
         result = side_action;
     } else {
         match choice {
+            DialogChoice::Primary if read_only => {
+                result = ComponentPropertyDialogResult::Cancelled;
+            }
             DialogChoice::Primary => {
                 if !dirty_after_render {
                     result = ComponentPropertyDialogResult::Cancelled;
@@ -408,6 +434,7 @@ mod tests {
                             quantity_policy: QuantityPresentationPolicy::default(),
                             number_locale: UiNumberLocale::default(),
                             model_reads: None,
+                            read_only: false,
                         },
                         &mut NoServices,
                     );

@@ -545,9 +545,8 @@ pub fn selected_object_properties_available_in(
             .iter()
             .any(|probe| probe.id == id);
     }
-    if model.schematic_edit_read_only() {
-        return false;
-    }
+    // A part's properties open on a read-only view too, every field
+    // read-only, so its values can be read where they cannot be changed.
     if let Some(id) = model.schematic.session.editor.selection.single_component() {
         return model
             .schematic
@@ -562,6 +561,9 @@ pub fn selected_object_properties_available_in(
                     registry.get(component.kind).is_some()
                 }
             });
+    }
+    if model.schematic_edit_read_only() {
+        return false;
     }
     if let Some(id) = model.schematic.session.editor.selection.single_net_label() {
         return model
@@ -650,9 +652,6 @@ pub fn open_property_editor_in(
         return;
     }
     if !commit_pending_inspector_edit(model, wb) {
-        return;
-    }
-    if deny_read_only_edit(model, wb) {
         return;
     }
     let Some(component) = model
@@ -797,14 +796,16 @@ pub fn open_selected_object_properties_in(
         wb.drawer = Some(crate::workbench::state::Drawer::Inspector);
         return true;
     }
+    if let Some(component_id) = model.schematic.session.editor.selection.single_component()
+        && selected_object_properties_available_in(parts.property_registry, model)
+    {
+        open_property_editor_in(parts, model, wb, component_id);
+        return parts.tabbed_property_dialog.open;
+    }
     if deny_read_only_edit(model, wb)
         || !selected_object_properties_available_in(parts.property_registry, model)
     {
         return false;
-    }
-    if let Some(component_id) = model.schematic.session.editor.selection.single_component() {
-        open_property_editor_in(parts, model, wb, component_id);
-        return parts.tabbed_property_dialog.open;
     }
     let source = crate::workbench::app::schematic_editor_request_source(&*model);
     if let Some(label_id) = model.schematic.session.editor.selection.single_net_label()

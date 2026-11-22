@@ -20,6 +20,7 @@ pub fn render_tabbed_property_dialog(
     model_library_manager: &crate::state::ModelLibraryManager,
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
+    read_only: bool,
 ) -> ComponentPropertyDialogResult {
     if !state.open {
         return ComponentPropertyDialogResult::None;
@@ -43,6 +44,7 @@ pub fn render_tabbed_property_dialog(
         quantity_policy,
         number_locale,
         model_reads: state.model_reads,
+        read_only,
     };
     let mut services = ComponentDialogServices {
         reference: state.component_name.as_deref(),

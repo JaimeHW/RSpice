@@ -93,9 +93,8 @@ pub(super) fn instance_view(component: &Component) -> Option<&str> {
 }
 
 pub fn identity_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: &Component) {
-    let editable = !cx.model.schematic_edit_read_only();
-    let properties = section_header_action(ui, "Identity", "Properties…", editable);
-    if properties.clicked() {
+    // On a read-only document the editor opens with every field read-only.
+    if section_header_action(ui, "Identity", "Properties…", true).clicked() {
         crate::workbench::app::actions::property_edit::open_property_editor_in(
             &mut cx.state.property_form_parts(),
             cx.model,
@@ -103,7 +102,6 @@ pub fn identity_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: 
             component.id,
         );
     }
-    properties.on_disabled_hover_text("the active document is read-only");
     let instance_rejection = edit_row(ui, cx, component, InlineEditField::Instance, "Instance");
     field_rejection_slot(
         ui,
