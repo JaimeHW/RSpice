@@ -555,15 +555,28 @@ impl ProbeVisualStatus {
     }
 }
 
+/// How a probe marker stands out from the sheet, the strongest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeEmphasis {
+    /// It is selected: the selection fill.
+    Selected,
+    /// A click here would take it: the selection outline.
+    Hovered,
+    /// Its signal is the trace selected in Results: a ring in the net
+    /// highlight's hue, apart from selection, so it never reads as selected.
+    Traced,
+    Plain,
+}
+
 pub fn draw_probe(
     painter: &Painter,
     viewport: &Viewport,
     probe: &SchematicProbe,
     status: ProbeVisualStatus,
-    selected: bool,
-    hovered: bool,
+    emphasis: ProbeEmphasis,
     palette: &Palette,
 ) {
+    let selected = emphasis == ProbeEmphasis::Selected;
     let status_color = match status {
         ProbeVisualStatus::Materialized => palette.ok,
         ProbeVisualStatus::Hidden => palette.text_faint,
@@ -583,14 +596,28 @@ pub fn draw_probe(
         Emphasis::raised_if(selected),
     );
     let crosshair = lod::stroke_pt(StrokeRole::Probe, viewport.zoom, ppp, Emphasis::Plain);
-    if selected {
-        painter.circle_filled(center, radius + 4.0 * viewport.zoom, palette.canvas_select);
-    } else if hovered {
-        painter.circle_stroke(
-            center,
-            radius + 4.0 * viewport.zoom,
-            Stroke::new(lod::mark_outline_pt(ppp), palette.canvas_select),
-        );
+    match emphasis {
+        ProbeEmphasis::Selected => {
+            painter.circle_filled(center, radius + 4.0 * viewport.zoom, palette.canvas_select);
+        }
+        ProbeEmphasis::Hovered => {
+            painter.circle_stroke(
+                center,
+                radius + 4.0 * viewport.zoom,
+                Stroke::new(lod::mark_outline_pt(ppp), palette.canvas_select),
+            );
+        }
+        ProbeEmphasis::Traced => {
+            painter.circle_stroke(
+                center,
+                radius + 4.0 * viewport.zoom,
+                Stroke::new(
+                    lod::stroke_pt(StrokeRole::Probe, viewport.zoom, ppp, Emphasis::Raised),
+                    palette.canvas_net_highlight,
+                ),
+            );
+        }
+        ProbeEmphasis::Plain => {}
     }
     painter.circle_filled(center, radius, palette.canvas_bg);
     painter.circle_stroke(center, radius, Stroke::new(ring, status_color));

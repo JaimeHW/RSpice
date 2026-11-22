@@ -5,10 +5,10 @@ use super::{
     design_view::{DesignView, design_note_visible},
     documentation_shapes::{draw_documentation_shape, world_bounds as documentation_shape_bounds},
     drawing::{
-        ConductorInk, JunctionPaint, ProbeVisualStatus, bus_band_width_pt, bus_tap_width_pt,
-        chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor, draw_hover_halo,
-        draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe, draw_wire_bridge,
-        probe_world_bounds,
+        ConductorInk, JunctionPaint, ProbeEmphasis, ProbeVisualStatus, bus_band_width_pt,
+        bus_tap_width_pt, chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor,
+        draw_hover_halo, draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe,
+        draw_wire_bridge, probe_world_bounds,
     },
     net_labels::{NetLabelPaint, draw_net_label_attached, world_bounds as net_label_world_bounds},
     pointer_target::PointerTarget,
@@ -444,32 +444,33 @@ pub fn draw_content(
         {
             continue;
         }
-        let mut selected = view.editor.selection.has_probe(probe.id);
-        if !selected {
-            selected = (overlays.selected_trace_expression)()
-                .and_then(|trace| {
-                    probe
-                        .source_expression
-                        .as_deref()
-                        .map(|expression| (trace, expression))
-                })
-                .is_some_and(|(trace, expression)| {
-                    normalized_probe_expression(trace) == normalized_probe_expression(expression)
-                });
-        }
+        // The probe of the trace selected in Results is highlighted, not
+        // selected: Delete, Rotate and the inspector act on the selection.
         // The band previews what its release selects, by the drawn marker.
-        selected = selected
+        let emphasis = if view.editor.selection.has_probe(probe.id)
             || band_annotations.is_some_and(|band| {
                 let (min, max) = probe.layout_bounds();
                 band.takes_bounds(min, max)
-            });
+            }) {
+            ProbeEmphasis::Selected
+        } else if view.hover == Some(PointerTarget::Probe(probe.id)) {
+            ProbeEmphasis::Hovered
+        } else if (overlays.selected_trace_expression)()
+            .zip(probe.source_expression.as_deref())
+            .is_some_and(|(trace, expression)| {
+                normalized_probe_expression(trace) == normalized_probe_expression(expression)
+            })
+        {
+            ProbeEmphasis::Traced
+        } else {
+            ProbeEmphasis::Plain
+        };
         draw_probe(
             painter,
             viewport,
             probe,
             (overlays.probe_status)(probe),
-            selected,
-            view.hover == Some(PointerTarget::Probe(probe.id)),
+            emphasis,
             palette,
         );
     }
