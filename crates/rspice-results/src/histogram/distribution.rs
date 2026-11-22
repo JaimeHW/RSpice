@@ -28,12 +28,26 @@ impl HistogramDisplayMode {
         }
     }
 
+    /// The ordinate's unit with the binned quantity's unit unknown. A count
+    /// has none: "n" read as nano on a tick ("4 n").
     pub fn unit(self) -> &'static str {
         match self {
-            Self::Count => "n",
+            Self::Count => "",
             Self::Pdf => "1/x",
             Self::Cdf => "P(X ≤ x)",
             Self::Percent => "%",
+        }
+    }
+
+    /// The ordinate's unit for a binned quantity in `quantity_unit`: none for
+    /// a count or a cumulative probability, the reciprocal of the quantity's
+    /// unit for a density, and percent for a share.
+    pub fn ordinate_unit(self, quantity_unit: &str) -> String {
+        match self {
+            Self::Count | Self::Cdf => String::new(),
+            Self::Pdf if quantity_unit.trim().is_empty() => String::new(),
+            Self::Pdf => format!("1/{}", quantity_unit.trim()),
+            Self::Percent => "%".to_owned(),
         }
     }
 }
@@ -170,6 +184,18 @@ impl HistogramDistribution {
 mod tests {
     use super::*;
     use crate::histogram::HistogramBuilder;
+
+    /// A count and a cumulative probability have no unit, so a count axis
+    /// never reads "4 n" like nano; a density is per unit of the quantity.
+    #[test]
+    fn the_ordinate_unit_is_none_for_a_count_and_per_quantity_for_a_density() {
+        assert_eq!(HistogramDisplayMode::Count.unit(), "");
+        assert_eq!(HistogramDisplayMode::Count.ordinate_unit("V"), "");
+        assert_eq!(HistogramDisplayMode::Cdf.ordinate_unit("V"), "");
+        assert_eq!(HistogramDisplayMode::Pdf.ordinate_unit("V"), "1/V");
+        assert_eq!(HistogramDisplayMode::Pdf.ordinate_unit(""), "");
+        assert_eq!(HistogramDisplayMode::Percent.ordinate_unit("V"), "%");
+    }
 
     #[test]
     fn normalization_includes_samples_outside_the_custom_range() {
