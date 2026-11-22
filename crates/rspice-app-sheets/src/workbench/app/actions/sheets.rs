@@ -197,6 +197,35 @@ fn settle_drawing(
     }
 }
 
+/// Duplicate sheet `id`, or the drawing itself where it is not yet split
+/// into sheets: a copy of it, drawing and all, goes after it as the next
+/// free `Sheet N`, as one undo step, and becomes the sheet in view.
+pub fn duplicate_sheet(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    gesture: &mut (impl CanvasGesturePort + ?Sized),
+    id: Option<SheetId>,
+) -> Result<String, String> {
+    settle_drawing(model, workbench, gesture);
+    let mut source_name = String::new();
+    let mut name = String::new();
+    let outcome = model
+        .duplicate_sheet(id, |catalog, source| {
+            let sheet = catalog
+                .find(source)
+                .ok_or_else(|| Model::NO_SUCH_SHEET.to_owned())?;
+            source_name = sheet.name().to_owned();
+            name = unique_sheet_name(catalog);
+            Ok(SheetDefinition {
+                name: name.clone(),
+                port_policy: sheet.definition().port_policy,
+                explicit_page_number: Some(first_free_page_number(catalog)?),
+            })
+        })
+        .map(|_| format!("Duplicated `{source_name}` as `{name}`."));
+    workbench.report(outcome)
+}
+
 pub fn rename_sheet(
     model: &mut Model,
     workbench: &mut WorkbenchSession,

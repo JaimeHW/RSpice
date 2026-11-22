@@ -738,3 +738,80 @@ fn apply_to_all_sheets_letters_a_value_on_every_sheet_in_one_undo_step() {
     assert_eq!(own_value(&state, first, document_type), "");
     assert_eq!(own_value(&state, second, document_type), "");
 }
+
+/// Duplicate sheet puts a copy of the sheet, drawing and all, after it as
+/// the next free `Sheet N` and enters it. The copy stands where the original
+/// does, under fresh identities, and one undo takes the sheet and its copy
+/// away together.
+#[test]
+fn duplicate_sheet_copies_the_drawing_as_one_undo_step_and_numbers_the_new_sheet() {
+    let (mut state, first, second) = two_sheet_state();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let on_sheet = |state: &AppState, id: SheetId| {
+        let catalog = state
+            .model
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key)
+            .expect("sheet catalog");
+        let objects = catalog.objects_on_sheet(id).collect::<Vec<_>>();
+        state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .filter(|component| objects.contains(&component.id))
+            .map(|component| (component.id, component.kind, component.pos))
+            .collect::<Vec<_>>()
+    };
+
+    duplicate_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &mut *state.design,
+        Some(first),
+    )
+    .expect("the duplicate publishes");
+
+    let entries = sheet_entries(&state);
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Sheet 1", "Sheet 3", "Sheet 2"]
+    );
+    assert_eq!(entries[0].id, first);
+    assert_eq!(entries[2].id, second);
+    let copy = entries[1].id;
+    assert_eq!(active_sheet_id(&state), Some(copy));
+    let copied = on_sheet(&state, copy);
+    assert_eq!(copied.len(), 1, "{copied:?}");
+    let (copied_id, component_type, pos) = copied[0];
+    assert_ne!(copied_id, 10);
+    assert_eq!(component_type, ComponentType::Resistor);
+    assert_eq!(pos, Point::new(10, 10));
+    assert_eq!(
+        on_sheet(&state, first),
+        [(10, ComponentType::Resistor, Point::new(10, 10))]
+    );
+
+    state
+        .undo_project_design()
+        .expect("one guarded transaction");
+    assert_eq!(sheet_entries(&state).len(), 2);
+    assert_eq!(state.model.schematic.document().components.len(), 2);
+    assert_eq!(active_sheet_id(&state), Some(first));
+
+    state.redo_project_design().expect("the duplicate redoes");
+    assert_eq!(sheet_entries(&state).len(), 3);
+    assert_eq!(active_sheet_id(&state), Some(copy));
+    assert_eq!(on_sheet(&state, copy), copied);
+}

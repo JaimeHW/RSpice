@@ -101,6 +101,38 @@ impl Schematic {
         })
     }
 
+    /// This schematic with `clipboard` pasted at `pos`, as a candidate
+    /// another step publishes: a sheet duplicated with its drawing. Nothing
+    /// goes on this schematic's own undo history. `hidden` names the
+    /// objects the paste's dots must not join, as [`Self::paste_at`] takes
+    /// it. `None` when the clipboard pastes nothing.
+    pub fn pasted_candidate(
+        &self,
+        clipboard: &ClipboardData,
+        pos: Point,
+        hidden: impl Fn(u64) -> bool,
+    ) -> Result<Option<Self>, String> {
+        let mut candidate = self.clone();
+        let Some(paste) = ClipboardPaste::prepare(
+            &mut candidate.document,
+            &mut candidate.identity,
+            clipboard,
+            pos,
+            hidden,
+        )?
+        else {
+            return Ok(None);
+        };
+        let pasted = paste.commit();
+        if !pasted.has_content() {
+            return Ok(None);
+        }
+        let topology_changes = pasted.topology_changes;
+        candidate.topology_version = candidate.topology_version.wrapping_add(topology_changes);
+        candidate.content_version = candidate.content_version.wrapping_add(1);
+        Ok(Some(candidate))
+    }
+
     /// This schematic without the complete objects `ids` names, and the
     /// markers that hang on them, as a candidate another step publishes: a
     /// sheet deleted with what it holds. Nothing goes on this schematic's own

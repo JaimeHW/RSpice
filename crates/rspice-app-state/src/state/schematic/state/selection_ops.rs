@@ -41,6 +41,27 @@ impl SchematicState {
         edit.committed
     }
 
+    /// This schematic with `clipboard` pasted where it was copied from, as a
+    /// candidate a project step publishes (a sheet duplicated with its
+    /// drawing); its own undo history gains nothing. `hidden` names the
+    /// objects of the cell view's other sheets. `None` when nothing pastes.
+    pub(crate) fn pasted_in_place_candidate(
+        &self,
+        clipboard: &ClipboardData,
+        hidden: impl Fn(u64) -> bool,
+    ) -> Result<Option<SchematicState>, String> {
+        let Some(design) = self
+            .design
+            .pasted_candidate(clipboard, clipboard.origin, hidden)?
+        else {
+            return Ok(None);
+        };
+        let mut candidate = SchematicState::from_parts(design, self.session.clone());
+        candidate.session.is_dirty = true;
+        candidate.session.editor.selection.clear();
+        Ok(Some(candidate))
+    }
+
     /// This schematic without the objects `ids` names, as a candidate a
     /// project step publishes (a sheet deleted with what it holds); its own
     /// undo history gains nothing. `None` when none of them is drawn.

@@ -12,8 +12,8 @@
 
 use super::Model;
 use crate::state::{
-    DesignManagementCatalog, Selection, SheetCatalog, SheetDeleteReceipt, SheetDeleteResolution,
-    SheetId,
+    DesignManagementCatalog, SchematicState, Selection, SheetCatalog, SheetDefinition,
+    SheetDeleteReceipt, SheetDeleteResolution, SheetId,
 };
 use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
 use std::collections::{BTreeMap, HashSet};
@@ -303,6 +303,142 @@ impl Model {
         Ok(receipt)
     }
 
+    /// Duplicate sheet `source` of the open cell view, drawing and all, as
+    /// one step: a new sheet, named by `definition` from the catalog and the
+    /// sheet it copies, goes after it on the same drawing sheet, holding a
+    /// copy of every object on `source` where the original stands, with
+    /// fresh identities and reference names. A drawing with no catalog yet
+    /// is one sheet, and `None` duplicates it: everything drawn becomes
+    /// Sheet 1 in the same step. One undo takes the new sheet and its copy
+    /// away together. The new sheet becomes the sheet in view in the same
+    /// step. Returns the new sheet.
+    pub fn duplicate_sheet(
+        &mut self,
+        source: Option<SheetId>,
+        definition: impl FnOnce(&SheetCatalog, SheetId) -> Result<SheetDefinition, String>,
+    ) -> Result<SheetId, String> {
+        if self.schematic.session.read_only {
+            return Err("The schematic is read-only, so its sheets stay as they are.".to_owned());
+        }
+        let owner = self.workspace.content.active_schematic_reference();
+        let key = owner.key();
+        let before = (*self.workspace.content.design_management).clone();
+        let mut candidate = before.clone();
+        let source = match source {
+            Some(source) => source,
+            None => candidate
+                .bootstrap_for_cell_view(&key, "Sheet 1", live_object_ids(&self.schematic))
+                .map_err(|error| error.to_string())?,
+        };
+        let catalog = candidate
+            .sheet_catalog_mut(&key)
+            .ok_or_else(|| Self::NO_SHEET_CATALOG.to_owned())?;
+        let definition = definition(catalog, source)?;
+        let page_format = catalog
+            .find(source)
+            .ok_or_else(|| Self::NO_SUCH_SHEET.to_owned())?
+            .page_format()
+            .clone();
+        let on_source = catalog.objects_on_sheet(source).collect::<HashSet<_>>();
+        let duplicate = catalog
+            .create_sheet_with_page_format(definition, Some(source), page_format)
+            .map_err(|error| error.to_string())?;
+        // The copy becomes the sheet in view in the same step, so one undo
+        // also returns to the sheet it was made from.
+        catalog
+            .set_active(duplicate)
+            .map_err(|error| error.to_string())?;
+
+        let before_schematic = self.schematic.clone();
+        let mut copying = self.schematic.clone();
+        copying.session.editor.selection = self.every_object_among(&on_source);
+        let symbols = self.schematic_symbol_context();
+        let drawing = copying.capture_complete_selection_resolved(
+            |component| symbols.terminal_points(component),
+            &|id| on_source.contains(&id),
+        );
+        let existing = live_object_ids(&self.schematic);
+        // Every object already drawn is on another sheet than the copy's, so
+        // the copy's dots join only its own wires.
+        if let Some(after_schematic) = self
+            .schematic
+            .pasted_in_place_candidate(&drawing, |id| existing.contains(&id))?
+        {
+            let copied = live_object_ids(&after_schematic)
+                .into_iter()
+                .filter(|id| !existing.contains(id))
+                .collect::<Vec<_>>();
+            if !copied.is_empty() {
+                catalog
+                    .assign_objects(catalog.revision(), duplicate, copied)
+                    .map_err(|error| error.to_string())?;
+            }
+            self.schematic = after_schematic;
+        }
+        candidate.validate().map_err(|error| error.to_string())?;
+        let committed_revision = match self.workspace.content.replace_design_management(candidate) {
+            Ok(revision) => revision,
+            Err(error) => {
+                self.schematic = before_schematic;
+                return Err(error.to_string());
+            }
+        };
+        self.workspace
+            .insert_schematic_editor(key.clone(), self.schematic.clone());
+        let after = (*self.workspace.content.design_management).clone();
+        self.record_design_management_transaction(DesignManagementHistoryEntry {
+            description: "duplicate sheet".to_owned(),
+            owner,
+            before,
+            after,
+            before_schematics: BTreeMap::from([(key.clone(), before_schematic)]),
+            after_schematics: BTreeMap::from([(key, self.schematic.clone())]),
+            references: Default::default(),
+            committed_revision,
+        });
+        self.enter_active_sheet();
+        Ok(duplicate)
+    }
+
+    /// Every object of the open drawing whose identity `ids` holds, as a
+    /// selection.
+    fn every_object_among(&self, ids: &HashSet<u64>) -> Selection {
+        let document = self.schematic.document();
+        let mut selection = Selection::default();
+        for object in document.components.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_component(object.id);
+        }
+        for object in document.wires.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_wire(object.id);
+        }
+        for object in document.junctions.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_junction(object.pos);
+        }
+        for object in document.buses.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_bus(object.id);
+        }
+        for object in document.bus_taps.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_bus_tap(object.id);
+        }
+        for object in document.net_labels.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_net_label(object.id);
+        }
+        for object in document.design_notes.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_design_note(object.id);
+        }
+        for object in document
+            .documentation_shapes
+            .iter()
+            .filter(|o| ids.contains(&o.id))
+        {
+            selection.select_documentation_shape(object.id);
+        }
+        for object in document.probes.iter().filter(|o| ids.contains(&o.id)) {
+            selection.select_probe(object.id);
+        }
+        selection
+    }
+
     /// Publish `candidate` over `before` as one project transaction, with the
     /// schematic buffers it moves objects between.
     pub fn commit_sheet_catalog(
@@ -333,4 +469,20 @@ impl Model {
         });
         Ok(())
     }
+}
+
+/// Every stable identity the drawing `schematic` holds.
+fn live_object_ids(schematic: &SchematicState) -> HashSet<u64> {
+    let document = schematic.document();
+    let mut ids = HashSet::new();
+    ids.extend(document.components.iter().map(|object| object.id));
+    ids.extend(document.wires.iter().map(|object| object.id));
+    ids.extend(document.buses.iter().map(|object| object.id));
+    ids.extend(document.bus_taps.iter().map(|object| object.id));
+    ids.extend(document.junctions.iter().map(|object| object.id));
+    ids.extend(document.net_labels.iter().map(|object| object.id));
+    ids.extend(document.design_notes.iter().map(|object| object.id));
+    ids.extend(document.documentation_shapes.iter().map(|object| object.id));
+    ids.extend(document.probes.iter().map(|object| object.id));
+    ids
 }

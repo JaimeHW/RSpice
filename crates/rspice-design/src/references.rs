@@ -16,8 +16,10 @@ pub use probe_rewrite::remap_instance_probes_many;
 
 pub type PathMappings = Vec<(InstancePath, InstancePath)>;
 
-/// Before/after components for a validated reference edit. Every original
-/// component identity must be present in the replacement slice.
+/// Before/after components for a validated reference edit. An original
+/// component the replacement slice lacks was removed by the edit (a sheet's
+/// copy undone, a sheet deleted with its objects redone), so no path renames
+/// to it.
 pub struct ReferenceComponents<'a> {
     pub before: &'a [Component],
     pub after: &'a [Component],
@@ -49,7 +51,9 @@ fn append_document_paths<'a>(
         .map(|component| (component.id, component))
         .collect();
     for component in edit.before {
-        let candidate = candidates[&component.id];
+        let Some(candidate) = candidates.get(&component.id) else {
+            continue;
+        };
         if component.name == candidate.name || component.kind.spice_prefix().is_empty() {
             continue;
         }
