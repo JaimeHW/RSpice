@@ -364,17 +364,20 @@ fn every_include_the_deck_does_not_keep_offers_add_file_on_its_line() {
 /// them includes is no deck of its own.
 #[test]
 fn picked_files_come_in_as_the_decks_no_other_file_includes() {
-    let decks = deck_import::import_files(vec![
-        (
-            "tb.cir".to_owned(),
-            b"* tb\n.include \"stage.cir\"\n.op\n.end\n".to_vec(),
-        ),
-        ("stage.cir".to_owned(), b"R1 a 0 1k\n".to_vec()),
-        (
-            "other.sp".to_owned(),
-            b"* other\nV1 a 0 1\n.op\n.end\n".to_vec(),
-        ),
-    ])
+    let decks = deck_import::import_files(
+        vec![
+            (
+                "tb.cir".to_owned(),
+                b"* tb\n.include \"stage.cir\"\n.op\n.end\n".to_vec(),
+            ),
+            ("stage.cir".to_owned(), b"R1 a 0 1k\n".to_vec()),
+            (
+                "other.sp".to_owned(),
+                b"* other\nV1 a 0 1\n.op\n.end\n".to_vec(),
+            ),
+        ],
+        AppState::default().workbench.messages(),
+    )
     .expect("decks");
 
     let names = decks
@@ -412,7 +415,8 @@ fn a_deck_kept_as_text_exports_alone_or_as_a_zip_of_it_and_its_files() {
         .expect("kept as text")
         .clone();
     assert_eq!(
-        deck_import::import_files(vec![(zip_name, zip)]).expect("in again"),
+        deck_import::import_files(vec![(zip_name, zip)], state.workbench.messages())
+            .expect("in again"),
         vec![kept]
     );
 }

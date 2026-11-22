@@ -14,12 +14,14 @@ pub fn action_export_generated_netlist_with_options(
     include_source_map: bool,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
+    use crate::workbench::MessageId;
+    let messages = wb.messages();
     let Some(document) = model.netlist_artifacts.generated_document.as_ref() else {
-        wb.prompt("There is no generated netlist to export.");
+        wb.prompt(messages.text(MessageId::NetlistExportNotGenerated));
         return false;
     };
     let Some(artifact) = document.generated_artifact().cloned() else {
-        wb.prompt("The selected document is not a generated netlist.");
+        wb.prompt(messages.text(MessageId::NetlistExportNotANetlist));
         return false;
     };
     if model.netlist_artifacts.generation_error.is_some()
@@ -28,18 +30,15 @@ pub fn action_export_generated_netlist_with_options(
         || model.netlist_artifacts.generated_input_digest
             != Some(artifact.provenance().input().digest())
     {
-        wb.prompt("The generated netlist is out of date; regenerate it to export.");
+        wb.prompt(messages.text(MessageId::NetlistExportOutOfDate));
         return false;
     }
     if include_source_map && !bundle_dependencies {
-        wb.prompt("A source map is exported only with a self-contained bundle.");
+        wb.prompt(messages.text(MessageId::NetlistExportSourceMapNeedsZip));
         return false;
     }
     if !bundle_dependencies && !artifact.dependencies().is_empty() {
-        wb.prompt(
-            "This netlist includes project or external files; export it as a self-contained \
-             bundle.",
-        );
+        wb.prompt(messages.text(MessageId::NetlistExportIncludesNeedZip));
         return false;
     }
     if !bundle_dependencies {

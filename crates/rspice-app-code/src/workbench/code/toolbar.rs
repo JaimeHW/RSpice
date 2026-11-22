@@ -178,7 +178,9 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
             icon_button(
                 ui,
                 WorkbenchIcon::Format,
-                "Format document",
+                &cx.wb
+                    .messages()
+                    .text(crate::workbench::MessageId::NetlistFormatDocument),
                 false,
                 toolbar_icon_button_size(layout),
             )
@@ -289,7 +291,10 @@ pub(super) fn missing_deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
 fn missing_deck_save(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     use crate::workbench::MessageId;
 
-    let (icon, label) = (WorkbenchIcon::Save, "Save deck");
+    let (icon, label) = (
+        WorkbenchIcon::Save,
+        cx.wb.messages().text(MessageId::NetlistSaveDeck),
+    );
     let reason = crate::workbench::documents::deck_files::missing_deck(cx.model, &cx.state.netlist)
         .map(|missing| {
             cx.wb.messages().format(
@@ -306,13 +311,13 @@ fn missing_deck_save(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: La
             labeled_icon_button_sized(
                 ui,
                 icon,
-                label,
+                &label,
                 false,
-                explicit_label_width(ui, label, false),
+                explicit_label_width(ui, &label, false),
                 layout.toolbar_control_height,
             )
         } else {
-            icon_button(ui, icon, label, false, toolbar_icon_button_size(layout))
+            icon_button(ui, icon, &label, false, toolbar_icon_button_size(layout))
         }
     });
     let _ = response.inner.on_disabled_hover_text(reason);

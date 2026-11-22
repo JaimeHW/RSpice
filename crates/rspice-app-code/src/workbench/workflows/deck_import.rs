@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::state::{StoredDeck, StoredDeckFile, TextEncoding};
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// The extensions of a file that can be a deck: a library or an include is
 /// read by one, never run alone.
@@ -21,17 +22,20 @@ const DECK_EXTENSIONS: &[&str] = &[
 /// bytes: one ZIP is read for the files in it. Every file no other includes
 /// and whose name says it is a deck is one; the text files besides are kept
 /// with each.
-pub fn import_files(files: Vec<(String, Vec<u8>)>) -> Result<Vec<StoredDeck>, String> {
+pub fn import_files(
+    files: Vec<(String, Vec<u8>)>,
+    messages: MessageCatalog,
+) -> Result<Vec<StoredDeck>, String> {
     if let [(name, bytes)] = files.as_slice()
         && bytes.starts_with(b"PK\x03\x04")
     {
-        return import_zip(name, bytes);
+        return import_zip(name, bytes, messages);
     }
     if files
         .iter()
         .any(|(_, bytes)| bytes.starts_with(b"PK\x03\x04"))
     {
-        return Err("Pick one ZIP alone, or SPICE files.".to_owned());
+        return Err(messages.text(MessageId::NetlistImportZipWithOthers));
     }
     let mut picked = Vec::with_capacity(files.len());
     let mut paths = BTreeSet::new();
@@ -41,7 +45,7 @@ pub fn import_files(files: Vec<(String, Vec<u8>)>) -> Result<Vec<StoredDeck>, St
             continue;
         }
         if !paths.insert(path.clone()) {
-            return Err(format!("{path} is picked twice."));
+            return Err(messages.format(MessageId::NetlistImportPickedTwice, &[("file", &path)]));
         }
         let (text, encoding) = TextEncoding::decode(&bytes)?;
         picked.push(Picked {
@@ -50,12 +54,16 @@ pub fn import_files(files: Vec<(String, Vec<u8>)>) -> Result<Vec<StoredDeck>, St
             encoding,
         });
     }
-    decks_among(&picked)
+    decks_among(&picked, messages)
 }
 
 /// The decks in the ZIP `bytes`, called `name`: its files, by their paths
 /// in it, read as [`import_files`] reads picked files.
-pub fn import_zip(name: &str, bytes: &[u8]) -> Result<Vec<StoredDeck>, String> {
+pub fn import_zip(
+    name: &str,
+    bytes: &[u8],
+    messages: MessageCatalog,
+) -> Result<Vec<StoredDeck>, String> {
     let files = rspice_formats::zip::read_zip_files(
         bytes,
         crate::state::MAX_PROJECT_SOURCE_FILES,
@@ -66,21 +74,23 @@ pub fn import_zip(name: &str, bytes: &[u8]) -> Result<Vec<StoredDeck>, String> {
         .iter()
         .any(|(_, bytes)| bytes.starts_with(b"PK\x03\x04"))
     {
-        return Err(format!("{name} holds another ZIP; pick the files in it."));
+        return Err(messages.format(MessageId::NetlistImportZipInZip, &[("name", name)]));
     }
     if files.is_empty() {
-        return Err(format!("{name} holds no files."));
+        return Err(messages.format(MessageId::NetlistImportEmptyZip, &[("name", name)]));
     }
-    import_files(files)
+    import_files(files, messages)
 }
 
 /// The text of `bytes`, the one file `name` picked to keep with a deck, and
 /// its encoding: a ZIP, or a file that is not text, is refused.
-pub fn picked_text(name: &str, bytes: &[u8]) -> Result<(String, TextEncoding), String> {
+pub fn picked_text(
+    name: &str,
+    bytes: &[u8],
+    messages: MessageCatalog,
+) -> Result<(String, TextEncoding), String> {
     if bytes.starts_with(b"PK\x03\x04") || is_binary(bytes) {
-        return Err(format!(
-            "{name} is not a text file: pick the file the line names."
-        ));
+        return Err(messages.format(MessageId::NetlistImportNotText, &[("name", name)]));
     }
     TextEncoding::decode(bytes)
 }
@@ -108,7 +118,7 @@ struct Picked {
 
 /// The decks among `picked`: each deck file no other picked file includes,
 /// with the rest kept by their paths from it.
-fn decks_among(picked: &[Picked]) -> Result<Vec<StoredDeck>, String> {
+fn decks_among(picked: &[Picked], messages: MessageCatalog) -> Result<Vec<StoredDeck>, String> {
     let sources = picked
         .iter()
         .map(|file| {
@@ -148,14 +158,10 @@ fn decks_among(picked: &[Picked]) -> Result<Vec<StoredDeck>, String> {
         .collect::<Vec<_>>();
     let decks = roots
         .iter()
-        .map(|deck| stored_deck(deck, &rest))
+        .map(|deck| stored_deck(deck, &rest, messages))
         .collect::<Result<Vec<_>, _>>()?;
     if decks.is_empty() {
-        return Err(
-            "No deck among the files: a deck is a .cir, .sp, .net or similar file that no other \
-             picked file includes."
-                .to_owned(),
-        );
+        return Err(messages.text(MessageId::NetlistImportNoDeck));
     }
     Ok(decks)
 }
@@ -164,7 +170,11 @@ fn decks_among(picked: &[Picked]) -> Result<Vec<StoredDeck>, String> {
 /// its path from the deck's folder. A file above that folder is kept where
 /// the deck's `..` reaches, which stops at the deck's folder as the deck
 /// reads it.
-fn stored_deck(deck: &Picked, rest: &[&Picked]) -> Result<StoredDeck, String> {
+fn stored_deck(
+    deck: &Picked,
+    rest: &[&Picked],
+    messages: MessageCatalog,
+) -> Result<StoredDeck, String> {
     let folder = deck.path.rsplit_once('/').map_or("", |(folder, _)| folder);
     let name = deck
         .path
@@ -177,9 +187,9 @@ fn stored_deck(deck: &Picked, rest: &[&Picked]) -> Result<StoredDeck, String> {
     for file in rest {
         let path = from_folder(folder, &file.path);
         if path == name || !kept.insert(path.clone()) {
-            return Err(format!(
-                "{} cannot be kept with {name}: another of its files is kept as {path}.",
-                file.path
+            return Err(messages.format(
+                MessageId::NetlistImportKeptTwice,
+                &[("file", &file.path), ("name", &name), ("path", &path)],
             ));
         }
         files.push(StoredDeckFile {

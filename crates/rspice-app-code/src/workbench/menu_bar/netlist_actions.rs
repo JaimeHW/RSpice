@@ -73,7 +73,10 @@ pub fn action_export_netlist_with_io(
     // The deck the run executes, with every enabled analysis's card, so the
     // file runs in the CLI as the design runs here.
     if model.schematic.document().components.is_empty() {
-        wb.prompt("No circuit to export. Add components first.");
+        wb.prompt(
+            wb.messages()
+                .text(crate::workbench::MessageId::NetlistExportNoCircuit),
+        );
         return;
     }
     let exported =
@@ -115,8 +118,8 @@ pub fn action_export_netlist_with_io(
             let (netlist_content, sources) = (export.netlist, export.sources);
             if !sources.is_empty() && !io.saved_paths_are_reopenable() {
                 wb.prompt(
-                    "This netlist uses project Verilog-A sources; export it from the Netlist \
-                     page as a self-contained bundle.",
+                    wb.messages()
+                        .text(crate::workbench::MessageId::NetlistExportVerilogANeedsZip),
                 );
                 return;
             }

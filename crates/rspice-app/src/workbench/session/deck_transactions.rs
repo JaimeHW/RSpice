@@ -107,7 +107,10 @@ impl AppState {
     /// to the front.
     #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn import_deck_files(&mut self, files: Vec<(String, Vec<u8>)>) -> bool {
-        let decks = match rspice_app_code::workbench::workflows::deck_import::import_files(files) {
+        let decks = match rspice_app_code::workbench::workflows::deck_import::import_files(
+            files,
+            self.workbench.messages(),
+        ) {
             Ok(decks) => decks,
             Err(error) => {
                 self.prompt(error);
@@ -202,8 +205,11 @@ impl AppState {
         name: &str,
         bytes: &[u8],
     ) -> Result<String, String> {
-        let (text, encoding) =
-            rspice_app_code::workbench::workflows::deck_import::picked_text(name, bytes)?;
+        let (text, encoding) = rspice_app_code::workbench::workflows::deck_import::picked_text(
+            name,
+            bytes,
+            self.workbench.messages(),
+        )?;
         rspice_app_code::workbench::documents::deck_files::add_file_to_deck(
             &mut self.model,
             &mut self.code.netlist,
