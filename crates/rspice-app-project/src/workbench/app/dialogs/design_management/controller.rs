@@ -43,12 +43,21 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
     let description = page.description();
     let initial_height = if page == DesignManagementPage::Manager {
         MANAGER_INITIAL_HEIGHT
+    } else if page.form() {
+        FORM_INITIAL_HEIGHT
     } else {
         SUBFLOW_INITIAL_HEIGHT
     };
-    // The manager and its subflows are one width, so moving between them
-    // never resizes the dialog, and each pane's tables keep their headings.
-    let size = DialogSize::WideWorkflow;
+    // The manager and the pages with a list are one width, so moving between
+    // them never resizes the dialog and each pane's tables keep their
+    // headings. A page of fields alone is a form's width, as the sub-dialog
+    // a manager opens is in KiCad and Altium: at the manager's width its
+    // fields filled the left half and left the right half bare.
+    let size = if page.form() {
+        DialogSize::CommandForm
+    } else {
+        DialogSize::WideWorkflow
+    };
     let ghost = if discard {
         "Discard changes"
     } else if page == DesignManagementPage::Manager {

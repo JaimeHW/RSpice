@@ -102,19 +102,14 @@ pub(super) fn split_surface(
     ui.advance_cursor_after_rect(surface);
 }
 
-/// One pane for a page that is fields alone, as wide as the manager's left
-/// pane, or the dialog's width when it is narrow. Fields carry no inset of
-/// their own, so the pane stands the dialog's whole inset in: its labels
-/// start where the title and the footer do.
+/// One pane for a page that is fields alone, the width of the form-width
+/// dialog such a page opens in. Fields carry no inset of their own, so the
+/// pane stands the dialog's whole inset in: its labels start where the
+/// title and the footer do.
 pub(super) fn single_pane(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
-    let available = ui.available_width().max(1.0);
+    let width = ui.available_width().max(1.0);
     let origin = ui.next_widget_position();
     let padding = vec2(crate::ui::widgets::DIALOG_BODY_INSET, tokens::SP_5);
-    let width = if available < SPLIT_BREAKPOINT {
-        available
-    } else {
-        split_widths(available, MAIN_SPLIT_LEFT_FRACTION).0
-    };
     let mut pane = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(egui::Rect::from_min_size(
@@ -127,7 +122,7 @@ pub(super) fn single_pane(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
     let height = pane.min_rect().height() + padding.y * 2.0;
     ui.advance_cursor_after_rect(egui::Rect::from_min_size(
         origin,
-        vec2(available, height.max(80.0)),
+        vec2(width, height.max(80.0)),
     ));
 }
 

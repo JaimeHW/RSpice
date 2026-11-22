@@ -39,6 +39,9 @@ const MANAGER_DESCRIPTION: &str =
     "Manage sheets, assembly variants, reference designators, and how the hierarchy resolves.";
 const MANAGER_INITIAL_HEIGHT: f32 = 590.0;
 const SUBFLOW_INITIAL_HEIGHT: f32 = 610.0;
+/// About the height of a page of fields alone, so its first frame does not
+/// open taller than it stays.
+const FORM_INITIAL_HEIGHT: f32 = 320.0;
 const SPLIT_BREAKPOINT: f32 = 720.0;
 const MAIN_SPLIT_LEFT_FRACTION: f32 = 0.5;
 /// The share of the Renumber page its fields take; its list of names takes
@@ -120,6 +123,11 @@ impl DesignManagementPage {
     /// is offered on a project that cannot be written.
     const fn read_out(self) -> bool {
         matches!(self, Self::CompareVariants | Self::VariantMatrix)
+    }
+
+    /// Whether the page is fields alone, with no list beside them.
+    const fn form(self) -> bool {
+        !matches!(self, Self::Manager | Self::RenumberPreview) && !self.read_out()
     }
 
     /// What the page is for, in a sentence under its title.
