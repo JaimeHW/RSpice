@@ -51,6 +51,10 @@ pub struct TabbedPropertyDialogState {
     /// preview cannot draw a source without one; the host binds the plan's own
     /// transient when it has one, and the card says which it used.
     pub(super) preview_timing: crate::simulation::stimulus_realize::PreviewTiming,
+
+    /// The instance parameters the bound model reads, when that is known:
+    /// the form offers only those, as the inspector does.
+    pub(super) model_reads: Option<&'static [&'static str]>,
 }
 
 /// Durable document authority captured when a component property transaction
@@ -62,6 +66,7 @@ pub struct ComponentPropertySession {
     view_path: String,
     data_root: Option<std::path::PathBuf>,
     preview_timing: crate::simulation::stimulus_realize::PreviewTiming,
+    model_reads: Option<&'static [&'static str]>,
 }
 
 impl ComponentPropertySession {
@@ -76,6 +81,7 @@ impl ComponentPropertySession {
             component_baseline,
             data_root: None,
             preview_timing: crate::simulation::stimulus_realize::PreviewTiming::default(),
+            model_reads: None,
         }
     }
 
@@ -88,6 +94,7 @@ impl ComponentPropertySession {
             view_path: String::new(),
             data_root: None,
             preview_timing: crate::simulation::stimulus_realize::PreviewTiming::default(),
+            model_reads: None,
         }
     }
 
@@ -97,6 +104,14 @@ impl ComponentPropertySession {
     #[must_use]
     pub fn with_data_root(mut self, data_root: Option<std::path::PathBuf>) -> Self {
         self.data_root = data_root;
+        self
+    }
+
+    /// Bind the instance parameters the bound model reads, so the form
+    /// offers no field the model would ignore.
+    #[must_use]
+    pub fn with_model_reads(mut self, model_reads: Option<&'static [&'static str]>) -> Self {
+        self.model_reads = model_reads;
         self
     }
 
@@ -153,9 +168,11 @@ impl TabbedPropertyDialogState {
             view_path,
             data_root,
             preview_timing,
+            model_reads,
         } = session;
         self.data_root = data_root;
         self.preview_timing = preview_timing;
+        self.model_reads = model_reads;
         self.open = true;
         self.component_id = Some(component_id);
         self.component_name = Some(component_name.into());

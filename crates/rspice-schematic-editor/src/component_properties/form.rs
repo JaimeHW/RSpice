@@ -62,6 +62,81 @@ pub struct ParametersPane<'a> {
     /// alone is the whole body, under the dialog's own title, and scrolls
     /// with it.
     pub beside_another: bool,
+    /// The instance parameters the bound model reads, when the host knows
+    /// them; see [`property_form`].
+    pub model_reads: Option<&'a [&'a str]>,
+}
+
+/// One headed group of the property form: a category and its rows, both in
+/// schema order.
+#[derive(Debug, Clone)]
+pub struct PropertyGroup {
+    pub category: String,
+    pub rows: Vec<PropertyDefinition>,
+}
+
+/// The rows the property form shows for one instance, grouped: the groups
+/// shown open, then the groups folded under Advanced.
+///
+/// The component editor and the inspector both render this list, so the two
+/// never disagree about which fields apply, how they are grouped, or which
+/// are folded away.
+#[derive(Debug, Clone, Default)]
+pub struct PropertyForm {
+    pub groups: Vec<PropertyGroup>,
+    pub advanced: Vec<PropertyGroup>,
+}
+
+impl PropertyForm {
+    /// How many rows the Advanced fold holds.
+    #[must_use]
+    pub fn advanced_count(&self) -> usize {
+        self.advanced.iter().map(|group| group.rows.len()).sum()
+    }
+
+    /// Every row, open groups first.
+    pub fn rows(&self) -> impl Iterator<Item = &PropertyDefinition> {
+        self.groups
+            .iter()
+            .chain(&self.advanced)
+            .flat_map(|group| &group.rows)
+    }
+}
+
+/// The property form of an instance of `kind`, over its `values` (what the
+/// instance sets, as the property bridge collects them, or the draft an
+/// editor holds).
+///
+/// A row is shown when the sheet does not hide it, its visibility condition
+/// holds over `values` (a resistor's geometry waits on a model), and the
+/// bound model reads it: `model_reads` is the instance parameters the model
+/// reads, when the host knows them (a LEVEL=1 MOSFET reads no BSIM4 stress
+/// distances), and a parameter the instance sets anyway is always shown.
+/// Rows marked advanced are folded. The name heads the form on its own, and
+/// a PWL source's points are its own table, so neither is a row here.
+pub fn property_form(
+    sheet: &PropertySheet,
+    kind: rspice_design::schematic::component_type::ComponentType,
+    values: &std::collections::HashMap<String, PropertyValue>,
+    model_reads: Option<&[&str]>,
+) -> PropertyForm {
+    let read_by_the_model = |name: &str| {
+        model_reads.is_none_or(|reads| reads.iter().any(|read| read.eq_ignore_ascii_case(name)))
+            || values.contains_key(name)
+    };
+    let (advanced, open): (Vec<_>, Vec<_>) = sheet
+        .iter()
+        .filter(|definition| definition.name != "name")
+        .filter(|definition| !(kind.is_pwl_source() && definition.name == "pwl_data"))
+        .filter(|definition| definition.display_mode != DisplayMode::Hidden)
+        .filter(|definition| property_is_visible(definition, values))
+        .filter(|definition| read_by_the_model(&definition.name))
+        .cloned()
+        .partition(|definition| definition.display_mode == DisplayMode::Advanced);
+    PropertyForm {
+        groups: group_by_category(&open),
+        advanced: group_by_category(&advanced),
+    }
 }
 
 /// Render the parameter form and return its first keyboard-focus target.
@@ -147,15 +222,12 @@ fn parameters_contents(
     // two are told apart, so the section is offered only when opening it
     // would show something. A resistor's advanced fields all wait on a model,
     // and judging the schema alone offered a switch that showed nothing.
-    let (advanced, inline): (Vec<_>, Vec<_>) = sheet
-        .iter()
-        .filter(|definition| definition.name != "name")
-        .filter(|definition| !(component_type.is_pwl_source() && definition.name == "pwl_data"))
-        .filter(|definition| definition.display_mode != DisplayMode::Hidden)
-        .filter(|definition| property_is_visible(definition, draft))
-        .cloned()
-        .partition(|definition| definition.display_mode == DisplayMode::Advanced);
-    let groups = group_by_category(&inline);
+    let form = property_form(sheet, component_type, &draft.values, pane.model_reads);
+    let advanced_count = form.advanced_count();
+    let PropertyForm {
+        groups,
+        advanced: advanced_groups,
+    } = form;
 
     let mut first_control = None;
     // What of the last row's height lies below what it draws: a row of checks
@@ -179,12 +251,12 @@ fn parameters_contents(
             // it; every group of parameters after it is headed, so a single
             // group is never left for the title alone to stand over.
             identity_row(ui, draft, pane.identity);
-            for (category, definitions) in &groups {
+            for group in &groups {
                 ui.add_space(GROUP_GAP);
-                property_group_heading(ui, category);
+                property_group_heading(ui, &group.category);
                 let (control, slack) = property_grid(
                     ui,
-                    definitions,
+                    &group.rows,
                     draft,
                     advisories,
                     quantity_policy,
@@ -219,21 +291,19 @@ fn parameters_contents(
             // advanced fields moves nothing already on screen. They used to
             // join their categories in schema order, which reflowed the grid
             // and put whole groups between the switch and what it sat under.
-            if !advanced.is_empty() {
+            if advanced_count > 0 {
                 ui.add_space(GROUP_GAP);
-                advanced_disclosure(ui, advanced.len(), &mut draft.show_advanced);
+                advanced_disclosure(ui, advanced_count, &mut draft.show_advanced);
                 trailing_slack = 0.0;
                 if draft.show_advanced {
-                    for (index, (category, definitions)) in
-                        group_by_category(&advanced).into_iter().enumerate()
-                    {
+                    for (index, group) in advanced_groups.iter().enumerate() {
                         // The disclosure row carries its own air; the groups
                         // after the first are spaced as the ones above it are.
                         ui.add_space(if index == 0 { 4.0 } else { GROUP_GAP });
-                        property_group_heading(ui, &category);
+                        property_group_heading(ui, &group.category);
                         let (control, slack) = property_grid(
                             ui,
-                            &definitions,
+                            &group.rows,
                             draft,
                             advisories,
                             quantity_policy,
@@ -409,15 +479,18 @@ fn fact_value(ui: &mut Ui, label: &str, value: &str, font: egui::FontId, width: 
 
 /// Partition the visible sheet into its authored categories, keeping both the
 /// categories and their members in schema order.
-fn group_by_category(properties: &[PropertyDefinition]) -> Vec<(String, Vec<PropertyDefinition>)> {
-    let mut groups: Vec<(String, Vec<PropertyDefinition>)> = Vec::new();
+fn group_by_category(properties: &[PropertyDefinition]) -> Vec<PropertyGroup> {
+    let mut groups: Vec<PropertyGroup> = Vec::new();
     for definition in properties {
         match groups
             .iter_mut()
-            .find(|(category, _)| category == &definition.category)
+            .find(|group| group.category == definition.category)
         {
-            Some((_, members)) => members.push(definition.clone()),
-            None => groups.push((definition.category.clone(), vec![definition.clone()])),
+            Some(group) => group.rows.push(definition.clone()),
+            None => groups.push(PropertyGroup {
+                category: definition.category.clone(),
+                rows: vec![definition.clone()],
+            }),
         }
     }
     groups
@@ -641,18 +714,21 @@ fn takes_standard_value(draft: &ComponentPropertyDraft, def: &PropertyDefinition
     })
 }
 
-fn property_is_visible(definition: &PropertyDefinition, draft: &ComponentPropertyDraft) -> bool {
+fn property_is_visible(
+    definition: &PropertyDefinition,
+    values: &std::collections::HashMap<String, PropertyValue>,
+) -> bool {
     use rspice_vocabulary::property::VisibilityCondition;
     match &definition.visibility_condition {
         VisibilityCondition::Always => true,
-        VisibilityCondition::WhenNonDefault => draft
-            .get_value(&definition.name)
+        VisibilityCondition::WhenNonDefault => values
+            .get(&definition.name)
             .is_some_and(|value| value != &definition.default_value),
-        VisibilityCondition::WhenPropertyEquals { property, value } => draft
-            .get_value(property)
+        VisibilityCondition::WhenPropertyEquals { property, value } => values
+            .get(property)
             .is_some_and(|current| current.display_string().eq_ignore_ascii_case(value)),
-        VisibilityCondition::WhenPropertySet(property) => draft
-            .get_value(property)
+        VisibilityCondition::WhenPropertySet(property) => values
+            .get(property)
             .is_some_and(|current| !current.display_string().trim().is_empty()),
     }
 }
@@ -1179,6 +1255,7 @@ mod tests {
                                 master: "",
                             },
                             beside_another: true,
+                            model_reads: None,
                         },
                         &mut |_, _| {},
                     );

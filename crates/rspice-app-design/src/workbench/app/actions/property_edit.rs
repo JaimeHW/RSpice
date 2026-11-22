@@ -699,6 +699,10 @@ pub fn open_property_editor_in(
         parts.property_registry,
     );
     let component_name = component.name.clone();
+    let model_reads =
+        crate::workbench::design::inspector::component::level_supported_instance_parameters(
+            model, &component,
+        );
     if let Some(sheet) = parts.property_registry.get(component_type) {
         parts.tabbed_property_dialog.open_for_component(
             component_id,
@@ -719,7 +723,8 @@ pub fn open_property_editor_in(
                     .data_root()
                     .map(std::path::Path::to_path_buf),
             )
-            .with_preview_timing(stimulus_preview_timing(model)),
+            .with_preview_timing(stimulus_preview_timing(model))
+            .with_model_reads(model_reads),
         );
     } else {
         log::warn!("No property sheet found for {:?}", component_type);

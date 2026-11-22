@@ -753,3 +753,54 @@ fn a_stored_partial_commit_setting_applies_edits_whole() {
     assert_eq!(state.model.schematic.document().components[0].name, "R99");
     assert_eq!(state.model.schematic.document().components[0].params, "m=2");
 }
+
+/// The component editor offers a LEVEL=1 MOSFET the fields its card reads,
+/// as the inspector does: a width and a length, and no finger count or
+/// stress distances, which only the BSIM cards read and a LEVEL=1 deck
+/// ignores.
+#[test]
+fn a_level_1_mosfet_editor_offers_only_the_fields_its_card_reads() {
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut state = AppState::default();
+    rspice_app_state::workbench::examples::load_example(
+        "CMOS Inverter",
+        &mut state.model.schematic,
+    );
+    let mn = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.name == "MN")
+        .expect("the inverter has an MN")
+        .id;
+    state.open_property_editor(mn);
+    assert!(state.design.tabbed_property_dialog.open);
+
+    // The first pass only measures the dialog.
+    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+        render_property_dialog(ctx, &mut state);
+    });
+    let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+        render_property_dialog(ctx, &mut state);
+    });
+    let painted: Vec<String> = super::raster_review::painted_text(&output.shapes)
+        .into_iter()
+        // A required field's label carries its mark.
+        .map(|text| text.text.trim_end_matches(" *").to_owned())
+        .collect();
+    for read in ["Width", "Length"] {
+        assert!(
+            painted.iter().any(|text| text == read),
+            "{read} is offered: {painted:?}"
+        );
+    }
+    for unread in ["# fingers", "SA distance", "Stress"] {
+        assert!(
+            !painted.iter().any(|text| text == unread),
+            "{unread} is not offered: {painted:?}"
+        );
+    }
+}

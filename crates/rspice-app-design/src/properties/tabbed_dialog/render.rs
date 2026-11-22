@@ -42,6 +42,7 @@ pub fn render_tabbed_property_dialog(
         show_source_preview: crate::simulation::stimulus_realize::is_independent_source(kind),
         quantity_policy,
         number_locale,
+        model_reads: state.model_reads,
     };
     let mut services = ComponentDialogServices {
         reference: state.component_name.as_deref(),

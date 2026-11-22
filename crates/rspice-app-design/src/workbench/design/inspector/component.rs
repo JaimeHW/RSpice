@@ -371,7 +371,7 @@ fn foundation_default_model_location(
 /// The MOSFET property sheet is the union of every MOS level's instance set,
 /// so without this a LEVEL=1 inverter offers BSIM4 geometry modes, stress
 /// distances, mismatch terms and body squares that nothing in its deck reads.
-fn level_supported_instance_parameters(
+pub fn level_supported_instance_parameters(
     model: &Model,
     component: &Component,
 ) -> Option<&'static [&'static str]> {

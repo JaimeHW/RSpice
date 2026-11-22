@@ -25,6 +25,9 @@ pub struct ComponentPropertyDialogView<'a> {
     pub show_source_preview: bool,
     pub quantity_policy: QuantityPresentationPolicy,
     pub number_locale: UiNumberLocale,
+    /// The instance parameters the bound model reads, when the host knows
+    /// them, so the form offers the rows the inspector offers.
+    pub model_reads: Option<&'a [&'a str]>,
 }
 
 /// Services called at their original position within the component dialog.
@@ -82,6 +85,7 @@ pub fn render_component_property_dialog(
         show_source_preview,
         quantity_policy,
         number_locale,
+        model_reads,
     } = view;
     let mut result = ComponentPropertyDialogResult::None;
     draft.sync_pwl_validation_error();
@@ -139,10 +143,12 @@ pub fn render_component_property_dialog(
     let alone = ParametersPane {
         identity,
         beside_another: false,
+        model_reads,
     };
     let beside = ParametersPane {
         identity,
         beside_another: true,
+        model_reads,
     };
 
     let mut side_action = ComponentPropertyDialogResult::None;
@@ -401,6 +407,7 @@ mod tests {
                             show_source_preview: true,
                             quantity_policy: QuantityPresentationPolicy::default(),
                             number_locale: UiNumberLocale::default(),
+                            model_reads: None,
                         },
                         &mut NoServices,
                     );
