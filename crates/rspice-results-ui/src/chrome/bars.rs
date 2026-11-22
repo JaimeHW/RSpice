@@ -396,16 +396,22 @@ fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
     // in the light interface; the palette's tertiary text holds 4.5:1.
     let faint = Tokens::get(ui.ctx()).color.text_faint;
     let restored = ui.visuals_mut().weak_text_color.replace(faint);
+    // As tall as every other control in the bar, its words on its centre
+    // line: a field is its line of text and its margins, so the margins make
+    // up the bar's control height.
+    let font = theme::field_mono();
+    let line = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    let pad = ((ui.spacing().interact_size.y - line) * 0.5).max(0.0);
     let field = ui.add(
         egui::TextEdit::singleline(filter)
             .id(operating_point_filter_id())
             .desired_width(150.0)
-            .font(theme::field_mono())
+            .font(font)
             .margin(egui::Margin {
                 left: 4,
                 right: FILTER_CLEAR_INSET,
-                top: 2,
-                bottom: 2,
+                top: pad.floor() as i8,
+                bottom: pad.ceil() as i8,
             })
             .hint_text("Filter…"),
     );
