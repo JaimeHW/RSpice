@@ -985,3 +985,66 @@ fn loading_a_saved_filter_lists_the_sections_of_what_it_finds() {
         "the loaded filter finds X2 alone, so its library's sections are offered"
     );
 }
+
+/// A filter name that cannot be saved is refused under the name, and the
+/// dialog's band, which reports a failed Apply as "Nothing was changed",
+/// stays shut: saving a filter changes nothing in the design either way.
+#[test]
+fn a_refused_filter_name_is_explained_under_the_name() {
+    let mut state = two_libraries();
+    state.design.selection_bulk_edit.save_filter_open = true;
+    state.design.selection_bulk_edit.save_filter_name = "two\nlines".to_owned();
+    act(&mut state, SelectionBulkBodyAction::SaveFilter);
+    assert!(state.design.selection_bulk_edit.error.is_none());
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut texts = Vec::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                render_selection_bulk_edit_dialog(
+                    &mut state.design.selection_bulk_edit,
+                    &mut state.design.schematic_bulk_edit_filters,
+                    &mut state.model,
+                    &mut state.workbench,
+                    ctx,
+                );
+            },
+        );
+        texts.extend(
+            output
+                .platform_output
+                .accesskit_update
+                .expect("bulk-edit access tree")
+                .nodes
+                .into_iter()
+                .filter_map(|(_, node)| node.label().or_else(|| node.value()).map(str::to_owned)),
+        );
+    }
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "A saved filter name is one line of text."),
+        "the refusal is shown: {texts:?}"
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text.contains("Nothing was changed")),
+        "the Apply band stays shut"
+    );
+    assert!(state.design.schematic_bulk_edit_filters.saved().is_empty());
+
+    state.design.selection_bulk_edit.save_filter_name = "Passives".to_owned();
+    act(&mut state, SelectionBulkBodyAction::SaveFilter);
+    assert_eq!(state.design.schematic_bulk_edit_filters.saved().len(), 1);
+}

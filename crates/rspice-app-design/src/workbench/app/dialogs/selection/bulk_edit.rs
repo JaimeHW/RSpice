@@ -235,6 +235,9 @@ pub struct SelectionBulkEditDialogState {
     pub(crate) body_scroll_offset: f32,
     save_filter_open: bool,
     save_filter_name: String,
+    /// Why the filter could not be saved under the name typed, shown under
+    /// the name: a filter that was not saved changed nothing in the design.
+    save_filter_error: Option<String>,
     selected_saved_filter: Option<String>,
 }
 
@@ -253,6 +256,7 @@ impl Default for SelectionBulkEditDialogState {
             body_scroll_offset: 0.0,
             save_filter_open: false,
             save_filter_name: String::new(),
+            save_filter_error: None,
             selected_saved_filter: None,
         }
     }
@@ -326,6 +330,7 @@ pub fn open_selection_bulk_edit_dialog(
         body_scroll_offset: 0.0,
         save_filter_open: false,
         save_filter_name: String::new(),
+        save_filter_error: None,
         selected_saved_filter: None,
     };
 }
@@ -458,9 +463,9 @@ fn handle_selection_bulk_body_action(
                     bulk_edit.selected_saved_filter = Some(name.trim().to_owned());
                     bulk_edit.save_filter_name.clear();
                     bulk_edit.save_filter_open = false;
-                    bulk_edit.error = None;
+                    bulk_edit.save_filter_error = None;
                 }
-                Err(error) => bulk_edit.error = Some(error),
+                Err(error) => bulk_edit.save_filter_error = Some(error),
             }
         }
         SelectionBulkBodyAction::LoadFilter => {
@@ -815,6 +820,9 @@ fn saved_filter_controls(
             220.0,
         );
         name_control(ui, &response, "Filter name");
+        if response.changed() {
+            dialog.save_filter_error = None;
+        }
         if Button::new("Save").accent().show(ui).clicked() {
             *action = SelectionBulkBodyAction::SaveFilter;
         }
@@ -841,6 +849,9 @@ fn saved_filter_controls(
             }
         }
     });
+    if let Some(error) = &dialog.save_filter_error {
+        ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+    }
 }
 
 fn selection_filter_fields(
