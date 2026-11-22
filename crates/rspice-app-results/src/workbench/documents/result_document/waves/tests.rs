@@ -285,6 +285,81 @@ fn a_readout_and_a_table_cell_spell_a_value_alike() {
     );
 }
 
+/// A reading finer than its trace resolves reads 0: a 1 V sine at its
+/// zero crossing read "122.4647 aV", and two equal 354 µA readings a
+/// difference of "1.246832 aA" with a slope in fA/s.
+#[test]
+fn a_reading_finer_than_its_trace_resolves_reads_zero() {
+    use rspice_app_state::workbench::preferences::ScalarPreference;
+    let mut state = ResultsTestHost::default();
+    let time: Vec<f64> = (0..=8).map(|index| f64::from(index) * 0.125e-3).collect();
+    let sine: Vec<f64> = time
+        .iter()
+        .map(|t| (std::f64::consts::TAU * 1.0e3 * t).sin())
+        .collect();
+    // A supply current flat at 354 µA but for the rounding of its samples.
+    let current: Vec<f64> = time
+        .iter()
+        .enumerate()
+        .map(|(index, _)| 354.0e-6 + if index % 2 == 0 { 0.0 } else { 1.25e-18 })
+        .collect();
+    state.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            RetainedTrace::new("V(out)", time.clone(), sine, "#fff"),
+            RetainedTrace::new("I(VDD)", time, current, "#fff"),
+        ]),
+    );
+    state
+        .model
+        .preferences
+        .set_scalar(ScalarPreference::DisplayedSignificantDigits, 4)
+        .expect("four digits");
+    let presentation = state.model.preferences.result_presentation_policy();
+    let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    let models = cached_models(
+        &state.model.simulation,
+        &mut state.results.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let extent = |trace: &rspice_results_ui::waves::StripTrace| {
+        let y = trace.held()?.1;
+        let low = y.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        Some((low, high))
+    };
+    // A on the sine's zero crossing at half a period, B a sample later.
+    let rows = rspice_results_ui::waves::readout::readout_rows_within(
+        &models[0],
+        CursorPair {
+            a: Some(0.5e-3),
+            b: Some(0.625e-3),
+        },
+        (presentation.readout(), quantity_policy),
+        &rspice_results_ui::waves::as_returned,
+        &extent,
+    );
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].a, "0 V", "the zero crossing reads zero");
+    assert_eq!(rows[1].a, "354 µA");
+    assert_eq!(rows[1].b, "354 µA");
+    assert_eq!(rows[1].delta, "0 A", "equal readings differ by nothing");
+    assert_eq!(rows[1].slope, "0 A/s", "and have no slope");
+
+    // Without the trace's extent the floating point shows through.
+    let raw = readout_rows(
+        &models[0],
+        CursorPair {
+            a: Some(0.5e-3),
+            b: Some(0.625e-3),
+        },
+        presentation.readout(),
+        quantity_policy,
+        &rspice_results_ui::waves::as_returned,
+    );
+    assert_ne!(raw[0].a, "0 V");
+}
+
 #[test]
 fn a_slope_is_named_by_its_own_unit_not_the_strips() {
     let mut state = ResultsTestHost::default();

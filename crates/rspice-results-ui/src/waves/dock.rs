@@ -7,7 +7,7 @@
 //! because a difference across two domains is not a measurement.
 
 use super::cursor_values::{marker_position, x_separation};
-use super::readout::{READOUT_PAD_X, READOUT_ROW_H, readout_rows};
+use super::readout::{READOUT_PAD_X, READOUT_ROW_H, readout_rows, readout_rows_within};
 use super::{ReadoutPolicy, StripModel, anchor_key, cursor_interpolation};
 use crate::session::{HorizontalCursors, MarkerSelector, MarkerView, ResultViewerState};
 use egui::Ui;
@@ -367,15 +367,32 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut ResultViewerState, source: Read
         return;
     };
     let cursors = state.cursors;
-    // Per-trace values at A and B, their difference, and their own slope;
-    // then what each event lane reads at A and B.
-    let mut rows = readout_rows(
-        model,
-        cursors,
-        presentation,
-        quantity_policy,
-        source.display_name,
-    );
+    // Per-trace values at A and B, their difference, and their own slope,
+    // each settled against the trace's resolution over its record; then what
+    // each event lane reads at A and B.
+    let mut rows = {
+        let derived = std::cell::RefCell::new(&mut state.derived);
+        readout_rows_within(
+            model,
+            cursors,
+            (presentation, quantity_policy),
+            source.display_name,
+            &|trace| {
+                let index = model
+                    .traces
+                    .iter()
+                    .position(|candidate| std::ptr::eq(candidate, trace))?;
+                super::stack::pane_trace_extremes(
+                    &mut derived.borrow_mut(),
+                    model,
+                    &[index],
+                    None,
+                    |_| {},
+                )
+                .range()
+            },
+        )
+    };
     rows.extend(strip_lane_rows(
         state,
         model,

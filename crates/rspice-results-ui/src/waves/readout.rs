@@ -748,18 +748,59 @@ pub fn readout_rows(
     quantity_policy: QuantityPresentationPolicy,
     display_name: DisplayName<'_>,
 ) -> Vec<ReadoutRow> {
+    readout_rows_within(
+        model,
+        cursors,
+        (presentation, quantity_policy),
+        display_name,
+        &|_| None,
+    )
+}
+
+/// [`readout_rows`], each trace's readings settled against `extent`, the
+/// lowest and highest the trace reaches over its record: a reading, a
+/// difference or a slope finer than the trace's resolution reads 0.
+pub fn readout_rows_within(
+    model: &StripModel,
+    cursors: CursorPair,
+    (presentation, quantity_policy): (ReadoutPolicy, QuantityPresentationPolicy),
+    display_name: DisplayName<'_>,
+    extent: &dyn Fn(&StripTrace) -> Option<(f64, f64)>,
+) -> Vec<ReadoutRow> {
     readout_traces(model)
         .flat_map(|trace| {
             trace_readout_rows(
                 model,
                 trace,
                 cursors,
-                presentation,
-                quantity_policy,
+                (presentation, quantity_policy, extent(trace)),
                 display_name,
             )
         })
         .collect()
+}
+
+/// The finest reading a trace reaching from `low` to `high` states at
+/// `significant_digits`: its span times the printed significance. A flat
+/// trace is resolved against its level instead, so that the rounding noise
+/// between two equal readings of it is not a difference.
+#[must_use]
+pub fn reading_resolution((low, high): (f64, f64), significant_digits: usize) -> f64 {
+    let significance = 10f64.powi(-i32::try_from(significant_digits).unwrap_or(i32::MAX));
+    let level = low.abs().max(high.abs());
+    let scale = (high - low).abs().max(level * significance);
+    if scale.is_finite() {
+        scale * significance
+    } else {
+        0.0
+    }
+}
+
+/// `value`, or 0 when it is finer than `resolution`: what is left of a zero
+/// crossing, or of two equal readings, after the floating point.
+#[must_use]
+pub fn settled(value: f64, resolution: f64) -> f64 {
+    if value.abs() < resolution { 0.0 } else { value }
 }
 
 /// The suffix that says which run a row's numbers came from.
@@ -791,11 +832,15 @@ fn trace_readout_rows(
     model: &StripModel,
     trace: &StripTrace,
     cursors: CursorPair,
-    presentation: ReadoutPolicy,
-    quantity_policy: QuantityPresentationPolicy,
+    (presentation, quantity_policy, extent): (
+        ReadoutPolicy,
+        QuantityPresentationPolicy,
+        Option<(f64, f64)>,
+    ),
     display_name: DisplayName<'_>,
 ) -> Vec<ReadoutRow> {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
+    let resolution = extent.map_or(0.0, |extent| reading_resolution(extent, significant_digits));
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let shape = trace.shape.as_ref();
     let branches = shape.branch_count();
@@ -870,10 +915,16 @@ fn trace_readout_rows(
     branch_list
         .into_iter()
         .map(|branch| {
-            let at = |cursor: Option<f64>| cursor.and_then(|x| sample(x, branch));
+            let at = |cursor: Option<f64>| {
+                cursor
+                    .and_then(|x| sample(x, branch))
+                    .map(|value| settled(value, resolution))
+            };
             let (a_value, b_value) = (at(cursors.a), at(cursors.b));
+            // A slope is taken from the settled difference, so two equal
+            // readings have none rather than one in fV/s.
             let difference = match (a_value, b_value) {
-                (Some(a), Some(b)) => Some(b - a),
+                (Some(a), Some(b)) => Some(settled(b - a, resolution)),
                 _ => None,
             };
             let slope = difference
