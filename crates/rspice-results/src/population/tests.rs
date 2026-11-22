@@ -174,6 +174,29 @@ fn a_perfect_yield_still_carries_an_interval() {
     assert!(high > 98.5 && high < 99.3, "{high}");
 }
 
+/// The yield interval is the Wilson score interval at 95 %, checked against
+/// its closed form evaluated once in double precision (z = 1.959963984540054).
+#[test]
+fn the_yield_interval_is_the_wilson_score_interval() {
+    for (passing, total, low, high) in [
+        (97, 100, 91.548_063_570_947_235, 98.974_547_597_596_114),
+        (100, 100, 96.300_650_179_301_428, 100.0),
+        (0, 10, 0.0, 27.753_279_986_288_92),
+        (19, 20, 76.386_880_655_325_797, 99.111_855_119_920_463),
+    ] {
+        let (got_low, got_high) = wilson_interval(passing, total).expect("trials");
+        assert!(
+            (got_low - low).abs() < 1.0e-9,
+            "{passing}/{total}: {got_low}"
+        );
+        assert!(
+            (got_high - high).abs() < 1.0e-9,
+            "{passing}/{total}: {got_high}"
+        );
+    }
+    assert_eq!(wilson_interval(0, 0), None);
+}
+
 #[test]
 fn three_sigma_of_margin_is_a_capability_of_one() {
     let values: Vec<f64> = (0..1_001)

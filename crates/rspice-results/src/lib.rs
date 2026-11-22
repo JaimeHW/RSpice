@@ -61,6 +61,7 @@ pub mod plot_axis;
 pub mod pole_zero;
 #[cfg(feature = "engine-evidence")]
 pub mod population;
+pub mod population_statistics;
 pub mod provenance;
 #[cfg(feature = "engine-evidence")]
 pub mod renderability;

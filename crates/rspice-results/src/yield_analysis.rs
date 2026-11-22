@@ -103,8 +103,10 @@ pub struct DistributionStats {
     pub min: f64,
     pub max: f64,
     pub median: f64,
-    pub skewness: f64,
-    pub kurtosis: f64,
+    /// Sample skewness G1; `None` below three samples or with no spread.
+    pub skewness: Option<f64>,
+    /// Sample excess kurtosis G2; `None` below four samples or with no spread.
+    pub kurtosis: Option<f64>,
     /// Process capability index
     pub cp: Option<f64>,
     /// Process capability index (centered)
@@ -195,8 +197,8 @@ pub fn calculate_distribution_stats(values: &[f64], spec: &YieldSpec) -> Distrib
             min: value,
             max: value,
             median: value,
-            skewness: 0.0,
-            kurtosis: 0.0,
+            skewness: None,
+            kurtosis: None,
             cp: None,
             cpk: None,
         };
@@ -222,69 +224,21 @@ pub fn calculate_distribution_stats(values: &[f64], spec: &YieldSpec) -> Distrib
     let min = finite_values[0];
     let max = finite_values[finite_values.len() - 1];
 
-    // Skewness and kurtosis remain centered moments around the mean.
-    let (skewness, kurtosis) = if std_dev > 0.0 {
-        let m3 = finite_values
-            .iter()
-            .map(|value| (value - mean).powi(3))
-            .sum::<f64>()
-            / n;
-        let m4 = finite_values
-            .iter()
-            .map(|value| (value - mean).powi(4))
-            .sum::<f64>()
-            / n;
-        let skewness = m3 / std_dev.powi(3);
-        let kurtosis = (m4 / std_dev.powi(4)) - 3.0;
-        if skewness.is_finite() && kurtosis.is_finite() {
-            (skewness, kurtosis)
-        } else {
-            (0.0, 0.0)
-        }
-    } else {
-        (0.0, 0.0)
+    // One named estimator for the shape: the sample-adjusted G1 and G2
+    // that Excel and the statistics packages print.
+    let skewness = crate::population_statistics::skewness(&finite_values);
+    let kurtosis = crate::population_statistics::excess_kurtosis(&finite_values);
+
+    // Exactly the bounds `YieldSpec::evaluates` judges against, so an index
+    // can never be computed from a limit the verdict ignores.
+    let finite = |value: &f64| value.is_finite();
+    let (lsl, usl) = match spec.limit_type {
+        SpecLimitType::Lower => (spec.min.filter(finite), None),
+        SpecLimitType::Upper => (None, spec.max.filter(finite)),
+        SpecLimitType::Range => (spec.min.filter(finite), spec.max.filter(finite)),
     };
-
-    // Capability indices.
-    //
-    // Cp is the ratio of the specification width to the process width and
-    // therefore exists only for a two-sided specification. Cpk is the
-    // distance from the mean to the nearer bound in three-sigma units, and
-    // a bound that does not exist is not a nearer one: a one-sided
-    // specification reports the one-sided form — Cpu against an upper
-    // limit, Cpl against a lower one — which is what a capability study
-    // of a process with a single limit publishes. Refusing to compute it
-    // left the majority of specifications showing an em dash for the one
-    // index they can actually have.
-    let mut cp = None;
-    let mut cpk = None;
-
-    if std_dev > 0.0 {
-        // Exactly the bounds `YieldSpec::evaluates` judges against, so an
-        // index can never be computed from a limit the verdict ignores.
-        let finite = |value: &f64| value.is_finite();
-        let (lsl, usl) = match spec.limit_type {
-            SpecLimitType::Lower => (spec.min.filter(finite), None),
-            SpecLimitType::Upper => (None, spec.max.filter(finite)),
-            SpecLimitType::Range => (spec.min.filter(finite), spec.max.filter(finite)),
-        };
-        if let (Some(lsl), Some(usl)) = (lsl, usl)
-            && usl > lsl
-        {
-            let cp_val = (usl - lsl) / (6.0 * std_dev);
-            if cp_val.is_finite() {
-                cp = Some(cp_val);
-            }
-        }
-        let cpu = usl.map(|usl| (usl - mean) / (3.0 * std_dev));
-        let cpl = lsl.map(|lsl| (mean - lsl) / (3.0 * std_dev));
-        let cpk_val = match (cpu, cpl) {
-            (Some(cpu), Some(cpl)) => Some(cpu.min(cpl)),
-            (Some(one), None) | (None, Some(one)) => Some(one),
-            (None, None) => None,
-        };
-        cpk = cpk_val.filter(|value| value.is_finite());
-    }
+    let crate::population_statistics::Capability { cp, cpk } =
+        crate::population_statistics::capability(mean, std_dev, lsl, usl);
 
     DistributionStats {
         count: finite_values.len(),
@@ -317,6 +271,28 @@ fn distribution_stats_keep_finite_samples_and_capability_limits() {
     let range = calculate_distribution_stats(&values, &YieldSpec::range("gain", 7.0, 16.0, ""));
     assert!(range.cp.is_some_and(|cp| (cp - 1.5).abs() < 1e-12));
     assert!(range.cpk.is_some_and(|cpk| (cpk - 1.0).abs() < 1e-12));
+}
+
+/// The yield engine's shape statistics are the sample-adjusted G1 and G2
+/// (`scipy.stats.skew/kurtosis(bias=False)`); two samples carry neither,
+/// where a mixed estimator read a kurtosis of −2.75.
+#[cfg(test)]
+#[test]
+fn distribution_shape_is_g1_and_g2_and_absent_for_two_samples() {
+    let spec = YieldSpec::lower("gain", 0.0, "");
+    let stats = calculate_distribution_stats(&[1.2, 2.5, 2.9, 3.1, 4.8, 7.4, 3.3, 2.2], &spec);
+    assert!(
+        stats
+            .skewness
+            .is_some_and(|g1| (g1 - 1.421_861_494_812_867_8).abs() < 1e-12)
+    );
+    assert!(
+        stats
+            .kurtosis
+            .is_some_and(|g2| (g2 - 2.415_297_205_511_455_7).abs() < 1e-12)
+    );
+    let two = calculate_distribution_stats(&[1.0, 3.0], &spec);
+    assert_eq!((two.skewness, two.kurtosis), (None, None));
 }
 
 mod evidence;

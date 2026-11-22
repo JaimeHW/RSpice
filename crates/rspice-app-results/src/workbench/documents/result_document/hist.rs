@@ -140,8 +140,8 @@ fn yield_result_is_consistent(result: &YieldResult) -> bool {
         || !result.yield_percent.is_finite()
         || !(0.0..=100.0).contains(&result.yield_percent)
         || !result.stats.median.is_finite()
-        || !result.stats.skewness.is_finite()
-        || !result.stats.kurtosis.is_finite()
+        || result.stats.skewness.is_some_and(|value| !value.is_finite())
+        || result.stats.kurtosis.is_some_and(|value| !value.is_finite())
         || result.stats.cp.is_some_and(|value| !value.is_finite())
         || result.stats.cpk.is_some_and(|value| !value.is_finite())
     {
@@ -717,8 +717,8 @@ mod tests {
                 min: moments.min,
                 max: moments.max,
                 median: 0.0,
-                skewness: 0.0,
-                kurtosis: 0.0,
+                skewness: None,
+                kurtosis: None,
                 cp: None,
                 cpk: None,
             },

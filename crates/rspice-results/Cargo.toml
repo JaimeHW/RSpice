@@ -30,6 +30,8 @@ rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = f
 rspice-results-store = { workspace = true, optional = true }
 rspice-units.workspace = true
 base64.workspace = true
+# The error function behind the normal distribution the statistics sheets fit.
+libm = "0.2"
 num-complex.workspace = true
 once_cell = { version = "1.19", optional = true }
 rustfft = { workspace = true, optional = true }

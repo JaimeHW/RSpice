@@ -527,6 +527,11 @@ fn trial_status(columns: &[PopulationColumn], row: usize) -> TrialStatus {
 // descriptive statistics
 // ---------------------------------------------------------------------------
 
+pub use crate::population_statistics::{
+    Capability, ProbabilityPlot, capability, excess_kurtosis, normal_cdf, normal_pdf,
+    normal_probability_plot, normal_quantile, plotting_positions, skewness,
+};
+
 /// Ascending copy of a sample set, non-finite values dropped.
 pub fn sorted(values: &[f64]) -> Vec<f64> {
     let mut sorted = values

@@ -6118,6 +6118,7 @@ name = "rspice-results"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "libm",
  "num-complex",
  "once_cell",
  "png",
