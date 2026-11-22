@@ -4,11 +4,13 @@
 use egui::containers::menu::MenuButton;
 use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 
+use crate::state::{AssemblyVariant, AssemblyVariantCatalog, AssemblyVariantId};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::host::DocumentHost;
 use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
+use rspice_app_state::workbench::app_state::model::BASE_DESIGN;
 
 use super::super::layout::LayoutSpec;
 use super::super::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
@@ -88,7 +90,15 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 })
                 .collect::<Vec<_>>();
             let hidden_button_width = HIDDEN_BUTTON_WIDTH.max(t.metrics.ctl_h);
-            let fit = StripFit::resolve(&natural, rect.width(), hidden_button_width);
+            let chooser = VariantChooser::read(app);
+            let chooser_width = chooser
+                .as_ref()
+                .map_or(0.0, |chooser| chooser.width(ui.painter()));
+            let fit = StripFit::resolve(
+                &natural,
+                (rect.width() - chooser_width).max(0.0),
+                hidden_button_width,
+            );
             ui.horizontal(|ui| {
                 let scroll = ui
                     .allocate_ui_with_layout(
@@ -141,8 +151,227 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                         Vec2::new(hidden_button_width, height),
                     );
                 }
+                if let Some(chooser) = chooser {
+                    let rest = ui.available_width();
+                    ui.add_space((rest - chooser_width).max(0.0));
+                    chooser.show(ui, app, Vec2::new(chooser_width, height));
+                }
             });
         });
+}
+
+/// The command that opens Design management on its Variants tab.
+const MANAGE_VARIANTS: &str = "design-variants";
+/// The command that opens Design management's New variant form.
+const NEW_VARIANT: &str = "design-variants";
+
+/// The variant chooser at the bar's right end: which variant the design is
+/// netlisted, drawn and inspected as. It is there only in the Design
+/// workspace of a project that has a variant.
+struct VariantChooser {
+    /// The variant chosen; `None` is the base design.
+    chosen: Option<AssemblyVariantId>,
+    /// What the field shows: the chosen variant's name.
+    shown: String,
+    /// Every variant, parents before their children, with its depth.
+    variants: Vec<(AssemblyVariantId, String, usize)>,
+}
+
+/// Every variant of `catalog` as the chooser lists it: each parent before
+/// its children, children in catalog order, with each one's depth below a
+/// variant that has no parent.
+fn variant_rows(catalog: &AssemblyVariantCatalog) -> Vec<(AssemblyVariantId, String, usize)> {
+    let parent_of = |variant: &AssemblyVariant| {
+        variant
+            .definition()
+            .parent
+            .as_ref()
+            .map(|parent| parent.id)
+            .filter(|id| catalog.find(*id).is_some())
+    };
+    let mut rows: Vec<(AssemblyVariantId, String, usize)> =
+        Vec::with_capacity(catalog.variants().len());
+    let mut stack: Vec<(&AssemblyVariant, usize)> = catalog
+        .variants()
+        .iter()
+        .rev()
+        .filter(|variant| parent_of(variant).is_none())
+        .map(|variant| (variant, 0))
+        .collect();
+    while let Some((variant, depth)) = stack.pop() {
+        if rows.iter().any(|(id, ..)| *id == variant.id()) {
+            continue;
+        }
+        rows.push((variant.id(), variant.name().to_owned(), depth));
+        stack.extend(
+            catalog
+                .variants()
+                .iter()
+                .rev()
+                .filter(|child| parent_of(child) == Some(variant.id()))
+                .map(|child| (child, depth + 1)),
+        );
+    }
+    rows
+}
+
+impl VariantChooser {
+    const PADDING_X: f32 = 10.0;
+    const GAP: f32 = 6.0;
+    const CHEVRON: f32 = 12.0;
+
+    fn read(app: &impl WorkbenchHost) -> Option<Self> {
+        if app.workbench().workspace != Workspace::Design {
+            return None;
+        }
+        let catalog = app.model().workspace.content.design_management.variants();
+        if catalog.variants().is_empty() {
+            return None;
+        }
+        let variants = variant_rows(catalog);
+        let chosen = catalog.active_variant_id();
+        let shown = catalog.active().map_or_else(
+            || BASE_DESIGN.to_owned(),
+            |variant| variant.name().to_owned(),
+        );
+        Some(Self {
+            chosen,
+            shown,
+            variants,
+        })
+    }
+
+    fn caption(painter: &egui::Painter, text: &str, weight: FontWeight) -> f32 {
+        painter
+            .layout_no_wrap(
+                text.to_owned(),
+                theme::sans(tokens::FS_1, weight),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+    }
+
+    fn width(&self, painter: &egui::Painter) -> f32 {
+        let name = Self::caption(painter, &self.shown, FontWeight::Medium).min(TAB_MAX_WIDTH);
+        Self::PADDING_X * 2.0
+            + Self::caption(painter, "Variant", FontWeight::Regular)
+            + Self::GAP
+            + name
+            + Self::GAP
+            + Self::CHEVRON
+    }
+
+    fn show(self, ui: &mut Ui, app: &mut impl WorkbenchHost, size: Vec2) {
+        let t = Tokens::get(ui.ctx());
+        let mut picked: Option<Option<AssemblyVariantId>> = None;
+        let mut command = None;
+        let response = ui
+            .scope(|ui| {
+                ui.spacing_mut().button_padding = Vec2::ZERO;
+                MenuButton::from_button(egui::Button::new("").frame(false).min_size(size))
+                    .ui(ui, |ui| {
+                        ui.set_min_width(size.x.max(200.0));
+                        let row = |ui: &mut Ui, selected: bool, label: &str| {
+                            ui.add_sized(
+                                [ui.available_width(), t.metrics.ctl_h],
+                                egui::Button::selectable(selected, label),
+                            )
+                            .clicked()
+                        };
+                        if row(ui, self.chosen.is_none(), BASE_DESIGN) {
+                            picked = Some(None);
+                        }
+                        for (id, name, depth) in &self.variants {
+                            let label = format!("{}{name}", "\u{2003}".repeat(*depth));
+                            if row(ui, self.chosen == Some(*id), &label) {
+                                picked = Some(Some(*id));
+                            }
+                        }
+                        ui.separator();
+                        if row(ui, false, "New variant\u{2026}") {
+                            command = Some(NEW_VARIANT);
+                        }
+                        if row(ui, false, "Manage variants\u{2026}") {
+                            command = Some(MANAGE_VARIANTS);
+                        }
+                        if picked.is_some() || command.is_some() {
+                            ui.close();
+                        }
+                    })
+                    .0
+            })
+            .inner;
+        let spoken = format!("Variant {}", self.shown);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), &spoken)
+        });
+        let rect = response.rect;
+        let name_font = theme::sans(tokens::FS_1, FontWeight::Medium);
+        let caption_width = Self::caption(ui.painter(), "Variant", FontWeight::Regular);
+        let name_x = rect.left() + Self::PADDING_X + caption_width + Self::GAP;
+        let name_width =
+            (rect.right() - Self::PADDING_X - Self::CHEVRON - Self::GAP - name_x).max(1.0);
+        let name = elide_text(ui, &self.shown, &name_font, name_width);
+        let painter = ui.painter();
+        painter.rect_filled(
+            rect,
+            0.0,
+            if response.hovered() {
+                t.color.bg_hover
+            } else {
+                t.color.bg_panel
+            },
+        );
+        painter.vline(
+            rect.left(),
+            rect.y_range(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+        painter.hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            egui::Stroke::new(1.0, t.color.border),
+        );
+        painter.text(
+            egui::pos2(rect.left() + Self::PADDING_X, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Variant",
+            theme::sans(tokens::FS_1, FontWeight::Regular),
+            t.color.text_dim,
+        );
+        painter.text(
+            egui::pos2(name_x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            name_font,
+            t.color.text,
+        );
+        WorkbenchIcon::ChevronDown.paint(
+            painter,
+            Rect::from_center_size(
+                egui::pos2(
+                    rect.right() - Self::PADDING_X - Self::CHEVRON * 0.5,
+                    rect.center().y,
+                ),
+                Vec2::splat(Self::CHEVRON),
+            ),
+            t.color.text_dim,
+        );
+        theme::paint_focus_ring(ui, &response, rect);
+        response.on_hover_text("The variant the design is netlisted, drawn and inspected as");
+        if let Some(choice) = picked {
+            let outcome = app.model_mut().choose_assembly_variant(choice);
+            if choice != self.chosen && outcome.is_ok() {
+                app.simulation_input_changed();
+            }
+            let (Ok(message) | Err(message)) = outcome;
+            app.workbench_mut().prompt(message);
+        }
+        if let Some(command) = command {
+            app.execute(crate::state::command_catalog::CommandKey::new(command));
+        }
+    }
 }
 
 /// How the strip's tabs share its width.
@@ -1137,5 +1366,49 @@ pub fn suffix_width(dirty: bool, closable: bool) -> f32 {
         (true, false) => TAB_CONTENT_GAP + TAB_DIRTY_SIZE,
         (false, true) => TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
         (true, true) => TAB_CONTENT_GAP + TAB_DIRTY_SIZE + TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
+    }
+}
+
+#[cfg(test)]
+mod variant_chooser_tests {
+    use super::*;
+    use crate::state::{AssemblyVariantDraft, VariantInheritance, VariantQualificationPlan};
+
+    fn create(
+        catalog: &mut AssemblyVariantCatalog,
+        name: &str,
+        parent_id: Option<AssemblyVariantId>,
+    ) -> AssemblyVariantId {
+        catalog
+            .create(AssemblyVariantDraft {
+                name: name.to_owned(),
+                parent_id,
+                inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: std::collections::BTreeMap::new(),
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn the_chooser_lists_each_child_indented_under_its_parent() {
+        let mut catalog = AssemblyVariantCatalog::default();
+        let industrial = create(&mut catalog, "Industrial", None);
+        create(&mut catalog, "Low power", None);
+        let automotive = create(&mut catalog, "Automotive", Some(industrial));
+        create(&mut catalog, "Racing", Some(automotive));
+        let rows = variant_rows(&catalog)
+            .into_iter()
+            .map(|(_, name, depth)| (name, depth))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [
+                ("Industrial".to_owned(), 0),
+                ("Automotive".to_owned(), 1),
+                ("Racing".to_owned(), 2),
+                ("Low power".to_owned(), 0),
+            ]
+        );
     }
 }
