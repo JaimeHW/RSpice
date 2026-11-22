@@ -91,8 +91,37 @@ fn frame_input() -> RawInput {
 
 #[test]
 fn one_sheet_is_a_drawing_rather_than_a_set_of_them() {
-    assert!(!is_visible(&app_with_sheets(1).state.model));
-    assert!(is_visible(&app_with_sheets(2).state.model));
+    let visible = |app: RSpiceApp| is_visible(&app.state.workbench, &app.state.model);
+    assert!(!visible(app_with_sheets(1)));
+    assert!(visible(app_with_sheets(2)));
+}
+
+/// The sheets are paged where they are drawn: on the Project, Simulate and
+/// Results pages a two-sheet design paints no strip, so those pages keep the
+/// row for their own content.
+#[test]
+fn the_strip_is_drawn_only_beside_the_schematic_editor() {
+    let ctx = Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    for workspace in [Workspace::Project, Workspace::Simulate, Workspace::Results] {
+        let mut app = app_with_sheets(2);
+        app.state.workbench.activate(workspace);
+        assert!(!is_visible(&app.state.workbench, &app.state.model));
+
+        let output = ctx.run_ui(frame_input(), |ui| chrome_rows(ui, &mut app));
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree")
+            .nodes;
+        assert!(
+            !nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Sheets in this drawing")),
+            "{workspace:?} paints no sheet strip"
+        );
+    }
 }
 
 #[test]

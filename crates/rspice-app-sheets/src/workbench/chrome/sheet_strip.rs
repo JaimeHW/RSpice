@@ -34,10 +34,13 @@ const ADD_ICON_SIZE: f32 = 14.0;
 const CARET_WIDTH: f32 = 2.0;
 const RENAME_WIDTH: f32 = 132.0;
 
-/// Whether the active cell view has enough sheets for the strip to mean
-/// anything. One sheet is a drawing, not a set of them.
-pub fn is_visible(model: &Model) -> bool {
-    sheet_actions::sheet_count(model) > 1
+/// Whether the strip is drawn: beneath the schematic editor, where the
+/// sheets are paged and drawn, and only for a drawing of more than one sheet.
+/// One sheet is a drawing, not a set of them, and no other workspace pages
+/// the drawing's sheets.
+pub fn is_visible(workbench: &WorkbenchSession, model: &Model) -> bool {
+    crate::workbench::sheets::schematic_editor_open(workbench, model)
+        && sheet_actions::sheet_count(model) > 1
 }
 
 /// What the strip reads and writes: the model whose sheets it shows and
@@ -53,7 +56,7 @@ pub struct SheetStrip<'a> {
 
 /// Draw the strip beneath the document row.
 pub fn show(root: &mut Ui, mut strip: SheetStrip<'_>, layout: LayoutSpec) {
-    if !is_visible(strip.model) {
+    if !is_visible(strip.workbench, strip.model) {
         clear_gestures(root.ctx());
         return;
     }

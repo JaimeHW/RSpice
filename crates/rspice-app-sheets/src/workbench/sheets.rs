@@ -170,7 +170,7 @@ fn reveal_sheet_properties(cx: &mut Cx<'_, SheetsFeature>) {
 
 /// Whether the design workspace shows a schematic or testbench editor: where
 /// the sheets of a drawing are paged and authored.
-fn schematic_editor_open(workbench: &WorkbenchSession, model: &Model) -> bool {
+pub(crate) fn schematic_editor_open(workbench: &WorkbenchSession, model: &Model) -> bool {
     workbench.workspace == Workspace::Design
         && matches!(
             model.workspace.content.active_view_type(),
