@@ -90,8 +90,10 @@ impl PropertyCatalog {
                 .when_set("model"),
         );
 
-        // Parasitics (order 17-19). Explicit only: the parser synthesizes a
-        // real element per parasitic and never imposes a default.
+        // Parasitics (order 17-20). Explicit only: the parser synthesizes a
+        // real element per resistance and capacitance and never imposes a
+        // default; the netlister writes the inductance in series outside
+        // them, as it does a resistor's.
         sheet.add(
             PropertyDefinition::new("rser")
                 .with_display_name("Series resistance")
@@ -120,6 +122,16 @@ impl PropertyCatalog {
                 .with_default(PropertyValue::expression(""))
                 .with_unit("F")
                 .with_order(19)
+                .with_category("Parasitics"),
+        );
+        sheet.add(
+            PropertyDefinition::new("lser")
+                .with_display_name("Series inductance")
+                .with_description("ESL in series with the capacitor through an internal node")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("H")
+                .with_order(20)
                 .with_category("Parasitics"),
         );
 

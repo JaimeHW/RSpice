@@ -2,9 +2,10 @@
 //!
 //! A part with a tolerance writes its value as a deck parameter with a
 //! `.TOLERANCE` card, which every analysis reads at nominal and a Monte Carlo
-//! draws from the part's own band. A resistor's `lser` becomes an inductor in
-//! series with its `+` terminal, outside the resistor and the `cpar` the
-//! engine writes across it.
+//! draws from the part's own band. A resistor's or capacitor's `lser` becomes
+//! an inductor in series with its `+` terminal, outside the part and the
+//! `rser`, `rpar` and `cpar` the engine expands around it, which it does not
+//! read on a resistor or capacitor card itself.
 
 use super::*;
 use rspice_design::schematic::tolerance::{
@@ -79,7 +80,7 @@ impl NetlistGenerator<'_> {
             self.format_params(&component.params)
         };
         let nodes = self.format_nodes(node_names, 2);
-        match component.resistor_series_inductance() {
+        match component.series_inductance() {
             Some(inductor) => {
                 let internal = format!("__rspice_part_{}_lser", component.id);
                 let negative = nodes.split_once(' ').map_or("0", |(_, negative)| negative);
@@ -175,5 +176,95 @@ mod tests {
             .find(|element| element.name.eq_ignore_ascii_case("CR1#PAR"))
             .expect("the engine expands cpar");
         assert!(cpar.nodes[0].eq_ignore_ascii_case("__rspice_part_1_lser"));
+    }
+
+    /// A deck of parts, each terminal tied to its net by a label.
+    fn wired_deck(parts: &[(ComponentType, &str, &str, &str, [&str; 2])]) -> String {
+        use rspice_design::schematic::net_label::NetLabel;
+
+        let mut state = Schematic::default();
+        let document = state.document_mut_for_test();
+        for (index, (kind, name, value, params, nets)) in parts.iter().enumerate() {
+            let mut component =
+                Component::new(index as u64 + 1, *kind, Point::new(0, index as i32 * 400));
+            component.name = (*name).to_owned();
+            component.value = (*value).to_owned();
+            component.params = (*params).to_owned();
+            for (terminal, ((_, point), net)) in component
+                .terminal_positions()
+                .into_iter()
+                .zip(nets)
+                .enumerate()
+            {
+                let id = 100 + 10 * index as u64 + terminal as u64;
+                document.net_labels.push(NetLabel::new(id, point, *net));
+            }
+            document.components.push(component);
+        }
+        NetlistGenerator::new(
+            &state,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        )
+        .generate()
+    }
+
+    /// A capacitor's series inductance is written in series with it, and
+    /// the run sees it: above the series resonance a 1 uF capacitor with
+    /// 100 nH of ESL behind 50 Ohm is an inductor, where without it it is a
+    /// short.
+    #[test]
+    fn a_capacitor_series_inductance_reaches_the_deck_and_the_run() {
+        let rc = |capacitor_params: &str| {
+            wired_deck(&[
+                (ComponentType::VoltageSource, "V1", "AC 1", "", ["in", "0"]),
+                (ComponentType::Resistor, "R1", "50", "", ["in", "out"]),
+                (
+                    ComponentType::Capacitor,
+                    "C1",
+                    "1u",
+                    capacitor_params,
+                    ["out", "0"],
+                ),
+            ])
+        };
+        let with_esl = rc("rser=10m lser=100n");
+        let inductor = card(&with_esl, "L__RSPICE_PART_3_LSER ")
+            .split_whitespace()
+            .collect::<Vec<_>>();
+        let capacitor = card(&with_esl, "C1 ")
+            .split_whitespace()
+            .collect::<Vec<_>>();
+        assert!(inductor[1].eq_ignore_ascii_case("out"), "{with_esl}");
+        assert_eq!(inductor[2], "__rspice_part_3_lser");
+        assert_eq!(inductor[3], "100n");
+        assert_eq!(capacitor[1], "__rspice_part_3_lser");
+        assert_eq!(capacitor[3..], ["1u", "rser=10m"], "{with_esl}");
+
+        let frequency = 10e6;
+        let magnitude = |deck: &str| {
+            let parsed =
+                rspice_core::Netlist::parse(deck).unwrap_or_else(|error| panic!("{error}\n{deck}"));
+            let ac = rspice_core::engine::Engine::default()
+                .run_ac(&parsed, &[frequency])
+                .expect("AC solves");
+            let index = ac[0]
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .expect("node out");
+            ac[0].voltages[index].norm()
+        };
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        let reactance = omega * 100e-9 - 1.0 / (omega * 1e-6);
+        let expected = 0.01f64.hypot(reactance) / 50.01f64.hypot(reactance);
+        let measured = magnitude(&with_esl);
+        assert!(
+            (measured - expected).abs() < 1e-3 * expected,
+            "{measured} against {expected}"
+        );
+        assert!(
+            magnitude(&rc("rser=10m")) < 1e-3,
+            "without its ESL the capacitor shorts the output"
+        );
     }
 }

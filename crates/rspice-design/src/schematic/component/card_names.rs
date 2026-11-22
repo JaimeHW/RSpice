@@ -188,11 +188,14 @@ impl Component {
         })
     }
 
-    /// The inductor a resistor's `lser` writes in series with its `+`
-    /// terminal, outside the resistor and its `cpar`; `None` when `lser` is
-    /// blank or zero.
-    pub fn resistor_series_inductance(&self) -> Option<SourceParasitic> {
-        if self.kind != ComponentType::Resistor {
+    /// The inductor a resistor's or capacitor's `lser` writes in series with
+    /// its `+` terminal, outside the part and the parallel parasitics the
+    /// engine expands across it; `None` when `lser` is blank or zero.
+    pub fn series_inductance(&self) -> Option<SourceParasitic> {
+        if !matches!(
+            self.kind,
+            ComponentType::Resistor | ComponentType::Capacitor
+        ) {
             return None;
         }
         let params = crate::parameters::parse_params_string(&self.params);
@@ -224,7 +227,7 @@ impl Component {
             self.sense_source_name()
                 .map(|name| card(name, CardRole::SenseSource)),
         );
-        if let Some(inductor) = self.resistor_series_inductance() {
+        if let Some(inductor) = self.series_inductance() {
             cards.push(card(inductor.name, CardRole::SeriesInductance));
         }
         if let Some(parasitics) = self.source_parasitics() {
