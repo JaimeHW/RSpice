@@ -14,7 +14,7 @@ use rspice_results::{
     soa_evidence::{SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence},
     waveform::RetainedTrace,
 };
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey, Tone};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights, SortKey, Tone};
 use rspice_ui_kit::{
     panels::section_header,
     plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_significant},
@@ -140,13 +140,12 @@ impl SoaWorstInterval {
     fn compact(self, numbers: SoaNumbers) -> String {
         let instant = |seconds| numbers.value(seconds, "s");
         match self {
-            Self::Passed { worst_s } => format!("— · worst {}", instant(worst_s)),
-            Self::NotRetained { worst_s } | Self::NotReproduced { worst_s } => {
-                format!("worst {}", instant(worst_s))
-            }
+            Self::Passed { worst_s }
+            | Self::NotRetained { worst_s }
+            | Self::NotReproduced { worst_s } => format!("at {}", instant(worst_s)),
             Self::Excursion { start_s, end_s, .. }
             | Self::AboveThreshold { start_s, end_s, .. } => {
-                format!("{}…{}", instant(start_s), instant(end_s))
+                format!("{} \u{2026} {}", instant(start_s), instant(end_s))
             }
         }
     }
@@ -317,6 +316,9 @@ pub struct SoaResponse {
     pub stress_view_change: Option<plot::ViewChange>,
     /// The reader followed the rule's limit line to where Verify judges it.
     pub open_check: bool,
+    /// What the stress trace's axes spanned this frame, when it was drawn:
+    /// the sheet's one pane with a viewport the reader can set.
+    pub stress_axes: Option<((f64, f64), (f64, f64))>,
 }
 
 struct StressPlot<'a> {
@@ -466,7 +468,37 @@ pub fn show(
     let mut requested = selected.cloned();
     let mut cross_probe = None;
     let mut fit_clicked = false;
+    let mut stress_axes = None;
 
+    // One layout at every size: the rule table stands at the foot of the
+    // sheet, exactly its head and rows tall and ending on the sheet's bottom
+    // edge, and the plot fills everything above it: the stress trace the
+    // reader opened, else the device's I-V locus. Past its cap the table
+    // shows whole rows and scrolls.
+    let locus = plan.locus_for(
+        selected
+            .filter(|selection| selection.analysis == analysis_key)
+            .map(|selection| selection.device_id.as_str()),
+    );
+    let area = ui.available_rect_before_wrap();
+    let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
+    let rows = plan.visible(filter).len().max(1) as f32;
+    let cap = ((area.height() * RULE_TABLE_SHARE - lines.head) / lines.row)
+        .floor()
+        .max(RULE_TABLE_LEAST_ROWS);
+    let table_height = lines.head + rows.min(cap) * lines.row;
+    let table_area = egui::Rect::from_min_max(
+        egui::pos2(area.left(), (area.bottom() - table_height).max(area.top())),
+        area.max,
+    );
+    let plot_area = egui::Rect::from_min_max(area.min, egui::pos2(area.right(), table_area.top()));
+    let mut plot_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("rspice.results.soa-plot")
+            .max_rect(plot_area)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    let mut stress_drawn = false;
     if trace_open
         && let Some(selection) = requested.as_ref()
         && selection.analysis == analysis_key
@@ -484,7 +516,7 @@ pub fn show(
                 .map(|waveform| (facts, waveform))
         }) {
             let card = stress_trace_card(
-                ui,
+                &mut plot_ui,
                 &mut plot,
                 waveform,
                 evaluation,
@@ -499,57 +531,28 @@ pub fn show(
             stress_view_change = card.view_change;
             open_check = card.open_check;
             fit_clicked = card.fit_clicked;
+            stress_axes = Some(card.axes);
+            stress_drawn = true;
         } else {
-            legacy_stress_history_note(ui);
+            legacy_stress_history_note(&mut plot_ui);
         }
     }
-
-    // The device's locus stands beside the rule table when the sheet holds
-    // both without the table scrolling sideways, else above it, where it
-    // gives way to a stress trace the reader opened.
-    let locus = plan.locus_for(
-        selected
-            .filter(|selection| selection.analysis == analysis_key)
-            .map(|selection| selection.device_id.as_str()),
-    );
-    let width = ui.available_width();
-    let locus_width = (width * LOCUS_SHARE).clamp(LOCUS_MIN_WIDTH, LOCUS_MAX_WIDTH);
-    let beside = width - locus_width - LOCUS_GAP >= RULE_COLUMN_WIDTHS.iter().sum::<f32>();
-    let mut table_area = None;
-    if let Some(locus) = locus {
-        if beside {
-            let area = ui.available_rect_before_wrap();
-            let side = egui::Rect::from_min_max(
-                egui::pos2(area.right() - locus_width, area.top()),
-                area.max,
-            );
-            table_area = Some(egui::Rect::from_min_max(
-                area.min,
-                egui::pos2(side.left() - LOCUS_GAP, area.bottom()),
-            ));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(side), |ui| {
-                locus_card(
-                    ui,
-                    &mut *plot.cache,
-                    analysis,
-                    evaluations,
-                    locus,
-                    numbers,
-                    locus_width,
-                );
-            });
-        } else if !trace_open {
-            locus_card(
-                ui,
-                &mut *plot.cache,
-                analysis,
-                evaluations,
-                locus,
-                numbers,
-                LOCUS_HEIGHT,
-            );
-        }
+    if !stress_drawn && let Some(locus) = locus {
+        locus_card(
+            &mut plot_ui,
+            &mut *plot.cache,
+            analysis,
+            evaluations,
+            locus,
+            numbers,
+        );
     }
+    // With nothing to plot, the table has the whole sheet.
+    let table_area = if stress_drawn || locus.is_some() {
+        table_area
+    } else {
+        area
+    };
 
     let mut rule_table = |ui: &mut Ui| {
         let visible_rules = plan.visible(filter);
@@ -617,7 +620,7 @@ pub fn show(
                 .state(state)
                 .freeze(1)
                 .revision(revision)
-                .max_height(ui.available_height())
+                .max_height(table_height)
                 .show(ui, |row| {
                     // `rule` is an ordinal from the memoized plan and
                     // `evaluations` is the live retained evidence. A row the
@@ -705,13 +708,14 @@ pub fn show(
             well_hint(ui, "No retained SOA rules match the selected filter");
         }
     };
-    // One name for the table's place in both layouts, so its sort and
-    // scroll survive the locus moving between them.
-    let rules_scope = egui::UiBuilder::new().id_salt("rspice.results.soa-rules");
-    match table_area {
-        Some(area) => ui.scope_builder(rules_scope.max_rect(area), rule_table),
-        None => ui.scope_builder(rules_scope, |ui| rule_table(ui)),
-    };
+    let mut table_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("rspice.results.soa-rules")
+            .max_rect(table_area)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    rule_table(&mut table_ui);
+    ui.advance_cursor_after_rect(area);
 
     SoaResponse {
         trace_open,
@@ -720,6 +724,7 @@ pub fn show(
         fit_clicked,
         stress_view_change,
         open_check,
+        stress_axes,
     }
 }
 
@@ -770,6 +775,7 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
                 numbers.value(evaluation.limit_value, &evaluation.unit),
                 false,
             ),
+            ("Rating", evaluation.description.clone(), false),
             (
                 "Signed margin",
                 format!(
@@ -827,7 +833,6 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
             );
         }
     }
-    panel_note(ui, &evaluation.description);
 
     let trace_available = facts.is_some_and(|facts| facts.stress_waveform.is_some());
     let schematic_available = source.schematic_available;
@@ -1100,6 +1105,7 @@ struct StressCard {
     view_change: Option<plot::ViewChange>,
     open_check: bool,
     fit_clicked: bool,
+    axes: ((f64, f64), (f64, f64)),
 }
 
 /// Head room over the stress history, as a share of its span: the limit's
@@ -1220,8 +1226,9 @@ fn stress_trace_card(
                 }
                 readout
             };
+            let height = ui.available_height().max(PLOT_LEAST_HEIGHT);
             let response = ui
-                .allocate_ui(egui::vec2(ui.available_width(), 210.0), |ui| {
+                .allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
                     rspice_ui_kit::plot::show(
                         ui,
                         &spec,
@@ -1250,6 +1257,7 @@ fn stress_trace_card(
                 view_change: response.view.any().then_some(response.view),
                 open_check,
                 fit_clicked,
+                axes: response.axes,
             }
         }).inner
 }
@@ -1606,20 +1614,17 @@ fn device_locus(
     })
 }
 
-/// The locus card's plot height when it stands above the rule table.
-const LOCUS_HEIGHT: f32 = 220.0;
-/// The locus card's share of the sheet's width beside the rule table, and
-/// its narrowest and widest there.
-const LOCUS_SHARE: f32 = 0.38;
-const LOCUS_MIN_WIDTH: f32 = 320.0;
-const LOCUS_MAX_WIDTH: f32 = 560.0;
-/// The gutter between the rule table and the locus beside it.
-const LOCUS_GAP: f32 = 8.0;
+/// The most of the sheet's height the rule table takes before it scrolls,
+/// and the fewest rows it shows when it does.
+const RULE_TABLE_SHARE: f32 = 0.5;
+const RULE_TABLE_LEAST_ROWS: f32 = 3.0;
+/// The shortest a plot over the rule table is drawn, however little room
+/// the table leaves it.
+const PLOT_LEAST_HEIGHT: f32 = 120.0;
 
 /// The device's path in its voltage-current plane against the boundary its
 /// rules draw, the first crossing marked and named as the rule table names
-/// that rule. `plot_height` is the canvas' height under the header, which
-/// the space left may shorten.
+/// that rule. The canvas fills the room under its header.
 fn locus_card(
     ui: &mut Ui,
     cache: &mut plot::DecimationCache,
@@ -1627,7 +1632,6 @@ fn locus_card(
     evaluations: &[SoaEvaluationEvidence],
     locus: &SoaLocus,
     numbers: SoaNumbers,
-    plot_height: f32,
 ) {
     let (Some(volts), Some(amps)) = (
         evidence_trace(analysis, locus.voltage),
@@ -1709,7 +1713,7 @@ fn locus_card(
                 }
                 rows
             };
-            let height = plot_height.min(ui.available_height()).max(120.0);
+            let height = ui.available_height().max(PLOT_LEAST_HEIGHT);
             ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
                 plot::show(ui, &spec, cache, None, Some(&readout))
             });

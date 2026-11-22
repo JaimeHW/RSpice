@@ -327,6 +327,14 @@ fn active_result_pane(
     if !crate::workbench::documents::result_document::viewer_draws_a_pane(viewer) {
         return;
     }
+    // The SOA sheet's one pane with a viewport is the stress trace. With it
+    // closed the sheet draws the device's locus, whose axes the reader does
+    // not set, so there is no range to state.
+    if viewer == rspice_results::result_presentation::ResultViewer::Soa
+        && !state.results.session.soa_stress_trace_open
+    {
+        return;
+    }
     let Some(run) = state.model.simulation.active_run() else {
         return;
     };

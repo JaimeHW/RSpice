@@ -218,6 +218,24 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             });
     }
     state.results.session.soa_stress_trace_open = response.trace_open;
+    // The details pane's axis ranges speak for the stress trace, the one
+    // plot on the sheet whose viewport the reader sets.
+    match response.stress_axes {
+        Some(axes) => {
+            state
+                .results
+                .session
+                .drawn_axes
+                .insert(super::ResultViewer::Soa, axes);
+        }
+        None => {
+            state
+                .results
+                .session
+                .drawn_axes
+                .remove(&super::ResultViewer::Soa);
+        }
+    }
     if response.selection != state.results.session.selected_soa_rule {
         if response.selection.is_some() && response.trace_open {
             state
