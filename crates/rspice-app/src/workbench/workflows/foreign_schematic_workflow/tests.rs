@@ -544,6 +544,12 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         panic!("a transient analysis");
     };
     assert_eq!((tran.stop.as_str(), tran.max_step.as_str()), ("20m", "10u"));
+    // The deck's own `.save` cards are not carried over, so the run keeps
+    // every waveform, as the import notice says.
+    assert_eq!(
+        model.sim_setup.save_policy.output_selection_mode,
+        rspice_app_state::state::OutputSelectionMode::SaveAll
+    );
     let variables = &model
         .workspace
         .content

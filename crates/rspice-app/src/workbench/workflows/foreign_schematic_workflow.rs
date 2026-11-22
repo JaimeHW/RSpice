@@ -1030,8 +1030,12 @@ fn commit_plan_document(
         run_set,
         model_bindings,
         design_configuration: Default::default(),
-        save_policy:
-            rspice_app_state::workbench::app_state::sim_setup::SimulationSavePolicy::default(),
+        // A deck's `.save` and `.probe` cards are not carried over, so the
+        // plan keeps every waveform the run produces.
+        save_policy: rspice_app_state::workbench::app_state::sim_setup::SimulationSavePolicy {
+            output_selection_mode: rspice_app_state::state::OutputSelectionMode::SaveAll,
+            ..rspice_app_state::workbench::app_state::sim_setup::SimulationSavePolicy::default()
+        },
         options,
     };
     let mut setup = app.state.model.sim_setup.clone();
