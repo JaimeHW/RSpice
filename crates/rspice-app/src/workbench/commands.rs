@@ -160,6 +160,7 @@ impl ShellCommand {
                 ConsolePage::Console => {}
                 ConsolePage::Problems
                 | ConsolePage::Measurements
+                | ConsolePage::Cursors
                 | ConsolePage::TaskLog
                 | ConsolePage::References => {}
             },

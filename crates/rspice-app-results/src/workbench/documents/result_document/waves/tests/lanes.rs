@@ -365,10 +365,9 @@ fn the_cursor_table_reads_the_lanes_at_both_cursors() {
     assert_eq!(level("EOC", a), "1", "EOC has risen at A");
 }
 
-/// The readout strip under the Waves sheet, where the A/B table is.
+/// The dock's Cursors page, where the A/B table is.
 fn cursor_table(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let height = readout_strip_height(state);
-    readout_strip(ui, state, height);
+    cursors_page(ui, state);
 }
 
 /// Selecting a lane selects its net and the arrow keys then step the

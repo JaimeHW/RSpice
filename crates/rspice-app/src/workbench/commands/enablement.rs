@@ -96,6 +96,7 @@ impl ShellCommand {
                 }
                 ConsolePage::Problems
                 | ConsolePage::Measurements
+                | ConsolePage::Cursors
                 | ConsolePage::TaskLog
                 | ConsolePage::References => false,
             },

@@ -31,23 +31,20 @@ mod strips;
 mod xy;
 
 #[test]
-fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
+fn the_cursors_page_reads_nothing_until_a_cursor_stands_on_a_strip() {
     let mut state = ResultsTestHost::default();
     assert!(
         state.results.results.session.cursor_tool.is_armed(),
         "armed by default"
     );
     assert!(!state.results.results.session.cursor_readout_active());
-    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
+    assert!(!cursors_page_reads(&mut state));
 
+    // An empty run has no strip for the cursor to stand on: the page says
+    // how to place one rather than drawing a table of blank rows.
     state.results.results.session.cursors.place(1.0e-3);
     assert!(state.results.results.session.cursor_readout_active());
-    // No visible traces on an empty run: the header alone, never a band
-    // of blank rows.
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        READOUT_HEADER_H
-    );
+    assert!(!cursors_page_reads(&mut state));
 }
 
 #[test]
@@ -62,7 +59,7 @@ fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
     assert!(!state.results.results.session.cursor_tool.is_armed());
     assert!(!state.results.results.session.cursors.any());
     assert_eq!(state.results.results.session.cursor_strip, None);
-    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
+    assert!(!cursors_page_reads(&mut state));
 
     state.results.results.session.toggle_cursor_tool();
     assert!(state.results.results.session.cursor_tool.is_armed());
@@ -618,39 +615,18 @@ fn a_marker_never_migrates_to_a_different_dataset_after_a_re_run() {
 }
 
 #[test]
-fn markers_alone_keep_a_compact_readout_strip_on_screen() {
+fn markers_alone_give_the_cursors_page_something_to_read() {
     let mut state = marker_fixture();
     let (analysis, _) = marker_identity(&state);
     state.quick_frame();
-    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
+    assert!(!cursors_page_reads(&mut state));
 
     state.place_marker("V(out)", 0.5).expect("a marker");
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        READOUT_HEADER_H + MARKER_ROW_H,
-        "markers-only dock: one shared header and its one row"
-    );
+    assert!(cursors_page_reads(&mut state), "a marker alone is read");
 
     // A closed strip takes its markers off screen with it.
     state.results.results.session.hidden_strips.insert(analysis);
-    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
-}
-
-#[test]
-fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
-    let mut state = marker_fixture();
-    let (analysis, _) = marker_identity(&state);
-    state.quick_frame();
-    state.place_marker("V(out)", 0.5).expect("a marker");
-    state.results.results.session.readout_collapsed = true;
-
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        READOUT_HEADER_H
-    );
-
-    state.results.results.session.hidden_strips.insert(analysis);
-    assert_eq!(readout_strip_height(&mut state.results_parts()), 0.0);
+    assert!(!cursors_page_reads(&mut state));
 }
 
 #[test]
@@ -1507,13 +1483,17 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
     state.results.results.session.cursors.a = Some(0.0);
     state.results.results.session.cursors.b = Some(1.0e-3);
 
-    // Expanded: the strip owns the readout, so the bar says nothing.
-    state.results.results.session.readout_collapsed = false;
+    // The dock showing its Cursors page owns the readout, so the bar says
+    // nothing.
+    state.workbench.console_visible = true;
+    state.workbench.console_page =
+        rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Cursors;
     assert_eq!(inline_cursor_readout(&mut state.results_parts(), &t), None);
 
-    state.results.results.session.readout_collapsed = true;
+    state.workbench.console_page =
+        rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Console;
     let readout = inline_cursor_readout(&mut state.results_parts(), &t)
-        .expect("collapsed strip yields a readout");
+        .expect("the bar reads the cursors while the page is away");
     assert!(readout.starts_with("A "), "{readout}");
     assert!(readout.contains(" · B "), "{readout}");
     assert!(readout.contains(" \u{0394} "), "{readout}");
@@ -1559,7 +1539,6 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
     state.results.results.session.cursor_strip = Some(3);
     state.results.results.session.cursors.a = Some(1.0e3);
     state.results.results.session.cursors.b = Some(1.0e4);
-    state.results.results.session.readout_collapsed = true;
 
     let readout = inline_cursor_readout(&mut state.results_parts(), &t)
         .expect("the noise strip at index 3 owns the cursor readout");

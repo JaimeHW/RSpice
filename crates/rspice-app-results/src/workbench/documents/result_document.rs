@@ -2139,22 +2139,13 @@ fn show_with_chrome(
         run_controller.clear_prepared_run();
     }
 
-    // The stage bottom holds one bounded cursor/marker dock. Its header and
-    // owning scroll body are content-fit, so a stage with nothing to report
-    // gives the whole area back to the document.
-    let strip_height = match chrome {
-        ResultChrome::Full => readout_strip_height(state),
-        ResultChrome::CompactSplit { .. } => 0.0,
-    };
+    // What the cursors and markers read is the dock's Cursors page, so the
+    // viewer well takes the whole stage.
     let available = ui.available_rect_before_wrap();
-    let well_height = (available.height() - strip_height).max(0.0);
-    ui.allocate_ui(egui::vec2(available.width(), well_height), |ui| {
-        ui.set_min_height(well_height);
+    ui.allocate_ui(available.size(), |ui| {
+        ui.set_min_height(available.height());
         show_viewer_well(ui, state, run_controller, chrome);
     });
-    if strip_height > 0.0 {
-        waves::readout_strip(ui, state, strip_height);
-    }
     working_view::capture_at_frame_end(state);
 }
 
@@ -2170,18 +2161,16 @@ fn result_stage_bar_visible(state: ResultsReads<'_>) -> bool {
         .is_some_and(|run| !run.analyses.is_empty())
 }
 
-/// Height of the stage's readout strip for the active viewer, or zero.
-///
-/// Only the cursor-bearing waveform viewers carry a readout; structured
-/// documents (OP, tables) have no cursor to report.
-fn readout_strip_height(state: &mut ResultsParts<'_>) -> f32 {
-    match state.results.session.viewer {
+/// Whether a sheet reads cursors and markers: the waveform sheets do;
+/// structured documents (OP, tables) have no cursor to report.
+pub(crate) fn sheet_has_cursors(viewer: ResultViewer) -> bool {
+    matches!(
+        viewer,
         ResultViewer::Waves
-        | ResultViewer::DcSweep
-        | ResultViewer::Bode
-        | ResultViewer::NoiseContrib => waves::readout_strip_height(state),
-        _ => 0.0,
-    }
+            | ResultViewer::DcSweep
+            | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
+    )
 }
 
 /// The sheet a bound pane actually draws, once the analysis behind it is known.

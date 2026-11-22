@@ -130,7 +130,6 @@ fn arm_cursors(state: &mut ResultsTestHost) {
     state.results.results.session.cursor_strip = Some(0);
     state.results.results.session.cursors.a = Some(5.0e-4);
     state.results.results.session.cursors.b = Some(1.0e-3);
-    state.results.results.session.readout_collapsed = false;
 }
 
 // The crate bans stderr printing so debugging scaffolding cannot reach a

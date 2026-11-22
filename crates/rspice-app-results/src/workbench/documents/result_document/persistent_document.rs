@@ -194,11 +194,10 @@ pub fn show(
         );
     }
 
-    // Persistent pages own exactly one stage-level readout, just like quick
-    // Results. Individual panes never reserve their own instrument chrome.
-    let strip_height = active_viewer.map_or(0.0, |_| super::readout_strip_height(state));
+    // What the cursors and markers read is the dock's Cursors page, as in
+    // quick Results; panes reserve no instrument chrome of their own.
     let available = ui.available_rect_before_wrap();
-    let well_height = (available.height() - strip_height).max(0.0);
+    let well_height = available.height();
     let activated_pane_id = ui
         .allocate_ui(vec2(available.width(), well_height), |ui| {
             ui.set_min_height(well_height);
@@ -248,9 +247,6 @@ pub fn show(
     {
         let viewer = bound_viewer_projection(state.results_reads(), viewer);
         let _ = project_pane_presentation(state, &fresh_pane, viewer);
-    }
-    if strip_height > 0.0 {
-        super::waves::readout_strip(ui, state, strip_height);
     }
 }
 

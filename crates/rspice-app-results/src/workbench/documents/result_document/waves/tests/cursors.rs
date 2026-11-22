@@ -75,6 +75,10 @@ fn whole_frame(
     };
     let mut controller = crate::simulation::SimulationController::new();
     ctx.run_ui(input, |ctx| {
+        // The dock's Cursors page under the stage, as the shell lays them out.
+        egui::Panel::bottom("cursors-page")
+            .exact_size(240.0)
+            .show(ctx, |ui| super::super::cursors_page(ui, parts));
         egui::CentralPanel::default().show(ctx, |ui| {
             super::super::super::show(ui, parts, &mut controller);
         });

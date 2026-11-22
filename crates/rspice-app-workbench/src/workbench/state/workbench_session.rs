@@ -321,6 +321,9 @@ pub enum ConsolePage {
     Console,
     Problems,
     Measurements,
+    /// What the cursors and markers of the shown sheet read. Its tab shows
+    /// while Results shows a sheet that has them.
+    Cursors,
     TaskLog,
     /// What Find references found. Its tab shows only while there is a list.
     References,
@@ -341,6 +344,7 @@ impl ConsolePage {
             Self::Console => "Console",
             Self::Problems => "Problems",
             Self::Measurements => "Measurements",
+            Self::Cursors => "Cursors",
             Self::TaskLog => "Task log",
             Self::References => "References",
         }

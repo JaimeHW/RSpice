@@ -40,12 +40,6 @@ pub struct MarkerActions {
     pub edit: Option<MarkerSelector>,
 }
 
-/// Height of the cursor readout strip's header row.
-pub const READOUT_HEADER_H: f32 = 26.0;
-/// Tallest scroll viewport owned by the dock body.
-pub const READOUT_BODY_MAX_H: f32 = 212.0;
-/// Tallest complete dock: the fixed header plus its independently capped body.
-pub const READOUT_MAX_H: f32 = READOUT_HEADER_H + READOUT_BODY_MAX_H;
 const READOUT_DESKTOP_SPLIT_MIN_W: f32 = 680.0;
 const READOUT_COLUMN_SEAM: f32 = 1.0;
 const CURSOR_TABLE_MIN_W: f32 = 660.0;
@@ -193,122 +187,55 @@ fn readout_columns_side_by_side(width: f32, cursor: bool, markers: bool) -> bool
     cursor && markers && width >= READOUT_DESKTOP_SPLIT_MIN_W
 }
 
-/// Exact height the readout strip needs, or zero when it stands down.
-///
-/// The dock is content-fit up to a 212 px body, then its one body viewport
-/// scrolls. Expanded cursor/marker content, marker-only, collapsed-header,
-/// and no-strip states remain distinct.
-///
-/// Row counts and painting use the same host-provided strip projections.
-pub fn readout_strip_height(state: &mut ResultViewerState, source: ReadoutInput<'_>) -> f32 {
-    let cursor = state.cursor_readout_active();
-    let markers = !visible_markers(state, source).is_empty()
-        || !horizontal_cursor_rows(state, source).is_empty();
-    if !cursor && !markers {
-        return 0.0;
-    }
-    if state.readout_collapsed {
-        return READOUT_HEADER_H;
-    }
-    (READOUT_HEADER_H + readout_body_content_height(state, source)).min(READOUT_MAX_H)
-}
-
-/// The cursor readout: one X row naming A, B and Δ, then the value each
-/// visible trace takes at those cursors.
-///
-/// This is the single home for the cursor readout. The inspector reports
-/// window statistics the strip does not carry, and never repeats these
-/// numbers one panel away.
-pub fn readout_strip(
+/// What the dock's Cursors page draws, below its toolbar band: the shown
+/// strip's cursor table beside its markers, scrolled when taller than the
+/// page. `None` when there is nothing to read, no cursor on a strip of the
+/// sheet and no marker, and the page says how to place one instead.
+pub fn cursors_page(
     ui: &mut Ui,
     state: &mut ResultViewerState,
     source: ReadoutInput<'_>,
-    height: f32,
-) -> MarkerActions {
-    let mut actions = MarkerActions::default();
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 0.0, c.bg_panel);
-    ui.painter()
-        .hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
-
-    let header = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2(
-            rect.right(),
-            (rect.top() + READOUT_HEADER_H).min(rect.bottom()),
-        ),
-    );
-    readout_header(ui, state, header);
-    if state.readout_collapsed || rect.bottom() <= header.bottom() {
-        return actions;
+) -> Option<MarkerActions> {
+    if !page_has_readings(state, source) {
+        return None;
     }
-
-    let body = egui::Rect::from_min_max(header.left_bottom(), rect.right_bottom());
-    ui.painter()
-        .hline(body.x_range(), body.top(), egui::Stroke::new(1.0, c.border));
-    let mut body_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .id_salt("results-readout-body")
-            .max_rect(body)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    body_ui.set_clip_rect(body);
+    let mut actions = MarkerActions::default();
     egui::ScrollArea::vertical()
-        .id_salt("rspice.results.readout")
+        .id_salt("rspice.results.cursors")
         .auto_shrink([false, false])
-        .show(&mut body_ui, |ui| {
-            readout_body(ui, state, source, &mut actions)
-        });
-    actions
+        .show(ui, |ui| readout_body(ui, state, source, &mut actions));
+    Some(actions)
 }
 
-fn readout_header(ui: &mut Ui, state: &mut ResultViewerState, rect: egui::Rect) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let cursor = state.cursor_readout_active();
-    let title = if cursor {
-        "Cursors & markers"
-    } else {
-        "Markers"
-    };
-    let mut header_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .id_salt("results-readout-header")
-            .max_rect(rect.shrink2(egui::vec2(8.0, 0.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    header_ui.set_clip_rect(rect);
-    header_ui.spacing_mut().item_spacing.x = 6.0;
-    header_ui.label(
-        egui::RichText::new(title)
-            .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-            .color(c.text),
-    );
-    // The rows and markers are directly below; counting them is the band
-    // describing what the reader can see.
-    header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let collapsed = state.readout_collapsed;
-        let label = if collapsed {
-            "Expand readout"
+/// Whether the Cursors page has anything to read: a cursor on a strip of
+/// the sheet, or a marker on a strip on screen.
+pub fn page_has_readings(state: &mut ResultViewerState, source: ReadoutInput<'_>) -> bool {
+    cursor_target_available(state, source)
+        || !visible_markers(state, source).is_empty()
+        || !horizontal_cursor_rows(state, source).is_empty()
+}
+
+/// The strip the Cursors page reads, as its header names it: the strip the
+/// cursors stand on, else the first on screen with a marker.
+pub fn followed_strip(state: &mut ResultViewerState, source: ReadoutInput<'_>) -> Option<String> {
+    let models = source.models;
+    let followed = state
+        .cursor_strip
+        .filter(|_| cursor_target_available(state, source))
+        .and_then(|index| models.iter().find(|model| model.analysis_index == index))
+        .or_else(|| {
+            models.iter().find(|model| {
+                source.on_screen_strips.contains(&model.analysis_key)
+                    && state.strip_markers(model.analysis_key).next().is_some()
+            })
+        })?;
+    Some(
+        if followed.subtitle.is_empty() || followed.subtitle == followed.kind_tag {
+            followed.kind_tag.clone()
         } else {
-            "Collapse readout"
-        };
-        if ui
-            .add_sized(
-                egui::vec2(24.0, 22.0),
-                egui::Button::new(if collapsed { "▴" } else { "▾" }).frame(false),
-            )
-            .on_hover_text(label)
-            .clicked()
-        {
-            state.readout_collapsed = !collapsed;
-        }
-    });
+            format!("{} · {}", followed.kind_tag, followed.subtitle)
+        },
+    )
 }
 
 fn readout_body(
@@ -374,16 +301,17 @@ fn readout_body(
     }
 }
 
-/// The instrument bar's inline `A · B · Δ`, for the collapsed readout.
+/// The instrument bar's inline `A · B · Δ`, while the dock's Cursors page
+/// is not shown.
 ///
-/// Collapsing the strip hides the register that owns these three numbers, so
-/// the bar states them until it is expanded again — never both at once, which
-/// is the duplication the results de-duplication pass removed.
+/// The host asks only then: the page is the register that owns these three
+/// numbers, and the bar states them while it is away — never both at once,
+/// which is the duplication the results de-duplication pass removed.
 pub fn inline_cursor_readout(
     state: &mut ResultViewerState,
     source: ReadoutInput<'_>,
 ) -> Option<String> {
-    if !state.readout_collapsed || !state.cursor_readout_active() {
+    if !state.cursor_readout_active() {
         return None;
     }
     let presentation = source.presentation;

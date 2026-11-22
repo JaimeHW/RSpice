@@ -62,7 +62,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     if !layout.show_console_body {
         return;
     }
-    let page = app.workbench().console_page;
+    let page = shown_page(app);
     let body_rect = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(body_rect, 0.0, Tokens::get(ui.ctx()).color.bg_inset);
@@ -107,6 +107,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 }
             }
             ConsolePage::Measurements => measurements(ui, app),
+            ConsolePage::Cursors => app.session_mut().cursors_page(ui),
             ConsolePage::TaskLog => task_log(ui, app),
             ConsolePage::References => references::references(ui, app),
         },
@@ -115,6 +116,15 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
         node.set_role(egui::accesskit::Role::TabPanel);
         node.set_label(page.label());
     });
+}
+
+/// The page the dock shows: the one chosen, unless it is the Cursors page
+/// and no sheet with cursors is shown, when it is the console's.
+fn shown_page(app: &impl WorkbenchHost) -> ConsolePage {
+    match app.workbench().console_page {
+        ConsolePage::Cursors if !app.session().offers_cursors() => ConsolePage::Console,
+        page => page,
+    }
 }
 
 /// The tab strip's height: a touch target under a finger.
@@ -275,9 +285,17 @@ pub fn console_tabs(
     let mut requested = None;
     let mut expand = false;
     let mut focus = None;
-    // The References tab stands for a list, and goes when the list does.
+    // The References tab stands for a list, and goes when the list does; the
+    // Cursors tab stands beside Measurements while a sheet with cursors is
+    // shown.
+    let cursors = app.session().offers_cursors();
     let pages = ConsolePage::ALL
         .into_iter()
+        .flat_map(|page| {
+            std::iter::once(page).chain(
+                (page == ConsolePage::Measurements && cursors).then_some(ConsolePage::Cursors),
+            )
+        })
         .chain(
             app.workbench()
                 .source_references
@@ -297,7 +315,7 @@ pub fn console_tabs(
                 ConsolePage::Problems => problems.total(),
                 ConsolePage::Measurements => active_measurement_count(&app.model().simulation),
                 ConsolePage::TaskLog => app.model().simulation.retained.runs.len(),
-                ConsolePage::Console => 0,
+                ConsolePage::Console | ConsolePage::Cursors => 0,
                 ConsolePage::References => app
                     .workbench()
                     .source_references
@@ -310,7 +328,7 @@ pub fn console_tabs(
             // errors.
             let breakdown =
                 (page == ConsolePage::Problems && count > 0).then(|| problems.announcement());
-            let current = app.workbench().console_page == page;
+            let current = shown_page(app) == page;
             let response = console_tab(
                 ui,
                 page,
@@ -1525,7 +1543,7 @@ fn row_with_sense(
 /// on each side. What a page writes outside a table — its toolbar, a note,
 /// an empty line, the transcript — stands here, so it lines up with the
 /// first cell's text in the table below it.
-fn padded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub fn padded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let page = ui.available_rect_before_wrap();
     let column = egui::Rect::from_min_max(
         egui::pos2(page.left() + CONSOLE_BODY_PADDING_X, page.top()),
@@ -1554,7 +1572,7 @@ fn padded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 /// toolbar draws it here, at the same height, so moving between them does
 /// not move it. A table's header band meets the rule; a page that writes
 /// prose under it insets that by the body's top padding.
-fn toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub fn toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let band = ui.painter().add(egui::Shape::Noop);
     let top = ui.cursor().top() - CONSOLE_BODY_PADDING_TOP;
     let inner = padded(ui, add);
@@ -1574,7 +1592,7 @@ fn toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 /// Whether one whole row fits in what is left of the page. A dock dragged
 /// shorter than a page's toolbar and one row shows the toolbar alone, rather
 /// than a line cut by its bottom edge.
-fn prose_fits(ui: &Ui) -> bool {
+pub fn prose_fits(ui: &Ui) -> bool {
     ui.available_height() + 0.5 >= CONSOLE_ROW_MIN_HEIGHT
 }
 
@@ -1585,7 +1603,7 @@ fn prose_fits(ui: &Ui) -> bool {
 /// middle of an otherwise tight panel and read as a different surface from
 /// the one the reader switched to; this reads as a list with nothing in it.
 /// A page that runs side to side writes it in [`padded`].
-fn muted(ui: &mut Ui, text: &str) {
+pub fn muted(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add(
         egui::Label::new(

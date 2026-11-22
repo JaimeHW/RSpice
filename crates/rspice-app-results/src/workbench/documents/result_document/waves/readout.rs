@@ -1,14 +1,15 @@
 //! Source/cache selection and transactional actions for the waveform readout.
 use super::*;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use crate::workbench::state::Workspace;
+use rspice_app_workbench::workbench::docks::console;
+use rspice_app_workbench::workbench::state::workbench_session::{ConsolePage, WorkbenchSession};
 use rspice_results_ui::session::ResultViewerState;
 use rspice_results_ui::waves::dock::{self, MarkerActions, ReadoutInput};
 #[cfg(test)]
-pub(super) use rspice_results_ui::waves::dock::{MARKER_ROW_H, READOUT_HEADER_H};
-#[cfg(test)]
 pub(super) use rspice_results_ui::waves::readout::{
-    MAX_READOUT_BRANCHES, READOUT_ABSENT, READOUT_ROW_H, ReadoutRow, measurement_values,
-    readout_branch_note, readout_rows, trace_interval_statistics,
+    MAX_READOUT_BRANCHES, READOUT_ABSENT, ReadoutRow, measurement_values, readout_branch_note,
+    readout_rows, trace_interval_statistics,
 };
 
 pub(super) fn on_screen_strips(state: ResultsReads<'_>) -> Vec<AnalysisPresentationKey> {
@@ -79,42 +80,77 @@ fn apply_marker_actions(state: &mut ResultsParts<'_>, actions: MarkerActions) {
     }
 }
 
-pub fn readout_strip_height(state: &mut ResultsParts<'_>) -> f32 {
-    let session = &state.results.session;
-    let need_models = !session.readout_collapsed
-        && session.cursor_readout_active()
-        && session.cursor_strip.is_some();
-    with_readout(
-        state,
-        &Tokens::default(),
-        need_models,
-        dock::readout_strip_height,
-    )
+/// Whether the dock offers its Cursors page: while Results shows a sheet
+/// that reads cursors and markers.
+pub fn offers_cursors(state: ResultsReads<'_>) -> bool {
+    state.workbench.workspace == Workspace::Results
+        && super::super::sheet_has_cursors(state.results.session.viewer)
 }
 
-pub fn readout_strip(ui: &mut Ui, state: &mut ResultsParts<'_>, height: f32) {
+/// Whether the dock shows its Cursors page now.
+fn cursors_page_shown(workbench: &WorkbenchSession) -> bool {
+    (workbench.console_visible || workbench.console_maximized)
+        && !workbench.focus_mode
+        && workbench.console_page == ConsolePage::Cursors
+}
+
+/// The dock's Cursors page: the strip it follows on its toolbar band, then
+/// what the cursors and markers read, or how to place one.
+pub fn cursors_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let session = &state.results.session;
     let need_models = (session.cursor_readout_active() && session.cursor_strip.is_some())
-        || (!session.readout_collapsed
-            && height > dock::READOUT_HEADER_H
-            && on_screen_strips(state.results_reads())
-                .into_iter()
-                .any(|key| session.strip_markers(key).next().is_some()));
-    let actions = with_readout(
+        || on_screen_strips(state.results_reads())
+            .into_iter()
+            .any(|key| session.strip_markers(key).next().is_some());
+    let shown = with_readout(
         state,
         &Tokens::get(ui.ctx()),
         need_models,
-        |session, source| dock::readout_strip(ui, session, source, height),
+        |session, source| {
+            // With nothing to read the page is one line, with no band over it.
+            if !dock::page_has_readings(session, source) {
+                return None;
+            }
+            let followed = dock::followed_strip(session, source);
+            console::toolbar(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_min_height(Tokens::get(ui.ctx()).metrics.ctl_h);
+                    if let Some(strip) = followed {
+                        ui.label(
+                            egui::RichText::new(strip)
+                                .font(rspice_ui_kit::theme::mono(
+                                    rspice_ui_kit::tokens::FS_1,
+                                    rspice_ui_kit::theme::FontWeight::Regular,
+                                ))
+                                .color(Tokens::get(ui.ctx()).color.text_dim),
+                        );
+                    }
+                });
+            });
+            dock::cursors_page(ui, session, source)
+        },
     );
-    apply_marker_actions(state, actions);
+    match shown {
+        Some(actions) => apply_marker_actions(state, actions),
+        None => {
+            ui.add_space(console::CONSOLE_BODY_PADDING_TOP);
+            if console::prose_fits(ui) {
+                console::padded(ui, |ui| {
+                    console::muted(
+                        ui,
+                        "No cursors or markers. Switch on A|B in the sheet's bar and click a plot to place A, then B.",
+                    );
+                });
+            }
+        }
+    }
 }
 
 pub(crate) fn inline_cursor_readout(
     state: &mut ResultsParts<'_>,
     tokens: &Tokens,
 ) -> Option<String> {
-    let session = &state.results.session;
-    if !session.readout_collapsed || !session.cursor_readout_active() {
+    if cursors_page_shown(state.workbench) || !state.results.session.cursor_readout_active() {
         return None;
     }
     with_readout(state, tokens, true, dock::inline_cursor_readout)
@@ -124,6 +160,16 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     with_readout(state, &Tokens::get(ui.ctx()), true, |session, source| {
         dock::right_panel(ui, session, source)
     });
+}
+
+#[cfg(test)]
+pub(super) fn cursors_page_reads(state: &mut ResultsTestHost) -> bool {
+    with_readout(
+        &mut state.results_parts(),
+        &Tokens::default(),
+        true,
+        dock::page_has_readings,
+    )
 }
 
 #[cfg(test)]

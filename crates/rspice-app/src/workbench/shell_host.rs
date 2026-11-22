@@ -1019,6 +1019,19 @@ impl ConsoleHost for AppState {
     fn remove_finding_waiver(&mut self, target: &WaiverTarget) -> Result<(), String> {
         AppState::remove_finding_waiver(self, target)
     }
+
+    fn offers_cursors(&self) -> bool {
+        rspice_app_results::workbench::documents::result_document::waves::offers_cursors(
+            self.results_reads(),
+        )
+    }
+
+    fn cursors_page(&mut self, ui: &mut egui::Ui) {
+        rspice_app_results::workbench::documents::result_document::waves::cursors_page(
+            ui,
+            &mut self.results_parts(),
+        );
+    }
 }
 
 impl WorkbenchHost for RSpiceApp {

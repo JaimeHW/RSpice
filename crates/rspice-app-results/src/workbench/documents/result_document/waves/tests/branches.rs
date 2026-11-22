@@ -220,24 +220,18 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
 /// the same thing. Sized from the retained waveform list, a loop's second row
 /// had nowhere to go.
 #[test]
-fn the_readout_band_is_sized_by_the_rows_it_will_draw() {
+fn the_cursor_table_counts_the_rows_it_will_draw() {
     let mut state = hysteresis_run();
     if !state.results.results.session.cursor_tool.is_armed() {
         state.results.results.session.toggle_cursor_tool();
     }
     state.results.results.session.cursors.place(0.25);
-    state.results.results.session.readout_collapsed = false;
 
     let retained_waveforms = state.model.simulation.active_run().unwrap().analyses[0]
         .waveforms
         .len();
     assert_eq!(retained_waveforms, 1, "one retained waveform, two branches");
     assert_eq!(readout_row_count(&mut state), 2);
-    assert_eq!(
-        readout_strip_height(&mut state.results_parts()),
-        READOUT_HEADER_H + (2 + 2) as f32 * READOUT_ROW_H,
-        "the reserved band does not match the rows the table will draw"
-    );
 }
 
 /// Window statistics integrate each branch between the cursors. Neither a

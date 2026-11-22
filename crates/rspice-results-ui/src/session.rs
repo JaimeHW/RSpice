@@ -808,9 +808,6 @@ pub struct ResultViewerState {
     /// a half-typed label can always be abandoned. Reclassifying a marker is
     /// a decision, not a side effect of clicking its kind.
     pub marker_edit: Option<MarkerEditDraft>,
-    /// Whether the stage-level cursor/marker dock is collapsed. Session-only
-    /// presentation state; retained result documents never serialize it.
-    pub readout_collapsed: bool,
     /// A/B cursors (data-space X of the strip they live on).
     pub cursors: CursorPair,
     /// Dataset-bound strip identity the cursors were placed on.

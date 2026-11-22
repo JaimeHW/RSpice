@@ -402,7 +402,6 @@ fn the_cursor_table_publishes_what_it_paints() {
     }
     state.results.results.session.cursors.place(0.25);
     state.results.results.session.cursors.place(0.75);
-    state.results.results.session.readout_collapsed = false;
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -418,8 +417,7 @@ fn the_cursor_table_publishes_what_it_paints() {
     for _ in 0..2 {
         let output = ctx.run_ui(input.clone(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let height = readout_strip_height(&mut state.results_parts());
-                readout_strip(ui, &mut state.results_parts(), height);
+                cursors_page(ui, &mut state.results_parts());
             });
         });
         labels = output

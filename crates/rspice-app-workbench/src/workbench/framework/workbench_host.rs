@@ -120,4 +120,13 @@ pub trait ConsoleHost: ProblemsHost + ListingSource {
 
     /// Remove the waiver stored at `target`.
     fn remove_finding_waiver(&mut self, target: &WaiverTarget) -> Result<(), String>;
+
+    /// Whether the dock offers its Cursors page: while a sheet with cursors
+    /// is shown.
+    fn offers_cursors(&self) -> bool {
+        false
+    }
+
+    /// Draw the Cursors page.
+    fn cursors_page(&mut self, _ui: &mut egui::Ui) {}
 }
