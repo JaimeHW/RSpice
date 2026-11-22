@@ -9,6 +9,7 @@ mod plot_overlay;
 mod printer_margin;
 mod provenance;
 mod receipt_faces;
+mod schematic_annotations;
 mod schematic_labels;
 mod shaped_text;
 mod sheet_frame;

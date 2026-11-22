@@ -399,7 +399,7 @@ fn placed_run(
 /// the canvas ends a dash square and draws a dot one width across. A dash is
 /// set short by the width and a dot is a dash of next to nothing, so the
 /// page shows the canvas's pattern at every weight.
-fn styled_print_stroke(stroke: StrokeStyle, style: SymbolStyle) -> StrokeStyle {
+pub(super) fn styled_print_stroke(stroke: StrokeStyle, style: SymbolStyle) -> StrokeStyle {
     /// The dash a round cap turns into a dot one line width across.
     const DOT_UM: f64 = 1.0;
     let scaled = (stroke.width.micrometres() as f64 * f64::from(style.stroke.scale())).round();

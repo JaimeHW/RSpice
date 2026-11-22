@@ -6,6 +6,7 @@
 //! itself. Every row is backed by live document state; no panel narrates a
 //! fact the open design cannot supply.
 
+mod annotation;
 pub mod component;
 pub mod model_evidence;
 /// Visible to the workbench so the library browser's own gate can render this
@@ -798,6 +799,7 @@ fn shape_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
     };
     object_title(ui, "Shape", Some(shape.kind().label()), None);
     section_block_gap(ui);
+    annotation::shape_style_rows(ui, cx, &shape);
     property_row(ui, "Layer", shape.layer.label());
     sheet_row(ui, cx.model, id);
 }

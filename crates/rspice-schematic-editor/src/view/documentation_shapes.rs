@@ -3,13 +3,14 @@
 use egui::{Color32, Painter, Pos2, Rect, Stroke};
 
 use rspice_design::schematic::documentation_shape::{
-    DocumentationShape, DocumentationShapeGeometry, arc_parameters,
+    DocumentationShape, DocumentationShapeGeometry, SymbolDash, SymbolStyle, arc_parameters,
 };
 use rspice_design_model::Point;
 use rspice_ui_kit::palette::Palette;
 
 use super::drawing::draw_hover_outline;
 use super::lod::{self, Emphasis, StrokeRole};
+use super::symbol_style::{broken_outline, inside_color, paint_fill};
 use super::viewport::Viewport;
 
 const HIT_TOLERANCE_POINTS: f32 = 6.0;
@@ -17,6 +18,61 @@ const RECTANGLE_CORNER_POINTS: f32 = 6.0;
 
 pub fn world_bounds(shape: &DocumentationShape) -> (Point, Point) {
     shape.bounds()
+}
+
+fn shape_ink(selected: bool, palette: &Palette) -> Color32 {
+    if selected {
+        palette.canvas_select
+    } else {
+        palette.text_faint
+    }
+}
+
+/// Paints the inside of a closed shape its style fills, beneath every wire,
+/// part and line of lettering, so a shaded box sets off what it encloses
+/// rather than hiding it.
+pub fn draw_documentation_shape_fill(
+    painter: &Painter,
+    viewport: &Viewport,
+    shape: &DocumentationShape,
+    selected: bool,
+    palette: &Palette,
+) {
+    if !shape.kind().is_closed() {
+        return;
+    }
+    let Some(fill) = inside_color(
+        shape.style.fill,
+        shape_ink(selected, palette),
+        palette.canvas_bg,
+    ) else {
+        return;
+    };
+    let rounded = |first: Point, opposite: Point| {
+        let rect = Rect::from_two_pos(
+            viewport.schematic_to_screen(first),
+            viewport.schematic_to_screen(opposite),
+        );
+        painter.rect_filled(rect, corner_radius(viewport), fill);
+    };
+    match &shape.geometry {
+        DocumentationShapeGeometry::Rectangle { first, opposite } => rounded(*first, *opposite),
+        DocumentationShapeGeometry::Callout {
+            elbow, box_corner, ..
+        } => rounded(*elbow, *box_corner),
+        DocumentationShapeGeometry::Polygon { points } => {
+            let screen = points
+                .iter()
+                .map(|point| viewport.schematic_to_screen(*point))
+                .collect::<Vec<_>>();
+            paint_fill(painter, &screen, Some(fill));
+        }
+        DocumentationShapeGeometry::Line { .. } | DocumentationShapeGeometry::Arc { .. } => {}
+    }
+}
+
+fn corner_radius(viewport: &Viewport) -> f32 {
+    (RECTANGLE_CORNER_POINTS * viewport.zoom).clamp(3.0, 9.0)
 }
 
 pub fn draw_documentation_shape(
@@ -27,11 +83,7 @@ pub fn draw_documentation_shape(
     hovered: bool,
     palette: &Palette,
 ) {
-    let color = if selected {
-        palette.canvas_select
-    } else {
-        palette.text_faint
-    };
+    let color = shape_ink(selected, palette);
     if hovered && !selected {
         let (min, max) = shape.bounds();
         draw_hover_outline(
@@ -48,10 +100,10 @@ pub fn draw_documentation_shape(
             viewport.zoom,
             painter.pixels_per_point(),
             Emphasis::raised_if(selected),
-        ),
+        ) * shape.style.stroke.scale(),
         color,
     );
-    draw_geometry(painter, viewport, &shape.geometry, stroke);
+    draw_styled_geometry(painter, viewport, &shape.geometry, stroke, shape.style);
     if selected {
         for point in shape.geometry.points() {
             let screen = viewport.schematic_to_screen(point);
@@ -59,6 +111,84 @@ pub fn draw_documentation_shape(
             painter.circle_stroke(screen, 3.0, Stroke::new(1.0, palette.canvas_select));
         }
     }
+}
+
+/// The outline of `geometry` in `style`'s pattern: whole as
+/// [`draw_geometry`] draws it, or broken into dashes or dots that keep their
+/// proportion against the drawing at every zoom.
+fn draw_styled_geometry(
+    painter: &Painter,
+    viewport: &Viewport,
+    geometry: &DocumentationShapeGeometry,
+    stroke: Stroke,
+    style: SymbolStyle,
+) {
+    if style.dash == SymbolDash::Solid {
+        draw_geometry(painter, viewport, geometry, stroke);
+        return;
+    }
+    let screen = |point: &Point| viewport.schematic_to_screen(*point);
+    let paths: Vec<(Vec<Pos2>, bool)> = match geometry {
+        DocumentationShapeGeometry::Rectangle { first, opposite } => vec![(
+            rounded_rect_path(
+                Rect::from_two_pos(screen(first), screen(opposite)),
+                corner_radius(viewport),
+            ),
+            true,
+        )],
+        DocumentationShapeGeometry::Line { start, end } => {
+            vec![(vec![screen(start), screen(end)], false)]
+        }
+        DocumentationShapeGeometry::Polygon { points } => {
+            vec![(points.iter().map(screen).collect(), true)]
+        }
+        DocumentationShapeGeometry::Arc {
+            start,
+            through,
+            end,
+        } => vec![(arc_screen_points(viewport, *start, *through, *end), false)],
+        DocumentationShapeGeometry::Callout {
+            tip,
+            elbow,
+            box_corner,
+        } => vec![
+            (vec![screen(tip), screen(elbow)], false),
+            (
+                rounded_rect_path(
+                    Rect::from_two_pos(screen(elbow), screen(box_corner)),
+                    corner_radius(viewport),
+                ),
+                true,
+            ),
+        ],
+    };
+    for (path, closed) in paths {
+        if let Some(pieces) = broken_outline(&path, closed, stroke, style, viewport.zoom) {
+            painter.extend(pieces);
+        }
+    }
+}
+
+/// The outline of `rect` with corners rounded to `radius`, as a closed path
+/// whose last point leads back to its first.
+fn rounded_rect_path(rect: Rect, radius: f32) -> Vec<Pos2> {
+    const CORNER_STEPS: usize = 4;
+    let radius = radius.min(rect.width() * 0.5).min(rect.height() * 0.5);
+    let corners = [
+        (rect.right_top() + egui::vec2(-radius, radius), -90.0_f32),
+        (rect.right_bottom() + egui::vec2(-radius, -radius), 0.0),
+        (rect.left_bottom() + egui::vec2(radius, -radius), 90.0),
+        (rect.left_top() + egui::vec2(radius, radius), 180.0),
+    ];
+    corners
+        .into_iter()
+        .flat_map(|(center, from)| {
+            (0..=CORNER_STEPS).map(move |step| {
+                let angle = (from + 90.0 * step as f32 / CORNER_STEPS as f32).to_radians();
+                center + radius * egui::vec2(angle.cos(), angle.sin())
+            })
+        })
+        .collect()
 }
 
 pub fn draw_geometry(
@@ -75,7 +205,7 @@ pub fn draw_geometry(
             );
             painter.rect_stroke(
                 rect,
-                (RECTANGLE_CORNER_POINTS * viewport.zoom).clamp(3.0, 9.0),
+                corner_radius(viewport),
                 stroke,
                 egui::StrokeKind::Middle,
             );
@@ -127,7 +257,7 @@ pub fn draw_geometry(
             );
             painter.rect_stroke(
                 rect,
-                (RECTANGLE_CORNER_POINTS * viewport.zoom).clamp(3.0, 9.0),
+                corner_radius(viewport),
                 stroke,
                 egui::StrokeKind::Middle,
             );

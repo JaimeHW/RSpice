@@ -4,6 +4,7 @@ use crate::state::{
     DesignNote, DesignNoteKind, DesignReviewState, DocumentationShape, DocumentationShapeGeometry,
     NetLabel, NetNamingPolicy, Point, SchematicGridPitch, SchematicState,
 };
+use rspice_design::schematic::documentation_shape::SymbolStyle;
 
 impl SchematicState {
     /// Make the changes a find and replace listed, as one undo step.
@@ -67,11 +68,12 @@ impl SchematicState {
         &mut self,
         expected: DocumentationShape,
         geometry: DocumentationShapeGeometry,
+        style: SymbolStyle,
     ) -> Result<bool, String> {
         let read_only = self.session.read_only;
         let Some(change) = self
             .design
-            .prepare_documentation_shape_properties(expected, geometry)?
+            .prepare_documentation_shape_properties(expected, geometry, style)?
         else {
             return Ok(false);
         };

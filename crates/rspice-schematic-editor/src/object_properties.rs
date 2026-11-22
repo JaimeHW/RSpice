@@ -11,7 +11,10 @@
 use rspice_design::schematic::{
     bus::{Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation},
     design_note::{DesignNote, DesignNoteKind, DesignReviewState},
-    documentation_shape::{DocumentationShape, DocumentationShapeKind, geometry_from_points},
+    documentation_shape::{
+        DocumentationShape, DocumentationShapeGeometry, DocumentationShapeKind, SymbolDash,
+        SymbolFill, SymbolStroke, SymbolStyle, geometry_from_points,
+    },
     net_label::NetLabel,
     owned::named_net::NamedNetTarget,
 };
@@ -74,10 +77,159 @@ pub struct DesignNoteObjectPropertiesDraft {
     pub review_state: Option<DesignReviewState>,
 }
 
+/// A shape's fields as typed. A rectangle, and a callout's box, are told as
+/// where their top-left corner stands and how wide and tall they are; a line,
+/// an arc and a polygon by the points that define them.
 #[derive(Debug, Clone)]
 pub struct DocumentationShapeObjectPropertiesDraft {
     pub original: DocumentationShape,
+    /// Each pair of fields: a point's X and Y, or a width and a height.
     pub points: Vec<(String, String)>,
+    pub style: SymbolStyle,
+}
+
+/// What one pair of a shape draft's fields stands for.
+enum ShapeFields {
+    Point(String),
+    Size,
+}
+
+impl DocumentationShapeObjectPropertiesDraft {
+    pub fn new(shape: &DocumentationShape) -> Self {
+        let pair = |x: i32, y: i32| (x.to_string(), y.to_string());
+        let points = match &shape.geometry {
+            DocumentationShapeGeometry::Rectangle { first, opposite } => {
+                let (corner, width, height) = rect_fields(*first, *opposite);
+                vec![pair(corner.x, corner.y), pair(width, height)]
+            }
+            DocumentationShapeGeometry::Callout {
+                tip,
+                elbow,
+                box_corner,
+            } => {
+                let (corner, width, height) = rect_fields(*elbow, *box_corner);
+                vec![
+                    pair(tip.x, tip.y),
+                    pair(corner.x, corner.y),
+                    pair(width, height),
+                ]
+            }
+            geometry => geometry
+                .points()
+                .into_iter()
+                .map(|point| pair(point.x, point.y))
+                .collect(),
+        };
+        Self {
+            original: shape.clone(),
+            points,
+            style: shape.style,
+        }
+    }
+
+    /// The geometry the fields describe, or what is wrong with them. Fields
+    /// left as they opened keep the shape exactly as it was drawn.
+    pub fn geometry(&self) -> Result<DocumentationShapeGeometry, String> {
+        let kind = self.original.kind();
+        let mut values = Vec::with_capacity(self.points.len());
+        for ((x, y), fields) in self
+            .points
+            .iter()
+            .zip(shape_fields(kind, self.points.len()))
+        {
+            let (x_name, y_name) = match &fields {
+                ShapeFields::Point(name) => (format!("{name} X"), format!("{name} Y")),
+                ShapeFields::Size => ("Width".to_owned(), "Height".to_owned()),
+            };
+            let whole = |text: &str, name: &str| {
+                text.trim()
+                    .parse::<i32>()
+                    .map_err(|_| format!("{name} must be a whole number."))
+            };
+            let (x, y) = (whole(x, &x_name)?, whole(y, &y_name)?);
+            if matches!(fields, ShapeFields::Size) && (x <= 0 || y <= 0) {
+                return Err(format!(
+                    "{} must be more than zero.",
+                    if x <= 0 { "Width" } else { "Height" }
+                ));
+            }
+            values.push(Point::new(x, y));
+        }
+        let opposite = |corner: Point, size: Point| {
+            Point::new(
+                corner.x.saturating_add(size.x),
+                corner.y.saturating_add(size.y),
+            )
+        };
+        let candidate = match (kind, values.as_slice()) {
+            (DocumentationShapeKind::Rectangle, [corner, size]) => {
+                DocumentationShapeGeometry::Rectangle {
+                    first: *corner,
+                    opposite: opposite(*corner, *size),
+                }
+            }
+            (DocumentationShapeKind::Callout, [tip, corner, size]) => {
+                // The leader meets the box at the corner nearest its tip.
+                let far = opposite(*corner, *size);
+                let x = if tip.x.abs_diff(corner.x) <= tip.x.abs_diff(far.x) {
+                    (corner.x, far.x)
+                } else {
+                    (far.x, corner.x)
+                };
+                let y = if tip.y.abs_diff(corner.y) <= tip.y.abs_diff(far.y) {
+                    (corner.y, far.y)
+                } else {
+                    (far.y, corner.y)
+                };
+                DocumentationShapeGeometry::Callout {
+                    tip: *tip,
+                    elbow: Point::new(x.0, y.0),
+                    box_corner: Point::new(x.1, y.1),
+                }
+            }
+            (kind, points) => {
+                geometry_from_points(kind, points).map_err(|error| error.to_string())?
+            }
+        };
+        if Self::new(&DocumentationShape {
+            geometry: candidate.clone(),
+            ..self.original.clone()
+        })
+        .points
+            == Self::new(&self.original).points
+        {
+            return Ok(self.original.geometry.clone());
+        }
+        candidate.validate().map_err(|error| error.to_string())?;
+        Ok(candidate)
+    }
+}
+
+/// The top-left corner of the box two opposite corners span, and its width
+/// and height.
+fn rect_fields(first: Point, opposite: Point) -> (Point, i32, i32) {
+    let corner = Point::new(first.x.min(opposite.x), first.y.min(opposite.y));
+    let extent = |a: i32, b: i32| i32::try_from(a.abs_diff(b)).unwrap_or(i32::MAX);
+    (
+        corner,
+        extent(first.x, opposite.x),
+        extent(first.y, opposite.y),
+    )
+}
+
+fn shape_fields(kind: DocumentationShapeKind, count: usize) -> Vec<ShapeFields> {
+    let point = |name: &str| ShapeFields::Point(name.to_owned());
+    match kind {
+        DocumentationShapeKind::Rectangle => vec![point("Position"), ShapeFields::Size],
+        DocumentationShapeKind::Callout => {
+            vec![point("Target"), point("Box position"), ShapeFields::Size]
+        }
+        DocumentationShapeKind::Line => vec![point("Start"), point("End")],
+        DocumentationShapeKind::Arc => vec![point("Start"), point("Through"), point("End")],
+        DocumentationShapeKind::Polygon => (1..=count)
+            .map(|index| ShapeFields::Point(format!("Vertex {index}")))
+            .collect(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -158,20 +310,10 @@ impl ObjectPropertiesDraft {
                     )
             }
             Self::DocumentationShape(draft) => {
-                let points: Option<Vec<_>> = draft
-                    .points
-                    .iter()
-                    .map(|(x, y)| {
-                        x.trim()
-                            .parse::<i32>()
-                            .ok()
-                            .zip(y.trim().parse::<i32>().ok())
-                            .map(|(x, y)| Point::new(x, y))
-                    })
-                    .collect();
-                points
-                    .and_then(|points| geometry_from_points(draft.original.kind(), &points).ok())
-                    .is_none_or(|geometry| geometry != draft.original.geometry)
+                draft.style != draft.original.style
+                    || draft
+                        .geometry()
+                        .map_or(true, |geometry| geometry != draft.original.geometry)
             }
         }
     }
@@ -382,12 +524,23 @@ pub fn show(
         }
         ObjectPropertiesDraft::DocumentationShape(draft) => {
             let kind = draft.original.kind();
-            for (index, (x, y)) in draft.points.iter_mut().enumerate() {
+            let fields = shape_fields(kind, draft.points.len());
+            for (index, ((x, y), fields)) in draft.points.iter_mut().zip(fields).enumerate() {
                 let id = egui::Id::new(("documentation-shape-point", index));
-                let (x, y) = rows.point(&documentation_point_name(kind, index), id, x, y);
-                focus.get_or_insert(x.id);
-                edited |= x.changed() || y.changed();
+                match fields {
+                    ShapeFields::Point(name) => {
+                        let (x, y) = rows.point(&name, id, x, y);
+                        focus.get_or_insert(x.id);
+                        edited |= x.changed() || y.changed();
+                    }
+                    ShapeFields::Size => {
+                        let width = rows.text("Width", id.with("width"), x, "");
+                        let height = rows.text("Height", id.with("height"), y, "");
+                        edited |= width.changed() || height.changed();
+                    }
+                }
             }
+            edited |= shape_style_rows(rows, kind, &mut draft.style);
         }
     }
     (focus, edited)
@@ -424,18 +577,61 @@ fn orientation_row(rows: &mut FormRows<'_>, orientation: &mut BusTapOrientation)
     })
 }
 
-fn documentation_point_name(kind: DocumentationShapeKind, index: usize) -> String {
-    match (kind, index) {
-        (DocumentationShapeKind::Rectangle, 0) => "First corner".to_owned(),
-        (DocumentationShapeKind::Rectangle, _) => "Opposite corner".to_owned(),
-        (DocumentationShapeKind::Line, 0) => "Start".to_owned(),
-        (DocumentationShapeKind::Line, _) => "End".to_owned(),
-        (DocumentationShapeKind::Arc, 0) => "Start".to_owned(),
-        (DocumentationShapeKind::Arc, 1) => "Through".to_owned(),
-        (DocumentationShapeKind::Arc, _) => "End".to_owned(),
-        (DocumentationShapeKind::Callout, 0) => "Target".to_owned(),
-        (DocumentationShapeKind::Callout, 1) => "First box corner".to_owned(),
-        (DocumentationShapeKind::Callout, _) => "Opposite box corner".to_owned(),
-        (DocumentationShapeKind::Polygon, _) => format!("Vertex {}", index + 1),
+/// A shape's style as the symbol editor names it: the outline's stroke and
+/// dash, and a closed shape's fill. Returns whether a choice changed.
+fn shape_style_rows(
+    rows: &mut FormRows<'_>,
+    kind: DocumentationShapeKind,
+    style: &mut SymbolStyle,
+) -> bool {
+    fn choice<T: Copy + PartialEq>(
+        rows: &mut FormRows<'_>,
+        label: &str,
+        id: &str,
+        all: &[T],
+        name: fn(T) -> &'static str,
+        value: &mut T,
+    ) -> bool {
+        let options = all
+            .iter()
+            .map(|item| name(*item).to_owned())
+            .collect::<Vec<_>>();
+        match rows
+            .select(label, id, name(*value), &options)
+            .and_then(|index| all.get(index))
+        {
+            Some(next) if next != value => {
+                *value = *next;
+                true
+            }
+            _ => false,
+        }
     }
+    let mut edited = choice(
+        rows,
+        "Stroke",
+        "documentation-shape-stroke",
+        &SymbolStroke::ALL,
+        SymbolStroke::label,
+        &mut style.stroke,
+    );
+    edited |= choice(
+        rows,
+        "Dash",
+        "documentation-shape-dash",
+        &SymbolDash::ALL,
+        SymbolDash::label,
+        &mut style.dash,
+    );
+    if kind.is_closed() {
+        edited |= choice(
+            rows,
+            "Fill",
+            "documentation-shape-fill",
+            &SymbolFill::ALL,
+            SymbolFill::label,
+            &mut style.fill,
+        );
+    }
+    edited
 }

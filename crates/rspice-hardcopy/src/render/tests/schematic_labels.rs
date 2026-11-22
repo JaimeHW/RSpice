@@ -383,7 +383,7 @@ fn semantic(component: Component) -> SemanticComponent {
     }
 }
 
-fn sheet(components: Vec<Component>) -> SemanticSchematic {
+pub(super) fn sheet(components: Vec<Component>) -> SemanticSchematic {
     SemanticSchematic {
         view_path: "test-schematic".to_owned(),
         drawing_sheet: None,
@@ -469,21 +469,21 @@ pub(super) fn review_sheet() -> SemanticSchematic {
     sheet
 }
 
-struct Compiled {
-    primitives: Vec<ScenePrimitive>,
+pub(super) struct Compiled {
+    pub(super) primitives: Vec<ScenePrimitive>,
     minimum: SemanticPoint,
 }
 
 impl Compiled {
     /// A world point in this scene's micrometres.
-    fn at(&self, x_wu: f64, y_wu: f64) -> (i64, i64) {
+    pub(super) fn at(&self, x_wu: f64, y_wu: f64) -> (i64, i64) {
         (
             (x_wu * UM as f64).round() as i64 - self.minimum.x_um,
             (y_wu * UM as f64).round() as i64 - self.minimum.y_um,
         )
     }
 
-    fn texts(&self) -> Vec<(&str, i64, i64, TextAnchor, u64)> {
+    pub(super) fn texts(&self) -> Vec<(&str, i64, i64, TextAnchor, u64)> {
         self.primitives
             .iter()
             .filter_map(|primitive| match primitive {
@@ -522,7 +522,7 @@ impl Compiled {
     }
 }
 
-fn compile(semantic: &SemanticSchematic) -> Compiled {
+pub(super) fn compile(semantic: &SemanticSchematic) -> Compiled {
     let bounds = schematic_bounds(semantic).unwrap();
     let mapping = PrintMappingTable::try_new(PrintMappingSaveScope::Document, Vec::new()).unwrap();
     let mut compiler = SemanticSceneCompiler::new(

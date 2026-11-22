@@ -2,7 +2,7 @@
 use super::super::{
     design_note::{DesignNote, DesignNoteKind, DesignReviewState},
     document_policy::{NetNamingPolicy, SchematicGridPitch},
-    documentation_shape::{DocumentationShape, DocumentationShapeGeometry},
+    documentation_shape::{DocumentationShape, DocumentationShapeGeometry, SymbolStyle},
     net_label::NetLabel,
 };
 use super::Schematic;
@@ -153,6 +153,7 @@ impl Schematic {
         &mut self,
         expected: DocumentationShape,
         geometry: DocumentationShapeGeometry,
+        style: SymbolStyle,
     ) -> Result<Option<PreparedPropertyEdit<'_>>, String> {
         let Some(current) = self
             .document
@@ -165,8 +166,9 @@ impl Schematic {
         if current != &expected {
             return Err("The selected documentation shape changed before commit.".to_owned());
         }
-        let candidate =
-            DocumentationShape::new(expected.id, geometry).map_err(|error| error.to_string())?;
+        let candidate = DocumentationShape::new(expected.id, geometry)
+            .map_err(|error| error.to_string())?
+            .with_style(style);
         if candidate == expected {
             return Ok(None);
         }

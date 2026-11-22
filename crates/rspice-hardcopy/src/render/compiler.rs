@@ -412,6 +412,21 @@ impl<'a> SemanticSceneCompiler<'a> {
                 drawing_metrics::BUS_TAP_WIDTH_WORLD,
             )?,
         );
+        let documentation_stroke = self.mapped_stroke(
+            PrintObjectKind::Layer,
+            "layer:drawing-documentation",
+            StrokeStyle::try_new(
+                SemanticColor::Secondary,
+                Length::from_micrometres(220),
+                StrokePattern::Solid,
+                None,
+            )?,
+        );
+        // A filled shape's inside prints first, under every wire, part and
+        // line of lettering, as the canvas lays it.
+        for shape in &schematic.documentation_shapes {
+            self.documentation_shape_fill(shape, documentation_stroke)?;
+        }
         for wire in &schematic.wires {
             if let Some(bridge) = wire.drawn_bridge() {
                 self.wire_bridge(wire.points[0], bridge)?;
@@ -502,18 +517,11 @@ impl<'a> SemanticSceneCompiler<'a> {
                 origin = self.offset_scene_point(origin, 0, (3_400.0 * scale).round() as i64)?;
             }
         }
-        let documentation_stroke = self.mapped_stroke(
-            PrintObjectKind::Layer,
-            "layer:drawing-documentation",
-            StrokeStyle::try_new(
-                SemanticColor::Secondary,
-                Length::from_micrometres(220),
-                StrokePattern::Solid,
-                None,
-            )?,
-        );
         for shape in &schematic.documentation_shapes {
-            self.documentation_shape(&shape.geometry, documentation_stroke)?;
+            self.documentation_shape(
+                &shape.geometry,
+                symbol_document::styled_print_stroke(documentation_stroke, shape.style),
+            )?;
         }
         self.add_mapping_legend(
             PrintObjectKind::Layer,
@@ -1080,6 +1088,66 @@ impl<'a> SemanticSceneCompiler<'a> {
                 (anchor, SceneTextRotation::Upright),
             )?;
         }
+        Ok(())
+    }
+
+    /// The inside of a closed shape its style fills: a light tint of the
+    /// outline's ink, or the ink itself through the layer's print mapping.
+    fn documentation_shape_fill(
+        &mut self,
+        shape: &DocumentationShape,
+        stroke: StrokeStyle,
+    ) -> Result<(), HardcopyRenderError> {
+        let fill = match shape.style.fill {
+            SymbolFill::None => return Ok(()),
+            SymbolFill::Background => SceneFill::Tint {
+                color: stroke.color,
+            },
+            SymbolFill::Solid => {
+                match self.mapped_fill(
+                    PrintObjectKind::Layer,
+                    "layer:drawing-documentation",
+                    Some(SceneFill::solid(stroke.color)),
+                ) {
+                    Some(fill) => fill,
+                    None => return Ok(()),
+                }
+            }
+        };
+        let rect = |this: &Self, first: SchematicPoint, opposite: SchematicPoint| {
+            let first = this.schematic_point(first)?;
+            let opposite = this.schematic_point(opposite)?;
+            SceneRect::try_new(
+                first.x.min(opposite.x),
+                first.y.min(opposite.y),
+                Length::from_micrometres(first.x.micrometres().abs_diff(opposite.x.micrometres())),
+                Length::from_micrometres(first.y.micrometres().abs_diff(opposite.y.micrometres())),
+            )
+        };
+        let primitive = match &shape.geometry {
+            DocumentationShapeGeometry::Rectangle { first, opposite } => ScenePrimitive::Rect {
+                rect: rect(self, *first, *opposite)?,
+                stroke: None,
+                fill: Some(fill),
+            },
+            DocumentationShapeGeometry::Callout {
+                elbow, box_corner, ..
+            } => ScenePrimitive::Rect {
+                rect: rect(self, *elbow, *box_corner)?,
+                stroke: None,
+                fill: Some(fill),
+            },
+            DocumentationShapeGeometry::Polygon { points } => ScenePrimitive::Polyline {
+                points: self.schematic_polyline(points)?,
+                closed: true,
+                stroke: symbol_document::styled_print_stroke(stroke, shape.style),
+                fill: Some(fill),
+            },
+            DocumentationShapeGeometry::Line { .. } | DocumentationShapeGeometry::Arc { .. } => {
+                return Ok(());
+            }
+        };
+        self.primitives.push(primitive);
         Ok(())
     }
 

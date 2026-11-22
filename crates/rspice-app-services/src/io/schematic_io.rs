@@ -586,6 +586,39 @@ mod tests {
         assert!(loaded.document().documentation_shapes.is_empty());
     }
 
+    /// A shape's stroke, dash and fill are saved with it and come back as
+    /// they were; a plain shape writes no style at all.
+    #[test]
+    fn a_shapes_stroke_dash_and_fill_survive_a_save_and_a_reopen() {
+        use rspice_design::schematic::documentation_shape::{
+            SymbolDash, SymbolFill, SymbolStroke, SymbolStyle,
+        };
+        let mut shapes = documentation_shape_fixture();
+        shapes[0] = shapes[0].clone().with_style(SymbolStyle {
+            stroke: SymbolStroke::Heavy,
+            dash: SymbolDash::Dashed,
+            fill: SymbolFill::Background,
+        });
+        shapes[2] = shapes[2].clone().with_style(SymbolStyle {
+            stroke: SymbolStroke::Thin,
+            dash: SymbolDash::Dotted,
+            fill: SymbolFill::Solid,
+        });
+        let mut schematic = SchematicState::default();
+        schematic.document_mut_for_test().documentation_shapes = shapes.clone();
+
+        let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
+        let loaded = load_schematic_text(&json, None).unwrap();
+        assert_eq!(loaded.document().documentation_shapes, shapes);
+
+        let written: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let saved = &written["schematic"]["documentation_shapes"];
+        assert_eq!(saved[0]["style"]["stroke"], "heavy");
+        assert_eq!(saved[0]["style"]["dash"], "dashed");
+        assert_eq!(saved[2]["style"]["fill"], "solid");
+        assert!(saved[1].get("style").is_none(), "{}", saved[1]);
+    }
+
     #[test]
     fn probe_flags_round_trip_and_legacy_documents_default_empty() {
         let mut schematic = SchematicState::default();

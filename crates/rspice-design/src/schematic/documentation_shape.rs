@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use rspice_design_model::Point;
+pub use rspice_design_model::symbol_geometry::{SymbolDash, SymbolFill, SymbolStroke, SymbolStyle};
 
 pub const MAX_DOCUMENTATION_POLYGON_POINTS: usize = 512;
 
@@ -49,6 +50,11 @@ impl DocumentationShapeKind {
 
     pub const fn commits_automatically(self) -> bool {
         !matches!(self, Self::Polygon)
+    }
+
+    /// Whether the shape encloses an inside a fill can paint.
+    pub const fn is_closed(self) -> bool {
+        matches!(self, Self::Rectangle | Self::Polygon | Self::Callout)
     }
 }
 
@@ -232,6 +238,11 @@ pub struct DocumentationShape {
     pub id: u64,
     pub geometry: DocumentationShapeGeometry,
     pub layer: DocumentationShapeLayer,
+    /// The weight and pattern of the outline and the paint inside a closed
+    /// shape, in the words a symbol's shapes use. An open shape keeps no
+    /// fill.
+    #[serde(default, skip_serializing_if = "SymbolStyle::is_plain")]
+    pub style: SymbolStyle,
 }
 
 impl DocumentationShape {
@@ -244,7 +255,18 @@ impl DocumentationShape {
             id,
             geometry,
             layer: DocumentationShapeLayer::DrawingDocumentation,
+            style: SymbolStyle::default(),
         })
+    }
+
+    /// The same shape drawn in `style`; an open shape takes no fill.
+    #[must_use]
+    pub fn with_style(mut self, mut style: SymbolStyle) -> Self {
+        if !self.kind().is_closed() {
+            style.fill = SymbolFill::None;
+        }
+        self.style = style;
+        self
     }
 
     pub const fn kind(&self) -> DocumentationShapeKind {

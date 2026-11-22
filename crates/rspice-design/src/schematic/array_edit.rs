@@ -623,6 +623,7 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
                     }
                 })?;
                 item.layer = source.layer;
+                item.style = source.style;
                 if let Some((other_id, _)) = radial_shape_geometries.iter().find(|(_, existing)| {
                     documentation_geometries_equivalent(existing, &item.geometry)
                 }) {

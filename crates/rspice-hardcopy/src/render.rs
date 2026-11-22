@@ -44,7 +44,8 @@ use super::sources::{
     SemanticSchematic, SemanticTable,
 };
 use rspice_design::schematic::{
-    component::Component, documentation_shape::DocumentationShapeGeometry,
+    component::Component,
+    documentation_shape::{DocumentationShape, DocumentationShapeGeometry},
 };
 use rspice_design::symbol::{
     SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle, SymbolTextAlign,

@@ -163,15 +163,7 @@ impl ObjectPropertiesDialogState {
         *self = Self {
             open: true,
             draft: Some(ObjectPropertiesDraft::DocumentationShape(
-                DocumentationShapeObjectPropertiesDraft {
-                    original: shape.clone(),
-                    points: shape
-                        .geometry
-                        .points()
-                        .into_iter()
-                        .map(|point| (point.x.to_string(), point.y.to_string()))
-                        .collect(),
-                },
+                DocumentationShapeObjectPropertiesDraft::new(shape),
             )),
             source: Some(source),
             view_path,
@@ -225,6 +217,7 @@ pub enum PropertyCommit {
     DocumentationShape {
         expected: DocumentationShape,
         geometry: DocumentationShapeGeometry,
+        style: rspice_design::schematic::documentation_shape::SymbolStyle,
     },
 }
 
@@ -323,6 +316,7 @@ enum DraftResolutionSource {
     DocumentationShape {
         original: DocumentationShape,
         points: Vec<(String, String)>,
+        style: rspice_design::schematic::documentation_shape::SymbolStyle,
     },
 }
 
@@ -573,6 +567,7 @@ pub fn draft_resolution_key(model: &Model, draft: &ObjectPropertiesDraft) -> Dra
             DraftResolutionSource::DocumentationShape {
                 original: draft.original.clone(),
                 points: draft.points.clone(),
+                style: draft.style,
             },
         ),
     };
@@ -669,9 +664,11 @@ fn apply_commit(
             text,
             review_state,
         } => schematic.edit_design_note_properties(expected, kind, text, review_state),
-        PropertyCommit::DocumentationShape { expected, geometry } => {
-            schematic.edit_documentation_shape_properties(expected, geometry)
-        }
+        PropertyCommit::DocumentationShape {
+            expected,
+            geometry,
+            style,
+        } => schematic.edit_documentation_shape_properties(expected, geometry, style),
     }
 }
 
@@ -749,39 +746,18 @@ fn validate_documentation_shape_draft(
             "The selected documentation shape changed while properties were open.",
         );
     }
-    let mut points = Vec::with_capacity(draft.points.len());
-    for (index, (x, y)) in draft.points.iter().enumerate() {
-        let Ok(x) = x.trim().parse::<i32>() else {
-            return DraftValidation::Invalid {
-                field: None,
-                message: format!(
-                    "Point {} X must be a whole number in the signed 32-bit coordinate range.",
-                    index + 1
-                ),
-            };
-        };
-        let Ok(y) = y.trim().parse::<i32>() else {
-            return DraftValidation::Invalid {
-                field: None,
-                message: format!(
-                    "Point {} Y must be a whole number in the signed 32-bit coordinate range.",
-                    index + 1
-                ),
-            };
-        };
-        points.push(Point::new(x, y));
-    }
-    match crate::state::geometry_from_points(draft.original.kind(), &points) {
+    match draft.geometry() {
         Ok(geometry) => DraftValidation::Valid(
             Box::new(PropertyCommit::DocumentationShape {
                 expected: draft.original.clone(),
                 geometry,
+                style: draft.style,
             }),
             None,
         ),
-        Err(error) => DraftValidation::Invalid {
+        Err(message) => DraftValidation::Invalid {
             field: None,
-            message: error.to_string(),
+            message,
         },
     }
 }
@@ -1428,6 +1404,7 @@ pub mod tests {
                 ("10".to_owned(), "-3".to_owned()),
                 ("25".to_owned(), "12".to_owned()),
             ],
+            style: original.style,
         };
 
         let DraftValidation::Valid(commit, None) =
@@ -1466,11 +1443,73 @@ pub mod tests {
                 ("10".to_owned(), "10".to_owned()),
                 ("20".to_owned(), "20".to_owned()),
             ],
+            style: Default::default(),
         };
         assert!(matches!(
             validate_documentation_shape_draft(&schematic, &invalid),
             DraftValidation::Invalid { field: None, .. }
         ));
+    }
+
+    /// Properties on a rectangle tells where it stands and how wide and tall
+    /// it is, not its two raw corners, and edits its stroke with them: one
+    /// undo step. Fields left as they opened change nothing.
+    #[test]
+    fn a_rectangles_properties_edit_its_width_height_and_stroke() {
+        use rspice_design::schematic::documentation_shape::SymbolStroke;
+        // Drawn from its bottom-right corner to its top-left one.
+        let original = DocumentationShape::new(
+            23,
+            DocumentationShapeGeometry::Rectangle {
+                first: Point::new(40, 30),
+                opposite: Point::new(0, 0),
+            },
+        )
+        .unwrap();
+        let mut schematic = SchematicState::default();
+        schematic
+            .document_mut_for_test()
+            .documentation_shapes
+            .push(original.clone());
+        schematic.init_undo_history();
+
+        let mut draft = DocumentationShapeObjectPropertiesDraft::new(&original);
+        let pair = |x: &str, y: &str| (x.to_owned(), y.to_owned());
+        assert_eq!(draft.points, vec![pair("0", "0"), pair("40", "30")]);
+        assert_eq!(draft.geometry(), Ok(original.geometry.clone()));
+        assert!(!ObjectPropertiesDraft::DocumentationShape(draft.clone()).is_modified());
+
+        draft.points[1] = pair("60", "45");
+        draft.style.stroke = SymbolStroke::Heavy;
+        let DraftValidation::Valid(commit, None) =
+            validate_documentation_shape_draft(&schematic, &draft)
+        else {
+            panic!("a new width and height were refused");
+        };
+        assert!(apply_commit(&mut schematic, *commit, &|_| true).unwrap());
+        let edited = &schematic.document().documentation_shapes[0];
+        assert_eq!(
+            edited.geometry,
+            DocumentationShapeGeometry::Rectangle {
+                first: Point::new(0, 0),
+                opposite: Point::new(60, 45),
+            }
+        );
+        assert_eq!(edited.style.stroke, SymbolStroke::Heavy);
+        assert!(schematic.undo());
+        assert_eq!(
+            schematic.document().documentation_shapes,
+            vec![original.clone()]
+        );
+        assert!(!schematic.can_undo());
+
+        draft.points[1] = pair("0", "45");
+        let DraftValidation::Invalid { message, .. } =
+            validate_documentation_shape_draft(&schematic, &draft)
+        else {
+            panic!("a rectangle no wide was accepted");
+        };
+        assert_eq!(message, "Width must be more than zero.");
     }
 
     #[test]

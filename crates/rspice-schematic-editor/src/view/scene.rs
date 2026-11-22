@@ -3,7 +3,10 @@
 use super::{
     design_notes::{conservative_world_bounds as design_note_world_bounds, draw_design_note},
     design_view::{DesignView, design_note_visible},
-    documentation_shapes::{draw_documentation_shape, world_bounds as documentation_shape_bounds},
+    documentation_shapes::{
+        draw_documentation_shape, draw_documentation_shape_fill,
+        world_bounds as documentation_shape_bounds,
+    },
     drawing::{
         ConductorInk, JunctionPaint, ProbeEmphasis, ProbeVisualStatus, VariantMark,
         bus_band_width_pt, bus_tap_width_pt, chain_conductors, draw_bus, draw_bus_tap,
@@ -125,6 +128,28 @@ pub fn draw_content(
     let visible_wire_indices = cache
         .map(|cache| cache.wire_indices_in_world_rect(wx0, wy0, wx1, wy1))
         .unwrap_or_else(|| (0..view.design.document.wires.len()).collect());
+
+    // A filled shape's inside goes beneath everything it may enclose.
+    let shape_in_view =
+        |shape: &rspice_design::schematic::documentation_shape::DocumentationShape| {
+            let (min, max) = documentation_shape_bounds(shape);
+            view.design.object_is_visible(shape.id)
+                && (max.x as f32) >= wx0
+                && (min.x as f32) <= wx1
+                && (max.y as f32) >= wy0
+                && (min.y as f32) <= wy1
+        };
+    for shape in view
+        .design
+        .document
+        .documentation_shapes
+        .iter()
+        .filter(|shape| shape_in_view(shape))
+    {
+        let selected = view.editor.selection.has_documentation_shape(shape.id)
+            || band_annotations.is_some_and(|band| band.takes_documentation_shape(shape));
+        draw_documentation_shape_fill(painter, viewport, shape, selected, palette);
+    }
 
     // A hovered conductor's halo goes beneath every conductor.
     let selection = &view.editor.selection;
@@ -367,18 +392,13 @@ pub fn draw_content(
 
     // Presentation geometry is a background documentation layer. It remains
     // selectable, but is intentionally painted below authored text and names.
-    for shape in &view.design.document.documentation_shapes {
-        if !view.design.object_is_visible(shape.id) {
-            continue;
-        }
-        let (min, max) = documentation_shape_bounds(shape);
-        if (max.x as f32) < wx0
-            || (min.x as f32) > wx1
-            || (max.y as f32) < wy0
-            || (min.y as f32) > wy1
-        {
-            continue;
-        }
+    for shape in view
+        .design
+        .document
+        .documentation_shapes
+        .iter()
+        .filter(|shape| shape_in_view(shape))
+    {
         let selected = view.editor.selection.has_documentation_shape(shape.id)
             || band_annotations.is_some_and(|band| band.takes_documentation_shape(shape));
         draw_documentation_shape(
