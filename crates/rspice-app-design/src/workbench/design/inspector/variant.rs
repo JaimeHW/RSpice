@@ -2,7 +2,8 @@
 //!
 //! The section comes first, above Identity, and only while a variant is
 //! chosen. Its rows change what that variant does to the part: fit it, leave
-//! it off, put another library cell in its place, or give it another value.
+//! it off, put another library cell in its place, choose the section of
+//! that cell's model the netlist reads, or give it another value.
 //! Every row below it edits the base design, which every variant shares. Each
 //! change is one undo step. An override inside a cell reaches every copy of
 //! that cell, and the section says so when there is more than one.
@@ -293,6 +294,7 @@ pub fn variant_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: &
     match part.effective().cloned() {
         Some(VariantObjectOverride::Substitute { replacement }) => {
             substitute_row(ui, cx, component, &key, &part, &variant_name, &replacement);
+            section_row(ui, cx, component, &key, &part, &variant_name, &replacement);
             value_row(ui, cx, component, &key, &part, &variant_name, editable);
             if replacement.qualification != VariantQualificationState::Current {
                 property_row_problem(
@@ -547,6 +549,99 @@ fn substitutes(
     list
 }
 
+/// The sections the substitute's model states, by name, found as the deck
+/// finds its model: the cell's own name, then the value it is given, in the
+/// model library the substitute names.
+fn substitute_sections(
+    model: &Model,
+    replacement: &ComponentSubstitution,
+    value: &str,
+) -> Vec<String> {
+    let Some(library) = model
+        .model_library_manager
+        .get_library(&replacement.library)
+    else {
+        return Vec::new();
+    };
+    let value = value.trim();
+    let Some(card) = [
+        Some(replacement.cell.as_str()),
+        (!value.is_empty()).then_some(value),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|candidate| library.bindable_model(candidate)) else {
+        return Vec::new();
+    };
+    let mut sections = super::model_evidence::model_sections(library, card.name());
+    sections.sort_by_key(|section| section.to_ascii_lowercase());
+    sections.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    sections
+}
+
+/// The Section row of a substitute whose model states sections, as Design's
+/// own Section row is for a bound model: which section the netlist reads in
+/// this variant, the model's default first. A section the model no longer
+/// states stays the row's value, so the row says what the variant holds.
+fn section_row(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, DesignFeature>,
+    component: &Component,
+    key: &SchematicObjectKey,
+    part: &PartInVariant,
+    variant_name: &str,
+    current: &ComponentSubstitution,
+) {
+    let value = current
+        .value_override
+        .as_deref()
+        .unwrap_or(&component.value);
+    let sections = substitute_sections(cx.model, current, value);
+    let held = current.model_section.clone().unwrap_or_default();
+    if sections.is_empty() && held.is_empty() {
+        return;
+    }
+    let mut options = vec![(String::new(), "default".to_owned())];
+    options.extend(
+        sections
+            .into_iter()
+            .map(|section| (section.clone(), section)),
+    );
+    if !options
+        .iter()
+        .any(|(section, _)| section.eq_ignore_ascii_case(&held))
+    {
+        options.push((held.clone(), held.clone()));
+    }
+    let mut picked = held.clone();
+    let editable = !cx.model.schematic_edit_read_only();
+    if !property_row_combo(
+        ui,
+        "Section",
+        ("variant-section", component.id),
+        &mut picked,
+        &options,
+        editable,
+    ) || picked == held
+    {
+        return;
+    }
+    let mut replacement = current.clone();
+    replacement.model_section = (!picked.is_empty()).then_some(picked);
+    let description = format!(
+        "Set {} model section to {} in {variant_name}",
+        component.name,
+        replacement.model_section.as_deref().unwrap_or("default")
+    );
+    commit_one(
+        cx,
+        key,
+        part,
+        Some(VariantObjectOverride::Substitute { replacement }),
+        &description,
+    );
+}
+
 /// The Value row: the part's value in this variant, which leaves its state
 /// alone. Empty is the base design's value, which the hint states.
 fn value_row(
@@ -769,5 +864,155 @@ mod tests {
             part.with_state(PartState::DoNotPopulate, None),
             Some(do_not_populate())
         );
+    }
+
+    /// A substitute whose model states sections gets a Section row that
+    /// offers them, and the section picked is the one the variant's
+    /// substitute then names.
+    #[test]
+    fn the_section_row_offers_the_substitute_models_sections_and_keeps_the_pick() {
+        use crate::state::model_library::{
+            DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelSectionDefinition,
+            ModelSectionQualification, ModelType,
+        };
+        use crate::state::{AssemblyVariantDraft, ComponentType, Point, VariantQualificationPlan};
+        use crate::workbench::framework::feature::harness::FeatureHarness;
+
+        let mut model = Model::session_start(
+            crate::state::pdk_config::PdkConfig::default(),
+            None,
+            rspice_app_state::workbench::workspace::restore_model_library_manager,
+        );
+        let mut library = ModelLibrary::new("qualified");
+        library.add_model(DeviceModel::new("res_aec", ModelType::Other));
+        library.model_definition_metadata.insert(
+            "res_aec".to_owned(),
+            ModelDefinitionMetadata {
+                schema_version: 1,
+                source_identity: None,
+                parameters: Vec::new(),
+                sections: ["typical", "automotive"]
+                    .map(|name| ModelSectionDefinition {
+                        name: name.to_owned(),
+                        parent: None,
+                        overrides: BTreeMap::new(),
+                        model_files: Vec::new(),
+                        qualification: ModelSectionQualification::Unqualified,
+                    })
+                    .into(),
+                statistics: Default::default(),
+                temperature_laws: Vec::new(),
+            },
+        );
+        model.model_library_manager.add_library(library);
+        let id = model
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        let key = part_key(&model, id).unwrap();
+        let replacement = ComponentSubstitution {
+            library: "qualified".to_owned(),
+            cell: "res_aec".to_owned(),
+            view: "symbol".to_owned(),
+            value_override: None,
+            model_section: None,
+            port_equivalence_digest: None,
+            qualification: VariantQualificationState::Current,
+        };
+        let mut catalog = (*model.workspace.content.design_management).clone();
+        let variant = catalog
+            .variants_mut()
+            .create(AssemblyVariantDraft {
+                name: "Automotive".to_owned(),
+                parent_id: None,
+                inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: BTreeMap::from([(
+                    key.clone(),
+                    VariantObjectOverride::Substitute { replacement },
+                )]),
+            })
+            .unwrap();
+        model
+            .workspace
+            .content
+            .replace_design_management(catalog)
+            .unwrap();
+        let mut harness =
+            FeatureHarness::<DesignFeature>::with_model(model, WorkbenchSession::default());
+        let component = harness
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .unwrap()
+            .clone();
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let frame = |harness: &mut FeatureHarness<DesignFeature>, events| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(420.0, 700.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        variant_section(ui, &mut harness.cx(), &component);
+                    });
+                },
+            )
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default()
+        };
+        let click = |id| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: id,
+                data: None,
+            })
+        };
+        let find = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str| {
+            nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| panic!("nothing is labelled {label:?}"))
+        };
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            nodes = frame(&mut harness, Vec::new());
+        }
+        let section = find(&nodes, "Section");
+        let _ = frame(&mut harness, vec![click(section)]);
+        let nodes = frame(&mut harness, Vec::new());
+        let _ = find(&nodes, "typical");
+        let automotive = find(&nodes, "automotive");
+        let _ = frame(&mut harness, vec![click(automotive)]);
+
+        let own = harness
+            .model
+            .workspace
+            .content
+            .design_management
+            .variants()
+            .find(variant)
+            .unwrap()
+            .definition()
+            .overrides
+            .get(&key)
+            .cloned();
+        let Some(VariantObjectOverride::Substitute { replacement }) = own else {
+            panic!("the part is no longer substituted: {own:?}");
+        };
+        assert_eq!(replacement.model_section.as_deref(), Some("automotive"));
     }
 }
