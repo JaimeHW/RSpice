@@ -42,6 +42,8 @@ fn a_repeating_trace_reads_its_period_and_frequency() {
             "V(out) freq",
         ]
     );
+    // Five whole cycles average to nothing the trace resolves.
+    assert_eq!(rows[3].value, "0 V", "{rows:?}");
     // One millisecond, read to four digits whether the crossings land on
     // it exactly or a rounding away.
     assert!(

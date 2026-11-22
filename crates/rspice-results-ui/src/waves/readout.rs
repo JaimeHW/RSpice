@@ -201,6 +201,9 @@ struct MeasuredTrace {
     /// Its mean period over the window, where it repeats there and is a
     /// time signal a reading keeps.
     period: Option<f64>,
+    /// The lowest and highest it reaches over its record, which a reading
+    /// finer than it resolves is settled against.
+    extent: Option<(f64, f64)>,
     first_row: usize,
 }
 
@@ -323,7 +326,21 @@ impl Measurements {
             return absent();
         };
         let digits = wording.significant_digits;
-        let fmt = |value| model.format_trace_value(trace, value, digits, wording.quantity_policy);
+        // A reading finer than the trace resolves reads 0, as its cursor
+        // readings do: a sine's average over whole cycles is 0, not the
+        // floating point's attovolts. Its period is read from its X, and is
+        // not settled.
+        let resolution = measured
+            .extent
+            .map_or(0.0, |extent| reading_resolution(extent, digits));
+        let fmt = |value| {
+            model.format_trace_value(
+                trace,
+                settled(value, resolution),
+                digits,
+                wording.quantity_policy,
+            )
+        };
         let period = measured.period.unwrap_or(f64::NAN);
         let value = match reading {
             Reading::Min => fmt(stats.min),
@@ -458,12 +475,19 @@ impl MeasurementPlan {
             let period = (planned.period && stats.is_ok())
                 .then(|| interval_period(&planned.x, &planned.y, &planned.shape, self.window))
                 .flatten();
+            // The whole record's extent is the window's own when there is
+            // none.
+            let extent = match (self.window, planned.branch) {
+                (None, None) => stats,
+                _ => interval_statistics(&planned.x, &planned.y, &planned.shape, None, None),
+            };
             let measured = MeasuredTrace {
                 trace: planned.trace,
                 branch: planned.branch,
                 stats,
                 rms: planned.rms,
                 period,
+                extent: extent.ok().map(|whole| (whole.min, whole.max)),
                 first_row: rows,
             };
             rows += measured.rows();
@@ -1144,12 +1168,14 @@ pub fn measurement_values(
             let period = (time && keeps(trace, branch) && stats.is_ok())
                 .then(|| interval_period(&trace.x, &trace.y, &trace.shape, window))
                 .flatten();
+            let extent = trace_interval_statistics(derived, model, trace, None, None);
             let measured = MeasuredTrace {
                 trace: index,
                 branch,
                 stats,
                 rms: has_rms(trace.kind),
                 period,
+                extent: extent.ok().map(|whole| (whole.min, whole.max)),
                 first_row: rows,
             };
             rows += measured.rows();
