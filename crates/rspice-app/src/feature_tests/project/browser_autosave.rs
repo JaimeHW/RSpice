@@ -423,6 +423,7 @@ fn in_the_browser_keep_then_save_leaves_nothing_unsaved() {
         );
         let _ = std::fs::remove_dir_all(root);
     }
+}
 
 /// A cell made before the page was left is only in the autosave: the
 /// reload's question lists it as new in the autosave, not as removed.

@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted};
-use super::with_cx;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
@@ -288,6 +287,7 @@ fn after_a_crash_keep_then_save_leaves_nothing_unsaved() {
         );
         let _ = std::fs::remove_dir_all(folder);
     }
+}
 
 /// A cell the crashed session created is only in the autosave: the question
 /// lists it as new in the autosave, as the autosave holds it, not as removed.
