@@ -12,7 +12,10 @@ use super::super::{
     },
 };
 use super::{DocumentEdit, Schematic};
+use crate::properties::PropertyCatalog;
+use crate::schematic::component_type::ComponentType;
 use std::collections::{BTreeSet, HashSet};
+use std::sync::LazyLock;
 
 /// Replace each expected instance by its candidate, as one undo step, after
 /// proving every expected instance unchanged and every candidate the same
@@ -87,6 +90,18 @@ pub enum SelectionBulkUnsetBehavior {
     LeaveUnchanged,
     SetExplicitValue,
     RestoreInheritedValue,
+}
+
+/// Whether an instance of `kind` may take a `temp` instance parameter: its
+/// property sheet declares one. The passives and the semiconductor devices
+/// do; sources, switches, controlled sources and ground do not, and the
+/// netlist refuses `temp=` on a source. A library cell has no built-in
+/// sheet; what its own card takes is left to it.
+pub fn takes_instance_temperature(kind: ComponentType) -> bool {
+    static CATALOG: LazyLock<PropertyCatalog> = LazyLock::new(PropertyCatalog::new);
+    CATALOG
+        .get(kind)
+        .is_none_or(|sheet| sheet.get("temp").is_some())
 }
 
 /// Why "Restore inherited value" cannot apply to a part's value.
@@ -194,6 +209,9 @@ pub fn mutate_component(
             Ok(true)
         }
         SelectionBulkProperty::Temperature => {
+            if !takes_instance_temperature(component.kind) {
+                return Err(format!("{} takes no temperature.", component.name));
+            }
             mutate_parameter(component, "temp", normalized, unset, restore)
         }
         SelectionBulkProperty::Tolerance | SelectionBulkProperty::ToleranceDistribution => {

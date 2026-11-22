@@ -275,6 +275,25 @@ fn bulk_edit_sets_the_value_of_the_ticked_parts() {
     );
 }
 
+/// Temperature reached every ticked part, so a source took `temp=` and the
+/// netlist refused it. A part whose kind takes no temperature is locked for
+/// it, as one without a tolerance is locked for Tolerance.
+#[test]
+fn temperature_reaches_only_parts_that_take_one() {
+    let mut state = DesignTestHost::default();
+    state.model.schematic.document_mut_for_test().components = vec![
+        Component::new(1, ComponentType::Resistor, Point::new(0, 0)),
+        Component::new(2, ComponentType::VoltageSource, Point::new(100, 0)),
+    ];
+    let rows = build_rows(
+        &state.model,
+        &SelectionBulkFilter::default(),
+        SelectionBulkProperty::Temperature,
+    );
+    let editable: Vec<bool> = rows.iter().map(SelectionBulkRow::editable).collect();
+    assert_eq!(editable, vec![true, false]);
+}
+
 /// The sections offered are the bound library's own, not a fixed list,
 /// and a library that defines none says so.
 #[test]

@@ -15,7 +15,7 @@ use super::bulk_filter::{
     SelectionBulkFilter, SelectionBulkFilterSession, SelectionBulkHierarchyScope,
     SelectionBulkObjectKind,
 };
-pub(crate) use crate::state::bulk_edit::{SelectionBulkProperty, SelectionBulkUnsetBehavior};
+use crate::state::bulk_edit::{SelectionBulkProperty, SelectionBulkUnsetBehavior};
 use crate::state::bulk_edit::{
     apply_bulk_edit, mutate_component, parameter_key_from_filter, validate_bulk_value,
 };
@@ -31,6 +31,7 @@ use crate::ui::widgets::{
 };
 use crate::ui::widgets::{DIALOG_BODY_INSET, band_header};
 use crate::workbench::design_system::WorkbenchIcon;
+pub(crate) use rspice_design::schematic::owned::bulk_edit::takes_instance_temperature;
 
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::actions::workspace::sync_active_schematic;
@@ -1621,6 +1622,8 @@ fn component_row(
         Some("Other owner".to_owned())
     } else if (kind == SelectionBulkRowKind::Port && property != SelectionBulkProperty::Display)
         || (property == SelectionBulkProperty::Value && component.kind == ComponentType::Ground)
+        || (property == SelectionBulkProperty::Temperature
+            && !takes_instance_temperature(component.kind))
         || (property == SelectionBulkProperty::ModelSection && component.library_cell.is_none())
         || (matches!(
             property,
