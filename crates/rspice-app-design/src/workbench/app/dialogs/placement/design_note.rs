@@ -49,6 +49,7 @@ pub(in crate::workbench) fn render_design_note_dialog(
     if !dialog.open {
         return;
     }
+    recapture(dialog, model);
     let validation = validate_draft(dialog, model);
     let status = design_note_status(&dialog.text, &validation);
     let draft = &mut *dialog;
@@ -80,6 +81,20 @@ pub(in crate::workbench) fn render_design_note_dialog(
     }
 }
 
+/// A form left open while the drawing changes, another sheet is opened, or
+/// another instance of the cell is entered places on what is open now: the
+/// kind and the text belong to no document, so the form reads the active
+/// schematic again rather than asking to be closed and reopened.
+fn recapture(dialog: &mut DesignNoteDialogState, model: &Model) {
+    if model.schematic_edit_read_only() {
+        return;
+    }
+    let current = schematic_editor_request_source(model);
+    if dialog.source.as_ref() != Some(&current) {
+        dialog.source = Some(current);
+    }
+}
+
 /// What the footer says. An untouched form has refused nothing, so it says
 /// what Place waits for as a plain fact; once there is text, a refusal is
 /// stated as one.
@@ -103,32 +118,12 @@ fn validate_draft(
     if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    let Some(source) = draft.source.as_ref() else {
-        return Err("Reopen Place text or note to capture the active schematic.".to_owned());
+    // The form reads the open schematic again each frame, so a draft that
+    // holds another one has not been drawn since the drawing changed.
+    let current = schematic_editor_request_source(model);
+    let Some(source) = draft.source.as_ref().filter(|source| **source == current) else {
+        return Err("The open schematic changed.".to_owned());
     };
-    if source.design_epoch != model.design_execution_epoch {
-        return Err("The design document changed. Close and reopen Place text or note.".to_owned());
-    }
-    if source.document_epoch != model.active_schematic_epoch {
-        return Err(
-            "The active schematic buffer changed. Close and reopen Place text or note.".to_owned(),
-        );
-    }
-    if source.topology_version != model.schematic.topology_version() {
-        return Err(
-            "The schematic topology changed. Close and reopen Place text or note.".to_owned(),
-        );
-    }
-    if source.document.display_path() != model.workspace.content.active_view.display_path() {
-        return Err(
-            "The active cell/view changed. Close and reopen Place text or note.".to_owned(),
-        );
-    }
-    if *source != schematic_editor_request_source(model) {
-        return Err(
-            "The active schematic context changed. Close and reopen Place text or note.".to_owned(),
-        );
-    }
     match PendingDesignNotePlacement::new(
         draft.kind,
         entered_text(&draft.text),
@@ -207,6 +202,66 @@ pub mod tests {
         assert!(state.design.design_note.source.is_none());
         assert_eq!(pending.source, Some(source));
         assert!(state.model.schematic.document().design_notes.is_empty());
+    }
+
+    /// A form left open while the drawing changes under it, or while another
+    /// instance of the cell is entered, reads the open schematic again on its
+    /// next frame and places there: it never asks to be closed and reopened.
+    #[test]
+    fn an_open_form_reads_a_changed_schematic_again_on_the_next_frame() {
+        use crate::state::{CellViewRef, Point, ViewType};
+        for change in ["content", "occurrence"] {
+            let mut state = DesignTestHost::default();
+            let master = CellViewRef::new("work", "note_child", "schematic");
+            state.model.workspace.descend_into(
+                "X1".to_owned(),
+                master.clone(),
+                ViewType::Schematic,
+            );
+            state
+                .design
+                .design_note
+                .open(schematic_editor_request_source(&state));
+            state.design.design_note.text = "Check the bias network".to_owned();
+            match change {
+                "content" => {
+                    let pending = PendingDesignNotePlacement::new(
+                        crate::state::DesignNoteKind::PlainText,
+                        "Another note",
+                        state.model.schematic.topology_version(),
+                        &[],
+                    )
+                    .unwrap();
+                    state
+                        .model
+                        .schematic
+                        .place_pending_design_note(Point::origin(), pending)
+                        .unwrap();
+                }
+                _ => {
+                    state.model.workspace.ascend_one().unwrap();
+                    state.model.workspace.descend_into(
+                        "X2".to_owned(),
+                        master,
+                        ViewType::Schematic,
+                    );
+                }
+            }
+            assert!(validate_draft(&state).is_err(), "{change}");
+
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                render(&mut state.design.design_note, &mut state.model, ui.ctx());
+            });
+
+            assert!(state.design.design_note.open, "{change}");
+            assert_eq!(state.design.design_note.text, "Check the bias network");
+            let current = schematic_editor_request_source(&state);
+            assert_eq!(state.design.design_note.source.as_ref(), Some(&current));
+            let pending = validate_draft(&state).expect("the form places on the open schematic");
+            assert_eq!(pending.source, Some(current), "{change}");
+        }
     }
 
     #[test]
