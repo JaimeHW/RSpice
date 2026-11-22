@@ -330,9 +330,12 @@ pub fn show(
             members.len()
         )
     };
+    // A trial in the first trace hue and a failing one in the error ink, so
+    // only a failure reads as one; the fit is a neutral line over them, as
+    // the histogram draws its fitted normal.
     let mut legend = vec![LegendChip {
         name: "trial",
-        color: c.traces[1],
+        color: c.traces[0],
         on: true,
     }];
     if sheet.color_by_status && failing > 0 {
@@ -345,7 +348,7 @@ pub fn show(
     if sheet.fit {
         legend.push(LegendChip {
             name: "least-squares fit",
-            color: c.traces[0],
+            color: c.text,
             on: true,
         });
     }
@@ -395,10 +398,10 @@ pub fn show(
         y_limit: show_limits.then(|| y_column.limit.clone()).flatten(),
         brush: sheet.brush,
         colors: CloudColors {
-            point: c.traces[1],
+            point: c.traces[0],
             failing: c.err,
             selected: c.accent,
-            fit: c.traces[0],
+            fit: c.text,
             wash: c.err.gamma_multiply(0.09),
             limit: c.err,
         },
@@ -771,7 +774,7 @@ fn paint_hover_card(
         .trials
         .get(row)
         .map_or_else(|| format!("Trial {row}"), |trial| trial.label.clone());
-    let color = Tokens::get(ui.ctx()).color.traces[1];
+    let color = Tokens::get(ui.ctx()).color.traces[0];
     crate::presentation::point_card(
         ui,
         response.plot_rect,
