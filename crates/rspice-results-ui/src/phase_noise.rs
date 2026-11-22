@@ -444,7 +444,7 @@ pub struct PhaseNoiseInspector<'a> {
 
 /// A number for a table cell whose column head carries the unit: the
 /// prefix the unit takes, and no unit.
-fn plain(value: f64, unit: &str, digits: usize) -> String {
+pub(crate) fn plain(value: f64, unit: &str, digits: usize) -> String {
     let text = fmt_si_significant(value, unit, digits);
     text.strip_suffix(unit)
         .map_or_else(|| text.clone(), |number| number.trim_end().to_owned())

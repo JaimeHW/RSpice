@@ -2742,6 +2742,9 @@ fn validate_sheet_setting(setting: &SheetSetting) -> Result<(), VisualizationErr
         SheetSettingValue::PhaseNoise { spots, band, .. } => {
             return validate_phase_noise_setting(spots, *band);
         }
+        SheetSettingValue::NoiseContributors { pinned } => {
+            return validate_pinned_contributors(pinned);
+        }
     };
     ensure_maximum_len(
         "sheet-setting.markers",
@@ -2794,6 +2797,35 @@ fn validate_histogram_reading(reading: &HistogramReading) -> Result<(), Visualiz
                 reading.lower_limit, reading.upper_limit
             ),
         });
+    }
+    Ok(())
+}
+
+/// Each pinned contributor names a device, and a mechanism when the run
+/// gave one, in words a label can hold; none is pinned twice.
+fn validate_pinned_contributors(
+    pinned: &[crate::visualization_document::PinnedContributor],
+) -> Result<(), VisualizationError> {
+    ensure_maximum_len(
+        "sheet-setting.pinned",
+        pinned.len(),
+        MAX_VISUALIZATION_MARKERS,
+    )?;
+    let mut seen = std::collections::HashSet::with_capacity(pinned.len());
+    for contributor in pinned {
+        validate_label("sheet-setting.pinned.device", &contributor.device)?;
+        if !contributor.mechanism.is_empty() {
+            validate_label("sheet-setting.pinned.mechanism", &contributor.mechanism)?;
+        }
+        if !seen.insert(contributor) {
+            return Err(VisualizationError::InvalidValue {
+                field: "sheet-setting.pinned",
+                message: format!(
+                    "{} {} is pinned twice",
+                    contributor.device, contributor.mechanism
+                ),
+            });
+        }
     }
     Ok(())
 }

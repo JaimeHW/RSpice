@@ -1979,6 +1979,12 @@ pub enum SheetSettingValue {
         band: Option<[f64; 2]>,
         slopes: bool,
     },
+    /// The noise contributors the reader pinned above the rest of the
+    /// contributor table, first pinned first.
+    NoiseContributors {
+        #[serde(deserialize_with = "deserialize_pinned_contributors")]
+        pinned: Vec<PinnedContributor>,
+    },
     /// How the histogram reads one measurement of a population.
     Histogram(HistogramReading),
 }
@@ -2012,6 +2018,17 @@ pub enum HistogramPlotKind {
     NormalQuantile,
 }
 
+/// A noise contributor by the device and mechanism a run names it with, so
+/// a later run of the plan pins its own row for the same source.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PinnedContributor {
+    #[serde(deserialize_with = "deserialize_label_string")]
+    pub device: String,
+    /// Empty for a source a run ranks without naming its mechanism.
+    #[serde(deserialize_with = "deserialize_label_string")]
+    pub mechanism: String,
+}
+
 impl SheetSettingValue {
     /// The sheet the settings are for.
     pub const fn sheet(&self) -> crate::result_presentation::ResultViewer {
@@ -2022,8 +2039,20 @@ impl SheetSettingValue {
             Self::PoleZero { .. } => crate::result_presentation::ResultViewer::PoleZero,
             Self::Histogram(_) => crate::result_presentation::ResultViewer::Hist,
             Self::PhaseNoise { .. } => crate::result_presentation::ResultViewer::PhaseNoise,
+            Self::NoiseContributors { .. } => {
+                crate::result_presentation::ResultViewer::NoiseContrib
+            }
         }
     }
+}
+
+fn deserialize_pinned_contributors<'de, D>(
+    deserializer: D,
+) -> Result<Vec<PinnedContributor>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_MARKERS>(deserializer)
 }
 
 fn deserialize_spot_offsets<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>

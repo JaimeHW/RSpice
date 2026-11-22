@@ -1,16 +1,17 @@
 //! Band-integrated noise contributors, conversion provenance and noise-figure presentation.
 
-use crate::presentation::table_row_height;
-use egui::{Align2, Sense, Ui};
+use egui::Ui;
 use rspice_results::noise::NoiseSummary;
-use rspice_ui_kit::panels::{elide_middle, section_header};
+pub use rspice_results::visualization_document::PinnedContributor;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si_significant;
-use rspice_ui_kit::theme::{self, FontWeight};
-use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::measurement_table;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 mod figure;
+mod table;
+pub use table::ContributorLine;
+pub(crate) use table::contributor_table;
 
 /// Contributor evidence bound by the host to the displayed noise spectrum.
 pub enum ContributorEvidence<'a> {
@@ -25,23 +26,16 @@ pub enum ContributorEvidence<'a> {
     Unavailable,
 }
 
-const RANK_W: f32 = 30.0;
-const SOURCE_W: f32 = 132.0;
-const POWER_W: f32 = 94.0;
-const SHARE_W: f32 = 70.0;
-const CELL_INSET: f32 = 6.0;
-
-fn contributor_table_width() -> f32 {
-    RANK_W + SOURCE_W + POWER_W + SHARE_W
-}
-
-/// Show contributors for the host-selected analysis and its validated noise-figure evidence.
+/// Show contributors for the host-selected analysis and its validated
+/// noise-figure evidence. The reader's `pinned` contributors lead the
+/// table; returns whether the reader changed them.
 pub fn right_panel(
     ui: &mut Ui,
     evidence: ContributorEvidence<'_>,
     quantity_policy: &QuantityPresentationPolicy,
     digits: usize,
-) {
+    pinned: &mut Vec<PinnedContributor>,
+) -> bool {
     let frequency = |hertz| crate::presentation::frequency_readout(quantity_policy, hertz, digits);
     let summary = match evidence {
         ContributorEvidence::Retained { summary, .. } => summary,
@@ -51,7 +45,7 @@ pub fn right_panel(
                 ui,
                 "No contributor data. Turn on contributor ranking in the noise analysis.",
             );
-            return;
+            return false;
         }
     };
 
@@ -148,224 +142,28 @@ pub fn right_panel(
             ui,
             "No contributor data. Turn on contributor ranking in the noise analysis.",
         );
-        return;
+        return false;
     }
-    section_header(
-        ui,
-        "Ranked contributors",
-        Some(&format!("integrated {}", summary.power_unit())),
-    );
-    contributor_table(ui, summary, digits);
-}
-
-fn contributor_table(ui: &mut Ui, summary: &NoiseSummary, digits: usize) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let viewport_width = ui.available_width().max(1.0);
-    // The dense row of the sheet's other tables. The rows abut, each drawing
-    // its own rule, so the header and every row are one row height apart.
-    let row_height = table_row_height(ui);
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-
-    let table = ui
-        .scope(|ui| {
-            egui::ScrollArea::horizontal()
-                .id_salt("rspice.results.noise.contributors")
-                .auto_shrink([false, true])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let width = viewport_width.max(contributor_table_width());
-                    ui.set_min_width(width);
-                    contributor_header(ui, width, row_height);
-                    for (rank, row) in summary.rows.iter().enumerate() {
-                        let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
-                        response.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Label,
-                                ui.is_enabled(),
-                                format!(
-                                    "Contributor rank {}, {} {}, integrated noise power {:.6e} {}, share {:.3} percent",
-                                    rank + 1,
-                                    row.device,
-                                    row.mechanism,
-                                    row.power,
-                                    summary.power_unit(),
-                                    row.share_pct
-                                ),
-                            )
-                        });
-                        ui.ctx().accesskit_node_builder(response.id, |node| {
-                            node.set_role(egui::accesskit::Role::Row);
-                        });
-                        if !ui.is_rect_visible(rect) {
-                            continue;
-                        }
-                        if response.hovered() {
-                            ui.painter().rect_filled(rect, 0.0, c.bg_hover);
-                        }
-                        ui.painter().hline(
-                            rect.x_range(),
-                            rect.bottom() - 0.5,
-                            egui::Stroke::new(1.0, c.border.gamma_multiply(0.6)),
-                        );
-                        paint_cell(
-                            ui,
-                            rect,
-                            0.0,
-                            RANK_W,
-                            rank + 1,
-                            Align2::LEFT_CENTER,
-                            c.text_faint,
-                        );
-                        // Device and mechanism share the row's one line. A
-                        // device too long for what the mechanism leaves of
-                        // the column elides in the middle, keeping its leaf,
-                        // and the whole source is read on hover.
-                        let mechanism = format!(" · {}", row.mechanism);
-                        let mechanism_width = ui
-                            .painter()
-                            .layout_no_wrap(mechanism.clone(), font.clone(), c.text)
-                            .size()
-                            .x;
-                        let device = elide_middle(
-                            ui,
-                            &row.device,
-                            &font,
-                            SOURCE_W - 2.0 * CELL_INSET - mechanism_width,
-                        );
-                        if device != row.device {
-                            response
-                                .clone()
-                                .on_hover_text(format!("{}{mechanism}", row.device));
-                        }
-                        paint_cell(
-                            ui,
-                            rect,
-                            RANK_W,
-                            SOURCE_W,
-                            format!("{device}{mechanism}"),
-                            Align2::LEFT_CENTER,
-                            c.text,
-                        );
-                        paint_cell(
-                            ui,
-                            rect,
-                            RANK_W + SOURCE_W,
-                            POWER_W,
-                            fmt_si_significant(row.power, summary.power_unit(), digits),
-                            Align2::RIGHT_CENTER,
-                            c.text_dim,
-                        );
-                        let share_offset = RANK_W + SOURCE_W + POWER_W;
-                        let share_cell = column_rect(rect, share_offset, width - share_offset);
-                        let fill_rect = share_cell
-                            .shrink2(egui::vec2(CELL_INSET, (row_height * 0.25).round()));
-                        let fill = fill_rect.width()
-                            * (row.share_pct as f32 / 100.0).clamp(0.0, 1.0);
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(
-                                fill_rect.min,
-                                egui::vec2(fill, fill_rect.height()),
-                            ),
-                            2.0,
-                            c.accent_dim,
-                        );
-                        paint_cell(
-                            ui,
-                            rect,
-                            share_offset,
-                            width - share_offset,
-                            fmt_si_significant(row.share_pct, "%", digits),
-                            Align2::RIGHT_CENTER,
-                            c.text,
-                        );
-                    }
-                });
+    section_header(ui, "Contributors", Some("band-integrated"));
+    let lines: Vec<ContributorLine<'_>> = summary
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| ContributorLine {
+            rank: index + 1,
+            device: &row.device,
+            mechanism: &row.mechanism,
+            figure: Some(row.power),
+            figure_absent: None,
+            share_pct: Some(row.share_pct),
         })
-        .response;
-    table.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("Ranked noise contributors, {} rows", summary.rows.len()),
-        )
-    });
-    ui.ctx().accesskit_node_builder(table.id, |node| {
-        node.set_role(egui::accesskit::Role::Table);
-        node.set_row_count(summary.rows.len().saturating_add(1));
-        node.set_column_count(4);
-    });
-}
-
-fn contributor_header(ui: &mut Ui, width: f32, row_height: f32) {
-    let c = Tokens::get(ui.ctx()).color;
-    let (rect, row) = ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
-    ui.ctx().accesskit_node_builder(row.id, |node| {
-        node.set_role(egui::accesskit::Role::Row);
-    });
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-    for (index, (label, offset, column_width, align)) in [
-        ("#", 0.0, RANK_W, Align2::LEFT_CENTER),
-        ("Source", RANK_W, SOURCE_W, Align2::LEFT_CENTER),
-        ("Power", RANK_W + SOURCE_W, POWER_W, Align2::RIGHT_CENTER),
-        (
-            "Share",
-            RANK_W + SOURCE_W + POWER_W,
-            width - RANK_W - SOURCE_W - POWER_W,
-            Align2::RIGHT_CENTER,
-        ),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let cell = column_rect(rect, offset, column_width);
-        let response = ui.interact(cell, row.id.with(index), Sense::hover());
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label)
-        });
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(egui::accesskit::Role::ColumnHeader);
-            node.set_label(label);
-        });
-        paint_cell(ui, rect, offset, column_width, label, align, c.text_faint);
-    }
-}
-
-fn column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
-    egui::Rect::from_min_size(
-        egui::pos2(row.left() + offset, row.top()),
-        egui::vec2(width.max(0.0), row.height()),
+        .collect();
+    contributor_table(
+        ui,
+        "noise-contributors",
+        &lines,
+        ("Power", summary.power_unit()),
+        digits,
+        Some(pinned),
     )
-}
-
-fn paint_cell(
-    ui: &Ui,
-    row: egui::Rect,
-    offset: f32,
-    width: f32,
-    text: impl ToString,
-    align: Align2,
-    color: egui::Color32,
-) {
-    let cell = column_rect(row, offset, width);
-    let x = if align == Align2::RIGHT_CENTER {
-        cell.right() - CELL_INSET
-    } else {
-        cell.left() + CELL_INSET
-    };
-    ui.painter()
-        .with_clip_rect(cell.shrink2(egui::vec2(2.0, 0.0)))
-        .text(
-            egui::pos2(x, cell.center().y),
-            align,
-            text,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            color,
-        );
 }

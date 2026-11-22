@@ -41,6 +41,7 @@
           "stb",
           "noise",
           "pac",
+          "pnoise",
           "pstb",
           "qpac",
           "qpnoise"

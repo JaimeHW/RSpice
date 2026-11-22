@@ -360,7 +360,9 @@ mod tests {
         assert_eq!(
             viewer_compatibility("viewer-bode", empty),
             ViewerCompatibility::MissingAnalysis {
-                accepted_analysis_ids: &["ac", "stb", "noise", "pac", "pstb", "qpac", "qpnoise"],
+                accepted_analysis_ids: &[
+                    "ac", "stb", "noise", "pac", "pnoise", "pstb", "qpac", "qpnoise"
+                ],
             }
         );
 

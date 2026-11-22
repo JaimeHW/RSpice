@@ -1,10 +1,11 @@
 //! Noise contributor source binding and CSV export at the application boundary.
 
 use super::bode;
+use crate::results::visualization_document::{PinnedContributor, SheetSettingValue};
 use crate::state::SimulationState;
-use crate::workbench::documents::result_document::ResultsParts;
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+use crate::workbench::documents::result_document::{ResultViewer, ResultsParts, ResultsReads};
 use egui::Ui;
 use rspice_results_ui::noise_contrib as view;
 
@@ -28,6 +29,25 @@ fn selected_evidence(
     }
 }
 
+/// The contributors the reader pinned above the rest, as the view keeps
+/// them for the analysis shown.
+fn pinned(state: ResultsReads<'_>) -> Vec<PinnedContributor> {
+    match super::sheet_settings::kept(state, ResultViewer::NoiseContrib) {
+        Some(SheetSettingValue::NoiseContributors { pinned }) => pinned,
+        _ => Vec::new(),
+    }
+}
+
+/// Keep the reader's pins in the view, where undo steps them back and the
+/// next run of the plan lists the same sources first.
+fn keep_pinned(state: &mut ResultsParts<'_>, pinned: Vec<PinnedContributor>) {
+    super::sheet_settings::keep(
+        state,
+        ResultViewer::NoiseContrib,
+        (!pinned.is_empty()).then_some(SheetSettingValue::NoiseContributors { pinned }),
+    );
+}
+
 /// Bind the contributor inspector to the same qualified analysis as the noise spectrum.
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     bode::noise_spectrum_right_panel(ui, state);
@@ -41,7 +61,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .displayed_significant_digits()
             .get(),
     );
-    view::right_panel(ui, evidence, &quantity_policy, digits);
+    let mut pins = pinned(state.results_reads());
+    if view::right_panel(ui, evidence, &quantity_policy, digits, &mut pins) {
+        keep_pinned(state, pins);
+    }
 }
 
 #[cfg(test)]
@@ -194,6 +217,31 @@ mod tests {
         output_quantity: crate::state::PeriodicNoiseOutputQuantity,
         summary: NoiseSummary,
     ) -> SimulationRun {
+        stored_plan_run(
+            (
+                crate::product::SimulationPlanId::new(),
+                crate::product::AnalysisInstanceId::new(),
+            ),
+            frequency,
+            unit,
+            densities,
+            output_quantity,
+            summary,
+        )
+    }
+
+    /// The same, as a run of the authored analysis `ids` names.
+    fn stored_plan_run(
+        ids: (
+            crate::product::SimulationPlanId,
+            crate::product::AnalysisInstanceId,
+        ),
+        frequency: Vec<f64>,
+        unit: &str,
+        densities: Vec<(String, Vec<f64>)>,
+        output_quantity: crate::state::PeriodicNoiseOutputQuantity,
+        summary: NoiseSummary,
+    ) -> SimulationRun {
         use super::super::test_fixtures::{completed_prepared_run, digest, stored_transient};
         let (mut stored, _) = stored_transient(frequency, densities, Some([0x5e; 32]));
         for waveform in &mut stored.waveforms {
@@ -205,13 +253,86 @@ mod tests {
             output_quantity,
             carrier_frequency_hz: Some(1.0e9),
         });
-        let mut run = completed_prepared_run(
-            crate::product::SimulationPlanId::new(),
-            crate::product::ObjectRevision::INITIAL,
-            digest(0x5e),
+        let mut run =
+            completed_prepared_run(ids.0, crate::product::ObjectRevision::INITIAL, digest(0x5e));
+        run.add_analysis(
+            stored.with_noise_summary(summary).with_provenance(
+                crate::state::AnalysisResultProvenance::new(
+                    ids.1,
+                    crate::product::ObjectRevision::INITIAL,
+                    digest(0x5f),
+                    Vec::new(),
+                )
+                .expect("analysis provenance"),
+            ),
         );
-        run.add_analysis(stored.with_noise_summary(summary));
         run
+    }
+
+    /// The contributors the reader pins are the view's: the next run of the
+    /// plan lists the same sources first, and undo steps a pin back.
+    #[test]
+    fn the_contributors_the_reader_pins_are_kept_by_the_view() {
+        use super::super::view_edits;
+        let ids = (
+            crate::product::SimulationPlanId::new(),
+            crate::product::AnalysisInstanceId::new(),
+        );
+        let row = |device: &str, mechanism: &str, power: f64| crate::state::NoiseContributorRow {
+            device: device.into(),
+            mechanism: mechanism.into(),
+            power,
+            share_pct: 0.0,
+        };
+        let run = || {
+            stored_plan_run(
+                ids,
+                vec![1.0e3, 1.0e6],
+                "V²/Hz",
+                vec![("onoise".to_owned(), vec![1.0e-16, 1.0e-16])],
+                crate::state::PeriodicNoiseOutputQuantity::OutputNoisePowerSpectralDensity,
+                NoiseSummary {
+                    rows: vec![
+                        row("R1", "thermal", 3.0e-11),
+                        row("M1", "flicker", 2.0e-11),
+                        row("M1", "thermal", 1.0e-11),
+                    ],
+                    band: (1.0e3, 1.0e6),
+                    ..NoiseSummary::default()
+                },
+            )
+        };
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run()].into();
+        assert!(state.model.simulation.select_run(0));
+        state.results.results.session.viewer = super::super::ResultViewer::NoiseContrib;
+        state.quick_frame();
+        assert!(pinned(state.results_reads()).is_empty());
+
+        let pin = |device: &str, mechanism: &str| PinnedContributor {
+            device: device.into(),
+            mechanism: mechanism.into(),
+        };
+        let chosen = vec![pin("M1", "thermal"), pin("R1", "thermal")];
+        keep_pinned(&mut state.results_parts(), chosen.clone());
+        state.quick_frame();
+
+        // The session forgets them, as a restart does; then the plan runs
+        // again.
+        super::super::working_view::release(&mut state.results_parts());
+        state.results.results.session.sheet_settings.clear();
+        state.model.simulation.retained.runs.insert(0, run());
+        assert!(state.model.simulation.select_run(0));
+        state.quick_frame();
+        assert_eq!(pinned(state.results_reads()), chosen);
+
+        keep_pinned(&mut state.results_parts(), chosen[..1].to_vec());
+        state.quick_frame();
+        let view = state.working_view().expect("the run's view").id();
+        view_edits::step(&mut state.results_parts(), view, view_edits::Step::Undo)
+            .expect("the unpin is undone");
+        state.quick_frame();
+        assert_eq!(pinned(state.results_reads()), chosen);
     }
 
     /// A periodic-noise run referred to the output opens on the Noise sheet:

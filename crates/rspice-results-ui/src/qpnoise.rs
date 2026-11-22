@@ -1,4 +1,5 @@
 //! Retained QPNOISE integrals and contributor rankings alongside the plots.
+use crate::noise_contrib::{ContributorLine, contributor_table};
 use crate::presentation::{frequency_readout, panel_note};
 use rspice_results::engine_evidence::{
     QpnoiseAnalysisResult, QpnoiseIntegrationMethod, QpnoiseObservation, QpnoiseUnavailable,
@@ -9,27 +10,56 @@ use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::widgets::measurement_table;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
-/// The contributors a reader acts on. Below this the shares are rounding.
-const RANKED_CONTRIBUTORS: usize = 10;
+fn unavailable_reason(why: QpnoiseUnavailable) -> &'static str {
+    match why {
+        QpnoiseUnavailable::ZeroInputTransfer => "zero input transfer",
+        QpnoiseUnavailable::OutsideNumericRange => "outside numerical range",
+        QpnoiseUnavailable::NoFrequencyInterval => "a frequency interval is required",
+        QpnoiseUnavailable::NegativeIntegrationFrequency => {
+            "integration band includes negative frequencies"
+        }
+        QpnoiseUnavailable::IncompleteIntegrationBand => {
+            "sweep does not cover the integration band"
+        }
+        QpnoiseUnavailable::UndefinedIntegrationSample => "integration contains undefined samples",
+    }
+}
 
 fn value(v: QpnoiseValue, unit: &str, digits: usize) -> String {
     match v {
         QpnoiseValue::Finite(v) => fmt_si_significant(v, unit, digits),
-        QpnoiseValue::Unavailable(why) => format!(
-            "Unavailable: {}",
-            match why {
-                QpnoiseUnavailable::ZeroInputTransfer => "zero input transfer",
-                QpnoiseUnavailable::OutsideNumericRange => "outside numerical range",
-                QpnoiseUnavailable::NoFrequencyInterval => "a frequency interval is required",
-                QpnoiseUnavailable::NegativeIntegrationFrequency =>
-                    "integration band includes negative frequencies",
-                QpnoiseUnavailable::IncompleteIntegrationBand =>
-                    "sweep does not cover the integration band",
-                QpnoiseUnavailable::UndefinedIntegrationSample =>
-                    "integration contains undefined samples",
-            }
-        ),
+        QpnoiseValue::Unavailable(why) => format!("Unavailable: {}", unavailable_reason(why)),
     }
+}
+
+/// Every source the run ranked, in its order, each with its rms at the
+/// output and its share; a source the run holds no rms for says why.
+fn ranked_lines<'a>(
+    names: &[&'a str],
+    ranking: impl IntoIterator<Item = (usize, f64)>,
+    rms: Option<&[QpnoiseValue]>,
+) -> Vec<ContributorLine<'a>> {
+    ranking
+        .into_iter()
+        .enumerate()
+        .filter_map(|(rank, (source, share))| {
+            let value = rms.and_then(|rms| rms.get(source));
+            Some(ContributorLine {
+                rank: rank + 1,
+                device: names.get(source)?,
+                mechanism: "",
+                figure: match value {
+                    Some(QpnoiseValue::Finite(value)) => Some(*value),
+                    _ => None,
+                },
+                figure_absent: match value {
+                    Some(QpnoiseValue::Unavailable(why)) => Some(unavailable_reason(*why)),
+                    _ => None,
+                },
+                share_pct: Some(share),
+            })
+        })
+        .collect()
 }
 /// Render measurements from source-qualified retained QPNOISE evidence.
 ///
@@ -90,38 +120,6 @@ pub fn summary(
                 rows.push(("Input RMS".into(), value(input, unit, digits)));
             }
         }
-        // Without a ranking there is no order to truncate to, and listing
-        // every noise source in the circuit is not a contributor list; the
-        // "ranking unavailable" line below says so instead.
-        let indices: Vec<_> = spectrum.ranking.as_ref().map_or_else(Vec::new, |ranking| {
-            ranking
-                .iter()
-                .take(RANKED_CONTRIBUTORS)
-                .map(|v| v.source_index)
-                .collect()
-        });
-        for (rank, source) in indices.into_iter().enumerate() {
-            let share = spectrum
-                .ranking
-                .as_ref()
-                .map(|r| fmt_si_significant(r[rank].percentage, "%", digits));
-            // "RMS" names the quantity, so it goes on the measurement and
-            // never on the sentence that says why there is none.
-            let rms = spectrum
-                .integrated
-                .as_ref()
-                .map(|i| match i.contributor_rms[source] {
-                    QpnoiseValue::Finite(_) => {
-                        format!("{} rms", value(i.contributor_rms[source], unit, digits))
-                    }
-                    QpnoiseValue::Unavailable(_) => value(i.contributor_rms[source], unit, digits),
-                });
-            let reading = [share, rms].into_iter().flatten().collect::<Vec<_>>();
-            if reading.is_empty() {
-                continue;
-            }
-            rows.push((response.sources[source].name.clone(), reading.join(" · ")));
-        }
         let unavailable = spectrum
             .input_noise
             .iter()
@@ -140,11 +138,64 @@ pub fn summary(
             .map(|(name, reading)| (name.as_str(), reading.as_str()))
             .collect();
         measurement_table(ui, &refs);
+        // Without a ranking there is no order to list in, and listing every
+        // noise source in the circuit is not a contributor list; the
+        // "ranking unavailable" line below says so instead.
+        if let Some(ranking) = &spectrum.ranking {
+            let names: Vec<&str> = response
+                .sources
+                .iter()
+                .map(|source| source.name.as_str())
+                .collect();
+            let lines = ranked_lines(
+                &names,
+                ranking
+                    .iter()
+                    .map(|rank| (rank.source_index, rank.percentage)),
+                spectrum
+                    .integrated
+                    .as_ref()
+                    .map(|integral| integral.contributor_rms.as_slice()),
+            );
+            contributor_table(
+                ui,
+                &format!("qpnoise-contributors-{index}"),
+                &lines,
+                ("RMS", unit),
+                digits,
+                None,
+            );
+        }
         if request.contributor_ranking && spectrum.ranking.is_none() {
             panel_note(
                 ui,
                 "Contributor ranking unavailable for this integration band.",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_source_the_run_ranks_is_listed_in_its_order() {
+        let names: Vec<String> = (0..25).map(|index| format!("R{index}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut rms: Vec<QpnoiseValue> = (0..25)
+            .map(|index| QpnoiseValue::Finite(1.0e-6 * f64::from(index + 1)))
+            .collect();
+        rms[3] = QpnoiseValue::Unavailable(QpnoiseUnavailable::ZeroInputTransfer);
+        let ranking = (0..25).rev().map(|source| (source, 4.0));
+
+        let lines = ranked_lines(&names, ranking, Some(&rms));
+        assert_eq!(lines.len(), 25);
+        assert_eq!((lines[0].rank, lines[0].device), (1, "R24"));
+        assert_eq!(lines[0].figure, Some(1.0e-6 * 25.0));
+        assert_eq!((lines[24].rank, lines[24].device), (25, "R0"));
+        let refused = &lines[21];
+        assert_eq!((refused.device, refused.figure), ("R3", None));
+        assert_eq!(refused.figure_absent, Some("zero input transfer"));
     }
 }
