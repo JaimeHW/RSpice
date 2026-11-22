@@ -267,6 +267,15 @@ pub fn handle_pre_render_placement_transform(
     ) {
         return true;
     }
+    if canvas_has_focus
+        && let Some(typed) = armed_transform_typed_distance(state)
+        && ctx.input_mut(|input| {
+            rspice_schematic_editor::view::transform_input::capture_typed_distance(input, typed)
+        })
+    {
+        ctx.request_repaint();
+        return true;
+    }
     let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
     // A floating paste, or the selection Move carries, turns about its own
     // middle and keeps floating. Neither is on the sheet until it lands, and
@@ -292,6 +301,32 @@ pub fn handle_pre_render_placement_transform(
     apply_placement_transform(&mut state.model.schematic, transform);
     ctx.request_repaint();
     true
+}
+
+/// The typed distance of the transform armed on the canvas: Move, Stretch,
+/// or Create array placing copies at a pitch. A radial array is placed by
+/// its centre, a point the pointer gives, so it takes no typed distance.
+fn armed_transform_typed_distance<'a>(state: &'a mut CanvasParts<'_>) -> Option<&'a mut String> {
+    if state.schematic_edit_read_only() {
+        return None;
+    }
+    let design = &mut *state.design;
+    match state.model.schematic.session.editor.tool {
+        crate::state::Tool::MoveSelection if design.move_selection.armed => {
+            Some(&mut design.move_selection.canvas.typed)
+        }
+        crate::state::Tool::StretchSelection if design.stretch_selection.armed => {
+            Some(&mut design.stretch_selection.canvas.gesture.typed)
+        }
+        crate::state::Tool::ArraySelection
+            if design.array_selection.armed
+                && design.array_selection.kind
+                    != crate::state::SchematicArrayKind::RadialDocumentation =>
+        {
+            Some(&mut design.array_selection.canvas.typed)
+        }
+        _ => None,
+    }
 }
 
 /// While Move carries the selection, a turn floats with it about its own

@@ -164,22 +164,22 @@ pub(super) fn commit_armed_move_selection(
             let recorded = state.model.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
             let count = state.model.schematic.live_movable_selection_count();
+            let objects = if count == 1 {
+                "1 object".to_owned()
+            } else {
+                format!("{count} objects")
+            };
             state.prompt(if !recorded {
                 "Nothing moved.".to_owned()
             } else if delta == Point::origin() {
-                format!(
-                    "Turned {} in place.",
-                    if count == 1 {
-                        "1 object".to_owned()
-                    } else {
-                        format!("{count} objects")
-                    }
-                )
+                format!("Turned {objects} in place.")
             } else {
                 format!(
-                    "Moved {count} objects by ({}, {}) in {} mode.",
-                    delta.x,
-                    delta.y,
+                    "Moved {objects} by {} in {} mode.",
+                    rspice_schematic_editor::view::transform_input::distance_label(
+                        delta,
+                        super::preview::sheet_shows_inches(state.model),
+                    ),
                     mode.label(),
                 )
             });

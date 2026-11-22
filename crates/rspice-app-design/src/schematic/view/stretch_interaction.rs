@@ -145,7 +145,13 @@ pub(super) fn commit_armed_stretch_selection(
             let recorded = state.model.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
             state.prompt(if recorded {
-                format!("Stretched the selection by ({}, {}).", delta.x, delta.y)
+                format!(
+                    "Stretched the selection by {}.",
+                    rspice_schematic_editor::view::transform_input::distance_label(
+                        delta,
+                        super::preview::sheet_shows_inches(state.model),
+                    )
+                )
             } else {
                 "Nothing stretched.".to_owned()
             });

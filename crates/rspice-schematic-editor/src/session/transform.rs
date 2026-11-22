@@ -8,6 +8,9 @@ pub struct TransformCanvasSession {
     pub preview_delta: Point,
     pub pointer_drag: bool,
     pub preview_error: Option<String>,
+    /// A distance typed on the canvas while the transform is armed, "5 2.5"
+    /// read in millimetres, which Enter lands in place of the preview.
+    pub typed: String,
 }
 
 impl TransformCanvasSession {

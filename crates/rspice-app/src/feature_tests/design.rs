@@ -99,6 +99,7 @@ mod symbol_touch;
 mod toolbar_lane_drawn;
 mod touch_flow;
 mod transient_annotations;
+mod typed_distance;
 mod visibility_options_drawn;
 mod wiring;
 mod wiring_acceptance;

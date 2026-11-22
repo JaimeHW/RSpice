@@ -242,7 +242,9 @@ pub fn draw_transform_feedback(
     let palette = Tokens::get(painter.ctx()).color;
     let color = if valid { palette.ok } else { palette.err };
     let clip = painter.clip_rect();
-    let tooltip_width = (clip.width() * 0.7).clamp(80.0, 300.0);
+    // Wide enough that a distance read in both units on an inch sheet, with
+    // the mode beside it, stays one line.
+    let tooltip_width = (clip.width() * 0.7).clamp(80.0, 420.0);
     let galley = painter.layout(detail, feedback_font(), color, tooltip_width);
     let requested = response
         .hover_pos()

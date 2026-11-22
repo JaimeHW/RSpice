@@ -68,16 +68,27 @@ fn apply_input(
     draft: &mut StretchCanvasSession,
 ) -> bool {
     retain_canvas_focus_from_pointer(response);
-    let (keyboard_step, keyboard_commit) =
-        consume_keyboard(ui, response.has_focus(), view.design.document.grid_size);
-    if keyboard_step != Point::origin() {
+    let keys = consume_keyboard(
+        ui,
+        response.has_focus(),
+        view.design.document.grid_size,
+        &draft.gesture.typed,
+    );
+    if keys.step != Point::origin() {
         let target = draft.target.expect("validated stretch target");
-        let requested = checked_accumulate_delta(draft.gesture.preview_delta, keyboard_step);
+        let requested = checked_accumulate_delta(draft.gesture.preview_delta, keys.step);
         draft.gesture.anchor = None;
         draft.gesture.pointer_drag = false;
         update_preview_delta(view, draft, target, requested);
     }
-    if keyboard_commit {
+    if let Some(typed) = keys.typed {
+        let target = draft.target.expect("validated stretch target");
+        draft.gesture.typed.clear();
+        draft.gesture.anchor = None;
+        draft.gesture.pointer_drag = false;
+        update_preview_delta(view, draft, target, Ok(typed));
+    }
+    if keys.commit {
         return true;
     }
 

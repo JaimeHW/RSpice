@@ -74,18 +74,29 @@ fn apply_input(
     sheet_variables: &impl Fn() -> SheetTextVariables,
 ) -> bool {
     retain_canvas_focus_from_pointer(response);
-    let (keyboard_step, keyboard_commit) =
-        consume_keyboard(ui, response.has_focus(), view.design.document.grid_size);
-    if keyboard_step != Point::origin() {
+    let keys = consume_keyboard(
+        ui,
+        response.has_focus(),
+        view.design.document.grid_size,
+        &draft.typed,
+    );
+    if keys.step != Point::origin() {
         draft.anchor = None;
         draft.pointer_drag = false;
         draft.preview_error = None;
         draft.preview_delta = Point::new(
-            draft.preview_delta.x.saturating_add(keyboard_step.x),
-            draft.preview_delta.y.saturating_add(keyboard_step.y),
+            draft.preview_delta.x.saturating_add(keys.step.x),
+            draft.preview_delta.y.saturating_add(keys.step.y),
         );
     }
-    if keyboard_commit {
+    if let Some(typed) = keys.typed {
+        draft.typed.clear();
+        draft.anchor = None;
+        draft.pointer_drag = false;
+        draft.preview_error = None;
+        draft.preview_delta = typed;
+    }
+    if keys.commit {
         return true;
     }
 

@@ -13,6 +13,7 @@ use crate::state::transform_preview_memo::{TransformPreviewKey, TransformPreview
 use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool};
 use egui::{Painter, Response};
 use rspice_schematic_editor::view::preview::{self, PreviewView, TransformPreviewStyle};
+use rspice_schematic_editor::view::transform_input::{distance_label, typed_distance_readout};
 use std::sync::Arc;
 
 pub(super) fn preview_view<'a>(model: &'a Model, design: &DesignState) -> PreviewView<'a> {
@@ -140,7 +141,12 @@ fn draw_move_selection_preview(
         return;
     }
     let delta = state.design.move_selection.canvas.preview_delta;
+    let inches = sheet_shows_inches(state.model);
+    let typed = typed_readout(&state.design.move_selection.canvas.typed, inches, "moves");
     if delta == Point::origin() && state.design.move_selection.turns.is_empty() {
+        if let Some((valid, detail)) = typed {
+            preview::draw_transform_feedback(painter, response, valid, detail);
+        }
         return;
     }
     let mode = state.design.move_selection.mode;
@@ -168,15 +174,36 @@ fn draw_move_selection_preview(
         );
     }
 
-    let detail = state
-        .design
-        .move_selection
-        .canvas
-        .preview_error
-        .as_deref()
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("\u{0394} {}, {} \u{b7} {}", delta.x, delta.y, mode.label()));
+    let (valid, detail) = typed.unwrap_or_else(|| {
+        let detail = state
+            .design
+            .move_selection
+            .canvas
+            .preview_error
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                format!(
+                    "\u{0394} {} \u{b7} {}",
+                    distance_label(delta, inches),
+                    mode.label()
+                )
+            });
+        (valid, detail)
+    });
     preview::draw_transform_feedback(painter, response, valid, detail);
+}
+
+/// Whether the open sheet reads lengths in inches, so a distance gives its
+/// inches beside the millimetres the grid is named in.
+pub(super) fn sheet_shows_inches(model: &Model) -> bool {
+    model.active_sheet_display_unit() == crate::state::DrawingSheetDisplayUnit::Inches
+}
+
+/// The readout while a distance is typed for the armed transform; it stands
+/// in for the preview's own until Enter lands it or Esc clears it.
+fn typed_readout(typed: &str, inches: bool, lands: &str) -> Option<(bool, String)> {
+    (!typed.is_empty()).then(|| typed_distance_readout(typed, inches, lands))
 }
 
 fn draw_stretch_selection_preview(
@@ -196,6 +223,18 @@ fn draw_stretch_selection_preview(
     let Some(target) = state.design.stretch_selection.canvas.target else {
         return;
     };
+    let inches = sheet_shows_inches(state.model);
+    let typed = typed_readout(
+        &state.design.stretch_selection.canvas.gesture.typed,
+        inches,
+        "stretches",
+    );
+    if let Some((valid, detail)) = typed.clone()
+        && delta == Point::origin()
+    {
+        preview::draw_transform_feedback(painter, response, valid, detail);
+        return;
+    }
     if delta == Point::origin() {
         if let Some(detail) = state
             .design
@@ -218,30 +257,33 @@ fn draw_stretch_selection_preview(
         Ok(None) => return,
         Err(error) => {
             state.design.stretch_selection.canvas.gesture.preview_error = Some(error.clone());
-            preview::draw_transform_feedback(painter, response, false, error);
+            let (valid, detail) = typed.unwrap_or((false, error));
+            preview::draw_transform_feedback(painter, response, valid, detail);
             return;
         }
     };
 
     preview::draw_stretch_diff(painter, viewport, &diff);
 
-    let detail = state
-        .design
-        .stretch_selection
-        .canvas
-        .gesture
-        .preview_error
-        .as_deref()
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            format!(
-                "\u{0394} {}, {} \u{b7} {}",
-                delta.x,
-                delta.y,
-                policy.label()
-            )
-        });
-    preview::draw_transform_feedback(painter, response, true, detail);
+    let (valid, detail) = typed.unwrap_or_else(|| {
+        let detail = state
+            .design
+            .stretch_selection
+            .canvas
+            .gesture
+            .preview_error
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                format!(
+                    "\u{0394} {} \u{b7} {}",
+                    distance_label(delta, inches),
+                    policy.label()
+                )
+            });
+        (true, detail)
+    });
+    preview::draw_transform_feedback(painter, response, valid, detail);
 }
 
 /// Where a dragged wire segment would land, and its neighbours with it; a
@@ -418,10 +460,14 @@ fn draw_array_selection_preview(
         return;
     }
     let draft = &state.design.array_selection;
+    let inches = sheet_shows_inches(state.model);
+    let typed = typed_readout(&draft.canvas.typed, inches, "places the copies");
     if draft.kind != SchematicArrayKind::RadialDocumentation
         && draft.canvas.preview_delta == Point::origin()
     {
-        if let Some(detail) = draft.canvas.preview_error.clone() {
+        if let Some((valid, detail)) = typed {
+            preview::draw_transform_feedback(painter, response, valid, detail);
+        } else if let Some(detail) = draft.canvas.preview_error.clone() {
             preview::draw_transform_feedback(painter, response, false, detail);
         }
         return;
@@ -502,16 +548,22 @@ fn draw_array_selection_preview(
     let impact = preview.impact();
     let detail = match placement {
         SchematicArrayPlacement::Pitch(delta) => format!(
-            "{} replicas \u{00b7} pitch \u{0394} {}, {}",
-            impact.replicas, delta.x, delta.y
+            "{} replicas \u{00b7} pitch \u{0394} {}",
+            impact.replicas,
+            distance_label(delta, inches)
         ),
         SchematicArrayPlacement::Center(center) => format!(
-            "{} radial replicas \u{00b7} center {}, {}",
-            impact.replicas, center.x, center.y
+            "{} radial replicas \u{00b7} center {}",
+            impact.replicas,
+            state
+                .model
+                .active_drawing_sheet()
+                .cursor_status(f64::from(center.x), f64::from(center.y))
         ),
     };
+    let (valid, detail) = typed.unwrap_or((true, detail));
     state.design.array_selection.preview_cache = Some(cache);
-    preview::draw_transform_feedback(painter, response, true, detail);
+    preview::draw_transform_feedback(painter, response, valid, detail);
 }
 
 fn draw_bus_preview(

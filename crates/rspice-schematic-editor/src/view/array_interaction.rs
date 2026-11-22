@@ -70,16 +70,25 @@ fn apply_input(
     snap_engine: &SnapEngine,
 ) -> bool {
     retain_canvas_focus_from_pointer(response);
-    let (keyboard_step, keyboard_commit) = consume_keyboard(ui, response.has_focus(), grid_size);
-    if keyboard_step != Point::origin() {
-        let requested = checked_accumulate_delta(draft.preview_delta, keyboard_step);
+    let keys = consume_keyboard(ui, response.has_focus(), grid_size, &draft.typed);
+    if keys.step != Point::origin() {
+        let requested = checked_accumulate_delta(draft.preview_delta, keys.step);
         draft.pointer_drag = false;
         if kind == SchematicArrayKind::RadialDocumentation && draft.anchor.is_none() {
             draft.anchor = Some(Point::origin());
         }
         update_preview_delta(draft, requested);
     }
-    if keyboard_commit {
+    // A typed distance is the pitch between copies. A radial array is
+    // placed by its centre, a point the pointer gives, so it takes none.
+    if let Some(typed) = keys.typed
+        && kind != SchematicArrayKind::RadialDocumentation
+    {
+        draft.typed.clear();
+        draft.pointer_drag = false;
+        update_preview_delta(draft, Ok(typed));
+    }
+    if keys.commit {
         return true;
     }
 
