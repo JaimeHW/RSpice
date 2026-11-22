@@ -532,10 +532,13 @@ impl SnapEngine {
             .cloned()
     }
 
-    /// Snap a position to the nearest grid point
+    /// Snap a position to the nearest grid point, rounding a midpoint away
+    /// from the origin as the pointer's own grid conversion does, so a target
+    /// left of or above the origin lands where the cursor is.
     fn snap_to_grid_point(&self, pos: Point) -> Point {
         let gs = self.grid_size.max(1);
-        Point::new(((pos.x + gs / 2) / gs) * gs, ((pos.y + gs / 2) / gs) * gs)
+        let nearest = |v: i32| (f64::from(v) / f64::from(gs)).round() as i32 * gs;
+        Point::new(nearest(pos.x), nearest(pos.y))
     }
 }
 
@@ -662,6 +665,39 @@ mod tests {
             engine.snap_to_grid_point(Point::new(13, -41)),
             Point::new(13, -41)
         );
+    }
+
+    /// Left of and above the origin a point snaps to the nearest grid line,
+    /// the same line the pointer's grid conversion picks, rather than the
+    /// line nearer zero.
+    #[test]
+    fn grid_snap_rounds_negative_coordinates_as_the_pointer_does() {
+        let engine = engine_with(|e| e.grid_size = 10);
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(-7, -14)),
+            Point::new(-10, -10)
+        );
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(-16, -3)),
+            Point::new(-20, 0)
+        );
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(-5, 5)),
+            Point::new(-10, 10)
+        );
+        let viewport = crate::view::viewport::Viewport {
+            offset: egui::pos2(400.0, 300.0),
+            zoom: 2.0,
+            bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+        };
+        for x in [-16, -14, -7, -5, -3, 3, 5, 7, 14, 16] {
+            let screen = viewport.schematic_to_screen(Point::new(x, 0));
+            assert_eq!(
+                engine.snap_to_grid_point(Point::new(x, 0)),
+                crate::view::coordinates::screen_to_grid(&viewport, 10, screen),
+                "x = {x}"
+            );
+        }
     }
 
     /// A non-positive grid_size is clamped to 1 rather than dividing by zero.
