@@ -2083,20 +2083,39 @@ fn show_unit_pane(
     // there, so it places A however many cursors stood elsewhere.
     let places_a = cursors.is_none() || host.session().cursor_a_is_next();
     let margins = host.margin_marks(model, pane, &t);
+    let presented: Vec<pane_view::MarkerPresentation<'_>> = host
+        .session()
+        .strip_markers(model.analysis_key)
+        .map(|marker| pane_view::MarkerPresentation {
+            anchor: marker.anchor(),
+            x: marker_x(model, host.session(), marker).unwrap_or_else(|seed| seed),
+            kind: marker.kind(),
+            color: marker_color(marker.kind(), &t),
+            label: marker_label(marker),
+        })
+        .collect();
     let mut markers = pane_view::plot_markers(
         model,
-        pane,
+        &pane.traces,
         interpolation,
-        host.session()
-            .strip_markers(model.analysis_key)
-            .map(|marker| pane_view::MarkerPresentation {
-                anchor: marker.anchor(),
-                x: marker_x(model, host.session(), marker).unwrap_or_else(|seed| seed),
-                kind: marker.kind(),
-                color: marker_color(marker.kind(), &t),
-                label: marker_label(marker),
-            }),
+        presented.iter().cloned(),
+        true,
     );
+    // The markers on the curves of the strip's other axes, each at its value
+    // on its own axis.
+    let secondary_markers: Vec<Vec<plot::Marker>> = pane
+        .secondary
+        .iter()
+        .map(|axis| {
+            pane_view::plot_markers(
+                model,
+                &axis.traces,
+                interpolation,
+                presented.iter().cloned(),
+                false,
+            )
+        })
+        .collect();
     markers.extend(margins.markers);
     // Each axis after the first fits the curves it reads, over the same
     // window, until the reader pins a range of its own on it.
@@ -2116,7 +2135,8 @@ fn show_unit_pane(
         .secondary
         .iter()
         .zip(&secondary_axis_exprs)
-        .filter_map(|(axis, axis_exprs)| {
+        .zip(secondary_markers)
+        .filter_map(|((axis, axis_exprs), markers)| {
             let fitted = pane_fit(
                 &mut host.session_mut().derived,
                 model,
@@ -2139,6 +2159,7 @@ fn show_unit_pane(
                 expressions: axis_exprs,
                 range: pinned.or(fitted)?,
                 slot: axis.slot,
+                markers,
             })
         })
         .collect();

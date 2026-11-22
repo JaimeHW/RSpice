@@ -640,6 +640,8 @@ mod tests {
                 ac: Default::default(),
                 selection: None,
                 hidden_family_traces: &HashSet::new(),
+                waveform_visibility: &Default::default(),
+                signals: None,
             },
             |_| None,
         );
@@ -653,7 +655,7 @@ mod tests {
         UnitPane {
             unit: "V",
             axis: "V",
-            traces: vec![0],
+            traces: vec![0].into(),
             expressions: Vec::new(),
             hidden_expressions: Vec::new(),
             unlabeled: false,

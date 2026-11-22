@@ -346,7 +346,8 @@ pub fn pane_auto_log_y(
     Some((lo / factor, hi * factor))
 }
 
-/// The active-run trace whose drawn curve passes closest to the pointer.
+/// The active-run trace whose drawn curve passes closest to the pointer,
+/// and how far from the pointer it passes on screen.
 ///
 /// Two things make this the trace the reader is pointing at rather than an
 /// approximation of it. The value is mapped to the screen through the pane's
@@ -355,7 +356,7 @@ pub fn pane_auto_log_y(
 /// measured on every branch that reaches this abscissa, so clicking the return
 /// leg of a hysteresis curve anchors to that curve rather than to whichever
 /// neighbour happened to sit near its forward leg.
-pub fn nearest_drawn_trace<'a>(
+fn nearest_with_distance<'a>(
     pane_traces: &[(usize, &'a StripTrace)],
     x: f64,
     pointer_y: Option<f32>,
@@ -363,7 +364,7 @@ pub fn nearest_drawn_trace<'a>(
     y_scale: XScale,
     (y0, y1): (f64, f64),
     interpolation: SampleInterpolation,
-) -> Option<&'a StripTrace> {
+) -> Option<(&'a StripTrace, f32)> {
     let screen_y = |value: f64| -> Option<f32> {
         let fraction = y_scale.normalize(value, y0, y1);
         (value.is_finite() && fraction.is_finite())
@@ -394,10 +395,73 @@ pub fn nearest_drawn_trace<'a>(
             }
         }
     }
-    best.map(|(trace, _)| trace)
+    best
+}
+
+/// The active-run trace whose drawn curve passes closest to the pointer, on
+/// an axis of `y_scale` over `y0..y1` ([`nearest_with_distance`]).
+pub fn nearest_drawn_trace<'a>(
+    pane_traces: &[(usize, &'a StripTrace)],
+    x: f64,
+    pointer_y: Option<f32>,
+    plot_rect: egui::Rect,
+    y_scale: XScale,
+    range: (f64, f64),
+    interpolation: SampleInterpolation,
+) -> Option<&'a StripTrace> {
+    nearest_with_distance(
+        pane_traces,
+        x,
+        pointer_y,
+        plot_rect,
+        y_scale,
+        range,
+        interpolation,
+    )
+    .map(|(trace, _)| trace)
+}
+
+/// The curves read on one added axis of a pane, by their index in the strip,
+/// and the range that axis spans.
+pub(crate) type AxisCurves<'a> = (Vec<(usize, &'a StripTrace)>, (f64, f64));
+
+/// The curve nearest the pointer over every axis of a pane: the first on
+/// its own scale, and each axis after it over its range, as each is drawn.
+pub(crate) fn nearest_on_axes<'a>(
+    first: &[(usize, &'a StripTrace)],
+    others: &[AxisCurves<'a>],
+    (x, pointer_y): (f64, Option<f32>),
+    plot_rect: egui::Rect,
+    (y_scale, range): (XScale, (f64, f64)),
+    interpolation: SampleInterpolation,
+) -> Option<&'a StripTrace> {
+    std::iter::once(nearest_with_distance(
+        first,
+        x,
+        pointer_y,
+        plot_rect,
+        y_scale,
+        range,
+        interpolation,
+    ))
+    .chain(others.iter().map(|(traces, range)| {
+        nearest_with_distance(
+            traces,
+            x,
+            pointer_y,
+            plot_rect,
+            XScale::Linear,
+            *range,
+            interpolation,
+        )
+    }))
+    .flatten()
+    .min_by(|a, b| a.1.total_cmp(&b.1))
+    .map(|(trace, _)| trace)
 }
 
 /// A marker already selected by the host from its quick or retained store.
+#[derive(Clone)]
 pub struct MarkerPresentation<'a> {
     pub anchor: &'a WaveformPresentationKey,
     pub x: f64,
@@ -406,12 +470,16 @@ pub struct MarkerPresentation<'a> {
     pub label: String,
 }
 
-/// Project source-anchored marker positions onto this pane's exact sweep branches.
+/// Project source-anchored marker positions onto the exact sweep branches of
+/// `traces`, the curves one axis of a pane reads, each at its value on that
+/// axis. The limit lines of markers that ride no curve come with them when
+/// `limits` asks.
 pub fn plot_markers<'a>(
     model: &StripModel,
-    pane: &UnitPane,
+    traces: &[usize],
     interpolation: SampleInterpolation,
     markers: impl IntoIterator<Item = MarkerPresentation<'a>>,
+    limits: bool,
 ) -> Vec<plot::Marker> {
     let mut projected = Vec::new();
     // Markers ride their anchored trace: Y is resampled here rather than
@@ -422,13 +490,14 @@ pub fn plot_markers<'a>(
         if !marker.kind.rides_a_trace() {
             // A spec constrains the X position, which every pane of the
             // strip shares — so it draws on all of them.
-            projected.push(plot::Marker::limit_line(marker.x, color, label));
+            if limits {
+                projected.push(plot::Marker::limit_line(marker.x, color, label));
+            }
             continue;
         }
         // A marker belongs to the pane that owns its trace's unit; the
         // other panes are a different scale and would misplace it.
-        let anchored = pane
-            .traces
+        let anchored = traces
             .iter()
             .filter_map(|&index| model.traces.get(index).map(|trace| (index, trace)))
             .find(|(_, trace)| !trace.overlay && anchor_key(model, trace) == *marker.anchor);
@@ -676,6 +745,8 @@ pub struct SecondaryPlot<'a> {
     pub traces: &'a [usize],
     pub expressions: &'a [ResolvedExpr],
     pub range: (f64, f64),
+    /// The markers on its curves, each at its value on this axis.
+    pub markers: Vec<plot::Marker>,
     /// The key its range is pinned by in the session's viewports.
     pub slot: usize,
 }
@@ -1013,6 +1084,16 @@ pub fn show_plot<'a>(
     spec.horizontal_cursors = input.horizontal_cursors;
     spec.horizontal_cursor_interactive = input.horizontal_cursor_interactive;
     spec.markers = input.markers;
+    // A marker on a curve of an added axis stands where the curve is drawn:
+    // its value read on that axis, put on the first axis' scale.
+    for axis in input.secondary {
+        for marker in &axis.markers {
+            let share = XScale::Linear.normalize(marker.y, axis.range.0, axis.range.1);
+            let mut placed = marker.clone();
+            placed.y = y_scale.denormalize(share, y0, y1);
+            spec.markers.push(placed);
+        }
+    }
 
     // 0 dB reference on a log-magnitude pane.
     if pane.axis_unit() == "dB" && y0 < 0.0 && y1 > 0.0 {
@@ -1533,30 +1614,46 @@ pub fn show_plot<'a>(
             "Unit unknown: {reason}, so this expression has an axis of its own"
         ));
     }
+    // A click finds the curve it is nearest on whichever axis that curve is
+    // read on, as the curves are drawn; they are listed only when asked.
+    let secondary_traces = || -> Vec<AxisCurves<'_>> {
+        input
+            .secondary
+            .iter()
+            .map(|axis| {
+                (
+                    axis.traces
+                        .iter()
+                        .filter_map(|index| model.traces.get(*index).map(|trace| (*index, trace)))
+                        .collect(),
+                    axis.range,
+                )
+            })
+            .collect()
+    };
+    let pointer_y = response.response.interact_pointer_pos().map(|pos| pos.y);
     let nearest_trace = response
         .clicked_x
         .filter(|_| input.find_nearest)
         .and_then(|x| {
-            nearest_drawn_trace(
+            nearest_on_axes(
                 pane_traces(),
-                x,
-                response.response.interact_pointer_pos().map(|pos| pos.y),
+                &secondary_traces(),
+                (x, pointer_y),
                 response.plot_rect,
-                y_scale,
-                (y0, y1),
+                (y_scale, (y0, y1)),
                 interpolation,
             )
         });
     let context = response.context_at.map(|(x, y)| PlotContext {
         x,
         y,
-        trace: nearest_drawn_trace(
+        trace: nearest_on_axes(
             pane_traces(),
-            x,
-            response.response.interact_pointer_pos().map(|pos| pos.y),
+            &secondary_traces(),
+            (x, pointer_y),
             response.plot_rect,
-            y_scale,
-            (y0, y1),
+            (y_scale, (y0, y1)),
             interpolation,
         ),
         values: readout(x),

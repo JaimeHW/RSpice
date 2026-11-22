@@ -421,6 +421,7 @@ fn zooming_a_current_axis_leaves_the_volts_axis_of_its_strip_alone() {
         expressions: &[],
         range: (0.0, 2.0e-3),
         slot: amps.slot,
+        markers: Vec::new(),
     }];
     let plot_rect = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(800.0, 450.0));
     let gutter = super::super::stack::Gutter {
@@ -568,6 +569,7 @@ fn an_axis_paints_its_labels_inside_its_column_and_nothing_without_room() {
         expressions: &[],
         range: (0.0, 2.0e-3),
         slot: amps.slot,
+        markers: Vec::new(),
     }];
     let plot_rect = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(700.0, 450.0));
     let draw = |kept: usize| {
@@ -624,4 +626,42 @@ fn an_axis_paints_its_labels_inside_its_column_and_nothing_without_room() {
         "an axis without room paints nothing: {:?}",
         painted_text(&output)
     );
+}
+
+/// A click over a curve read on a strip's second axis finds that curve: its
+/// value is hit where it is drawn, on its own axis, not where the first
+/// axis would put it.
+#[test]
+fn a_click_over_a_curve_on_the_second_axis_finds_that_curve() {
+    use rspice_ui_kit::plot::{SampleInterpolation, XScale};
+    let model = model(&[
+        ("V(out)", "V", [0.0, 2.5, 5.0]),
+        ("I(R1)", "A", [1.5e-3, 1.5e-3, 1.5e-3]),
+    ]);
+    let index = |name: &str| {
+        model
+            .traces
+            .iter()
+            .position(|trace| trace.name == name)
+            .expect("the curve is drawn")
+    };
+    let (volts, amps) = (index("V(out)"), index("I(R1)"));
+    let first = [(volts, &model.traces[volts])];
+    let second = vec![(vec![(amps, &model.traces[amps])], (0.0, 2.0e-3))];
+    let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(100.0, 100.0));
+    // Mid-record, V(out) is 2.5 V, drawn at y 50 over 0 to 5 V; I(R1) is
+    // 1.5 mA, drawn at y 25 over 0 to 2 mA.
+    let nearest = |pointer: f32| {
+        crate::waves::pane::nearest_on_axes(
+            &first,
+            &second,
+            (0.5e-3, Some(pointer)),
+            rect,
+            (XScale::Linear, (0.0, 5.0)),
+            SampleInterpolation::Linear,
+        )
+        .map(|trace| trace.name.clone())
+    };
+    assert_eq!(nearest(27.0).as_deref(), Some("I(R1)"));
+    assert_eq!(nearest(52.0).as_deref(), Some("V(out)"));
 }
