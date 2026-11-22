@@ -30,6 +30,12 @@ fn state_with(variable: MonteCarloVariableMetadata) -> ResultsTestHost {
     state
 }
 
+/// Whether the plan judges the distribution against the run's own yield.
+fn judges_the_run_yield(plan: &HistPlan) -> bool {
+    plan.limits
+        .is_some_and(|limits| limits.source == LimitSource::Yield)
+}
+
 fn paint(state: &mut ResultsTestHost, panel: bool) -> String {
     fn collect(shape: &egui::Shape, text: &mut String) {
         match shape {
@@ -91,10 +97,10 @@ fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
             .viewer_capability(ActiveViewer::Histogram)
             .available
     );
-    assert!(paint(&mut state, false).contains("gain"));
+    assert!(paint(&mut state, false).contains("GAIN"));
     assert!(paint(&mut state, true).contains("Std dev"));
     let text = paint(&mut state, false);
-    assert!(text.contains("gain"), "{text}");
+    assert!(text.contains("GAIN"), "{text}");
 }
 
 #[test]
@@ -252,7 +258,10 @@ fn hist_source_yield_replacement_cannot_reuse_a_wrapped_generation() {
         .simulation
         .replace_yield_evidence(vec![valid.clone()], Some(provenance));
     let version = state.model.simulation.view.data_version;
-    assert!(hist_plan(state.results_reads(), "gain").yield_is_consistent);
+    assert!(judges_the_run_yield(&hist_plan(
+        state.results_reads(),
+        "gain"
+    )));
     let mut invalid = valid;
     invalid.stats.mean += 1.0;
     state
@@ -260,7 +269,10 @@ fn hist_source_yield_replacement_cannot_reuse_a_wrapped_generation() {
         .simulation
         .replace_yield_evidence(vec![invalid], Some(provenance));
     state.model.simulation.view.data_version = version;
-    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
+    assert!(!judges_the_run_yield(&hist_plan(
+        state.results_reads(),
+        "gain"
+    )));
 }
 
 #[test]
@@ -273,7 +285,10 @@ fn hist_source_yield_must_describe_the_displayed_monte_carlo_population() {
         .model
         .simulation
         .replace_yield_evidence(vec![unrelated], Some(provenance));
-    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
+    assert!(!judges_the_run_yield(&hist_plan(
+        state.results_reads(),
+        "gain"
+    )));
 }
 
 #[test]
@@ -402,14 +417,20 @@ fn hist_source_yield_requires_matching_seed_and_ordered_samples() {
         .model
         .simulation
         .replace_yield_evidence(vec![result.clone()], Some(provenance));
-    assert!(hist_plan(state.results_reads(), "gain").yield_is_consistent);
+    assert!(judges_the_run_yield(&hist_plan(
+        state.results_reads(),
+        "gain"
+    )));
     let mut wrong_seed = provenance;
     wrong_seed.seed += 1;
     state
         .model
         .simulation
         .replace_yield_evidence(vec![result.clone()], Some(wrong_seed));
-    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
+    assert!(!judges_the_run_yield(&hist_plan(
+        state.results_reads(),
+        "gain"
+    )));
     let mut reordered = result;
     reordered.samples.reverse();
     reordered.trail.reverse();
@@ -418,7 +439,10 @@ fn hist_source_yield_requires_matching_seed_and_ordered_samples() {
         .model
         .simulation
         .replace_yield_evidence(vec![reordered], Some(provenance));
-    assert!(!hist_plan(state.results_reads(), "gain").yield_is_consistent);
+    assert!(!judges_the_run_yield(&hist_plan(
+        state.results_reads(),
+        "gain"
+    )));
 }
 
 #[test]
@@ -444,7 +468,7 @@ fn hist_source_moments_preserve_representable_tiny_and_large_statistics() {
         min: 1e308,
         max: 1.7e308,
     });
-    assert!(paint(&mut state, false).contains("large"));
+    assert!(paint(&mut state, false).contains("LARGE"));
     assert!(paint(&mut state, true).contains("Std dev"));
 }
 
@@ -503,7 +527,7 @@ fn a_histogram_bin_and_a_scatter_brush_share_one_member_selection() {
             simulation.active_analysis().unwrap(),
         )
     };
-    assert!(paint(&mut state, false).contains("V(out)"));
+    assert!(paint(&mut state, false).contains("V(OUT)"));
     assert!(!paint(&mut state, false).contains("picked"));
 
     // Brushed in the scatter sheet: drawn over the histogram's bars.
@@ -513,9 +537,10 @@ fn a_histogram_bin_and_a_scatter_brush_share_one_member_selection() {
     // Picked in the histogram: the trials the bin counts, by its edge rule.
     let histogram = active_histogram(state.results_reads()).unwrap();
     let bin = histogram.bin_of(7.0).unwrap();
-    let rows = picked_rows(&samples, &histogram, view::HistogramPick::Bin(bin));
+    let values: Vec<Option<f64>> = samples.iter().copied().map(Some).collect();
+    let rows = picked_rows(&values, &histogram, view::HistogramPick::Bin(bin));
     assert_eq!(rows, [7, 17]);
-    assert!(picked_rows(&samples, &histogram, view::HistogramPick::Clear).is_empty());
+    assert!(picked_rows(&values, &histogram, view::HistogramPick::Clear).is_empty());
     *state.results.results.session.members.on(key) = rows;
     assert_eq!(state.results.results.session.members.rows_on(key), [7, 17]);
     assert!(paint(&mut state, false).contains("2 picked"));
@@ -536,4 +561,121 @@ fn a_histogram_bin_and_a_scatter_brush_share_one_member_selection() {
             .is_empty()
     );
     assert!(!paint(&mut state, false).contains("picked"));
+}
+
+/// A measurement the project bounds reads in its own unit: its mean and
+/// standard deviation in volts, its capability against the requirement, and
+/// a yield whose interval is the Wilson score interval of the count.
+#[test]
+fn a_measured_distribution_reads_in_its_unit_against_its_requirement() {
+    use crate::state::{
+        FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements, SimulationRun,
+        SpecEntry, SpecPointScope,
+    };
+    // A seeded normal sample: 400 trials about 1 V with a 40 mV spread.
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut uniform = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        ((seed >> 11) as f64 + 0.5) / (1_u64 << 53) as f64
+    };
+    let trials = 400;
+    let values: Vec<f64> = (0..trials)
+        .map(|_| {
+            let (u1, u2) = (uniform(), uniform());
+            1.0 + 0.04 * (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+        })
+        .collect();
+    let members = values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::MonteCarloTrial {
+                    index,
+                    seed: 7 + index as u64,
+                },
+                vec![FamilyMeasurementEvidence {
+                    unit: None,
+                    name: "gain".to_owned(),
+                    value: Some(*value),
+                    passed: true,
+                    error: None,
+                }],
+            )
+        })
+        .collect();
+    let ordinals: Vec<f64> = (0..trials).map(|index| index as f64).collect();
+    let analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
+        AnalysisResultFamilyMetadata::MonteCarlo {
+            seed: 7,
+            runs_requested: trials,
+            runs_completed: trials,
+            failures: 0,
+            all_converged: true,
+            variables: vec![MonteCarloVariableMetadata {
+                mean_confidence: None,
+                name: "RGAIN.r".to_owned(),
+                mean: (trials as f64 - 1.0) / 2.0,
+                std_dev: rspice_results::population::std_dev(&ordinals).expect("a spread"),
+                min: 0.0,
+                max: trials as f64 - 1.0,
+                samples: ordinals,
+            }],
+            member_measurements: members,
+        },
+    );
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(analysis);
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run(0));
+    state.model.workspace.content.specs.push(SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: String::new(),
+        min: Some(0.95),
+        max: Some(1.1),
+        unit: "V".to_owned(),
+        scope: SpecPointScope::AllPoints,
+    });
+    state.results.results.session.document_presentation = Some(
+        crate::results::visualization_document::VisualizationPresentationPolicy {
+            significant_digits: 4,
+            phase_continuous: false,
+        },
+    );
+    state.results.analysis.histogram_state.selected = Some("gain".to_owned());
+
+    let moments = SampleMoments::from_samples(&values).expect("finite samples");
+    // The generator's own mean and spread, within what 400 draws resolve.
+    assert!((moments.mean - 1.0).abs() < 0.01, "{moments:?}");
+    assert!((moments.std_dev / 0.04 - 1.0).abs() < 0.1, "{moments:?}");
+    let passing = values
+        .iter()
+        .filter(|value| (0.95..=1.1).contains(*value))
+        .count();
+    let (low, high) =
+        rspice_results::population::wilson_interval(passing, trials).expect("an interval");
+    let cpk = (1.1 - moments.mean).min(moments.mean - 0.95) / (3.0 * moments.std_dev);
+    let format = crate::ui::plot::fmt_si_significant;
+    let panel = paint(&mut state, true);
+    for expected in [
+        format(moments.mean, "V", 4),
+        format(moments.std_dev, "V", 4),
+        format(cpk, "", 4),
+        format!(
+            "{} \u{b7} 95 % CI {} to {}",
+            format(100.0 * passing as f64 / trials as f64, "%", 4),
+            format(low, "", 4),
+            format(high, "%", 4)
+        ),
+        format!("{passing} of {trials}"),
+        "the project's requirement".to_owned(),
+    ] {
+        assert!(panel.contains(&expected), "missing {expected}: {panel}");
+    }
+    // The abscissa names the quantity and its unit; a count has none.
+    let plot = paint(&mut state, false);
+    assert!(plot.contains("GAIN \u{b7} V"), "{plot}");
 }

@@ -993,7 +993,7 @@ mod tests {
     fn the_histogram_draws_the_limits_of_the_yield_kept_on_its_pane() {
         let (mut host, document) = kept_yield();
         let text = picture(&mut host, document, crate::ui::Mode::Dark).1;
-        for expected in ["LSL 39", "USL 41.2", "retained spec limit"] {
+        for expected in ["LSL 39", "USL 41.2", "spec limit"] {
             assert!(text.contains(expected), "missing {expected}: {text}");
         }
     }

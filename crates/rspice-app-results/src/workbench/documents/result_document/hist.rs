@@ -1,24 +1,29 @@
 //! HIST — distributions rebuilt from retained samples, with descriptive
-//! moments and specification evidence bound to the same population.
+//! moments, shape and specification evidence bound to the same population.
 
 #[cfg(test)]
 mod source_tests;
 
 use egui::Ui;
+use std::borrow::Cow;
 use std::sync::Arc;
 
-use super::{ResultsParts, ResultsReads};
+use super::population::{self, PopulationPlan};
+use super::{ResultsParts, ResultsReads, SheetContext};
 use crate::product::DatasetId;
+use crate::results::visualization_document::{HistogramReading, SheetSettingValue};
 use crate::source_revision::SourceRevision;
 use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata, SimulationState,
 };
 use rspice_results::histogram::{Histogram, SampleMoments};
 use rspice_results::histogram::{HistogramBuilder, HistogramDisplayMode};
+use rspice_results::population::{ColumnKind, PopulationColumn};
 use rspice_results::yield_analysis::{SpecLimitType, YieldResult};
 use rspice_results_ui::histogram::display::HistogramDisplay;
 use rspice_results_ui::histogram::view::{
-    self, HistogramInspector, HistogramPlot, HistogramUnavailable, MonteCarloMethod,
+    self, HistogramInspector, HistogramPlot, HistogramUnavailable, LimitSource, MonteCarloMethod,
+    SampleShape, SpecLimits, YieldCount,
 };
 
 use super::frame_work::{self, DatasetWalk};
@@ -45,6 +50,7 @@ fn matching_yield_result<'a>(
     matches.next().is_none().then_some(result)
 }
 
+#[cfg(test)]
 fn selected_yield_result<'a>(
     simulation: &'a SimulationState,
     histogram_name: &str,
@@ -140,8 +146,14 @@ fn yield_result_is_consistent(result: &YieldResult) -> bool {
         || !result.yield_percent.is_finite()
         || !(0.0..=100.0).contains(&result.yield_percent)
         || !result.stats.median.is_finite()
-        || result.stats.skewness.is_some_and(|value| !value.is_finite())
-        || result.stats.kurtosis.is_some_and(|value| !value.is_finite())
+        || result
+            .stats
+            .skewness
+            .is_some_and(|value| !value.is_finite())
+        || result
+            .stats
+            .kurtosis
+            .is_some_and(|value| !value.is_finite())
         || result.stats.cp.is_some_and(|value| !value.is_finite())
         || result.stats.cpk.is_some_and(|value| !value.is_finite())
     {
@@ -172,22 +184,27 @@ struct MonteCarloAuthority<'a> {
     variable: &'a MonteCarloVariableMetadata,
 }
 
+/// Whether the shown analysis is a successful family whose retained
+/// evidence still describes the shown run.
+fn family_evidence_is_valid(state: ResultsReads<'_>) -> bool {
+    let simulation = &state.model.simulation;
+    simulation.active_analysis().is_some_and(|analysis| {
+        analysis.success
+            && analysis.family_metadata.is_some()
+            && simulation.active_run().is_some_and(|run| {
+                super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+            })
+    })
+}
+
 fn active_monte_carlo_authority<'a>(
     state: ResultsReads<'a>,
     histogram_name: &str,
 ) -> Option<MonteCarloAuthority<'a>> {
+    if !family_evidence_is_valid(state) {
+        return None;
+    }
     let analysis = state.model.simulation.active_analysis()?;
-    if !analysis.success {
-        return None;
-    }
-    let metadata = analysis.family_metadata.as_ref()?;
-    if !super::analysis_evidence_is_valid(
-        state,
-        state.model.simulation.active_run()?.dataset_id,
-        analysis,
-    ) {
-        return None;
-    }
     let AnalysisResultFamilyMetadata::MonteCarlo {
         seed,
         runs_requested,
@@ -195,7 +212,7 @@ fn active_monte_carlo_authority<'a>(
         failures,
         variables,
         ..
-    } = metadata
+    } = analysis.family_metadata.as_ref()?
     else {
         return None;
     };
@@ -245,12 +262,33 @@ fn exact_moments(state: ResultsReads<'_>, histogram_name: &str) -> Option<Sample
     moments_from_samples(&result.samples)
 }
 
-/// The descriptive moments and yield verdict behind one distribution.
+/// Specification limits from the reader's side, judged only where the run
+/// states none: a measurement on the reading pane, else the reader's own.
+/// Held as bits, so a limit being typed keys the plan exactly.
+type FallbackLimits = (Option<u64>, Option<u64>, LimitSource);
+
+fn fallback_limits(state: ResultsReads<'_>, name: &str) -> Option<FallbackLimits> {
+    let bits = |(lower, upper): (Option<f64>, Option<f64>), source| {
+        (lower.is_some() || upper.is_some())
+            .then(|| (lower.map(f64::to_bits), upper.map(f64::to_bits), source))
+    };
+    kept_yield_limits(state, name)
+        .and_then(|limits| bits(limits, LimitSource::Pane))
+        .or_else(|| {
+            let settings = &state.analysis.histogram_state;
+            bits(
+                (settings.lower_limit, settings.upper_limit),
+                LimitSource::Reader,
+            )
+        })
+}
+
+/// The descriptive moments, shape and yield behind one distribution.
 ///
-/// Both walk the retained Monte-Carlo population several times over — the
-/// moments are four passes and the yield verdict counts, filters and then
-/// recomputes the moments to check the retained summary against them. The
-/// sheet and its panel each asked for both on every frame.
+/// Each walks the retained population — the moments are four passes, the
+/// shape sorts it, the yield verdict counts, filters and then recomputes the
+/// moments to check the retained summary against them. The sheet and its
+/// panel each asked for them on every frame.
 #[derive(Debug, Clone)]
 pub(super) struct HistPlan {
     version: u64,
@@ -261,33 +299,84 @@ pub(super) struct HistPlan {
     histogram_name: String,
     bin_count: usize,
     range: Option<(u64, u64)>,
+    population: Option<Arc<PopulationPlan>>,
+    fallback: Option<FallbackLimits>,
     histogram: Option<Arc<Histogram>>,
     mode: HistogramDisplayMode,
     display: Result<Arc<HistogramDisplay>, &'static str>,
     display_source: SourceRevision,
     moments: Option<SampleMoments>,
-    yield_is_consistent: bool,
+    shape: Option<SampleShape>,
+    /// The binned quantity's unit; empty when the run states none.
+    unit: String,
+    limits: Option<SpecLimits>,
+    yield_count: Option<YieldCount>,
+    method: Option<MonteCarloMethod>,
+    /// The values by population row, with the analysis whose member
+    /// selection those rows index, when the rows are the trials the scatter
+    /// sheet brushes.
+    rows: Option<(super::AnalysisPresentationKey, Vec<Option<f64>>)>,
+}
+
+/// The population's measured column named `name`, spelled as the
+/// requirement spells it in any case.
+fn measured_column<'a>(population: &'a PopulationPlan, name: &str) -> Option<&'a PopulationColumn> {
+    population.columns.iter().find(|column| {
+        column.kind == ColumnKind::Measurement && column.name.eq_ignore_ascii_case(name)
+    })
+}
+
+/// Whether `column` holds `samples` row for row, so that its unit and its
+/// requirement describe them. A requirement may state a measurement in
+/// another unit ("mV", "dB"); a column converted to it is not these numbers.
+fn column_holds(column: &PopulationColumn, samples: &[f64]) -> bool {
+    column.values.len() == samples.len()
+        && column.values.iter().any(Option::is_some)
+        && column
+            .values
+            .iter()
+            .zip(samples)
+            .all(|(value, sample)| value.is_none_or(|value| nearly_equal(value, *sample)))
+}
+
+/// How many of `values` pass, out of every trial row. A row with no value
+/// counts against the yield; trials the run requested and never completed
+/// are named beside it instead.
+fn count_passing(
+    values: &[Option<f64>],
+    passes: impl Fn(f64) -> bool,
+    runs_requested: Option<usize>,
+) -> YieldCount {
+    frame_work::note(DatasetWalk::HistMoments);
+    let total = values.len();
+    YieldCount {
+        passing: values
+            .iter()
+            .filter(|value| value.is_some_and(&passes))
+            .count(),
+        total,
+        excluded: runs_requested.map_or(0, |requested| requested.saturating_sub(total)),
+    }
 }
 
 /// Resolve bins and statistics together. Source tokens also cover nested edits,
 /// wholesale replacement and clones whose numeric generations happen to match.
 fn hist_plan(state: ResultsReads<'_>, histogram: &str) -> Arc<HistPlan> {
-    let version = state.model.simulation.view.data_version;
-    let source = state.model.simulation.retained.runs.revision();
-    let yield_source = state.model.simulation.retained.yield_evidence.revision();
-    let dataset = state
-        .model
-        .simulation
-        .active_run()
-        .map(|run| run.dataset_id);
+    let simulation = &state.model.simulation;
+    let workspace = &state.model.workspace;
+    let version = simulation.view.data_version;
+    let source = simulation.retained.runs.revision();
+    let yield_source = simulation.retained.yield_evidence.revision();
+    let dataset = simulation.active_run().map(|run| run.dataset_id);
     let analysis = dataset
-        .zip(state.model.simulation.active_analysis())
+        .zip(simulation.active_analysis())
         .map(|(dataset, analysis)| super::AnalysisPresentationKey::new(dataset, analysis));
     let settings = &state.analysis.histogram_state;
     let bin_count = settings.bin_count.clamp(1, 1000);
     let range = settings
         .custom_range
         .then_some((settings.custom_min.to_bits(), settings.custom_max.to_bits()));
+    let fallback = fallback_limits(state, histogram);
     if let Some(plan) = state.results.plans.hist.borrow().as_ref()
         && plan.version == version
         && plan.source == source
@@ -298,19 +387,23 @@ fn hist_plan(state: ResultsReads<'_>, histogram: &str) -> Arc<HistPlan> {
         && plan.mode == settings.mode
         && plan.bin_count == bin_count
         && plan.range == range
+        && plan.fallback == fallback
+        && plan
+            .population
+            .as_deref()
+            .is_none_or(|population| population.is_shown(simulation, workspace))
     {
         return Arc::clone(plan);
     }
+    let population = population::shown(simulation, workspace, state.results);
     let authority = active_monte_carlo_authority(state, histogram);
-    let yield_result = matching_yield_result(&state.model.simulation, histogram);
+    let yield_result = matching_yield_result(simulation, histogram);
     let yield_is_consistent = yield_result.is_some_and(|result| {
         if !yield_result_is_consistent(result) {
             return false;
         }
         match authority {
-            Some(authority) => state
-                .model
-                .simulation
+            Some(authority) => simulation
                 .retained
                 .yield_provenance()
                 .is_some_and(|provenance| {
@@ -327,15 +420,125 @@ fn hist_plan(state: ResultsReads<'_>, histogram: &str) -> Arc<HistPlan> {
             None => legacy_yield_is_eligible(state),
         }
     });
-    let moments = exact_moments(state, histogram);
-    let samples = authority
+    let engine_yield = yield_result.filter(|_| yield_is_consistent);
+    let paired = |samples: &[f64]| {
+        population.as_deref().is_some_and(|population| {
+            population.variables_paired && population.trial_count() == samples.len()
+        })
+    };
+    // A retained variable is the population. A measured column of the same
+    // name lends it a unit and a requirement only when it holds the same
+    // numbers; a name only the trials measured is that column.
+    let variable = authority
         .map(|authority| authority.variable.samples.as_slice())
-        .or_else(|| {
-            yield_result
-                .filter(|_| yield_is_consistent)
-                .map(|result| result.samples.as_slice())
+        .or_else(|| engine_yield.map(|result| result.samples.as_slice()));
+    let column = population
+        .as_deref()
+        .and_then(|population| measured_column(population, histogram))
+        .filter(|column| {
+            variable.is_none_or(|samples| paired(samples) && column_holds(column, samples))
         });
-    let derived = samples.and_then(|samples| {
+    let (samples, values, moments): (Option<Cow<'_, [f64]>>, Vec<Option<f64>>, _) =
+        match (variable, column) {
+            (Some(samples), _) => (
+                Some(Cow::Borrowed(samples)),
+                samples.iter().copied().map(Some).collect(),
+                exact_moments(state, histogram),
+            ),
+            (None, Some(column)) => {
+                let samples: Vec<f64> = column.values.iter().flatten().copied().collect();
+                let moments = moments_from_samples(&samples);
+                (Some(Cow::Owned(samples)), column.values.clone(), moments)
+            }
+            (None, None) => (None, Vec::new(), None),
+        };
+    let unit = column
+        .map(|column| column.unit.trim())
+        .filter(|unit| !unit.is_empty())
+        .or_else(|| engine_yield.map(|result| result.spec.unit.trim()))
+        .unwrap_or_default()
+        .to_owned();
+    let method = match (authority, population.as_deref()) {
+        (Some(authority), _) => Some(MonteCarloMethod {
+            seed: authority.seed,
+            runs_requested: authority.runs_requested,
+            runs_completed: authority.runs_completed,
+            failures: authority.failures,
+            mean_confidence: authority.variable.mean_confidence,
+        }),
+        (None, Some(population)) if variable.is_none() && column.is_some() => {
+            Some(MonteCarloMethod {
+                seed: population.seed,
+                runs_requested: population.runs_requested,
+                runs_completed: population.runs_completed,
+                failures: population.failures,
+                mean_confidence: None,
+            })
+        }
+        _ => None,
+    };
+    let requested = method.map(|method| method.runs_requested);
+    let requirement = column.and_then(|column| column.limit.as_ref());
+    let (limits, yield_count) = if samples.is_none() {
+        (None, None)
+    } else if let Some(result) = engine_yield {
+        (
+            Some(SpecLimits {
+                lower: result.spec.min,
+                upper: result.spec.max,
+                source: LimitSource::Yield,
+            }),
+            Some(YieldCount {
+                passing: result.pass_count,
+                total: result.total_runs,
+                excluded: requested
+                    .map_or(0, |requested| requested.saturating_sub(result.total_runs)),
+            }),
+        )
+    } else if let Some(limit) = requirement {
+        (
+            Some(SpecLimits {
+                lower: limit.min(),
+                upper: limit.max(),
+                source: LimitSource::Requirement,
+            }),
+            Some(count_passing(
+                &values,
+                |value| limit.passes(value),
+                requested,
+            )),
+        )
+    } else if let Some((lower, upper, source)) = fallback {
+        let (lower, upper) = (lower.map(f64::from_bits), upper.map(f64::from_bits));
+        let passes = |value: f64| {
+            value.is_finite()
+                && lower.is_none_or(|lower| value >= lower)
+                && upper.is_none_or(|upper| value <= upper)
+        };
+        (
+            Some(SpecLimits {
+                lower,
+                upper,
+                source,
+            }),
+            Some(count_passing(&values, passes, requested)),
+        )
+    } else {
+        (None, None)
+    };
+    let rows = population.as_deref().and_then(|population| {
+        let rows = match (variable, column) {
+            (Some(samples), _) if paired(samples) => values.clone(),
+            (None, Some(_)) => values.clone(),
+            _ => return None,
+        };
+        Some((population.analysis(), rows))
+    });
+    let shape = samples.as_deref().and_then(|samples| {
+        frame_work::note(DatasetWalk::HistMoments);
+        SampleShape::of(samples)
+    });
+    let derived = samples.as_deref().and_then(|samples| {
         let mut builder = HistogramBuilder::new().name(histogram).bin_count(bin_count);
         if let Some((min, max)) = range {
             let (min, max) = (f64::from_bits(min), f64::from_bits(max));
@@ -349,7 +552,7 @@ fn hist_plan(state: ResultsReads<'_>, histogram: &str) -> Arc<HistPlan> {
     });
     let display = derived
         .as_deref()
-        .zip(samples)
+        .zip(samples.as_deref())
         .ok_or("The selected distribution is unavailable")
         .and_then(|(histogram, samples)| HistogramDisplay::new(histogram, samples, settings.mode))
         .map(Arc::new);
@@ -362,12 +565,19 @@ fn hist_plan(state: ResultsReads<'_>, histogram: &str) -> Arc<HistPlan> {
         histogram_name: histogram.to_owned(),
         bin_count,
         range,
+        population: population.clone(),
+        fallback,
         histogram: derived,
         mode: settings.mode,
         display,
         display_source: SourceRevision::default(),
         moments,
-        yield_is_consistent,
+        shape,
+        unit,
+        limits,
+        yield_count,
+        method,
+        rows,
     });
     *state.results.plans.hist.borrow_mut() = Some(Arc::clone(&built));
     built
@@ -386,16 +596,13 @@ fn legacy_yield_is_eligible(state: ResultsReads<'_>) -> bool {
             })
 }
 
-/// Names come from current retained evidence, never the mutable legacy bins.
-fn histogram_names(state: ResultsReads<'_>) -> Vec<&str> {
+/// The names the retained run states itself: its Monte Carlo variables, or
+/// a legacy run's yield targets. Never the mutable legacy bins.
+fn retained_names(state: ResultsReads<'_>) -> Vec<&str> {
     if let Some(analysis) = state.model.simulation.active_analysis()
         && analysis.family_metadata.is_some()
     {
-        if !analysis.success
-            || !state.model.simulation.active_run().is_some_and(|run| {
-                super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
-            })
-        {
+        if !family_evidence_is_valid(state) {
             return Vec::new();
         }
         return match &analysis.family_metadata {
@@ -419,6 +626,33 @@ fn histogram_names(state: ResultsReads<'_>) -> Vec<&str> {
         .collect()
 }
 
+/// Every distribution the sheet offers: the run's variables, then each
+/// measurement its trials produced that no variable already names.
+fn histogram_names(state: ResultsReads<'_>) -> Vec<String> {
+    let mut names: Vec<String> = retained_names(state)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    if family_evidence_is_valid(state)
+        && let Some(population) = population::shown(
+            &state.model.simulation,
+            &state.model.workspace,
+            state.results,
+        )
+    {
+        for column in &population.columns {
+            if column.kind == ColumnKind::Measurement
+                && !names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&column.name))
+            {
+                names.push(column.name.clone());
+            }
+        }
+    }
+    names
+}
+
 /// The reader's significant digits, which the histogram's values read at.
 fn significant_digits(state: ResultsReads<'_>) -> usize {
     usize::from(
@@ -429,15 +663,37 @@ fn significant_digits(state: ResultsReads<'_>) -> usize {
     )
 }
 
+/// Whether the shown run has a distribution to draw. Called for every frame
+/// the sheet's tab is drawn, so it reads the retained evidence directly
+/// rather than resolving the population.
 pub(super) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
-    let names = histogram_names(state);
-    names.iter().any(|name| {
+    let names = retained_names(state);
+    let retained = names.iter().any(|name| {
         active_monte_carlo_authority(state, name)
             .is_some_and(|authority| !authority.variable.samples.is_empty())
             || (legacy_yield_is_eligible(state)
                 && matching_yield_result(&state.model.simulation, name)
                     .is_some_and(|result| !result.samples.is_empty()))
-    })
+    });
+    retained
+        || (family_evidence_is_valid(state)
+            && state
+                .model
+                .simulation
+                .active_analysis()
+                .and_then(|analysis| analysis.family_metadata.as_ref())
+                .is_some_and(|metadata| {
+                    matches!(
+                        metadata,
+                        AnalysisResultFamilyMetadata::MonteCarlo { member_measurements, .. }
+                            if member_measurements.iter().any(|member| {
+                                member.measurements.iter().any(|evidence| {
+                                    evidence.is_measured()
+                                        && evidence.value.is_some_and(f64::is_finite)
+                                })
+                            })
+                    )
+                }))
 }
 
 pub(super) fn active_histogram(state: ResultsReads<'_>) -> Option<Arc<Histogram>> {
@@ -456,47 +712,17 @@ pub(super) fn active_histogram_display(state: ResultsReads<'_>) -> Option<Arc<Hi
 
 /// The distribution the reader has selected, by name.
 fn selected_histogram_name(state: ResultsReads<'_>) -> Option<String> {
-    let names = histogram_names(state);
+    selected_name(state, &histogram_names(state))
+}
+
+fn selected_name(state: ResultsReads<'_>, names: &[String]) -> Option<String> {
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let index = rspice_results_ui::histogram::state::measurement_index(
         state.analysis.histogram_state.selected.as_deref(),
         0,
         &names,
     )?;
     Some(names[index].to_owned())
-}
-
-/// The shown variable's samples, with the analysis they belong to, when
-/// each sample's position is its trial's row in the population the scatter
-/// sheet reads — so a bin picks the trials a brush would.
-///
-/// A run that dropped trials indexes its variables and its measured trials
-/// differently, retains no correspondence between them, and offers no link.
-fn member_samples(
-    state: ResultsReads<'_>,
-    name: &str,
-) -> Option<(super::AnalysisPresentationKey, Vec<f64>)> {
-    let run = state.model.simulation.active_run()?;
-    let analysis = state.model.simulation.active_analysis()?;
-    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        &analysis.family_metadata
-    else {
-        return None;
-    };
-    let samples = variables
-        .iter()
-        .find(|variable| variable.name == name)?
-        .samples
-        .as_slice();
-    let population = rspice_results::population::build(
-        analysis,
-        rspice_results::population::PopulationRequirements::Retained(&[]),
-    )?;
-    (population.variables_paired && population.trial_count() == samples.len()).then(|| {
-        (
-            super::AnalysisPresentationKey::new(run.dataset_id, analysis),
-            samples.to_vec(),
-        )
-    })
 }
 
 /// The limits of the yield the reader last kept on the reading pane for
@@ -526,56 +752,101 @@ fn kept_yield_limits(state: ResultsReads<'_>, name: &str) -> Option<(Option<f64>
         .map(|family| (family.lower, family.upper))
 }
 
-/// The trial rows a pick in the histogram selects: the trials whose sample
+/// The trial rows a pick in the histogram selects: the trials whose value
 /// the picked bin counts, by the same edge rule that counted them.
-fn picked_rows(samples: &[f64], histogram: &Histogram, picked: view::HistogramPick) -> Vec<usize> {
+fn picked_rows(
+    values: &[Option<f64>],
+    histogram: &Histogram,
+    picked: view::HistogramPick,
+) -> Vec<usize> {
     match picked {
-        view::HistogramPick::Bin(bin) => samples
+        view::HistogramPick::Bin(bin) => values
             .iter()
             .enumerate()
-            .filter(|(_, value)| histogram.bin_of(**value) == Some(bin))
+            .filter(|(_, value)| value.is_some_and(|value| histogram.bin_of(value) == Some(bin)))
             .map(|(row, _)| row)
             .collect(),
         view::HistogramPick::Clear => Vec::new(),
     }
 }
 
-/// Render controls, resolve the current population, and apply local plot outcomes.
-pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let names: Vec<String> = histogram_names(state.results_reads())
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-    if view::controls(ui, &mut state.analysis.histogram_state, &names) {
+/// Resolve the shown population once for the frame, into the memo the
+/// scatter and box sheets share, so every read below finds it current.
+fn resolve_population(state: &mut ResultsParts<'_>) {
+    let _ = population::plan(&mut SheetContext::of(state));
+}
+
+/// Take the reading the view keeps for the shown analysis.
+fn take_kept_reading(state: &mut ResultsParts<'_>) {
+    if let Some(SheetSettingValue::Histogram(reading)) =
+        super::sheet_settings::kept(state.results_reads(), super::ResultViewer::Hist)
+        && reading != state.analysis.histogram_state.reading()
+    {
+        state.analysis.histogram_state.apply(&reading);
+    }
+}
+
+/// Keep what the reader changed since `before`, so the view reopens on it.
+fn keep_reading(state: &mut ResultsParts<'_>, before: &HistogramReading) {
+    let reading = state.analysis.histogram_state.reading();
+    if reading != *before {
+        super::sheet_settings::keep(
+            state,
+            super::ResultViewer::Hist,
+            Some(SheetSettingValue::Histogram(reading)),
+        );
+    }
+}
+
+/// The sheet's controls in its bar; `false` when there is no distribution
+/// to choose from.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    resolve_population(state);
+    take_kept_reading(state);
+    let names = histogram_names(state.results_reads());
+    if names.is_empty() {
+        return false;
+    }
+    if state.analysis.histogram_state.selected.is_none() {
+        state.analysis.histogram_state.selected = names.first().cloned();
+    }
+    let before = state.analysis.histogram_state.reading();
+    if view::domain_bar(ui, &mut state.analysis.histogram_state, &names) {
         state
             .results
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
-    let name = selected_histogram_name(state.results_reads());
+    keep_reading(state, &before);
+    true
+}
+
+/// Resolve the current population and draw it, applying local plot outcomes.
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    resolve_population(state);
+    take_kept_reading(state);
+    let names = histogram_names(state.results_reads());
+    let name = selected_name(state.results_reads(), &names);
     let plan = name
         .as_deref()
         .map(|name| hist_plan(state.results_reads(), name));
-    let members = name
-        .as_deref()
-        .and_then(|name| member_samples(state.results_reads(), name));
-    let selected: Vec<f64> = members
+    let selected: Vec<f64> = plan
         .as_ref()
-        .map(|(key, samples)| {
+        .and_then(|plan| plan.rows.as_ref())
+        .map(|(key, values)| {
             state
                 .results
                 .session
                 .members
                 .rows_on(*key)
                 .iter()
-                .filter_map(|row| samples.get(*row).copied())
+                .filter_map(|row| values.get(*row).copied().flatten())
                 .collect()
         })
         .unwrap_or_default();
-    let kept_limits = name
-        .as_deref()
-        .and_then(|name| kept_yield_limits(state.results_reads(), name));
     let significant_digits = significant_digits(state.results_reads());
+    let settings = &state.analysis.histogram_state;
+    let (normal_fit, normal_quantile) = (settings.normal_fit, settings.normal_quantile);
     let model = match &plan {
         None => Err(HistogramUnavailable::NoSelection {
             has_measurements: !names.is_empty(),
@@ -592,16 +863,14 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                     .map(Arc::as_ref)
                     .map_err(|reason| *reason),
                 moments: plan.moments,
-                spec_limits: selected_yield_result(
-                    &state.model.simulation,
-                    &histogram.name,
-                    plan.yield_is_consistent,
-                )
-                .map(|result| (result.spec.min, result.spec.max))
-                .or(kept_limits),
+                shape: plan.shape.as_ref(),
+                unit: &plan.unit,
+                limits: plan.limits,
                 source: &plan.display_source,
                 selected: &selected,
                 significant_digits,
+                normal_fit,
+                normal_quantile,
             }),
     };
     let plot_view = state
@@ -609,12 +878,10 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .session
         .plot_view(super::ResultViewer::Hist, 0);
     let out = view::show(ui, model, plot_view, &mut state.results.session.cache);
-    if let (Some(picked), Some((key, samples)), Some(histogram)) = (
-        out.picked,
-        members,
-        plan.as_ref().and_then(|plan| plan.histogram.as_deref()),
-    ) {
-        *state.results.session.members.on(key) = picked_rows(&samples, histogram, picked);
+    if let (Some(picked), Some(plan)) = (out.picked, plan.as_ref())
+        && let (Some((key, values)), Some(histogram)) = (&plan.rows, plan.histogram.as_deref())
+    {
+        *state.results.session.members.on(*key) = picked_rows(values, histogram, picked);
     }
     if out.fit_requested {
         state
@@ -641,8 +908,11 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
 }
 
-/// Resolve source authority around range controls and render the qualified facts.
+/// Render the qualified facts beside the sheet, and keep the range and the
+/// limits the reader set there.
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    resolve_population(state);
+    take_kept_reading(state);
     let Some(name) = selected_histogram_name(state.results_reads()) else {
         view::right_panel(
             ui,
@@ -652,6 +922,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         );
         return;
     };
+    let before = state.analysis.histogram_state.reading();
     let current_range = active_histogram(state.results_reads()).map(|histogram| histogram.range());
     if view::range_controls(ui, &mut state.analysis.histogram_state, current_range) {
         state
@@ -660,6 +931,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
     let plan = hist_plan(state.results_reads(), &name);
+    let settings = &state.analysis.histogram_state;
     let model = plan
         .histogram
         .as_deref()
@@ -667,23 +939,21 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .map(|histogram| HistogramInspector {
             histogram,
             moments: plan.moments,
-            method: active_monte_carlo_authority(state.results_reads(), &histogram.name).map(
-                |authority| MonteCarloMethod {
-                    seed: authority.seed,
-                    runs_requested: authority.runs_requested,
-                    runs_completed: authority.runs_completed,
-                    failures: authority.failures,
-                    mean_confidence: authority.variable.mean_confidence,
-                },
-            ),
-            yield_result: selected_yield_result(
-                &state.model.simulation,
-                &histogram.name,
-                plan.yield_is_consistent,
-            ),
+            shape: plan.shape.as_ref(),
+            unit: &plan.unit,
+            method: plan.method,
+            limits: plan.limits,
+            yield_count: plan.yield_count,
+            reader_limits: (settings.lower_limit, settings.upper_limit),
             significant_digits: significant_digits(state.results_reads()),
         });
-    view::right_panel(ui, model);
+    let response = view::right_panel(ui, model);
+    if let Some((lower, upper)) = response.reader_limits {
+        let settings = &mut state.analysis.histogram_state;
+        settings.lower_limit = lower;
+        settings.upper_limit = upper;
+    }
+    keep_reading(state, &before);
 }
 
 #[cfg(test)]

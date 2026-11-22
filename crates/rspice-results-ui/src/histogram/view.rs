@@ -1,4 +1,7 @@
-//! Histogram controls, plot and inspector over qualified retained evidence.
+//! Histogram controls, plot and inspector over qualified retained evidence:
+//! the distribution of one measurement in its own unit, the normal it is
+//! fitted with, its probability plot, and the yield and capability against
+//! the specification that bounds it.
 
 use super::HistogramState;
 use crate::presentation::{PlotView, well_hint};
@@ -8,12 +11,12 @@ use egui::Ui;
 use rspice_results::histogram::display::{HistogramDisplay, hist_axis};
 use rspice_results::histogram::{Histogram, HistogramDisplayMode, SampleMoments};
 use rspice_results::monte_carlo::{MonteCarloMeanConfidence, MonteCarloMeanInterval};
-use rspice_results::yield_analysis::YieldResult;
+use rspice_results::population::{self, ProbabilityPlot};
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::panels::{
     panel_body, panel_inset, property_row_control_columns, property_row_height,
 };
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant, padded_fit};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::source_revision::SourceRevision;
@@ -25,21 +28,93 @@ pub enum HistogramUnavailable {
     Invalid,
 }
 
+/// The shape of a population beyond its moments: the median, the sample
+/// skewness and excess kurtosis (G1 and G2), and its normal probability plot.
+/// Each walks or sorts the whole population, so the host resolves it once
+/// per population and lends it to every frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SampleShape {
+    pub median: f64,
+    pub skewness: Option<f64>,
+    pub kurtosis: Option<f64>,
+    pub probability: Option<ProbabilityPlot>,
+}
+
+impl SampleShape {
+    /// The shape of finite `samples`; `None` for an empty set.
+    pub fn of(samples: &[f64]) -> Option<Self> {
+        let sorted = population::sorted(samples);
+        Some(Self {
+            median: population::quantile(&sorted, 0.5)?,
+            skewness: population::skewness(&sorted),
+            kurtosis: population::excess_kurtosis(&sorted),
+            probability: population::normal_probability_plot(&sorted),
+        })
+    }
+}
+
+/// Where the specification limits a distribution is judged against came
+/// from. The run's own yield and the project's requirement are the run's;
+/// the reader's are the reader's to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitSource {
+    /// The yield the run judged.
+    Yield,
+    /// The project's requirement for the measurement.
+    Requirement,
+    /// A family measurement on the reading pane.
+    Pane,
+    /// The reader set them on this sheet.
+    Reader,
+}
+
+/// The lower and upper specification limits, either optional.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpecLimits {
+    pub lower: Option<f64>,
+    pub upper: Option<f64>,
+    pub source: LimitSource,
+}
+
+/// How many of the population pass its limits, out of how many trials.
+/// Trials with no value count against the yield, as the yield engine counts
+/// a diverged trial.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct YieldCount {
+    pub passing: usize,
+    pub total: usize,
+    /// Trials the run requested that never completed, named beside the figure.
+    pub excluded: usize,
+}
+
+impl YieldCount {
+    pub fn percent(self) -> Option<f64> {
+        (self.total > 0).then(|| 100.0 * self.passing as f64 / self.total as f64)
+    }
+}
+
 /// One source-qualified population and its cached display projection.
 pub struct HistogramPlot<'a> {
     pub histogram: &'a Histogram,
     pub display: Result<&'a HistogramDisplay, &'static str>,
     pub moments: Option<SampleMoments>,
-    pub spec_limits: Option<(Option<f64>, Option<f64>)>,
+    pub shape: Option<&'a SampleShape>,
+    /// The binned quantity's unit; empty when the run states none.
+    pub unit: &'a str,
+    pub limits: Option<SpecLimits>,
     pub source: &'a SourceRevision,
     /// The values of the members the reader picked, drawn over the bars.
     pub selected: &'a [f64],
     /// The reader's significant digits, which every value on the plot reads at.
     pub significant_digits: usize,
+    /// Whether the fitted normal is drawn.
+    pub normal_fit: bool,
+    /// The samples against their normal quantiles instead of the bars.
+    pub normal_quantile: bool,
 }
 
 /// Retained method facts for the population selected by the host.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct MonteCarloMethod {
     pub seed: u64,
     pub runs_requested: usize,
@@ -52,10 +127,22 @@ pub struct MonteCarloMethod {
 pub struct HistogramInspector<'a> {
     pub histogram: &'a Histogram,
     pub moments: Option<SampleMoments>,
+    pub shape: Option<&'a SampleShape>,
+    pub unit: &'a str,
     pub method: Option<MonteCarloMethod>,
-    pub yield_result: Option<&'a YieldResult>,
+    pub limits: Option<SpecLimits>,
+    pub yield_count: Option<YieldCount>,
+    /// The reader's own limits, offered for editing where the run states none.
+    pub reader_limits: (Option<f64>, Option<f64>),
     /// The reader's significant digits, which every statistic reads at.
     pub significant_digits: usize,
+}
+
+/// What the reader changed in the inspector.
+#[derive(Debug, Default, PartialEq)]
+pub struct HistogramInspectorResponse {
+    /// The reader's own lower and upper limits, when they set either.
+    pub reader_limits: Option<(Option<f64>, Option<f64>)>,
 }
 
 /// What a click on the histogram asked of the member selection.
@@ -79,24 +166,62 @@ pub struct HistogramViewResponse {
 
 /// The share of the frame the single bar of a degenerate distribution covers.
 const DEGENERATE_BAR_FRACTION: f32 = 0.18;
+/// Samples along the fitted normal curve.
+const FIT_SAMPLES: usize = 241;
+/// The bar's measurement select: the width of a long measurement name.
+const MEASURE_WIDTH: f32 = 150.0;
+/// The bar's display select: its longest choice.
+const DISPLAY_WIDTH: f32 = 132.0;
+const DISPLAY_CHOICES: [&str; 5] = [
+    "Count",
+    "Density",
+    "Percent",
+    "Cumulative",
+    "Normal quantile",
+];
 
-/// The yield figure, with the population it was measured over.
+/// A value of the binned quantity at the reader's digits, in its unit.
+fn quantity(value: f64, unit: &str, digits: usize) -> String {
+    fmt_si_significant(value, unit, digits)
+}
+
+/// A dimensionless statistic at the reader's digits, never prefixed.
+fn plain(value: f64, digits: usize) -> String {
+    fmt_si_significant(value, "", digits)
+}
+
+/// A percentage at the reader's digits.
+fn percent(value: f64, digits: usize) -> String {
+    fmt_si_significant(value, "%", digits)
+}
+
+/// The yield figure with its 95 % Wilson interval and the population it was
+/// measured over.
 ///
 /// A percentage alone reads as a property of the run, and it is not: the
-/// denominator is the trials the yield engine had evidence for, and a Monte
-/// Carlo that requested a hundred and completed ninety reports a yield over
-/// ninety. Both halves are stated here rather than left for the reader to
-/// reconstruct from the "Failures" row and the method panel — the count that
-/// makes the percentage mean something belongs beside it.
-fn yield_label(result: &YieldResult, authority: Option<MonteCarloMethod>) -> String {
-    let mut label = format!(
-        "{:.1} % · {} of {} evaluated",
-        result.yield_percent, result.pass_count, result.total_runs
-    );
-    if let Some(authority) = authority
-        && authority.failures > 0
-    {
-        label.push_str(&format!(" · {} diverged excluded", authority.failures));
+/// denominator is the trials the population holds, and a Monte Carlo that
+/// requested a hundred and completed ninety reports a yield over ninety. The
+/// interval says how far the figure can be trusted at that size.
+fn yield_label(count: YieldCount, digits: usize) -> String {
+    let Some(share) = count.percent() else {
+        return "\u{2014}".to_owned();
+    };
+    let mut label = percent(share, digits);
+    if let Some((low, high)) = population::wilson_interval(count.passing, count.total) {
+        label.push_str(&format!(
+            " \u{b7} 95 % CI {} to {}",
+            plain(low, digits),
+            percent(high, digits)
+        ));
+    }
+    label
+}
+
+/// The trials the yield was counted over.
+fn evaluated_label(count: YieldCount) -> String {
+    let mut label = format!("{} of {}", count.passing, count.total);
+    if count.excluded > 0 {
+        label.push_str(&format!(" \u{b7} {} diverged excluded", count.excluded));
     }
     label
 }
@@ -115,69 +240,137 @@ fn binning_label(histogram: &rspice_results::histogram::Histogram) -> String {
     format!("{count} display bin{plural}")
 }
 
-/// Draw measurement, display mode and bin controls; true requests a fitted view.
-pub fn controls(ui: &mut Ui, settings: &mut HistogramState, names: &[String]) -> bool {
-    if !names.is_empty() {
-        if settings.selected.is_none() {
-            settings.selected = names.first().cloned();
-        }
-        let selected_text = settings.selected.as_deref().unwrap_or_default().to_owned();
-        // The controls are interface chrome, on a panel band of their own as
-        // the strip header under them is: on the canvas-filled pane their
-        // labels took the interface's text over the canvas, unreadable when
-        // the two themes differ. The band meets the header with no canvas
-        // seam between them.
-        let t = Tokens::get(ui.ctx());
-        let row_spacing = ui.spacing().item_spacing.y;
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let changed = egui::Frame::NONE
-            .fill(t.color.bg_panel)
-            .inner_margin(egui::Margin::symmetric(6, 3))
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = row_spacing;
-                ui.set_width(ui.available_width());
-                ui.horizontal_wrapped(|ui| {
-                    let mut changed = false;
-                    ui.label("Measure");
-                    rspice_ui_kit::widgets::Combo::from_id_salt("hist_measurement")
-                        .selected_text(&selected_text)
-                        .show_ui(ui, |ui| {
-                            for name in names {
-                                changed |= ui
-                                    .selectable_value(
-                                        &mut settings.selected,
-                                        Some(name.clone()),
-                                        name,
-                                    )
-                                    .changed();
-                            }
-                        });
-                    ui.label("Display");
-                    rspice_ui_kit::widgets::Combo::from_id_salt("hist_mode")
-                        .selected_text(settings.mode.label())
-                        .show_ui(ui, |ui| {
-                            for mode in HistogramDisplayMode::ALL {
-                                changed |= ui
-                                    .selectable_value(&mut settings.mode, mode, mode.label())
-                                    .changed();
-                            }
-                        });
-                    ui.label("Bins");
-                    changed |= ui
-                        .add_enabled(
-                            settings.mode != HistogramDisplayMode::Cdf,
-                            egui::DragValue::new(&mut settings.bin_count).range(1..=1000),
-                        )
-                        .changed();
-                    changed
-                })
-                .inner
-            })
-            .inner;
-        ui.spacing_mut().item_spacing.y = row_spacing;
-        return changed;
+/// The display select's choice for `settings`.
+fn display_choice(settings: &HistogramState) -> usize {
+    if settings.normal_quantile {
+        return 4;
     }
-    false
+    match settings.mode {
+        HistogramDisplayMode::Count => 0,
+        HistogramDisplayMode::Pdf => 1,
+        HistogramDisplayMode::Percent => 2,
+        HistogramDisplayMode::Cdf => 3,
+    }
+}
+
+/// The sheet's own controls in its bar: the measurement, how it is drawn,
+/// how finely it is binned, and whether the normal fit is drawn. True when a
+/// change asks for a fitted view.
+pub fn domain_bar(ui: &mut Ui, settings: &mut HistogramState, names: &[String]) -> bool {
+    if names.is_empty() {
+        return false;
+    }
+    if settings.selected.is_none() {
+        settings.selected = names.first().cloned();
+    }
+    let before = settings.clone();
+    crate::chrome::bars::bar_label(ui, "Measure");
+    let index = names
+        .iter()
+        .position(|name| Some(name) == settings.selected.as_ref())
+        .unwrap_or(0);
+    if let Some(picked) = rspice_ui_kit::widgets::select(
+        ui,
+        "rspice.results.hist.measurement",
+        "Measurement",
+        names.get(index).map_or("", String::as_str),
+        names,
+        MEASURE_WIDTH,
+    ) {
+        settings.selected = names.get(picked).cloned();
+    }
+    ui.add_space(8.0);
+    crate::chrome::bars::bar_label(ui, "Display");
+    let choices = DISPLAY_CHOICES.map(str::to_owned).to_vec();
+    let choice = display_choice(settings);
+    if let Some(picked) = rspice_ui_kit::widgets::select(
+        ui,
+        "rspice.results.hist.display",
+        "Display",
+        DISPLAY_CHOICES[choice],
+        &choices,
+        DISPLAY_WIDTH,
+    ) {
+        settings.normal_quantile = picked == 4;
+        settings.mode = match picked {
+            1 => HistogramDisplayMode::Pdf,
+            2 => HistogramDisplayMode::Percent,
+            3 => HistogramDisplayMode::Cdf,
+            4 => settings.mode,
+            _ => HistogramDisplayMode::Count,
+        };
+    }
+    ui.add_space(8.0);
+    crate::chrome::bars::bar_label(ui, "Bins");
+    let binned = !settings.normal_quantile && settings.mode != HistogramDisplayMode::Cdf;
+    ui.add_enabled(
+        binned,
+        egui::DragValue::new(&mut settings.bin_count)
+            .range(1..=1000)
+            .speed(0.25),
+    )
+    .on_hover_text("Bins across the binned range")
+    .on_disabled_hover_text("A cumulative or quantile plot reads every sample, unbinned");
+    ui.add_space(8.0);
+    let fit = settings.normal_fit;
+    let response = rspice_ui_kit::widgets::chip(ui, "FIT", fit).on_hover_text(if fit {
+        "The normal distribution with the sample mean and standard deviation drawn"
+    } else {
+        "The fitted normal distribution hidden"
+    });
+    if response.clicked() {
+        settings.normal_fit = !fit;
+    }
+    // A new measurement, a new reading or new bins are a new range to fit;
+    // the normal fit drawn or hidden is not.
+    settings.selected != before.selected
+        || settings.mode != before.mode
+        || settings.normal_quantile != before.normal_quantile
+        || settings.bin_count != before.bin_count
+}
+
+/// The fitted normal over `x0..x1`, in the ordinate of `mode`: the expected
+/// count or percentage of a bin `width` wide, the density, or the cumulative
+/// probability.
+fn normal_fit_curve(
+    moments: SampleMoments,
+    mode: HistogramDisplayMode,
+    width: f64,
+    (x0, x1): (f64, f64),
+) -> Option<(Vec<f64>, Vec<f64>)> {
+    let sigma = moments.std_dev;
+    if !(sigma.is_finite() && sigma > 0.0 && x1 > x0) {
+        return None;
+    }
+    let scale = match mode {
+        HistogramDisplayMode::Count => moments.count as f64 * width,
+        HistogramDisplayMode::Percent => 100.0 * width,
+        HistogramDisplayMode::Pdf | HistogramDisplayMode::Cdf => 1.0,
+    };
+    let step = (x1 - x0) / (FIT_SAMPLES - 1) as f64;
+    let xs: Vec<f64> = (0..FIT_SAMPLES).map(|i| x0 + step * i as f64).collect();
+    let ys = xs
+        .iter()
+        .map(|x| {
+            let z = (x - moments.mean) / sigma;
+            if mode == HistogramDisplayMode::Cdf {
+                population::normal_cdf(z)
+            } else {
+                scale * population::normal_pdf(z) / sigma
+            }
+        })
+        .collect();
+    Some((xs, ys))
+}
+
+/// The width of one bin of the drawn histogram.
+fn bin_width(histogram: &Histogram) -> f64 {
+    match (histogram.bins.first(), histogram.bins.last()) {
+        (Some(first), Some(last)) if !histogram.bins.is_empty() => {
+            (last.upper - first.lower) / histogram.bins.len() as f64
+        }
+        _ => 0.0,
+    }
 }
 
 /// Draw the qualified distribution without changing host source or selection state.
@@ -187,16 +380,14 @@ pub fn show(
     view: PlotView,
     cache: &mut plot::DecimationCache,
 ) -> HistogramViewResponse {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let mut out = HistogramViewResponse::default();
+    let out = HistogramViewResponse::default();
     let model = match model {
         Ok(model) => model,
         Err(HistogramUnavailable::NoSelection { has_measurements }) => {
             well_hint(
                 ui,
                 if has_measurements {
-                    "The selected measurement is unavailable. Choose a measurement above."
+                    "The selected measurement is unavailable. Choose a measurement in the bar."
                 } else {
                     "No distribution yet — run a Monte Carlo analysis"
                 },
@@ -212,10 +403,12 @@ pub fn show(
         }
     };
     let histogram = model.histogram;
-    let digits = model.significant_digits;
     if histogram.bins.is_empty() || histogram.total_count == 0 {
         well_hint(ui, "The selected distribution is empty");
         return out;
+    }
+    if model.normal_quantile {
+        return show_probability(ui, &model, view, cache);
     }
     let display = match model.display {
         Ok(display) => display,
@@ -224,26 +417,72 @@ pub fn show(
             return out;
         }
     };
+    show_bars(ui, &model, display, view, cache)
+}
+
+fn show_bars(
+    ui: &mut Ui,
+    model: &HistogramPlot<'_>,
+    display: &HistogramDisplay,
+    view: PlotView,
+    cache: &mut plot::DecimationCache,
+) -> HistogramViewResponse {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let mut out = HistogramViewResponse::default();
+    let histogram = model.histogram;
+    let digits = model.significant_digits;
+    let unit = model.unit;
     let mode = display.mode;
     let moments = model.moments;
-    let spec_limits = model.spec_limits;
+    let limits = model.limits;
+    let spec_limits = limits.map(|limits| (limits.lower, limits.upper));
 
-    let subtitle = format!("{} · {} samples", histogram.name, histogram.total_count);
+    let axis = hist_axis(histogram);
+    let (x0, x1) = view.x.unwrap_or((axis.x0, axis.x1));
+    if !(x1 - x0).is_finite() || x1 <= x0 {
+        well_hint(
+            ui,
+            "The sample range exceeds the linear display range. Set a narrower range in the Distribution panel.",
+        );
+        return out;
+    }
+    let fit = moments
+        .filter(|_| model.normal_fit && axis.degenerate_at.is_none())
+        .and_then(|moments| normal_fit_curve(moments, mode, bin_width(histogram), (x0, x1)));
+    let fit_peak = fit
+        .as_ref()
+        .map_or(0.0, |(_, ys)| ys.iter().copied().fold(0.0, f64::max));
+    let y_top = if display.cdf.is_some() {
+        display.y_max()
+    } else {
+        display.y_max().max(fit_peak * 1.08)
+    };
+    let (y0, y1) = view.y.unwrap_or((0.0, y_top));
+
+    let subtitle = format!("{} samples", histogram.total_count);
     let mut legend = vec![LegendChip {
         name: mode.label(),
         color: c.accent,
         on: true,
     }];
-    if moments.is_some() {
+    if fit.is_some() {
         legend.push(LegendChip {
-            name: "descriptive ±1σ",
+            name: "normal fit",
+            color: c.text,
+            on: true,
+        });
+    }
+    if moments.is_some_and(|moments| moments.std_dev > 0.0) {
+        legend.push(LegendChip {
+            name: "\u{b1}1\u{3c3}",
             color: c.text_dim,
             on: true,
         });
     }
     if spec_limits.is_some() {
         legend.push(LegendChip {
-            name: "retained spec limit",
+            name: "spec limit",
             color: c.err,
             on: true,
         });
@@ -266,28 +505,16 @@ pub fn show(
         .show(ui);
     out.fit_requested = header.fit_clicked;
 
-    let axis = hist_axis(histogram);
-    let (x0, x1) = view.x.unwrap_or((axis.x0, axis.x1));
-    if !(x1 - x0).is_finite() || x1 <= x0 {
-        well_hint(
-            ui,
-            "The sample range exceeds the linear display range. Set a narrower range in the Distribution panel.",
-        );
-        return out;
-    }
-    let y1 = display.y_max();
-    let (y0, y1) = view.y.unwrap_or((0.0, y1));
-
     let mut spec = PlotSpec::new(
-        Axis::linear(x0, x1, ""),
+        Axis::linear(x0, x1, unit).with_label(&histogram.name),
         XScale::Linear,
-        Axis::linear_with(y0, y1, mode.unit(), 5),
+        Axis::linear_with(y0, y1, mode.ordinate_unit(unit), 5),
     )
+    .with_significant_digits(digits)
     .accessible_name("Statistical histogram");
 
-    // Descriptive ±1σ band and mean marker from exact retained sample
-    // moments. This is deliberately not called a distribution fit: no fit
-    // family or goodness-of-fit evidence is retained by the result schema.
+    // The mean and one standard deviation either side, from the exact
+    // retained moments. The mean's value is read once, in the panel.
     if let Some(moments) = moments {
         if moments.std_dev > 0.0 {
             let band_start = (moments.mean - moments.std_dev).max(x0);
@@ -303,42 +530,29 @@ pub fn show(
             x: moments.mean,
             y: y1 * 0.86,
             color: c.accent,
-            label: format!("µ {}", fmt_si_significant(moments.mean, "", digits)),
+            label: "\u{3bc}".to_owned(),
             drop_line: true,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
         });
     }
 
-    // Spec limits from the judged yield evidence, when present.
     if let Some((lsl, usl)) = spec_limits {
-        if let Some(lsl) = lsl
-            && lsl > x0
-            && lsl < x1
-        {
-            spec.markers.push(plot::Marker {
-                x: lsl,
-                y: y1 * 0.72,
-                color: c.err,
-                label: format!("LSL {}", fmt_si_significant(lsl, "", digits)),
-                drop_line: true,
-                label_dy: 0.0,
-                shape: plot::MarkerShape::Point,
-            });
-        }
-        if let Some(usl) = usl
-            && usl > x0
-            && usl < x1
-        {
-            spec.markers.push(plot::Marker {
-                x: usl,
-                y: y1 * 0.72,
-                color: c.err,
-                label: format!("USL {}", fmt_si_significant(usl, "", digits)),
-                drop_line: true,
-                label_dy: 0.0,
-                shape: plot::MarkerShape::Point,
-            });
+        for (limit, name) in [(lsl, "LSL"), (usl, "USL")] {
+            if let Some(limit) = limit
+                && limit > x0
+                && limit < x1
+            {
+                spec.markers.push(plot::Marker {
+                    x: limit,
+                    y: y1 * 0.72,
+                    color: c.err,
+                    label: format!("{name} {}", quantity(limit, unit, digits)),
+                    drop_line: true,
+                    label_dy: 0.0,
+                    shape: plot::MarkerShape::Point,
+                });
+            }
         }
     }
 
@@ -352,7 +566,7 @@ pub fn show(
             label: format!(
                 "all {} samples at {}",
                 histogram.total_count,
-                fmt_si_significant(value, "", digits)
+                quantity(value, unit, digits)
             ),
             drop_line: false,
             label_dy: 0.0,
@@ -383,6 +597,9 @@ pub fn show(
     if let Some(cdf) = &display.cdf {
         spec.traces
             .push(plot::Trace::new(&cdf.x, &cdf.y, accent).cache_key(0x4849_5354_4344_4600));
+    }
+    if let Some((xs, ys)) = &fit {
+        spec.traces.push(plot::Trace::new(xs, ys, c.text).thin());
     }
     spec.underlay = Some(Box::new(move |painter, mapper| {
         if let Some((lsl, usl)) = spec_limits {
@@ -480,16 +697,17 @@ pub fn show(
         }
     }));
 
+    let ordinate_unit = mode.ordinate_unit(unit);
     let readout = |x: f64| -> Vec<(String, String)> {
         let value = display.value_at(histogram, x);
         vec![
-            ("x".to_owned(), fmt_si_significant(x, "", digits)),
+            (histogram.name.clone(), quantity(x, unit, digits)),
             (
                 mode.label().to_owned(),
                 if mode == HistogramDisplayMode::Count {
                     format!("{value:.0}")
                 } else {
-                    fmt_si_significant(value, mode.unit(), digits)
+                    fmt_si_significant(value, &ordinate_unit, digits)
                 },
             ),
         ]
@@ -527,6 +745,128 @@ pub fn show(
     out
 }
 
+/// The normal probability plot: each sorted sample against the standard
+/// normal quantile of its plotting position, the fitted normal as the line
+/// they lie on when the population is normal, and the limits across it.
+fn show_probability(
+    ui: &mut Ui,
+    model: &HistogramPlot<'_>,
+    view: PlotView,
+    cache: &mut plot::DecimationCache,
+) -> HistogramViewResponse {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let mut out = HistogramViewResponse::default();
+    let digits = model.significant_digits;
+    let unit = model.unit;
+    let Some(probability) = model.shape.and_then(|shape| shape.probability.as_ref()) else {
+        well_hint(ui, "The selected distribution has no probability plot");
+        return out;
+    };
+    let quantiles: Vec<f64> = probability.points.iter().map(|(z, _)| *z).collect();
+    let samples: Vec<f64> = probability.points.iter().map(|(_, x)| *x).collect();
+    let z_range = (
+        quantiles.first().copied().unwrap_or(-1.0),
+        quantiles.last().copied().unwrap_or(1.0),
+    );
+    let (z0, z1) = view.x.unwrap_or_else(|| padded_fit(z_range));
+    let limits = model.limits;
+    let mut y_values: Vec<f64> = samples.clone();
+    if let Some(limits) = limits {
+        y_values.extend(limits.lower);
+        y_values.extend(limits.upper);
+    }
+    let y_range = y_values
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), value| {
+            (lo.min(*value), hi.max(*value))
+        });
+    let (y0, y1) = view.y.unwrap_or_else(|| padded_fit(y_range));
+
+    let fit = model
+        .moments
+        .filter(|moments| model.normal_fit && moments.std_dev > 0.0)
+        .map(|moments| {
+            let xs = vec![z0, z1];
+            let ys = vec![
+                moments.mean + moments.std_dev * z0,
+                moments.mean + moments.std_dev * z1,
+            ];
+            (xs, ys)
+        });
+
+    let subtitle = match probability.correlation {
+        Some(r) => format!("{} samples \u{b7} r {}", samples.len(), plain(r, digits)),
+        None => format!("{} samples", samples.len()),
+    };
+    let mut legend = vec![LegendChip {
+        name: "samples",
+        color: c.accent,
+        on: true,
+    }];
+    if fit.is_some() {
+        legend.push(LegendChip {
+            name: "normal fit",
+            color: c.text,
+            on: true,
+        });
+    }
+    if limits.is_some() {
+        legend.push(LegendChip {
+            name: "spec limit",
+            color: c.err,
+            on: true,
+        });
+    }
+    let header = strip::StripHeader::new("MC", &subtitle, &legend)
+        .zoomed(view.is_zoomed())
+        .show(ui);
+    out.fit_requested = header.fit_clicked;
+
+    let mut spec = PlotSpec::new(
+        Axis::linear(z0, z1, "").with_label("Normal quantile"),
+        XScale::Linear,
+        Axis::linear_with(y0, y1, unit, 5),
+    )
+    .with_significant_digits(digits)
+    .accessible_name("Normal probability plot");
+    cache.ensure_source(model.source);
+    if let Some((xs, ys)) = &fit {
+        spec.traces.push(plot::Trace::new(xs, ys, c.text).thin());
+    }
+    spec.traces.push(
+        plot::Trace::new(&quantiles, &samples, c.accent)
+            .draw(plot::DrawMode::Points)
+            .cache_key(0x4849_5354_5150_5000),
+    );
+    if let Some(limits) = limits {
+        for (limit, name) in [(limits.lower, "LSL"), (limits.upper, "USL")] {
+            if let Some(limit) = limit {
+                spec.limit_lines.push(plot::LimitLine {
+                    y: limit,
+                    color: c.err,
+                    label: format!("{name} {}", quantity(limit, unit, digits)),
+                });
+            }
+        }
+    }
+    let moments = model.moments;
+    let name = model.histogram.name.clone();
+    let readout = |z: f64| -> Vec<(String, String)> {
+        let mut rows = vec![("Normal quantile".to_owned(), plain(z, digits))];
+        if let Some(moments) = moments.filter(|moments| moments.std_dev > 0.0) {
+            rows.push((
+                format!("{name} fit"),
+                quantity(moments.mean + moments.std_dev * z, unit, digits),
+            ));
+        }
+        rows
+    };
+    let response = plot::show(ui, &spec, cache, None, Some(&readout));
+    out.plot = Some(response);
+    out
+}
+
 /// Draw local range controls; true requests a fitted view before rebuilding.
 pub fn range_controls(
     ui: &mut Ui,
@@ -556,6 +896,12 @@ pub fn range_controls(
 /// One bound of the custom range as a property row: its name in the label
 /// column and the drag field that sets it in the value column.
 fn bound_row(ui: &mut Ui, label: &str, value: &mut f64) -> bool {
+    property_field(ui, label, |ui| ui.add(egui::DragValue::new(value)))
+}
+
+/// A property row: `label` in the label column and the field `add` draws in
+/// the value column.
+fn property_field(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> egui::Response) -> bool {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let trailing = panel_inset(ui);
@@ -580,7 +926,7 @@ fn bound_row(ui: &mut Ui, label: &str, value: &mut f64) -> bool {
             egui::UiBuilder::new()
                 .max_rect(value_rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            |ui| ui.add(egui::DragValue::new(value)),
+            add,
         )
         .inner;
     ui.ctx()
@@ -588,8 +934,62 @@ fn bound_row(ui: &mut Ui, label: &str, value: &mut f64) -> bool {
     field.changed()
 }
 
-/// Render descriptive and specification evidence already qualified by the host.
-pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramUnavailable>) {
+/// A limit the reader types in engineering notation ("1.2m", "950 mV"),
+/// taken when the field loses focus; empty clears it. True when it changed.
+fn limit_field(
+    ui: &mut Ui,
+    label: &str,
+    limit: &mut Option<f64>,
+    unit: &str,
+    digits: usize,
+) -> bool {
+    let id = ui.id().with(("rspice.results.hist.limit", label));
+    let mut changed = false;
+    property_field(ui, label, |ui| {
+        let shown = limit.map_or_else(String::new, |value| quantity(value, unit, digits));
+        let mut text = ui
+            .data(|data| data.get_temp::<String>(id))
+            .unwrap_or_else(|| shown.clone());
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut text)
+                .id(id.with("field"))
+                .font(theme::field_mono())
+                .hint_text("none")
+                .desired_width(f32::INFINITY),
+        );
+        if response.has_focus() {
+            ui.data_mut(|data| data.insert_temp(id, text.clone()));
+        } else if response.lost_focus() {
+            ui.data_mut(|data| data.remove::<String>(id));
+            let trimmed = text.trim();
+            let typed = trimmed.strip_suffix(unit).unwrap_or(trimmed).trim();
+            let parsed = if typed.is_empty() {
+                Some(None)
+            } else {
+                rspice_vocabulary::quantity::parse_engineering_value(typed)
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .map(Some)
+            };
+            if let Some(parsed) = parsed
+                && parsed != *limit
+            {
+                *limit = parsed;
+                changed = true;
+            }
+        }
+        response
+    });
+    changed
+}
+
+/// Render descriptive and specification evidence already qualified by the
+/// host, and the reader's own limits where the run states none.
+pub fn right_panel(
+    ui: &mut Ui,
+    model: Result<HistogramInspector<'_>, HistogramUnavailable>,
+) -> HistogramInspectorResponse {
+    let mut out = HistogramInspectorResponse::default();
     let model = match model {
         Ok(model) => model,
         Err(reason) => {
@@ -603,27 +1003,49 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
                     HistogramUnavailable::Invalid => "Invalid display range or sample data.",
                 },
             );
-            return;
+            return out;
         }
     };
     let histogram = model.histogram;
     let digits = model.significant_digits;
+    let unit = model.unit;
+    let value = |value: f64| quantity(value, unit, digits);
+    let absent = |reason: &str| format!("\u{2014} {reason}");
     section_header(ui, "Distribution", None);
-    // The strip header above already names the measure, and the two
-    // out-of-range counts are zero on an autoscaled histogram: one row, and
-    // only when the display range is actually cutting samples off.
     if let Some(moments) = model.moments {
         let mut rows = vec![
             ("N", moments.count.to_string(), false),
-            ("Mean", fmt_si_significant(moments.mean, "", digits), true),
-            (
-                "Std dev",
-                fmt_si_significant(moments.std_dev, "", digits),
-                true,
-            ),
-            ("Min", fmt_si_significant(moments.min, "", digits), false),
-            ("Max", fmt_si_significant(moments.max, "", digits), false),
+            ("Mean", value(moments.mean), true),
         ];
+        if let Some(shape) = model.shape {
+            rows.push(("Median", value(shape.median), false));
+        }
+        rows.push(("Std dev", value(moments.std_dev), true));
+        if let Some(shape) = model.shape {
+            rows.push((
+                "Skewness",
+                shape
+                    .skewness
+                    .map_or_else(|| absent("needs 3 samples"), |g1| plain(g1, digits)),
+                false,
+            ));
+            rows.push((
+                "Excess kurtosis",
+                shape
+                    .kurtosis
+                    .map_or_else(|| absent("needs 4 samples"), |g2| plain(g2, digits)),
+                false,
+            ));
+        }
+        rows.push(("Min", value(moments.min), false));
+        rows.push(("Max", value(moments.max), false));
+        if let Some(r) = model
+            .shape
+            .and_then(|shape| shape.probability.as_ref())
+            .and_then(|plot| plot.correlation)
+        {
+            rows.push(("Normal plot r", plain(r, digits), false));
+        }
         let outside = histogram.underflow + histogram.overflow;
         if outside > 0 {
             rows.push(("Outside range", outside.to_string(), false));
@@ -641,11 +1063,7 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
             format!("Mean {}% CI", confidence.level_pct),
             match confidence.interval {
                 MonteCarloMeanInterval::Available { lower, upper } => {
-                    format!(
-                        "{} to {}",
-                        fmt_si_significant(lower, "", digits),
-                        fmt_si_significant(upper, "", digits)
-                    )
+                    format!("{} to {}", value(lower), value(upper))
                 }
                 MonteCarloMeanInterval::InsufficientSamples => {
                     "Unavailable — fewer than two successful trials".into()
@@ -658,6 +1076,69 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
     });
     if let Some((label, limits)) = &confidence_row {
         crate::presentation::stat_table(ui, &[(label.as_str(), limits.clone(), true)]);
+    }
+
+    section_header(ui, "Specification", None);
+    let editable = model
+        .limits
+        .is_none_or(|limits| limits.source == LimitSource::Reader);
+    if editable {
+        let (mut lower, mut upper) = model.reader_limits;
+        let mut changed = limit_field(ui, "LSL", &mut lower, unit, digits);
+        changed |= limit_field(ui, "USL", &mut upper, unit, digits);
+        if changed {
+            out.reader_limits = Some((lower, upper));
+        }
+    } else if let Some(limits) = model.limits {
+        let from = match limits.source {
+            LimitSource::Yield => "the run's yield",
+            LimitSource::Requirement => "the project's requirement",
+            LimitSource::Pane => "the reading pane's measurement",
+            LimitSource::Reader => "this sheet",
+        };
+        crate::presentation::stat_table(
+            ui,
+            &[
+                (
+                    "LSL",
+                    limits.lower.map_or_else(|| "none".to_owned(), value),
+                    false,
+                ),
+                (
+                    "USL",
+                    limits.upper.map_or_else(|| "none".to_owned(), value),
+                    false,
+                ),
+                ("From", from.to_owned(), false),
+            ],
+        );
+    }
+    if let (Some(limits), Some(count)) = (model.limits, model.yield_count) {
+        let capability = model
+            .moments
+            .map(|moments| {
+                population::capability(moments.mean, moments.std_dev, limits.lower, limits.upper)
+            })
+            .unwrap_or_default();
+        let rows = [
+            ("Yield", yield_label(count, digits), true),
+            ("Passing", evaluated_label(count), false),
+            (
+                "Cp",
+                capability
+                    .cp
+                    .map_or_else(|| absent("two limits"), |cp| plain(cp, digits)),
+                false,
+            ),
+            (
+                "Cpk",
+                capability
+                    .cpk
+                    .map_or_else(|| absent("no spread"), |cpk| plain(cpk, digits)),
+                true,
+            ),
+        ];
+        crate::presentation::stat_table(ui, &rows);
     }
 
     section_header(ui, "Run", None);
@@ -675,56 +1156,12 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
     }
     run_rows.push(("Binning", binning_label(histogram), false));
     crate::presentation::stat_table(ui, &run_rows);
-
-    // No spec bound to this measurement is not a finding; the section only
-    // exists when there is a yield to read.
-    if let Some(yield_result) = model.yield_result {
-        section_header(ui, "Spec", None);
-        let cpk = yield_result
-            .stats
-            .cpk
-            .map_or("—".to_owned(), |v| fmt_si_significant(v, "", 3));
-        let rows = [
-            ("Yield", yield_label(yield_result, mc), true),
-            ("Cpk", cpk, false),
-        ];
-        crate::presentation::stat_table(ui, &rows);
-    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_results::yield_analysis::{DistributionStats, YieldSpec};
-    fn result(target: &str, yield_percent: f64) -> YieldResult {
-        let total_runs = 100;
-        let pass_count = yield_percent.round() as usize;
-        let mut samples = vec![1.0; pass_count];
-        samples.resize(total_runs, 0.0);
-        let moments = SampleMoments::from_samples(&samples).expect("finite test samples");
-        YieldResult {
-            spec: YieldSpec::lower(target, 0.9, "V"),
-            total_runs,
-            pass_count,
-            fail_count: total_runs - pass_count,
-            yield_percent,
-            stats: DistributionStats {
-                count: moments.count,
-                mean: moments.mean,
-                std_dev: moments.std_dev,
-                min: moments.min,
-                max: moments.max,
-                median: 0.0,
-                skewness: None,
-                kurtosis: None,
-                cp: None,
-                cpk: None,
-            },
-            trail: (0..total_runs).map(|index| index < pass_count).collect(),
-            samples,
-        }
-    }
-
     /// The histogram a zero-variation Monte Carlo produces.
     ///
     /// `VariableStatistics::compute_histogram` returns `(vec![n], vec![v, v])`
@@ -781,31 +1218,33 @@ mod tests {
         );
     }
 
-    /// The percentage states the population it was measured over.
+    /// The percentage states its 95 % Wilson interval and the population
+    /// it was measured over, at the reader's digits.
     ///
     /// "97.0 %" alone reads as a property of the run. It is a property of the
-    /// trials the yield engine had evidence for, which is not the number
-    /// requested when trials diverged, and the reader had to reconstruct the
-    /// difference from two other rows and a second panel.
+    /// trials the population holds, which is not the number requested when
+    /// trials diverged, and at a hundred trials it is uncertain by several
+    /// points either way.
     #[test]
-    fn the_yield_figure_states_the_population_it_was_measured_over() {
-        let result = result("V(out)", 97.0);
-        assert_eq!(
-            yield_label(&result, None),
-            "97.0 % · 97 of 100 evaluated",
-            "the yield percentage stands on its own with no denominator"
-        );
-
-        let authority = MonteCarloMethod {
-            seed: 7,
-            runs_requested: 110,
-            runs_completed: 100,
-            failures: 10,
-            mean_confidence: None,
+    fn the_yield_figure_states_its_interval_and_population() {
+        let count = YieldCount {
+            passing: 97,
+            total: 100,
+            excluded: 0,
         };
+        // Wilson at 97 of 100: 91.548 % to 98.975 %.
         assert_eq!(
-            yield_label(&result, Some(authority)),
-            "97.0 % · 97 of 100 evaluated · 10 diverged excluded"
+            yield_label(count, 4),
+            "97 % \u{b7} 95 % CI 91.55 to 98.97 %"
+        );
+        assert_eq!(yield_label(count, 3), "97 % \u{b7} 95 % CI 91.5 to 99.0 %");
+        assert_eq!(evaluated_label(count), "97 of 100");
+        assert_eq!(
+            evaluated_label(YieldCount {
+                excluded: 10,
+                ..count
+            }),
+            "97 of 100 \u{b7} 10 diverged excluded"
         );
     }
 
@@ -890,10 +1329,18 @@ mod tests {
                                 histogram: &histogram,
                                 display: Ok(&display),
                                 moments: None,
-                                spec_limits,
+                                shape: None,
+                                unit: "",
+                                limits: spec_limits.map(|(lower, upper)| SpecLimits {
+                                    lower,
+                                    upper,
+                                    source: LimitSource::Requirement,
+                                }),
                                 source: &source,
                                 selected: &selected,
                                 significant_digits: 4,
+                                normal_fit: false,
+                                normal_quantile: false,
                             }),
                             PlotView::default(),
                             &mut cache,

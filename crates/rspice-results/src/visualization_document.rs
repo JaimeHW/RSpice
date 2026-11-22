@@ -1970,6 +1970,37 @@ pub enum SheetSettingValue {
     },
     /// Whether the pole-zero map is drawn on a logarithmic plane.
     PoleZero { logarithmic: bool },
+    /// How the histogram reads one measurement of a population.
+    Histogram(HistogramReading),
+}
+
+/// What the histogram sheet was left showing: the measurement by name, how
+/// its distribution is drawn and binned, whether the normal fit is drawn,
+/// and the specification limits the reader set where the run states none.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct HistogramReading {
+    #[serde(default, deserialize_with = "deserialize_optional_label_string")]
+    pub measurement: Option<String>,
+    pub plot: HistogramPlotKind,
+    pub bins: u16,
+    /// The binned range, lower then upper; `None` fits the samples.
+    pub range: Option<[f64; 2]>,
+    pub normal_fit: bool,
+    pub lower_limit: Option<f64>,
+    pub upper_limit: Option<f64>,
+}
+
+/// How the histogram sheet draws its distribution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HistogramPlotKind {
+    Count,
+    Density,
+    Percent,
+    Cumulative,
+    /// The samples against their standard normal quantiles.
+    NormalQuantile,
 }
 
 impl SheetSettingValue {
@@ -1980,6 +2011,7 @@ impl SheetSettingValue {
             Self::NetworkMatrix { .. } => crate::result_presentation::ResultViewer::NetworkMatrix,
             Self::Bode { .. } => crate::result_presentation::ResultViewer::Bode,
             Self::PoleZero { .. } => crate::result_presentation::ResultViewer::PoleZero,
+            Self::Histogram(_) => crate::result_presentation::ResultViewer::Hist,
         }
     }
 }

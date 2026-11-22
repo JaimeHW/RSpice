@@ -34,7 +34,7 @@ fn central_moments(values: &[f64]) -> Option<(f64, f64, f64)> {
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), value| {
             (lo.min(*value), hi.max(*value))
         });
-    if !(max > min) {
+    if max <= min || max.is_nan() || min.is_nan() {
         return None;
     }
     let n = values.len() as f64;
@@ -97,7 +97,7 @@ pub struct Capability {
 }
 
 pub fn capability(mean: f64, sigma: f64, lower: Option<f64>, upper: Option<f64>) -> Capability {
-    if !(sigma > 0.0) || !sigma.is_finite() || !mean.is_finite() {
+    if !(sigma.is_finite() && sigma > 0.0 && mean.is_finite()) {
         return Capability::default();
     }
     let lower = lower.filter(|value| value.is_finite());

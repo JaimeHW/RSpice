@@ -1,9 +1,9 @@
 //! Application source keys, requirement authority and cache lifetime for population viewers.
 
-use super::{AnalysisPresentationKey, SheetContext};
+use super::{AnalysisPresentationKey, ResultsState, SheetContext};
 use crate::state::{
-    AnalysisResult, PreparedSpecification, ProjectWorkspace, RunHistoryRevision, SpecEntry,
-    SpecPointScope,
+    AnalysisResult, PreparedSpecification, ProjectWorkspace, RunHistoryRevision, SimulationState,
+    SpecEntry, SpecPointScope,
 };
 use rspice_results::population::{self as projection, PopulationData, PopulationRequirements};
 use std::ops::Deref;
@@ -36,23 +36,11 @@ impl Deref for PopulationPlan {
 /// exact requirement inputs, then hand back a shared handle.
 pub(super) fn plan(context: &mut SheetContext<'_>) -> Option<Arc<PopulationPlan>> {
     let run = context.simulation.active_run()?;
-    let dataset_id = run.dataset_id;
     let analysis = context.simulation.active_analysis()?;
-    let key = AnalysisPresentationKey::new(dataset_id, analysis);
-    let source = (
-        context.simulation.retained.runs.revision(),
-        context.simulation.view.data_version,
-    );
+    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let source = source_of(context.simulation);
     if let Some(plan) = context.results.plans.population.as_ref()
-        && plan.source == source
-        && plan.analysis == key
-        && plan.requirements.as_ref().is_none_or(|requirements| {
-            requirements.len() == context.workspace.content.specs.len()
-                && requirements
-                    .iter()
-                    .zip(&context.workspace.content.specs)
-                    .all(|(retained, spec)| retained.matches(spec))
-        })
+        && plan.is_current(&source, key, context.workspace)
     {
         return Some(Arc::clone(plan));
     }
@@ -67,6 +55,80 @@ pub(super) fn plan(context: &mut SheetContext<'_>) -> Option<Arc<PopulationPlan>
     )?);
     context.results.plans.population = Some(Arc::clone(&built));
     Some(built)
+}
+
+/// The population of the shown analysis for a reader that cannot keep it:
+/// the memo when it is current, otherwise one resolved for this call.
+pub(super) fn shown(
+    simulation: &SimulationState,
+    workspace: &ProjectWorkspace,
+    results: &ResultsState,
+) -> Option<Arc<PopulationPlan>> {
+    let run = simulation.active_run()?;
+    let analysis = simulation.active_analysis()?;
+    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let source = source_of(simulation);
+    if let Some(plan) = results.plans.population.as_ref()
+        && plan.is_current(&source, key, workspace)
+    {
+        return Some(Arc::clone(plan));
+    }
+    build(
+        analysis,
+        key,
+        source,
+        workspace,
+        run.prepared_receipt()
+            .map(|receipt| receipt.specifications()),
+    )
+    .map(Arc::new)
+}
+
+fn source_of(simulation: &SimulationState) -> (RunHistoryRevision, u64) {
+    (
+        simulation.retained.runs.revision(),
+        simulation.view.data_version,
+    )
+}
+
+impl PopulationPlan {
+    /// Whether this population is still the shown analysis's under the
+    /// workspace's requirements.
+    pub(super) fn is_shown(
+        &self,
+        simulation: &SimulationState,
+        workspace: &ProjectWorkspace,
+    ) -> bool {
+        simulation
+            .active_run()
+            .zip(simulation.active_analysis())
+            .is_some_and(|(run, analysis)| {
+                self.is_current(
+                    &source_of(simulation),
+                    AnalysisPresentationKey::new(run.dataset_id, analysis),
+                    workspace,
+                )
+            })
+    }
+
+    /// Whether this population still describes `key` at `source` under the
+    /// workspace's requirements.
+    fn is_current(
+        &self,
+        source: &(RunHistoryRevision, u64),
+        key: AnalysisPresentationKey,
+        workspace: &ProjectWorkspace,
+    ) -> bool {
+        self.source == *source
+            && self.analysis == key
+            && self.requirements.as_ref().is_none_or(|requirements| {
+                requirements.len() == workspace.content.specs.len()
+                    && requirements
+                        .iter()
+                        .zip(&workspace.content.specs)
+                        .all(|(retained, spec)| retained.matches(spec))
+            })
+    }
 }
 
 /// Exactly the authored fields this projection reads, in requirement order.

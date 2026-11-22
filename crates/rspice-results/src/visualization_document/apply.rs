@@ -2738,6 +2738,7 @@ fn validate_sheet_setting(setting: &SheetSetting) -> Result<(), VisualizationErr
         SheetSettingValue::NetworkMatrix { .. } | SheetSettingValue::PoleZero { .. } => {
             return Ok(());
         }
+        SheetSettingValue::Histogram(reading) => return validate_histogram_reading(reading),
     };
     ensure_maximum_len(
         "sheet-setting.markers",
@@ -2752,6 +2753,44 @@ fn validate_sheet_setting(setting: &SheetSetting) -> Result<(), VisualizationErr
                 message: format!("a marker cannot sit at {} Hz", marker.frequency),
             });
         }
+    }
+    Ok(())
+}
+
+/// A histogram names its measurement, bins into at least one and at most a
+/// thousand bins over a finite, increasing range, and judges against finite
+/// limits that leave room between them.
+fn validate_histogram_reading(reading: &HistogramReading) -> Result<(), VisualizationError> {
+    if let Some(measurement) = &reading.measurement {
+        validate_label("sheet-setting.histogram.measurement", measurement)?;
+    }
+    if !(1..=1000).contains(&reading.bins) {
+        return Err(VisualizationError::InvalidValue {
+            field: "sheet-setting.histogram.bins",
+            message: format!("a histogram cannot have {} bins", reading.bins),
+        });
+    }
+    if let Some([low, high]) = reading.range
+        && !(low.is_finite() && high.is_finite() && low < high)
+    {
+        return Err(VisualizationError::InvalidValue {
+            field: "sheet-setting.histogram.range",
+            message: format!("a histogram cannot bin {low} to {high}"),
+        });
+    }
+    let finite = |limit: Option<f64>| limit.is_none_or(f64::is_finite);
+    let ordered = match (reading.lower_limit, reading.upper_limit) {
+        (Some(lower), Some(upper)) => lower < upper,
+        _ => true,
+    };
+    if !(finite(reading.lower_limit) && finite(reading.upper_limit) && ordered) {
+        return Err(VisualizationError::InvalidValue {
+            field: "sheet-setting.histogram.limits",
+            message: format!(
+                "a histogram cannot judge against {:?} to {:?}",
+                reading.lower_limit, reading.upper_limit
+            ),
+        });
     }
     Ok(())
 }
