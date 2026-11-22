@@ -690,6 +690,32 @@ fn refresh_diagnostics(
     }
 }
 
+/// Bring the findings to the shown source as it stands, whichever workspace
+/// is in front: a check of it already running is waited for, else it is
+/// checked here. Run and Check and netlist call this, so what Problems
+/// lists after the press is what the text they read holds, never what an
+/// older text held. Findings are worded in `messages`.
+pub(crate) fn bring_findings_current(
+    model: &super::Model,
+    netlist: &mut super::NetlistDocumentState,
+    include_resolutions: &BTreeMap<String, IncludeResolution>,
+    messages: crate::workbench::MessageCatalog,
+) {
+    let revision = netlist.revision;
+    let folders = model.library_folders();
+    netlist.live_check.stop_unless(revision, folders);
+    netlist.live_check.wait();
+    if let Some(checked) = netlist.live_check.take_finished() {
+        receive_check(netlist, folders, checked);
+    }
+    if netlist.diag_revision == Some(revision) && netlist.diag_library_folders == folders {
+        return;
+    }
+    let checked = SourceCheck::of(model, netlist, include_resolutions, revision, messages)
+        .run(&rspice_core::abort_signal::NoAbort);
+    publish_check(netlist, checked);
+}
+
 /// Take what a check found: shown when it read the text as it stands
 /// through the library folders as they stand, dropped when either has moved
 /// on since.
@@ -872,7 +898,6 @@ impl LiveCheck {
     }
 
     /// Wait for the running check to finish.
-    #[cfg(any(test, feature = "test-support"))]
     fn wait(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(running) = self.running.take() {

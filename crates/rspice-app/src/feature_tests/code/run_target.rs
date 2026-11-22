@@ -546,3 +546,85 @@ fn with_the_generated_netlist_in_front_check_and_netlist_is_the_plans() {
 
     assert_eq!(app.routed_command_key_enabled(ids::CHECK_AND_NETLIST), None);
 }
+
+/// What Problems lists: where, what, and whether it is current.
+fn problems(app: &RSpiceApp) -> Vec<(String, String, bool)> {
+    let listed =
+        rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .map(|row| (row.location.clone(), row.message.to_owned(), row.current()))
+        .collect()
+}
+
+/// `text` written over the deck's own tab, as typing it there would.
+fn edit_deck(app: &mut RSpiceApp, text: &str) {
+    assert!(
+        rspice_app_code::workbench::documents::netlist_document::edit_deck_file(
+            &mut app.state.model,
+            &mut app.state.code.netlist,
+            text.to_owned(),
+        ),
+        "the deck's tab takes the edit"
+    );
+}
+
+/// Run and Check and netlist each leave Problems saying what the text they
+/// read holds, after an edit no check has read yet, whether the deck runs or
+/// not: every finding is current and on the line it is on now.
+#[test]
+fn run_and_check_leave_problems_current_after_an_edit() {
+    let deck = "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.control\nprint v(out)\n.endc\n.end\n";
+    let mut replay =
+        crate::feature_tests::replay::Replay::of(netlist_session_with_deck(deck, "amp_tb.cir"));
+    replay.frames(Vec::new());
+    // Where Problems lists the dropped `print`, and that nothing it lists
+    // is stale.
+    let dropped_at = |app: &RSpiceApp| {
+        let rows = problems(app);
+        assert!(rows.iter().all(|(_, _, current)| *current), "{rows:?}");
+        rows.into_iter()
+            .filter(|(_, message, _)| message.starts_with("control command 'print' ignored"))
+            .map(|(location, _, _)| location)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        dropped_at(&replay.app),
+        ["line 6"],
+        "the opened deck's check"
+    );
+
+    edit_deck(
+        &mut replay.app,
+        &deck.replacen("R1 out 0 1k", "R1 out 0 {1k", 1),
+    );
+    press_run(&mut replay.app);
+    assert!(
+        !deck_run_started(&replay.app),
+        "a deck with an error does not run"
+    );
+    let rows = problems(&replay.app);
+    assert!(
+        rows.iter().all(|(_, _, current)| *current)
+            && rows.iter().any(|(location, _, _)| location == "line 3"),
+        "the refused run's check is what Problems lists: {rows:?}"
+    );
+
+    edit_deck(&mut replay.app, &deck.replacen('\n', "\n* edited\n", 1));
+    replay.app.execute_command_key(ids::CHECK_AND_NETLIST);
+    assert_eq!(
+        dropped_at(&replay.app),
+        ["line 7"],
+        "Check and netlist's check"
+    );
+
+    edit_deck(
+        &mut replay.app,
+        &deck.replacen('\n', "\n* edited\n* again\n", 1),
+    );
+    press_run(&mut replay.app);
+    assert!(deck_run_started(&replay.app), "the edited deck runs");
+    assert_eq!(dropped_at(&replay.app), ["line 8"], "Run's check");
+    replay.frames(Vec::new());
+    assert_eq!(dropped_at(&replay.app), ["line 8"], "and Problems stays so");
+}

@@ -18,6 +18,9 @@
 //! Check and netlist checks the same deck the same way and starts nothing:
 //! the notice says that nothing stops it running, or names the deck, the
 //! line and why, with the deck in front.
+//!
+//! Either press leaves Problems current: it lists what the text the press
+//! read holds, whichever workspace is in front afterwards.
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::MessageId;
@@ -164,6 +167,17 @@ fn bring_project_deck(cx: &mut Cx<'_, CodeFeature>) -> bool {
     false
 }
 
+/// Make Problems say what the text the check read holds, whichever
+/// workspace the press leaves in front.
+fn bring_findings_current(cx: &mut Cx<'_, CodeFeature>) {
+    crate::workbench::documents::netlist_document::bring_findings_current(
+        cx.model,
+        &mut cx.state.netlist,
+        &cx.state.code_workspace.include_resolutions,
+        cx.wb.messages(),
+    );
+}
+
 /// Check the deck Run runs and run it, or say why it did not run.
 pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
     cx.runs.waiting.deck_run = false;
@@ -186,6 +200,7 @@ pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
         }
         Err(error) => refuse(cx, &name, Verdict::DidNotRun, &text, &error),
     }
+    bring_findings_current(cx);
 }
 
 /// Check and netlist while a deck is what Run runs: check the deck as Run
@@ -224,6 +239,7 @@ pub fn check_deck(cx: &mut Cx<'_, CodeFeature>) {
         }
         Err(error) => refuse(cx, &name, Verdict::CannotRun, &text, &error),
     }
+    bring_findings_current(cx);
 }
 
 /// What a deck the check stopped is said to have done.

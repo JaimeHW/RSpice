@@ -50,8 +50,8 @@ pub use comparison::{
 };
 pub use comparison::{compare, compare_generated_revision, diff_line_counts};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
-pub(crate) use editor::is_missing_file_finding;
 pub use editor::show as show_editor;
+pub(crate) use editor::{bring_findings_current, is_missing_file_finding};
 pub use editor::{
     commit_edit as commit_editor_edit, editor_id_in, open_editor_ids_in, release_closed_editors,
 };
