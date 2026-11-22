@@ -14,6 +14,7 @@ use crate::workbench::app::actions::workspace::symbol_in_place::{
 };
 use crate::workbench::app::actions::workspace::{
     NavigationParts, hierarchical_edit_in_place_enabled, selected_hierarchy_master,
+    selected_instance_veriloga_source,
 };
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::Model;
@@ -28,6 +29,9 @@ pub enum HierarchyDescendEditMode {
     /// Edit the instance's symbol master on the parent, through the
     /// instance's transform.
     EditSymbolInPlace,
+    /// Open a Verilog-A instance's module, a view of its cell with no
+    /// occurrence below it.
+    OpenVerilogA,
 }
 
 /// Isolated task draft for Design ▸ Descend into selected instance.
@@ -47,6 +51,9 @@ pub struct DescendHierarchyDialogState {
     /// The instance's cell has a symbol and no schematic master: its symbol
     /// edited in place is the one way in.
     pub(crate) symbol_only: bool,
+    /// The instance is a Verilog-A instance: its module opens, or its
+    /// symbol is edited in place.
+    pub(crate) veriloga: bool,
 }
 
 impl DescendHierarchyDialogState {
@@ -67,6 +74,29 @@ impl DescendHierarchyDialogState {
             parent_dirty,
             validation_error: None,
             symbol_only: false,
+            veriloga: false,
+        };
+    }
+
+    /// Open over a Verilog-A instance, whose module view `module` opens as
+    /// the direct gesture opens it.
+    pub(crate) fn open_veriloga(
+        &mut self,
+        instance_name: String,
+        module: crate::state::CellViewRef,
+        authority: SchematicEditAuthority,
+        parent_dirty: bool,
+    ) {
+        *self = Self {
+            open: true,
+            instance_name,
+            reference: Some(module),
+            edit_mode: HierarchyDescendEditMode::OpenVerilogA,
+            authority: Some(authority),
+            parent_dirty,
+            validation_error: None,
+            symbol_only: false,
+            veriloga: true,
         };
     }
 
@@ -87,6 +117,7 @@ impl DescendHierarchyDialogState {
             parent_dirty,
             validation_error: None,
             symbol_only: true,
+            veriloga: false,
         };
     }
 
@@ -111,6 +142,11 @@ pub fn open_descend_hierarchy_dialog(
     let authority = SchematicEditAuthority::capture(model);
     let parent_dirty = model.schematic.session.is_dirty;
     let Some((instance_name, reference)) = selected_hierarchy_master(model) else {
+        // A Verilog-A instance opens its module, as the direct gesture does.
+        if let Some((instance_name, module)) = selected_veriloga_instance(model) {
+            dialog.open_veriloga(instance_name, module, authority, parent_dirty);
+            return true;
+        }
         // A cell with a symbol and no schematic master has no level below to
         // open, but its symbol can still be edited where it stands.
         if let Some(instance_name) = selected_symbol_only_instance(model) {
@@ -133,6 +169,24 @@ pub fn open_descend_hierarchy_dialog(
         preferred_edit_mode,
     );
     true
+}
+
+/// The selected Verilog-A instance's name and the module view it opens.
+fn selected_veriloga_instance(model: &Model) -> Option<(String, crate::state::CellViewRef)> {
+    let module = selected_instance_veriloga_source(model)?;
+    let id = model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()?;
+    model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .map(|component| (component.name.clone(), module))
 }
 
 /// The name of the selected instance when its cell has no schematic master
@@ -280,6 +334,21 @@ pub fn descend_request(
         .reference
         .clone()
         .ok_or_else(|| "The selected hierarchy master no longer resolves.".to_owned())?;
+    if draft.edit_mode == HierarchyDescendEditMode::OpenVerilogA {
+        if selected_veriloga_instance(model)
+            != Some((draft.instance_name.clone(), reference.clone()))
+        {
+            return Err(
+                "The selected Verilog-A instance changed. Close and reopen Descend into hierarchy."
+                    .to_owned(),
+            );
+        }
+        return Ok(DescendHierarchy::Open {
+            edit_mode: draft.edit_mode,
+            instance: draft.instance_name.clone(),
+            reference,
+        });
+    }
     let current = selected_hierarchy_master(model)
         .ok_or_else(|| "The selected hierarchy master no longer resolves.".to_owned())?;
     if current.0 != draft.instance_name || current.1 != reference {
@@ -315,6 +384,9 @@ pub fn answer_descend_hierarchy(mut navigation: NavigationParts<'_>, request: De
             HierarchyDescendEditMode::ReadOnlyReference => {
                 navigation.descend_read_only(instance, reference);
             }
+            // A module has no occurrences below it, so opening it is not a
+            // descent and records no step.
+            HierarchyDescendEditMode::OpenVerilogA => navigation.open_workspace_view(reference),
             HierarchyDescendEditMode::EditSymbolInPlace => {}
         },
     }
@@ -334,6 +406,9 @@ fn descend_rows(
     // occurrence path to show.
     if draft.edit_mode == HierarchyDescendEditMode::OpenIsolated {
         rows.value("Instance", "Opens as its own root");
+    } else if draft.veriloga {
+        // A module is opened, not descended into: there is no occurrence.
+        rows.value_mono("Instance", &draft.instance_name);
     } else {
         rows.value_mono("Instance", occurrence_path);
     }
@@ -341,13 +416,6 @@ fn descend_rows(
         Ok(target) => rows.value_mono("Cell view", target),
         Err(reason) => rows.value("Cell view", reason),
     }
-    let options = [
-        "Edit in place",
-        "Open isolated cell view",
-        "Read-only reference",
-        "Edit symbol in place",
-    ]
-    .map(str::to_owned);
     if draft.symbol_only {
         // One way in is a fact, not a choice.
         rows.value("Edit mode", edit_mode_label(draft.edit_mode));
@@ -356,19 +424,33 @@ fn descend_rows(
         }
         return None;
     }
+    // A Verilog-A instance's choices are its cell's views: the module and
+    // the symbol.
+    let modes: &[HierarchyDescendEditMode] = if draft.veriloga {
+        &[
+            HierarchyDescendEditMode::OpenVerilogA,
+            HierarchyDescendEditMode::EditSymbolInPlace,
+        ]
+    } else {
+        &[
+            HierarchyDescendEditMode::EditInPlace,
+            HierarchyDescendEditMode::OpenIsolated,
+            HierarchyDescendEditMode::ReadOnlyReference,
+            HierarchyDescendEditMode::EditSymbolInPlace,
+        ]
+    };
+    let options: Vec<String> = modes
+        .iter()
+        .map(|mode| edit_mode_label(*mode).to_owned())
+        .collect();
     let edit_mode = rows.select_with_response(
         "Edit mode",
         "descend-hierarchy-edit-mode",
         edit_mode_label(draft.edit_mode),
         &options,
     );
-    if let Some(index) = edit_mode.picked {
-        draft.edit_mode = match index {
-            1 => HierarchyDescendEditMode::OpenIsolated,
-            2 => HierarchyDescendEditMode::ReadOnlyReference,
-            3 => HierarchyDescendEditMode::EditSymbolInPlace,
-            _ => HierarchyDescendEditMode::EditInPlace,
-        };
+    if let Some(mode) = edit_mode.picked.and_then(|index| modes.get(index)) {
+        draft.edit_mode = *mode;
         draft.validation_error = None;
     }
     // With nothing unsaved there is nothing to say.
@@ -384,6 +466,7 @@ const fn edit_mode_label(mode: HierarchyDescendEditMode) -> &'static str {
         HierarchyDescendEditMode::OpenIsolated => "Open isolated cell view",
         HierarchyDescendEditMode::ReadOnlyReference => "Read-only reference",
         HierarchyDescendEditMode::EditSymbolInPlace => "Edit symbol in place",
+        HierarchyDescendEditMode::OpenVerilogA => "Open Verilog-A view",
     }
 }
 
@@ -574,6 +657,36 @@ pub(crate) mod tests {
 
         assert_eq!(state.model.workspace.content.active_view, child);
         assert_eq!(state.model.workspace.content.hierarchy_stack.len(), 2);
+    }
+
+    #[test]
+    fn a_verilog_a_instance_opens_its_module_from_the_form() {
+        let mut state = DesignTestHost::default();
+        let parent = state.model.workspace.content.active_view.clone();
+        let (_, module) =
+            crate::schematic::view::context_menu::tests::select_a_veriloga_instance(&mut state);
+        assert!(open_descend_hierarchy_dialog(
+            &mut state.design.descend_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        ));
+        assert_eq!(
+            state.design.descend_hierarchy.edit_mode,
+            HierarchyDescendEditMode::OpenVerilogA,
+            "the module is the form's first choice, as it is the direct gesture's"
+        );
+        let request = descend_request(&state.design.descend_hierarchy, &state.model)
+            .expect("the module resolves");
+        state.design.descend_hierarchy.close();
+        answer_descend_hierarchy(state.navigation(), request);
+
+        assert_eq!(state.model.workspace.content.active_view, module);
+        assert_eq!(
+            state.model.workspace.content.occurrence_labels(),
+            ["gain"],
+            "a module has no occurrence below its parent to record"
+        );
+        assert_ne!(module, parent);
     }
 
     #[test]
