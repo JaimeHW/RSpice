@@ -69,8 +69,7 @@ use rspice_app_workbench::workbench::framework::requests::{
     FollowSchematicGrid, MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor,
     OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
     PromptAfterCommands, RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter,
-    ShowOnSchematic,
-    ShowProjectDeck, ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms,
+    ShowOnSchematic, ShowProjectDeck, ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms,
     VoidVerilogAEvidence,
 };
 
