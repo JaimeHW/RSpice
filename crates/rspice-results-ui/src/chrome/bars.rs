@@ -254,14 +254,12 @@ pub fn show(ui: &mut Ui, host: &mut impl SheetBarHost) {
     let t = Tokens::get(ui.ctx());
     let viewer = host.viewer();
     let structured = viewer_has_structured_strip(viewer);
+    // One bar for every sheet: the structured documents' bar is as tall as
+    // the plot sheets', and its controls stand at the same height on the
+    // same centre line.
     let metrics = ResultBarMetrics::resolve(&t);
-    let height = if structured {
-        metrics.structured_strip
-    } else {
-        metrics.sheet_bar
-    };
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
+        egui::vec2(ui.available_width(), metrics.sheet_bar),
         egui::Sense::hover(),
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
@@ -291,26 +289,24 @@ pub fn show(ui: &mut Ui, host: &mut impl SheetBarHost) {
         node.set_label(accessible_label);
     });
 
-    let content = rect.shrink2(egui::vec2(if structured { 12.0 } else { 8.0 }, 0.0));
+    let content = rect.shrink2(egui::vec2(8.0, 0.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(content)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     child.spacing_mut().item_spacing.x = 4.0;
-    if !structured {
-        // Every control in the bar stands at the bar's control height, on
-        // its centre line: the kit's controls and egui's buttons take the
-        // row's interact height, and a button's padding is what centres its
-        // words in it rather than the theme's taller control.
-        let control = metrics.instrument_control;
-        let words = child.text_style_height(&egui::TextStyle::Button);
-        // An egui button's frame adds its stroke around the padding.
-        let stroke = child.visuals().widgets.inactive.bg_stroke.width;
-        let spacing = child.spacing_mut();
-        spacing.interact_size.y = control;
-        spacing.button_padding.y = ((control - words) * 0.5 - stroke).max(0.0);
-    }
+    // Every control in the bar stands at the bar's control height, on its
+    // centre line: the kit's controls and egui's buttons take the row's
+    // interact height, and a button's padding is what centres its words in
+    // it rather than the theme's taller control.
+    let control = metrics.instrument_control;
+    let words = child.text_style_height(&egui::TextStyle::Button);
+    // An egui button's frame adds its stroke around the padding.
+    let stroke = child.visuals().widgets.inactive.bg_stroke.width;
+    let spacing = child.spacing_mut();
+    spacing.interact_size.y = control;
+    spacing.button_padding.y = ((control - words) * 0.5 - stroke).max(0.0);
     if structured {
         show_structured_result_strip(&mut child, host);
     } else if matches!(

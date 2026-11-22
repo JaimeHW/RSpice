@@ -54,7 +54,6 @@ pub struct ResultBarMetrics {
     pub viewer_tabs: f32,
     pub viewer_tab: f32,
     pub sheet_bar: f32,
-    pub structured_strip: f32,
     pub instrument_control: f32,
 }
 
@@ -69,7 +68,6 @@ impl ResultBarMetrics {
             viewer_tabs: 41.0,
             viewer_tab: 30.0,
             sheet_bar: 31.0,
-            structured_strip: 40.0,
             instrument_control: 23.0,
         };
         if !tokens.metrics.is_touch() {
@@ -80,9 +78,6 @@ impl ResultBarMetrics {
             viewer_tabs: fine.viewer_tabs.max(target + RESULT_TAB_STRIP_CHROME),
             viewer_tab: fine.viewer_tab.max(target),
             sheet_bar: fine.sheet_bar.max(target + RESULT_CONTROL_ROW_CHROME),
-            structured_strip: fine
-                .structured_strip
-                .max(target + RESULT_CONTROL_ROW_CHROME),
             instrument_control: fine.instrument_control.max(target),
         }
     }

@@ -1907,10 +1907,9 @@ fn show_with_chrome(
 }
 
 /// Whether the stage shows its bar below the viewer tabs: whenever the run
-/// has results. Plot and custom-canvas sheets use the 31 px
-/// instrument/purpose bar; OP and Table use the 40 px structured-document
-/// strip. Every sheet's bar carries its copy and export outputs in the same
-/// place, so no sheet goes without one.
+/// has results. Every sheet's bar is the one 31 px bar, plot and
+/// structured document alike, and carries its copy and export outputs in the
+/// same place, so no sheet goes without one.
 fn result_stage_bar_visible(state: ResultsReads<'_>) -> bool {
     state
         .model
