@@ -152,6 +152,7 @@ fn plain(value: f64, decimals: usize) -> String {
 /// One column of a details table before it is sized: its head, what the
 /// head says on hover, where its words sit, and every cell's words with
 /// whether they are a number, set in mono.
+#[derive(Clone)]
 pub(crate) struct Fitting {
     pub head: String,
     pub tooltip: Option<String>,
@@ -165,6 +166,23 @@ pub(crate) struct Fitting {
 /// takes a share of the width the pane leaves over, so the table runs the
 /// pane's width and no column is cut short.
 pub(crate) fn fitted(ui: &Ui, columns: Vec<Fitting>) -> Vec<Column> {
+    let widths = fitted_widths(ui, &columns);
+    columns
+        .into_iter()
+        .zip(widths)
+        .map(|(column, width)| {
+            let fitted = Column::name(column.head, width).align(column.align);
+            match column.tooltip {
+                Some(tooltip) => fitted.tooltip(tooltip),
+                None => fitted,
+            }
+        })
+        .collect()
+}
+
+/// How wide each of `columns` is fitted: its head with room for a sort mark
+/// or its widest cell, padded as the table pads it.
+pub(crate) fn fitted_widths(ui: &Ui, columns: &[Fitting]) -> Vec<f32> {
     let width = |text: &str, font: egui::FontId| {
         ui.painter()
             .layout_no_wrap(text.to_owned(), font, egui::Color32::PLACEHOLDER)
@@ -173,7 +191,7 @@ pub(crate) fn fitted(ui: &Ui, columns: Vec<Fitting>) -> Vec<Column> {
     };
     let count = columns.len();
     columns
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(index, column)| {
             let head =
@@ -202,12 +220,7 @@ pub(crate) fn fitted(ui: &Ui, columns: Vec<Fitting>) -> Vec<Column> {
             } else {
                 CELL_PAD
             };
-            let fitted =
-                Column::name(column.head, widest.ceil() + left + right).align(column.align);
-            match column.tooltip {
-                Some(tooltip) => fitted.tooltip(tooltip),
-                None => fitted,
-            }
+            widest.ceil() + left + right
         })
         .collect()
 }

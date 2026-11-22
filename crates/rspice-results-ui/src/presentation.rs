@@ -78,6 +78,78 @@ pub const DECIBEL_PLACES: usize = 2;
 /// A share's places: to the tenth of a percent.
 pub const SHARE_PLACES: usize = 1;
 
+/// The least widths of a details table's columns, laid in `room`: each
+/// column as wide as its head, with room for a sort mark, and its widest
+/// cell when `room` holds them all whole. When it does not, the heads give
+/// up the sort mark's room, which a sorted head takes from its words. When
+/// even that does not fit, each `flexible` column, one that shares the spare
+/// width, narrows to the shorter of its head and its widest cell, so its
+/// longer words elide while a fixed column's never do. Tables stacked one
+/// over another pass together and share one width per column, the widest
+/// any of them needs, so they read as one grid.
+pub(crate) fn details_column_widths(
+    ui: &Ui,
+    tables: &[&[crate::fft::view::columns::Fitting]],
+    flexible: &[bool],
+    room: f32,
+) -> Vec<f32> {
+    use crate::fft::view::columns::{Fitting, fitted_widths};
+    use rspice_ui_kit::widgets::table::SORT_MARK_ROOM;
+    let widest = |part: &dyn Fn(&Fitting) -> Fitting| {
+        tables
+            .iter()
+            .map(|table| fitted_widths(ui, &table.iter().map(part).collect::<Vec<_>>()))
+            .reduce(|widest, widths| {
+                widest
+                    .iter()
+                    .zip(&widths)
+                    .map(|(widest, width)| widest.max(*width))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let whole = widest(&Fitting::clone);
+    if whole.iter().sum::<f32>() <= room {
+        return whole;
+    }
+    // Each column's head words alone, and its widest cell alone.
+    let heads: Vec<f32> = widest(&|column| Fitting {
+        cells: Vec::new(),
+        ..column.clone()
+    })
+    .into_iter()
+    .map(|head| head - SORT_MARK_ROOM)
+    .collect();
+    let cells = widest(&|column| Fitting {
+        head: String::new(),
+        ..column.clone()
+    });
+    let tight: Vec<f32> = heads
+        .iter()
+        .zip(&cells)
+        .map(|(head, cell)| head.max(*cell))
+        .collect();
+    if tight.iter().sum::<f32>() <= room {
+        return tight;
+    }
+    tight
+        .iter()
+        .zip(flexible)
+        .zip(heads.iter().zip(&cells))
+        .map(
+            |((tight, flexible), (head, cell))| {
+                if *flexible { head.min(*cell) } else { *tight }
+            },
+        )
+        .collect()
+}
+
+/// The width a details table in `ui` runs: to the panel's edges on a panel
+/// body's inset.
+pub(crate) fn details_table_room(ui: &Ui) -> f32 {
+    rspice_ui_kit::panels::panel_bleed(ui, ui.available_rect_before_wrap()).width()
+}
+
 /// The most of a sheet's height the table under a plane takes; a short
 /// table takes only its rows.
 pub const TABLE_SHARE_UNDER_PLANE: f32 = 0.42;

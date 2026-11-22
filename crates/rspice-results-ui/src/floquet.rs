@@ -2,6 +2,7 @@
 //! or PSTB orbit drawn on the complex plane, beside a table of its
 //! magnitude, phase, exponent, verdict and margin.
 
+use crate::fft::view::columns::{Fitting, fitted_widths};
 use crate::presentation::{PlotView, angle_readout, well_hint, with_table_state};
 use crate::strip::{self, LegendChip};
 use egui::Ui;
@@ -11,7 +12,7 @@ use rspice_results::floquet::{
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey, Tone};
+use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable, SortKey, Tone};
 use rspice_vocabulary::quantity::{AngleDisplay, QuantityPresentationPolicy};
 
 /// One Floquet mode of the orbit.
@@ -439,20 +440,97 @@ fn mode_table(
         AngleDisplay::Radians => ("∠μ (rad)", "rad"),
     };
     let measured = data.modes.iter().any(|mode| mode.participation.is_some());
-    let mut columns = vec![
-        Column::number("#", 30.0),
-        Column::number("|μ|", 76.0),
-        Column::number(angle_head, 76.0),
-        Column::number("Re λ (1/s)", 86.0),
-        Column::number("Im λ (rad/s)", 86.0),
-        Column::number("Margin (dB)", 84.0),
+    let rows: Vec<Vec<Cell>> = data
+        .modes
+        .iter()
+        .enumerate()
+        .map(|(index, mode)| {
+            let angle = match quantity_policy.angle_display {
+                AngleDisplay::Degrees => mode.angle_rad().to_degrees(),
+                AngleDisplay::Radians => mode.angle_rad(),
+            };
+            let verdict = mode.verdict(data.band);
+            let mut words = verdict.label().to_owned();
+            if let Some(order) = mode.subharmonic {
+                words.push_str(&format!(" · 1/{order} subharmonic"));
+            }
+            let mut verdict_cell = Cell::text(words).sort_by(SortKey::Status(match verdict {
+                ModeVerdict::Phase => 0,
+                ModeVerdict::Stable => 1,
+                ModeVerdict::Marginal => 2,
+                ModeVerdict::Unstable => 3,
+            }));
+            verdict_cell = match verdict {
+                ModeVerdict::Unstable => verdict_cell.toned(Tone::Error),
+                ModeVerdict::Marginal => verdict_cell.toned(Tone::Caution),
+                ModeVerdict::Stable | ModeVerdict::Phase => verdict_cell,
+            };
+            let mut cells = vec![
+                Cell::number((index + 1).to_string()).sort_by(SortKey::Number((index + 1) as f64)),
+                figure(mode.magnitude(), "", digits),
+                figure(angle, angle_unit, digits),
+                figure(mode.exponent.0, "1/s", digits),
+                figure(mode.exponent.1, "rad/s", digits),
+                mode.margin_db().map_or_else(Cell::absent, |margin| {
+                    Cell::number(hundredths(margin)).sort_by(SortKey::Number(margin))
+                }),
+            ];
+            if measured {
+                cells.push(
+                    mode.participation
+                        .map_or_else(Cell::absent, |share| figure(share, "", digits)),
+                );
+            }
+            cells.push(verdict_cell);
+            cells
+        })
+        .collect();
+    let mut heads = vec![
+        "#",
+        "|μ|",
+        angle_head,
+        "Re λ (1/s)",
+        "Im λ (rad/s)",
+        "Margin (dB)",
     ];
     if measured {
-        columns.push(Column::number("Participation", 92.0));
+        heads.push("Participation");
     }
-    // Last, so the spare width falls after its words and the numbers read
-    // as one group.
-    columns.push(Column::words("Verdict", 110.0));
+    heads.push("Verdict");
+    // Each column as wide as its words. The figures share the spare width,
+    // so neither the mode's number nor its verdict takes it.
+    let verdict_column = heads.len() - 1;
+    let fitting: Vec<Fitting> = heads
+        .iter()
+        .enumerate()
+        .map(|(column, head)| {
+            let number = column != verdict_column;
+            Fitting {
+                head: (*head).to_owned(),
+                tooltip: None,
+                align: if number { Align::Right } else { Align::Left },
+                cells: rows
+                    .iter()
+                    .map(|row| (row[column].text.clone(), number))
+                    .collect(),
+            }
+        })
+        .collect();
+    let widths = fitted_widths(ui, &fitting);
+    let columns: Vec<Column> = heads
+        .iter()
+        .zip(widths)
+        .enumerate()
+        .map(|(column, (head, width))| {
+            if column == 0 {
+                Column::number(*head, width)
+            } else if column == verdict_column {
+                Column::words(*head, width)
+            } else {
+                Column::name(*head, width).align(Align::Right)
+            }
+        })
+        .collect();
     let revision = egui::Id::new(("floquet-modes", &data.label, data.modes.len(), digits)).value();
     with_table_state(ui, "floquet-modes", |ui, state| {
         let pinned = pin
@@ -469,48 +547,7 @@ fn mode_table(
             .freeze(1)
             .revision(revision)
             .max_height(ui.available_height())
-            .show(ui, |index| {
-                let mode = &data.modes[index];
-                let angle = match quantity_policy.angle_display {
-                    AngleDisplay::Degrees => mode.angle_rad().to_degrees(),
-                    AngleDisplay::Radians => mode.angle_rad(),
-                };
-                let verdict = mode.verdict(data.band);
-                let mut words = verdict.label().to_owned();
-                if let Some(order) = mode.subharmonic {
-                    words.push_str(&format!(" · 1/{order} subharmonic"));
-                }
-                let mut verdict_cell = Cell::text(words).sort_by(SortKey::Status(match verdict {
-                    ModeVerdict::Phase => 0,
-                    ModeVerdict::Stable => 1,
-                    ModeVerdict::Marginal => 2,
-                    ModeVerdict::Unstable => 3,
-                }));
-                verdict_cell = match verdict {
-                    ModeVerdict::Unstable => verdict_cell.toned(Tone::Error),
-                    ModeVerdict::Marginal => verdict_cell.toned(Tone::Caution),
-                    ModeVerdict::Stable | ModeVerdict::Phase => verdict_cell,
-                };
-                let mut cells = vec![
-                    Cell::number((index + 1).to_string())
-                        .sort_by(SortKey::Number((index + 1) as f64)),
-                    figure(mode.magnitude(), "", digits),
-                    figure(angle, angle_unit, digits),
-                    figure(mode.exponent.0, "1/s", digits),
-                    figure(mode.exponent.1, "rad/s", digits),
-                    mode.margin_db().map_or_else(Cell::absent, |margin| {
-                        Cell::number(hundredths(margin)).sort_by(SortKey::Number(margin))
-                    }),
-                ];
-                if measured {
-                    cells.push(
-                        mode.participation
-                            .map_or_else(Cell::absent, |share| figure(share, "", digits)),
-                    );
-                }
-                cells.push(verdict_cell);
-                cells
-            });
+            .show(ui, |index| rows[index].clone());
         if response.selection_changed {
             *pin = state.selected_row().map(|index| (0, index));
             return true;

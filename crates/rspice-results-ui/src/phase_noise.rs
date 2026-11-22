@@ -2,6 +2,7 @@
 //! offsets the reader lists read on them, the band the reader sets
 //! integrated to phase error and jitter, and slope guides.
 
+use crate::fft::view::columns::Fitting;
 use crate::presentation::{PlotView, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 use crate::waves::ReadoutPolicy;
@@ -542,74 +543,163 @@ pub fn right_panel(
         .collect();
     crate::presentation::stat_table(ui, &rows);
 
-    if !settings.spots.is_empty() {
-        // Several traces each head a column by name, so the unit they share
-        // is stated once over the table.
-        let unit = (traces.len() > 1).then_some("L(f) in dBc/Hz");
-        section_header(ui, "Spots", unit);
-        spot_table(ui, traces, &settings.spots, quantities, digits);
-    }
-
     let figures: Vec<Option<BandFigures>> = traces
         .iter()
         .map(|trace| band_figures(trace, settings))
         .collect();
-    if figures.iter().any(Option::is_some) {
+    let spots = spot_rows(traces, &settings.spots, quantities, digits);
+    let band = if figures.iter().any(Option::is_some) {
+        band_rows(&figures, quantities, digits)
+    } else {
+        Vec::new()
+    };
+    // The spot table and the band table stand one over the other, so they
+    // share one width per column and read as one grid.
+    let spot_heads: Vec<String> = traces
+        .iter()
+        .map(|trace| {
+            if traces.len() > 1 {
+                trace.label.to_owned()
+            } else {
+                "L(f) (dBc/Hz)".to_owned()
+            }
+        })
+        .collect();
+    let band_heads: Vec<String> = traces.iter().map(|trace| trace.label.to_owned()).collect();
+    let widths = stacked_widths(
+        ui,
+        [
+            (("Offset", true), &spot_heads, &spots),
+            (("Figure", false), &band_heads, &band),
+        ],
+    );
+
+    if !spots.is_empty() {
+        // Several traces each head a column by name, so the unit they share
+        // is stated once over the table.
+        let unit = (traces.len() > 1).then_some("L(f) in dBc/Hz");
+        section_header(ui, "Spots", unit);
+        let mut columns = vec![Column::number("Offset", widths[0])];
+        columns.extend(
+            spot_heads
+                .iter()
+                .zip(&widths[1..])
+                .map(|(head, width)| Column::name(head, *width).align(Align::Right)),
+        );
+        DataTable::new("rspice.results.phase-noise.spots", &columns, spots.len())
+            .freeze(1)
+            .show(ui, |index| spots[index].clone());
+    }
+
+    if !band.is_empty() {
         section_header(ui, "Integrated", None);
-        band_table(ui, traces, &figures, quantities, digits);
+        let mut columns = vec![Column::words("Figure", widths[0]).unsortable()];
+        columns.extend(
+            band_heads
+                .iter()
+                .zip(&widths[1..])
+                .map(|(head, width)| Column::name(head, *width).align(Align::Right).unsortable()),
+        );
+        DataTable::new("rspice.results.phase-noise.band", &columns, band.len())
+            .freeze(1)
+            .show(ui, |index| band[index].clone());
     }
 
     if device_shares.is_empty() {
         return;
     }
     section_header(ui, "Device noise shares", None);
+    let shares: Vec<Vec<Cell>> = device_shares
+        .iter()
+        .map(|&(device, share)| {
+            vec![
+                Cell::text(device).sort_by(SortKey::Text(device.to_owned())),
+                Cell::number(crate::presentation::fixed_places(
+                    share,
+                    crate::presentation::SHARE_PLACES,
+                ))
+                .sort_by(SortKey::Number(share)),
+            ]
+        })
+        .collect();
+    let fitting = [
+        ("Device", Align::Left, false),
+        ("Share (%)", Align::Right, true),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(column, (head, align, number))| Fitting {
+        head: head.to_owned(),
+        tooltip: None,
+        align,
+        cells: shares
+            .iter()
+            .map(|row| (row[column].text.clone(), number))
+            .collect(),
+    })
+    .collect::<Vec<_>>();
+    let widths = crate::presentation::details_column_widths(
+        ui,
+        &[&fitting],
+        &[true, false],
+        crate::presentation::details_table_room(ui),
+    );
     let columns = [
-        Column::name("Device", 120.0),
-        Column::number("Share (%)", 90.0),
+        Column::name("Device", widths[0]),
+        Column::number("Share (%)", widths[1]),
     ];
-    DataTable::new(
-        "rspice.results.phase-noise.shares",
-        &columns,
-        device_shares.len(),
-    )
-    .show(ui, |index| {
-        let (device, share) = device_shares[index];
-        vec![
-            Cell::text(device).sort_by(SortKey::Text(device.to_owned())),
-            Cell::number(crate::presentation::fixed_places(
-                share,
-                crate::presentation::SHARE_PLACES,
-            ))
-            .sort_by(SortKey::Number(share)),
-        ]
-    });
+    DataTable::new("rspice.results.phase-noise.shares", &columns, shares.len())
+        .show(ui, |index| shares[index].clone());
 }
 
-/// One row per spot: the offset, then L(f) of each trace there. The traces'
-/// columns share the inspector's width, so two read side by side.
-fn spot_table(
-    ui: &mut Ui,
+/// A table stacked with another: its first column's head and whether that
+/// column holds numbers, the traces' heads, and its rows.
+type StackedTable<'a> = ((&'a str, bool), &'a [String], &'a [Vec<Cell>]);
+
+/// The widths of the spot and band tables' columns, one per column for
+/// both: the first as wide as the widest offset or figure, fixed; each
+/// trace's as wide as its widest value, and as its name when the pane
+/// allows, sharing what the pane leaves.
+fn stacked_widths(ui: &Ui, tables: [StackedTable<'_>; 2]) -> Vec<f32> {
+    let fitting = |((first, first_numbers), heads, rows): StackedTable<'_>| {
+        std::iter::once(first.to_owned())
+            .chain(heads.iter().cloned())
+            .enumerate()
+            .map(|(column, head)| {
+                let numbers = column > 0 || first_numbers;
+                Fitting {
+                    head,
+                    tooltip: None,
+                    align: if numbers { Align::Right } else { Align::Left },
+                    cells: rows
+                        .iter()
+                        .map(|row| (row[column].text.clone(), numbers))
+                        .collect(),
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let [spots, band] = tables.map(fitting);
+    let mut flexible = vec![true; spots.len()];
+    flexible[0] = false;
+    crate::presentation::details_column_widths(
+        ui,
+        &[&spots, &band],
+        &flexible,
+        crate::presentation::details_table_room(ui),
+    )
+}
+
+/// One row per spot: the offset, then L(f) of each trace there.
+fn spot_rows(
     traces: &[PhaseNoiseTrace<'_>],
     spots: &[f64],
     quantities: &QuantityPresentationPolicy,
     digits: usize,
-) {
-    let mut columns = vec![Column::number("Offset", 70.0)];
-    columns.extend(traces.iter().map(|trace| {
-        Column::name(
-            if traces.len() > 1 {
-                trace.label.to_owned()
-            } else {
-                "L(f) (dBc/Hz)".to_owned()
-            },
-            72.0,
-        )
-        .align(Align::Right)
-    }));
-    DataTable::new("rspice.results.phase-noise.spots", &columns, spots.len())
-        .freeze(1)
-        .show(ui, |index| {
-            let spot = spots[index];
+) -> Vec<Vec<Cell>> {
+    spots
+        .iter()
+        .map(|&spot| {
             let mut cells = vec![
                 Cell::number(frequency_readout(quantities, spot, digits))
                     .sort_by(SortKey::Number(spot)),
@@ -621,20 +711,19 @@ fn spot_table(
                     })
             }));
             cells
-        });
+        })
+        .collect()
 }
 
 /// One row per figure over the band, one column per trace: integrated L(f),
 /// rms phase error and jitter, and Jc and Jcc where the sweep reaches half
-/// the carrier. A figure's unit heads its row, and the traces' columns share
-/// the inspector's width, so every figure shows without a sideways scroll.
-fn band_table(
-    ui: &mut Ui,
-    traces: &[PhaseNoiseTrace<'_>],
+/// the carrier. A figure's unit heads its row, so every figure shows
+/// without a sideways scroll.
+fn band_rows(
     figures: &[Option<BandFigures>],
     quantities: &QuantityPresentationPolicy,
     digits: usize,
-) {
+) -> Vec<Vec<Cell>> {
     let cycles = figures
         .iter()
         .flatten()
@@ -666,16 +755,8 @@ fn band_table(
             figure.cycle.map(|cycle| cycle.cycle_to_cycle_s)
         }));
     }
-    let mut columns = vec![Column::words("Figure", 80.0).unsortable()];
-    columns.extend(traces.iter().map(|trace| {
-        Column::name(trace.label.to_owned(), 72.0)
-            .align(Align::Right)
-            .unsortable()
-    }));
-    DataTable::new("rspice.results.phase-noise.band", &columns, rows.len())
-        .freeze(1)
-        .show(ui, |index| {
-            let (head, unit, read) = &rows[index];
+    rows.iter()
+        .map(|(head, unit, read)| {
             let mut cells = vec![Cell::text(head.clone())];
             cells.extend(figures.iter().map(|figure| {
                 figure
@@ -690,7 +771,8 @@ fn band_table(
                     })
             }));
             cells
-        });
+        })
+        .collect()
 }
 
 #[cfg(test)]

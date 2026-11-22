@@ -1,9 +1,10 @@
 //! Every ranked contributor in a table the reader sorts, selects and pins.
 
+use crate::fft::view::columns::Fitting;
 use crate::presentation::{table_row_menu, with_table_state};
 use egui::Ui;
 use rspice_results::visualization_document::PinnedContributor;
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, Group, RowKey, SortKey};
+use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable, Group, RowKey, SortKey};
 
 /// One source a run ranked: its place in the run's ranking, its
 /// band-integrated figure and its share of the total.
@@ -80,15 +81,40 @@ pub(crate) fn contributor_table(
         })
         .collect();
     let (head, unit) = figure;
-    let columns = [
-        // Sized to the inspector: the figures keep their width and the two
-        // names share what is left, so every column shows without a scroll.
-        Column::number("#", 30.0),
-        Column::name("Device", 52.0),
-        Column::name("Noise", 56.0),
-        Column::number(format!("{head} ({unit})"), 72.0),
-        Column::number("Share (%)", 76.0),
-    ];
+    let number = |value: Option<f64>, unit: &str| {
+        value.map_or_else(Cell::absent, |value| {
+            Cell::number(crate::phase_noise::plain(value, unit, digits))
+                .sort_by(SortKey::Number(value))
+        })
+    };
+    let rows: Vec<Vec<Cell>> = order
+        .iter()
+        .map(|&index| {
+            let line = &lines[index];
+            let mut figure = number(line.figure, unit);
+            if let (None, Some(why)) = (line.figure, line.figure_absent) {
+                figure = figure.hint(why);
+            }
+            vec![
+                Cell::number(line.rank.to_string()).sort_by(SortKey::Number(line.rank as f64)),
+                Cell::text(line.device).sort_by(SortKey::Text(line.device.to_owned())),
+                if line.mechanism.is_empty() {
+                    Cell::empty()
+                } else {
+                    Cell::text(line.mechanism).sort_by(SortKey::Text(line.mechanism.to_owned()))
+                },
+                figure,
+                line.share_pct.map_or_else(Cell::absent, |share| {
+                    Cell::number(crate::presentation::fixed_places(
+                        share,
+                        crate::presentation::SHARE_PLACES,
+                    ))
+                    .sort_by(SortKey::Number(share))
+                }),
+            ]
+        })
+        .collect();
+    let columns = contributor_columns(ui, format!("{head} ({unit})"), &rows);
     let revision = {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::hash::DefaultHasher::new();
@@ -100,12 +126,6 @@ pub(crate) fn contributor_table(
         hasher.finish()
     };
     let id = format!("rspice.results.noise.{salt}");
-    let number = |value: Option<f64>, unit: &str| {
-        value.map_or_else(Cell::absent, |value| {
-            Cell::number(crate::phase_noise::plain(value, unit, digits))
-                .sort_by(SortKey::Number(value))
-        })
-    };
     let response = with_table_state(ui, salt, |ui, state| {
         DataTable::new(&id, &columns, order.len())
             .state(state)
@@ -113,30 +133,7 @@ pub(crate) fn contributor_table(
             .freeze(2)
             .groups(&groups)
             .revision(revision)
-            .show(ui, |row| {
-                let line = &lines[order[row]];
-                let mut figure = number(line.figure, unit);
-                if let (None, Some(why)) = (line.figure, line.figure_absent) {
-                    figure = figure.hint(why);
-                }
-                vec![
-                    Cell::number(line.rank.to_string()).sort_by(SortKey::Number(line.rank as f64)),
-                    Cell::text(line.device).sort_by(SortKey::Text(line.device.to_owned())),
-                    if line.mechanism.is_empty() {
-                        Cell::empty()
-                    } else {
-                        Cell::text(line.mechanism).sort_by(SortKey::Text(line.mechanism.to_owned()))
-                    },
-                    figure,
-                    line.share_pct.map_or_else(Cell::absent, |share| {
-                        Cell::number(crate::presentation::fixed_places(
-                            share,
-                            crate::presentation::SHARE_PLACES,
-                        ))
-                        .sort_by(SortKey::Number(share))
-                    }),
-                ]
-            })
+            .show(ui, |row| rows[row].clone())
     });
     let mut changed = false;
     table_row_menu(ui, salt, response.context_menu, |ui, row| {
@@ -172,6 +169,42 @@ pub(crate) fn contributor_table(
         }
     });
     changed
+}
+
+/// The contributor table's columns: the rank and the two figures as wide as
+/// their heads and widest values, and the device and mechanism, which share
+/// what the figures leave, as wide as their longest names when the pane
+/// allows. In a narrower pane a long name elides, never a figure.
+fn contributor_columns(ui: &Ui, figure_head: String, rows: &[Vec<Cell>]) -> [Column; 5] {
+    let heads = ["#", "Device", "Noise", figure_head.as_str(), "Share (%)"];
+    let named = [false, true, true, false, false];
+    let fitting: Vec<Fitting> = heads
+        .iter()
+        .zip(named)
+        .enumerate()
+        .map(|(column, (head, name))| Fitting {
+            head: (*head).to_owned(),
+            tooltip: None,
+            align: if name { Align::Left } else { Align::Right },
+            cells: rows
+                .iter()
+                .map(|row| (row[column].text.clone(), !name))
+                .collect(),
+        })
+        .collect();
+    let widths = crate::presentation::details_column_widths(
+        ui,
+        &[&fitting],
+        &named,
+        crate::presentation::details_table_room(ui),
+    );
+    [
+        Column::number("#", widths[0]),
+        Column::name("Device", widths[1]),
+        Column::name("Noise", widths[2]),
+        Column::number(figure_head, widths[3]),
+        Column::number("Share (%)", widths[4]),
+    ]
 }
 
 #[cfg(test)]
