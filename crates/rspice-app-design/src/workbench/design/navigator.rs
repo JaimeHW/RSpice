@@ -465,7 +465,7 @@ pub fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                             .color(t.color.text);
                         let response = ui
                             .add(egui::Button::new(occurrence_text).frame(false))
-                            .on_hover_text("Ascend to the parent sheet");
+                            .on_hover_text(DesignCommand::AscendHierarchy.declared_spec().label);
                         if response.clicked() {
                             ascend = true;
                         }

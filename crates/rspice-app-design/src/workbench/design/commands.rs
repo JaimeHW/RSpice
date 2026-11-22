@@ -897,7 +897,7 @@ impl DesignCommand {
             // Every plausible mnemonic in the placement family is taken; the
             // toolbar and the palette are its routes.
             Self::PlaceOffSheetConnector => ("Off-sheet connector", "Design", place, canvas, NONE),
-            Self::PlaceProbe => ("Place probe", "Design", palette, canvas, PLACE_PROBE),
+            Self::PlaceProbe => ("Probe", "Design", palette, canvas, PLACE_PROBE),
             Self::PlacePin => ("Create pins\u{2026}", "Design", place, canvas, PLACE_PIN),
             Self::PlaceText => (
                 "Place text or note\u{2026}",

@@ -27,7 +27,7 @@ fn one_row_view(summary: Option<String>) -> ContextMenuView {
         summary,
         entries: vec![ContextEntry::Command(ContextCommand {
             action: ContextAction::Delete,
-            icon: ContextIcon::Trash,
+            icon: Some(ContextIcon::Trash),
             label: "Delete",
             shortcut: "Delete".to_owned(),
             enabled: true,

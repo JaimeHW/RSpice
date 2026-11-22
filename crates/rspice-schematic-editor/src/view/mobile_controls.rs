@@ -61,7 +61,7 @@ impl MobileCanvasAction {
             Self::SelectBox => "Select with a box",
             Self::SelectAdd => "Add to selection",
             Self::Rotate => "Rotate clockwise",
-            Self::Mirror => "Mirror",
+            Self::Mirror => "Mirror about vertical axis",
             Self::Cancel => "Cancel",
             Self::Undo => "Undo",
             Self::Redo => "Redo",

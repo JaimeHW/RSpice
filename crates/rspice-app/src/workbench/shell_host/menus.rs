@@ -641,7 +641,7 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     ),
     simulate(SimulateCommand::JobsManager).access('H'),
     Separator,
-    MenuEntry::command_as(DesignCommand::PlaceProbe.key(), "Probe").access('P'),
+    design(DesignCommand::PlaceProbe).access('P'),
     design(DesignCommand::AnnotateOperatingPoint).access('D'),
     design(DesignCommand::AnnotateTransientVoltages).access('T'),
     MenuEntry::command_as(

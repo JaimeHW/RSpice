@@ -242,34 +242,34 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<CommandKey>
 #[test]
 fn each_target_gets_the_catalog_its_kind_calls_for() {
     let head = [
+        ("Properties…", Some(DesignCommand::ObjectProperties.key())),
         (
-            "Object properties…",
-            Some(DesignCommand::ObjectProperties.key()),
+            "Rotate clockwise",
+            Some(DesignCommand::RotateSelection.key()),
         ),
-        ("Rotate 90°", Some(DesignCommand::RotateSelection.key())),
         (
-            "Mirror",
+            "Mirror about vertical axis",
             Some(DesignCommand::MirrorSelectionHorizontal.key()),
         ),
         (
-            "Mirror vertically",
+            "Mirror about horizontal axis",
             Some(DesignCommand::MirrorSelectionVertical.key()),
         ),
         // G-12: the Arrange page, which a phone reaches only from here.
         ("Arrange", None),
-        ("Cut selection", Some(ids::CUT)),
-        ("Copy selection", Some(ids::COPY)),
+        ("Cut", Some(ids::CUT)),
+        ("Copy", Some(ids::COPY)),
         ("Duplicate", Some(ids::DUPLICATE)),
         ("Delete", Some(ids::DELETE)),
     ];
     let tail = [
         (
-            "Create hierarchy from selection…",
+            "Create hierarchy…",
             Some(DesignCommand::CreateHierarchy.key()),
         ),
         ("Show in netlist", Some(ids::SHOW_IN_NETLIST)),
         ("Probe", Some(DesignCommand::PlaceProbe.key())),
-        ("Open operating point", Some(ids::RESULT_OPERATING_POINT)),
+        ("Operating-point table", Some(ids::RESULT_OPERATING_POINT)),
     ];
     let menu = |slot: &[(&'static str, Option<CommandKey>)]| {
         head.iter()
@@ -292,10 +292,7 @@ fn each_target_gets_the_catalog_its_kind_calls_for() {
             Some(DesignCommand::ReplaceInstance.key()),
         ),
     ];
-    let descend = (
-        "Descend into selected instance",
-        Some(DesignCommand::DescendHierarchyDirect.key()),
-    );
+    let descend = ("Descend", Some(DesignCommand::DescendHierarchyDirect.key()));
     let open_veriloga = (
         "Open Verilog-A view",
         Some(DesignCommand::DescendHierarchyDirect.key()),
@@ -316,11 +313,11 @@ fn each_target_gets_the_catalog_its_kind_calls_for() {
             ("Create symbol from schematic ports…", None),
             ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
             (
-                "Fit schematic content",
+                "Fit content",
                 Some(DesignCommand::FitSchematicContent.key())
             ),
             ("Zoom box", Some(ids::ZOOM_BOX)),
-            ("Open operating point", Some(ids::RESULT_OPERATING_POINT)),
+            ("Operating-point table", Some(ids::RESULT_OPERATING_POINT)),
         ],
     );
     assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (10, 3));
@@ -353,8 +350,8 @@ fn each_target_gets_the_catalog_its_kind_calls_for() {
         vec![
             ("Draw wire from here", None),
             ("Name this net…", None),
-            ("Cut selection", Some(ids::CUT)),
-            ("Copy selection", Some(ids::COPY)),
+            ("Cut", Some(ids::CUT)),
+            ("Copy", Some(ids::COPY)),
             ("Duplicate", Some(ids::DUPLICATE)),
             ("Delete", Some(ids::DELETE)),
             ("Probe", Some(DesignCommand::PlaceProbe.key())),
@@ -384,7 +381,7 @@ fn each_target_gets_the_catalog_its_kind_calls_for() {
 #[test]
 fn a_right_click_on_empty_sheet_lets_go_of_the_selection() {
     let mut state = state_with_selected_source(0, false);
-    assert!(labels_of(&menu_entries(&state, ContextTarget::Canvas)).contains(&"Cut selection"));
+    assert!(labels_of(&menu_entries(&state, ContextTarget::Canvas)).contains(&"Cut"));
 
     let target = super::select_context_target(&mut canvas_parts(&mut state), None);
 
@@ -392,8 +389,8 @@ fn a_right_click_on_empty_sheet_lets_go_of_the_selection() {
     assert!(state.model.schematic.session.editor.selection.is_empty());
     let labels = labels_of(&menu_entries(&state, target));
     assert!(labels.contains(&"Draw wire"));
-    assert!(!labels.contains(&"Cut selection"));
-    assert!(!labels.contains(&"Rotate 90°"));
+    assert!(!labels.contains(&"Cut"));
+    assert!(!labels.contains(&"Rotate clockwise"));
 }
 
 /// Each annotation's menu holds what applies to it: its form where it has
@@ -422,8 +419,13 @@ fn an_annotation_menu_holds_only_what_applies_to_it() {
         )
         .unwrap(),
     );
-    let clipboard = ["Cut selection", "Copy selection", "Duplicate", "Delete"];
-    let turns = ["Rotate 90°", "Mirror", "Mirror vertically", "Arrange"];
+    let clipboard = ["Cut", "Copy", "Duplicate", "Delete"];
+    let turns = [
+        "Rotate clockwise",
+        "Mirror about vertical axis",
+        "Mirror about horizontal axis",
+        "Arrange",
+    ];
     let menu = |state: &mut DesignTestHost, select: &dyn Fn(&mut Selection)| {
         let selection = &mut state.model.schematic.session.editor.selection;
         selection.clear();
@@ -432,7 +434,7 @@ fn an_annotation_menu_holds_only_what_applies_to_it() {
     };
 
     let label = menu(&mut state, &|selection| selection.select_only_net_label(73));
-    let expected: Vec<&str> = ["Object properties…"]
+    let expected: Vec<&str> = ["Properties…"]
         .into_iter()
         .chain(turns)
         .chain(clipboard)
@@ -456,19 +458,14 @@ fn an_annotation_menu_holds_only_what_applies_to_it() {
         vec![
             "Draw wire from here",
             "Name this net…",
-            "Cut selection",
-            "Copy selection",
+            "Cut",
+            "Copy",
             "Delete"
         ]
     );
 
     for labels in [label, note, probe, junction] {
-        for absent in [
-            "Place instance…",
-            "Draw wire",
-            "Zoom box",
-            "Descend into selected instance",
-        ] {
+        for absent in ["Place instance…", "Draw wire", "Zoom box", "Descend"] {
             assert!(!labels.contains(&absent), "{absent} in {labels:?}");
         }
     }
@@ -557,7 +554,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
         let entries = menu_entries(state, ContextTarget::Component(7));
         let labels = labels_of(&entries);
         for master_row in [
-            "Descend into selected instance",
+            "Descend",
             "Open Verilog-A view",
             "New Verilog-A device…",
             "Update instance interface",

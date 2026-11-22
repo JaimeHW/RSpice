@@ -683,10 +683,10 @@ fn a_right_click_on_a_shape_opens_its_menu_and_rotate_turns_it() {
             .shapes,
         [0].into()
     );
-    assert!(canvas.controls.contains_key("Rotate 90°"));
-    assert!(canvas.controls.contains_key("Object properties…"));
+    assert!(canvas.controls.contains_key("Rotate clockwise"));
+    assert!(canvas.controls.contains_key("Properties…"));
 
-    canvas.click_control("Rotate 90°");
+    canvas.click_control("Rotate clockwise");
 
     assert_eq!(
         canvas.body(),

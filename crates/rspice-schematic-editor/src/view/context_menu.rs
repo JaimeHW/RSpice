@@ -13,7 +13,6 @@ use egui::{
 use rspice_design::schematic::selection::Selection;
 use rspice_design_model::Point;
 use rspice_ui_kit::{
-    icons::Icon,
     panels::WorkbenchIcon,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -153,24 +152,17 @@ pub enum ContextIcon {
     Mirror,
     MirrorVertical,
     Copy,
+    /// Duplicate, as the toolbar's Duplicate button draws it.
+    Duplicate,
     Trash,
-    Hierarchy,
-    Sheet,
+    /// Descend, as the toolbar's Descend button draws it.
+    Descend,
     Fit,
-    Code,
     Probe,
-    Waveform,
-    VerilogA,
     /// The chosen object among those under a long press.
     Check,
-    /// Arrange, and the align and distribute rows on its page: bars lined
-    /// up on one edge.
-    Arrange,
     /// The Arrange page's way back to the menu.
     Back,
-    ZoomBox,
-    /// Snap Selection to Grid, as the Design menu's Arrange draws it, and
-    /// Snap to standard value, which snaps a value to its series' grid.
     Grid,
     Instance,
     Wire,
@@ -260,7 +252,9 @@ pub struct ContextMenuRequest<B = ContextMenuBinding, A = ContextAction> {
 #[derive(Debug, Clone)]
 pub struct ContextCommand<A = ContextAction> {
     pub action: A,
-    pub icon: ContextIcon,
+    /// The glyph of the toolbar button that runs the same command; a row
+    /// with no such button draws none, as the menu bar's rows do.
+    pub icon: Option<ContextIcon>,
     pub label: &'static str,
     pub shortcut: String,
     pub enabled: bool,
@@ -540,7 +534,15 @@ pub fn render_context_contents<B: MenuBinding, A: MenuAction>(
     if arranging {
         let response = ui
             .push_id("schematic-context-back", |ui| {
-                menu_item(ui, ContextIcon::Back, "Back", "", true, "", row_height)
+                menu_item(
+                    ui,
+                    Some(ContextIcon::Back),
+                    "Back",
+                    "",
+                    true,
+                    "",
+                    row_height,
+                )
             })
             .inner;
         if menu_row_keyboard_activated(ui, &response) || response.clicked() {
@@ -596,6 +598,11 @@ pub fn render_context_contents<B: MenuBinding, A: MenuAction>(
                         )
                     })
                     .inner;
+                // A row that turns the menu to a page of its own says so at
+                // its end, as a menu bar row that opens a submenu does.
+                if command.action.turns_page() {
+                    paint_page_chevron(ui, response.rect, enabled);
+                }
                 // Consume a focused Enter/Space before consulting the egui
                 // click synthesis. If `clicked` is checked first, the
                 // short-circuit can execute the command while leaving the
@@ -692,7 +699,7 @@ fn menu_header(ui: &mut Ui, title: &str, summary: &str) {
 
 fn menu_item(
     ui: &mut Ui,
-    icon: ContextIcon,
+    icon: Option<ContextIcon>,
     label: &str,
     shortcut: &str,
     enabled: bool,
@@ -719,7 +726,7 @@ fn menu_item(
             node.set_keyboard_shortcut(shortcut);
         }
     });
-    paint_row(ui, rect, &response, enabled, Some(icon), label, shortcut);
+    paint_row(ui, rect, &response, enabled, icon, label, shortcut);
 
     if enabled {
         response
@@ -750,6 +757,25 @@ fn choice_item(ui: &mut Ui, choice: &ChooserRow, selected: bool, row_height: f32
         kind,
     );
     response
+}
+
+/// The chevron at the end of a row that turns the menu to another page.
+fn paint_page_chevron(ui: &Ui, row: Rect, enabled: bool) {
+    let t = Tokens::get(ui.ctx());
+    let color = if enabled {
+        t.color.text_faint
+    } else {
+        t.color.text_faint.gamma_multiply(0.4)
+    };
+    let side = ICON_SIDE * 0.8;
+    let rect = Rect::from_min_size(
+        pos2(
+            row.right() - ROW_HORIZONTAL_PADDING - side,
+            row.center().y - side * 0.5,
+        ),
+        vec2(side, side),
+    );
+    WorkbenchIcon::ChevronRight.paint(ui.painter(), rect, color);
 }
 
 /// A row's face: the press and hover fill, the icon, the label, and the
@@ -909,18 +935,6 @@ fn paint_copy_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
     );
 }
 
-/// Three bars of different lengths lined up on a left edge.
-fn paint_arrange_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
-    let scale = rect.width().min(rect.height()) / 24.0;
-    let origin = rect.center() - vec2(12.0, 12.0) * scale;
-    let map = |x: f32, y: f32| origin + vec2(x, y) * scale;
-    let stroke = Stroke::new((1.7 * rect.width() / 16.0).max(1.0), color);
-    painter.line_segment([map(4.0, 3.0), map(4.0, 21.0)], stroke);
-    for (y, right) in [(7.0, 19.0), (12.0, 14.0), (17.0, 17.0)] {
-        painter.line_segment([map(7.0, y), map(right, y)], stroke);
-    }
-}
-
 fn fit_text(
     painter: &egui::Painter,
     text: &str,
@@ -983,18 +997,13 @@ impl ContextIcon {
             Self::Mirror => WorkbenchIcon::Mirror.paint(painter, rect, color),
             Self::MirrorVertical => WorkbenchIcon::MirrorVertical.paint(painter, rect, color),
             Self::Copy => paint_copy_icon(painter, rect, color),
-            Self::Trash => Icon::Trash.paint(painter, rect, color),
-            Self::Hierarchy => WorkbenchIcon::Instance.paint(painter, rect, color),
-            Self::Sheet => WorkbenchIcon::Layers.paint(painter, rect, color),
+            Self::Duplicate => WorkbenchIcon::Copy.paint(painter, rect, color),
+            Self::Trash => WorkbenchIcon::Trash.paint(painter, rect, color),
+            Self::Descend => WorkbenchIcon::Layers.paint(painter, rect, color),
             Self::Fit => WorkbenchIcon::ZoomFit.paint(painter, rect, color),
-            Self::Code => WorkbenchIcon::Code.paint(painter, rect, color),
             Self::Probe => WorkbenchIcon::Probe.paint(painter, rect, color),
-            Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
-            Self::VerilogA => WorkbenchIcon::VerilogA.paint(painter, rect, color),
             Self::Check => WorkbenchIcon::Check.paint(painter, rect, color),
-            Self::Arrange => paint_arrange_icon(painter, rect, color),
             Self::Back => WorkbenchIcon::ArrowLeft.paint(painter, rect, color),
-            Self::ZoomBox => WorkbenchIcon::ZoomIn.paint(painter, rect, color),
             Self::Grid => WorkbenchIcon::Grid.paint(painter, rect, color),
             Self::Instance => WorkbenchIcon::Instance.paint(painter, rect, color),
             Self::Wire => WorkbenchIcon::Wire.paint(painter, rect, color),

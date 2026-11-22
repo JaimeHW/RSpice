@@ -324,7 +324,7 @@ fn the_strip_buttons_run_the_canvas_commands() {
         "Rotate turns the selection"
     );
     let turned = pose(&finger);
-    finger.press("Mirror");
+    finger.press("Mirror about vertical axis");
     let mirrored = pose(&finger);
     assert_ne!(mirrored, turned, "Mirror flips it");
     finger.press("Undo");
@@ -526,7 +526,17 @@ fn a_long_press_on_overlapping_parts_offers_each_of_them() {
         Some(under),
         "the second long press keeps the chosen part"
     );
-    finger.press("Rotate 90°");
+    // The menu's row, not the strip's button of the same name.
+    let menu = finger
+        .find(&name(&finger, under))
+        .expect("the menu lists the parts again");
+    let rotate = finger
+        .named
+        .iter()
+        .find(|(label, rect)| label == "Rotate clockwise" && rect.min.x == menu.min.x)
+        .map(|(_, rect)| *rect)
+        .expect("the menu's Rotate row");
+    finger.tap(rotate.center());
     let turned: Vec<(u64, bool)> = finger
         .app
         .state
@@ -605,7 +615,7 @@ fn the_strip_turns_the_part_being_placed() {
         ));
     finger.frame(Vec::new());
     finger.press("Rotate clockwise");
-    finger.press("Mirror");
+    finger.press("Mirror about vertical axis");
     let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
     assert_eq!(
         finger

@@ -24,7 +24,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::state::{SymbolDocument, SymbolEditorMetadata};
 use crate::workbench::app::actions::{duplicate_selected_symbol_shape, paste_symbol_shape};
 use crate::workbench::design::commands::DesignCommand;
-use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::command_registry::{WorkbenchCommand, ids};
 use crate::workbench::framework::feature::Execute;
 
 /// The key a row shows: its command's, as the menus show it, or the key the
@@ -62,32 +62,34 @@ const SELECTION_ROWS: &[ContextEntry<Row>] = &[
     row(
         SymbolMenuAction::Properties,
         ContextIcon::Sliders,
-        "Object properties…",
+        DesignCommand::ObjectProperties.declared_spec().label,
         DesignCommand::ObjectProperties.key(),
     ),
     row(
         SymbolMenuAction::Rotate,
         ContextIcon::Rotate,
-        "Rotate 90°",
+        DesignCommand::RotateSelection.declared_spec().label,
         DesignCommand::RotateSelection.key(),
     ),
     row(
         SymbolMenuAction::Mirror,
         ContextIcon::Mirror,
-        "Mirror",
+        DesignCommand::MirrorSelectionHorizontal
+            .declared_spec()
+            .label,
         DesignCommand::MirrorSelectionHorizontal.key(),
     ),
     ContextEntry::Separator,
     row(
         SymbolMenuAction::Cut,
         ContextIcon::Copy,
-        "Cut selection",
+        WorkbenchCommand::Cut.declared_spec().label,
         ids::CUT,
     ),
     row(
         SymbolMenuAction::Copy,
         ContextIcon::Copy,
-        "Copy selection",
+        WorkbenchCommand::Copy.declared_spec().label,
         ids::COPY,
     ),
     row(
@@ -313,7 +315,7 @@ fn resolve_row(
     };
     ContextCommand {
         action: row.action,
-        icon: row.icon,
+        icon: Some(row.icon),
         label,
         shortcut,
         enabled,

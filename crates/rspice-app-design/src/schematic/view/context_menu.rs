@@ -22,7 +22,7 @@ use crate::workbench::{
         schematic_grid_step, show_stimulus_definition,
     },
     design::commands::DesignCommand,
-    framework::command_registry::ids,
+    framework::command_registry::{WorkbenchCommand, ids},
     framework::feature::Execute,
     framework::requests::RevealSheetSection,
 };
@@ -49,7 +49,7 @@ mod stimulus;
 #[derive(Debug, Clone, Copy)]
 pub struct ContextCommand {
     pub action: ContextAction,
-    icon: ContextIcon,
+    icon: Option<ContextIcon>,
     pub label: &'static str,
     /// The command whose shortcut the row shows.
     pub shortcut_command: Option<CommandKey>,
@@ -57,281 +57,256 @@ pub struct ContextCommand {
 
 pub type ContextEntry = context_surface::ContextEntry<ContextCommand>;
 
+/// A row that runs `command`, under the name and with the key the command
+/// declares, so it reads as the menu bar's row does.
+const fn design_row(
+    action: ContextAction,
+    command: DesignCommand,
+    icon: Option<ContextIcon>,
+) -> ContextEntry {
+    ContextEntry::Command(ContextCommand {
+        action,
+        icon,
+        label: command.declared_spec().label,
+        shortcut_command: Some(command.key()),
+    })
+}
+
+/// A row that runs the workbench's `command`, under its declared name.
+const fn workbench_row(
+    action: ContextAction,
+    command: WorkbenchCommand,
+    icon: Option<ContextIcon>,
+) -> ContextEntry {
+    ContextEntry::Command(ContextCommand {
+        action,
+        icon,
+        label: command.declared_spec().label,
+        shortcut_command: Some(command.key()),
+    })
+}
+
+/// A row under the name the menu bar gives `shortcut_command`, or a row
+/// of this menu's own when it has none.
+const fn named_row(
+    action: ContextAction,
+    label: &'static str,
+    shortcut_command: Option<CommandKey>,
+) -> ContextEntry {
+    ContextEntry::Command(ContextCommand {
+        action,
+        icon: None,
+        label,
+        shortcut_command,
+    })
+}
+
+// A row wears the glyph of the toolbar button that runs the same command,
+// and a row with no such button wears none, as the menu bar's rows do; so
+// no glyph stands for two actions anywhere.
 const CONTEXT_ENTRIES: &[ContextEntry] = &[
     // The wire or bus being drawn: Enter, Backspace and Escape, as rows. A
     // right-click while routing offers these alone.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::FinishRoute,
-        icon: ContextIcon::Check,
-        label: "Finish",
-        shortcut_command: None,
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::RemoveRoutePoint,
-        icon: ContextIcon::Back,
-        label: "Remove last point",
-        shortcut_command: None,
-    }),
+    named_row(ContextAction::FinishRoute, "Finish", None),
+    named_row(ContextAction::RemoveRoutePoint, "Remove last point", None),
+    // The touch strip's Cancel.
     ContextEntry::Command(ContextCommand {
         action: ContextAction::CancelRoute,
-        icon: ContextIcon::Close,
+        icon: Some(ContextIcon::Close),
         label: "Cancel",
         shortcut_command: Some(ids::CANCEL),
     }),
     ContextEntry::Separator,
     // What can be started on a bare sheet: only the empty canvas offers them.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::PlaceInstance,
-        icon: ContextIcon::Instance,
-        label: "Place instance…",
-        shortcut_command: Some(DesignCommand::PlaceInstance.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::PlaceWire,
-        icon: ContextIcon::Wire,
-        label: "Draw wire",
-        shortcut_command: Some(DesignCommand::PlaceWire.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::PlaceLabel,
-        icon: ContextIcon::Label,
-        label: "Place net label",
-        shortcut_command: Some(DesignCommand::PlaceLabel.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::PlaceText,
-        icon: ContextIcon::Text,
-        label: "Place text or note…",
-        shortcut_command: Some(DesignCommand::PlaceText.key()),
-    }),
+    design_row(
+        ContextAction::PlaceInstance,
+        DesignCommand::PlaceInstance,
+        Some(ContextIcon::Instance),
+    ),
+    design_row(
+        ContextAction::PlaceWire,
+        DesignCommand::PlaceWire,
+        Some(ContextIcon::Wire),
+    ),
+    design_row(
+        ContextAction::PlaceLabel,
+        DesignCommand::PlaceLabel,
+        Some(ContextIcon::Label),
+    ),
+    design_row(
+        ContextAction::PlaceText,
+        DesignCommand::PlaceText,
+        Some(ContextIcon::Text),
+    ),
     ContextEntry::Separator,
     // What starts where the menu was opened on a wire, a junction or a pin
     // end: the places a wire or a label is started from.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::DrawWireFromHere,
-        icon: ContextIcon::Wire,
-        label: "Draw wire from here",
-        shortcut_command: None,
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::NameNet,
-        icon: ContextIcon::Label,
-        label: "Name this net…",
-        shortcut_command: None,
-    }),
+    named_row(ContextAction::DrawWireFromHere, "Draw wire from here", None),
+    named_row(ContextAction::NameNet, "Name this net…", None),
     ContextEntry::Separator,
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Properties,
-        icon: ContextIcon::Sliders,
-        label: "Object properties…",
-        shortcut_command: Some(DesignCommand::ObjectProperties.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Rotate,
-        icon: ContextIcon::Rotate,
-        label: "Rotate 90°",
-        shortcut_command: Some(DesignCommand::RotateSelection.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Mirror,
-        icon: ContextIcon::Mirror,
-        label: "Mirror",
-        shortcut_command: Some(DesignCommand::MirrorSelectionHorizontal.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::MirrorVertical,
-        icon: ContextIcon::MirrorVertical,
-        label: "Mirror vertically",
-        shortcut_command: Some(DesignCommand::MirrorSelectionVertical.key()),
-    }),
+    design_row(
+        ContextAction::Properties,
+        DesignCommand::ObjectProperties,
+        None,
+    ),
+    design_row(
+        ContextAction::Rotate,
+        DesignCommand::RotateSelection,
+        Some(ContextIcon::Rotate),
+    ),
+    design_row(
+        ContextAction::Mirror,
+        DesignCommand::MirrorSelectionHorizontal,
+        Some(ContextIcon::Mirror),
+    ),
+    design_row(
+        ContextAction::MirrorVertical,
+        DesignCommand::MirrorSelectionVertical,
+        Some(ContextIcon::MirrorVertical),
+    ),
     // The Design menu's Arrange submenu, as a page of this menu: a phone
     // shows no menu bar, and Align and Distribute have no key.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Arrange,
-        icon: ContextIcon::Arrange,
-        label: "Arrange",
-        shortcut_command: None,
-    }),
+    named_row(ContextAction::Arrange, "Arrange", None),
     // Only in the menu of a selection that holds a resistor, capacitor or
     // inductor; see `menu_entries`.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::SnapToStandardValue,
-        icon: ContextIcon::Grid,
-        label: "Snap to standard value",
-        shortcut_command: None,
-    }),
+    design_row(
+        ContextAction::SnapToStandardValue,
+        DesignCommand::SnapToStandardValue,
+        None,
+    ),
     // Only in the menu of a selection that holds a part whose name or value
     // has been moved; see `menu_entries`.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::ResetLabelPosition,
-        icon: ContextIcon::Text,
-        label: "Reset label position",
-        shortcut_command: Some(DesignCommand::ResetLabelPosition.key()),
-    }),
+    design_row(
+        ContextAction::ResetLabelPosition,
+        DesignCommand::ResetLabelPosition,
+        None,
+    ),
     // The stimulus-library group, which exists only in a placed source's menu
     // and states the verbs that source's standing with the library calls for;
     // see `stimulus`.
     ContextEntry::Separator,
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::AdoptStimulus,
-        icon: ContextIcon::Waveform,
-        label: "Adopt stimulus definition…",
-        shortcut_command: None,
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::ReadoptStimulus,
-        icon: ContextIcon::Waveform,
-        label: "Re-adopt library revision",
-        shortcut_command: None,
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::SaveStimulus,
-        icon: ContextIcon::Waveform,
-        label: "Save as stimulus definition…",
-        shortcut_command: None,
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::OpenStimulusDefinition,
-        icon: ContextIcon::Waveform,
-        label: "Open in Stimulus Library",
-        shortcut_command: None,
-    }),
+    named_row(
+        ContextAction::AdoptStimulus,
+        "Adopt stimulus definition…",
+        None,
+    ),
+    named_row(
+        ContextAction::ReadoptStimulus,
+        "Re-adopt library revision",
+        None,
+    ),
+    named_row(
+        ContextAction::SaveStimulus,
+        "Save as stimulus definition…",
+        None,
+    ),
+    named_row(
+        ContextAction::OpenStimulusDefinition,
+        "Open in Stimulus Library",
+        None,
+    ),
     ContextEntry::Separator,
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Cut,
-        icon: ContextIcon::Copy,
-        label: "Cut selection",
-        shortcut_command: Some(ids::CUT),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Copy,
-        icon: ContextIcon::Copy,
-        label: "Copy selection",
-        shortcut_command: Some(ids::COPY),
-    }),
-    // Where the menu was opened, which is the point a reader right-clicks
-    // to say "here".
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Paste,
-        icon: ContextIcon::Copy,
-        label: "Paste here",
-        shortcut_command: Some(ids::PASTE),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Duplicate,
-        icon: ContextIcon::Copy,
-        label: "Duplicate",
-        shortcut_command: Some(ids::DUPLICATE),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Delete,
-        icon: ContextIcon::Trash,
-        label: "Delete",
-        shortcut_command: Some(ids::DELETE),
-    }),
+    workbench_row(ContextAction::Cut, WorkbenchCommand::Cut, None),
+    workbench_row(ContextAction::Copy, WorkbenchCommand::Copy, None),
+    // Floats the clipboard where the menu was opened, which is the point a
+    // reader right-clicks to say "here"; Edit ▸ Paste floats it at the
+    // pointer, which is on the menu by then.
+    named_row(ContextAction::Paste, "Paste here", Some(ids::PASTE)),
+    workbench_row(
+        ContextAction::Duplicate,
+        WorkbenchCommand::Duplicate,
+        Some(ContextIcon::Duplicate),
+    ),
+    workbench_row(
+        ContextAction::Delete,
+        WorkbenchCommand::Delete,
+        Some(ContextIcon::Trash),
+    ),
     ContextEntry::Separator,
     // The instance-master slot: what the menu's subject has for a master.
     // An instance descends into its schematic; a Verilog-A instance's master
     // is a module, which opens as its cell view (the Descend shortcut does
     // the same); the empty canvas has no master and offers a new one.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::DescendHierarchy,
-        icon: ContextIcon::Hierarchy,
-        label: "Descend into selected instance",
-        shortcut_command: Some(DesignCommand::DescendHierarchyDirect.key()),
-    }),
+    design_row(
+        ContextAction::DescendHierarchy,
+        DesignCommand::DescendHierarchyDirect,
+        Some(ContextIcon::Descend),
+    ),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OpenVerilogAView,
-        icon: ContextIcon::VerilogA,
+        icon: Some(ContextIcon::Descend),
         label: "Open Verilog-A view",
         shortcut_command: Some(DesignCommand::DescendHierarchyDirect.key()),
     }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::EditSymbolInPlace,
-        icon: ContextIcon::Hierarchy,
-        label: "Edit symbol in place",
-        shortcut_command: Some(DesignCommand::EditSymbolInPlace.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::NewVerilogADevice,
-        icon: ContextIcon::VerilogA,
-        label: "New Verilog-A device…",
-        shortcut_command: Some(ids::NEW_VERILOGA_DEVICE),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::UpdateInstanceInterface,
-        icon: ContextIcon::Hierarchy,
-        label: "Update instance interface",
-        shortcut_command: Some(DesignCommand::UpdateInstanceInterface.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::UpdateAllInstanceInterfaces,
-        icon: ContextIcon::Hierarchy,
-        label: "Update all instances",
-        shortcut_command: Some(DesignCommand::UpdateAllInstanceInterfaces.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::ReplaceInstance,
-        icon: ContextIcon::Hierarchy,
-        label: "Replace instance…",
-        shortcut_command: Some(DesignCommand::ReplaceInstance.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::CreateHierarchy,
-        icon: ContextIcon::Hierarchy,
-        label: "Create hierarchy from selection…",
-        shortcut_command: Some(DesignCommand::CreateHierarchy.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::CreateSymbolFromPorts,
-        icon: ContextIcon::Hierarchy,
-        label: "Create symbol from schematic ports…",
-        shortcut_command: None,
-    }),
+    design_row(
+        ContextAction::EditSymbolInPlace,
+        DesignCommand::EditSymbolInPlace,
+        None,
+    ),
+    named_row(
+        ContextAction::NewVerilogADevice,
+        "New Verilog-A device…",
+        Some(ids::NEW_VERILOGA_DEVICE),
+    ),
+    design_row(
+        ContextAction::UpdateInstanceInterface,
+        DesignCommand::UpdateInstanceInterface,
+        None,
+    ),
+    design_row(
+        ContextAction::UpdateAllInstanceInterfaces,
+        DesignCommand::UpdateAllInstanceInterfaces,
+        None,
+    ),
+    design_row(
+        ContextAction::ReplaceInstance,
+        DesignCommand::ReplaceInstance,
+        None,
+    ),
+    design_row(
+        ContextAction::CreateHierarchy,
+        DesignCommand::CreateHierarchy,
+        None,
+    ),
+    named_row(
+        ContextAction::CreateSymbolFromPorts,
+        "Create symbol from schematic ports…",
+        None,
+    ),
     ContextEntry::Separator,
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::SheetProperties,
-        icon: ContextIcon::Sheet,
-        label: "Sheet properties",
-        shortcut_command: Some(ids::SHEET_PROPERTIES),
-    }),
+    named_row(
+        ContextAction::SheetProperties,
+        "Sheet properties",
+        Some(ids::SHEET_PROPERTIES),
+    ),
     // Fitting the drawing sheet is not here. `WorkbenchCommand::ZoomFit` already has a
     // toolbar button on this canvas, a status-bar route, a mobile canvas
     // control and the `F` key; a selection menu that fits without scrolling is
     // worth more than a sixth route to it.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::FitContent,
-        icon: ContextIcon::Fit,
-        label: "Fit schematic content",
-        shortcut_command: Some(DesignCommand::FitSchematicContent.key()),
-    }),
+    design_row(
+        ContextAction::FitContent,
+        DesignCommand::FitSchematicContent,
+        None,
+    ),
     // Only on the empty canvas's menu: a finger has no Z key, and the next
     // drag after this row frames the view.
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::ZoomBox,
-        icon: ContextIcon::ZoomBox,
-        label: "Zoom box",
-        shortcut_command: Some(ids::ZOOM_BOX),
-    }),
+    workbench_row(ContextAction::ZoomBox, WorkbenchCommand::ZoomBox, None),
     ContextEntry::Separator,
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::ShowInNetlist,
-        icon: ContextIcon::Code,
-        label: "Show in netlist",
-        shortcut_command: Some(ids::SHOW_IN_NETLIST),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::Probe,
-        icon: ContextIcon::Probe,
-        label: "Probe",
-        shortcut_command: Some(DesignCommand::PlaceProbe.key()),
-    }),
-    ContextEntry::Command(ContextCommand {
-        action: ContextAction::OperatingPoint,
-        icon: ContextIcon::Waveform,
-        label: "Open operating point",
-        shortcut_command: Some(ids::RESULT_OPERATING_POINT),
-    }),
+    named_row(
+        ContextAction::ShowInNetlist,
+        "Show in netlist",
+        Some(ids::SHOW_IN_NETLIST),
+    ),
+    design_row(
+        ContextAction::Probe,
+        DesignCommand::PlaceProbe,
+        Some(ContextIcon::Probe),
+    ),
+    named_row(
+        ContextAction::OperatingPoint,
+        "Operating-point table",
+        Some(ids::RESULT_OPERATING_POINT),
+    ),
 ];
 
 /// The one independent source the menu is about, when that is all that is
@@ -444,25 +419,28 @@ fn route_is_live(state: &CanvasFacts<'_>) -> bool {
 
 /// The Arrange page: the Design menu's Arrange submenu, group by group.
 pub const ARRANGE_ENTRIES: &[ContextEntry] = &[
-    arrange(ArrangeAction::RotateClockwise, ContextIcon::Rotate),
-    arrange(ArrangeAction::RotateCounterClockwise, ContextIcon::Rotate),
-    arrange(ArrangeAction::MirrorHorizontal, ContextIcon::Mirror),
-    arrange(ArrangeAction::MirrorVertical, ContextIcon::MirrorVertical),
+    arrange(ArrangeAction::RotateClockwise, Some(ContextIcon::Rotate)),
+    arrange(ArrangeAction::RotateCounterClockwise, None),
+    arrange(ArrangeAction::MirrorHorizontal, Some(ContextIcon::Mirror)),
+    arrange(
+        ArrangeAction::MirrorVertical,
+        Some(ContextIcon::MirrorVertical),
+    ),
     ContextEntry::Separator,
-    arrange(ArrangeAction::AlignLeft, ContextIcon::Arrange),
-    arrange(ArrangeAction::AlignCenter, ContextIcon::Arrange),
-    arrange(ArrangeAction::AlignRight, ContextIcon::Arrange),
-    arrange(ArrangeAction::AlignTop, ContextIcon::Arrange),
-    arrange(ArrangeAction::AlignMiddle, ContextIcon::Arrange),
-    arrange(ArrangeAction::AlignBottom, ContextIcon::Arrange),
+    arrange(ArrangeAction::AlignLeft, None),
+    arrange(ArrangeAction::AlignCenter, None),
+    arrange(ArrangeAction::AlignRight, None),
+    arrange(ArrangeAction::AlignTop, None),
+    arrange(ArrangeAction::AlignMiddle, None),
+    arrange(ArrangeAction::AlignBottom, None),
     ContextEntry::Separator,
-    arrange(ArrangeAction::DistributeHorizontal, ContextIcon::Arrange),
-    arrange(ArrangeAction::DistributeVertical, ContextIcon::Arrange),
+    arrange(ArrangeAction::DistributeHorizontal, None),
+    arrange(ArrangeAction::DistributeVertical, None),
     ContextEntry::Separator,
-    arrange(ArrangeAction::SnapToGrid, ContextIcon::Grid),
+    arrange(ArrangeAction::SnapToGrid, None),
 ];
 
-const fn arrange(action: ArrangeAction, icon: ContextIcon) -> ContextEntry {
+const fn arrange(action: ArrangeAction, icon: Option<ContextIcon>) -> ContextEntry {
     let command = arrange_command(action);
     ContextEntry::Command(ContextCommand {
         action: ContextAction::ArrangeCommand(action),

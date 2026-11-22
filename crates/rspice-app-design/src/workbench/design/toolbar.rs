@@ -34,11 +34,15 @@ pub(crate) const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<DesignFeature>])] = &[
     (STIMULUS_TOOLBAR, STIMULUS),
 ];
 
+/// The schematic's direct tools, each under the name its command declares,
+/// without the ellipsis a menu row gives a command that asks for more. The
+/// Select tool also names Escape, which returns to it from any tool but is
+/// Cancel's key.
 pub const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &str); 11] = [
     (
         DesignCommand::SelectTool.key(),
         WorkbenchIcon::Select,
-        "Select (Esc)",
+        "Select tool (Esc)",
     ),
     (
         DesignCommand::PlaceInstance.key(),
@@ -68,7 +72,7 @@ pub const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &str); 11
     (
         DesignCommand::PlaceLabel.key(),
         WorkbenchIcon::Label,
-        "Net label",
+        "Place net label",
     ),
     // Not `Layers`: that glyph already sits in this same row for descending
     // into an instance, and a sheet crossing is a sideways continuation of a
@@ -81,12 +85,12 @@ pub const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &str); 11
     (
         DesignCommand::PlacePin.key(),
         WorkbenchIcon::Pin,
-        "Create pin",
+        "Create pins",
     ),
     (
         DesignCommand::PlaceProbe.key(),
         WorkbenchIcon::Probe,
-        "Probe signal",
+        "Probe",
     ),
     (
         DesignCommand::PlaceText.key(),
@@ -253,11 +257,7 @@ const SCHEMATIC: &[ToolbarEntry<DesignFeature>] = &[
         DesignCommand::DescendHierarchyDirect.key(),
         WorkbenchIcon::Layers,
     ),
-    named(
-        DesignCommand::AscendHierarchy.key(),
-        WorkbenchIcon::ArrowUp,
-        "Ascend to parent sheet · double-click the sheet background also ascends",
-    ),
+    icon(DesignCommand::AscendHierarchy.key(), WorkbenchIcon::ArrowUp),
     ToolbarEntry::Separator,
     icon(ids::ZOOM_OUT, WorkbenchIcon::ZoomOut),
     icon(ids::ZOOM_IN, WorkbenchIcon::ZoomIn),

@@ -481,8 +481,8 @@ fn a_tablet_edits_a_schematic_by_finger_alone() {
 
     // Descend into the subcircuit from its long-press menu.
     tablet.long_press(tablet.screen(subcircuit + Point::new(20, 0)));
-    tablet.reveal("Descend into selected instance");
-    tablet.press("Descend into selected instance");
+    tablet.reveal("Descend");
+    tablet.press("Descend");
     assert_eq!(
         tablet
             .app
