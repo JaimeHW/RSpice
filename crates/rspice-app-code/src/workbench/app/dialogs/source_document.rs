@@ -471,7 +471,7 @@ fn render_netlist_source_document_dialog(
         return;
     };
     let dialog = Dialog::new(
-        messages.text(MessageId::CodeSourceLifecycleTitle),
+        messages.text(MessageId::NetlistManageDeckTitle),
         messages.text(MessageId::CommonClose),
     )
     .description(messages.format(
@@ -516,7 +516,7 @@ fn render_netlist_source_document_dialog(
     }
 }
 
-/// The sections of a Manage source document dialog, stacked down its flush
+/// The sections of a Files and includes dialog, stacked down its flush
 /// body.
 fn sections<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.scope(|ui| {
@@ -526,7 +526,7 @@ fn sections<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
-/// One section of a Manage source document dialog: the dialog's band across
+/// One section of a Files and includes dialog: the dialog's band across
 /// its flush body, then `body` on the panel rhythm with every row on the left
 /// edge of the dialog's title and footer.
 fn dialog_section(ui: &mut Ui, title: &str, meta: Option<&str>, body: impl FnOnce(&mut Ui)) {

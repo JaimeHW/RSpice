@@ -174,7 +174,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
         icon_button(
             ui,
             WorkbenchIcon::Folder,
-            &messages.text(MessageId::CodeSourceLifecycleTitle),
+            &messages.text(MessageId::NetlistManageDeckTitle),
             false,
             side,
         )

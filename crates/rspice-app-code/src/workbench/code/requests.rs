@@ -164,7 +164,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             action,
             path,
         } => {
-            // The transaction's own form opens; Manage source document is
+            // The transaction's own form opens; Files and includes is
             // not behind it.
             let opened = code_workspace::open_source_file_dialog_in_bundle(
                 &mut CodeFeature::workspace_parts(cx),

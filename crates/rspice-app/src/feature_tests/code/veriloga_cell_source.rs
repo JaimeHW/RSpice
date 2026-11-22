@@ -880,7 +880,7 @@ fn a_file_dropped_on_the_veriloga_editor_opens_the_import_form() {
 
 const REPLACEMENT: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n) / 2k;\nendmodule\n";
 
-/// "Replace from file…" in the Manage source document dialog for the open
+/// "Replace from file…" in the Files and includes dialog for the open
 /// `model.va`, through the picker, to the confirmation it opens.
 fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
     app.execute_command_key(
@@ -891,7 +891,7 @@ fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
         output = frame(ctx, app, DESKTOP);
     }
     let replace = node_center(&output, "Replace from file…")
-        .expect("Manage source document offers Replace from file");
+        .expect("Files and includes offers Replace from file");
     click(ctx, app, replace);
     assert!(
         app.state.code.code_workspace.veriloga.import_requested,

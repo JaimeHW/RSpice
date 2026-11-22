@@ -1,7 +1,7 @@
 //! New, Rename, Move, Duplicate and Delete for one file of a Verilog-A
 //! bundle, each its own compact command form.
 //!
-//! The Files rail and Manage source document both open these. A form states
+//! The Files rail and Files and includes both open these. A form states
 //! the file it acts on, the name it is given, and what else the change
 //! rewrites — the `include a new file adds, the includes a rename updates or
 //! a delete removes — and refuses before the click rather than after it: a
@@ -227,7 +227,7 @@ fn titles(draft: &CodeSourceFileDialogState, messages: MessageCatalog) -> (Strin
 /// main file, a file a role binds, or a file that still includes another.
 ///
 /// These are the bundle's own refusals, said before the click. The rail's
-/// Delete, Manage source document's and this form's footer all read them
+/// Delete, the Files and includes dialog and this form's footer all read them
 /// from here, so the three can never disagree.
 pub(in crate::workbench) fn delete_refusal(
     bundle: &ProjectSourceBundle,

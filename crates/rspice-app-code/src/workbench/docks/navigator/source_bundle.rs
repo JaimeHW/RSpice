@@ -109,7 +109,7 @@ struct Rail {
 /// New, rename and delete for a bundle's files, offered by the rail that
 /// lists them.
 ///
-/// Each opens its own form, the same one Manage source document opens:
+/// Each opens its own form, the same one Files and includes opens:
 /// rewriting a bundle's file graph is confirmed and committed, never applied
 /// by a single click in a list. The controls are neutral; danger is the
 /// form's to state.

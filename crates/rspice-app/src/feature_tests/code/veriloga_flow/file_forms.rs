@@ -1,5 +1,5 @@
 //! New, Rename and Delete from the Verilog-A Files rail, through whole
-//! frames: each opens its own compact form, never Manage source document.
+//! frames: each opens its own compact form, never Files and includes.
 
 use egui::Key;
 
@@ -8,7 +8,7 @@ use super::*;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_workbench::workbench::localization::MessageId;
 
-const MANAGE: &str = "Manage source document";
+const MANAGE: &str = "Files and includes";
 const NEW_FORM: &str = "New Verilog-A file";
 
 /// The bundle of the view in front.
@@ -67,7 +67,7 @@ fn new_file_on_the_rail_is_a_compact_form_and_enter_creates_the_file() {
     user.expect(NEW_FORM);
     assert!(
         user.find(MANAGE).is_none(),
-        "Manage source document stays shut"
+        "Files and includes stays shut"
     );
     user.expect(&format!("Adds an `include at the top of {main}"));
 

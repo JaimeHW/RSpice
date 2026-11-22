@@ -735,7 +735,7 @@ impl CodeCommand {
             Self::FindCodeDocument => ("Find in document\u{2026}", "Netlist", palette),
             Self::ReplaceInCodeDocument => ("Replace in document\u{2026}", "Netlist", palette),
             Self::ShowRunDeck => ("Show deck", "Simulate", navigates),
-            Self::ManageSourceDocument => ("Manage source document\u{2026}", "Netlist", palette),
+            Self::ManageSourceDocument => ("Files and includes\u{2026}", "Netlist", palette),
             Self::ToggleLineComment => ("Toggle line comment", "Edit", palette),
             Self::IndentLines => ("Indent lines", "Edit", palette),
             Self::OutdentLines => ("Outdent lines", "Edit", palette),

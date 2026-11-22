@@ -43,7 +43,7 @@ pub(in crate::workbench) enum DocsTopic {
     Verification,
     ModelsAndPdks,
     VerilogA,
-    NetlistsAndScripts,
+    Netlists,
     Troubleshooting,
     KeyboardShortcuts,
 }
@@ -58,7 +58,7 @@ impl DocsTopic {
         Self::Verification,
         Self::ModelsAndPdks,
         Self::VerilogA,
-        Self::NetlistsAndScripts,
+        Self::Netlists,
         Self::Troubleshooting,
         Self::KeyboardShortcuts,
     ];
@@ -73,7 +73,7 @@ impl DocsTopic {
             Self::Verification => "verification",
             Self::ModelsAndPdks => "models-and-pdks",
             Self::VerilogA => "verilog-a",
-            Self::NetlistsAndScripts => "netlists-and-scripts",
+            Self::Netlists => "netlists",
             Self::Troubleshooting => "troubleshooting",
             Self::KeyboardShortcuts => "keyboard-shortcuts",
         }
@@ -101,7 +101,7 @@ const fn workspace_topic(workspace: Workspace, view: Option<ViewType>) -> DocsTo
         Workspace::Results => DocsTopic::Results,
         Workspace::Verify => DocsTopic::Verification,
         Workspace::Models => DocsTopic::ModelsAndPdks,
-        Workspace::Netlist => DocsTopic::NetlistsAndScripts,
+        Workspace::Netlist => DocsTopic::Netlists,
     }
 }
 
@@ -144,7 +144,7 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
     ("project.technology_attachment", DocsTopic::ModelsAndPdks),
     ("code.new_veriloga_device", DocsTopic::VerilogA),
     ("code.veriloga_build_settings", DocsTopic::VerilogA),
-    ("code.netlist", DocsTopic::NetlistsAndScripts),
+    ("code.netlist", DocsTopic::Netlists),
     ("services.recovered_work", DocsTopic::Troubleshooting),
     ("services.unopened_project", DocsTopic::Troubleshooting),
     ("services.autosave_restore", DocsTopic::Troubleshooting),
@@ -279,7 +279,7 @@ mod tests {
             (Workspace::Results, DocsTopic::Results),
             (Workspace::Verify, DocsTopic::Verification),
             (Workspace::Models, DocsTopic::ModelsAndPdks),
-            (Workspace::Netlist, DocsTopic::NetlistsAndScripts),
+            (Workspace::Netlist, DocsTopic::Netlists),
         ];
         assert_eq!(
             expected.map(|(workspace, _)| workspace),
