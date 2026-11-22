@@ -840,7 +840,6 @@ fn complete_project_rows_are_editable_unless_their_cell_view_is_read_only() {
 #[test]
 fn the_default_scope_edits_the_blocks_below_as_one_undo_step() {
     let mut state = DesignTestHost::default();
-    state.model.project_open.set_from_lifecycle(true);
     let top = state.model.workspace.content.active_schematic_reference();
     let resistor = |id: u64, name: &str| {
         let mut part = Component::new(id, ComponentType::Resistor, Point::new(id as i32, 0));

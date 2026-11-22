@@ -2054,7 +2054,6 @@ pub mod tests {
     #[cfg(test)]
     fn three_resistors() -> DesignTestHost {
         let mut state = DesignTestHost::default();
-        state.model.project_open.set_from_lifecycle(true);
         for (id, name) in [(1, "R1"), (2, "R2"), (3, "R3")] {
             let mut part = crate::state::Component::new(
                 id,
