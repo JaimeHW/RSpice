@@ -155,7 +155,7 @@ const CANVAS_ROWS: &[ContextEntry<Row>] = &[
     ),
     row(
         SymbolMenuAction::Tool(SymbolTool::Text),
-        ContextIcon::Label,
+        ContextIcon::Text,
         "Place text",
         DesignCommand::SymbolTextTool.key(),
     ),

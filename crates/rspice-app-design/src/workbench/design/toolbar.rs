@@ -141,7 +141,7 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, SymbolTool); 
     ),
     (
         DesignCommand::SymbolTextTool.key(),
-        WorkbenchIcon::Label,
+        WorkbenchIcon::Text,
         SymbolTool::Text,
     ),
 ];

@@ -445,9 +445,16 @@ impl WorkbenchIcon {
                 line(&[(10.0, 7.0), (20.0, 17.0)]);
                 line(&[(20.0, 7.0), (10.0, 17.0)]);
             }
+            // A name tag whose point sits on the net, so it reads apart
+            // from Text's letter T.
             Self::Label => {
-                line(&[(5.0, 5.0), (19.0, 5.0)]);
-                line(&[(12.0, 5.0), (12.0, 20.0)]);
+                closed(&[
+                    (3.0, 12.0),
+                    (8.0, 7.0),
+                    (21.0, 7.0),
+                    (21.0, 17.0),
+                    (8.0, 17.0),
+                ]);
             }
             Self::Pin => {
                 closed(&[(9.0, 4.0), (15.0, 4.0), (15.0, 10.0), (9.0, 10.0)]);
