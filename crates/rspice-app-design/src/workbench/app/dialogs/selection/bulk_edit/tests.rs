@@ -264,6 +264,16 @@ fn bulk_edit_sets_the_value_of_the_ticked_parts() {
         .map(|part| (part.value.as_str(), part.params.as_str()))
         .collect();
     assert_eq!(values, vec![("12k", ""), ("12k", ""), ("10k", "")]);
+    let prompt = state
+        .workbench
+        .prompt
+        .as_ref()
+        .map(|prompt| prompt.text.clone())
+        .unwrap_or_default();
+    assert!(
+        prompt.starts_with("Bulk edit changed 2 objects") && !prompt.contains("undo step"),
+        "{prompt}"
+    );
     assert!(
         validate_bulk_value(
             SelectionBulkProperty::ParameterOverride,
@@ -852,4 +862,58 @@ fn every_object_kind_offered_lists_rows_a_property_edits() {
             kind.label()
         );
     }
+}
+
+/// A manufacturer or a display mode changes no analysis, so neither the
+/// impact pane nor the status line counts analyses for it. Both reported
+/// every enabled analysis as affected whatever the property.
+#[test]
+fn a_bom_edit_reports_no_analyses_affected() {
+    let mut state = DesignTestHost::default();
+    let mut part = Component::new(1, ComponentType::Resistor, Point::new(0, 0));
+    part.name = "R1".to_owned();
+    part.value = "1k".to_owned();
+    state.model.schematic.document_mut_for_test().components = vec![part];
+    state.model.schematic.init_undo_history();
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(1);
+    state
+        .model
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("the test plan is stable")
+        .insert(crate::simulation::plan::AnalysisKind::OperatingPoint)
+        .expect("an operating point inserts");
+    assert!(state.model.sim_setup.enabled_analysis_instance_count() > 0);
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
+    state.design.selection_bulk_edit.property = SelectionBulkProperty::Bom(BomField::Manufacturer);
+    state.design.selection_bulk_edit.new_value = "Vishay".to_owned();
+    assert!(!changes_the_circuit(
+        state.design.selection_bulk_edit.property
+    ));
+
+    commit_selection_bulk_edit(
+        &mut state.design.selection_bulk_edit,
+        &mut state.model,
+        &mut state.workbench,
+    )
+    .expect("the manufacturer applies");
+    assert_eq!(
+        state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.as_str()),
+        Some("Bulk edit changed 1 object.")
+    );
+    assert!(changes_the_circuit(SelectionBulkProperty::Value));
 }

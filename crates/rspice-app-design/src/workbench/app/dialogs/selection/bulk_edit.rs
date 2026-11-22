@@ -551,14 +551,20 @@ fn commit_selection_bulk_edit(
         return Err("The selected objects already satisfy the requested value.".to_owned());
     }
     sync_active_schematic(model, workbench);
-    let analyses = model.sim_setup.enabled_analysis_instance_count();
-    workbench.prompt(format!(
-        "Bulk edit changed {} object{} as one undo step; {} enabled analys{} affected.",
+    let changed = format!(
+        "Bulk edit changed {} object{}",
         receipt.changed,
         if receipt.changed == 1 { "" } else { "s" },
-        analyses,
-        if analyses == 1 { "is" } else { "es" },
-    ));
+    );
+    let analyses = model.sim_setup.enabled_analysis_instance_count();
+    workbench.prompt(if changes_the_circuit(dialog.property) && analyses > 0 {
+        format!(
+            "{changed}; {analyses} enabled analys{} affected.",
+            if analyses == 1 { "is" } else { "es" },
+        )
+    } else {
+        format!("{changed}.")
+    });
     bulk_edit.close();
     Ok(())
 }
@@ -1122,16 +1128,29 @@ fn bulk_edit_fields(
             &impact.locked_or_excluded.to_string(),
         );
     }
-    impact_row(
-        ui,
-        "Analyses affected",
-        if impact.changed == 0 {
-            "0".to_owned()
-        } else {
-            affected_analyses.to_string()
-        }
-        .as_str(),
-    );
+    // A bill-of-materials field or how a part is lettered changes no
+    // analysis, so the count is shown only for what the netlist carries.
+    if changes_the_circuit(dialog.property) {
+        impact_row(
+            ui,
+            "Analyses affected",
+            if impact.changed == 0 {
+                "0".to_owned()
+            } else {
+                affected_analyses.to_string()
+            }
+            .as_str(),
+        );
+    }
+}
+
+/// Whether `property` reaches the netlist, so that an edit of it changes
+/// what the enabled analyses compute.
+const fn changes_the_circuit(property: SelectionBulkProperty) -> bool {
+    !matches!(
+        property,
+        SelectionBulkProperty::Display | SelectionBulkProperty::Bom(_)
+    )
 }
 
 /// One count of the edit's impact: its words on the pane's left edge, the
