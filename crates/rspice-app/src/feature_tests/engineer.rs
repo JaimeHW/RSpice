@@ -246,7 +246,10 @@ impl Engineer {
         self.press(&tab, Role::Tab);
     }
 
-    /// Where the schematic point `at` is on the screen.
+    /// Where the schematic point `at` is on the screen. The drawings were
+    /// laid out at 100 % with the canvas corner on the schematic's origin,
+    /// and some run past the A4 sheet a schematic opens framed on, so the
+    /// engineer holds the camera there, with no fit pending to move it.
     pub(super) fn screen(&mut self, at: Point) -> egui::Pos2 {
         let bounds = match self.canvas {
             Some(bounds) => bounds,
@@ -255,9 +258,11 @@ impl Engineer {
                 self.canvas.expect("the schematic canvas")
             }
         };
-        let editor = &self.replay.app.state.model.schematic.session.editor;
-        let x = bounds.x0 + editor.pan.0 as f64 + f64::from(at.x) * editor.zoom as f64;
-        let y = bounds.y0 + editor.pan.1 as f64 + f64::from(at.y) * editor.zoom as f64;
+        let editor = &mut self.replay.app.state.model.schematic.session.editor;
+        (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
+        (editor.zoom, editor.pan) = (1.0, (0.0, 0.0));
+        let x = bounds.x0 + f64::from(at.x);
+        let y = bounds.y0 + f64::from(at.y);
         assert!(
             x < bounds.x1 && y < bounds.y1,
             "{at:?} is off the canvas {bounds:?}"
