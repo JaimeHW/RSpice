@@ -876,11 +876,12 @@ pub fn add_file_to_deck(
         .open_deck
         .as_ref()
         .filter(|deck| deck.is_stored())
-        .ok_or_else(|| "Open the deck kept in the project to add a file to it.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistAddFileNeedsStoredDeck))?;
     let name = deck.root.name();
     let keep_as = request.keep_as.as_str();
+    let said = |id| messages.format(id, &[("name", &name), ("path", keep_as)]);
     if keep_as.is_empty() || keep_as == name {
-        return Err(format!("{name} cannot keep a file as {keep_as}."));
+        return Err(said(MessageId::NetlistAddFileBadName));
     }
     let kept = deck
         .stored_files
@@ -888,16 +889,14 @@ pub fn add_file_to_deck(
         .flatten()
         .find(|file| file.path == keep_as);
     if kept.is_some_and(|file| file.text != text) {
-        return Err(format!(
-            "{name} already keeps {keep_as}, with other text: nothing was added."
-        ));
+        return Err(said(MessageId::NetlistAddFileClash));
     }
     let added = kept.is_none();
     if let Some(to) = &request.rewrite_to {
         rewrite_named_path(model, netlist, request, to, messages)?;
     }
     let Some(deck) = netlist.open_deck.as_mut() else {
-        return Err("No deck is open.".to_owned());
+        return Err(messages.text(MessageId::NetlistNoDeckOpen));
     };
     let file = StoredDeckFile {
         path: keep_as.to_owned(),
@@ -926,11 +925,11 @@ pub fn add_file_to_deck(
     // The deck reads the file it now keeps.
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
-    Ok(if added {
-        format!("Added {keep_as} to {name}.")
+    Ok(said(if added {
+        MessageId::NetlistAddFileAdded
     } else {
-        format!("{name} already keeps {keep_as}.")
-    })
+        MessageId::NetlistAddFileAlreadyKept
+    }))
 }
 
 /// Name the file `request` asks for as `to` on the line that names it,
@@ -946,7 +945,7 @@ fn rewrite_named_path(
     let deck = netlist
         .open_deck
         .as_ref()
-        .ok_or_else(|| "No deck is open.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistNoDeckOpen))?;
     let id = deck.id;
     let include = (request.owner != deck.root.name()).then_some(request.owner.as_str());
     let open = deck.file(include).map(|file| file.text.clone());
@@ -958,14 +957,21 @@ fn rewrite_named_path(
             .flatten()
             .find(|file| file.path == request.owner)
             .map(|file| file.text.clone())
-            .ok_or_else(|| format!("{} is no longer in the deck.", request.owner))?,
+            .ok_or_else(|| {
+                messages.format(
+                    MessageId::NetlistAddFileOwnerGone,
+                    &[("file", &request.owner)],
+                )
+            })?,
     };
     let span = named_path_span(&text, request.line, &request.requested).ok_or_else(|| {
-        format!(
-            "Line {} of {} no longer names {}: nothing was added.",
-            request.line + 1,
-            request.owner,
-            request.requested
+        messages.format(
+            MessageId::NetlistAddFileLineMoved,
+            &[
+                ("line", &(request.line + 1).to_string()),
+                ("file", &request.owner),
+                ("path", &request.requested),
+            ],
         )
     })?;
     let mut changed = text.clone();
@@ -1811,7 +1817,7 @@ pub fn show_include(
     let deck = netlist
         .open_deck
         .as_mut()
-        .ok_or_else(|| "No deck is open.".to_owned())?;
+        .ok_or_else(|| messages.text(MessageId::NetlistNoDeckOpen))?;
     // A file of a deck kept as text is named by its path from the deck,
     // whether asked for so or by where the engine read it.
     let key = if deck.is_stored() {
@@ -1828,10 +1834,12 @@ pub fn show_include(
         // A deck the project keeps as text reads its includes from what the
         // project keeps beside it.
         if let Some(files) = &deck.stored_files {
-            let stored = files
-                .iter()
-                .find(|file| file.path == key)
-                .ok_or_else(|| format!("{} is not kept with this deck.", file_name(path)))?;
+            let stored = files.iter().find(|file| file.path == key).ok_or_else(|| {
+                messages.format(
+                    MessageId::NetlistIncludeNotKept,
+                    &[("file", &file_name(path))],
+                )
+            })?;
             let (text, line_ending) = LineEnding::read(stored.text.clone());
             deck.includes.push(OpenFile {
                 path: path.to_path_buf(),
@@ -1846,7 +1854,10 @@ pub fn show_include(
             #[cfg(not(target_arch = "wasm32"))]
             deck.includes.push(read_file(path)?);
             #[cfg(target_arch = "wasm32")]
-            return Err(format!("{} is not open.", file_name(path)));
+            return Err(messages.format(
+                MessageId::NetlistIncludeNotOpen,
+                &[("file", &file_name(path))],
+            ));
         }
     }
     let root = deck.tab_id();
