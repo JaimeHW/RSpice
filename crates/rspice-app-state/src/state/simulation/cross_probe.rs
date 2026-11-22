@@ -272,10 +272,6 @@ impl CrossProbeMapping {
         net_in(sheets.get(&sheet).unwrap_or(&NO_GEOMETRY), point)
     }
 
-    pub fn is_current_for(&self, reference: &CellViewRef, topology_version: u64) -> bool {
-        self.is_captured_from(reference) && self.source_topology_version == Some(topology_version)
-    }
-
     /// Whether this map's geometry was captured from `reference`.
     pub fn is_captured_from(&self, reference: &CellViewRef) -> bool {
         self.source_reference

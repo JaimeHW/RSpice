@@ -1182,10 +1182,7 @@ pub(super) fn active_run_matches_design(model: &Model) -> bool {
     };
     run.prepared_receipt().is_some_and(|receipt| {
         receipt.project_revision() == model.workspace.content.project.revision()
-    }) && model.simulation.source.cross_probe.is_current_for(
-        &model.workspace.content.active_view,
-        model.schematic.topology_version(),
-    )
+    }) && model.result_mapping_is_current()
 }
 
 pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
