@@ -410,20 +410,38 @@ fn note_run_press(app: &mut RSpiceApp) {
     }
 }
 
-/// Answer the end of the run a press of Run asked for. One that completed
-/// opens in Results if the reader is still on the page they pressed from; a
-/// reader who moved on is told in the window's corner. One that failed brings
-/// its own account up in the Console. Only the first of these changes the
-/// page, and only for a reader who stayed.
-///
-/// Returns whether the reader stayed on the page Run was pressed on, where
-/// the run's end is already in front of them.
-fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::RunId]) -> bool {
+/// How the end of the run a press of Run asked for met the reader.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PressedRunEnd {
+    /// The reader stayed on the page Run was pressed on.
+    stayed: bool,
+    /// The run, by its display sequence, that finished on the drawing while
+    /// the reader had the plot pane closed: its plot is off-screen.
+    plot_hidden: Option<u64>,
+}
+
+impl PressedRunEnd {
+    /// Whether the run's end is in front of the reader.
+    fn in_view(self) -> bool {
+        self.stayed && self.plot_hidden.is_none()
+    }
+}
+
+/// Answer the end of the run a press of Run asked for. One that completed on
+/// the drawing shows its plot in the pane beside it and leaves the drawing
+/// the active page; one that completed on any other page opens in Results if
+/// the reader is still there; a reader who moved on is told in the window's
+/// corner. One that failed brings its own account up in the Console and
+/// opens no plot.
+fn follow_pressed_run(
+    app: &mut RSpiceApp,
+    ended: &[rspice_app_state::product::RunId],
+) -> PressedRunEnd {
     use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
     use rspice_app_workbench::ui::widgets::NotificationAction;
 
     let Some(route) = app.state.workbench.run_press_route else {
-        return false;
+        return PressedRunEnd::default();
     };
     let simulation = &app.state.model.simulation;
     let pressed = ended
@@ -447,12 +465,20 @@ fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::R
         {
             app.state.workbench.run_press_route = None;
         }
-        return false;
+        return PressedRunEnd::default();
     };
     let (sequence, lifecycle, has_results) = (run.id, run.lifecycle, !run.analyses.is_empty());
     app.state.workbench.run_press_route = None;
     let stayed = app.state.workbench.current_route() == route;
+    let mut plot_hidden = None;
     match lifecycle {
+        Lifecycle::Completed
+            if has_results && stayed && route.surface_id() == SurfaceId::Design =>
+        {
+            if !app.plot_finished_run(sequence) {
+                plot_hidden = Some(sequence);
+            }
+        }
         Lifecycle::Completed if has_results && stayed => app.open_finished_run(sequence),
         Lifecycle::Failed => {
             if let Some(log_id) = run_end_line(&app.state, sequence) {
@@ -465,7 +491,10 @@ fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::R
         }
         _ => {}
     }
-    stayed
+    PressedRunEnd {
+        stayed,
+        plot_hidden,
+    }
 }
 
 /// The line the run wrote in the session's log as it ended.
@@ -492,13 +521,14 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .iter()
         .map(|run| (run.run_id, run.lifecycle));
     let ended = app.state.runs.run_watch.observe(runs);
-    let stayed = follow_pressed_run(app, &ended);
-    // A reader in Results, or still on the page they pressed Run on, has the
-    // run's end in front of them: the status bar's run segment states it and
-    // the Problems count beside it holds what it raised, as ADE and ADS keep
-    // run status in the window's status and log areas. Nothing floats over
-    // the data; the outcome is kept in the bell.
-    let watched = stayed
+    let pressed = follow_pressed_run(app, &ended);
+    // A reader in Results, or still on the page they pressed Run on with its
+    // plot in view, has the run's end in front of them: the status bar's run
+    // segment states it and the Problems count beside it holds what it
+    // raised, as ADE and ADS keep run status in the window's status and log
+    // areas. Nothing floats over the data; the outcome is kept in the bell.
+    // A reader who closed the plot pane is offered the plot in the corner.
+    let watched = pressed.in_view()
         || app.state.workbench.workspace
             == rspice_app_state::workbench::workspace::Workspace::Results;
     let campaigns = app.state.runs.run_watch.take_campaign_outcomes();
@@ -508,6 +538,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     let notices = ended
         .into_iter()
         .filter_map(|run_id| run_notice(&app.state, run_id))
+        .map(|notice| offer_hidden_plot(notice, pressed.plot_hidden))
         .chain(campaigns.into_iter().map(campaign_notice))
         .collect::<Vec<_>>();
     // The reader's Task attention setting says which outcomes may interrupt
@@ -587,6 +618,20 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
             egui::ViewportCommand::RequestUserAttention(urgency),
         );
     }
+}
+
+/// A run that finished on the drawing with its plot pane closed offers the
+/// plot beside the drawing rather than a trip to Results.
+fn offer_hidden_plot(mut notice: RunNotice, plot_hidden: Option<u64>) -> RunNotice {
+    use rspice_app_workbench::ui::widgets::NotificationAction;
+
+    if let (Some(hidden), Some(NotificationAction::OpenRunInResults { run_sequence })) =
+        (plot_hidden, notice.action)
+        && hidden == run_sequence
+    {
+        notice.action = Some(NotificationAction::ShowPlot { run_sequence });
+    }
+    notice
 }
 
 /// Whether an outcome just announced asks for the reader's attention from

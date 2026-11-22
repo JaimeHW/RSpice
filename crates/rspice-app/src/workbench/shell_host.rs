@@ -1246,9 +1246,20 @@ impl DocumentHost for AppState {
 }
 
 /// The any-workspace inspector section applies: a trace is selected in the
-/// results split beside the schematic, and the inspector reads it.
+/// results split beside the schematic, and the inspector reads it. Something
+/// selected on the drawing comes first: the drawing is the page being
+/// worked on, and a probe or a Plot press that selects its trace must not
+/// take the inspector away from the net it was pressed on.
 fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
+        && app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .is_empty()
         && app.state.workbench.results_split_visible(
             app.state.platform.project_lifecycle.is_open(),
             app.state

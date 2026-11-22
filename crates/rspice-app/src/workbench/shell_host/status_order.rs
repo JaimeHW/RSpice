@@ -634,6 +634,16 @@ impl RSpiceApp {
         self.after_contribution();
     }
 
+    /// Show a run a press of Run on the drawing finished in the plot pane
+    /// beside it, in the results feature's context, then answer what it
+    /// raised; false when the reader closed the pane and the plot stays
+    /// off-screen.
+    pub(crate) fn plot_finished_run(&mut self, run_sequence: u64) -> bool {
+        let shown = ResultsFeature::plot_finished_run(&mut features::cx(self), run_sequence);
+        self.after_contribution();
+        shown
+    }
+
     /// Open Results on the newest run that holds a dataset, in the results
     /// feature's context, then answer what it raised; false when there is
     /// none.

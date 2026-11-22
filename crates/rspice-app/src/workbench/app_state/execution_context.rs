@@ -37,7 +37,7 @@ impl AppState {
         self.model.workspace.content.decks.clear();
         self.model.workspace.content.decks_dirty = false;
         self.model.simulation = rspice_app_state::state::SimulationState::default();
-        // A notice's "Open in Results" names its run by number, and the new
+        // A notice's "Open in Results" or "Show plot" names its run by number, and the new
         // history numbers its runs from one again: kept, the offer would
         // open this design's run of the same number. The notices stay, as
         // does "Show in Console": the session's log outlives the design.
@@ -45,6 +45,7 @@ impl AppState {
             matches!(
                 action,
                 rspice_app_workbench::ui::widgets::NotificationAction::OpenRunInResults { .. }
+                    | rspice_app_workbench::ui::widgets::NotificationAction::ShowPlot { .. }
             )
         });
         self.code.netlist = Default::default();

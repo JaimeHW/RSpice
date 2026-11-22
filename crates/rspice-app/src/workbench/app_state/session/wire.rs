@@ -47,8 +47,8 @@ use rspice_app_workbench::ui::Theme;
 use rspice_app_workbench::workbench::lifecycle::window_session::WindowSessionRegistry;
 use rspice_app_workbench::workbench::routing::navigation::SurfaceNavigation;
 use rspice_app_workbench::workbench::state::workbench_session::{
-    ConsolePage, WorkbenchSession, WorkspaceDocumentRegistry, WorkspaceLayoutState,
-    default_console_height, default_inspector_width, default_navigator_width,
+    ConsolePage, ResultsSplitLayout, WorkbenchSession, WorkspaceDocumentRegistry,
+    WorkspaceLayoutState, default_console_height, default_inspector_width, default_navigator_width,
 };
 
 /// What a session keeps of the document engines' session state, which the
@@ -308,6 +308,8 @@ pub(crate) struct WorkbenchWire {
     focus_mode: bool,
     #[serde(default)]
     split_with_results: bool,
+    #[serde(default)]
+    results_split: ResultsSplitLayout,
     #[serde(default = "default_navigator_width")]
     navigator_width: f32,
     #[serde(default)]
@@ -409,6 +411,8 @@ pub(crate) struct WorkbenchWireRef<'a> {
     focus_mode: &'a bool,
     #[serde(default)]
     split_with_results: &'a bool,
+    #[serde(default)]
+    results_split: &'a ResultsSplitLayout,
     #[serde(default = "default_navigator_width")]
     navigator_width: &'a f32,
     #[serde(default)]
@@ -539,6 +543,7 @@ impl<'a> WorkbenchWireRef<'a> {
             console_maximized,
             focus_mode,
             split_with_results,
+            results_split,
             full_screen: _,
             full_screen_presentation: _,
             coarse_pointer: _,
@@ -589,6 +594,7 @@ impl<'a> WorkbenchWireRef<'a> {
             console_maximized,
             focus_mode,
             split_with_results,
+            results_split,
             navigator_width,
             navigator_width_custom,
             inspector_width,
@@ -638,6 +644,7 @@ impl<'a> WorkbenchWireRef<'a> {
             console_maximized: *self.console_maximized,
             focus_mode: *self.focus_mode,
             split_with_results: *self.split_with_results,
+            results_split: *self.results_split,
             navigator_width: *self.navigator_width,
             navigator_width_custom: *self.navigator_width_custom,
             inspector_width: *self.inspector_width,
@@ -688,6 +695,7 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
             console_maximized: &wire.console_maximized,
             focus_mode: &wire.focus_mode,
             split_with_results: &wire.split_with_results,
+            results_split: &wire.results_split,
             navigator_width: &wire.navigator_width,
             navigator_width_custom: &wire.navigator_width_custom,
             inspector_width: &wire.inspector_width,
@@ -767,6 +775,7 @@ impl WorkbenchWire {
             console_maximized,
             focus_mode,
             split_with_results,
+            results_split,
             full_screen: _,
             full_screen_presentation: _,
             coarse_pointer: _,
@@ -816,6 +825,7 @@ impl WorkbenchWire {
         *console_maximized = self.console_maximized;
         *focus_mode = self.focus_mode;
         *split_with_results = self.split_with_results;
+        *results_split = self.results_split;
         *navigator_width = self.navigator_width;
         *navigator_width_custom = self.navigator_width_custom;
         *inspector_width = self.inspector_width;

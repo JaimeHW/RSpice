@@ -111,12 +111,12 @@ fn open_results_on_the_inspector_opens_that_run_in_results() {
     );
 }
 
-/// From Design, Simulation or Results, a run leaves the reader where they are
-/// while it runs, and when it completes it opens in Results on Waves, whatever
+/// From Simulation or Results, a run leaves the reader where they are while
+/// it runs, and when it completes it opens in Results on Waves, whatever
 /// viewer Results last showed.
 #[test]
-fn a_finished_run_opens_in_results_on_waves_from_any_page() {
-    for workspace in [Workspace::Design, Workspace::Simulate, Workspace::Results] {
+fn a_finished_run_opens_in_results_on_waves_from_the_setup_pages() {
+    for workspace in [Workspace::Simulate, Workspace::Results] {
         let mut user = example_project();
         user.app.state.workbench.activate(workspace);
         user.app.state.results.results.session.viewer = ResultViewer::Op;
@@ -185,19 +185,163 @@ fn a_run_that_ends_after_the_reader_moved_on_is_announced_in_the_corner() {
     assert_eq!(active_run(&user), Some(1));
 }
 
-/// A reader who stayed on the page they pressed Run on is taken to the
-/// results, and nothing floats over them: the run segment states the
+/// Whether the plot pane is on screen beside the page.
+fn plot_pane_shown(user: &User) -> bool {
+    user.find("Results split pane").is_some()
+}
+
+/// A run pressed on the drawing shows its plot in the pane below it and
+/// leaves the drawing the active page: the reader never leaves the
+/// schematic, as Virtuoso, ADS and KiCad plot beside it.
+#[test]
+fn a_run_from_the_drawing_plots_below_it_and_stays_on_the_drawing() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    user.app.state.results.results.session.viewer = ResultViewer::Op;
+    user.settle();
+    assert!(!plot_pane_shown(&user), "no pane before any run");
+
+    run_to_its_end(&mut user);
+
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+    assert!(plot_pane_shown(&user), "the first run opens the plot pane");
+    let pane = user.expect("Results split pane");
+    let canvas = user.expect("Schematic canvas");
+    assert!(
+        pane.top() >= canvas.bottom() - 1.0 && pane.width() >= canvas.width() - 1.0,
+        "the plot sits below the drawing, across its width: {pane:?} under {canvas:?}"
+    );
+    assert_eq!(
+        user.app.state.results.results.session.viewer,
+        ResultViewer::Waves
+    );
+    assert_eq!(active_run(&user), Some(newest_run(&user)));
+    assert!(
+        !user
+            .named
+            .iter()
+            .any(|(name, _)| name.starts_with("Open in Results:") || name.starts_with("Show plot:")),
+        "nothing floats over a plot that is on screen"
+    );
+
+    user.click("Open in Results");
+    assert_eq!(
+        user.app.state.workbench.workspace,
+        Workspace::Results,
+        "the pane's header opens the run in Results"
+    );
+    assert_eq!(active_run(&user), Some(newest_run(&user)));
+}
+
+/// A pane the reader closed stays closed through the next run: the status
+/// bar states the run, and the window's corner offers its plot, which opens
+/// the pane again.
+#[test]
+fn a_plot_pane_the_reader_closed_stays_closed_and_the_corner_offers_it() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    run_to_its_end(&mut user);
+    user.click("Close plot");
+    assert!(
+        !plot_pane_shown(&user),
+        "the header's close button closes it"
+    );
+
+    run_to_its_end(&mut user);
+
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+    assert!(!plot_pane_shown(&user), "a closed pane stays closed");
+    assert!(
+        user.named
+            .iter()
+            .any(|(name, _)| name.contains("Run 2 complete")),
+        "the status bar states the run"
+    );
+    let offer = user
+        .named
+        .iter()
+        .find(|(name, _)| name.starts_with("Show plot:"))
+        .map(|(name, _)| name.clone())
+        .expect("the corner offers the run's plot");
+    user.click(&offer);
+    assert!(plot_pane_shown(&user), "the corner's offer opens the pane");
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(active_run(&user), Some(2));
+}
+
+/// Probing a net always shows its plot, even with the pane closed.
+#[test]
+fn probing_a_net_opens_the_plot_pane() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    run_to_its_end(&mut user);
+    user.click("Close plot");
+    assert!(!plot_pane_shown(&user));
+
+    probe_out_wire(&mut user);
+
+    assert!(plot_pane_shown(&user), "the probe opens the pane");
+    assert!(plotted(&user, "V(out)"));
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+}
+
+/// A re-run updates the plot in place: the signals the reader plotted stay
+/// plotted, and the zoom they set stays set.
+#[test]
+fn a_rerun_keeps_the_plotted_signals_and_the_zoom() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    run_to_its_end(&mut user);
+    let name = unplotted_signal(&user);
+    let (key, _) = signal(&user, &name);
+    rspice_app_results::workbench::docks::navigator::results_actions::set_result_quantity_ticked(
+        &mut user.app.state.results_parts(),
+        &rspice_results_ui::selection::ResultBrowserSelectionKey::Waveform(key.clone()),
+        true,
+    );
+    user.settle();
+    assert!(plotted(&user, &name));
+    let session = &mut user.app.state.results.results.session;
+    session
+        .analysis_plot_view_pane_mut(ResultViewer::Waves, key.analysis(), 0)
+        .x = Some((1e-4, 2e-4));
+    let zoom = session
+        .analysis_plot_view_pane(ResultViewer::Waves, key.analysis(), 0)
+        .x;
+    assert_eq!(zoom, Some((1e-4, 2e-4)));
+
+    run_to_its_end(&mut user);
+
+    assert_eq!(active_run(&user), Some(2));
+    assert!(plotted(&user, &name), "{name} stays plotted on the new run");
+    let (key, _) = signal(&user, &name);
+    assert_eq!(
+        user.app
+            .state
+            .results
+            .results
+            .session
+            .analysis_plot_view_pane(ResultViewer::Waves, key.analysis(), 0)
+            .x,
+        zoom,
+        "the zoom stays as the reader set it"
+    );
+    assert!(plot_pane_shown(&user));
+}
+
+/// A reader who stayed on the page they pressed Run on has the results in
+/// front of them, and nothing floats over them: the run segment states the
 /// outcome, and Open in Results is not offered where the results are.
 #[test]
 fn a_run_whose_results_are_on_screen_raises_no_notice() {
     let mut user = example_project();
     run_to_its_end(&mut user);
-    assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
+    assert!(plot_pane_shown(&user));
     assert!(
         !user
             .named
             .iter()
-            .any(|(name, _)| name.starts_with("Open in Results")),
+            .any(|(name, _)| name.starts_with("Open in Results:")),
         "{:?}",
         user.named.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );
@@ -308,6 +452,7 @@ fn a_failed_run_shows_its_problem_and_changes_no_page() {
             .any(|(name, _)| name.starts_with("Open in Results")),
         "nothing is offered to open"
     );
+    assert!(!plot_pane_shown(&user), "a failed run opens no plot");
 }
 
 /// A run with no curve to draw opens where its result can be read.
@@ -340,7 +485,8 @@ fn an_operating_point_run_opens_on_its_operating_point() {
 
     run_to_its_end(&mut user);
 
-    assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+    assert!(plot_pane_shown(&user));
     assert_eq!(
         user.app.state.results.results.session.viewer,
         ResultViewer::Op
@@ -406,11 +552,11 @@ fn every_example_opens_on_a_plot_whose_trace_moves() {
     }
 }
 
-/// The Results page on Waves after a run, as a completed run opens it.
+/// The Results page on Waves after a run, opened from the plot pane.
 fn results_after_a_run() -> User {
     let mut user = example_project();
     run_to_its_end(&mut user);
-    assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
+    user.app.state.workbench.activate(Workspace::Results);
     user.app.state.workbench.navigator_visible = true;
     user.app.state.workbench.inspector_visible = true;
     user.settle();

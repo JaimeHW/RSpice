@@ -78,6 +78,32 @@ impl ResultsFeature {
         cx.execute(ids::OPEN_RUN_IN_RESULTS);
     }
 
+    /// Show the run a press of Run on the drawing finished in the plot pane
+    /// beside it, as Virtuoso, ADS and KiCad plot beside the schematic: the
+    /// drawing stays the active page. A pane already showing keeps its
+    /// sheet, signals and zoom, so a re-run updates the plot in place; a
+    /// first run opens it on the sheet the run's analyses open on. A pane
+    /// the reader closed stays closed. Returns whether the plot is on
+    /// screen.
+    pub fn plot_finished_run(cx: &mut Cx<'_, Self>, run_sequence: u64) -> bool {
+        if !cx.model.simulation.select_run_by_sequence(run_sequence) {
+            return false;
+        }
+        let viewer = cx.state.results.session.viewer;
+        let keep = cx.wb.split_with_results
+            && viewer_is_available(cx.state.reads(cx.model, cx.wb), viewer);
+        if !keep {
+            let sheet =
+                opening_sheet(cx.state.reads(cx.model, cx.wb)).unwrap_or(ResultViewer::Waves);
+            cx.state.results.session.viewer = sheet;
+        }
+        if cx.wb.run_opens_results_split() {
+            cx.wb.show_results_split();
+            return true;
+        }
+        false
+    }
+
     /// Take the navigation offer a notice carried: open Results on the run
     /// it names, or the Console on the line it names. The shell answers the
     /// command it raises straight after.
@@ -792,7 +818,7 @@ impl CommandSet for ResultsCommand {
             }
             Self::ToggleResultsSplit => {
                 if cx.wb.split_with_results {
-                    cx.wb.split_with_results = false;
+                    cx.wb.close_results_split();
                 } else if let Some(run_index) = cx
                     .model
                     .simulation
@@ -803,7 +829,7 @@ impl CommandSet for ResultsCommand {
                     // but remains the one canonical Results selection: there
                     // is no copied run, waveform, or document owner.
                     cx.model.simulation.select_run(run_index);
-                    cx.wb.split_with_results = true;
+                    cx.wb.show_results_split();
                 }
             }
             Self::DatasetManifestBrowser => open_dataset_browser(&mut results_parts(cx)),

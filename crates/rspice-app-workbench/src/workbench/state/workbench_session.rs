@@ -36,6 +36,59 @@ const NAVIGATION_SCHEMA_VERSION: u8 = 1;
 /// those values must not distort the redesigned schematic workspace forever.
 pub const LAYOUT_SCHEMA_VERSION: u8 = 1;
 
+/// Which side of the document the plot pane takes when the two share the
+/// stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ResultsSplitAxis {
+    /// Below the document, across its full width: a time or frequency axis
+    /// wants width more than height.
+    #[default]
+    Below,
+    /// To the right of the document, over its full height.
+    Beside,
+}
+
+impl ResultsSplitAxis {
+    /// The other side.
+    #[must_use]
+    pub const fn turned(self) -> Self {
+        match self {
+            Self::Below => Self::Beside,
+            Self::Beside => Self::Below,
+        }
+    }
+}
+
+/// How the plot pane shares the stage with the document beside it, as the
+/// reader left it: the side it takes, where the divider sits, and whether
+/// they closed it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ResultsSplitLayout {
+    pub axis: ResultsSplitAxis,
+    /// The share of the stage the document keeps along the axis, 0 to 1.
+    pub document_share: f32,
+    /// The reader closed the pane. A run then leaves it closed and says
+    /// where its plot is; probing a signal or asking for the plot opens it.
+    pub closed_by_reader: bool,
+}
+
+impl ResultsSplitLayout {
+    /// The document's share of the stage before the reader drags the
+    /// divider: the drawing keeps the larger part.
+    pub const DEFAULT_DOCUMENT_SHARE: f32 = 0.6;
+}
+
+impl Default for ResultsSplitLayout {
+    fn default() -> Self {
+        Self {
+            axis: ResultsSplitAxis::Below,
+            document_share: Self::DEFAULT_DOCUMENT_SHARE,
+            closed_by_reader: false,
+        }
+    }
+}
+
 /// Device-local dock composition retained independently for each workspace.
 /// Engineering documents and project state never enter this presentation
 /// snapshot.
@@ -451,6 +504,9 @@ pub struct WorkbenchSession {
     /// only controls whether that existing document is projected beside an
     /// eligible primary workspace.
     pub split_with_results: bool,
+    /// Where the plot pane sits when it shares the stage, and whether the
+    /// reader closed it.
+    pub results_split: ResultsSplitLayout,
     /// Current viewport full-screen intent. Runtime-owned because the host
     /// window, browser, or mobile shell decides whether the request can be
     /// honored and must never restore a stale platform window state.
@@ -594,6 +650,7 @@ impl Default for WorkbenchSession {
             run_press_route: None,
             focus_mode: false,
             split_with_results: false,
+            results_split: ResultsSplitLayout::default(),
             full_screen: false,
             full_screen_presentation: false,
             coarse_pointer: false,
@@ -910,6 +967,27 @@ impl WorkbenchSession {
             && project_open
             && has_retained_result
             && self.supports_results_split()
+    }
+
+    /// Show the plot pane beside the document. Runs keep it open from now
+    /// on, as they do until the reader closes it.
+    pub fn show_results_split(&mut self) {
+        self.split_with_results = true;
+        self.results_split.closed_by_reader = false;
+    }
+
+    /// Close the plot pane as the reader asked. A run leaves it closed and
+    /// says where its plot is, until the reader shows it again.
+    pub fn close_results_split(&mut self) {
+        self.split_with_results = false;
+        self.results_split.closed_by_reader = true;
+    }
+
+    /// Whether a run that ends on this page opens the plot pane: the first
+    /// run does, and so does every run after it unless the reader closed it.
+    #[must_use]
+    pub fn run_opens_results_split(&self) -> bool {
+        self.supports_results_split() && !self.results_split.closed_by_reader
     }
 
     /// The route the reader is working on: the current one, or, while the

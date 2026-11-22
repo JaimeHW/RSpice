@@ -68,18 +68,75 @@ pub const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
     matches!(viewer, ResultViewer::Op | ResultViewer::Table)
 }
 
+/// What the plot pane's header asked of the pane beside the document.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CompactBarActions {
+    pub viewer: Option<ResultViewer>,
+    /// Open the run in the Results workspace, where measurements, cursors
+    /// and several plots are.
+    pub open_in_results: bool,
+    /// Move the pane to the document's other side.
+    pub turn: bool,
+    /// Close the pane.
+    pub close: bool,
+}
+
+/// The plot pane's header: its sheets on the left, and on the right the way
+/// into Results, the side the pane takes, and its close button. `beside`
+/// says the pane is to the document's right, so the side control offers
+/// below.
 pub fn compact_document_bar(
     ui: &mut Ui,
     current: ResultViewer,
     available: impl IntoIterator<Item = ResultViewer>,
-) -> Option<ResultViewer> {
-    let mut selected = None;
+    beside: bool,
+) -> CompactBarActions {
+    let mut actions = CompactBarActions::default();
     docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
-        viewer_tab_scroller(ui, "rspice.results.split.viewer-tabs", |ui| {
-            selected = viewer_tabs(ui, current, available);
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let size = egui::vec2(
+                ResultBarMetrics::of(ui).viewer_tab,
+                ResultBarMetrics::of(ui).viewer_tab,
+            );
+            actions.close = rspice_ui_kit::panels::icon_button(
+                ui,
+                WorkbenchIcon::Close,
+                "Close plot",
+                false,
+                size,
+            )
+            .on_hover_text("Close plot")
+            .clicked();
+            let (icon, side) = if beside {
+                (WorkbenchIcon::Console, "Plot below the drawing")
+            } else {
+                (WorkbenchIcon::Inspector, "Plot beside the drawing")
+            };
+            actions.turn = rspice_ui_kit::panels::icon_button(ui, icon, side, false, size)
+                .on_hover_text(side)
+                .clicked();
+            viewer_picker_separator(ui);
+            actions.open_in_results = viewer_picker(
+                ui,
+                WorkbenchIcon::Results,
+                "Open in Results",
+                "Open in Results",
+            );
+            viewer_picker_separator(ui);
+            let tabs_size = ui.available_size();
+            ui.allocate_ui_with_layout(
+                tabs_size,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    viewer_tab_scroller(ui, "rspice.results.split.viewer-tabs", |ui| {
+                        actions.viewer = viewer_tabs(ui, current, available);
+                    });
+                },
+            );
         });
     });
-    selected
+    actions
 }
 
 pub fn document_bar(

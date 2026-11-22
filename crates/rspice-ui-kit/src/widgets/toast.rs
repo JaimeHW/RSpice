@@ -69,6 +69,9 @@ impl ToastKind {
 pub enum NotificationAction {
     /// Activate the retained dataset of the run with this display sequence.
     OpenRunInResults { run_sequence: u64 },
+    /// Show the plot pane beside the drawing on the run with this display
+    /// sequence, for a run that ended while the reader had the pane closed.
+    ShowPlot { run_sequence: u64 },
     /// Open the Console on the line this notice was lifted from, by the log
     /// entry's id, among the lines around it. A warning is one sentence here
     /// and a paragraph there, and the paragraph is usually what explains it.
@@ -80,6 +83,7 @@ impl NotificationAction {
     pub const fn label(self) -> &'static str {
         match self {
             Self::OpenRunInResults { .. } => "Open in Results",
+            Self::ShowPlot { .. } => "Show plot",
             Self::ShowInConsole { .. } => "Show in Console",
         }
     }
@@ -93,7 +97,9 @@ impl NotificationAction {
     /// so it names nothing.
     pub fn record_title(self) -> Option<String> {
         match self {
-            Self::OpenRunInResults { run_sequence } => Some(format!("Run {run_sequence}")),
+            Self::OpenRunInResults { run_sequence } | Self::ShowPlot { run_sequence } => {
+                Some(format!("Run {run_sequence}"))
+            }
             Self::ShowInConsole { .. } => None,
         }
     }

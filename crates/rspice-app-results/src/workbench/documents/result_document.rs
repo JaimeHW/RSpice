@@ -2304,13 +2304,29 @@ const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
 /// Split projection of the mockup's viewer-tab row. Run binding, output
 /// controls, result-document creation and properties remain owned by the full
 /// Results workspace; every compatible existing viewer stays reachable here.
+/// The plot pane's header, and what its controls ask of the pane: another
+/// sheet, the run opened in Results, the pane moved to the document's other
+/// side, or closed.
 fn show_compact_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    use rspice_app_workbench::workbench::state::workbench_session::ResultsSplitAxis;
+
     let available = ResultViewer::all()
         .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
-    if let Some(viewer) =
-        chrome::bars::compact_document_bar(ui, state.results.session.viewer, available)
-    {
+    let beside = state.workbench.results_split.axis == ResultsSplitAxis::Beside;
+    let actions =
+        chrome::bars::compact_document_bar(ui, state.results.session.viewer, available, beside);
+    if let Some(viewer) = actions.viewer {
         state.results.session.viewer = viewer;
+    }
+    if actions.open_in_results {
+        state
+            .workbench
+            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
+    } else if actions.turn {
+        let split = &mut state.workbench.results_split;
+        split.axis = split.axis.turned();
+    } else if actions.close {
+        state.workbench.close_results_split();
     }
 }
 
