@@ -78,7 +78,8 @@ pub struct LanguageServiceIndex {
 }
 
 /// An open Rename symbol: the index it was opened against, the name under
-/// the caret, and the new name being typed.
+/// the caret, and the new name being typed, with what renaming to it would
+/// do, worked out once for each new name.
 #[derive(Debug, Clone)]
 pub struct CodeLanguageToolsState {
     pub index: LanguageServiceIndex,
@@ -89,6 +90,68 @@ pub struct CodeLanguageToolsState {
     pub replacement: String,
     /// Why the last Rename was refused, until the name is edited.
     pub error: Option<String>,
+    planned: Option<(String, Result<SourceRenamePlan, String>)>,
+    /// Whether the index's closure digest is the bundle's, taken once: the
+    /// index is of one revision, and the bundle at another is never it.
+    digest_matches: Option<bool>,
+}
+
+/// What a rename does: one row to each line it changes, and how many places
+/// in how many files it rewrites.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceRenamePlan {
+    pub(crate) rows: Vec<crate::workbench::documents::netlist_document::references::RenameRow>,
+    pub(crate) places: usize,
+    pub(crate) files: usize,
+}
+
+impl CodeLanguageToolsState {
+    /// The new name as written, without the space around it.
+    pub fn new_name(&self) -> &str {
+        self.replacement.trim()
+    }
+
+    /// Whether no new name is written, or the one written is the old one.
+    pub fn unchanged(&self) -> bool {
+        self.new_name().is_empty() || self.new_name() == self.query
+    }
+
+    /// Whether the index still reads `bundle` as it stands, in the project
+    /// `project_id`.
+    pub(crate) fn reads(&mut self, project_id: ProjectId, bundle: &ProjectSourceBundle) -> bool {
+        let index = &self.index;
+        if index.project_id != project_id
+            || index.bundle_id != bundle.id()
+            || index.bundle_revision != bundle.revision().get()
+        {
+            return false;
+        }
+        *self
+            .digest_matches
+            .get_or_insert_with(|| index.closure_digest == bundle.closure_digest())
+    }
+
+    /// What renaming to the new name does, or why it refuses.
+    /// The plan is worked out in the words of `messages`, the catalogue
+    /// the form is shown in.
+    pub(crate) fn plan(&mut self, messages: MessageCatalog) -> &Result<SourceRenamePlan, String> {
+        let new_name = self.new_name().to_owned();
+        if self
+            .planned
+            .as_ref()
+            .is_some_and(|(planned, _)| *planned != new_name)
+        {
+            self.planned = None;
+        }
+        let (index, path, caret, name) = (&self.index, &self.active_path, self.caret, &self.query);
+        &self
+            .planned
+            .get_or_insert_with(|| {
+                let plan = index.rename_plan_at(messages, path, caret, name, &new_name);
+                (new_name.clone(), plan)
+            })
+            .1
+    }
 }
 
 pub fn open_language_tools_in_bundle(
@@ -125,6 +188,8 @@ pub fn open_language_tools_in_bundle(
         query,
         replacement: String::new(),
         error: None,
+        planned: None,
+        digest_matches: None,
     });
     Ok(())
 }
@@ -137,7 +202,7 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
         &state.active_path,
         state.caret,
         &state.query,
-        &state.replacement,
+        state.new_name(),
     )?;
     if let Some((logical_path, _)) = replacements.iter().find(|(logical_path, _)| {
         !super::source_files::source_bundle_document_is_editable_in(
@@ -170,7 +235,7 @@ pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<Stri
         MessageId::SourceRenamed,
         &[
             ("old", &state.query),
-            ("new", &state.replacement),
+            ("new", state.new_name()),
             (
                 "extent",
                 &extent_words(messages, occurrences, changed_files),
@@ -620,6 +685,46 @@ impl LanguageServiceIndex {
             }
             None => self.rename_extent(name),
         }
+    }
+
+    /// What a rename of the name at `char_index` of `logical_path` to
+    /// `replacement` does: each line it changes, before and after, and how
+    /// many places in how many files; or why it refuses.
+    pub(crate) fn rename_plan_at(
+        &self,
+        messages: MessageCatalog,
+        logical_path: &str,
+        char_index: usize,
+        name: &str,
+        replacement: &str,
+    ) -> Result<SourceRenamePlan, String> {
+        use crate::workbench::documents::netlist_document::references::RenameRow;
+        let changed =
+            self.rename_preview_at(messages, logical_path, char_index, name, replacement)?;
+        let (places, _) = self.rename_extent_at(logical_path, char_index, name);
+        let mut rows = Vec::new();
+        for (path, after) in &changed {
+            let before = self.source_for_path(path).map_or("", String::as_str);
+            // A rename rewrites names, never line breaks: line for line.
+            rows.extend(
+                before
+                    .lines()
+                    .zip(after.lines())
+                    .enumerate()
+                    .filter(|(_, (was, is))| was != is)
+                    .map(|(at, (was, is))| RenameRow {
+                        file: path.clone(),
+                        line: at + 1,
+                        before: was.trim().to_owned(),
+                        after: is.trim().to_owned(),
+                    }),
+            );
+        }
+        Ok(SourceRenamePlan {
+            rows,
+            places,
+            files: changed.len(),
+        })
     }
 
     /// The new text of every file a rename of the name at `char_index` of
@@ -1455,6 +1560,55 @@ mod tests {
         let definition = index.definition_at("two.va", caret, "b").unwrap();
         assert_eq!(definition.line, 2);
         assert_eq!(definition.column, 15);
+    }
+
+    /// The Rename form lists each line a rename changes, before and after,
+    /// worked out once for each new name; it worked the whole rename out
+    /// again on every frame and showed only a count.
+    #[test]
+    fn a_rename_plan_lists_each_changed_line_and_is_worked_out_once_for_each_name() {
+        use crate::workbench::documents::netlist_document::references::RenameRow;
+        let caret = char_of(TWO_SCOPES, "b;\n  analog V(a");
+        let mut tools = CodeLanguageToolsState {
+            index: two_scopes(),
+            active_path: "two.va".to_owned(),
+            caret,
+            query: "b".to_owned(),
+            replacement: " bottom ".to_owned(),
+            error: None,
+            planned: None,
+            digest_matches: None,
+        };
+        let row = |line: usize, before: &str, after: &str| RenameRow {
+            file: "two.va".to_owned(),
+            line,
+            before: before.to_owned(),
+            after: after.to_owned(),
+        };
+        let plan = tools.plan(english()).clone().unwrap();
+        assert_eq!(
+            plan.rows,
+            vec![
+                row(2, "module one(a, b);", "module one(a, bottom);"),
+                row(3, "inout a, b;", "inout a, bottom;"),
+                row(4, "electrical a, b;", "electrical a, bottom;"),
+                row(5, "analog V(a, b) <+ 0;", "analog V(a, bottom) <+ 0;"),
+            ]
+        );
+        assert_eq!((plan.places, plan.files), (4, 1));
+
+        // The same name, however spaced, reads the plan already worked out.
+        tools.planned = Some(("bottom".to_owned(), Err("worked out".to_owned())));
+        tools.replacement = "bottom".to_owned();
+        assert_eq!(tools.plan(english()), &Err("worked out".to_owned()));
+        // Another name is worked out afresh.
+        tools.replacement = "base".to_owned();
+        assert_eq!(
+            tools.plan(english()).as_ref().map(|plan| plan.rows.len()),
+            Ok(4)
+        );
+        tools.replacement = "begin".to_owned();
+        assert!(tools.plan(english()).is_err(), "a reserved word is refused");
     }
 
     /// The whole reserved-word list and the language's own names are

@@ -5,8 +5,8 @@
 //! it lives in another file of the bundle. Find references lists every
 //! occurrence in the bottom dock's References page, one row each with its
 //! file, line, column and text, and states the count on the status bar.
-//! Rename symbol is a command form: the new name, and how many occurrences in
-//! how many files it rewrites.
+//! Rename symbol is a command form: the new name, how many occurrences in
+//! how many files it rewrites, and each line it changes, before and after.
 //!
 //! These used to be views of a nine-tab "Source navigation and language
 //! tools" dialog (document symbols, completion, hover, signature help,
@@ -23,7 +23,7 @@
 
 use egui::{Context, Id};
 
-use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
+use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, TableColumn};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace::{
@@ -179,10 +179,11 @@ fn list_references(
     });
 }
 
-/// Rename symbol: the name under the caret, the new name, and what the
-/// rename rewrites, over the Code workspace's state, the model and the
-/// platform's state. Enter renames; Esc and Cancel close. Returns whether
-/// the reader asked for the rename.
+/// Rename symbol: the name under the caret, the new name, and each line
+/// renaming to it changes, before and after, worked out once for each new
+/// name; or why it refuses. Over the Code workspace's state, the model and
+/// the platform's state. Enter renames; Esc and Cancel close. Returns
+/// whether the reader asked for the rename.
 pub(in crate::workbench) fn render_rename_symbol_form(
     code: &mut CodeWorkspaceRuntimeState,
     model: &Model,
@@ -190,19 +191,10 @@ pub(in crate::workbench) fn render_rename_symbol_form(
     ctx: &Context,
     messages: MessageCatalog,
 ) -> bool {
-    let Some(tools) = code.language_tools.clone() else {
+    let Some(tools) = code.language_tools.as_ref() else {
         return false;
     };
-    let stale = model
-        .workspace
-        .content
-        .project_sources
-        .get_bundle(tools.index.bundle_id)
-        .is_none_or(|bundle| {
-            !tools
-                .index
-                .is_current(model.workspace.content.project.id(), bundle)
-        });
+    let (bundle_id, active_path) = (tools.index.bundle_id, tools.active_path.clone());
     let blocked = code_workspace::source_file_mutation_block_reason_in(model, code, platform)
         .map(str::to_owned)
         .or_else(|| {
@@ -210,65 +202,72 @@ pub(in crate::workbench) fn render_rename_symbol_form(
                 model,
                 code,
                 platform,
-                tools.index.bundle_id,
-                &tools.active_path,
+                bundle_id,
+                &active_path,
             ))
-            .then(|| {
-                messages.format(
-                    MessageId::SourceRenameReadOnly,
-                    &[("file", &tools.active_path)],
-                )
-            })
+            .then(|| messages.format(MessageId::SourceRenameReadOnly, &[("file", &active_path)]))
         });
-    let new_name = tools.replacement.trim();
+    let Some(tools) = code.language_tools.as_mut() else {
+        return false;
+    };
+    let current = model
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(bundle_id)
+        .is_some_and(|bundle| tools.reads(model.workspace.content.project.id(), bundle));
+    let unchanged = tools.unchanged();
     let refusal = if let Some(error) = tools.error.clone() {
         Some(error)
-    } else if stale {
+    } else if !current {
         Some(messages.text(MessageId::SourceRenameSourceChanged))
     } else if let Some(reason) = blocked {
         Some(reason)
-    } else if new_name.is_empty() || new_name == tools.query {
+    } else if unchanged {
         None
     } else {
-        tools
-            .index
-            .rename_preview_at(
-                messages,
-                &tools.active_path,
-                tools.caret,
-                &tools.query,
-                new_name,
-            )
-            .err()
+        tools.plan(messages).as_ref().err().cloned()
     };
-    let unchanged = new_name.is_empty() || new_name == tools.query;
-    let ready = refusal.is_none() && !unchanged;
-    let (occurrences, files) =
-        tools
-            .index
-            .rename_extent_at(&tools.active_path, tools.caret, &tools.query);
-    let extent = messages.format(
-        MessageId::SourceRenameExtent,
-        &[(
-            "extent",
-            &code_workspace::extent_words(messages, occurrences, files),
-        )],
-    );
+    let plan = (refusal.is_none() && !unchanged)
+        .then(|| tools.plan(messages).as_ref().ok())
+        .flatten();
     let enter_name = messages.text(MessageId::SourceRenameEnterName);
     let status = match (refusal.as_deref(), unchanged) {
         (Some(refusal), _) => Err(refusal),
         (None, true) => Ok(Some(enter_name.as_str())),
         (None, false) => Ok(None),
     };
+    let extent = plan.map(|plan| {
+        messages.format(
+            MessageId::SourceRenameExtent,
+            &[(
+                "extent",
+                &code_workspace::extent_words(messages, plan.places, plan.files),
+            )],
+        )
+    });
+    let room = preview_room(ctx.content_rect().width());
+    let table = plan.map(|plan| {
+        plan.rows
+            .iter()
+            .map(|row| {
+                let (before, after) = around_the_change(&row.before, &row.after, room);
+                vec![row.file.clone(), row.line.to_string(), before, after]
+            })
+            .collect::<Vec<_>>()
+    });
+    let ready = plan.is_some();
     let title = messages.text(MessageId::SourceRenameTitle);
     let primary = messages.text(MessageId::SourceRenamePrimary);
     let symbol = messages.text(MessageId::SourceRenameSymbol);
     let new_name_label = messages.text(MessageId::SourceRenameNewName);
     let cancel = messages.text(MessageId::CommonCancel);
+    let headers = rename_columns(messages);
 
     let mut replacement = tools.replacement.clone();
     let mut edited = false;
     let choice = CommandForm::new(&title, &primary)
+        .wide()
         .cancel_label(&cancel)
         .fit_labels(ctx, &[&symbol, &new_name_label])
         .primary_enabled(ready)
@@ -279,14 +278,20 @@ pub(in crate::workbench) fn render_rename_symbol_form(
             edited = rows
                 .text(&new_name_label, field, &mut replacement, "")
                 .changed();
-            rows.field_line(Some(field), FieldLine::Derived(&extent));
+            if let (Some(extent), Some(table)) = (extent.as_deref(), table.as_deref()) {
+                rows.field_line(Some(field), FieldLine::Derived(extent));
+                rows.table(
+                    &headers
+                        .each_ref()
+                        .map(|header| TableColumn { header, mono: true }),
+                    table,
+                );
+            }
             Some(field)
         });
-    if let Some(open) = code.language_tools.as_mut() {
-        open.replacement = replacement;
-        if edited {
-            open.error = None;
-        }
+    tools.replacement = replacement;
+    if edited {
+        tools.error = None;
     }
     match choice {
         DialogChoice::Primary => true,
@@ -296,6 +301,18 @@ pub(in crate::workbench) fn render_rename_symbol_form(
         }
         DialogChoice::None => false,
     }
+}
+
+/// The columns of a rename's preview: each line it changes, by file and
+/// line, before and after.
+fn rename_columns(messages: MessageCatalog) -> [String; 4] {
+    [
+        MessageId::SourceRenameColumnFile,
+        MessageId::SourceRenameColumnLine,
+        MessageId::SourceRenameColumnBefore,
+        MessageId::SourceRenameColumnAfter,
+    ]
+    .map(|header| messages.text(header))
 }
 
 const DECK_NEW_NAME_FIELD: &str = "workbench.rename-symbol.deck-new-name";
@@ -370,7 +387,6 @@ pub(in crate::workbench) fn render_deck_rename_form(
     cx: &mut crate::workbench::framework::feature::Cx<'_, crate::workbench::code::CodeFeature>,
     ctx: &Context,
 ) {
-    use crate::ui::widgets::TableColumn;
     use crate::workbench::documents::netlist_document::references;
 
     let Some(mut rename) = cx.state.deck_rename.take() else {
@@ -420,13 +436,7 @@ pub(in crate::workbench) fn render_deck_rename_form(
     let primary = messages.text(MessageId::SourceRenamePrimary);
     let new_name_label = messages.text(MessageId::SourceRenameNewName);
     let cancel = messages.text(MessageId::CommonCancel);
-    let headers = [
-        MessageId::SourceRenameColumnFile,
-        MessageId::SourceRenameColumnLine,
-        MessageId::SourceRenameColumnBefore,
-        MessageId::SourceRenameColumnAfter,
-    ]
-    .map(|header| messages.text(header));
+    let headers = rename_columns(messages);
 
     let mut replacement = rename.replacement.clone();
     let mut edited = false;
