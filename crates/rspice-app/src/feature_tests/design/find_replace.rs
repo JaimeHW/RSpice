@@ -400,3 +400,48 @@ fn find_folds_the_replace_row_that_find_and_replace_unfolded() {
     app.execute_command_key(ids::FIND_IN_DESIGN);
     assert!(!app.state.design.find_replace.replacing);
 }
+
+/// F3 shows the next hit of what the Navigator's search box finds and
+/// Shift+F3 the one before, wrapping at the ends, from anywhere in the
+/// design workspace rather than only with the caret in the box. With the
+/// box empty both say what to type.
+#[test]
+fn find_next_and_previous_step_through_the_hits_of_the_search_box() {
+    use rspice_app_design::workbench::design::commands::DesignCommand;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.model.schematic.document_mut_for_test().components = vec![
+        part(1, "R1", "10k"),
+        part(2, "R2", "1k"),
+        part(3, "R3", "10k"),
+    ];
+    app.state.sync_active_schematic_to_workspace();
+    app.state.workbench.activate(Workspace::Design);
+    assert!(!app.command_key_enabled(DesignCommand::FindNext.key()));
+    assert!(!app.command_key_enabled(DesignCommand::FindPrevious.key()));
+
+    app.state.workbench.set_navigator_filter("10k");
+    let selected = |app: &RSpiceApp| {
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_component()
+    };
+    app.execute_command_key(DesignCommand::FindNext.key());
+    assert_eq!(selected(&app), Some(1), "F3 shows the first hit");
+    app.execute_command_key(DesignCommand::FindNext.key());
+    assert_eq!(selected(&app), Some(3), "and then the next, past R2's 1k");
+    app.execute_command_key(DesignCommand::FindNext.key());
+    assert_eq!(selected(&app), Some(1), "wrapping at the end");
+    app.execute_command_key(DesignCommand::FindPrevious.key());
+    assert_eq!(selected(&app), Some(3), "Shift+F3 steps back");
+    assert_eq!(
+        app.state.model.schematic.session.editor.center_request,
+        Some(Point::new(300, 0)),
+        "and centres the hit it shows"
+    );
+}

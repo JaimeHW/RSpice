@@ -261,8 +261,8 @@ const EDIT_MENU: &[MenuEntry] = &[
     ),
 ];
 
-/// Edit over a drawing. Its 22 rows have 20 letters to give as access keys:
-/// Deselect all and the Select submenu go without.
+/// Edit over a drawing. Its 24 rows have 21 letters to give as access keys:
+/// Deselect all, the Select submenu and Find previous go without.
 const DRAWING_EDIT_MENU: &[MenuEntry] = &[
     workbench(WorkbenchCommand::Undo).access('U'),
     workbench(WorkbenchCommand::Redo).access('R'),
@@ -297,6 +297,8 @@ const DRAWING_EDIT_MENU: &[MenuEntry] = &[
     Separator,
     workbench(WorkbenchCommand::FindInDesign).access('F'),
     design(DesignCommand::FindReplace).access('I'),
+    design(DesignCommand::FindNext).access('X'),
+    design(DesignCommand::FindPrevious),
 ];
 
 /// Every object of one kind on the active sheet, in place of the selection.

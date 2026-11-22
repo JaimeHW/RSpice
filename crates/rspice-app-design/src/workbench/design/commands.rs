@@ -63,6 +63,10 @@ pub enum DesignCommand {
     CreateHierarchy,
     /// Bring Find forward with its Replace row unfolded.
     FindReplace,
+    /// Show the next hit of what the Navigator's search box finds.
+    FindNext,
+    /// Show the hit before the one in view.
+    FindPrevious,
     /// Pick an instance from the component shelf.
     PlaceInstance,
     /// Arm the wire tool.
@@ -286,6 +290,15 @@ const FIND_REPLACE: &[ShortcutBinding] = &[primary(
     chord(Key::H, true, false, false, "Ctrl+H"),
     DESKTOP,
 )];
+// KiCad's Find steps through its hits on F3 and Shift+F3, as most editors do.
+const FIND_NEXT: &[ShortcutBinding] = &[primary(
+    chord(Key::F3, false, false, false, "F3"),
+    DESKTOP_BROWSER,
+)];
+const FIND_PREVIOUS: &[ShortcutBinding] = &[primary(
+    chord(Key::F3, false, false, true, "Shift+F3"),
+    DESKTOP_BROWSER,
+)];
 const PLACE_INSTANCE: &[ShortcutBinding] = &[primary(
     chord(Key::I, false, false, true, "Shift+I"),
     EVERYWHERE,
@@ -415,7 +428,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 101] = [
+    pub const ALL: [Self; 103] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -435,6 +448,8 @@ impl DesignCommand {
         Self::ReplaceInstance,
         Self::CreateHierarchy,
         Self::FindReplace,
+        Self::FindNext,
+        Self::FindPrevious,
         Self::PlaceInstance,
         Self::PlaceWire,
         Self::PlaceBus,
@@ -541,6 +556,8 @@ impl DesignCommand {
             Self::ReplaceInstance => CommandKey::new("replace-instance"),
             Self::CreateHierarchy => CommandKey::new("create-hierarchy"),
             Self::FindReplace => CommandKey::new("find-replace"),
+            Self::FindNext => CommandKey::new("find-next"),
+            Self::FindPrevious => CommandKey::new("find-previous"),
             Self::PlaceInstance => CommandKey::new("place-instance"),
             Self::PlaceWire => CommandKey::new("place-wire"),
             Self::PlaceBus => CommandKey::new("place-bus"),
@@ -795,6 +812,8 @@ impl DesignCommand {
                 canvas,
                 FIND_REPLACE,
             ),
+            Self::FindNext => ("Find next", "Edit", project, canvas, FIND_NEXT),
+            Self::FindPrevious => ("Find previous", "Edit", project, canvas, FIND_PREVIOUS),
             Self::PlaceInstance => ("Place instance…", "Design", place, canvas, PLACE_INSTANCE),
             Self::PlaceWire => ("Draw wire", "Design", place, canvas, PLACE_WIRE),
             Self::PlaceBus => ("Draw bus", "Design", place, canvas, PLACE_BUS),

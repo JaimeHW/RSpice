@@ -304,6 +304,15 @@ impl CommandSet for DesignCommand {
             // Find works on what can only be read; its Replace row says why
             // nothing there can change.
             Self::FindReplace => (!schematic).then_some("command is unavailable in this context"),
+            Self::FindNext | Self::FindPrevious if !schematic => {
+                Some("command is unavailable in this context")
+            }
+            Self::FindNext | Self::FindPrevious => reads
+                .wb
+                .navigator_filter()
+                .trim()
+                .is_empty()
+                .then_some("type what to find in the Navigator's search box"),
             // A symbol edited in place is a level below its sheet: going up
             // leaves it, as Return does.
             Self::AscendHierarchy
@@ -767,6 +776,19 @@ impl CommandSet for DesignCommand {
                 cx.wb.drawer = Some(Drawer::Navigator);
                 cx.state.show_navigator();
                 cx.wb.outbox.push(FocusNavigatorSearch);
+            }
+            // What the search box holds is what is found, as Enter there
+            // steps through it.
+            Self::FindNext | Self::FindPrevious => {
+                let find = cx.wb.navigator_filter().trim().to_owned();
+                crate::workbench::app::dialogs::find_replace::step_hit(
+                    cx.state,
+                    cx.model,
+                    cx.wb,
+                    cx.runs,
+                    &find,
+                    self == Self::FindNext,
+                );
             }
             Self::PlaceInstance => {
                 cx.wb.activate(Workspace::Design);

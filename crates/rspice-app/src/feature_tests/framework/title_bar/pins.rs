@@ -350,6 +350,8 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "---",
             "Find… | find-design | Ctrl+F | on",
             "Find and replace… | find-replace | Ctrl+H | on",
+            "Find next | find-next | F3 | off: type what to find in the Navigator's search box",
+            "Find previous | find-previous | Shift+F3 | off: type what to find in the Navigator's search box",
             "---",
             "Preferences… | preferences | Ctrl+, | on",
         ],

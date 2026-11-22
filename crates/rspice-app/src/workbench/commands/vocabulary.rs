@@ -380,6 +380,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::ObjectProperties.key(),
     WorkbenchCommand::FindInDesign.key(),
     DesignCommand::FindReplace.key(),
+    DesignCommand::FindNext.key(),
+    DesignCommand::FindPrevious.key(),
     ShellCommand::RepeatLastCommand.key(),
     SettingsCommand::Preferences.key(),
     ShellCommand::OpenWorkspace(Workspace::Project).key(),
