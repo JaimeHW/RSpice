@@ -1,6 +1,7 @@
 //! Component placement, committed orientation edits, and terminal geometry.
 
 use super::{
+    attachment::{self, Attachable, Conductor, MovingGeometry, Scene},
     clipboard::ClipboardData,
     component::{Component, LibraryCellInstance},
     component_type::ComponentType,
@@ -163,7 +164,9 @@ impl SelectionTransform {
 /// labels, notes, shapes and probes. A wire left out of the selection that
 /// ends on something that moved follows it, rerouted with square corners
 /// where it was square; one that cannot be rerouted that way follows in a
-/// straight line. Returns whether anything moved.
+/// straight line. A label, probe, tap end or dot left out of the selection
+/// that sits on a turned pin, wire or bus turns with it. Returns whether
+/// anything moved.
 pub fn transform_selection(
     document: &mut SchematicDocument,
     selection: &Selection,
@@ -175,6 +178,50 @@ pub fn transform_selection(
         return false;
     }
     let map = |point: Point| transform.apply(point, pivot);
+    let attached = {
+        let mut points = std::collections::HashSet::new();
+        let mut fixed_points = std::collections::HashSet::new();
+        for component in &document.components {
+            let pins = terminal_points_for(component);
+            if selection.has_component(component.id) {
+                points.extend(pins);
+            } else {
+                fixed_points.extend(pins);
+            }
+        }
+        let mut conductors = std::collections::HashSet::new();
+        for wire in document
+            .wires
+            .iter()
+            .filter(|wire| selection.has_wire(wire.id))
+        {
+            points.extend(wire.points.iter().copied());
+            conductors.insert(Conductor::Wire(wire.id));
+        }
+        conductors.extend(
+            document
+                .buses
+                .iter()
+                .filter(|bus| selection.has_bus(bus.id))
+                .map(|bus| Conductor::Bus(bus.id)),
+        );
+        attachment::attached(
+            &Scene::of(document),
+            MovingGeometry {
+                points: &points,
+                conductors: &conductors,
+                runs: &[],
+                carries_vertices: true,
+                fixed_points: &fixed_points,
+            },
+            |item| match item {
+                Attachable::NetLabel(id) => selection.has_net_label(id),
+                Attachable::Probe(id) => selection.has_probe(id),
+                Attachable::BusTap(id) => selection.has_bus_tap(id),
+                Attachable::Junction(pos) => selection.has_junction(pos),
+            },
+        )
+    };
     // Old position to new, for everything an unselected wire can end on.
     let mut remaps: Vec<(Point, Point)> = Vec::new();
 
@@ -188,15 +235,11 @@ pub fn transform_selection(
         component.pos = map(component.pos);
         remaps.extend(before.into_iter().zip(terminal_points_for(component)));
     }
-    let moved_wire_points: Vec<Point> = document
-        .wires
-        .iter()
-        .filter(|wire| selection.has_wire(wire.id))
-        .flat_map(|wire| wire.points.iter().copied())
-        .collect();
-    for junction in document.junctions.iter_mut().filter(|junction| {
-        selection.has_junction(junction.pos) || moved_wire_points.contains(&junction.pos)
-    }) {
+    for junction in document
+        .junctions
+        .iter_mut()
+        .filter(|junction| selection.has_junction(junction.pos))
+    {
         junction.pos = map(junction.pos);
     }
     for wire in document
@@ -256,8 +299,21 @@ pub fn transform_selection(
         probe.position = map(probe.position);
     }
 
+    attached.carry(document, |_, point| map(point));
+
     remaps.retain(|(before, after)| before != after);
-    follow_with_unselected_wires(document, selection, &remaps);
+    let relaid = follow_with_unselected_wires(document, selection, &remaps);
+    let relaid = relaid
+        .iter()
+        .map(|(id, points)| (*id, points.as_slice()))
+        .collect::<Vec<_>>();
+    attachment::settle_on_relaid_wires(document, &relaid, |item| match item {
+        Attachable::NetLabel(id) => {
+            selection.has_net_label(id) || attached.net_labels.contains_key(&id)
+        }
+        Attachable::Probe(id) => selection.has_probe(id) || attached.probes.contains_key(&id),
+        Attachable::BusTap(_) | Attachable::Junction(_) => true,
+    });
     true
 }
 
@@ -361,11 +417,13 @@ fn map_shape_points(geometry: &mut DocumentationShapeGeometry, map: impl Fn(Poin
 /// Carry every unselected wire point that sat on a moved position to where
 /// that position went. A square wire is rerouted with square corners, as
 /// Move reroutes it, and the part connections that index its points follow.
+/// Returns each wire it laid again with the vertices it had.
 fn follow_with_unselected_wires(
     document: &mut SchematicDocument,
     selection: &Selection,
     remaps: &[(Point, Point)],
-) {
+) -> Vec<(u64, Vec<Point>)> {
+    let mut relaid = Vec::new();
     let moved_to = |point: &Point| {
         remaps
             .iter()
@@ -386,6 +444,7 @@ fn follow_with_unselected_wires(
             continue;
         }
         let wire_id = wire.id;
+        relaid.push((wire_id, wire.points.clone()));
         let rerouted = wire.is_orthogonal().then(|| {
             orthogonal_route_for_corresponding_points(document, wire_id, &wire.points, &followed)
         });
@@ -405,6 +464,7 @@ fn follow_with_unselected_wires(
             Some(Err(_)) | None => document.wires[index].points = followed,
         }
     }
+    relaid
 }
 
 /// The names the deck writes every loop probe drawn on this sheet under, which

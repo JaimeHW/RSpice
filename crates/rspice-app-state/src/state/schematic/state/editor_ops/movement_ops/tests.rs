@@ -1364,3 +1364,71 @@ fn a_move_that_breaks_connections_leaves_the_label_with_the_wire() {
     assert_eq!(document.net_labels[0].pos, Point::new(120, 100));
     assert_eq!(document.bus_taps[0].connection_point, Point::new(80, 100));
 }
+
+/// Turn or flip the selection about `pivot` as the editor does, tidying
+/// included.
+fn transform_on_one_sheet(
+    schematic: &mut SchematicState,
+    transform: rspice_design::schematic::component_edit::SelectionTransform,
+    pivot: Point,
+) -> bool {
+    schematic.with_single_sheet_topology(|state, scope| {
+        state.transform_selection(transform, pivot, legacy_terminal_points, scope)
+    })
+}
+
+#[test]
+fn a_turn_carries_the_label_and_tap_on_the_parts_pins() {
+    let mut schematic = attached_sheet();
+    let before = net_names_by_terminal(schematic.design.document());
+    assert!(transform_on_one_sheet(
+        &mut schematic,
+        rspice_design::schematic::component_edit::SelectionTransform::RotateClockwise,
+        Point::new(100, 100),
+    ));
+    let document = schematic.design.document();
+    assert_eq!(document.net_labels[0].pos, Point::new(100, 120));
+    assert_eq!(document.bus_taps[0].connection_point, Point::new(100, 80));
+    assert_nets_kept(&schematic, &before, "Rotate");
+}
+
+#[test]
+fn a_flip_carries_the_label_probe_tap_and_dot_on_the_flipped_pins_and_wires() {
+    let mut schematic = attached_sheet();
+    let selection = &mut schematic.session.editor.selection;
+    selection.select_component(2);
+    selection.select_wire(10);
+    selection.select_wire(11);
+    let before = net_names_by_terminal(schematic.design.document());
+    assert!(transform_on_one_sheet(
+        &mut schematic,
+        rspice_design::schematic::component_edit::SelectionTransform::MirrorVertical,
+        Point::new(100, 250),
+    ));
+    let document = schematic.design.document();
+    assert_eq!(document.net_labels[0].pos, Point::new(120, 400));
+    assert_eq!(document.probes[0].position, Point::new(150, 400));
+    assert_eq!(document.junctions[0].pos, Point::new(180, 400));
+    assert_eq!(document.bus_taps[0].connection_point, Point::new(80, 400));
+    assert_nets_kept(&schematic, &before, "Mirror");
+}
+
+/// A bus and its wire turned without the tap between them take the tap's
+/// two ends with them, so its bit stays joined.
+#[test]
+fn a_turned_bus_and_wire_take_the_unselected_tap_along() {
+    let mut schematic = bus_tap_and_scalar_target();
+    schematic.session.editor.selection.select_bus(1);
+    schematic.session.editor.selection.select_wire(3);
+    assert!(transform_on_one_sheet(
+        &mut schematic,
+        rspice_design::schematic::component_edit::SelectionTransform::RotateClockwise,
+        Point::new(5, 5),
+    ));
+    let document = schematic.design.document();
+    let tap = &document.bus_taps[0];
+    assert_eq!(tap.bus_point, Point::new(10, 5));
+    assert_eq!(tap.connection_point, Point::new(0, 0));
+    assert!(tap.validate_against_bus(&document.buses[0]).is_ok());
+    assert!(document.wires[0].contains_point(tap.connection_point));
+}
