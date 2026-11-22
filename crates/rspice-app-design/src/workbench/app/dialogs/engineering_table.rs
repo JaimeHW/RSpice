@@ -14,6 +14,8 @@ use crate::ui::widgets::{
     Button, CommandForm, Dialog, DialogChoice, DialogInitialFocus, DialogSize, IconButton,
     TableColumn, select,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::workflows::export_workflow::ObservedExportDestination;
 use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
 };
@@ -837,18 +839,7 @@ impl EngineeringTable<'_> {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         let schema_path = destination.with_extension("schema.json");
-                        if schema_path.exists() {
-                            return Err(format!(
-                                "Schema destination {} already exists; choose another CSV destination.",
-                                schema_path.display()
-                            ));
-                        }
-                        // Publish the companion first and the user-selected
-                        // CSV last. The primary destination is the completion
-                        // marker: a failed companion can never leave a CSV
-                        // that appears to be a complete CSV+schema export.
-                        io.write_new_text_file(&schema_path, &schema)?;
-                        io.write_text_file_observed(&observed, &text)
+                        publish_with_companion(&io, &observed, &schema_path, &schema, &text)
                     }
                 }
                 EngineeringTableExportFormat::Tsv => {
@@ -880,17 +871,7 @@ impl EngineeringTable<'_> {
                         #[cfg(not(target_arch = "wasm32"))]
                         {
                             let metadata_path = destination.with_extension("metadata.json");
-                            if metadata_path.exists() {
-                                return Err(format!(
-                                    "Metadata destination {} already exists; choose another TSV destination.",
-                                    metadata_path.display()
-                                ));
-                            }
-                            // As with CSV+schema, the selected TSV is
-                            // published only after its requested metadata
-                            // companion.
-                            io.write_new_text_file(&metadata_path, &metadata)?;
-                            io.write_text_file_observed(&observed, &text)
+                            publish_with_companion(&io, &observed, &metadata_path, &metadata, &text)
                         }
                     } else {
                         io.write_text_file_observed(&observed, &text)
@@ -1222,6 +1203,28 @@ impl EngineeringTable<'_> {
 }
 
 /// The columns of a row's details: each field, its value, and its unit.
+/// Publish a table export that has a companion file beside it: the
+/// companion first, then the table the save dialog named, so a companion
+/// that fails can never leave a table that looks like a complete export.
+///
+/// The companion is overwritten along with the table. It is named for the
+/// table and holds that table's schema, and the save dialog has already
+/// asked whether to replace the table, so a second question, or a refusal,
+/// would only stand between the reader and the usual export-edit-export
+/// loop.
+#[cfg(not(target_arch = "wasm32"))]
+fn publish_with_companion(
+    io: &impl ExportWorkflowIo,
+    table: &ObservedExportDestination,
+    companion: &std::path::Path,
+    companion_text: &str,
+    table_text: &str,
+) -> Result<(), String> {
+    let companion = io.observe_destination(companion)?;
+    io.write_text_file_observed(&companion, companion_text)?;
+    io.write_text_file_observed(table, table_text)
+}
+
 const ROW_DETAIL_COLUMNS: [TableColumn<'static>; 3] = [
     TableColumn {
         header: "Field",
@@ -2100,5 +2103,29 @@ pub mod tests {
                 .grid_id,
             crate::state::engineering_table::ACTIVE_SCHEMATIC_GRID_ID
         );
+    }
+
+    /// Exporting the table again to the file it was exported to replaces
+    /// the table and its companion both; it used to refuse because the
+    /// companion was already there.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    #[test]
+    fn re_export_to_the_same_file_replaces_the_table_and_its_companion() {
+        let folder = std::env::temp_dir().join(format!(
+            "rspice-object-table-re-export-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let table = folder.join("parts.csv");
+        let schema = table.with_extension("schema.json");
+        let io = NativeExportWorkflowIo;
+        for (table_text, schema_text) in [("R1,1k\n", "{\"v\":1}"), ("R1,2k\n", "{\"v\":2}")] {
+            let observed = io.observe_destination(&table).unwrap();
+            publish_with_companion(&io, &observed, &schema, schema_text, table_text)
+                .expect("the export is written");
+            assert_eq!(std::fs::read_to_string(&table).unwrap(), table_text);
+            assert_eq!(std::fs::read_to_string(&schema).unwrap(), schema_text);
+        }
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 }
