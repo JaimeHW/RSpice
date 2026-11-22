@@ -109,7 +109,7 @@ impl GridSnapRoutingDialogState {
 
 pub(crate) const TITLE: &str = "Grid, snap and wire routing";
 pub const PRIMARY: &str = "Apply canvas settings";
-const DESCRIPTION: &str = "Grid display is what you see; snap pitch and snap targets are what the cursor commits to. They are set separately because a coarse grid with fine snapping is a normal way to work.";
+const DESCRIPTION: &str = "The grid is drawn at the snap spacing and thinned as you zoom out. Snap targets are what the cursor locks onto.";
 const GRID_STYLES: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
 
 pub fn open_grid_snap_routing_dialog(
