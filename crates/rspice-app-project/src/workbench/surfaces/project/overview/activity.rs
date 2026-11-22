@@ -260,11 +260,30 @@ fn fitted_widths(ui: &Ui, operations: &[OperationSnapshot], now_ms: u64) -> (f32
 
 pub(super) fn run_title(sequence: u64, label: &str) -> String {
     let prefix = format!("Run {sequence}");
-    if label.starts_with(&prefix) {
+    if started_at_label(&prefix, label) {
+        // The label only says when the run started, which the When column
+        // states: the operation reads as the run, and keeps its room.
+        prefix
+    } else if label.starts_with(&prefix) {
         label.to_owned()
     } else {
         format!("{prefix} · {label}")
     }
+}
+
+/// Whether `label` is the label a run is given when it starts, `prefix`
+/// and the time of day it started: "Run 3 (1:04:01 PM)".
+fn started_at_label(prefix: &str, label: &str) -> bool {
+    label
+        .strip_prefix(prefix)
+        .and_then(|rest| rest.strip_prefix(" ("))
+        .and_then(|rest| {
+            rest.strip_suffix(" AM)")
+                .or_else(|| rest.strip_suffix(" PM)"))
+        })
+        .is_some_and(|time| {
+            !time.is_empty() && time.chars().all(|c| c.is_ascii_digit() || c == ':')
+        })
 }
 
 pub(super) fn unix_seconds_to_millis(seconds: f64) -> Option<u64> {

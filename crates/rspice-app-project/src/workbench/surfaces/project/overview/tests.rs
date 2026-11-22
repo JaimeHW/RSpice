@@ -23,9 +23,12 @@ fn completed_failure_is_not_rendered_as_success() {
 
 #[test]
 fn run_title_does_not_duplicate_retained_sequence_prefix() {
+    // A label that only says when the run started reads as the run: the
+    // When column states the time.
+    assert_eq!(run_title(12, "Run 12 (10:31:02 AM)"), "Run 12");
     assert_eq!(
-        run_title(12, "Run 12 (10:31:02 AM)"),
-        "Run 12 (10:31:02 AM)"
+        run_title(12, "Run 12 (fast corner)"),
+        "Run 12 (fast corner)"
     );
     assert_eq!(run_title(12, "corner sweep"), "Run 12 · corner sweep");
 }
