@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use rspice_vocabulary::natural_order::natural_cmp;
 use serde::{Deserialize, Serialize};
 
 pub const VIRTUALIZATION_THRESHOLD: usize = 250;
@@ -558,7 +559,7 @@ impl EngineeringDataset {
                     };
                 }
             }
-            left.stable_id.cmp(&right.stable_id)
+            natural_cmp(&left.stable_id, &right.stable_id)
         });
         EngineeringProjection {
             columns,
@@ -581,16 +582,12 @@ fn compare_cells(
             // "15" < numeric 2, which violates the sorting contract.
             (Some(_), None) => std::cmp::Ordering::Greater,
             (None, Some(_)) => std::cmp::Ordering::Less,
-            (None, None) => natural_key(&left.display).cmp(&natural_key(&right.display)),
+            (None, None) => natural_cmp(&left.display, &right.display),
         },
         (Some(_), None) => std::cmp::Ordering::Greater,
         (None, Some(_)) => std::cmp::Ordering::Less,
         (None, None) => std::cmp::Ordering::Equal,
     }
-}
-
-fn natural_key(value: &str) -> String {
-    value.to_lowercase()
 }
 
 fn filter_matches(cell: &EngineeringCell, query: &str, grammar: EngineeringFilterGrammar) -> bool {
@@ -682,6 +679,48 @@ fn compare_number(value: f64, operator: &str, target: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rows read in counting order, R2 before R10, as a designer counts
+    /// parts: with no sort chosen, and sorted by a column of names.
+    #[test]
+    fn rows_read_in_counting_order() {
+        let column = EngineeringColumn {
+            id: "name".into(),
+            label: "Name".into(),
+            unit: None,
+            identifier: true,
+            numeric: false,
+            hidden_by_default: false,
+        };
+        let rows = ["R10", "C10", "R2", "C2", "r3"]
+            .map(|name| EngineeringRow {
+                stable_id: name.into(),
+                cells: HashMap::from([("name".to_owned(), EngineeringCell::text(name))]),
+            })
+            .to_vec();
+        let dataset = EngineeringDataset {
+            id: "parts".into(),
+            title: "Parts".into(),
+            source_revision: 0,
+            columns: vec![column],
+            rows,
+        };
+        let order = |view: &EngineeringTableView| {
+            dataset
+                .project(view)
+                .rows
+                .into_iter()
+                .map(|row| row.stable_id)
+                .collect::<Vec<_>>()
+        };
+        let mut view = EngineeringTableView::for_dataset(&dataset);
+        assert_eq!(order(&view), ["C2", "C10", "R2", "r3", "R10"]);
+        view.sort = vec![EngineeringSortRule {
+            column_id: "name".into(),
+            direction: SortDirection::Descending,
+        }];
+        assert_eq!(order(&view), ["R10", "r3", "R2", "C10", "C2"]);
+    }
 
     #[test]
     fn mixed_numeric_and_display_only_cells_have_a_total_sort_order() {
