@@ -425,8 +425,15 @@ mod tests {
         let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
+        // The data browser picks the analysis; the Noise sheet is the NOISE
+        // analysis' sheet, and the phase-referenced run must not join it.
+        assert!(state.model.simulation.select_analysis(1));
         state.results.results.session.viewer = super::super::ResultViewer::NoiseContrib;
         state.quick_frame();
+        assert_eq!(
+            state.results.results.session.viewer,
+            super::super::ResultViewer::NoiseContrib
+        );
 
         let tokens = crate::ui::tokens::Tokens::default();
         let presentation = state.model.preferences.result_presentation_policy();
