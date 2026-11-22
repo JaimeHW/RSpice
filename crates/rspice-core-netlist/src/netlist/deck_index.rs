@@ -14,7 +14,7 @@ use std::ops::{Range, RangeInclusive};
 
 use super::lexer::{Lexer, TokenKind, parse_spice_value_complete};
 use super::source_map::{
-    MappedLine, for_each_logical_line, is_param_boundary, logical_values, token_spans,
+    MappedLine, card_fields, for_each_logical_line, is_param_boundary, logical_values,
 };
 use super::{ParameterRedefinitionPolicy, SourceKind, comment_ranges};
 
@@ -781,7 +781,7 @@ impl Builder {
             return;
         }
         let (first_line, last_line) = line.physical_lines();
-        let fields = fields_of(&line.text);
+        let fields = card_fields(&line.text);
         let Some(head_range) = fields.first().cloned() else {
             return;
         };
@@ -1577,42 +1577,6 @@ impl Builder {
         self.index.references = references;
         self.index
     }
-}
-
-/// The whitespace- and comma-separated fields of a logical card, with
-/// `name = value` written apart joined back into the one field the parser
-/// reads.
-fn fields_of(text: &str) -> Vec<Range<usize>> {
-    let mut fields: Vec<Range<usize>> = Vec::new();
-    for span in token_spans(text) {
-        let field = &text[span.clone()];
-        // `name = value` is one field, and so is an expression written with
-        // blanks in it (`{1 * k}`), as the engine reads them.
-        let joins = fields.last().is_some_and(|previous| {
-            let previous = &text[previous.clone()];
-            previous.ends_with('=') || expression_left_open(previous)
-        }) || field.starts_with('=');
-        match fields.last_mut() {
-            Some(previous) if joins => previous.end = span.end,
-            _ => fields.push(span),
-        }
-    }
-    fields
-}
-
-/// Whether `field` opens a `{...}` or `'...'` expression it does not close.
-fn expression_left_open(field: &str) -> bool {
-    let mut depth = 0i32;
-    let mut quoted = false;
-    for character in field.chars() {
-        match character {
-            '\'' => quoted = !quoted,
-            '{' if !quoted => depth += 1,
-            '}' if !quoted => depth -= 1,
-            _ => {}
-        }
-    }
-    depth > 0 || quoted
 }
 
 /// The arguments `fields` spell, a quoted one that holds blanks taken whole.

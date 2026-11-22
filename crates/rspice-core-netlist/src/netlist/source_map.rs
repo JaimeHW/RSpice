@@ -323,15 +323,29 @@ pub fn source_map_for_editor_as_read<'a>(
 
 /// The editor source map of `buffer` read lexically, every line taken as
 /// read. [`source_map_for_editor_as_read`] applies what a parse skipped.
+///
+/// A `.control` block, through its `.endc`, holds commands for the
+/// interpreter, not cards: nothing in it defines or names a model, a
+/// subcircuit or a parameter.
 pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
     let mut map = NetlistSourceMap::default();
     let mut scopes = Vec::new();
+    let mut in_control = false;
     for_each_logical_line(
         buffer,
         1,
         |_, raw| Some(&raw[..comment_start(raw, SourceKind::DeckRoot).unwrap_or(raw.len())]),
         |_| false,
-        |line| process_logical_line(&line, &mut scopes, &mut map),
+        |line| {
+            let head = line.text.split_whitespace().next().unwrap_or_default();
+            if in_control {
+                in_control = !head.eq_ignore_ascii_case(".endc");
+            } else if head.eq_ignore_ascii_case(".control") {
+                in_control = true;
+            } else {
+                process_logical_line(&line, &mut scopes, &mut map);
+            }
+        },
     );
     map
 }
@@ -554,7 +568,7 @@ fn process_logical_line(line: &MappedLine, scopes: &mut Vec<String>, map: &mut N
         return;
     }
 
-    if let Some(reference) = reference_from_element_line(line, &tokens, scope) {
+    if let Some(reference) = reference_from_element_line(line, &card_fields(&line.text), scope) {
         map.references.push(reference);
     }
 }
@@ -917,6 +931,9 @@ fn current_scope(scopes: &[String]) -> Option<String> {
     scopes.last().cloned()
 }
 
+/// The model or subcircuit a device card names, read from its fields as
+/// [`card_fields`] splits them, so `w = 18.0u` is one parameter, not a
+/// model named `w`.
 fn reference_from_element_line(
     line: &MappedLine,
     tokens: &[Range<usize>],
@@ -1012,18 +1029,12 @@ fn model_assignment_span(
     for (idx, span) in tokens.iter().enumerate().skip(start) {
         let token = &line.text[span.clone()];
         if let Some((key, value)) = token.split_once('=')
-            && key.eq_ignore_ascii_case("model")
-            && !value.is_empty()
+            && key.trim_end().eq_ignore_ascii_case("model")
         {
-            let value_start = span.start + key.len() + 1;
-            return Some(value_start..span.end);
+            let value = value.trim_start();
+            return (!value.is_empty()).then(|| span.end - value.len()..span.end);
         }
         if token.eq_ignore_ascii_case("model") {
-            if let Some(eq) = tokens.get(idx + 1)
-                && &line.text[eq.clone()] == "="
-            {
-                return tokens.get(idx + 2).cloned();
-            }
             return tokens.get(idx + 1).cloned();
         }
     }
@@ -1041,24 +1052,28 @@ fn fixed_token_reference(
     reference_from_span(line, span, kind, scope)
 }
 
+/// The model or subcircuit a card names last before its parameters, at
+/// field `start` or after. A number there is a value, as a BJT's positional
+/// area is, and names no model.
 fn tail_reference(
     line: &MappedLine,
-    tokens: &[Range<usize>],
+    fields: &[Range<usize>],
     start: usize,
     kind: ReferenceKind,
     scope: Option<String>,
 ) -> Option<NetlistReference> {
-    let boundary = tokens
+    let boundary = fields
         .iter()
         .enumerate()
         .skip(start)
         .find(|(_, span)| is_param_boundary(&line.text[(*span).clone()]))
         .map(|(idx, _)| idx)
-        .unwrap_or(tokens.len());
-    if boundary <= start {
-        return None;
-    }
-    reference_from_span(line, tokens[boundary - 1].clone(), kind, scope)
+        .unwrap_or(fields.len());
+    let named = fields.get(start..boundary)?.iter().rposition(|span| {
+        kind == ReferenceKind::Subcircuit
+            || super::lexer::parse_spice_value_complete(&line.text[span.clone()]).is_err()
+    })?;
+    reference_from_span(line, fields[start + named].clone(), kind, scope)
 }
 
 fn reference_from_span(
@@ -1095,6 +1110,42 @@ pub(super) fn token_spans(line: &str) -> Vec<Range<usize>> {
         spans.push(token_start..line.len());
     }
     spans
+}
+
+/// The whitespace- and comma-separated fields of a logical card, with
+/// `name = value` written apart joined back into the one field the parser
+/// reads.
+pub(super) fn card_fields(text: &str) -> Vec<Range<usize>> {
+    let mut fields: Vec<Range<usize>> = Vec::new();
+    for span in token_spans(text) {
+        let field = &text[span.clone()];
+        // `name = value` is one field, and so is an expression written with
+        // blanks in it (`{1 * k}`), as the engine reads them.
+        let joins = fields.last().is_some_and(|previous| {
+            let previous = &text[previous.clone()];
+            previous.ends_with('=') || expression_left_open(previous)
+        }) || field.starts_with('=');
+        match fields.last_mut() {
+            Some(previous) if joins => previous.end = span.end,
+            _ => fields.push(span),
+        }
+    }
+    fields
+}
+
+/// Whether `field` opens a `{...}` or `'...'` expression it does not close.
+fn expression_left_open(field: &str) -> bool {
+    let mut depth = 0i32;
+    let mut quoted = false;
+    for character in field.chars() {
+        match character {
+            '\'' => quoted = !quoted,
+            '{' if !quoted => depth += 1,
+            '}' if !quoted => depth -= 1,
+            _ => {}
+        }
+    }
+    depth > 0 || quoted
 }
 
 pub(super) fn is_param_boundary(token: &str) -> bool {
@@ -1218,13 +1269,16 @@ mod editor_tests {
 
     #[test]
     fn source_map_records_passive_model_assignment_span() {
-        let src = "deck\nR1 in out MODEL=rmod L=1u W=2u\n.model rmod r\n.end\n";
+        let src = "deck\nR1 in out MODEL=rmod L=1u W=2u\nR2 in out model = rapart\n\
+                   .model rmod r\n.end\n";
 
         let map = source_map_for_editor(src);
 
         let reference = map.references.iter().find(|r| r.name == "rmod").unwrap();
         assert_eq!(reference.kind, ReferenceKind::Model);
         assert_eq!(&src[reference.span.clone()], "rmod");
+        let apart = map.references.iter().find(|r| r.name == "rapart").unwrap();
+        assert_eq!(&src[apart.span.clone()], "rapart");
     }
 
     #[test]

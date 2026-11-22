@@ -714,6 +714,59 @@ fn the_reference_lint_counts_only_the_branch_the_parser_takes() {
     );
 }
 
+/// What the reference lint calls an unknown model or subcircuit in `deck`.
+fn unknown_references(deck: &str) -> Vec<String> {
+    validated(deck)
+        .state
+        .netlist
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .canonical
+                .code
+                .as_ref()
+                .starts_with("SPICE-UNKNOWN-")
+        })
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect()
+}
+
+/// A `.control` block holds interpreter commands, which the engine runs
+/// as commands: no line in it names a model, however it starts.
+#[test]
+fn no_line_of_a_control_block_names_a_model() {
+    let deck = "multiple .elseif, nested .if\nV1 1 0 1\nR1 1 0 1000\n.control\n\
+                define mismatch(a,b,err) abs(a-b)>err\nop\nlet out = -1/v1#branch\n\
+                print out > test.log\nset foo = ( 1 2 3 )\nset baz = ( mi au $aux )\n\
+                let vec1 = @v1[pulse]\nalter @v1[pulse] = [ 2 5 11n 12n 13n 54n 105n ]\n\
+                .endc\nD1 1 0 dmissing\n.end\n";
+
+    assert_eq!(
+        unknown_references(deck),
+        vec!["Unknown model 'dmissing' in this deck.".to_owned()],
+        "the card after .endc is a card again"
+    );
+}
+
+/// An instance parameter written with blanks around its `=` is one
+/// parameter, as the engine reads it, and the model is the field before it.
+#[test]
+fn a_parameter_written_apart_from_its_equals_is_not_the_model() {
+    let deck = "MOSdriver -- lossy line LTRA model -- C load\n\
+                m5     0     168    2     0  mn0p9  w = 18.0u l=0.9u\n\
+                m6     1     168    2     1  mp1p0  w = 36.0u l=1.0u\n\
+                Q1 3 168 0 qnp 2\nX1 168 3 buffer gain = 2\n\
+                .MODEL mn0p9 NMOS VTO=0.8 KP=48U GAMMA=0.30 PHI=0.55\n\
+                .model qnp npn\n.subckt buffer a b params: gain=1\nR1 a b {1k*gain}\n.ends\n.end\n";
+
+    assert_eq!(
+        unknown_references(deck),
+        vec!["Unknown model 'mp1p0' in this deck.".to_owned()],
+        "only the model the deck does not define is unknown"
+    );
+}
+
 #[test]
 fn parse_buffer_maps_syntax_error_to_structured_diagnostic() {
     let (diagnostics, symbols) = parse_buffer("title\n.enddata\n");
