@@ -1,8 +1,12 @@
 //! Validated stretch previews and document edits.
 
 use super::{
-    bus::BusTargetKind, component::Component, document::SchematicDocument,
-    documentation_shape::DocumentationShapeGeometry, wire::WireSegment,
+    attachment::{self, Attachable, Attached, Conductor, MovingGeometry, Scene},
+    bus::BusTargetKind,
+    component::Component,
+    document::SchematicDocument,
+    documentation_shape::DocumentationShapeGeometry,
+    wire::WireSegment,
 };
 use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
@@ -305,7 +309,14 @@ fn conductor_stretch_candidate(
         points[segment_index] = checked_offset(points[segment_index], delta)?;
         points[segment_index + 1] = checked_offset(points[segment_index + 1], delta)?;
     }
-    translate_attached_taps(document, &mut candidate, target, source_segment, delta)?;
+    let attached = carry_attached(
+        document,
+        &mut candidate,
+        target,
+        source_segment,
+        &carried,
+        delta,
+    )?;
     let carried_segments = carry_neighbour_ends(&mut candidate, &carried, delta, policy)?;
 
     let candidate_points =
@@ -363,6 +374,21 @@ fn conductor_stretch_candidate(
             component_bounds_by_component,
         )?;
     }
+    // A probe on a neighbour the stretch shortened past it goes to the
+    // nearest point left; a label there was refused above.
+    let relaid = document
+        .wires
+        .iter()
+        .enumerate()
+        .filter(|(index, wire)| {
+            target == ConductorTarget::Wire(wire.id) || carries_wire(&carried, *index)
+        })
+        .map(|(_, wire)| (wire.id, wire.points.as_slice()))
+        .collect::<Vec<_>>();
+    attachment::settle_on_relaid_wires(&mut candidate, &relaid, |item| match item {
+        Attachable::Probe(id) => attached.probes.contains_key(&id),
+        Attachable::NetLabel(_) | Attachable::BusTap(_) | Attachable::Junction(_) => true,
+    });
 
     Ok(candidate)
 }
@@ -573,8 +599,8 @@ fn validate_carried_segment(
             return Err(StretchSelectionError::FixedAnchor { point: new.pos });
         }
     }
-    for label in &candidate.net_labels {
-        if after.contains_point(label.pos) != before.contains_point(label.pos) {
+    for (old, label) in original.net_labels.iter().zip(&candidate.net_labels) {
+        if after.contains_point(label.pos) != before.contains_point(old.pos) {
             return Err(StretchSelectionError::NetLabelAnchor {
                 label_id: label.id,
                 point: label.pos,
@@ -638,6 +664,8 @@ fn commit_stretch_candidate(
             document.junctions = candidate.junctions;
             document.connections = candidate.connections;
             document.bus_taps = candidate.bus_taps;
+            document.net_labels = candidate.net_labels;
+            document.probes = candidate.probes;
         }
         StretchTarget::BusSegment { bus_id, .. } => {
             let points = candidate
@@ -653,6 +681,8 @@ fn commit_stretch_candidate(
                 .ok_or(StretchSelectionError::StaleTarget)?
                 .points = points;
             document.bus_taps = candidate.bus_taps;
+            document.net_labels = candidate.net_labels;
+            document.probes = candidate.probes;
         }
         StretchTarget::DocumentationShapePoint { shape_id, .. } => {
             let geometry = candidate
@@ -867,17 +897,6 @@ fn reject_source_anchors(
             point: junction.pos,
         });
     }
-    if let Some(label) = state
-        .net_labels
-        .iter()
-        .find(|label| selected.contains_point(label.pos))
-    {
-        return Err(StretchSelectionError::NetLabelAnchor {
-            label_id: label.id,
-            point: label.pos,
-        });
-    }
-
     for (wire_index, wire) in state.wires.iter().enumerate() {
         if target == ConductorTarget::Wire(wire.id) || carries_wire(carried, wire_index) {
             continue;
@@ -909,36 +928,56 @@ fn unrelated_anchor_point(points: &[Point], selected: WireSegment) -> Option<Poi
         })
 }
 
-fn translate_attached_taps(
+/// Carry what sits on the stretched segment with it: net labels, probes and
+/// either end of a bus tap, and say which those were. A label stays on its
+/// net and a tap on its bus; the dots on the carried corners move with the
+/// neighbours that follow them.
+fn carry_attached(
     original: &SchematicDocument,
     candidate: &mut SchematicDocument,
     target: ConductorTarget,
     selected: WireSegment,
+    carried: &[CarriedEnd],
     delta: Point,
-) -> Result<(), StretchSelectionError> {
-    for (index, old_tap) in original.bus_taps.iter().enumerate() {
-        let source_moves = matches!(target, ConductorTarget::Bus(bus_id) if old_tap.bus_id == bus_id)
-            && selected.contains_point(old_tap.bus_point);
-        let target_moves = match target {
-            ConductorTarget::Wire(_) => {
-                old_tap.target_kind() == BusTargetKind::Wire
-                    && selected.contains_point(old_tap.connection_point)
-            }
-            ConductorTarget::Bus(bus_id) => {
-                old_tap.bus_id != bus_id
-                    && old_tap.target_kind() == BusTargetKind::Bus
-                    && selected.contains_point(old_tap.connection_point)
-            }
-        };
-        if source_moves {
-            candidate.bus_taps[index].bus_point = checked_offset(old_tap.bus_point, delta)?;
-        }
-        if target_moves {
-            candidate.bus_taps[index].connection_point =
-                checked_offset(old_tap.connection_point, delta)?;
+) -> Result<Attached, StretchSelectionError> {
+    let conductor = match target {
+        ConductorTarget::Wire(id) => Conductor::Wire(id),
+        ConductorTarget::Bus(id) => Conductor::Bus(id),
+    };
+    let corners = [selected.start, selected.end]
+        .into_iter()
+        .filter(|corner| carries_corner(carried, *corner))
+        .collect::<std::collections::HashSet<_>>();
+    let attached = attachment::attached(
+        &Scene::of(original),
+        MovingGeometry {
+            points: &corners,
+            conductors: &std::collections::HashSet::new(),
+            runs: &[(conductor, selected)],
+            carries_vertices: true,
+            fixed_points: &std::collections::HashSet::new(),
+        },
+        |_| false,
+    );
+    for (old, label) in original.net_labels.iter().zip(&mut candidate.net_labels) {
+        if attached.net_labels.contains_key(&old.id) {
+            label.pos = checked_offset(old.pos, delta)?;
         }
     }
-    Ok(())
+    for (old, probe) in original.probes.iter().zip(&mut candidate.probes) {
+        if attached.probes.contains_key(&old.id) {
+            probe.position = checked_offset(old.position, delta)?;
+        }
+    }
+    for (old, tap) in original.bus_taps.iter().zip(&mut candidate.bus_taps) {
+        if attached.tap_buses.contains_key(&old.id) {
+            tap.bus_point = checked_offset(old.bus_point, delta)?;
+        }
+        if attached.tap_connections.contains_key(&old.id) {
+            tap.connection_point = checked_offset(old.connection_point, delta)?;
+        }
+    }
+    Ok(attached)
 }
 
 fn validate_all_tap_attachments(state: &SchematicDocument) -> Result<(), StretchSelectionError> {
@@ -1093,13 +1132,15 @@ fn validate_new_conductor_conflicts(
             });
         }
     }
-    for label in &candidate.net_labels {
+    // A label on the stretched segment travelled with it; one on the
+    // segments either side must stay on them.
+    for (old, label) in original.net_labels.iter().zip(&candidate.net_labels) {
         let new_contact = candidate_affected
             .iter()
             .any(|(_, segment)| segment.contains_point(label.pos));
         let old_contact = original_affected
             .iter()
-            .any(|(_, segment)| segment.contains_point(label.pos));
+            .any(|(_, segment)| segment.contains_point(old.pos));
         if new_contact != old_contact {
             return Err(StretchSelectionError::NetLabelAnchor {
                 label_id: label.id,

@@ -130,7 +130,8 @@ mod tests {
     use super::*;
     use crate::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
-        DocumentationShape, Junction, NetLabel, SchematicSnapshot, Wire, WireConnection,
+        DocumentationShape, Junction, NetLabel, SchematicProbe, SchematicSnapshot, Wire,
+        WireConnection,
     };
     use rspice_design::schematic::component_edit::legacy_terminal_points;
 
@@ -528,27 +529,49 @@ mod tests {
         }
     }
 
+    /// A label and a probe on the stretched segment go with it, so the net
+    /// between R1 and R2 keeps its name and its join to R3's label; a
+    /// segment stretched onto a label it did not carry is refused, so no net
+    /// takes a name it did not have.
     #[test]
-    fn existing_and_new_net_label_anchors_are_rejected_atomically() {
-        let mut existing = selected_u_wire();
-        existing
-            .design
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(70, Point::new(10, 10), "SENSE"));
-        let before = SchematicSnapshot::capture(existing.design.document());
+    fn a_label_on_the_segment_goes_with_it_and_a_new_label_contact_is_refused() {
+        let mut carried = selected_u_wire();
+        let document = carried.design.document_mut_for_test();
+        document.components.extend([
+            Component::new(2, ComponentType::Resistor, Point::new(-20, 0)),
+            Component::new(3, ComponentType::Resistor, Point::new(40, 0)),
+            Component::new(4, ComponentType::Resistor, Point::new(200, 100)),
+        ]);
+        document.net_labels.extend([
+            NetLabel::new(70, Point::new(10, 10), "SENSE"),
+            NetLabel::new(73, Point::new(180, 100), "SENSE"),
+        ]);
+        document
+            .probes
+            .push(SchematicProbe::new(72, Point::new(15, 10), "V(SENSE)", None).unwrap());
+        let nets =
+            rspice_design::connectivity::summary::net_names_by_terminal(carried.design.document());
         assert_eq!(
-            existing.stretch_on_one_sheet(
+            nets.get(&(2, "-".to_owned())).map(String::as_str),
+            Some("SENSE")
+        );
+        assert_eq!(
+            carried.stretch_on_one_sheet(
                 Point::new(0, 5),
                 wire_target(1, 1),
                 StretchOrthogonalPolicy::PreserveOrthogonal,
             ),
-            Err(StretchSelectionError::NetLabelAnchor {
-                label_id: 70,
-                point: Point::new(10, 10),
-            })
+            Ok(true)
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(existing.design.document())));
+        let document = carried.design.document();
+        assert_eq!(document.net_labels[0].pos, Point::new(10, 15));
+        assert_eq!(document.probes[0].position, Point::new(15, 15));
+        assert!(document.wires[0].contains_point(Point::new(10, 15)));
+        assert!(document.wires[0].is_orthogonal());
+        assert_eq!(
+            rspice_design::connectivity::summary::net_names_by_terminal(document),
+            nets
+        );
 
         let mut new_contact = selected_u_wire();
         new_contact
