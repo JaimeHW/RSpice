@@ -31,9 +31,9 @@ use rspice_design_model::design_management::{
     DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetDisplayUnit, DrawingSheetFrameArtwork,
     DrawingSheetFrameLayer, DrawingSheetFrameMark,
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
-    DrawingSheetTitleAlign, DrawingSheetTitleLetteringRole, DrawingSheetTitleMeasure,
-    DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField, SchematicSheetFormat,
-    drawing_sheet_mono_em_um, drawing_sheet_title_layout,
+    DrawingSheetTitleAlign, DrawingSheetTitleLettering, DrawingSheetTitleLetteringRole,
+    DrawingSheetTitleMeasure, DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField,
+    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -314,9 +314,10 @@ fn frame_line_width(width_um: u64, zoom: f32, pixels_per_point: f32) -> f32 {
 }
 
 /// Smallest em height, in physical pixels, at which title-block lettering is
-/// worth drawing. Below it the glyphs carry no readable detail and the field
-/// text is withheld rather than drawn as grey mush.
-const DRAWING_SHEET_LEGIBLE_LETTERING_PX: f32 = 8.0;
+/// drawn as text. Below it the glyphs carry no readable detail, so each line
+/// is drawn as a bar of its length instead: the block still reads as a filled
+/// form, as KiCad's and Altium's blocks read at any zoom.
+const DRAWING_SHEET_LEGIBLE_LETTERING_PX: f32 = 4.0;
 
 impl DrawingSheetLod {
     fn resolve(zoom: f32, pixels_per_point: f32, lettering: DrawingSheetLettering) -> Self {
@@ -343,8 +344,7 @@ impl DrawingSheetLod {
             show_zone_labels: tier != DrawingSheetLodTier::Thumbnail,
             // Title-block lettering is drawn at its authored paper height, so
             // it is legible only once that height resolves on screen. Below
-            // that the block stays ruled and empty, which is what the sheet
-            // looks like from the same distance on paper.
+            // that each line is greeked to a bar.
             show_title_block_fields: data_lettering_px >= DRAWING_SHEET_LEGIBLE_LETTERING_PX,
             show_grid: tier != DrawingSheetLodTier::Thumbnail,
             show_origin: tier == DrawingSheetLodTier::Detail,
@@ -1378,7 +1378,7 @@ fn draw_title_block(
             );
         }
     }
-    if !lod.show_title_block_fields || field_grid.width() < 80.0 || field_grid.height() < 30.0 {
+    if !lod.show_border {
         return;
     }
     let fields = resolve_title_fields();
@@ -1387,6 +1387,10 @@ fn draw_title_block(
     }
     let padding = authored_title_cell_padding(layout.padding_um) * zoom;
     for line in layout.lettering_measured(&fields, &DrawingSheetTitleWidth) {
+        if !lod.show_title_block_fields {
+            greek_title_line(painter, &line, &x_at, &y_at, palette);
+            continue;
+        }
         let cell = &layout.cells[line.cell];
         let clip = Rect::from_min_max(
             pos2(x_at(cell.x_um), y_at(cell.y_um)),
@@ -1432,6 +1436,41 @@ fn draw_title_block(
             color,
         );
     }
+}
+
+/// A title line too small to letter, drawn as a bar over the length the
+/// line would take and about the height of its lower-case letters, in the
+/// line's own ink at reduced strength.
+fn greek_title_line(
+    painter: &Painter,
+    line: &DrawingSheetTitleLettering,
+    x_at: &impl Fn(u64) -> f32,
+    y_at: &impl Fn(u64) -> f32,
+    palette: DrawingSheetPalette,
+) {
+    let length_um = DrawingSheetTitleWidth
+        .width_um(&line.text, line.lettering_um, line.emphasised)
+        .min(line.width_um);
+    let (left_um, right_um) = match line.align {
+        DrawingSheetTitleAlign::Left => (line.x_um, line.x_um + length_um),
+        DrawingSheetTitleAlign::Right => (
+            line.x_um + line.width_um - length_um,
+            line.x_um + line.width_um,
+        ),
+    };
+    let half_um = line.lettering_um * 3 / 10;
+    let one_pixel = 1.0 / painter.pixels_per_point();
+    let top = y_at(line.seat_um.saturating_sub(half_um));
+    let bottom = y_at(line.seat_um + half_um).max(top + one_pixel);
+    let ink = match line.role {
+        DrawingSheetTitleLetteringRole::Caption => palette.block_label,
+        DrawingSheetTitleLetteringRole::Value => palette.block_ink,
+    };
+    painter.rect_filled(
+        Rect::from_min_max(pos2(x_at(left_um), top), pos2(x_at(right_um), bottom)),
+        0.0,
+        ink.gamma_multiply(0.45),
+    );
 }
 
 /// Sheet one of several on the ASME form says every sheet is at the same
