@@ -22,6 +22,9 @@ const GAP: f32 = 9.0;
 const RIGHT_INSET: f32 = 14.0;
 /// Below this a row's words go under its name rather than beside it.
 const STACKED_BELOW: f32 = 480.0;
+/// The least room between a row's words and its action, where a wide card
+/// sets the action after the words rather than at its far edge.
+const ACTION_GAP: f32 = 32.0;
 /// The room over and under the words of a row that takes several lines.
 const ROW_PAD: f32 = 6.0;
 /// The most finding rows the strip shows before it scrolls.
@@ -68,6 +71,21 @@ fn status_rows(ui: &mut Ui, statuses: &[StatusSnapshot]) -> Option<OverviewInten
         .iter()
         .map(|status| text_width(ui, status.action, &words_font))
         .fold(0.0_f32, f32::max);
+    // A row is as wide as its widest words need, its action a gap after
+    // them: on a wide card the verb stays beside the fact it addresses
+    // rather than a page's width away, and the rows end where they end.
+    let widest_words = statuses
+        .iter()
+        .map(|status| text_width(ui, &status.text(), &words_font))
+        .fold(0.0_f32, f32::max);
+    let width = if stacked {
+        width
+    } else {
+        width.min(
+            (NAME_LEFT + name_width + GAP + widest_words + ACTION_GAP + action_width + RIGHT_INSET)
+                .ceil(),
+        )
+    };
     let action_left = width - RIGHT_INSET - action_width;
     let (words_left, words_width) = if stacked {
         (NAME_LEFT, (width - NAME_LEFT - RIGHT_INSET).max(1.0))

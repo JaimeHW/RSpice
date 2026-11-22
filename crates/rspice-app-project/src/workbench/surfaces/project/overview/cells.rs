@@ -63,17 +63,20 @@ fn cells_table(
     // narrow for every column's least width gives up whole columns from its
     // right, the instances and then the views, rather than scrolling
     // sideways with its edge through a word, as the Activity card does;
-    // views given up are the cell's hint.
+    // views given up are the cell's hint. The Cell column is as wide as the
+    // names it lists, so a wide card gives its spare to Views, the last
+    // column of words, and the instances stay beside them.
     let modified = modified_width(ui, snapshot);
+    let name = name_width(ui, snapshot);
     let columns = [
-        Column::name("Cell", 104.0),
+        Column::words("Cell", name),
         Column::words("Library", 104.0),
         Column::words("Role", 84.0),
         Column::words("Modified", modified),
         Column::name("Views", 120.0),
         Column::number("Instances", 84.0),
     ];
-    let least = [104.0, 104.0, 84.0, modified, 120.0, 84.0];
+    let least = [name, 104.0, 84.0, modified, 120.0, 84.0];
     let room_wide = ui.available_width();
     let shown = (KEPT_COLUMNS..=least.len())
         .rev()
@@ -150,6 +153,45 @@ const VIEWS_COLUMN: usize = 4;
 /// The least the Modified column is made: room for its head and the sort
 /// mark beside it, as wide as the Instances column.
 const MODIFIED_HEAD_WIDTH: f32 = 84.0;
+
+/// The least and the most the Cell column is made: room for its head and
+/// sort mark, and room for a long name before the rest of the row is pushed
+/// off a narrow card. A longer name is cut, and its row's hover names it.
+const NAME_LEAST: f32 = 104.0;
+const NAME_MOST: f32 = 280.0;
+/// What the unsaved mark takes before a name.
+const UNSAVED_MARK: f32 = 14.0;
+/// How many of the longest names, by their count of characters, are
+/// measured: in a proportional face the widest is among them, and a project
+/// of thousands of cells is not laid out name by name on every frame.
+const NAMES_MEASURED: usize = 16;
+
+/// How wide the Cell column is made: as wide as the widest name it lists,
+/// between [`NAME_LEAST`] and [`NAME_MOST`].
+fn name_width(ui: &Ui, snapshot: &OverviewSnapshot) -> f32 {
+    let mut longest = snapshot
+        .cell_rows()
+        .map(|row| (row.name.chars().count(), row.name.as_str()))
+        .collect::<Vec<_>>();
+    let measured = longest.len().min(NAMES_MEASURED);
+    if measured == 0 {
+        return NAME_LEAST;
+    }
+    longest.select_nth_unstable_by(measured - 1, |a, b| b.0.cmp(&a.0));
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let widest = longest[..measured]
+        .iter()
+        .map(|(_, name)| {
+            ui.painter()
+                .layout_no_wrap((*name).to_owned(), font.clone(), Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+    (widest + 2.0 * CELL_PAD + UNSAVED_MARK + 2.0)
+        .ceil()
+        .clamp(NAME_LEAST, NAME_MOST)
+}
 
 /// How wide the Modified column is made: as wide as the widest time it
 /// shows, written in mono. Inside a day a time is told as an age, of which
