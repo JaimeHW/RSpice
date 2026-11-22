@@ -1447,7 +1447,7 @@ fn project_title_block_values_have_one_canonical_authority_and_migrate_legacy_de
     assert!(matches!(
         invalid.validate(),
         Err(DesignManagementError::NumericRange(
-            "project drawing sheet title field set"
+            "project drawing sheet title field ownership"
         ))
     ));
 
