@@ -8,9 +8,10 @@
 //! with it the check that an engine prefix really names the occurrence beside
 //! it, which is the condition under which the map can be read backwards.
 
-use rspice_results::run_receipt::HierarchyMapRow;
+use rspice_results::run_receipt::{HierarchyMapRow, SealedHierarchyMap};
 
 use super::PreparedRunSnapshot;
+use crate::netlist_gen::CrossProbeSnapshot;
 use crate::netlist_gen::EmissionMap;
 
 impl PreparedRunSnapshot {
@@ -21,20 +22,25 @@ impl PreparedRunSnapshot {
             .map(|design| design.emission_map.clone())
             .unwrap_or_default()
     }
+}
 
-    /// The same map in the form the run receipt seals.
-    pub(crate) fn receipt_hierarchy_map(&self) -> Result<Vec<HierarchyMapRow>, String> {
-        self.emission_map()
-            .iter()
-            .map(|row| {
-                let occurrence = row.occurrence.to_string();
-                HierarchyMapRow::new(
-                    &occurrence,
-                    row.master.clone(),
-                    row.engine_prefix.clone(),
-                    row.master_reference.clone(),
-                )
-            })
-            .collect()
-    }
+/// The map a design's emission produced, in the form the run receipt seals and checked once; a
+/// manual deck has none.
+pub(super) fn sealed(design: Option<&CrossProbeSnapshot>) -> Result<SealedHierarchyMap, String> {
+    let Some(design) = design else {
+        return Ok(SealedHierarchyMap::default());
+    };
+    let rows = design
+        .emission_map
+        .iter()
+        .map(|row| {
+            HierarchyMapRow::new(
+                &row.occurrence.to_string(),
+                row.master.clone(),
+                row.engine_prefix.clone(),
+                row.master_reference.clone(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    SealedHierarchyMap::new(rows)
 }

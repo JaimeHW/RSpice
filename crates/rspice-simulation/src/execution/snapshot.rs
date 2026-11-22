@@ -13,9 +13,9 @@ use crate::netlist_preparation::splice_before_terminal_end_card;
 use crate::output_contract::PreparedSavedOutput;
 use crate::preparation::QueuedAnalysis;
 pub use crate::preparation::touchstone::TouchstoneExportPolicy;
-use rspice_results::run_receipt::HierarchyMapRow;
 use rspice_results::run_receipt::PreparedModelSourceIdentity;
 use rspice_results::run_receipt::PreparedSourceCheckReceipt;
+use rspice_results::run_receipt::SealedHierarchyMap;
 use rspice_results::specification::PreparedSpecification;
 use rspice_results::specification::PreparedSpecificationPolicy;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -634,7 +634,7 @@ pub struct AuthorizedRunDispatch {
     advisories: Vec<String>,
     manual_source: Option<String>,
     cross_probe: Option<CrossProbeSnapshot>,
-    hierarchy_map: Vec<HierarchyMapRow>,
+    hierarchy_map: SealedHierarchyMap,
     configuration: Option<rspice_results::run_receipt::RunConfiguration>,
 }
 
@@ -1007,6 +1007,8 @@ pub struct PreparedRunSnapshot {
     advisories: Vec<String>,
     manual_source: Option<String>,
     cross_probe: Option<CrossProbeSnapshot>,
+    /// The occurrence map its receipts seal, converted and checked once.
+    hierarchy_map: SealedHierarchyMap,
     touchstone_export: TouchstoneExportPolicy,
     sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
     configuration: Option<rspice_results::run_receipt::RunConfiguration>,
@@ -1745,6 +1747,9 @@ impl PreparedRunSnapshot {
             .validate_source(&parts.executable_netlist)
             .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         let digest = snapshot_digest(&parts, &pvt_points);
+        // Converted and checked once: the check below, the dispatch and every receipt share it.
+        let hierarchy_map = hierarchy_map::sealed(parts.cross_probe.as_ref())
+            .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))?;
 
         let snapshot = Self {
             execution_limits: parts.execution_limits,
@@ -1771,6 +1776,7 @@ impl PreparedRunSnapshot {
             advisories: parts.advisories,
             manual_source: parts.manual_source,
             cross_probe: parts.cross_probe,
+            hierarchy_map,
             touchstone_export: parts.touchstone_export,
             sealed_source_dependencies: parts.sealed_source_dependencies,
             configuration: parts.configuration,
@@ -1785,7 +1791,8 @@ impl PreparedRunSnapshot {
         // refusal reaches preflight, campaign preparation and manual-deck
         // validation as a named blocker instead of surfacing after a run was
         // reported queued. The receipt itself is rebuilt at dispatch from the
-        // same sealer over the same facts, so this is a check, not a cache.
+        // same sealer over the same facts, so this is a check, not a cache;
+        // only the occurrence map, the costly part, is converted once and shared.
         snapshot.prepared_run_receipt()?;
 
         Ok(snapshot)
@@ -1865,9 +1872,7 @@ impl PreparedRunSnapshot {
                 "Consumed execution permit does not match the retained snapshot",
             ));
         }
-        let hierarchy_map = self
-            .receipt_hierarchy_map()
-            .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))?;
+        let hierarchy_map = self.hierarchy_map;
         let source_lines = self.source_lines.as_ref();
         let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
         let run_source_lines = source_lines.and_then(|lines| {

@@ -11,10 +11,10 @@
 
 use crate::execution::SimulationRunIntent;
 use rspice_results::provenance::AnalysisResultSourceDomain;
-use rspice_results::run_receipt::HierarchyMapRow;
 use rspice_results::run_receipt::PreparedModelSourceIdentity;
 use rspice_results::run_receipt::PreparedRunReceipt;
 use rspice_results::run_receipt::PreparedRunTaskReceipt;
+use rspice_results::run_receipt::SealedHierarchyMap;
 use rspice_results::specification::PreparedSpecification;
 use rspice_results::specification::PreparedSpecificationPolicy;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -58,7 +58,7 @@ struct ReceiptTaskFacts<'a> {
 fn seal_prepared_run_receipt<'a>(
     run: RunReceiptFacts<'_>,
     tasks: impl Iterator<Item = ReceiptTaskFacts<'a>>,
-    hierarchy_map: Vec<HierarchyMapRow>,
+    hierarchy_map: SealedHierarchyMap,
 ) -> Result<PreparedRunReceipt, PreparationError> {
     let project_revision = ObjectRevision::new(run.project_revision).map_err(|error| {
         PreparationError::new(
@@ -99,8 +99,11 @@ fn seal_prepared_run_receipt<'a>(
         specification_policy: run.specification_policy.clone(),
         tasks,
     })
-    .and_then(|receipt| receipt.with_hierarchy_map(hierarchy_map))
-    .map(|receipt| receipt.with_configuration(run.configuration.cloned()))
+    .map(|receipt| {
+        receipt
+            .with_sealed_hierarchy_map(hierarchy_map)
+            .with_configuration(run.configuration.cloned())
+    })
     .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))
 }
 
@@ -124,9 +127,6 @@ impl PreparedRunSnapshot {
     /// — therefore fails as a named preflight blocker rather than as a refusal
     /// after the operator has already been told the run was queued.
     pub fn prepared_run_receipt(&self) -> Result<PreparedRunReceipt, PreparationError> {
-        let hierarchy_map = self
-            .receipt_hierarchy_map()
-            .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))?;
         seal_prepared_run_receipt(
             RunReceiptFacts {
                 source_domain: result_source_domain(self.intent),
@@ -148,7 +148,7 @@ impl PreparedRunSnapshot {
                 spec: &task.task.spec,
                 config_digest: task.config_digest,
             }),
-            hierarchy_map,
+            self.hierarchy_map.clone(),
         )
     }
 }

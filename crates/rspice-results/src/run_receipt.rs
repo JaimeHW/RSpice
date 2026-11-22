@@ -5,6 +5,7 @@
 //! different run, and the receipt is what makes that detectable.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::specification::{PreparedSpecification, PreparedSpecificationPolicy};
 use rspice_design_model::cell_view::CellViewRef;
@@ -403,6 +404,39 @@ pub struct RunConfiguration {
     pub revision: u64,
 }
 
+/// A run's occurrence map, checked once to name every occurrence only once.
+///
+/// Its rows are shared rather than copied: a design of a million instances seals a million rows,
+/// and the check before a run, its dispatch and every receipt it hands out read the same ones.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SealedHierarchyMap(Arc<[HierarchyMapRow]>);
+
+impl SealedHierarchyMap {
+    /// Checks that `rows` name each occurrence once, as the reverse map from engine names needs.
+    pub fn new(rows: Vec<HierarchyMapRow>) -> Result<Self, String> {
+        let mut occurrences = HashSet::with_capacity(rows.len());
+        for row in &rows {
+            let occurrence = InstancePath::parse(&row.occurrence).map_err(|error| {
+                format!(
+                    "prepared-run receipt hierarchy map row '{}' is not an instance path: {error}",
+                    row.occurrence
+                )
+            })?;
+            if !occurrences.insert(occurrence.fold_key()) {
+                return Err(format!(
+                    "prepared-run receipt repeats hierarchy map occurrence {occurrence}"
+                ));
+            }
+        }
+        Ok(Self(rows.into()))
+    }
+
+    #[must_use]
+    pub fn rows(&self) -> &[HierarchyMapRow] {
+        &self.0
+    }
+}
+
 /// Durable authority for a run created from one consumed prepared snapshot.
 ///
 /// The complete task graph remains present even when execution is aborted or
@@ -421,7 +455,7 @@ pub struct PreparedRunReceipt {
     specifications: Vec<PreparedSpecification>,
     specification_policy: PreparedSpecificationPolicy,
     tasks: Vec<PreparedRunTaskReceipt>,
-    hierarchy_map: Vec<HierarchyMapRow>,
+    hierarchy_map: SealedHierarchyMap,
     configuration: Option<RunConfiguration>,
 }
 
@@ -578,7 +612,7 @@ impl PreparedRunReceipt {
             specifications,
             specification_policy,
             tasks,
-            hierarchy_map: Vec::new(),
+            hierarchy_map: SealedHierarchyMap::default(),
             configuration: None,
         })
     }
@@ -590,26 +624,15 @@ impl PreparedRunReceipt {
     /// run restored from a project file written before the map existed carries
     /// none. Neither is ever reconstructed — the reader falls back to raw
     /// engine names, which is what those runs always did.
-    pub fn with_hierarchy_map(
-        mut self,
-        hierarchy_map: Vec<HierarchyMapRow>,
-    ) -> Result<Self, String> {
-        let mut occurrences = HashSet::with_capacity(hierarchy_map.len());
-        for row in &hierarchy_map {
-            let occurrence = InstancePath::parse(&row.occurrence).map_err(|error| {
-                format!(
-                    "prepared-run receipt hierarchy map row '{}' is not an instance path: {error}",
-                    row.occurrence
-                )
-            })?;
-            if !occurrences.insert(occurrence.fold_key()) {
-                return Err(format!(
-                    "prepared-run receipt repeats hierarchy map occurrence {occurrence}"
-                ));
-            }
-        }
+    pub fn with_hierarchy_map(self, hierarchy_map: Vec<HierarchyMapRow>) -> Result<Self, String> {
+        Ok(self.with_sealed_hierarchy_map(SealedHierarchyMap::new(hierarchy_map)?))
+    }
+
+    /// Seals an occurrence map already checked, sharing its rows rather than copying them.
+    #[must_use]
+    pub fn with_sealed_hierarchy_map(mut self, hierarchy_map: SealedHierarchyMap) -> Self {
         self.hierarchy_map = hierarchy_map;
-        Ok(self)
+        self
     }
 
     /// Seals the configuration the run elaborated onto the receipt. Absent
@@ -780,7 +803,7 @@ impl PreparedRunReceipt {
     /// deck and for every run recorded before the map was sealed.
     #[must_use]
     pub fn hierarchy_map(&self) -> &[HierarchyMapRow] {
-        &self.hierarchy_map
+        self.hierarchy_map.rows()
     }
 
     pub fn validate_result_prefix<'a, W: AsRef<RetainedWaveform> + 'a>(
