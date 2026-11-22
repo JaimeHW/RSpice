@@ -149,3 +149,101 @@ fn the_net_inspector_folds_case_the_way_connectivity_does() {
         assert_eq!(normalized_net_name("Out"), normalized_net_name("out"));
     }
 }
+
+/// The Scope row names how far each net's name reaches: a supply symbol's
+/// rail everywhere, an off-sheet connector's net and a plain name across
+/// the cell view's sheets, and only an unnamed net, or a name on a view of
+/// one sheet, its own sheet.
+#[test]
+fn the_net_inspector_names_each_nets_real_scope() {
+    use crate::state::{CrossSheetPortDirection, NetLabel, SheetDefinition, SheetPortPolicy, Wire};
+    use rspice_design::schematic::net_label::SupplyGlyph;
+
+    let mut state = DesignTestHost::default();
+    let document = state.model.schematic.document_mut_for_test();
+    for (id, y) in [(1, 0), (2, 100), (3, 200), (4, 300), (5, 400)] {
+        document
+            .wires
+            .push(Wire::new(id, vec![Point::new(0, y), Point::new(200, y)]));
+    }
+    document.net_labels.extend([
+        NetLabel::supply(11, Point::new(100, 0), "VDD", SupplyGlyph::Bar),
+        NetLabel::off_sheet(
+            12,
+            Point::new(100, 100),
+            "BIAS",
+            CrossSheetPortDirection::Output,
+        ),
+        NetLabel::new(13, Point::new(100, 200), "sig"),
+        NetLabel::new(14, Point::new(100, 300), "clk!"),
+    ]);
+    let scopes = |state: &DesignTestHost| {
+        let nets =
+            rspice_design::connectivity::summary::design_nets(state.model.schematic.document());
+        let mut scopes = nets
+            .iter()
+            .map(|net| {
+                let off_sheet = off_sheet_declaration(&state.model, &net.name).is_some();
+                let name = if net.authored_name {
+                    net.name.to_ascii_lowercase()
+                } else {
+                    "unnamed".to_owned()
+                };
+                (name, net_scope(&state.model, net, off_sheet))
+            })
+            .collect::<Vec<_>>();
+        scopes.sort();
+        scopes
+    };
+    let owned = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(name, scope)| ((*name).to_owned(), (*scope).to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        scopes(&state),
+        owned(&[
+            ("bias", "cell view (off-sheet)"),
+            ("clk!", "global"),
+            ("sig", "sheet-local"),
+            ("unnamed", "sheet-local"),
+            ("vdd", "global (supply rail)"),
+        ])
+    );
+
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let first = state
+        .model
+        .workspace
+        .content
+        .design_management
+        .bootstrap_for_cell_view(&key, "Input", [1, 2, 3, 4, 5, 11, 12, 13, 14])
+        .expect("sheet ownership");
+    state
+        .model
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("sheet catalog")
+        .create_sheet(
+            SheetDefinition {
+                name: "Output".to_owned(),
+                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                explicit_page_number: Some(2),
+            },
+            Some(first),
+        )
+        .expect("second sheet");
+    let named = scopes(&state)
+        .into_iter()
+        .find(|(name, _)| name == "sig")
+        .expect("the named net");
+    assert_eq!(named.1, "cell view", "a name joins its name on every sheet");
+}

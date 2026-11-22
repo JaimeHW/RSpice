@@ -695,6 +695,29 @@ pub(super) fn off_sheet_declaration(model: &Model, name: &str) -> Option<OffShee
     })
 }
 
+/// How far a net's name reaches, as the net panel's Scope row states it.
+///
+/// Read from what the design declares: a port, the ground, a supply symbol
+/// (whose rail joins every sheet and cell, and which the deck writes as
+/// `.GLOBAL`), a `!` name, an off-sheet connector, or a name, which joins the
+/// same name on every sheet of the cell view. Only an unnamed net, or a name
+/// on a view of one sheet, stays on its sheet.
+pub(super) fn net_scope(model: &Model, net: &DesignNet, off_sheet: bool) -> String {
+    if let Some(direction) = net.port {
+        return format!("interface port · {}", direction.keyword());
+    }
+    match net.class {
+        NetClass::Ground => "global reference".to_owned(),
+        NetClass::Supply => "global (supply rail)".to_owned(),
+        NetClass::Signal if net.name.ends_with('!') => "global".to_owned(),
+        NetClass::Signal if off_sheet => "cell view (off-sheet)".to_owned(),
+        NetClass::Signal if net.authored_name && model.multi_sheet_catalog().is_some() => {
+            "cell view".to_owned()
+        }
+        NetClass::Signal => "sheet-local".to_owned(),
+    }
+}
+
 pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: &[DesignNet]) {
     let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
         // The conductor resolved to a net connectivity no longer reports.
@@ -704,18 +727,12 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
     };
     let class = net.class;
     let domain = net.domain;
-    let port = net.port;
     let net_name = net.name.clone();
     let terminals = net.terminals.clone();
-    let scope = match port {
-        Some(direction) => format!("interface port · {}", direction.keyword()),
-        None if class == NetClass::Ground => "global reference".to_owned(),
-        None => "sheet-local".to_owned(),
-    };
+    let off_sheet = off_sheet_declaration(cx.model, &net_name);
+    let scope = net_scope(cx.model, net, off_sheet.is_some());
 
     object_title(ui, &net_name, Some("Net"), None);
-
-    let off_sheet = off_sheet_declaration(cx.model, &net_name);
 
     section_header(ui, "Net identity", None);
     property_row(ui, "Scope", &scope);
