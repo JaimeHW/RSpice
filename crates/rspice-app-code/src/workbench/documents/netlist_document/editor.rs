@@ -1568,7 +1568,12 @@ fn parse_findings(
             if let Err(error) = rspice_core::netlist::validate_output_requests(&netlist) {
                 diagnostics.extend(parse_error_diagnostics_at(error, parse_source, messages));
             }
-            diagnostics.extend(unknown_reference_diagnostics(buffer, &unread, messages));
+            diagnostics.extend(unknown_reference_diagnostics(
+                buffer,
+                Some(&netlist),
+                &unread,
+                messages,
+            ));
             (
                 diagnostics,
                 Some(harvest_symbols(&netlist, messages)),

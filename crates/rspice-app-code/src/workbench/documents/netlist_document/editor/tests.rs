@@ -310,6 +310,71 @@ fn live_lint_honors_external_lib_section_selection() {
     );
 }
 
+/// A deck that names other files is checked against what they define, as
+/// the parse read them: a name the include or the library's selected
+/// section defines is known, binned models answer to their family's name,
+/// and a name nothing read defines is unknown.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_reference_lint_reads_what_the_files_a_deck_names_define() {
+    let fixture = IncludeFixtureDir::new("included-names");
+    let root = fixture.path().join("root.cir");
+    std::fs::write(
+        fixture.path().join("cells.inc"),
+        ".subckt CELL a b\nRIN a b 1k\n.ends CELL\n.model nch.1 nmos\n.model nch.2 nmos\n",
+    )
+    .expect("write the include");
+    std::fs::write(
+        fixture.path().join("models.lib"),
+        ".lib TT\n.model DTT D(Is=1e-14)\n.endl TT\n\
+         .lib FF\n.model DFF D(Is=1e-13)\n.endl FF\n",
+    )
+    .expect("write the library");
+    let source = "included names\n.include \"cells.inc\"\n.lib \"models.lib\" TT\n\
+                  X1 out 0 CELL\nX2 out 0 CEL\nD1 out 0 DTT\nD2 out 0 DFF\n\
+                  M1 out out 0 0 nch W=1u L=1u\n.op\n.end\n";
+
+    let (diagnostics, _) = parse_native_fixture(source, &root);
+
+    let unknown = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .canonical
+                .code
+                .as_ref()
+                .starts_with("SPICE-UNKNOWN-")
+        })
+        .map(|diagnostic| (diagnostic.line, diagnostic.message.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unknown,
+        [
+            (Some(4), "Unknown subcircuit 'CEL' in this deck."),
+            (Some(6), "Unknown model 'DFF' in this deck."),
+        ]
+    );
+}
+
+/// A name a file the deck names would define is never called unknown while
+/// that file cannot be read: the missing file is the finding.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_name_an_unread_include_would_define_is_not_unknown() {
+    let fixture = IncludeFixtureDir::new("unread-names");
+    let root = fixture.path().join("root.cir");
+    let source = "unread names\n.include \"cells.inc\"\nX1 out 0 CELL\n.op\n.end\n";
+
+    let (diagnostics, _) = parse_native_fixture(source, &root);
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert!(
+        diagnostics[0].message.starts_with("cells.inc not found"),
+        "{}",
+        diagnostics[0].message
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn live_lint_reports_missing_include_at_root_directive() {

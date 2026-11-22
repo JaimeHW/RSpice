@@ -343,21 +343,38 @@ pub(super) fn in_authored_text(
 /// One finding per model or subcircuit reference in `buffer` that no
 /// definition visible to it names.
 ///
-/// `unread` is what the parse of `buffer` did not read: a definition there
-/// defines nothing, and a reference there is not one.
+/// `read` is the parse of `buffer` with the files it names read. What those
+/// files define, as that parse read them, is known wherever the deck names
+/// it; a deck that names other files is not checked without it, since a name
+/// defined in a file nothing read is never an error. `unread` is what the
+/// parse of `buffer` did not read: a definition there defines nothing, and a
+/// reference there is not one.
 pub(super) fn unknown_reference_diagnostics(
     buffer: &str,
+    read: Option<&rspice_core::Netlist>,
     unread: &[rspice_core::netlist::UnreadSourceRegion],
     messages: MessageCatalog,
 ) -> Vec<Diagnostic> {
-    if has_external_model_sources(buffer) {
+    // A Verilog-A source declares masters only its compile names.
+    if names_veriloga_source(buffer) {
         return Vec::new();
     }
+    let elsewhere = if names_other_files(buffer) {
+        match read {
+            Some(netlist) => DefinedElsewhere::read_by(netlist),
+            None => return Vec::new(),
+        }
+    } else {
+        DefinedElsewhere::default()
+    };
 
     let map = rspice_core::netlist::source_map_for_editor_as_read(buffer, unread);
     let mut diagnostics = Vec::new();
 
     for reference in map.references {
+        if elsewhere.defines(&reference) {
+            continue;
+        }
         let definitions = match reference.kind {
             ReferenceKind::Model => &map.model_defs,
             ReferenceKind::Subcircuit => &map.subckt_defs,
@@ -365,7 +382,7 @@ pub(super) fn unknown_reference_diagnostics(
         let visible = visible_definitions(&reference, definitions);
         if visible
             .iter()
-            .any(|definition| definition.name.eq_ignore_ascii_case(&reference.name))
+            .any(|definition| answers_to(reference.kind, &definition.name, &reference.name))
         {
             continue;
         }
@@ -639,18 +656,83 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// added there is honoured here rather than listed twice. A malformed
 /// directive parses as no directive at all, which costs nothing: this lint
 /// only runs once the deck has parsed.
-fn has_external_model_sources(buffer: &str) -> bool {
-    buffer.lines().any(|line| {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('*') {
-            return false;
-        }
-        let head = trimmed.split_whitespace().next().unwrap_or_default();
-        head.eq_ignore_ascii_case(".include")
-            || head.eq_ignore_ascii_case(".inc")
-            || head.eq_ignore_ascii_case(".lib")
-            || rspice_core::netlist::parse_veriloga_source_directive(trimmed).is_some()
+/// The cards of `buffer` that are not comments, each trimmed at its start.
+fn cards(buffer: &str) -> impl Iterator<Item = &str> {
+    buffer
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| !line.is_empty() && !line.starts_with('*'))
+}
+
+/// Whether `buffer` names another file of SPICE cards: `.include`, `.inc`
+/// or `.lib`.
+fn names_other_files(buffer: &str) -> bool {
+    cards(buffer).any(|card| {
+        let head = card.split_whitespace().next().unwrap_or_default();
+        [".include", ".inc", ".lib"]
+            .iter()
+            .any(|directive| head.eq_ignore_ascii_case(directive))
     })
+}
+
+/// Whether `buffer` names a Verilog-A source.
+fn names_veriloga_source(buffer: &str) -> bool {
+    cards(buffer).any(|card| rspice_core::netlist::parse_veriloga_source_directive(card).is_some())
+}
+
+/// Whether a model or subcircuit called `definition` answers to `reference`.
+/// A model also answers to its family's name, the part of its name before a
+/// `.`, as a binned `nch.1` answers to `nch`, the way the engine reads it.
+fn answers_to(kind: ReferenceKind, definition: &str, reference: &str) -> bool {
+    definition.eq_ignore_ascii_case(reference)
+        || kind == ReferenceKind::Model
+            && definition
+                .match_indices('.')
+                .any(|(at, _)| at > 0 && definition[..at].eq_ignore_ascii_case(reference))
+}
+
+/// The models and subcircuits a parse read, among them what the files a
+/// deck names define. Where in those files a name is defined is not read
+/// here, so a name they define is known wherever the deck names it.
+#[derive(Default)]
+struct DefinedElsewhere {
+    models: Vec<String>,
+    subcircuits: Vec<String>,
+}
+
+impl DefinedElsewhere {
+    fn read_by(netlist: &rspice_core::Netlist) -> Self {
+        fn subcircuits(
+            definitions: &[rspice_core::netlist::SubcircuitDef],
+            names: &mut Vec<String>,
+        ) {
+            for definition in definitions {
+                names.push(definition.name.clone());
+                subcircuits(&definition.nested_subcircuits, names);
+            }
+        }
+        let mut defined = Self {
+            models: netlist
+                .models
+                .iter()
+                .map(|model| model.name.clone())
+                .collect(),
+            subcircuits: Vec::new(),
+        };
+        subcircuits(&netlist.subcircuits, &mut defined.subcircuits);
+        defined
+    }
+
+    /// Whether what the parse read defines what `reference` names.
+    fn defines(&self, reference: &NetlistReference) -> bool {
+        let names = match reference.kind {
+            ReferenceKind::Model => &self.models,
+            ReferenceKind::Subcircuit => &self.subcircuits,
+        };
+        names
+            .iter()
+            .any(|name| answers_to(reference.kind, name, &reference.name))
+    }
 }
 
 #[cfg(test)]
@@ -672,6 +754,7 @@ mod tests {
         let diagnostics = in_authored_text(
             unknown_reference_diagnostics(
                 &composed,
+                None,
                 &[],
                 crate::workbench::MessageCatalog::new(
                     crate::workbench::UiTextLocale::EnglishUnitedStates,
@@ -721,6 +804,7 @@ mod tests {
 
         let diagnostics = unknown_reference_diagnostics(
             src,
+            None,
             &[],
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
@@ -770,6 +854,7 @@ mod tests {
 
         let diagnostics = unknown_reference_diagnostics(
             src,
+            None,
             &[],
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
@@ -783,12 +868,41 @@ mod tests {
         assert_eq!(diagnostic.fix.as_ref().unwrap().replacement, "inv");
     }
 
+    /// A binned model answers to its family's name, as the engine picks a
+    /// bin of `nch` for `M1 ... nch`; a name that is only a bin's prefix
+    /// without the `.` is not one.
     #[test]
-    fn unknown_reference_lint_skips_decks_with_external_includes() {
+    fn a_binned_model_answers_to_its_family_name() {
+        let src = "deck\nM1 d g s b nch W=1u L=1u\nM2 d g s b nc W=1u L=1u\n\
+                   .model nch.1 nmos\n.model nch.2 nmos\n.end\n";
+
+        let diagnostics = unknown_reference_diagnostics(
+            src,
+            None,
+            &[],
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        );
+
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>(),
+            ["Unknown model 'nc' in this deck."]
+        );
+    }
+
+    /// A deck that names another file is checked only against what a parse
+    /// read from it: with no such parse, nothing it names is unknown.
+    #[test]
+    fn unknown_reference_lint_skips_decks_whose_includes_were_not_read() {
         let src = "deck\n.include models.scs\nM1 d g s b nchh W=1u L=1u\n.end\n";
 
         let diagnostics = unknown_reference_diagnostics(
             src,
+            None,
             &[],
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
@@ -808,6 +922,7 @@ mod tests {
         assert_eq!(
             unknown_reference_diagnostics(
                 bare,
+                None,
                 &[],
                 crate::workbench::MessageCatalog::new(
                     crate::workbench::UiTextLocale::EnglishUnitedStates
@@ -827,6 +942,7 @@ mod tests {
                 assert!(
                     unknown_reference_diagnostics(
                         &src,
+                        None,
                         &[],
                         crate::workbench::MessageCatalog::new(
                             crate::workbench::UiTextLocale::EnglishUnitedStates
@@ -843,6 +959,7 @@ mod tests {
         assert_eq!(
             unknown_reference_diagnostics(
                 near_miss,
+                None,
                 &[],
                 crate::workbench::MessageCatalog::new(
                     crate::workbench::UiTextLocale::EnglishUnitedStates
@@ -859,6 +976,7 @@ mod tests {
 
         let diagnostics = unknown_reference_diagnostics(
             src,
+            None,
             &[],
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
