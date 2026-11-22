@@ -758,21 +758,18 @@ fn carry_from_baseline(
         .map(|id| Conductor::Wire(*id))
         .chain(selection.buses.iter().map(|id| Conductor::Bus(*id)))
         .collect::<HashSet<_>>();
-    // Only a pin under a wire or bus that travels whole can hold what sits
-    // there; a moved pin's own point is never another part's pin.
+    // A pin that stays keeps what sits on it. That decides anything only at
+    // the end of a selected wire or bus resting on such a pin; where a moved
+    // pin left one it touched, the label goes with the moved pin and the
+    // wire bridging the two keeps them one net. The parts left out of the
+    // selection have not moved, so their pins are read where they are.
     let fixed_points = if selection.wires.is_empty() && selection.buses.is_empty() {
         HashSet::new()
     } else {
-        baseline
+        document
             .components
             .iter()
             .filter(|component| !selection.components.contains(&component.id))
-            .filter(|component| {
-                document
-                    .components
-                    .iter()
-                    .any(|live| live.id == component.id)
-            })
             .flat_map(terminal_points_for)
             .collect()
     };
