@@ -399,6 +399,8 @@ impl SimulationController {
         let live_window = self
             .live_window()
             .filter(|_| is_running && self.streams_live());
+        // A run asked to stop is stopping, whatever stage the engine last named.
+        let stopping = state.model().simulation.cancellation_is_pending();
         let execution = &mut state.model_mut().simulation.execution;
         execution.progress =
             Self::ui_progress_fraction(self.runner.progress_fraction(), is_running);
@@ -407,10 +409,10 @@ impl SimulationController {
             .progress_fraction()
             .filter(|_| is_running)
             .map(|fraction| f64::from(fraction).clamp(0.0, 1.0));
-        execution.phase = if is_running {
-            run_lines::phase_words(&self.runner.status())
-        } else {
-            None
+        execution.phase = match (is_running, stopping) {
+            (false, _) => None,
+            (true, true) => Some("stopping".to_owned()),
+            (true, false) => run_lines::phase_words(&self.runner.status()),
         };
         execution.live_window = live_window;
         if !is_running {

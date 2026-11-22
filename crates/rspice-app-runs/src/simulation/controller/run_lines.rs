@@ -325,11 +325,20 @@ fn platform(target: crate::state::ExecutionTarget) -> &'static str {
 /// reached: "Flattening", "Preparing 1,048,576 devices", "DC operating point", "Transient
 /// t = 5.2 ns of 10 ns · 52%". `None` once the task has ended, and before it has begun.
 pub(super) fn phase_words(status: &SimulationStatus) -> Option<String> {
-    // "5.2 ns": the digits, a space, then the prefix and the unit.
+    // "289.2 ps": four significant digits, as readouts show, then a space, the prefix and the
+    // unit.
     let seconds = |value: f64| {
+        let decade = if value == 0.0 {
+            0
+        } else {
+            value.abs().log10().floor() as i32
+        };
+        let whole_digits = decade.rem_euclid(3) + 1;
         let text = rspice_vocabulary::quantity::engineering::format_engineering_display_with(
             value,
-            rspice_vocabulary::quantity::engineering::EngineeringPrecision::Adaptive,
+            rspice_vocabulary::quantity::engineering::EngineeringPrecision::UpTo(
+                (4 - whole_digits).clamp(0, 3) as u8,
+            ),
         );
         let prefix = text.find(char::is_alphabetic).unwrap_or(text.len());
         format!("{} {}s", &text[..prefix], &text[prefix..])
@@ -407,6 +416,14 @@ mod tests {
             })
             .as_deref(),
             Some("Transient t = 5.2 ns of 10 ns · 52%")
+        );
+        assert_eq!(
+            phase_words(&SimulationStatus::Transient {
+                time: 289.203e-12,
+                stop_time: 10e-9
+            })
+            .as_deref(),
+            Some("Transient t = 289.2 ps of 10 ns · 3%")
         );
         assert_eq!(phase_words(&SimulationStatus::Idle), None);
     }

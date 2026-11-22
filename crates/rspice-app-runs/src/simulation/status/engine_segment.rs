@@ -47,6 +47,10 @@ pub fn simulation_engine_status(
     {
         return Some(words.clone());
     }
+    // A run the engine has reported no progress of has no figure to give.
+    if phase != "preparing" && simulation.execution.reported_progress.is_none() {
+        return Some(format!("Engine {phase}"));
+    }
     Some(format!(
         "Engine {phase} · {}%",
         simulation_progress_percent(simulation.execution.progress)

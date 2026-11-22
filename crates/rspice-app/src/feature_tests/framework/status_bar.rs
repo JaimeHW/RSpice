@@ -347,6 +347,7 @@ fn engine_status_follows_execution_lifecycle_not_worker_activity() {
         .expect("current run has execution identity");
     simulation.execution.active_execution = Some(identity);
     simulation.execution.progress = 0.375;
+    simulation.execution.reported_progress = Some(0.375);
     simulation.execution.is_running = false;
 
     assert_eq!(
