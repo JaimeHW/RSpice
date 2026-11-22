@@ -76,7 +76,7 @@ fn document_type_says_what_kind_of_document_a_sheet_is() {
             .find(|resolved| resolved.id == field)
             .map(|resolved| resolved.value)
     };
-    let format = SchematicSheetFormat::default();
+    let format = iso_a4();
     assert_eq!(value(&format).as_deref(), Some("Circuit diagram"));
     // A sheet that is some other kind of document says so.
     let wiring = format
@@ -114,8 +114,7 @@ fn document_status_holds_the_release_state_revision_and_date_used_to() {
     ]
     .into_iter()
     .collect();
-    let resolved =
-        resolve_drawing_sheet_title_fields(&SchematicSheetFormat::default(), &authority_values);
+    let resolved = resolve_drawing_sheet_title_fields(&iso_a4(), &authority_values);
     let value = |id| {
         resolved
             .iter()
@@ -141,7 +140,7 @@ fn an_empty_authored_field_letters_blank_and_an_unknown_automatic_one_a_dash() {
         DrawingSheetTitleFieldId::DocumentId,
         DrawingSheetTitleFieldId::Classification,
     ];
-    let format = SchematicSheetFormat::default()
+    let format = iso_a4()
         .try_update(|draft| {
             for field in authored {
                 draft.title_block.fields.get_mut(&field).unwrap().visible = true;
@@ -193,8 +192,31 @@ fn an_empty_authored_field_letters_blank_and_an_unknown_automatic_one_a_dash() {
 }
 
 #[test]
-fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
+fn a_new_schematic_starts_on_the_compact_block_and_an_iso_size_on_iso_7200s() {
+    // The compact block, 110 by 32 mm, whose title row holds a 40-character
+    // title on one line.
     let format = SchematicSheetFormat::default();
+    assert_eq!(
+        format.title_block.template,
+        DrawingSheetTitleBlockTemplate::Compact
+    );
+    assert!(!format.title_block_substituted());
+    let geometry = format.geometry().unwrap();
+    let block = geometry.title_block.unwrap();
+    assert_eq!((block.width_um, block.height_um), (110_000, 32_000));
+    let layout = drawing_sheet_title_layout(&format, &geometry).unwrap();
+    for (field, chars) in [
+        (DrawingSheetTitleFieldId::SheetTitle, 40),
+        (DrawingSheetTitleFieldId::DocumentId, 16),
+    ] {
+        let held = layout.value(field).unwrap().capacity();
+        assert!(held >= chars, "{field:?} holds {held} characters");
+    }
+
+    // A sheet started from the ISO size carries ISO 7200's 180 mm block.
+    // ISO 7200 recommends 25 characters for a title and 16 for the document
+    // identifier, and its cells hold both.
+    let format = iso_a4();
     assert_eq!(
         format.title_block.template,
         DrawingSheetTitleBlockTemplate::Standard
@@ -202,9 +224,6 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     assert!(!format.title_block_substituted());
     let geometry = format.geometry().unwrap();
     assert_eq!(geometry.title_block.unwrap().width_um, 180_000);
-
-    // ISO 7200 recommends 25 characters for a title and 16 for the document
-    // identifier, and the default block's cells hold both.
     let layout = drawing_sheet_title_layout(&format, &geometry).unwrap();
     for (field, chars) in [
         (DrawingSheetTitleFieldId::SheetTitle, 25),
@@ -212,6 +231,25 @@ fn a_new_sheet_starts_on_the_180_mm_block_iso_7200_specifies() {
     ] {
         let held = layout.value(field).unwrap().capacity();
         assert!(held >= chars, "{field:?} holds {held} characters");
+    }
+
+    // The compact block fits every standard size in either orientation.
+    for standard in DrawingSheetStandard::ALL {
+        for orientation in [
+            SchematicPageOrientation::Landscape,
+            SchematicPageOrientation::Portrait,
+        ] {
+            let sheet = SchematicSheetFormat::from_standard(standard, orientation)
+                .try_update(|draft| {
+                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+                })
+                .unwrap();
+            assert_eq!(
+                sheet.geometry().unwrap().effective_title_block_template,
+                DrawingSheetTitleBlockTemplate::Compact,
+                "{standard:?} {orientation:?}"
+            );
+        }
     }
 
     // Every sheet ISO 5457 frames starts on the block, in either
@@ -430,7 +468,7 @@ fn the_language_code_is_an_optional_project_field() {
     );
 
     // A sheet saved before the field existed loads with it hidden.
-    let format = SchematicSheetFormat::default();
+    let format = iso_a4();
     let mut wire = serde_json::to_value(&format).unwrap();
     wire["title_block"]["fields"]
         .as_object_mut()

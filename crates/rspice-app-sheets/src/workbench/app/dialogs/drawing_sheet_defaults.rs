@@ -1459,13 +1459,15 @@ fn title_frame_block(
                         .map(|template| (template, template.label())),
                 );
             } else {
-                // New sheets start on their format's form: ISO 7200's, or
-                // ASME Y14.1's on an ANSI or ARCH page, which is offered only
-                // there or to a default already on it.
+                // The compact block, which the built-in default carries,
+                // then the formal forms: ISO 7200's, or ASME Y14.1's on an
+                // ANSI or ARCH page, which is offered only there or to a
+                // default already on it.
                 let current = record.title_block.template;
                 let asme_format =
                     record.frame_convention() == DrawingSheetFrameConvention::AsmeY141;
                 let choices = [
+                    DrawingSheetTitleBlockTemplate::Compact,
                     DrawingSheetTitleBlockTemplate::Standard,
                     DrawingSheetTitleBlockTemplate::AsmeY141,
                     DrawingSheetTitleBlockTemplate::None,

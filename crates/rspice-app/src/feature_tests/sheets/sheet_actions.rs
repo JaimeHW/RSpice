@@ -9,6 +9,9 @@ use rspice_app_state::state::{
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_workbench::workbench::framework::feature::CanvasGesturePort;
 use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
+use rspice_design_model::design_management::{
+    DrawingSheetTitleBlockTemplate, drawing_sheet_title_layout,
+};
 
 /// [`Model::go_to_sheet`], stated on the status bar. Page navigation reaches
 /// it through [`next_sheet`] and [`previous_sheet`].
@@ -374,6 +377,58 @@ fn an_untitled_block_reads_the_design_name_on_every_sheet() {
     )
     .expect("activation publishes");
     assert_eq!(lettered_title(&state), design, "the first sheet");
+}
+
+/// A new schematic starts on the compact block. Untitled, the block letters
+/// the design's name as its Title, and its Sheet reads `n of N`: `1 of 1`
+/// alone, `2 of 2` on the sheet a second one adds.
+#[test]
+fn a_new_schematic_letters_its_name_and_sheet_on_the_compact_block() {
+    let mut state = AppState::default();
+    state.model.schematic.document_mut_for_test().components = vec![Component::new(
+        10,
+        ComponentType::Resistor,
+        Point::new(10, 10),
+    )];
+    let design = state.model.workspace.content.active_view.cell.clone();
+    let lettered = |state: &AppState| {
+        let sheet = state.model.active_drawing_sheet();
+        let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
+            .expect("the sheet carries a title block");
+        let lines = layout
+            .lettering(&state.model.title_block_fields(&sheet))
+            .into_iter()
+            .map(|line| line.text)
+            .collect::<Vec<_>>();
+        (
+            sheet.geometry.physical.effective_title_block_template,
+            lines,
+        )
+    };
+
+    let (template, lines) = lettered(&state);
+    assert_eq!(template, DrawingSheetTitleBlockTemplate::Compact);
+    for expected in ["Title:", design.as_str(), "Sheet:", "1 of 1"] {
+        assert!(
+            lines.iter().any(|line| line == expected),
+            "{expected} in {lines:?}"
+        );
+    }
+
+    new_sheet(&mut state.model, &mut state.workbench, &mut *state.design)
+        .expect("the first new sheet creates the catalog");
+    let (template, lines) = lettered(&state);
+    assert_eq!(
+        template,
+        DrawingSheetTitleBlockTemplate::Compact,
+        "the new sheet"
+    );
+    for expected in [design.as_str(), "2 of 2"] {
+        assert!(
+            lines.iter().any(|line| line == expected),
+            "{expected} in {lines:?}"
+        );
+    }
 }
 
 /// Delete asks nothing: a sheet that holds objects goes at once with them,

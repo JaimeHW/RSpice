@@ -530,7 +530,9 @@ impl DrawingSheetTitleBlockTemplate {
         }
     }
 
-    /// The block a new sheet of `convention`'s format starts on.
+    /// The formal block of `convention`'s format, which a sheet started from
+    /// one of its standard sizes carries. A new schematic starts on the
+    /// compact block (see [`SchematicSheetFormat::default`]).
     #[must_use]
     pub const fn for_convention(convention: DrawingSheetFrameConvention) -> Self {
         match convention {
@@ -1183,11 +1185,18 @@ impl SchematicSheetFormatDraft {
 }
 
 impl Default for SchematicSheetFormat {
+    /// The format a new schematic starts on when nothing has chosen one: A4
+    /// landscape in ISO 5457's frame, carrying the compact title block. A
+    /// sheet started from a standard size carries that standard's form (see
+    /// [`Self::from_standard`]).
     fn default() -> Self {
-        Self::from_standard(
+        let mut format = Self::from_standard(
             DrawingSheetStandard::IsoA4,
             SchematicPageOrientation::Landscape,
-        )
+        );
+        format.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+        debug_assert!(format.validate().is_ok());
+        format
     }
 }
 
@@ -1693,13 +1702,13 @@ impl SchematicSheetFormat {
         )))
     }
 
-    /// Start a new sheet on its format's standard title block: ISO 7200's
-    /// 180 mm block on a sheet ISO 5457 frames, which holds the standard's
-    /// 25-character title and 16-character document identifier, and ASME
-    /// Y14.1's form on an ANSI or ARCH sheet, and on a custom size the block
-    /// of the series it was started from. Either is the block whether or not
-    /// the drawing area holds it: a sheet that cannot carries no block, and
-    /// its properties say why.
+    /// Start a sheet chosen from a standard on its format's standard title
+    /// block: ISO 7200's 180 mm block on a sheet ISO 5457 frames, which
+    /// holds the standard's 25-character title and 16-character document
+    /// identifier, and ASME Y14.1's form on an ANSI or ARCH sheet, and on a
+    /// custom size the block of the series it was started from. Either is
+    /// the block whether or not the drawing area holds it: a sheet that
+    /// cannot carries no block, and its properties say why.
     fn start_on_standard_title_block(&mut self) {
         self.title_block.template =
             DrawingSheetTitleBlockTemplate::for_convention(self.frame_convention());

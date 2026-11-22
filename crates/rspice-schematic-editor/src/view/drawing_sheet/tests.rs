@@ -410,7 +410,10 @@ fn the_canvas_letters_each_field_in_the_cell_the_sheet_lays_out() {
     // The canvas draws the cells hardcopy plots, so a value is cut short on
     // screen exactly where it is on paper and nowhere else.
     use rspice_design_model::design_management::DrawingSheetTitleFieldId as Field;
-    let sheet = test_sheet();
+    let sheet = active(SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    ));
     let long = "a value far longer than any cell of the block can hold";
     let values = [
         (Field::CellView, long),
@@ -468,7 +471,10 @@ fn overflow_report_retains_exact_item_identity_severity_coordinates_and_zone() {
         vec![Point::new(500, 650), Point::new(520, 650)],
     ));
     let symbol_context = SchematicSymbolContext::default();
-    let sheet = test_sheet();
+    let sheet = active(SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    ));
 
     let report = drawing_sheet_overflow_summary(&test_view(&document), &symbol_context, &sheet);
 

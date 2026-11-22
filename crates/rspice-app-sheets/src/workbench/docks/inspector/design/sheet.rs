@@ -63,8 +63,9 @@ pub struct SheetInspector<'a> {
 /// An edit the panel asks for this frame, or why what was typed is refused.
 type PanelEdit = Result<DrawingSheetEdit, String>;
 
-/// The title-block templates `format`'s sheet can choose for itself: ISO
-/// 7200's form, ASME Y14.1's on an ANSI or ARCH sheet or one already on it,
+/// The title-block templates `format`'s sheet can choose for itself: the
+/// compact block a new schematic starts on, then the formal forms, ISO
+/// 7200's and ASME Y14.1's on an ANSI or ARCH sheet or one already on it,
 /// or none. The organization block is assigned by the organization, never
 /// chosen here.
 pub fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleBlockTemplate> {
@@ -72,6 +73,7 @@ pub fn template_choices(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleB
     let asme_format =
         format.frame_convention() == crate::state::DrawingSheetFrameConvention::AsmeY141;
     [
+        DrawingSheetTitleBlockTemplate::Compact,
         DrawingSheetTitleBlockTemplate::Standard,
         DrawingSheetTitleBlockTemplate::AsmeY141,
         DrawingSheetTitleBlockTemplate::None,

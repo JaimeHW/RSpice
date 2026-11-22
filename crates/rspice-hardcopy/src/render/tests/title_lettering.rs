@@ -161,16 +161,19 @@ fn laid_out_title_lines(format: &SchematicSheetFormat) -> Vec<(SceneFont, u64, S
 fn only_the_document_identifier_is_plotted_in_the_heavier_weight() {
     // ISO 7200 emphasises the identification number alone; every other value
     // stands out from its caption by its height.
-    let format = SchematicSheetFormat::default()
-        .try_update(|draft| {
-            draft
-                .title_block
-                .fields
-                .get_mut(&DrawingSheetTitleFieldId::DocumentId)
-                .unwrap()
-                .value = "PSAFE-SCH-001".to_owned();
-        })
-        .unwrap();
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    )
+    .try_update(|draft| {
+        draft
+            .title_block
+            .fields
+            .get_mut(&DrawingSheetTitleFieldId::DocumentId)
+            .unwrap()
+            .value = "PSAFE-SCH-001".to_owned();
+    })
+    .unwrap();
     let heavier = plotted_title_lines(&format)
         .into_iter()
         .filter(|(font, _, _)| *font == SceneFont::MonospaceMedium)
@@ -249,7 +252,10 @@ fn a_plotted_caption_letters_the_field_name_and_nothing_else() {
     // ISO 7200 marks no field as filled in by the system, so the caption of
     // a field RSpice fills in reads exactly as an authored field's does, in
     // the standard's own words.
-    let format = SchematicSheetFormat::default();
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    );
     let caption_em = drawing_sheet_mono_em_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.caption_um);
     let captions = plotted_title_lines(&format)
         .into_iter()
@@ -276,6 +282,7 @@ fn a_plotted_caption_letters_the_field_name_and_nothing_else() {
 #[test]
 fn the_plot_letters_exactly_the_lines_the_layout_letters() {
     for template in [
+        DrawingSheetTitleBlockTemplate::Compact,
         DrawingSheetTitleBlockTemplate::Standard,
         DrawingSheetTitleBlockTemplate::AsmeY141,
         DrawingSheetTitleBlockTemplate::OrganizationManaged,
@@ -345,7 +352,10 @@ fn the_title_block_is_outlined_wide_and_ruled_narrow() {
 fn an_empty_authored_field_plots_its_caption_alone() {
     // A title block is a form: Created by and Approved by start on a sheet
     // empty, boxes to sign on the print, with no dash in them.
-    let lines = plotted_title_lines(&SchematicSheetFormat::default());
+    let lines = plotted_title_lines(&SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    ));
     let value_em = drawing_sheet_mono_em_um(DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um);
     assert!(
         lines.iter().all(|(_, _, text)| !text.trim().is_empty()),
@@ -396,21 +406,24 @@ fn a_new_sheet_plots_typical_title_values_whole() {
         (DrawingSheetTitleFieldId::DocumentStatus, "Under approval"),
         (DrawingSheetTitleFieldId::DocumentId, "RS-0001-SCH-0042"),
     ];
-    let format = SchematicSheetFormat::default()
-        .try_update(|draft| {
-            // ISO 7200's form has no project field, so asking for one
-            // letters nothing.
-            draft
-                .title_block
-                .fields
-                .get_mut(&DrawingSheetTitleFieldId::Project)
-                .unwrap()
-                .visible = true;
-            for (field, value) in authored {
-                draft.title_block.fields.get_mut(&field).unwrap().value = value.to_owned();
-            }
-        })
-        .unwrap();
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    )
+    .try_update(|draft| {
+        // ISO 7200's form has no project field, so asking for one
+        // letters nothing.
+        draft
+            .title_block
+            .fields
+            .get_mut(&DrawingSheetTitleFieldId::Project)
+            .unwrap()
+            .visible = true;
+        for (field, value) in authored {
+            draft.title_block.fields.get_mut(&field).unwrap().value = value.to_owned();
+        }
+    })
+    .unwrap();
     let source = blank_schematic_titled(
         &format,
         supplied

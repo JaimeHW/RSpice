@@ -469,13 +469,15 @@ fn the_defaults_speak_in_sentence_case_through_named_selects() {
             .map(|(_, rect)| *rect)
             .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
     };
-    // What the dialog paints, from its title to its footer: the status bar
-    // behind it has dashes of its own.
+    // What the dialog paints, from its title to its footer: the canvas and
+    // the status bar behind it have dashes of their own, such as the title
+    // block's revision not yet issued.
     let surface = at("Drawing-sheet defaults")
         .union(at("Save sheet defaults"))
         .expand2(egui::vec2(16.0, 0.0));
     let texts = painted
         .iter()
+        .skip_while(|(text, _)| text != "Drawing-sheet defaults")
         .filter(|(_, rect)| surface.contains_rect(*rect))
         .map(|(text, _)| text.clone())
         .collect::<Vec<_>>();

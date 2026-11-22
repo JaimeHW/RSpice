@@ -485,7 +485,7 @@ fn the_iso_forms_vertical_rules_stand_on_a_common_grid() {
 fn the_iso_forms_mandatory_fields_stay_on_it() {
     // A sheet saved hiding every field still draws the eight ISO 7200 makes
     // mandatory, without its saved choices being rewritten.
-    let format = SchematicSheetFormat::default()
+    let format = iso_a4()
         .try_update(|draft| {
             for (field, state) in &mut draft.title_block.fields {
                 state.visible = field.policy().required_visible;
@@ -522,10 +522,7 @@ fn the_iso_forms_mandatory_fields_stay_on_it() {
         !DrawingSheetTitleBlockTemplate::OrganizationManaged.requires_field(Field::Organization)
     );
     // Project and Paper size are not on the form, whatever a sheet shows.
-    let every = showing(
-        &SchematicSheetFormat::default(),
-        &DrawingSheetTitleFieldId::ALL,
-    );
+    let every = showing(&iso_a4(), &DrawingSheetTitleFieldId::ALL);
     for field in [Field::Project, Field::PaperSize] {
         assert!(!every.title_field_shown(field));
         assert!(!every.title_block_field_order().contains(&field));
@@ -540,7 +537,7 @@ fn the_iso_forms_mandatory_fields_stay_on_it() {
 
 #[test]
 fn a_long_legal_owner_wraps_in_its_cell() {
-    let layout = layout_of(&SchematicSheetFormat::default());
+    let layout = layout_of(&iso_a4());
     let owner = layout.value(Field::Organization).unwrap();
     assert_eq!(
         owner.letter("Whitfield Analog Devices"),
@@ -627,7 +624,7 @@ fn every_lettered_line_stays_inside_its_cell() {
 
 #[test]
 fn a_new_sheet_letters_typical_values_whole() {
-    let new_sheet = SchematicSheetFormat::default();
+    let new_sheet = iso_a4();
     assert_eq!(
         new_sheet.geometry().unwrap().effective_title_block_template,
         DrawingSheetTitleBlockTemplate::Standard

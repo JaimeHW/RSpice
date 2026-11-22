@@ -10,8 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::state::{
-    DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetStandard,
-    SchematicPageOrientation, SchematicSheetFormat,
+    DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope, SchematicSheetFormat,
 };
 
 use super::UserPreferences;
@@ -67,14 +66,11 @@ impl<'de> Deserialize<'de> for DrawingSheetPersonalPreferences {
 impl Default for DrawingSheetPersonalPreferences {
     fn default() -> Self {
         Self {
-            default_format: SchematicSheetFormat::from_standard(
-                DrawingSheetStandard::IsoA4,
-                SchematicPageOrientation::Landscape,
-            )
-            .try_update(|draft| {
-                draft.inheritance = DrawingSheetInheritance::UserDefault;
-            })
-            .expect("the canonical personal drawing-sheet default is valid"),
+            default_format: SchematicSheetFormat::default()
+                .try_update(|draft| {
+                    draft.inheritance = DrawingSheetInheritance::UserDefault;
+                })
+                .expect("the canonical personal drawing-sheet default is valid"),
             presets: Vec::new(),
         }
     }

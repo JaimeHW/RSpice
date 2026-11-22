@@ -54,6 +54,31 @@ impl SheetPanel {
         }
     }
 
+    /// A panel on a sheet carrying ISO 7200's form, whose optional boxes a
+    /// sheet shows and hides; a new schematic starts on the compact block,
+    /// which has none.
+    fn on_iso_7200() -> Self {
+        let mut panel = Self::new();
+        apply_drawing_sheet_edit(
+            &mut panel.app.state,
+            DrawingSheetEdit::TitleBlock(DrawingSheetTitleBlockTemplate::Standard),
+        )
+        .unwrap();
+        panel
+    }
+
+    /// A panel on an ANSI B sheet carrying ASME Y14.1's form.
+    fn on_asme_y14_1() -> Self {
+        let mut panel = Self::new();
+        for edit in [
+            DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
+            DrawingSheetEdit::TitleBlock(DrawingSheetTitleBlockTemplate::AsmeY141),
+        ] {
+            apply_drawing_sheet_edit(&mut panel.app.state, edit).unwrap();
+        }
+        panel
+    }
+
     fn pass(&mut self, events: Vec<egui::Event>) {
         let output = self.ctx.run_ui(
             egui::RawInput {
@@ -211,10 +236,10 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
 
 /// With nothing selected the panel is the sheet's property editor: its size,
 /// orientation, where its format comes from, its frame and units, its title
-/// block and the optional boxes it shows, and every value its title block
-/// shows that someone types, editable where they stand — this sheet's own,
-/// then the document's, each in the order ISO 7200's form is read and named
-/// as the form names it. An empty value shows what the block letters
+/// block, and every value its title block shows that someone types,
+/// editable where they stand — this sheet's own, then the document's, each
+/// in the order the block is read. A new schematic's block is the compact
+/// one, which has no optional boxes. An empty value shows what the block letters
 /// instead. The toolbar's Check cellview is not repeated as a button, and a
 /// check never run adds no section.
 #[test]
@@ -227,17 +252,16 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
         "Sheet\nSize\nISO A4\nOrientation\nLandscape\n\
          Format from\nProject default\nFrame\nISO 5457 frame\nZones\n6 × 4\n\
          Centring marks\nDrawn\nUnits\nMillimetres\n\
-         Title block\nTemplate\nISO 7200\nOptional boxes\n3 of 6 shown\n\
-         Created by\n\nApproved by\n\nDocument type\nCircuit diagram\n\nTitle\ntop\n\n\
-         Document\nAll sheets\nLegal owner\n\nDocument status\nIn preparation\n\
-         Identification number\n\nRevision\n\nDate of issue\nYYYY-MM-DD\n\n\
-         Change reference\nECO or ticket\n\n\
+         Title block\nTemplate\nCompact\nTitle\ntop\n\nCreated by\n\n\
+         Document\nAll sheets\nLegal owner\n\nIdentification number\n\n\
+         Revision\n\nDate of issue\nYYYY-MM-DD\n\n\
+         Document status\nIn preparation\nChange reference\nECO or ticket\n\n\
          Schematic\nGrid\n2.5 mm\nNet names\nStrict\n"
     );
 }
 
-/// A sheet chooses ISO 7200's form, ASME Y14.1's on an ANSI or ARCH sheet or
-/// one already on it, or no block.
+/// A sheet chooses the compact block, ISO 7200's form, ASME Y14.1's on an
+/// ANSI or ARCH sheet or one already on it, or no block.
 #[test]
 fn a_sheet_is_offered_its_standards_blocks_or_none() {
     use DrawingSheetTitleBlockTemplate as Template;
@@ -247,27 +271,33 @@ fn a_sheet_is_offered_its_standards_blocks_or_none() {
             .unwrap()
     };
     let a4 = DrawingSheetStandard::IsoA4;
-    assert_eq!(
-        template_choices(&on(a4, Template::Standard)),
-        [Template::Standard, Template::None]
-    );
-    assert_eq!(
-        template_choices(&on(a4, Template::None)),
-        [Template::Standard, Template::None]
-    );
+    for template in [Template::Compact, Template::Standard, Template::None] {
+        assert_eq!(
+            template_choices(&on(a4, template)),
+            [Template::Compact, Template::Standard, Template::None]
+        );
+    }
     assert_eq!(
         template_choices(&on(a4, Template::AsmeY141)),
-        [Template::Standard, Template::AsmeY141, Template::None]
+        [
+            Template::Compact,
+            Template::Standard,
+            Template::AsmeY141,
+            Template::None
+        ]
     );
     for standard in [DrawingSheetStandard::AnsiB, DrawingSheetStandard::ArchD] {
-        assert_eq!(
-            template_choices(&on(standard, Template::AsmeY141)),
-            [Template::Standard, Template::AsmeY141, Template::None]
-        );
-        assert_eq!(
-            template_choices(&on(standard, Template::Standard)),
-            [Template::Standard, Template::AsmeY141, Template::None]
-        );
+        for template in [Template::Compact, Template::Standard, Template::AsmeY141] {
+            assert_eq!(
+                template_choices(&on(standard, template)),
+                [
+                    Template::Compact,
+                    Template::Standard,
+                    Template::AsmeY141,
+                    Template::None
+                ]
+            );
+        }
     }
     // The ASME form is named for the standard, whatever size of block the
     // sheet carries.
@@ -304,12 +334,7 @@ fn a_revision_index_with_an_o_is_flagged_and_kept() {
 /// and flagged, not refused, outside it.
 #[test]
 fn a_revision_outside_y14_35_is_flagged_and_kept_on_an_asme_sheet() {
-    let mut panel = SheetPanel::new();
-    apply_drawing_sheet_edit(
-        &mut panel.app.state,
-        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
-    )
-    .unwrap();
+    let mut panel = SheetPanel::on_asme_y14_1();
     panel.enter("Revision", "S");
     assert_eq!(
         panel.document_value(DrawingSheetTitleFieldId::Revision),
@@ -408,18 +433,13 @@ fn the_document_date_and_status_are_held_to_the_document_controls_rules() {
     );
 }
 
-/// On an ANSI sheet the block follows the size to ASME Y14.1's form, and the
-/// panel offers every value its approvals block letters: the engineer and
+/// On an ANSI sheet on ASME Y14.1's form the panel offers every value its
+/// approvals block letters: the engineer and
 /// each signature's date on the sheet, the CAGE code and contract number on
 /// the project. A signature date is held to the document date's form.
 #[test]
 fn the_asme_forms_approvals_are_typed_in_the_panel() {
-    let mut panel = SheetPanel::new();
-    apply_drawing_sheet_edit(
-        &mut panel.app.state,
-        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
-    )
-    .unwrap();
+    let mut panel = SheetPanel::on_asme_y14_1();
     let format = panel.app.state.model.active_drawing_sheet().format;
     assert_eq!(
         format.title_block.template,
@@ -480,12 +500,7 @@ fn the_asme_forms_approvals_are_typed_in_the_panel() {
 /// block that has a document section and an ASME sheet can be released.
 #[test]
 fn an_asme_sheet_offers_the_release_record_its_block_does_not_letter() {
-    let mut panel = SheetPanel::new();
-    apply_drawing_sheet_edit(
-        &mut panel.app.state,
-        DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
-    )
-    .unwrap();
+    let mut panel = SheetPanel::on_asme_y14_1();
     let format = panel.app.state.model.active_drawing_sheet().format;
     assert!(!format.title_field_shown(DrawingSheetTitleFieldId::Date));
     let painted = painted_panel(|ui| sheet_panel(ui, &mut panel.app.state));
@@ -977,7 +992,7 @@ fn a_sheet_follows_the_project_default_until_it_takes_its_own_format() {
 /// stays.
 #[test]
 fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
-    let mut panel = SheetPanel::new();
+    let mut panel = SheetPanel::on_iso_7200();
     for edit in [
         DrawingSheetEdit::BoxShown(DrawingSheetTitleFieldId::CheckedBy, true),
         DrawingSheetEdit::BoxShown(DrawingSheetTitleFieldId::Language, true),
@@ -1027,7 +1042,7 @@ fn the_optional_boxes_are_shown_and_hidden_in_the_panel() {
 /// the next one.
 #[test]
 fn the_optional_boxes_are_a_checklist() {
-    let mut panel = SheetPanel::new();
+    let mut panel = SheetPanel::on_iso_7200();
     let shown = |panel: &SheetPanel, field: DrawingSheetTitleFieldId| {
         panel
             .app

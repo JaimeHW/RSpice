@@ -11,6 +11,15 @@ mod sheet_lifecycle;
 mod title_fields;
 mod title_layout;
 
+/// An A4 landscape sheet on ISO 7200's form, the block a sheet started from
+/// the ISO size carries; a new schematic starts on the compact block.
+fn iso_a4() -> SchematicSheetFormat {
+    SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    )
+}
+
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
         name: name.to_owned(),
@@ -2666,7 +2675,7 @@ fn drawing_sheet_transactions_retain_complete_revisioned_project_receipts() {
 
 #[test]
 fn drawing_sheet_title_cell_budget_is_physical() {
-    let upright = SchematicSheetFormat::default();
+    let upright = iso_a4();
     let upright_layout =
         drawing_sheet_title_layout(&upright, &upright.geometry().unwrap()).unwrap();
 
@@ -2847,7 +2856,7 @@ fn an_organization_template_sealed_before_a_field_retired_still_loads() {
 
 #[test]
 fn a_new_sheet_shows_the_fields_iso_7200_requires_and_waits_on_the_rest() {
-    let format = SchematicSheetFormat::default();
+    let format = iso_a4();
     let visible = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new());
     // ISO 7200 makes the creator and the approval person mandatory, so a
     // sheet carries both, as boxes to sign, before anyone has signed it.
@@ -2982,7 +2991,7 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
     // Every caption must fit its cell in the default block even with every
     // field shown, because a caption is fixed wording that no operator can
     // shorten.
-    let format = SchematicSheetFormat::default()
+    let format = iso_a4()
         .try_update(|draft| {
             for state in draft.title_block.fields.values_mut() {
                 state.visible = true;

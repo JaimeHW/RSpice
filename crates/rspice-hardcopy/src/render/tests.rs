@@ -2039,7 +2039,10 @@ fn a_plotted_title_block_declares_no_scale() {
     // ISO 7200 keeps scale out of the title block, and a schematic is not
     // drawn to one, so the plot letters no Scale cell even though the sheet
     // still carries the ratio it was saved with.
-    let format = SchematicSheetFormat::default();
+    let format = SchematicSheetFormat::from_standard(
+        DrawingSheetStandard::IsoA4,
+        SchematicPageOrientation::Landscape,
+    );
     let source = resolved_blank_schematic(&format);
     let schematic = SchematicHardcopySetup::new(
         SchematicHardcopyExtent::AuthoredDrawingSheet,

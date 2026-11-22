@@ -10,7 +10,7 @@ use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::symbol_resolver::SymbolResolver;
 use rspice_design_model::design_management::{
     AuthoredDrawingSheetSize, DrawingSheetStandard, DrawingSheetStandardSeries,
-    SchematicSheetFormat,
+    DrawingSheetTitleBlockTemplate, SchematicSheetFormat,
 };
 use rspice_design_model::{Point, SchematicPageOrientation};
 use rspice_schematic_editor::view::drawing_sheet::{DrawingSheetGeometry, WorldRect};
@@ -115,6 +115,11 @@ fn larger_sheets(project: &SchematicSheetFormat) -> impl Iterator<Item = Schemat
         orientations.into_iter().map(move |orientation| {
             let mut format = SchematicSheetFormat::from_standard(standard, orientation);
             format.display_unit = project.display_unit;
+            // A larger sheet keeps the compact block the project's sheet
+            // carries, rather than taking the standard's formal form.
+            if project.title_block.template == DrawingSheetTitleBlockTemplate::Compact {
+                format.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
+            }
             format
         })
     })

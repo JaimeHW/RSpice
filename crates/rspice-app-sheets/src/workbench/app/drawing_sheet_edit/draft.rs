@@ -535,7 +535,7 @@ mod tests {
                 .unwrap()
                 .value = "Sheet 1".to_owned();
             // Turning a sheet keeps the block it asked for.
-            format.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
+            format.title_block.template = DrawingSheetTitleBlockTemplate::Compact;
         })
         .unwrap();
         let turned = draft.validate().unwrap();
