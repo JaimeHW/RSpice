@@ -297,15 +297,6 @@ impl NetLabel {
         Ok(())
     }
 
-    /// Check if this label uses a predefined power net name
-    pub fn is_power_net(&self) -> bool {
-        let upper = self.name.to_uppercase();
-        matches!(
-            upper.as_str(),
-            "VCC" | "VDD" | "VEE" | "VSS" | "GND" | "GROUND" | "0" | "AVDD" | "DVDD" | "AVSS"
-        )
-    }
-
     /// Check if this label names the simulation reference node.
     ///
     /// The alias set is the product's one ground authority, so the canvas, the

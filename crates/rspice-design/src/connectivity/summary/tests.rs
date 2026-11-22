@@ -178,3 +178,52 @@ fn a_placed_schematics_pin_reads_the_kind_of_its_net_inside() {
     let nets = design_nets_with_hierarchy(&top, &HierarchySource::from_buffers(&buffers));
     assert_eq!(kind_at(&nets, &driver, "out"), NetDomain::Logic);
 }
+
+/// A supply symbol makes its net a supply rail whatever the rail is called,
+/// and a plain label does not, whatever it is called.
+#[test]
+fn the_supply_symbol_not_the_name_makes_a_supply_rail() {
+    let rail = |id: u64, y: i32, name: &str, supply: bool| {
+        let wire = Wire::new(id, vec![Point::new(0, y), Point::new(200, y)]);
+        let pos = Point::new(100, y);
+        let label = if supply {
+            NetLabel::supply(
+                id + 100,
+                pos,
+                name,
+                crate::schematic::net_label::SupplyGlyph::Bar,
+            )
+        } else {
+            NetLabel::new(id + 100, pos, name)
+        };
+        (wire, label)
+    };
+    let (wires, net_labels): (Vec<_>, Vec<_>) = [
+        rail(1, 0, "VIO", true),
+        rail(2, 100, "VBAT", true),
+        rail(3, 200, "VDD", false),
+        rail(4, 300, "vcc_ok", false),
+    ]
+    .into_iter()
+    .unzip();
+    let schematic = SchematicDocument {
+        wires,
+        net_labels,
+        ..SchematicDocument::default()
+    };
+
+    let mut classes = design_nets(&schematic)
+        .into_iter()
+        .map(|net| (net.name.to_ascii_lowercase(), net.class))
+        .collect::<Vec<_>>();
+    classes.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        classes,
+        [
+            ("vbat".to_owned(), NetClass::Supply),
+            ("vcc_ok".to_owned(), NetClass::Signal),
+            ("vdd".to_owned(), NetClass::Signal),
+            ("vio".to_owned(), NetClass::Supply),
+        ]
+    );
+}

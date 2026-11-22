@@ -483,10 +483,12 @@ fn collect_design_nets(
             }
         }
     }
-    // A power label anywhere on the net declares it a supply rail.
+    // A supply symbol anywhere on the net declares it a supply rail. The
+    // symbol says so, not the name: a rail called `VBAT` is one, and a signal
+    // labelled `vdd_sense` is not.
     let mut power_labelled: HashSet<usize> = HashSet::new();
     for label in &schematic.net_labels {
-        if label.is_power_net()
+        if label.kind.supply_glyph().is_some()
             && !label.is_ground()
             && let Some(net) = net_at(label.pos)
         {

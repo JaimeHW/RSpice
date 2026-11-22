@@ -588,29 +588,23 @@ pub fn normalized_probe_expression(expression: &str) -> String {
         .collect()
 }
 
-/// The class colour of a named net: ground, supply or clock. Any other name
-/// declares no class and is painted as a wire: a net colour is an explicit
-/// assignment, and a hash of the name lands on the wire, selection and class
-/// hues as often as not.
-pub fn named_net_class_color(name: &str, palette: &Palette) -> Option<egui::Color32> {
-    let normalized = name.trim().to_ascii_lowercase();
-    if matches!(
-        normalized.as_str(),
-        "0" | "gnd" | "ground" | "vss" | "vssa" | "vssd"
-    ) {
-        return Some(palette.net_class_ground);
+/// The colour of a net's class: ground or supply. A signal is painted as a
+/// wire: a net colour is an explicit assignment, and a hash of the name
+/// lands on the wire, selection and class hues as often as not.
+///
+/// The class is the design's, so the canvas and the Connectivity dialog
+/// agree. Guessing it from the name painted `VSS` as ground, which the deck
+/// keeps off node 0, and a signal called `vcc_ok` as a supply.
+pub fn net_class_color(
+    class: rspice_design::connectivity::summary::NetClass,
+    palette: &Palette,
+) -> Option<egui::Color32> {
+    use rspice_design::connectivity::summary::NetClass;
+    match class {
+        NetClass::Ground => Some(palette.net_class_ground),
+        NetClass::Supply => Some(palette.net_class_supply),
+        NetClass::Signal => None,
     }
-    if normalized.starts_with("vdd")
-        || normalized.starts_with("vcc")
-        || normalized.starts_with("vee")
-        || normalized.starts_with("supply")
-    {
-        return Some(palette.net_class_supply);
-    }
-    if normalized.contains("clk") || normalized.contains("clock") {
-        return Some(palette.net_class_clock);
-    }
-    None
 }
 
 #[cfg(test)]

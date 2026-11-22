@@ -299,7 +299,6 @@ fn apply_engineering_canvas_palette(tokens: &mut Tokens, canvas: Palette) {
     tokens.color.canvas_net_highlight = canvas.canvas_net_highlight;
     tokens.color.net_class_ground = canvas.net_class_ground;
     tokens.color.net_class_supply = canvas.net_class_supply;
-    tokens.color.net_class_clock = canvas.net_class_clock;
     tokens.color.canvas_text = canvas.canvas_text;
     tokens.color.canvas_text_dim = canvas.canvas_text_dim;
     tokens.color.canvas_text_faint = canvas.canvas_text_faint;

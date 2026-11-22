@@ -74,10 +74,9 @@ pub struct Palette {
     pub canvas_select: Color32,
     /// A highlighted net on the schematic canvas.
     pub canvas_net_highlight: Color32,
-    /// Net-class colours: ground, supply and clock nets.
+    /// Net-class colours: ground and supply nets.
     pub net_class_ground: Color32,
     pub net_class_supply: Color32,
-    pub net_class_clock: Color32,
     /// Primary text drawn on a canvas: tick values, cursor readouts and the
     /// labels a viewer paints on its well. The canvas has its own theme, so
     /// the interface text tones can sit on it dark on dark.
@@ -309,7 +308,6 @@ pub const fn high_contrast(inks: ContrastInks) -> Palette {
         canvas_net_highlight: ground.magenta,
         net_class_ground: ground.info,
         net_class_supply: ground.warn,
-        net_class_clock: ground.magenta,
         canvas_text: inks.window_text,
         canvas_text_dim: blend(inks.window, inks.window_text, 88),
         canvas_text_faint: blend(inks.window, inks.window_text, 75),
@@ -381,7 +379,6 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     canvas_net_highlight: Color32::from_rgb(232, 110, 210),
     net_class_ground: Color32::from_rgb(0x7c, 0xb8, 0xe8),
     net_class_supply: Color32::from_rgb(234, 147, 68),
-    net_class_clock: Color32::from_rgb(217, 132, 176),
     canvas_text: Color32::from_rgb(215, 219, 222),
     canvas_text_dim: Color32::from_rgb(147, 153, 158),
     canvas_text_faint: Color32::from_rgb(136, 143, 148),
@@ -458,7 +455,6 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     canvas_net_highlight: Color32::from_rgb(194, 110, 18),
     net_class_ground: Color32::from_rgb(0, 124, 58),
     net_class_supply: Color32::from_rgb(194, 110, 18),
-    net_class_clock: Color32::from_rgb(168, 83, 126),
     canvas_text: Color32::from_rgb(31, 37, 40),
     canvas_text_dim: Color32::from_rgb(83, 89, 93),
     canvas_text_faint: Color32::from_rgb(0x5c, 0x63, 0x67),

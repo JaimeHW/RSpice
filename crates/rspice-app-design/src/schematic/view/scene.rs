@@ -21,7 +21,7 @@ use rspice_schematic_editor::view::{
     cross_probe::wrapped_signal_name,
     pointer_target::{self, PointerTarget},
     scene::{
-        self, BadgeSubject, OperatingPointCanvasAnnotation, named_net_class_color,
+        self, BadgeSubject, OperatingPointCanvasAnnotation, net_class_color,
         normalized_probe_expression,
     },
     tool_input::{ToolPointerAction, ToolPointerView},
@@ -521,9 +521,10 @@ fn net_class_colors(
         &projection,
         &state.model.workspace.content.active_view.key(),
     );
-    for net in nets.iter().filter(|net| net.authored_name) {
-        // A name that declares no class is painted as a wire.
-        let Some(color) = named_net_class_color(&net.name, palette) else {
+    for net in nets.iter() {
+        // A signal is painted as a wire; ground and supply rails in their
+        // class's colour.
+        let Some(color) = net_class_color(net.class, palette) else {
             continue;
         };
         for wire_id in &net.wire_ids {
@@ -1137,8 +1138,8 @@ pub mod tests {
     use std::collections::HashMap;
 
     /// Two conductor groups with no wire between them, each carrying the same
-    /// authored name. The netlister joins them into one node; a canvas that
-    /// traced the drawing itself would see two.
+    /// supply rail's symbol. The netlister joins them into one node; a canvas
+    /// that traced the drawing itself would see two.
     #[cfg(test)]
     fn separated_same_name_groups() -> DesignTestHost {
         let mut state = DesignTestHost::default();
@@ -1159,13 +1160,23 @@ pub mod tests {
             .schematic
             .document_mut_for_test()
             .net_labels
-            .push(crate::state::NetLabel::new(21, Point::new(20, 0), "VDD"));
+            .push(crate::state::NetLabel::supply(
+                21,
+                Point::new(20, 0),
+                "VDD",
+                rspice_design::schematic::net_label::SupplyGlyph::Bar,
+            ));
         state
             .model
             .schematic
             .document_mut_for_test()
             .net_labels
-            .push(crate::state::NetLabel::new(22, Point::new(20, 100), "VDD"));
+            .push(crate::state::NetLabel::supply(
+                22,
+                Point::new(20, 100),
+                "VDD",
+                rspice_design::schematic::net_label::SupplyGlyph::Bar,
+            ));
         state.sync_active_schematic_to_workspace();
         state
     }
