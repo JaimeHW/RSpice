@@ -35,8 +35,8 @@ fn the_descend_shortcut_opens_a_veriloga_instances_view_as_its_row_does() {
     let (_, reference) = select_a_veriloga_instance(&mut app.state);
     assert!(app.command_key_enabled(DesignCommand::DescendHierarchyDirect.key()));
     assert!(
-        !app.command_key_enabled(DesignCommand::DescendHierarchy.key()),
-        "the descent dialog lists schematic masters only"
+        app.command_key_enabled(DesignCommand::DescendHierarchy.key()),
+        "Descend with options opens a module as its form offers"
     );
 
     app.execute_command_key(DesignCommand::DescendHierarchyDirect.key());
