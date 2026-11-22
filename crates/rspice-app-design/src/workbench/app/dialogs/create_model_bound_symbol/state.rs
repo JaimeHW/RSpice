@@ -307,17 +307,27 @@ impl CreateModelBoundSymbolDialogState {
     pub(super) fn source_label(&self, mode: CreateSymbolSourceMode) -> String {
         match mode {
             CreateSymbolSourceMode::Model => self.model_source.as_ref().map_or_else(
-                || "Model contract unavailable".to_owned(),
+                || "No model to read pins from".to_owned(),
                 CreateSymbolModelSource::label,
             ),
             CreateSymbolSourceMode::ExistingSchematicPins => {
                 self.schematic_source.as_ref().map_or_else(
-                    || "Existing schematic pins unavailable".to_owned(),
+                    || "No schematic ports to read pins from".to_owned(),
                     |source| source.label(),
                 )
             }
-            CreateSymbolSourceMode::BlankExplicitContract => "Blank explicit contract".to_owned(),
+            CreateSymbolSourceMode::BlankExplicitContract => "None: add them by hand".to_owned(),
         }
+    }
+
+    /// Whether the pins were guessed from a model, so the author must say
+    /// their order and types are right before the symbol is made.
+    pub(super) fn pins_need_checking(&self) -> bool {
+        self.source_mode == CreateSymbolSourceMode::Model
+            && self
+                .model_source
+                .as_ref()
+                .is_some_and(|source| source.requires_pin_review)
     }
 
     pub(super) fn source_available(&self, mode: CreateSymbolSourceMode) -> bool {

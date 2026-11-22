@@ -259,9 +259,9 @@ pub fn validate_create_symbol_draft(
             return Err(format!("Pin name '{}' is repeated.", pin.name.trim()));
         }
     }
-    if matches!(draft.source_mode, CreateSymbolSourceMode::Model) && !draft.pin_contract_reviewed {
+    if draft.pins_need_checking() && !draft.pin_contract_reviewed {
         return Err(
-            "Review and confirm the inferred model pin order and electrical types before commit."
+            "The pin order and types were guessed from the model; check them, then tick Pin order checked."
                 .to_owned(),
         );
     }
@@ -294,7 +294,7 @@ pub fn validate_create_symbol_draft(
         CreateSymbolSourceMode::BlankExplicitContract => {
             if draft.simulation_test_fixture {
                 return Err(
-                    "A blank explicit contract cannot generate a simulation test fixture because it has no executable DUT implementation."
+                    "A symbol with no model or schematic behind it has nothing for a simulation test fixture to simulate."
                         .to_owned(),
                 );
             }

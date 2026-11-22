@@ -43,7 +43,7 @@ impl SymbolDefinitionImport {
                     ImportedGraphicSource::from_bytes(graphic_format, source_name, bytes)?;
                 let mut definition = explicit_contract.ok_or_else(|| {
                     SymbolDefinitionError::Import(format!(
-                        "{source_name}: {} geometry has no electrical semantics; choose a model/pin contract or Blank explicit contract",
+                        "{source_name}: {} geometry has no electrical semantics; take its pins from a model or the schematic, or add them by hand",
                         format.label()
                     ))
                 })?;

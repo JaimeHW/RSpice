@@ -33,7 +33,7 @@ pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
     let discard_confirm = draft.discard_confirm;
     let pin_count = draft.pins.len();
     let footer_hint = format!(
-        "{} pin{} \u{00b7} atomic library revision",
+        "{} pin{} \u{00b7} saved as one library revision",
         pin_count,
         if pin_count == 1 { "" } else { "s" }
     );
@@ -54,7 +54,7 @@ pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
         dialog = dialog.transaction_state(
             DialogTransactionTone::Error,
             "Discard symbol definition?",
-            "The library is unchanged. Discarding closes this draft and its reviewed pin contract.",
+            "The library is unchanged. Discarding closes this draft and the pins set in it.",
         );
     } else if let Err(error) = &validation {
         dialog = dialog.transaction_state(
@@ -153,7 +153,7 @@ fn identity_section(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) 
 }
 
 fn source_contract_combo(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) {
-    field_label(ui, "Source contract", |ui| {
+    field_label(ui, "Pins from", |ui| {
         let selected = draft.source_label(draft.source_mode);
         let response = crate::ui::widgets::Combo::from_id_salt("create-model-bound-symbol-source")
             .selected_text(selected)
@@ -179,9 +179,9 @@ fn source_contract_combo(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogSt
             })
             .response;
         ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_label("Source contract");
+            node.set_label("Pins from");
             node.set_description(
-                "Explicit model, schematic-interface, or blank terminal contract; source changes replace the pin draft",
+                "The model, the schematic's ports, or none; choosing another replaces the pins below",
             );
         });
     });
@@ -278,7 +278,7 @@ fn empty_pin_row(ui: &mut Ui) {
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
-        "Add an explicit ordered pin contract",
+        "Add the pins in netlist order",
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
@@ -539,10 +539,15 @@ fn pin_toolbar(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) {
         draft.pin_contract_reviewed = true;
         draft.mark_edited();
     }
-    let reviewed_before = draft.pin_contract_reviewed;
-    toolbar.checkbox(&mut draft.pin_contract_reviewed, "Pin contract reviewed");
-    if reviewed_before != draft.pin_contract_reviewed {
-        draft.mark_edited();
+    // Only pins guessed from a model need the author's word that their
+    // order and types are right; pins read from a schematic or typed in
+    // are the author's own.
+    if draft.pins_need_checking() {
+        let reviewed_before = draft.pin_contract_reviewed;
+        toolbar.checkbox(&mut draft.pin_contract_reviewed, "Pin order checked");
+        if reviewed_before != draft.pin_contract_reviewed {
+            draft.mark_edited();
+        }
     }
 }
 
@@ -581,11 +586,9 @@ fn generated_views_row(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogStat
     labels.add_sized(
         vec2(label_rect.width(), 27.0),
         egui::Label::new(
-            egui::RichText::new(
-                "The symbol and typed parameter form are independent versioned views.",
-            )
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_faint),
+            egui::RichText::new("Each is saved as its own view of the cell.")
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_faint),
         )
         .wrap(),
     );
@@ -616,7 +619,7 @@ fn generated_views_row(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogStat
         })
         .inner
         .on_disabled_hover_text(
-            "A blank explicit contract has no executable DUT implementation to fixture.",
+            "With no model or schematic behind the symbol there is nothing to simulate.",
         );
     if before
         != (
