@@ -64,6 +64,7 @@ impl AppState {
         self.model.unsaved_pin_renames.clear();
         self.model.symbol_rewired_sheets.clear();
         self.model.generated_symbol_ports.clear();
+        self.model.hand_drawn_symbol_ports.clear();
         // Problems are project-scoped under the source-workspace contract.
         // Clear them in the same transaction as documents and results so a
         // replacement can never render one frame containing two designs'

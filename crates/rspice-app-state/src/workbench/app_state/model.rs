@@ -164,6 +164,10 @@ pub struct Model {
     /// under another name was renamed, and its placed terminals follow it.
     /// Runtime only: another project replacing this one forgets them.
     pub generated_symbol_ports: std::collections::BTreeMap<String, Vec<(u64, String)>>,
+    /// The port names each schematic beside a hand-drawn symbol had at the
+    /// last sync, by cellview key, so a port change is told from the first
+    /// sight of the drawing. Runtime only.
+    pub hand_drawn_symbol_ports: std::collections::BTreeMap<String, Vec<String>>,
     /// Pinned-versus-present model source drift, as of the last event-driven
     /// scan. Runtime only: a saved verdict about bytes is a verdict about a
     /// moment that has passed.

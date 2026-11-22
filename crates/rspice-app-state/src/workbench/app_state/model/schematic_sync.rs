@@ -194,7 +194,7 @@ impl Model {
             .active_view_type()
             .is_some_and(is_schematic_like)
         {
-            self.sync_generated_symbol_view();
+            prompt = prompt.or(self.sync_generated_symbol_view());
         }
         self.record_frame_sync();
         prompt
@@ -357,28 +357,28 @@ impl Model {
     /// No view goes by itself. When the last port goes the symbol stays as it
     /// was drawn: its pins are then the ones the pin checks report as not in
     /// the schematic, and a port that comes back is drawn into it again.
-    fn sync_generated_symbol_view(&mut self) {
+    ///
+    /// Answers the status line's notice when a port change leaves a
+    /// hand-drawn symbol behind.
+    fn sync_generated_symbol_view(&mut self) -> Option<String> {
         let reference = self.workspace.content.active_view.clone();
         if !reference.view.eq_ignore_ascii_case("schematic") {
-            return;
+            return None;
         }
-        let Some(library) = self.library_manager.get_library(&reference.library) else {
-            return;
-        };
-        let Some(cell) = library.get_cell(&reference.cell) else {
-            return;
-        };
+        let library = self.library_manager.get_library(&reference.library)?;
+        let cell = library.get_cell(&reference.cell)?;
         if library.read_only {
-            return;
+            return None;
         }
         let existing_symbol = cell.get_view(GENERATED_SYMBOL_VIEW).cloned();
         let ports = self.schematic.interface_ports();
 
         if ports.is_empty() {
-            return;
+            return None;
         }
 
         let key = reference.key();
+        let mut notice = None;
         let symbol_error = match existing_symbol {
             Some(mut view) if is_generated_symbol(&view) => {
                 let before = view.metadata.clone();
@@ -419,7 +419,12 @@ impl Model {
                     }
                 }
             }
-            Some(_) => None, // hand-authored symbol: leave it alone
+            // A hand-drawn symbol is the author's: it is left alone, and a
+            // port change it no longer matches is said.
+            Some(view) => {
+                notice = self.hand_drawn_symbol_notice(&key, &reference.cell, &view, &ports);
+                None
+            }
             None => {
                 let mut view = View::new(GENERATED_SYMBOL_VIEW, ViewType::Symbol);
                 match store_generated_symbol(&mut view, &ports, |_| None) {
@@ -444,6 +449,62 @@ impl Model {
         {
             self.record(LogSeverity::Warning, LogSource::Studio, error);
         }
+        notice
+    }
+
+    /// What the status line says when a port added, removed or renamed
+    /// leaves the hand-drawn symbol beside the schematic behind: which ports
+    /// it has no pin for and which of its pins no port names, and the step
+    /// that brings it up to date. Nothing on the first sight of a drawing,
+    /// which is not a change made to it, nor while the ports stand still.
+    fn hand_drawn_symbol_notice(
+        &mut self,
+        key: &str,
+        cell: &str,
+        view: &View,
+        ports: &[crate::state::PortSpec],
+    ) -> Option<String> {
+        let names = ports
+            .iter()
+            .map(|port| port.name.clone())
+            .collect::<Vec<_>>();
+        let before = self
+            .hand_drawn_symbol_ports
+            .insert(key.to_owned(), names.clone())?;
+        if before == names {
+            return None;
+        }
+        let symbol = SymbolDocument::load_from_view(view).ok()?;
+        let has = |list: &[String], name: &str| list.iter().any(|n| n.eq_ignore_ascii_case(name));
+        let pins = symbol
+            .pins
+            .iter()
+            .map(|pin| pin.name.clone())
+            .collect::<Vec<_>>();
+        let unpinned = names
+            .iter()
+            .filter(|name| !has(&pins, name))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let unported = pins
+            .iter()
+            .filter(|pin| !has(&names, pin))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let mut behind = Vec::new();
+        if !unpinned.is_empty() {
+            behind.push(format!("no pin for {}", unpinned.join(", ")));
+        }
+        if !unported.is_empty() {
+            behind.push(format!("a pin {} no port names", unported.join(", ")));
+        }
+        (!behind.is_empty()).then(|| {
+            format!(
+                "{cell}'s symbol is drawn by hand and now has {}; open its symbol view and run \
+                 Update pins from schematic.",
+                behind.join(" and ")
+            )
+        })
     }
 
     /// Carry every placed instance of `symbol` from `drawn` to `redrawn`:

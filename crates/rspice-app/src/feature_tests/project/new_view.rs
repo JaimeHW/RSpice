@@ -308,6 +308,81 @@ fn first_symbol_editor_commit_takes_the_view_off_the_generated_marker() {
     assert!(!view.metadata.contains_key("ports"));
 }
 
+/// A hand-drawn symbol is never redrawn, so a port added to its schematic
+/// leaves it behind: the status line says which port it has no pin for and
+/// names the step that brings it up to date. Opening the drawing is not a
+/// change and says nothing, and the symbol itself is left as drawn.
+#[test]
+fn a_port_added_beside_a_hand_drawn_symbol_says_the_symbol_is_behind() {
+    let mut app = RSpiceApp::test_instance();
+    let mut library = Library::new("hand_test");
+    let mut cell = Cell::new("amp");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    let mut symbol = seeded_symbol_view(
+        "symbol",
+        &[PortSpec {
+            name: "IN".to_owned(),
+            direction: PortDirection::In,
+        }],
+    )
+    .expect("the symbol seeds");
+    symbol.metadata.remove("generated");
+    cell.add_view(symbol);
+    library.add_cell(cell);
+    app.state.model.library_manager.add_library(library);
+    let schematic = CellViewRef::new("hand_test", "amp", "schematic");
+    app.state
+        .model
+        .workspace
+        .insert_schematic_editor(schematic.key(), schematic_with_ports(&["IN"]));
+    app.state.open_workspace_view(schematic);
+    assert_eq!(app.state.model.sync_active_schematic_to_workspace(), None);
+
+    let port = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Port, Point::new(100, 0));
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == port)
+        .expect("the placed port")
+        .value = "OUT".to_owned();
+    let notice = app
+        .state
+        .model
+        .sync_active_schematic_to_workspace()
+        .unwrap_or_default();
+
+    assert!(
+        notice.contains("no pin for OUT") && notice.contains("Update pins from schematic"),
+        "{notice}"
+    );
+    let view = app
+        .state
+        .model
+        .library_manager
+        .get_library("hand_test")
+        .and_then(|library| library.get_cell("amp"))
+        .and_then(|cell| cell.get_view("symbol"))
+        .expect("the symbol view");
+    assert_eq!(
+        SymbolDocument::load_from_view(view)
+            .expect("the symbol parses")
+            .pins
+            .iter()
+            .map(|pin| pin.name.as_str())
+            .collect::<Vec<_>>(),
+        ["IN"],
+        "the hand-drawn symbol is left as drawn"
+    );
+    assert_eq!(app.state.model.sync_active_schematic_to_workspace(), None);
+}
+
 #[test]
 fn unsupported_view_type_is_rejected_before_project_mutation() {
     let mut app = RSpiceApp::test_instance();
