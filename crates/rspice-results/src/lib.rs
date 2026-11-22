@@ -98,6 +98,8 @@ pub mod store_reader;
 pub mod stored_analysis;
 #[cfg(feature = "engine-evidence")]
 pub mod stored_transient;
+#[cfg(feature = "engine-evidence")]
+pub mod sweep_table;
 pub mod transfer_function;
 #[cfg(feature = "engine-evidence")]
 pub mod transient_checkpoint;
