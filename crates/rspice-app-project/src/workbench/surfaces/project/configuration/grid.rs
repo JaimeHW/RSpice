@@ -16,7 +16,9 @@ const LABEL_WIDTH: f32 = 112.0;
 /// A grid row is a control tall plus the room around it, so it grows with
 /// the controls under a finger.
 pub(super) const ROW_PAD: f32 = 4.0;
-const PICKER_WIDTH: f32 = 300.0;
+/// Every select in the left column is this wide, the longest choice's
+/// width, so the three read as one field column.
+const PICKER_WIDTH: f32 = 340.0;
 /// From this width the five rows sit in two columns.
 const TWO_COLUMN_WIDTH: f32 = 760.0;
 
@@ -292,7 +294,7 @@ fn configuration_grid(
                     .iter()
                     .find(|(policy, _)| *policy == definition.unresolved_policy)
                     .map_or(UNRESOLVED_CHOICES[0].1, |(_, label)| label);
-                let width = (PICKER_WIDTH + 40.0).min(ui.available_width()).max(120.0);
+                let width = picker_width(ui);
                 ui.add_enabled_ui(write_allowed, |ui| {
                     if let Some(index) = crate::ui::widgets::select(
                         ui,
