@@ -54,10 +54,11 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
     let error = parts.dialog.error.clone();
     // A manager with nothing pending is at rest, not failing: Apply waits
     // for a reviewed change, and the footer says so without a failure mark.
+    // A new sheet or variant waits for its name the same way.
     let at_rest = validation
         .as_ref()
         .err()
-        .is_some_and(|message| message == NOTHING_PENDING);
+        .is_some_and(|message| AT_REST.contains(&message.as_str()));
     let mut body_scroll_offset = parts.dialog.body_scroll_offset;
     let mut dialog = Dialog::new(page.title(), page.primary())
         .description(description)
@@ -89,8 +90,8 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
             "Design transaction cannot continue",
             error,
         );
-    } else if at_rest {
-        dialog = dialog.hint(NOTHING_PENDING);
+    } else if let Some(waiting) = validation.as_ref().err().filter(|_| at_rest) {
+        dialog = dialog.hint(waiting);
     }
 
     let mut body_action = DesignManagementBodyAction::None;
@@ -294,6 +295,13 @@ fn publish_design_management_draft(parts: &mut DesignManagementParts<'_>) -> Res
 
 /// What Apply waits for while the manager holds no reviewed change.
 const NOTHING_PENDING: &str = "No reviewed design changes are pending.";
+/// What Create waits for on a new sheet: a name in a field that opens empty.
+const SHEET_NAME_NEEDED: &str = "Type a name for the new sheet.";
+/// What Create waits for on a new variant.
+const VARIANT_NAME_NEEDED: &str = "Type a name for the new variant.";
+/// What a page waits for rather than fails on: the footer states it as a
+/// hint, and the primary stays disabled until it is given.
+const AT_REST: [&str; 3] = [NOTHING_PENDING, SHEET_NAME_NEEDED, VARIANT_NAME_NEEDED];
 
 pub(super) fn validate_design_management_page(
     dialog: &DesignManagementDialogState,
@@ -313,7 +321,7 @@ pub(super) fn validate_design_management_page(
         }
         DesignManagementPage::NewSheet => {
             if dialog.inputs.sheet_name.trim().is_empty() {
-                return Err("Sheet name is required.".to_owned());
+                return Err(SHEET_NAME_NEEDED.to_owned());
             }
         }
         DesignManagementPage::MoveSelection => {
@@ -358,7 +366,7 @@ pub(super) fn validate_design_management_page(
         }
         DesignManagementPage::NewVariant => {
             if dialog.inputs.variant_name.trim().is_empty() {
-                return Err("Variant name is required.".to_owned());
+                return Err(VARIANT_NAME_NEEDED.to_owned());
             }
         }
         DesignManagementPage::CompareVariants => {
@@ -385,7 +393,7 @@ pub(super) fn validate_design_management_page(
             }
         }
         DesignManagementPage::AnnotationPolicy => {
-            parse_reserved_ranges(&dialog.inputs.reserved_ranges, dialog)?;
+            parse_reserved_ranges(&dialog.inputs.reserved_ranges)?;
         }
         DesignManagementPage::HierarchyAudit => {}
     }

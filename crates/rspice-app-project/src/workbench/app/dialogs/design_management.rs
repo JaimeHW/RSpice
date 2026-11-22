@@ -213,14 +213,14 @@ pub struct SubflowInputs {
 impl Default for SubflowInputs {
     fn default() -> Self {
         Self {
-            sheet_name: "Power and references".to_owned(),
+            sheet_name: String::new(),
             sheet_insert_after: None,
             sheet_port_policy: SheetPortPolicy::TypedOffSheetPorts,
             sheet_page_format: SchematicSheetFormat::default(),
             move_destination: None,
             move_boundary_policy: MoveBoundaryPolicy::TypedPorts,
             move_hierarchy_effect: MoveHierarchyEffect::SameCell,
-            variant_name: "Automotive high-temperature".to_owned(),
+            variant_name: String::new(),
             variant_parent: None,
             variant_inheritance: VariantInheritance::OverrideChangedObjectsOnly,
             variant_qualification: VariantQualificationPlan::InvalidateAffectedTests,
@@ -234,7 +234,7 @@ impl Default for SubflowInputs {
             renumber_order: RenumberOrder::HierarchyThenCoordinates,
             protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
             prefix_allocation: AnnotationPrefixAllocation::ByDeviceFamily,
-            reserved_ranges: "Project-owned ranges".to_owned(),
+            reserved_ranges: String::new(),
             imported_ids: ImportedReferencePolicy::PreserveWithSourceMap,
             audit_configuration: None,
             audit_view_checks: HierarchyViewChecks::AllDeclaredFallbacks,
@@ -622,10 +622,9 @@ fn selected_object_summary(
     names.join(" \u{00b7} ")
 }
 
+/// The policy's reserved ranges as the Reserved ranges field writes them;
+/// empty when it reserves none.
 fn format_reserved_ranges(ranges: &[AnnotationReservedRange]) -> String {
-    if ranges.is_empty() {
-        return "Project-owned ranges".to_owned();
-    }
     ranges
         .iter()
         .map(|range| {

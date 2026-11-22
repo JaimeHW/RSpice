@@ -68,18 +68,14 @@ pub(super) fn subflow_fields(
     match page {
         DesignManagementPage::Manager => unreachable!("manager has a dedicated body"),
         DesignManagementPage::NewSheet => {
-            let sheet_error = dialog
-                .inputs
-                .sheet_name
-                .trim()
-                .is_empty()
-                .then_some("Sheet name is required.");
+            // The name starts empty and Create waits for one: an empty
+            // field is not yet a mistake, so it is not marked as one.
             let response = input_field(
                 ui,
                 "Sheet name",
                 &mut dialog.inputs.sheet_name,
-                "Power and references",
-                sheet_error,
+                "",
+                None,
                 "Stable, project-owned sheet name.",
             );
             let sheets = sheet_choices(dialog);
@@ -249,18 +245,12 @@ pub(super) fn subflow_fields(
             response
         }
         DesignManagementPage::NewVariant => {
-            let variant_error = dialog
-                .inputs
-                .variant_name
-                .trim()
-                .is_empty()
-                .then_some("Variant name is required.");
             let response = input_field(
                 ui,
                 "Name",
                 &mut dialog.inputs.variant_name,
-                "Automotive high-temperature",
-                variant_error,
+                "",
+                None,
                 "Stable assembly-variant identity.",
             );
             let variants = variant_choices(dialog);
@@ -433,7 +423,7 @@ pub(super) fn subflow_fields(
             response
         }
         DesignManagementPage::AnnotationPolicy => {
-            let range_error = parse_reserved_ranges(&dialog.inputs.reserved_ranges, dialog).err();
+            let range_error = parse_reserved_ranges(&dialog.inputs.reserved_ranges).err();
             let response = field_combo(
                 ui,
                 "Prefix allocation",
@@ -452,7 +442,7 @@ pub(super) fn subflow_fields(
                 ui,
                 "Reserved ranges",
                 &mut dialog.inputs.reserved_ranges,
-                "R,C 1\u{2026}399; U 400\u{2026}599",
+                "None",
                 range_error.as_deref(),
                 "Project-owned prefix ranges separated by semicolons.",
             );

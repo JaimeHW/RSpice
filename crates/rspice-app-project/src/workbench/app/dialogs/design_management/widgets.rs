@@ -551,24 +551,8 @@ pub(super) fn variant_choices(
         .unwrap_or_default()
 }
 
-pub(super) fn parse_reserved_ranges(
-    text: &str,
-    dialog: &DesignManagementDialogState,
-) -> Result<Vec<AnnotationReservedRange>, String> {
-    if text.trim().eq_ignore_ascii_case("Project-owned ranges") {
-        return Ok(dialog
-            .draft
-            .as_ref()
-            .map(|draft| {
-                draft
-                    .annotation()
-                    .policy()
-                    .definition()
-                    .reserved_ranges
-                    .clone()
-            })
-            .unwrap_or_default());
-    }
+/// The ranges the Reserved ranges field holds: none when it is empty.
+pub(super) fn parse_reserved_ranges(text: &str) -> Result<Vec<AnnotationReservedRange>, String> {
     let mut ranges = Vec::new();
     for segment in text
         .split(';')
@@ -613,9 +597,6 @@ pub(super) fn parse_reserved_ranges(
             first,
             last,
         });
-    }
-    if ranges.is_empty() {
-        return Err("Enter at least one reserved range.".to_owned());
     }
     Ok(ranges)
 }

@@ -345,7 +345,7 @@ pub(super) fn commit_design_management_subflow(
             )
         }
         DesignManagementPage::AnnotationPolicy => {
-            let ranges = parse_reserved_ranges(&inputs.reserved_ranges, &*parts.dialog)?;
+            let ranges = parse_reserved_ranges(&inputs.reserved_ranges)?;
             let draft = parts
                 .dialog
                 .draft
