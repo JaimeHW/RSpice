@@ -233,7 +233,9 @@ pub fn show(
     )
     .accessible_name("Nyquist plot")
     .pinch_zooms_both_axes();
+    // Both axes through the origin, alike.
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
+    spec.x_ref_lines.push(0.0);
     spec.traces.push(
         // Re L(jω) is a coordinate, not an ordering — the locus encircles.
         Trace::new(re, im, c.traces[0])
@@ -297,17 +299,12 @@ pub fn show(
         }
     }
 
-    // Unit circle + vertical axis underlay.
+    // The unit circle underlay.
     let grid = c.canvas_grid;
     spec.underlay = Some(Box::new(move |painter, mapper| {
         let center = egui::pos2(mapper.x(0.0), mapper.y(0.0));
         let radius = (mapper.x(1.0) - mapper.x(0.0)).abs();
         painter.circle_stroke(center, radius, egui::Stroke::new(1.0, grid));
-        painter.vline(
-            center.x,
-            egui::Rangef::new(mapper.rect.top(), mapper.rect.bottom()),
-            egui::Stroke::new(1.0, grid),
-        );
     }));
 
     // Region sized so the INNER plot area is square: stability reading

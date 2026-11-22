@@ -626,6 +626,10 @@ pub struct PlotSpec<'a> {
     pub markers: Vec<Marker>,
     /// Horizontal reference lines.
     pub ref_lines: Vec<RefLine>,
+    /// Vertical reference lines, at X positions, drawn as the horizontal
+    /// ones are: a complex plane's imaginary axis reads as its real axis
+    /// does, not as one more grid line.
+    pub x_ref_lines: Vec<f64>,
     /// Exact labeled limits from an owning project contract.
     pub limit_lines: Vec<LimitLine>,
     /// Draw unlabeled subdivisions between major ticks.
@@ -683,6 +687,7 @@ impl<'a> PlotSpec<'a> {
             traces: Vec::new(),
             markers: Vec::new(),
             ref_lines: Vec::new(),
+            x_ref_lines: Vec::new(),
             limit_lines: Vec::new(),
             minor_grid: false,
             y_ink: None,

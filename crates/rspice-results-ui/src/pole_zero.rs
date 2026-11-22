@@ -405,11 +405,14 @@ pub fn show(
     let pole_color = c.traces[5];
     let zero_color = c.traces[1];
     let grid = c.canvas_grid;
+    // The imaginary axis is the stability boundary, so it is drawn as the
+    // Floquet sheet draws its unit circle: solid, above the grid.
+    let boundary = c.text_faint;
     spec.underlay = Some(Box::new(move |painter, mapper| {
         painter.vline(
             mapper.x(0.0),
             egui::Rangef::new(mapper.rect.top(), mapper.rect.bottom()),
-            egui::Stroke::new(1.0, grid),
+            egui::Stroke::new(1.2, boundary),
         );
         let origin = egui::pos2(mapper.x(0.0), mapper.y(0.0));
         for decade in 1..=decades {

@@ -250,7 +250,9 @@ pub fn show(
     .pinch_zooms_both_axes()
     .with_y_without_unit("IM")
     .accessible_detail(&detail);
+    // Both axes through the origin, alike.
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
+    spec.x_ref_lines.push(0.0);
 
     let places: Vec<(f64, f64)> = data.modes.iter().map(|mode| mode.multiplier).collect();
     let glyphs: Vec<(ModeVerdict, egui::Color32)> = data
@@ -262,14 +264,9 @@ pub fn show(
         })
         .collect();
     let underlay_places = places.clone();
-    let (grid, circle) = (c.canvas_grid, c.text_faint);
+    let circle = c.text_faint;
     let band = data.band;
     spec.underlay = Some(Box::new(move |painter, mapper| {
-        painter.vline(
-            mapper.x(0.0),
-            egui::Rangef::new(mapper.rect.top(), mapper.rect.bottom()),
-            egui::Stroke::new(1.0, grid),
-        );
         let origin = egui::pos2(mapper.x(0.0), mapper.y(0.0));
         let unit = (mapper.x(1.0) - mapper.x(0.0)).abs();
         painter.circle_stroke(origin, unit, egui::Stroke::new(1.2, circle));

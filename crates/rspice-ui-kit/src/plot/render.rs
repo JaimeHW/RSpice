@@ -1341,6 +1341,19 @@ pub fn show(
             3.0,
         ));
     }
+    let (x_low, x_high) = (spec.x.min.min(spec.x.max), spec.x.min.max(spec.x.max));
+    for &x in &spec.x_ref_lines {
+        if !(x >= x_low && x <= x_high) {
+            continue;
+        }
+        let px = mx(x);
+        inside.extend(Shape::dashed_line(
+            &[pos2(px, plot_rect.top()), pos2(px, plot_rect.bottom())],
+            ref_stroke,
+            4.0,
+            3.0,
+        ));
+    }
     // Where the limit labels sit, so a marker's tag keeps clear of them.
     let mut limit_labels: Vec<Rect> = Vec::new();
     for line in &spec.limit_lines {
