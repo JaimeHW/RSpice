@@ -18,7 +18,9 @@ use crate::workbench::app_state::Model;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_workbench::workbench::chrome::document_bar::record_active_document;
+use rspice_app_workbench::workbench::framework::requests::ShowOnSchematic;
 use rspice_design::drc::DrcSeverity;
+use rspice_design::schematic::selection::Selection;
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
 use super::symbol_document::cycle_active_symbol_pin_finding;
@@ -241,6 +243,58 @@ impl NavigationParts<'_> {
         }
     }
 
+    /// Show `place`: open its drawing, bring the sheet that draws it
+    /// forward, select what it names and centre the canvas on it. Every
+    /// route that shows the reader an object (a finding, a Find hit, a
+    /// Navigator row, a result row, a review comment) takes this one, so an
+    /// object on another sheet or in another cell view is never selected
+    /// where nobody can see it. Returns whether the canvas arrived: a drawing
+    /// or a sheet that will not come forward has said why, and the reader
+    /// stays where they were.
+    pub fn show_on_schematic(&mut self, place: ShowOnSchematic) -> bool {
+        let ShowOnSchematic {
+            cell_view,
+            sheet,
+            point,
+            selection,
+        } = place;
+        // The point and the object are the drawing's own, so the drawing
+        // opens first. A view that will not open (an edit in the inspector
+        // that cannot commit) leaves the reader where they were rather than
+        // selecting in the wrong view.
+        let active = |model: &Model| {
+            cell_view
+                .key()
+                .eq_ignore_ascii_case(&model.workspace.content.active_schematic_reference().key())
+        };
+        if !active(self.model) {
+            self.open_workspace_view(cell_view.clone());
+            if !active(self.model) {
+                self.wb.prompt(format!(
+                    "{} could not be opened, so it cannot be shown.",
+                    cell_view.display_path()
+                ));
+                return false;
+            }
+        }
+        // An object on another sheet is drawn nowhere until its sheet is in
+        // view, and the canvas keeps no selection off the sheet in view.
+        if let Some(sheet) = sheet
+            && self.model.active_sheet_id() != Some(sheet)
+        {
+            let outcome = self.model.activate_sheet(sheet, self.restore.drag.let_go());
+            if self.wb.report(outcome).is_err() {
+                return false;
+            }
+        }
+        self.wb.activate(Workspace::Design);
+        let editor = &mut self.model.schematic.session.editor;
+        editor.center_request = Some(point);
+        editor.net_highlight.clear();
+        editor.selection = selection;
+        true
+    }
+
     /// Follow `anchor` to what it points at: the object or pin in its
     /// drawing, the objects a failed run named, or the run a row names.
     pub fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
@@ -253,66 +307,19 @@ impl NavigationParts<'_> {
                 wire,
                 sheet,
             } => {
-                // The point and the object are the drawing's own, so the
-                // drawing opens first. A view that will not open — an edit
-                // in the inspector that cannot commit — leaves the reader
-                // where they were rather than selecting in the wrong view.
-                if !cell_view.key().eq_ignore_ascii_case(
-                    &self
-                        .model
-                        .workspace
-                        .content
-                        .active_schematic_reference()
-                        .key(),
-                ) {
-                    self.open_workspace_view(cell_view.clone());
-                    if !cell_view.key().eq_ignore_ascii_case(
-                        &self
-                            .model
-                            .workspace
-                            .content
-                            .active_schematic_reference()
-                            .key(),
-                    ) {
-                        self.wb.prompt(format!(
-                            "{} could not be opened, so the finding was not followed.",
-                            cell_view.display_path()
-                        ));
-                        return;
-                    }
-                }
-                // An object on another sheet is drawn nowhere until its sheet
-                // is in view, and selecting it there would select something
-                // the reader cannot see. A sheet that will not come forward
-                // has said why, and the reader stays where they were.
-                if let Some(sheet) = sheet
-                    && self.model.active_sheet_id() != Some(sheet)
-                {
-                    let outcome = self.model.activate_sheet(sheet, self.restore.drag.let_go());
-                    if self.wb.report(outcome).is_err() {
-                        return;
-                    }
-                }
-                self.wb.activate(Workspace::Design);
-                self.model.schematic.session.editor.center_request = Some(Point::new(x, y));
-                self.model.schematic.session.editor.net_highlight.clear();
-                self.model.schematic.session.editor.selection.clear();
+                let mut selection = Selection::default();
                 if let Some(id) = component {
-                    self.model
-                        .schematic
-                        .session
-                        .editor
-                        .selection
-                        .select_component(id);
+                    selection.select_component(id);
                 }
                 if let Some(id) = wire {
-                    self.model
-                        .schematic
-                        .session
-                        .editor
-                        .selection
-                        .select_wire(id);
+                    selection.select_wire(id);
                 }
+                self.show_on_schematic(ShowOnSchematic {
+                    cell_view,
+                    sheet,
+                    point: Point::new(x, y),
+                    selection,
+                });
             }
             LogAnchor::Symbol {
                 reference,

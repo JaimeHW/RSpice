@@ -581,6 +581,29 @@ fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
     );
 }
 
+/// A rail row for a part drawn on another sheet brings that sheet forward and
+/// selects the part there. The click used to select it on the sheet in front,
+/// which the canvas dropped on its next frame, and pan to an empty spot.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_excitation_on_another_sheet_brings_its_sheet_forward_and_selects_it() {
+    let mut panel = NavigatorPanel::open(two_sheet_named_signals());
+
+    panel.click("VBIAS");
+
+    let model = &mut panel.app.state.model;
+    assert_eq!(
+        model.sheet_name(model.active_sheet_id().expect("a sheet is active")),
+        "Output stage"
+    );
+    model.retain_selection_on_active_sheet();
+    assert!(model.schematic.session.editor.selection.has_component(302));
+    assert_eq!(
+        model.schematic.session.editor.center_request,
+        Some(rspice_app_state::state::Point::new(20, 20))
+    );
+}
+
 /// Sheet scope narrows the active cell view, and a row of another occurrence is
 /// on no sheet of it.
 ///

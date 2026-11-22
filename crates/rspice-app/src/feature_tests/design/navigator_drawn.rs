@@ -463,7 +463,6 @@ fn finding_references_seeds_the_navigator_filter_with_the_object_name() {
             name: "VOUT".to_owned(),
             wire_ids: Vec::new(),
             component_ids: Vec::new(),
-            position: None,
         },
     );
 

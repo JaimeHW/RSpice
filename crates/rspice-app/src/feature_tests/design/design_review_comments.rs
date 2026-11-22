@@ -398,3 +398,41 @@ fn the_filter_selects_show_their_whole_choice() {
         "the scope select does not read {scope:?}: {painted:?}"
     );
 }
+
+/// Go to anchor on a comment pinned to another sheet brings that sheet
+/// forward and selects the comment there, rather than panning the sheet in
+/// front to an empty spot and losing the selection.
+#[test]
+fn go_to_anchor_brings_the_comments_sheet_forward_and_selects_it() {
+    use rspice_app_state::state::Point;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .design_notes
+        .push(review_note(1));
+    rspice_app_design::schematic::view::sheet_visibility::seed_two_sheets(
+        &mut app.state.model,
+        &[],
+        &[1],
+    );
+    let first = app.state.model.active_sheet_id();
+
+    comments(&mut app).handle_design_review_action(ReviewAction::GoToAnchor(1, Point::new(10, 20)));
+    app.after_contribution();
+
+    let model = &mut app.state.model;
+    assert_ne!(model.active_sheet_id(), first);
+    model.retain_selection_on_active_sheet();
+    assert!(model.schematic.session.editor.selection.has_design_note(1));
+    assert_eq!(
+        model.schematic.session.editor.center_request,
+        Some(Point::new(10, 20))
+    );
+    assert_eq!(
+        app.state.workbench.workspace,
+        rspice_app_state::workbench::workspace::Workspace::Design
+    );
+}

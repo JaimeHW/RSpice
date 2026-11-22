@@ -414,22 +414,12 @@ fn apply_schematic_cross_probe(state: &mut ResultsParts<'_>, selection: &SoaRule
         );
         return;
     };
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .select_only_component(component_id);
-    state.model.schematic.session.editor.center_request = Some(position);
+    state.show_component_on_schematic(component_id, position);
     state.workbench.outbox.push(
         crate::workbench::framework::requests::ShowSchematicAnnotations(
             crate::state::SchematicAnnotationVisibility::ViolationsOnly,
         ),
     );
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Design);
 }
 
 #[cfg(test)]

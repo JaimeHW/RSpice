@@ -69,6 +69,7 @@ use rspice_app_workbench::workbench::framework::requests::{
     FollowSchematicGrid, MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor,
     OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
     PromptAfterCommands, RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter,
+    ShowOnSchematic,
     ShowProjectDeck, ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms,
     VoidVerilogAEvidence,
 };
@@ -578,6 +579,13 @@ impl RSpiceApp {
                 app.state
                     .workbench
                     .activate(rspice_app_state::workbench::workspace::Workspace::Design);
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, place: ShowOnSchematic| {
+                app.state.navigation().show_on_schematic(place);
             },
         );
         requests::drain(

@@ -736,6 +736,28 @@ impl ResultsParts<'_> {
     pub(crate) fn report_failure(&mut self, title: impl Into<String>, detail: impl Into<String>) {
         self.model.report_failure(title, detail);
     }
+
+    /// Show a part of the open drawing in Design, selected and centred on the
+    /// sheet that draws it, by the route every "show me this" takes.
+    pub(crate) fn show_component_on_schematic(
+        &mut self,
+        component_id: u64,
+        position: crate::state::Point,
+    ) {
+        let mut selection = rspice_design::schematic::selection::Selection::default();
+        selection.select_component(component_id);
+        self.workbench
+            .outbox
+            .push(crate::workbench::framework::requests::ShowOnSchematic {
+                cell_view: self.model.workspace.content.active_schematic_reference(),
+                sheet: self
+                    .model
+                    .multi_sheet_catalog()
+                    .and_then(|catalog| catalog.sheet_for_object(component_id)),
+                point: position,
+                selection,
+            });
+    }
 }
 
 /// How a retained plot-marker kind reads as a Results marker kind.

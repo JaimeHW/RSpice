@@ -21,18 +21,19 @@ use std::collections::{BTreeMap, HashSet};
 use egui::{Key, Modifiers, Response, ScrollArea, Ui};
 
 use crate::schematic::view::sheet_visibility::{self, SheetScope};
-use crate::state::{PortDirection, SavedOutputKind};
+use crate::state::{Point, PortDirection, SavedOutputKind, SheetId};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
 use crate::workbench::design::{DesignFeature, own_command_available};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::framework::requests::FocusNavigatorSearch;
+use crate::workbench::framework::requests::{FocusNavigatorSearch, ShowOnSchematic};
 use crate::workbench::slots::DesignState;
 use crate::workbench::slots::RunsState;
 use crate::workbench::state::WorkbenchSession;
 use rspice_design::connectivity::summary::DesignNet;
+use rspice_design::schematic::selection::Selection;
 
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design_system::{PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, elide_text};
@@ -647,7 +648,6 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         return;
     }
     for net in nets {
-        let position = net_anchor(cx.model, &net);
         let selected = if navigator_net_selection_matches(cx.model, &net) {
             true
         } else if net.wire_ids.is_empty() {
@@ -690,7 +690,7 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         )
         .on_hover_text(net.domain.label());
         if response.clicked() {
-            select_navigator_design_net(cx.model, &net, position);
+            select_navigator_design_net(cx, &net);
         }
         navigator_object_context_menu(
             &response,
@@ -703,40 +703,84 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                     .iter()
                     .map(|terminal| terminal.component_id)
                     .collect(),
-                position,
             },
         );
     }
 }
 
-fn net_anchor(model: &Model, net: &DesignNet) -> Option<crate::state::Point> {
-    model
-        .schematic
-        .document()
+/// Where a net row takes the reader: the first of the net's labels, wires
+/// and pins that the sheet in view draws, or else the first another sheet
+/// draws, with that sheet. A net that crosses sheets stays on the sheet in
+/// view where it is drawn there.
+fn net_place(
+    model: &Model,
+    names: &[&str],
+    wire_ids: &[u64],
+    component_ids: &[u64],
+) -> Option<(Point, Option<SheetId>)> {
+    let document = model.schematic.document();
+    let labels = document
         .net_labels
         .iter()
-        .find(|label| label.name.eq_ignore_ascii_case(&net.name))
-        .map(|label| label.pos)
-        .or_else(|| {
-            model
-                .schematic
-                .document()
-                .wires
+        .filter(|label| {
+            names
                 .iter()
-                .find(|wire| net.wire_ids.contains(&wire.id))
-                .and_then(crate::state::Wire::start)
+                .any(|name| label.name.eq_ignore_ascii_case(name))
         })
-        .or_else(|| {
-            net.terminals.iter().find_map(|terminal| {
-                model
-                    .schematic
-                    .document()
-                    .components
-                    .iter()
-                    .find(|component| component.id == terminal.component_id)
-                    .map(|component| component.pos)
-            })
+        .map(|label| (label.id, label.pos));
+    let wires = document
+        .wires
+        .iter()
+        .filter(|wire| wire_ids.contains(&wire.id))
+        .filter_map(|wire| Some((wire.id, wire.start()?)));
+    let pins = document
+        .components
+        .iter()
+        .filter(|component| component_ids.contains(&component.id))
+        .map(|component| (component.id, component.pos));
+    let candidates = labels.chain(wires).chain(pins).collect::<Vec<_>>();
+    if let Some(&(_, point)) = candidates
+        .iter()
+        .find(|(id, _)| sheet_visibility::object_is_on_active_sheet(model, *id))
+    {
+        return Some((point, None));
+    }
+    let &(id, point) = candidates.first()?;
+    Some((point, sheet_drawing(model, id)))
+}
+
+/// The sheet of the cell view in front that draws `object_id`; `None` where
+/// the drawing has one sheet or no sheet claims the object.
+fn sheet_drawing(model: &Model, object_id: u64) -> Option<SheetId> {
+    model.multi_sheet_catalog()?.sheet_for_object(object_id)
+}
+
+/// Show an object of the cell view in front as a row's click does, through
+/// the one route every "show me this" takes: its sheet forward, `selection`
+/// in place of the old one, and the canvas centred on `point`.
+fn show_on_canvas(
+    cx: &mut Cx<'_, DesignFeature>,
+    sheet: Option<SheetId>,
+    point: Point,
+    selection: Selection,
+) -> bool {
+    let cell_view = cx.model.workspace.content.active_schematic_reference();
+    cx.state
+        .navigation_parts(cx.model, cx.wb, cx.runs)
+        .show_on_schematic(ShowOnSchematic {
+            cell_view,
+            sheet,
+            point,
+            selection,
         })
+}
+
+/// Select one part of the cell view in front, on its own sheet, centred.
+fn show_navigator_component(cx: &mut Cx<'_, DesignFeature>, id: u64, position: Point) {
+    let mut selection = Selection::default();
+    selection.select_component(id);
+    let sheet = sheet_drawing(cx.model, id);
+    show_on_canvas(cx, sheet, position, selection);
 }
 
 /// One interface pin, as the ports rail lists it.
@@ -903,14 +947,7 @@ fn port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         .row
         .on_hover_text(port.tooltip());
         if response.clicked() {
-            cx.model
-                .schematic
-                .session
-                .editor
-                .selection
-                .select_only_component(port.component_id);
-            cx.model.schematic.session.editor.net_highlight.clear();
-            cx.model.schematic.session.editor.center_request = Some(port.position);
+            show_navigator_component(cx, port.component_id, port.position);
         }
         navigator_object_context_menu(
             &response,
@@ -1192,7 +1229,7 @@ fn rf_port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         match placed_object(cx.model, port.component_id, &port.reference) {
             Some(object) => {
                 if response.clicked() {
-                    select_navigator_object(cx.model, cx.wb, &object);
+                    select_navigator_object(cx, &object);
                 }
                 navigator_object_context_menu(&response, cx, object);
             }
@@ -1412,7 +1449,7 @@ pub fn excitation_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         match placed_object(cx.model, source.component_id, &source.reference) {
             Some(object) => {
                 if response.clicked() {
-                    select_navigator_object(cx.model, cx.wb, &object);
+                    select_navigator_object(cx, &object);
                 }
                 navigator_object_context_menu(&response, cx, object);
             }
@@ -1564,7 +1601,7 @@ fn named_signal_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         let response =
             nav_row_indented_mono_response(ui, WorkbenchIcon::ArrowLeft, &name, false, None, 1);
         if response.clicked() {
-            reveal_probe_expression(cx.model, cx.wb, &expression);
+            reveal_probe_expression(cx, &expression);
         }
         navigator_object_context_menu(
             &response,
@@ -1574,53 +1611,47 @@ fn named_signal_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     }
 }
 
-fn reveal_probe_expression(model: &mut Model, wb: &mut WorkbenchSession, expression: &str) {
+fn reveal_probe_expression(cx: &mut Cx<'_, DesignFeature>, expression: &str) {
     let Some(target) = raw_probe_target(expression) else {
-        open_measurements(wb);
+        open_measurements(cx.wb);
         return;
     };
 
     match target {
         RawProbeTarget::Current(component_name) => {
-            let Some(component) = model
+            let Some(component) = cx
+                .model
                 .schematic
                 .document()
                 .components
                 .iter()
                 .find(|component| component.name.eq_ignore_ascii_case(component_name))
             else {
-                open_measurements(wb);
+                open_measurements(cx.wb);
                 return;
             };
-            let id = component.id;
-            let position = component.pos;
-            model
-                .schematic
-                .session
-                .editor
-                .selection
-                .select_only_component(id);
-            model.schematic.session.editor.net_highlight.clear();
-            model.schematic.session.editor.center_request = Some(position);
+            let (id, position) = (component.id, component.pos);
+            show_navigator_component(cx, id, position);
         }
         RawProbeTarget::Voltage { positive, negative } => {
-            let resolved = model.workspace.design_projection(
-                &model.library_manager,
-                &model.workspace.content.active_view,
-                &model.schematic,
+            let resolved = cx.model.workspace.design_projection(
+                &cx.model.library_manager,
+                &cx.model.workspace.content.active_view,
+                &cx.model.schematic,
             );
             let projection = match resolved {
                 Ok(projection) => projection,
                 Err(error) => {
-                    wb.prompt(format!("The probed net cannot be revealed: {error}"));
-                    open_measurements(wb);
+                    cx.wb
+                        .prompt(format!("The probed net cannot be revealed: {error}"));
+                    open_measurements(cx.wb);
                     return;
                 }
             };
             let nets = rspice_design::connectivity::summary::projection_nets(
-                model.library_manager.catalog(),
+                cx.model.library_manager.catalog(),
                 &projection,
-                &model.workspace.content.active_view.key(),
+                &cx.model.workspace.content.active_view.key(),
             );
             let requested = std::iter::once(positive)
                 .chain(negative)
@@ -1630,28 +1661,21 @@ fn reveal_probe_expression(model: &mut Model, wb: &mut WorkbenchSession, express
                 .map(|name| nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)))
                 .collect::<Option<Vec<_>>>()
             else {
-                open_measurements(wb);
+                open_measurements(cx.wb);
                 return;
             };
-            let position = resolved.iter().find_map(|net| net_anchor(model, net));
-            if resolved.len() == 1 {
-                select_navigator_design_net(model, resolved[0], position);
-                return;
-            }
-
-            let mut wire_ids = resolved
+            let names = resolved
                 .iter()
-                .flat_map(|net| net.wire_ids.iter().copied())
+                .map(|net| net.name.as_str())
                 .collect::<Vec<_>>();
-            wire_ids.sort_unstable();
-            wire_ids.dedup();
-            let mut component_ids = resolved
-                .iter()
-                .flat_map(|net| net.terminals.iter().map(|terminal| terminal.component_id))
-                .collect::<Vec<_>>();
-            component_ids.sort_unstable();
-            component_ids.dedup();
-            select_navigator_net(model, &wire_ids, &component_ids, position);
+            let wire_ids =
+                sorted_unique(resolved.iter().flat_map(|net| net.wire_ids.iter().copied()));
+            let component_ids = sorted_unique(
+                resolved
+                    .iter()
+                    .flat_map(|net| net.terminals.iter().map(|terminal| terminal.component_id)),
+            );
+            select_navigator_net(cx, &names, &wire_ids, &component_ids);
         }
     }
 }
@@ -1667,7 +1691,6 @@ pub enum NavigatorObject {
         name: String,
         wire_ids: Vec<u64>,
         component_ids: Vec<u64>,
-        position: Option<crate::state::Point>,
     },
     SavedOutput {
         name: String,
@@ -1686,89 +1709,69 @@ impl NavigatorObject {
     }
 }
 
-fn select_navigator_object(model: &mut Model, wb: &mut WorkbenchSession, object: &NavigatorObject) {
+fn select_navigator_object(cx: &mut Cx<'_, DesignFeature>, object: &NavigatorObject) {
     match object {
         NavigatorObject::Component { id, position, .. } => {
-            model
-                .schematic
-                .session
-                .editor
-                .selection
-                .select_only_component(*id);
-            model.schematic.session.editor.net_highlight.clear();
-            model.schematic.session.editor.center_request = Some(*position);
+            show_navigator_component(cx, *id, *position);
         }
         NavigatorObject::Net {
             name,
             wire_ids,
             component_ids,
-            position,
-        } => {
-            select_navigator_net(model, wire_ids, component_ids, *position);
-            model
-                .schematic
-                .session
-                .editor
-                .net_highlight
-                .highlight_named_wires(name, wire_ids.iter().copied().collect());
-        }
+        } => select_navigator_net(cx, &[name.as_str()], wire_ids, component_ids),
         NavigatorObject::SavedOutput { expression, .. } => {
-            reveal_probe_expression(model, wb, expression);
+            reveal_probe_expression(cx, expression);
         }
     }
 }
 
-fn select_navigator_design_net(
-    model: &mut Model,
-    net: &DesignNet,
-    position: Option<crate::state::Point>,
-) {
+fn select_navigator_design_net(cx: &mut Cx<'_, DesignFeature>, net: &DesignNet) {
     let component_ids = net
         .terminals
         .iter()
         .map(|terminal| terminal.component_id)
         .collect::<Vec<_>>();
-    select_navigator_net(model, &net.wire_ids, &component_ids, position);
-    model
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .highlight_named_wires(&net.name, net.wire_ids.iter().copied().collect());
+    select_navigator_net(cx, &[net.name.as_str()], &net.wire_ids, &component_ids);
 }
 
+/// Select the nets `names` name, on the sheet that draws them, and light
+/// them: their wires, or their pins where they have no wire. One net is lit
+/// as that net, so the rails can tell its row; a difference of two is lit
+/// as the wires alone.
 fn select_navigator_net(
-    model: &mut Model,
+    cx: &mut Cx<'_, DesignFeature>,
+    names: &[&str],
     wire_ids: &[u64],
     component_ids: &[u64],
-    position: Option<crate::state::Point>,
 ) {
-    model.schematic.session.editor.selection.clear();
+    let mut selection = Selection::default();
     for wire_id in wire_ids {
-        model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_wire(*wire_id);
+        selection.select_wire(*wire_id);
     }
     if wire_ids.is_empty() {
         for component_id in component_ids {
-            model
-                .schematic
-                .session
-                .editor
-                .selection
-                .select_component(*component_id);
+            selection.select_component(*component_id);
         }
     }
-    model
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .highlight_wires(wire_ids.iter().copied().collect());
-    model.schematic.session.editor.center_request = position;
+    match net_place(cx.model, names, wire_ids, component_ids) {
+        Some((point, sheet)) => {
+            if !show_on_canvas(cx, sheet, point, selection) {
+                return;
+            }
+        }
+        // A net nothing draws has nowhere to go; it is still selected.
+        None => {
+            let editor = &mut cx.model.schematic.session.editor;
+            editor.selection = selection;
+            editor.center_request = None;
+        }
+    }
+    let wires = wire_ids.iter().copied().collect();
+    let highlight = &mut cx.model.schematic.session.editor.net_highlight;
+    match names {
+        [name] => highlight.highlight_named_wires(*name, wires),
+        _ => highlight.highlight_wires(wires),
+    }
 }
 
 fn sorted_unique(values: impl IntoIterator<Item = u64>) -> Vec<u64> {
@@ -1848,13 +1851,13 @@ fn navigator_object_context_menu(
 ) {
     let (popup, keyboard_open) = row_context_menu(response);
     if response.secondary_clicked() || keyboard_open {
-        select_navigator_object(cx.model, cx.wb, &object);
+        select_navigator_object(cx, &object);
     }
     popup.show(|ui| {
         // No caption and no summary: the reader right-clicked the row the
         // menu is about, and it is still under the pointer.
         if ui.button("Open").clicked() {
-            select_navigator_object(cx.model, cx.wb, &object);
+            select_navigator_object(cx, &object);
             match &object {
                 NavigatorObject::Component { id, .. }
                     if crate::workbench::app::hierarchy_master_for_component(cx.model, *id)

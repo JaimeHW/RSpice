@@ -37,3 +37,48 @@ fn a_refused_cross_probe_is_answered_on_the_status_bar() {
     assert_eq!(state.workbench.workspace, workspace);
     assert!(state.workbench.toasts.activity().is_empty());
 }
+
+/// Locating a device placed on a sheet that is not in front brings that
+/// sheet forward and selects the device there. It used to pan the sheet in
+/// front to where the device sits on its own sheet, and the canvas then
+/// dropped the selection it could not draw.
+#[test]
+fn locating_a_device_on_another_sheet_brings_its_sheet_forward() {
+    use rspice_app_state::state::{Component, ComponentType, Point};
+
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    let mut device = Component::new(7, ComponentType::Resistor, Point::new(300, 140));
+    device.name = "R7".to_owned();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(device);
+    rspice_app_design::schematic::view::sheet_visibility::seed_two_sheets(
+        &mut app.state.model,
+        &[],
+        &[7],
+    );
+    let first = app.state.model.active_sheet_id();
+
+    apply_action(&mut app.state.results_parts(), OpAction::LocateDevice(7));
+    app.after_contribution();
+
+    let model = &mut app.state.model;
+    assert_ne!(model.active_sheet_id(), first);
+    assert_eq!(
+        model.sheet_name(model.active_sheet_id().expect("a sheet is active")),
+        "Sheet 2"
+    );
+    model.retain_selection_on_active_sheet();
+    assert!(model.schematic.session.editor.selection.has_component(7));
+    assert_eq!(
+        model.schematic.session.editor.center_request,
+        Some(Point::new(300, 140))
+    );
+    assert_eq!(
+        app.state.workbench.workspace,
+        rspice_app_state::workbench::workspace::Workspace::Design
+    );
+}

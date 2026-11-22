@@ -574,6 +574,27 @@ impl Request for OpenInDesign {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Show one place of a schematic: open its cell view in Design, bring the
+/// sheet that draws it forward, select what it names and centre the canvas
+/// on it. Raised by the surfaces outside Design that locate an object (the
+/// result tables, the review comments), and taken straight after the call
+/// that raised it.
+#[derive(Clone, Debug)]
+pub struct ShowOnSchematic {
+    pub cell_view: crate::state::CellViewRef,
+    /// The sheet that draws the place; `None` where the drawing has no
+    /// sheets.
+    pub sheet: Option<crate::state::SheetId>,
+    /// Where the canvas centres.
+    pub point: crate::state::Point,
+    /// What is selected on arrival, in place of what was.
+    pub selection: rspice_design::schematic::selection::Selection,
+}
+
+impl Request for ShowOnSchematic {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Show the project's own models on the Models workspace's catalog. Raised
 /// by the project overview, and taken straight after the call that raised
 /// it.

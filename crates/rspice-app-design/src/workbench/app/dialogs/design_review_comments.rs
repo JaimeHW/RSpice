@@ -303,16 +303,23 @@ impl ReviewComments<'_> {
                 // pre-filled with "Review comment" for them to select away.
                 self.design_note.kind = DesignNoteKind::ReviewNote;
             }
+            // The comment may sit on another sheet, which comes forward
+            // first: the canvas keeps no selection off the sheet in view.
             ReviewAction::GoToAnchor(id, point) => {
                 self.dialog.close();
-                self.workbench.workspace = crate::workbench::state::Workspace::Design;
-                self.model
-                    .schematic
-                    .session
-                    .editor
-                    .selection
-                    .select_only_design_note(id);
-                self.model.schematic.session.editor.center_request = Some(point);
+                let mut selection = rspice_design::schematic::selection::Selection::default();
+                selection.select_design_note(id);
+                self.workbench.outbox.push(
+                    crate::workbench::framework::requests::ShowOnSchematic {
+                        cell_view: self.model.workspace.content.active_schematic_reference(),
+                        sheet: self
+                            .model
+                            .multi_sheet_catalog()
+                            .and_then(|catalog| catalog.sheet_for_object(id)),
+                        point,
+                        selection,
+                    },
+                );
             }
             ReviewAction::ApplyAssignment(assignee) => {
                 self.apply_review_mutation(DesignReviewMutation::Assign { assignee });
