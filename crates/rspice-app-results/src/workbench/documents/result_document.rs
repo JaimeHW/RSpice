@@ -2794,6 +2794,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         ResultViewer::Eye => return eye::domain_bar(ui, state),
         ResultViewer::HarmonicBalance => return harmonic_balance::domain_bar(ui, state),
         ResultViewer::Soa => return soa::domain_bar(ui, state),
+        ResultViewer::Events => return events::domain_bar(ui, state),
         ResultViewer::Nyquist => return nyquist::domain_bar(ui, state),
         ResultViewer::PoleZero => return pz::domain_bar(ui, state),
         ResultViewer::Hist => return hist::domain_bar(ui, state),
@@ -2807,7 +2808,6 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         ResultViewer::Contribution => sensitivity::domain_bar(ui, &mut context),
         ResultViewer::Scatter => scatter::domain_bar(ui, &mut context),
         ResultViewer::BoxViolin => box_violin::domain_bar(ui, &mut context),
-        ResultViewer::Events => events::domain_bar(ui, &mut context),
         ResultViewer::NetworkMatrix => network_matrix::domain_bar(ui, &mut context),
         _ => false,
     }

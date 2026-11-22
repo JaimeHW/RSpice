@@ -769,6 +769,9 @@ pub struct ResultViewerState {
     /// run, and a declaration that is not in the active analysis contributes
     /// no rows either way.
     pub expanded_event_buses: std::collections::BTreeSet<String>,
+    /// Which of its lists the Events sheet shows, and which rows of it: the
+    /// search and the time window. One per sheet, as the radix is.
+    pub event_filter: crate::events::EventFilter,
     /// The logic and bus lanes each waveform strip shows above its panes:
     /// their order, each bus's radix and expansion, the reader's buses and
     /// the selected rows. Which lanes exist follows the plotted `D()`

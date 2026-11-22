@@ -1,6 +1,6 @@
 //! Event source validation, history cache lifetime and selection recovery.
 
-use super::{AnalysisPresentationKey, ResultsParts, ResultsReads, SheetContext};
+use super::{AnalysisPresentationKey, ResultsParts, ResultsReads};
 use crate::state::{AnalysisResult, AnalysisResultPayload, RunHistoryRevision};
 #[cfg(test)]
 use crate::state::{AnalysisType, RetainedTrace};
@@ -12,10 +12,12 @@ use rspice_results::events::projection::EventOrder;
 use rspice_results::events::projection::{
     BusRadix, EventRow, EventSelectionSource, event_row_at_name, event_row_from_entry,
 };
+use rspice_results::result_presentation::ResultViewer;
 use rspice_results_ui::events::{
     self as viewer, DigitalEventSelection, EventAbsence, EventOrigin, SelectionAbsence,
     event_row_for_selection,
 };
+use rspice_ui_kit::tokens::Tokens;
 use std::sync::Arc;
 #[cfg(test)]
 use viewer::EventRowSelection;
@@ -160,6 +162,10 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .simulation
         .active_analysis()
         .expect("active analysis resolved above");
+    let messages = viewer::event_messages(
+        &analysis.data.checks,
+        viewer::event_axis(&analysis.data, &cache),
+    );
     let response = viewer::show(
         ui,
         &viewer::EventView {
@@ -171,12 +177,23 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             expanded: &state.results.session.expanded_event_buses,
             selected: state.results.session.selected_digital_event.as_ref(),
             numbers,
+            filter: &state.results.session.event_filter,
+            messages: &messages,
         },
     );
     let viewer::EventResponse {
         requested,
         toggled_bus,
+        place_cursor,
+        show_in_waves,
     } = response;
+    let tokens = Tokens::get(ui.ctx());
+    if let Some(time) = place_cursor {
+        jump_to_time(state, &tokens, time, false);
+    }
+    if let Some(time) = show_in_waves {
+        jump_to_time(state, &tokens, time, true);
+    }
     if let Some(selection) = requested {
         state.results.session.selected_digital_event = Some(selection);
     }
@@ -186,22 +203,101 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         state.results.session.expanded_event_buses.insert(bus);
     }
 }
-pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
-    let declares_bus = context
-        .simulation
-        .active_analysis()
-        .and_then(|analysis| analysis.result_payload.as_ref())
-        .is_some_and(|payload| {
-            matches!(
-                payload,
-                AnalysisResultPayload::TransientEvents { digital_buses, .. }
-                    if !digital_buses.is_empty()
-            )
-        });
-    if !declares_bus {
-        return false;
+/// Put the stepping cursor on `time` on the active analysis' waveform
+/// strip, scrolled into view, and turn to the Waves sheet when `show_waves`
+/// asks. An analysis Waves does not plot keeps the cursor for the sheet
+/// that does.
+pub(super) fn jump_to_time(
+    state: &mut ResultsParts<'_>,
+    tokens: &Tokens,
+    time: f64,
+    show_waves: bool,
+) {
+    let Some((key, index)) = state.model.simulation.active_run().and_then(|run| {
+        let index = state.model.simulation.view.active_analysis_idx?;
+        Some((
+            AnalysisPresentationKey::new(run.dataset_id, run.analyses.get(index)?),
+            index,
+        ))
+    }) else {
+        return;
+    };
+    let presentation = state.results_reads().presentation_policy();
+    let models = super::waves::cached_models(
+        &state.model.simulation,
+        state.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let session = &mut state.results.session;
+    match models.iter().find(|model| model.analysis_key == key) {
+        Some(model) => {
+            rspice_results_ui::waves::navigation::place_stepping_cursor(session, model, time);
+        }
+        None => {
+            let id = session.stepping_cursor;
+            if session.cursor_strip != Some(index) {
+                session.clear_cursors();
+                session.cursor_strip = Some(index);
+                session.stepping_cursor = id;
+            }
+            session.arm_cursor_tool();
+            session.cursors.set(id, time);
+        }
     }
-    viewer::domain_bar(ui, &mut context.results.session.event_bus_radix);
+    if show_waves {
+        session.viewer = ResultViewer::Waves;
+    }
+}
+
+/// The Events sheet's bar: the list, the search and the window, the radix
+/// when the run declares a bus, and the way to Verify's Checks view.
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    let Some(analysis) = state.model.simulation.active_analysis() else {
+        return false;
+    };
+    let declares_bus = analysis.result_payload.as_ref().is_some_and(|payload| {
+        matches!(
+            payload,
+            AnalysisResultPayload::TransientEvents { digital_buses, .. }
+                if !digital_buses.is_empty()
+        )
+    });
+    let messages = state
+        .results
+        .event_order_cache
+        .as_ref()
+        .filter(|cache| {
+            state.model.simulation.active_run().is_some_and(|run| {
+                cache.analysis == AnalysisPresentationKey::new(run.dataset_id, analysis)
+            })
+        })
+        .map_or(0, |cache| {
+            viewer::event_messages(
+                &analysis.data.checks,
+                viewer::event_axis(&analysis.data, &cache.order),
+            )
+            .len()
+        });
+    let session = &mut state.results.session;
+    let bar = viewer::domain_bar(
+        ui,
+        viewer::EventBar {
+            radix: declares_bus.then_some(&mut session.event_bus_radix),
+            filter: &mut session.event_filter,
+            messages,
+        },
+    );
+    if bar.open_checks {
+        state
+            .workbench
+            .outbox
+            .push(crate::workbench::framework::requests::OpenInVerify {
+                page: crate::state::VerificationPage::Checks,
+                specification: None,
+                check: None,
+            });
+    }
     true
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

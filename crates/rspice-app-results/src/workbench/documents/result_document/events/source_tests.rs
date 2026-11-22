@@ -1064,3 +1064,22 @@ fn the_event_tables_state_their_numbers_at_the_readers_digits() {
         "the copy is not exact: {copied:?}"
     );
 }
+
+/// A message row's time is where the stepping cursor goes, on the
+/// analysis' strip; Show in Waves also turns to the waveform sheet.
+#[test]
+fn a_message_row_puts_the_cursor_on_its_time_and_shows_it_in_waves() {
+    let mut state = mixed_event_state();
+    state.results.results.session.viewer = ResultViewer::Events;
+    let tokens = Tokens::default();
+    jump_to_time(&mut state.results_parts(), &tokens, 5.0e-9, false);
+    let session = &state.results.results.session;
+    assert_eq!(session.cursors.get(session.stepping_cursor), Some(5.0e-9));
+    assert_eq!(session.cursor_strip, Some(0));
+    assert_eq!(session.viewer, ResultViewer::Events);
+
+    jump_to_time(&mut state.results_parts(), &tokens, 7.5e-9, true);
+    let session = &state.results.results.session;
+    assert_eq!(session.cursors.get(session.stepping_cursor), Some(7.5e-9));
+    assert_eq!(session.viewer, ResultViewer::Waves);
+}

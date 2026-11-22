@@ -1,13 +1,16 @@
 //! Retained event tables, bus controls and source-aware selection readouts.
 
 use crate::{
+    chrome::bars::bar_label,
+    fft::view::columns::fitted_to,
     presentation::{panel_note, stat_table, table_row_menu, well_hint, with_table_state},
     strip::StripHeader,
+    waves::logic::RunMarkers,
 };
 use egui::{RichText, Ui};
 use rspice_results::{
     analysis_payload::AnalysisResultPayload,
-    analysis_result::AnalysisResult,
+    analysis_result::{AnalysisResult, RunChecks},
     events::projection::{
         BusRadix, BusTimeline, EventOrder, EventRow, EventSelectionSource, EventValue, bus_notes,
         bus_subtitle, event_row_at_name, event_row_from_entry,
@@ -21,12 +24,15 @@ use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{
-        SegmentedWidth, segmented,
-        table::{Cell, Column, DataTable, SortKey},
+        Button, SegmentedWidth, segmented,
+        table::{Align, Cell, Column, DataTable, SortKey},
     },
 };
-use rspice_vocabulary::quantity::QuantityPresentationPolicy;
-use std::collections::BTreeSet;
+use rspice_vocabulary::quantity::{
+    EngineeringPrecision, QuantityPresentationPolicy, format_engineering_value_with,
+    parse_engineering_value,
+};
+use std::{collections::BTreeSet, sync::Arc};
 
 /// The reader's significant digits and copied-value format, for every time,
 /// charge and real value the event sheet and its inspector state.
@@ -238,6 +244,260 @@ pub fn show_absent(ui: &mut Ui, absence: EventAbsence) {
     );
 }
 
+/// The Events sheet's two lists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EventPage {
+    /// The signals' events.
+    #[default]
+    Events,
+    /// What the run's checks reported: the HDL's severity records, the task
+    /// that ended the run and the assertions' violations.
+    Messages,
+}
+
+/// What the Events sheet lists, and which of its rows: those whose words
+/// contain the search, at times inside the window.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EventFilter {
+    pub page: EventPage,
+    pub search: String,
+    /// The window's first time; `None` leaves it open.
+    pub from: Option<f64>,
+    /// The window's last time; `None` leaves it open.
+    pub to: Option<f64>,
+}
+
+impl EventFilter {
+    fn keeps_time(&self, time: f64) -> bool {
+        self.from.is_none_or(|from| time >= from) && self.to.is_none_or(|to| time <= to)
+    }
+
+    /// Whether any of `words` contains the search, in any case.
+    fn keeps_words<'w>(&self, words: impl IntoIterator<Item = &'w str>) -> bool {
+        let search = self.search.trim();
+        if search.is_empty() {
+            return true;
+        }
+        let search = search.to_lowercase();
+        words
+            .into_iter()
+            .any(|word| word.to_lowercase().contains(&search))
+    }
+
+    /// The window as the sheet's title states it, when one is set.
+    fn window_words(&self, numbers: EventNumbers) -> Option<String> {
+        let at = |time: f64| numbers.shown(time, "s");
+        match (self.from, self.to) {
+            (None, None) => None,
+            (Some(from), None) => Some(format!("from {}", at(from))),
+            (None, Some(to)) => Some(format!("until {}", at(to))),
+            (Some(from), Some(to)) => Some(format!("{} to {}", at(from), at(to))),
+        }
+    }
+}
+
+/// One message the run's checks reported, as the Messages list states it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventMessage {
+    pub time: f64,
+    pub severity: &'static str,
+    /// The message, on one line.
+    pub text: String,
+    /// The instance, or the check, that reported it.
+    pub scope: String,
+    /// The `file:line` it was written at, when the run names one.
+    pub source: String,
+}
+
+/// One line of `text`, its lines joined by a space.
+fn one_line(text: &str) -> String {
+    text.lines().map(str::trim).collect::<Vec<_>>().join(" ")
+}
+
+/// The messages `checks` hold on an axis whose first and last instants are
+/// `axis`, in time order: one row for each record and violation the
+/// waveform's Checks strip marks.
+pub fn event_messages(checks: &RunChecks, axis: (f64, f64)) -> Vec<EventMessage> {
+    let Some(markers) = RunMarkers::of(checks, axis) else {
+        return Vec::new();
+    };
+    let records = markers.hdl.iter().map(|marker| EventMessage {
+        time: marker.time,
+        severity: marker.severity.label(),
+        text: one_line(&marker.text),
+        scope: marker.scope.clone(),
+        source: marker
+            .source
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+    });
+    let violations = markers.assertions.iter().map(|span| EventMessage {
+        time: span.start,
+        severity: if span.error {
+            "Assertion error"
+        } else {
+            "Assertion"
+        },
+        text: one_line(span.message.as_deref().unwrap_or(&span.check)),
+        scope: span.label.clone(),
+        source: span
+            .source
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+    });
+    let unchecked = markers.stop.iter().map(|stop| EventMessage {
+        time: stop.time,
+        severity: "Unchecked",
+        text: format!("{} expected outputs fall after the stop time", stop.beyond),
+        scope: String::new(),
+        source: stop
+            .source
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+    });
+    let mut messages: Vec<EventMessage> = records.chain(violations).chain(unchecked).collect();
+    messages.sort_by(|a, b| a.time.total_cmp(&b.time));
+    messages
+}
+
+/// The first and last instants of the analysis' axis, where its messages
+/// stand: its waveforms', else its first and last events'.
+pub fn event_axis<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
+    order: &EventOrder,
+) -> (f64, f64) {
+    if let Some(axis) = analysis
+        .waveforms
+        .first()
+        .and_then(|waveform| waveform.as_ref().x.ends())
+    {
+        return axis;
+    }
+    let time = |index: usize| {
+        order.rows().get(index).copied().and_then(|entry| {
+            event_row_from_entry(
+                analysis,
+                order.buses(),
+                BusRadix::default(),
+                entry,
+                index + 1,
+            )
+            .map(|row| row.time_s())
+        })
+    };
+    match (time(0), time(order.rows().len().saturating_sub(1))) {
+        (Some(first), Some(last)) => (first, last),
+        _ => (0.0, 0.0),
+    }
+}
+
+/// The rows of an event order a filter keeps, and, for each column, the
+/// kept row whose words are the widest, which the columns are sized from.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct KeptEvents {
+    /// Indices into the order's rows.
+    pub rows: Vec<usize>,
+    /// Positions in `rows`.
+    widest: Vec<usize>,
+}
+
+/// The cells of one event row.
+fn event_cells(
+    row: &EventRow<'_>,
+    numbers: EventNumbers,
+    expanded: &BTreeSet<String>,
+) -> Vec<Cell> {
+    let mut signal = Cell::text(row.signal_name());
+    if row.source() == EventSelectionSource::Bus {
+        signal = signal
+            .twist(expanded.contains(row.trace_name()))
+            .hint("Show or hide the member rows this word is reassembled from");
+    }
+    let mut value = Cell::number(numbers.value(row.value()));
+    match row.value() {
+        // A word is as wide as the bus: the whole word, and a real
+        // value's every digit, are one hover away.
+        EventValue::Bus(_) => value = value.hint(numbers.exact_value(row.value())),
+        EventValue::Real(real) => {
+            value = value
+                .hint(numbers.exact_value(row.value()))
+                .sort_by(SortKey::Number(*real));
+        }
+        _ => {}
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let ordinal = row.event_ordinal() as f64;
+    vec![
+        Cell::number(format!("#{:04}", row.event_ordinal())).sort_by(SortKey::Number(ordinal)),
+        Cell::number(numbers.shown(row.time_s(), "s"))
+            .hint(numbers.exact(row.time_s(), "s"))
+            .sort_by(SortKey::Number(row.time_s())),
+        signal,
+        value,
+        Cell::text(row.value().domain()),
+        Cell::text(if row.initial() { "initial" } else { "change" }),
+    ]
+}
+
+/// The event sheet's heads: where each column's words sit, and whether in
+/// mono.
+const EVENT_HEADS: [(&str, Align, bool); 6] = [
+    ("Event", Align::Right, true),
+    ("Physical time", Align::Right, true),
+    ("Signal", Align::Left, false),
+    ("Value", Align::Right, true),
+    ("Domain", Align::Left, false),
+    ("Kind", Align::Left, false),
+];
+
+/// The rows of `order` that `filter` keeps, searching each row's words as
+/// the table states them.
+pub fn kept_events<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
+    order: &EventOrder,
+    radix: BusRadix,
+    numbers: EventNumbers,
+    filter: &EventFilter,
+) -> KeptEvents {
+    let expanded = BTreeSet::new();
+    let mut kept = KeptEvents {
+        rows: Vec::new(),
+        widest: vec![0; EVENT_HEADS.len()],
+    };
+    let mut widths = [0_usize; EVENT_HEADS.len()];
+    for (index, entry) in order.rows().iter().copied().enumerate() {
+        let Some(row) = event_row_from_entry(analysis, order.buses(), radix, entry, index + 1)
+        else {
+            continue;
+        };
+        if !filter.keeps_time(row.time_s()) {
+            continue;
+        }
+        let cells = event_cells(&row, numbers, &expanded);
+        if !filter.keeps_words(cells.iter().skip(2).map(|cell| cell.text.as_str())) {
+            continue;
+        }
+        for (column, cell) in cells.iter().enumerate() {
+            let width = cell.text.chars().count();
+            if width > widths[column] {
+                widths[column] = width;
+                kept.widest[column] = kept.rows.len();
+            }
+        }
+        kept.rows.push(index);
+    }
+    kept
+}
+
+/// Where the sheet keeps the rows its filter kept, with what they were
+/// kept for.
+fn kept_id() -> egui::Id {
+    egui::Id::new("rspice.results.events.kept")
+}
+
 pub struct EventView<'a, W: AsRef<RetainedWaveform>> {
     pub analysis_key: AnalysisPresentationKey,
     pub analysis: &'a AnalysisResult<W>,
@@ -247,11 +507,18 @@ pub struct EventView<'a, W: AsRef<RetainedWaveform>> {
     pub expanded: &'a BTreeSet<String>,
     pub selected: Option<&'a DigitalEventSelection>,
     pub numbers: EventNumbers,
+    pub filter: &'a EventFilter,
+    /// The run's check messages, from [`event_messages`].
+    pub messages: &'a [EventMessage],
 }
 #[derive(Default)]
 pub struct EventResponse {
     pub requested: Option<DigitalEventSelection>,
     pub toggled_bus: Option<String>,
+    /// A message row was clicked: the cursor goes to its time.
+    pub place_cursor: Option<f64>,
+    /// A message row was opened: the cursor goes to its time, on Waves.
+    pub show_in_waves: Option<f64>,
 }
 fn show_current_impulses(
     ui: &mut Ui,
@@ -402,18 +669,58 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
     let expanded = source.expanded;
     let selected = source.selected;
     let numbers = source.numbers;
+    let filter = source.filter;
     let exact = cache.exact();
+    if filter.page == EventPage::Messages && !source.messages.is_empty() {
+        return show_messages(ui, analysis, source.messages, filter, numbers);
+    }
+    // The rows the search and the window keep, found again only when the
+    // rows' words or the filter change.
+    let revision = egui::Id::new((
+        "events",
+        analysis_key,
+        cache.rows().len(),
+        bus_radix_index(radix),
+        expanded,
+    ))
+    .value();
+    let kept_key = egui::Id::new((
+        revision,
+        filter.search.trim(),
+        filter.from.map(f64::to_bits),
+        filter.to.map(f64::to_bits),
+        numbers.significant_digits,
+    ))
+    .value();
+    let kept = match ui.data(|data| data.get_temp::<(u64, Arc<KeptEvents>)>(kept_id())) {
+        Some((key, kept)) if key == kept_key => kept,
+        _ => {
+            let kept = Arc::new(kept_events(analysis, cache, radix, numbers, filter));
+            ui.data_mut(|data| data.insert_temp(kept_id(), (kept_key, Arc::clone(&kept))));
+            kept
+        }
+    };
+    let total = cache.rows().len() + cache.current_rows().len();
+    let shown = kept.rows.len() + cache.current_rows().len();
+    let noun = if exact {
+        "retained events"
+    } else {
+        "projected changes"
+    };
+    let counted = if shown == total {
+        format!("{total} {noun}")
+    } else {
+        format!("{shown} of {total} {noun}")
+    };
+    let window = filter
+        .window_words(numbers)
+        .map(|window| format!(" · {window}"))
+        .unwrap_or_default();
     StripHeader::new(
         "EVENTS",
         &format!(
-            "{} · {} {}{}",
+            "{} · {counted}{window}{}",
             analysis.label,
-            cache.rows().len() + cache.current_rows().len(),
-            if exact {
-                "retained events"
-            } else {
-                "projected changes"
-            },
             bus_subtitle(cache.buses()),
         ),
         &[],
@@ -441,81 +748,54 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
 
     let mut requested = None;
     let mut toggled_bus = None;
-    let row_at = |index: usize| {
+    // A table row is a kept row; the event keeps its place in the whole
+    // order, so its number does not change as the filter narrows.
+    let row_at = |row: usize| {
+        let index = *kept.rows.get(row)?;
         cache.rows().get(index).copied().and_then(|entry| {
             event_row_from_entry(analysis, cache.buses(), radix, entry, index + 1)
         })
     };
-    let columns = [
-        Column::number("Event", 84.0),
-        Column::number("Physical time", 176.0),
-        Column::name("Signal", 190.0),
-        Column::number("Value", 152.0),
-        Column::words("Domain", 128.0),
-        Column::words("Kind", 112.0),
-    ];
-    // The rows' words change with the dataset, the radix a bus word is
-    // spelled in and which buses list their members.
-    let revision = egui::Id::new((
-        "events",
-        analysis_key,
-        cache.rows().len(),
-        bus_radix_index(radix),
-        expanded,
-    ))
-    .value();
+    let cells_at = |row: usize| {
+        row_at(row).map_or_else(
+            || vec![Cell::absent(); EVENT_HEADS.len()],
+            |event| event_cells(&event, numbers, expanded),
+        )
+    };
+    // Each column is as wide as its head, the widest of its kept rows and
+    // the rows at either end.
+    let count = kept.rows.len();
+    let sizing: Vec<Vec<Cell>> = (0..count.min(SIZING_ROWS))
+        .chain(count.saturating_sub(SIZING_ROWS)..count)
+        .chain(kept.widest.iter().copied().filter(|row| *row < count))
+        .map(cells_at)
+        .collect();
+    let columns = fitted_to(ui, &EVENT_HEADS, &sizing);
+    if count == 0 && !cache.rows().is_empty() {
+        well_hint(ui, "No event matches the search and window");
+    }
     let response = with_table_state(ui, "events", |ui, state| {
-        follow_page_selection(
-            ui,
-            state,
-            selected,
-            analysis_key,
-            cache.rows().len(),
-            |row| {
-                row_at(row).is_some_and(|row| {
-                    selected.is_some_and(|selection| selection.matches(&row, cache.buses()))
-                })
-            },
-        );
-        let response = DataTable::new("rspice.results.events", &columns, cache.rows().len())
+        // Rows the filter kept are numbered afresh, so the table looks for
+        // the page's event again whenever the filter changes.
+        let kept_seen = ui.id().with("rspice.results.events-kept");
+        if ui.data(|data| data.get_temp::<u64>(kept_seen)) != Some(kept_key) {
+            let remembered = page_selection_id(ui);
+            ui.data_mut(|data| {
+                data.insert_temp(kept_seen, kept_key);
+                data.remove::<Option<DigitalEventSelection>>(remembered);
+            });
+        }
+        follow_page_selection(ui, state, selected, analysis_key, count, |row| {
+            row_at(row).is_some_and(|row| {
+                selected.is_some_and(|selection| selection.matches(&row, cache.buses()))
+            })
+        });
+        let response = DataTable::new("rspice.results.events", &columns, count)
             .state(state)
             .freeze(1)
-            .revision(revision)
+            .revision(kept_key)
             .max_height(ui.available_height())
-            .show(ui, |index| {
-                let Some(row) = row_at(index) else {
-                    return vec![Cell::absent(); 6];
-                };
-                let mut signal = Cell::text(row.signal_name());
-                if row.source() == EventSelectionSource::Bus {
-                    signal = signal
-                        .twist(expanded.contains(row.trace_name()))
-                        .hint("Show or hide the member rows this word is reassembled from");
-                }
-                let mut value = Cell::number(numbers.value(row.value()));
-                match row.value() {
-                    // A word is as wide as the bus: the whole word, and a real
-                    // value's every digit, are one hover away.
-                    EventValue::Bus(_) => value = value.hint(numbers.exact_value(row.value())),
-                    EventValue::Real(real) => {
-                        value = value
-                            .hint(numbers.exact_value(row.value()))
-                            .sort_by(SortKey::Number(*real));
-                    }
-                    _ => {}
-                }
-                vec![
-                    Cell::number(format!("#{:04}", row.event_ordinal()))
-                        .sort_by(SortKey::Number(row.event_ordinal() as f64)),
-                    Cell::number(numbers.shown(row.time_s(), "s"))
-                        .hint(numbers.exact(row.time_s(), "s"))
-                        .sort_by(SortKey::Number(row.time_s())),
-                    signal,
-                    value,
-                    Cell::text(row.value().domain()),
-                    Cell::text(if row.initial() { "initial" } else { "change" }),
-                ]
-            });
+            .show(ui, cells_at);
         if response.clicked.is_some() || response.selection_changed {
             requested = state
                 .selected_row()
@@ -549,7 +829,136 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
     EventResponse {
         requested,
         toggled_bus,
+        ..EventResponse::default()
     }
+}
+
+/// Rows read from each end of a list to size its columns, beside the
+/// widest of its rows.
+const SIZING_ROWS: usize = 32;
+
+/// The Messages list: every record and violation of the run's checks the
+/// search and the window keep. A click puts the cursor on its time; opening
+/// a row, or Show in Waves, goes there on the waveform sheet.
+fn show_messages<W: AsRef<RetainedWaveform>>(
+    ui: &mut Ui,
+    analysis: &AnalysisResult<W>,
+    messages: &[EventMessage],
+    filter: &EventFilter,
+    numbers: EventNumbers,
+) -> EventResponse {
+    let kept: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| {
+            filter.keeps_time(message.time)
+                && filter.keeps_words([
+                    message.severity,
+                    message.text.as_str(),
+                    message.scope.as_str(),
+                    message.source.as_str(),
+                ])
+        })
+        .map(|(index, _)| index)
+        .collect();
+    let counted = if kept.len() == messages.len() {
+        format!("{} messages", messages.len())
+    } else {
+        format!("{} of {} messages", kept.len(), messages.len())
+    };
+    let window = filter
+        .window_words(numbers)
+        .map(|window| format!(" · {window}"))
+        .unwrap_or_default();
+    StripHeader::new(
+        "EVENTS",
+        &format!("{} · {counted}{window}", analysis.label),
+        &[],
+    )
+    .show(ui);
+    if kept.is_empty() {
+        well_hint(ui, "No message matches the search and window");
+        return EventResponse::default();
+    }
+    let rows: Vec<Vec<Cell>> = kept
+        .iter()
+        .map(|&index| {
+            let message = &messages[index];
+            let words = |text: &str| {
+                if text.is_empty() {
+                    Cell::empty()
+                } else {
+                    Cell::text(text)
+                }
+            };
+            vec![
+                Cell::number(numbers.shown(message.time, "s"))
+                    .hint(numbers.exact(message.time, "s"))
+                    .sort_by(SortKey::Number(message.time)),
+                Cell::text(message.severity),
+                words(&message.text),
+                words(&message.scope),
+                if message.source.is_empty() {
+                    Cell::empty()
+                } else {
+                    Cell::number(message.source.as_str())
+                },
+            ]
+        })
+        .collect();
+    let columns = fitted_to(
+        ui,
+        &[
+            ("Time", Align::Right, true),
+            ("Severity", Align::Left, false),
+            ("Message", Align::Left, false),
+            ("Instance", Align::Left, false),
+            ("Source", Align::Left, true),
+        ],
+        &rows,
+    );
+    let revision = egui::Id::new((
+        "rspice.results.event-messages",
+        analysis.id,
+        &kept,
+        numbers.significant_digits,
+    ))
+    .value();
+    let response = with_table_state(ui, "event-messages", |ui, state| {
+        DataTable::new("rspice.results.event-messages", &columns, kept.len())
+            .state(state)
+            .freeze(1)
+            .revision(revision)
+            .max_height(ui.available_height())
+            .show(ui, |row| rows[row].clone())
+    });
+    let time_of = |row: usize| kept.get(row).map(|&index| messages[index].time);
+    let mut out = EventResponse {
+        place_cursor: response.clicked.and_then(time_of),
+        show_in_waves: response.activate.and_then(time_of),
+        ..EventResponse::default()
+    };
+    table_row_menu(ui, "event-messages", response.context_menu, |ui, row| {
+        let Some(message) = kept.get(row).map(|&index| &messages[index]) else {
+            return;
+        };
+        if ui.button("Show in Waves").clicked() {
+            out.show_in_waves = Some(message.time);
+            ui.close();
+        }
+        if ui.button("Copy message").clicked() {
+            ui.ctx().copy_text(format!(
+                "{}\t{}\t{}\t{}\t{}",
+                numbers.exact(message.time, "s"),
+                message.severity,
+                message.text,
+                message.scope,
+                message.source,
+            ));
+            ui.close();
+        }
+    });
+    out
 }
 
 fn page_selection_id(ui: &Ui) -> egui::Id {
@@ -615,18 +1024,156 @@ fn bus_radix_index(radix: BusRadix) -> usize {
 fn bus_radix_from_index(index: usize) -> BusRadix {
     BusRadix::ALL.get(index).copied().unwrap_or_default()
 }
-pub fn domain_bar(ui: &mut Ui, radix: &mut BusRadix) {
-    let mut index = bus_radix_index(*radix);
-    if segmented(
-        ui,
-        "rspice.results.events.radix",
-        &BUS_RADIX_OPTIONS,
-        &mut index,
-        SegmentedWidth::Natural,
-    ) {
-        *radix = bus_radix_from_index(index);
-    }
+/// What the Events sheet's bar sets, and what it shows beside its controls.
+pub struct EventBar<'a> {
+    /// The bus radix, when the run declares a bus.
+    pub radix: Option<&'a mut BusRadix>,
+    pub filter: &'a mut EventFilter,
+    /// How many messages the run's checks reported.
+    pub messages: usize,
 }
+
+/// What the reader asked of the bar beyond its settings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EventBarResponse {
+    /// Open Verify's Checks view.
+    pub open_checks: bool,
+}
+
+/// Width of a time typed in the Display menu.
+const TIME_FIELD_WIDTH: f32 = 84.0;
+/// Width of the search field.
+const SEARCH_WIDTH: f32 = 140.0;
+
+/// The Events sheet's bar: the list it shows, the search, and in Display
+/// the time window and the bus radix; on the Messages list, the way to
+/// Verify's Checks view.
+pub fn domain_bar(ui: &mut Ui, bar: EventBar<'_>) -> EventBarResponse {
+    let mut out = EventBarResponse::default();
+    let filter = bar.filter;
+    if bar.messages > 0 {
+        let pages = ["Events".to_owned(), format!("Messages {}", bar.messages)];
+        let pages: Vec<&str> = pages.iter().map(String::as_str).collect();
+        let mut index = usize::from(filter.page == EventPage::Messages);
+        if segmented(
+            ui,
+            "rspice.results.events.page",
+            &pages,
+            &mut index,
+            SegmentedWidth::Natural,
+        ) {
+            filter.page = if index == 1 {
+                EventPage::Messages
+            } else {
+                EventPage::Events
+            };
+        }
+    }
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut filter.search)
+            .id(egui::Id::new("rspice.results.events.search"))
+            .desired_width(SEARCH_WIDTH)
+            .font(theme::field_mono())
+            .hint_text("Search…"),
+    );
+    if field.changed() {
+        filter.search = filter.search.replace('\n', "");
+    }
+    let messages_shown = bar.messages > 0 && filter.page == EventPage::Messages;
+    display_menu(ui, filter, if messages_shown { None } else { bar.radix });
+    if messages_shown
+        && Button::new("Checks")
+            .accessible_label("Open the run's checks in Verify")
+            .show(ui)
+            .clicked()
+    {
+        out.open_checks = true;
+    }
+    out
+}
+
+/// The Display menu: the time window, and the bus radix when there is one.
+fn display_menu(ui: &mut Ui, filter: &mut EventFilter, radix: Option<&mut BusRadix>) {
+    let display = Button::new("Display")
+        .menu()
+        .accessible_label("Event display options")
+        .show(ui);
+    egui::Popup::menu(&display)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            egui::Grid::new("rspice.results.events.display")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    bar_label(ui, "From");
+                    ui.horizontal(|ui| {
+                        if let Some(from) =
+                            time_field(ui, "rspice.results.events.from", filter.from)
+                        {
+                            filter.from = from;
+                        }
+                    });
+                    ui.end_row();
+                    bar_label(ui, "To");
+                    ui.horizontal(|ui| {
+                        if let Some(to) = time_field(ui, "rspice.results.events.to", filter.to) {
+                            filter.to = to;
+                        }
+                    });
+                    ui.end_row();
+                    if let Some(radix) = radix {
+                        bar_label(ui, "Radix");
+                        let mut index = bus_radix_index(*radix);
+                        if segmented(
+                            ui,
+                            "rspice.results.events.radix",
+                            &BUS_RADIX_OPTIONS,
+                            &mut index,
+                            SegmentedWidth::Natural,
+                        ) {
+                            *radix = bus_radix_from_index(index);
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
+}
+
+/// A time typed in engineering notation, in seconds: `Some(None)` for an
+/// emptied field, `Some(Some(time))` for a time read, `None` while nothing
+/// was committed.
+fn time_field(ui: &mut Ui, id: &str, value: Option<f64>) -> Option<Option<f64>> {
+    let shown = value.map_or_else(String::new, |value| {
+        format_engineering_value_with(value, EngineeringPrecision::UpTo(6))
+    });
+    let id = ui.make_persistent_id(id);
+    let mut text = ui
+        .data_mut(|data| data.get_temp::<String>(id))
+        .unwrap_or_else(|| shown.clone());
+    let response = ui.add_sized(
+        [TIME_FIELD_WIDTH, ui.spacing().interact_size.y],
+        egui::TextEdit::singleline(&mut text)
+            .font(theme::field_mono())
+            .hint_text("open"),
+    );
+    bar_label(ui, "s");
+    if response.has_focus() {
+        ui.data_mut(|data| data.insert_temp(id, text));
+        return None;
+    }
+    ui.data_mut(|data| data.remove::<String>(id));
+    if !response.lost_focus() || text == shown {
+        return None;
+    }
+    if text.trim().is_empty() {
+        return Some(None);
+    }
+    parse_engineering_value(text.trim())
+        .ok()
+        .filter(|time| time.is_finite())
+        .map(Some)
+}
+
 const EVENT_SELECTION_NO_DATASET: &str = "No dataset is open, so the selected event has nothing to resolve against. \
      Open the dataset it was taken from, or select an event row here.";
 const EVENT_SELECTION_UNRETAINED_ANALYSIS: &str = "The analysis this event was selected from is no longer retained in the \
@@ -892,11 +1439,161 @@ mod tests {
                         significant_digits: 4,
                         quantity_policy: QuantityPresentationPolicy::default(),
                     },
+                    filter: &EventFilter::default(),
+                    messages: &[],
                 },
             )
             .requested;
         });
         (output, geometry, requested)
+    }
+
+    fn numbers() -> EventNumbers {
+        EventNumbers {
+            significant_digits: 4,
+            quantity_policy: QuantityPresentationPolicy::default(),
+        }
+    }
+
+    /// A clock with four committed values, at 0, 5, 10 and 15 ns.
+    fn clock() -> AnalysisResult {
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_result_payload(
+            test_support::committed_events(&[(0.0, 0), (5.0e-9, 1), (10.0e-9, 0), (15.0e-9, 1)]),
+        )
+    }
+
+    /// The window keeps the events inside it, ends included; the search
+    /// keeps the rows whose words hold it, in any case; and together they
+    /// keep what both keep. Each row keeps its place in the whole order.
+    #[test]
+    fn a_filter_narrows_the_list_to_the_window_and_the_search() {
+        let analysis = clock();
+        let order =
+            rspice_results::events::projection::build_event_order(&analysis, &collapsed(), || {});
+        assert_eq!(order.rows().len(), 4);
+        let kept = |filter: &EventFilter| {
+            kept_events(&analysis, &order, BusRadix::Binary, numbers(), filter).rows
+        };
+        assert_eq!(kept(&EventFilter::default()), vec![0, 1, 2, 3]);
+        let window = EventFilter {
+            from: Some(5.0e-9),
+            to: Some(10.0e-9),
+            ..EventFilter::default()
+        };
+        assert_eq!(kept(&window), vec![1, 2]);
+        let initial = EventFilter {
+            search: "INITIAL".to_owned(),
+            ..EventFilter::default()
+        };
+        assert_eq!(kept(&initial), vec![0]);
+        let changes = EventFilter {
+            search: "change".to_owned(),
+            from: Some(6.0e-9),
+            ..EventFilter::default()
+        };
+        assert_eq!(kept(&changes), vec![2, 3]);
+        let nothing = EventFilter {
+            search: "vctl".to_owned(),
+            ..EventFilter::default()
+        };
+        assert!(kept(&nothing).is_empty());
+    }
+
+    fn warning_at(time: f64, text: &str) -> rspice_results::analysis_result::HdlDiagnostic {
+        rspice_results::analysis_result::HdlDiagnostic {
+            severity: rspice_results::engine_evidence::HdlSeverity::Warning,
+            text: text.to_owned(),
+            point: rspice_results::engine_evidence::HdlPoint::Transient { time },
+            origin: rspice_results::engine_evidence::HdlOrigin {
+                scope: "tb.dut".to_owned(),
+                file: "dut.va".to_owned(),
+                line: 12,
+            },
+        }
+    }
+
+    /// The Messages list states every record the Checks strip marks, in
+    /// time order, each on one line with its instance and source line; a
+    /// click on a row hands back its time for the cursor.
+    #[test]
+    fn a_message_row_hands_its_time_to_the_cursor() {
+        let mut checks = RunChecks::default();
+        checks.hdl.push(warning_at(9.0e-9, "late\nedge"));
+        checks.hdl.push(warning_at(3.0e-9, "glitch"));
+        let messages = event_messages(&checks, (0.0, 20.0e-9));
+        let times: Vec<f64> = messages.iter().map(|message| message.time).collect();
+        assert_eq!(times, vec![3.0e-9, 9.0e-9]);
+        assert_eq!(messages[1].text, "late edge");
+        assert_eq!(messages[1].scope, "tb.dut");
+        assert_eq!(messages[1].source, "dut.va:12");
+
+        let analysis = clock();
+        let order =
+            rspice_results::events::projection::build_event_order(&analysis, &collapsed(), || {});
+        let key =
+            AnalysisPresentationKey::new(rspice_vocabulary::product::DatasetId::new(), &analysis);
+        let filter = EventFilter {
+            page: EventPage::Messages,
+            ..EventFilter::default()
+        };
+        let expanded = collapsed();
+        let frame = |ctx: &egui::Context, events: Vec<egui::Event>| {
+            let mut response = EventResponse::default();
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 700.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let (_, geometry) = rspice_ui_kit::probe::pass(ctx, input, |ui| {
+                response = show(
+                    ui,
+                    &EventView {
+                        analysis_key: key,
+                        analysis: &analysis,
+                        order: &order,
+                        origin: EventOrigin::Native,
+                        radix: BusRadix::Binary,
+                        expanded: &expanded,
+                        selected: None,
+                        numbers: numbers(),
+                        filter: &filter,
+                        messages: &messages,
+                    },
+                );
+            });
+            (geometry, response)
+        };
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let (geometry, _) = frame(&ctx, Vec::new());
+        let second = geometry
+            .all("table.cell.0")
+            .into_iter()
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+            .expect("two message rows");
+        let pos = second.center();
+        let (_, response) = frame(
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(response.place_cursor, Some(9.0e-9));
     }
 
     /// The event sheet draws through the shared table: each head stands over
