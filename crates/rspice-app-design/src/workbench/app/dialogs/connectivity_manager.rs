@@ -1167,15 +1167,24 @@ impl ConnectivityManager<'_> {
                 let authority = SchematicEditAuthority::capture(&*self.model);
                 let dialog = &mut *self.dialog;
                 dialog.authority = Some(authority);
-                dialog.selected_repairs.clear();
                 match refreshed {
                     Ok(report) => {
+                        // A tick stays on a repair the refresh still offers,
+                        // so changing a policy does not undo the reader's
+                        // choices; a repair that went takes its tick with it.
+                        dialog.selected_repairs.retain(|id| {
+                            report
+                                .repairs
+                                .iter()
+                                .any(|repair| &repair.id == id && repair_takes_apply(repair))
+                        });
                         // The refreshed table is the report of its refresh.
                         dialog.report = report;
                         dialog.error = None;
                         dialog.receipt = None;
                     }
                     Err(error) => {
+                        dialog.selected_repairs.clear();
                         dialog.report = ConnectivityReport::default();
                         dialog.error = Some(error);
                         dialog.receipt = None;

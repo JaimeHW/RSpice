@@ -34,6 +34,56 @@ fn global_alias_repairs_are_derived_from_real_label_ids() {
     }
 }
 
+/// A local `VDD` beside a global `VDD!`, whose alias repair Apply carries
+/// out.
+fn aliased_rail() -> DesignTestHost {
+    let mut state = DesignTestHost::default();
+    for (id, x, name) in [(10, 0, "VDD!"), (11, 1, "VDD")] {
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .net_labels
+            .push(NetLabel::new(id, Point::new(x, 0), name));
+    }
+    state.sync_active_schematic_to_workspace();
+    state
+}
+
+/// Changing a policy refreshes the report and keeps the ticks on the repairs
+/// it still offers, rather than clearing every one without a word.
+#[test]
+fn a_policy_change_keeps_the_repair_ticks() {
+    let mut state = aliased_rail();
+    let mut dialog = ConnectivityManagerDialogState {
+        report: build_report(&state.model, &ConnectivityPolicy::default()).unwrap(),
+        ..ConnectivityManagerDialogState::default()
+    };
+    let rename = dialog
+        .report
+        .repairs
+        .iter()
+        .find(|repair| repair_takes_apply(repair))
+        .expect("the alias repair")
+        .id
+        .clone();
+    dialog.selected_repairs.insert(rename.clone());
+    dialog.policy.width_mismatch = BundleWidthMismatchPolicy::ALL
+        .into_iter()
+        .find(|policy| *policy != dialog.policy.width_mismatch)
+        .unwrap();
+    let ctx = egui::Context::default();
+    ConnectivityManager {
+        dialog: &mut dialog,
+        model: &mut state.model,
+        workbench: &mut state.workbench,
+    }
+    .handle_connectivity_body_action(&ctx, ConnectivityBodyAction::Refresh);
+
+    assert!(dialog.selected_repairs.contains(&rename));
+    assert_eq!(dialog.selected_actionable_count(), 1, "Apply counts it");
+}
+
 /// Two resistors, nothing wired: every pin is open.
 fn open_pins() -> DesignTestHost {
     let mut state = DesignTestHost::default();
