@@ -293,6 +293,7 @@ pub(in crate::workbench) fn render_shared_properties_dialog(
         (None, true) => Ok(Some("The selected instances share no property.")),
         (None, false) => Ok(None),
     };
+    let mut typed = false;
     let choice = CommandForm::new(TITLE, PRIMARY)
         .describe(DESCRIPTION)
         .primary_enabled(any_edited)
@@ -305,11 +306,16 @@ pub(in crate::workbench) fn render_shared_properties_dialog(
                 // An empty box no instance sets stays empty: a default
                 // drawn as a hint reads as a value someone set.
                 let hint = if field.common.is_none() { MIXED } else { "" };
-                rows.text(&field.label, id, &mut field.text, hint);
+                typed |= rows.text(&field.label, id, &mut field.text, hint).changed();
                 first.get_or_insert(id);
             }
             first
         });
+    // A refused Apply's reason describes the text it refused; once the reader
+    // edits a field it no longer does, and the footer stops repeating it.
+    if typed {
+        dialog.error = None;
+    }
     match choice {
         DialogChoice::Primary => {
             match apply_shared_properties(dialog, registry, model, workbench) {
@@ -406,6 +412,73 @@ pub mod tests {
         ]);
         assert!(two_resistors.contains(&"r".to_owned()));
         assert!(two_resistors.contains(&"l".to_owned()));
+    }
+
+    /// A refused Apply's reason stays in the footer until the reader edits a
+    /// field, and goes as soon as they do.
+    #[test]
+    fn editing_a_field_clears_a_refused_apply() {
+        let mut state = two_resistors();
+        assert!(open_shared_properties(
+            &mut state.design.shared_properties,
+            &state.design.property_registry,
+            false,
+            &state.model,
+            &mut state.workbench,
+        ));
+        let refusal = "R2 Resistance: must be at least 0";
+        state.design.shared_properties.error = Some(refusal.to_owned());
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let frame = |state: &mut DesignTestHost, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ctx| {
+                render_shared_properties_dialog(
+                    &mut state.design.shared_properties,
+                    &state.design.property_registry,
+                    &mut state.model,
+                    &mut state.workbench,
+                    ctx,
+                );
+            });
+            painted_text(&output)
+        };
+        // A dialog's first pass only measures it.
+        frame(&mut state, Vec::new());
+        let painted = frame(&mut state, Vec::new());
+        assert!(painted.contains(refusal), "{painted}");
+        let field = Id::new(("shared-property", "r"));
+        ctx.memory_mut(|memory| memory.request_focus(field));
+        assert!(frame(&mut state, Vec::new()).contains(refusal));
+        frame(&mut state, vec![egui::Event::Text("5".to_owned())]);
+        assert!(state.design.shared_properties.error.is_none());
+        let painted = frame(&mut state, Vec::new());
+        assert!(!painted.contains(refusal), "{painted}");
+        assert!(state.design.shared_properties.open);
+    }
+
+    #[cfg(test)]
+    fn painted_text(output: &egui::FullOutput) -> String {
+        fn walk(shape: &egui::epaint::Shape, into: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(painted) => {
+                    into.push_str(&painted.galley.job.text);
+                    into.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().for_each(|shape| walk(shape, into))
+                }
+                _ => {}
+            }
+        }
+        let mut text = String::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut text);
+        }
+        text
     }
 
     /// One instance is not this form's: Q there opens the single form.
