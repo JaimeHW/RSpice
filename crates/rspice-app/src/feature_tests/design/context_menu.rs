@@ -1282,3 +1282,68 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
         "an ordinary part keeps it"
     );
 }
+
+/// Align and Distribute say what the selection lacks in the layout's own
+/// words, on the Design menu and on the right-click Arrange page alike: a
+/// third part to distribute, or the wire that cannot be lined up. Both said
+/// something else, the menu that the command was unavailable and the page
+/// that two objects were needed while two were selected.
+#[test]
+fn align_and_distribute_name_what_the_selection_lacks_on_both_routes() {
+    use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+    use rspice_schematic_editor::view::context_menu::ArrangeAction;
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.workbench.activate(Workspace::Design);
+    let document = app.state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document.wires.clear();
+    for (id, x) in [(41, 0), (42, 120)] {
+        document.components.push(Component::new(
+            id,
+            ComponentType::Resistor,
+            Point::new(x, 0),
+        ));
+    }
+    document
+        .wires
+        .push(Wire::new(5, vec![Point::new(0, 200), Point::new(100, 200)]));
+    app.state.sync_active_schematic_to_workspace();
+    let selection = &mut app.state.model.schematic.session.editor.selection;
+    selection.select_only_component(41);
+    selection.select_component(42);
+
+    let third = "Select at least three compatible objects to distribute";
+    assert_eq!(
+        app.command_availability(DesignCommand::DistributeSelectionHorizontal.key()),
+        CommandAvailability::Disabled(third)
+    );
+    assert_eq!(
+        action_availability(
+            ContextAction::ArrangeCommand(ArrangeAction::DistributeHorizontal),
+            &app.state
+        ),
+        (false, third)
+    );
+    assert!(app.command_key_enabled(DesignCommand::AlignSelectionLeft.key()));
+
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(5);
+    let conductor = "Select only instances and non-electrical annotations; conductors and net-label anchors cannot be aligned safely";
+    assert_eq!(
+        app.command_availability(DesignCommand::AlignSelectionLeft.key()),
+        CommandAvailability::Disabled(conductor)
+    );
+    assert_eq!(
+        action_availability(
+            ContextAction::ArrangeCommand(ArrangeAction::AlignLeft),
+            &app.state
+        ),
+        (false, conductor)
+    );
+}

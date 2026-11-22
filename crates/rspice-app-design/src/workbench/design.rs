@@ -461,12 +461,18 @@ impl CommandSet for DesignCommand {
             | Self::AlignSelectionBottom
             | Self::DistributeSelectionHorizontal
             | Self::DistributeSelectionVertical => {
+                // The layout's own refusal says what the selection lacks:
+                // a third object to distribute, or a conductor taken out.
                 let markers = reads.state.schematic_visibility.review_markers;
-                let lays_out = schematic
-                    && layout_command(self).is_some_and(|command| {
-                        selection_layout_availability(reads.model, markers, command).is_ok()
-                    });
-                (!lays_out).then_some("command is unavailable in this context")
+                if schematic {
+                    layout_command(self).and_then(|command| {
+                        selection_layout_availability(reads.model, markers, command)
+                            .err()
+                            .map(|refusal| refusal.message())
+                    })
+                } else {
+                    Some("open an editable schematic or testbench")
+                }
             }
             Self::SelectOfKind(_) if !schematic => Some("open a schematic or testbench"),
             Self::SelectOfKind(kind) => objects_of_kind_on_active_sheet(reads.model, kind)

@@ -1433,10 +1433,7 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
                 layout,
             ) {
                 Ok(()) => (true, ""),
-                Err(_) => (
-                    false,
-                    "Select at least two editable objects to line up or space out",
-                ),
+                Err(refusal) => (false, refusal.message()),
             },
             None => (
                 writable && (has_copyable_object || something_floats(state)),
