@@ -1562,21 +1562,42 @@ pub fn show(
         }
         let px = mx(marker.x);
         let limit_line = marker.shape == MarkerShape::LimitLine;
-        // A limit line spans the pane, so it is never clipped by Y; anything
-        // else has to land inside the window. Stated positively because the
-        // pair of negations it replaces said the same thing less directly.
-        let y_is_drawable = limit_line || (marker.y >= spec.y.min && marker.y <= spec.y.max);
+        let span = match marker.shape {
+            MarkerShape::Span { to } => Some(to),
+            _ => None,
+        };
+        let in_window = |y: f64| y >= spec.y.min && y <= spec.y.max;
+        // A limit line spans the pane, so it is never clipped by Y; a span
+        // is drawn as far as it stands in the window; anything else has to
+        // land inside the window.
+        let y_is_drawable = limit_line
+            || span.map_or_else(
+                || in_window(marker.y),
+                |to| marker.y.max(to) >= spec.y.min && marker.y.min(to) <= spec.y.max,
+            );
         if !y_is_drawable {
             continue;
         }
         // A limit line is a callout about the X position alone, so it spans
-        // the plot and tags at the top; its `y` carries no meaning.
+        // the plot and tags at the top; its `y` carries no meaning. A span
+        // tags beside the middle of what the window shows of it.
+        let clamp_y = |y: f64| my(y.clamp(spec.y.min, spec.y.max));
         let py = if limit_line {
             plot_rect.top()
+        } else if let Some(to) = span {
+            (clamp_y(marker.y) + clamp_y(to)) * 0.5
         } else {
             my(marker.y)
         };
-        if limit_line {
+        if let Some(to) = span {
+            let stroke = Stroke::new(1.5, marker.color);
+            inside.line_segment([pos2(px, clamp_y(marker.y)), pos2(px, clamp_y(to))], stroke);
+            // Each end that stands in the window is capped, so the bar reads
+            // as a measured distance rather than a line running on.
+            for end in [marker.y, to].into_iter().filter(|&y| in_window(y)) {
+                inside.line_segment([pos2(px - 4.0, my(end)), pos2(px + 4.0, my(end))], stroke);
+            }
+        } else if limit_line {
             inside.extend(Shape::dashed_line(
                 &[pos2(px, plot_rect.top()), pos2(px, plot_rect.bottom())],
                 Stroke::new(1.0, marker.color),
@@ -1606,6 +1627,8 @@ pub fn show(
         let mut tx = px + 9.0;
         let mut ty = if limit_line {
             plot_rect.top() + 4.0 + marker.label_dy
+        } else if span.is_some() {
+            py - tag_h * 0.5 + marker.label_dy
         } else {
             py - tag_h - 7.0 + marker.label_dy
         };
@@ -1643,7 +1666,13 @@ pub fn show(
                 && let Some(rect) = [0.0, lift, 2.0 * lift]
                     .into_iter()
                     .flat_map(|farther| {
-                        let (above, below) = (py - tag_h - 7.0 - farther, py + 9.0 + farther);
+                        // A span's tag stays level with its bar, either side,
+                        // before it moves up or down along it.
+                        let (above, below) = if span.is_some() {
+                            (py - tag_h * 0.5 - farther, py - tag_h * 0.5 + farther)
+                        } else {
+                            (py - tag_h - 7.0 - farther, py + 9.0 + farther)
+                        };
                         [(right, above), (left, above), (right, below), (left, below)]
                     })
                     .map(|(x, y)| place(x, y))

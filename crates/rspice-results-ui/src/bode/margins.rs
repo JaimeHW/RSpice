@@ -61,19 +61,22 @@ pub fn rows(
     ]
 }
 
-/// What a loop's margins mark on the strips of a Bode sheet, tagged the way
+/// What a loop's margins mark on the strips of a Bode sheet: each margin a
+/// span from the level it is read against to the curve, tagged in the words
 /// the Nyquist sheet tags them on its locus.
 #[derive(Debug, Clone, Default)]
 pub struct MarginMarks {
-    /// The tagged points, on the pane's first axis.
+    /// The tagged spans, on the pane's first axis, each standing on its
+    /// reference (`y`) and reaching the curve (the span's `to`).
     pub markers: Vec<plot::Marker>,
     /// The levels the marks stand on, drawn as reference lines.
     pub references: Vec<f64>,
 }
 
-/// The gain margin on the strip drawing the loop's magnitude: tagged on the
-/// 0 dB reference at the phase crossover, where the curve stands the margin
-/// below it. The strip draws its own 0 dB reference.
+/// The gain margin on the strip drawing the loop's magnitude: a span at the
+/// phase crossover from the 0 dB reference to the curve, which stands the
+/// margin below it there, tagged beside it. The strip draws its own 0 dB
+/// reference.
 pub fn gain_marks(
     metrics: &AcBodeMetrics,
     color: egui::Color32,
@@ -83,9 +86,10 @@ pub fn gain_marks(
         return MarginMarks::default();
     };
     MarginMarks {
-        markers: vec![plot::Marker::point(
+        markers: vec![plot::Marker::span(
             hertz,
             0.0,
+            -decibels,
             color,
             format!(
                 "GM {}",
@@ -96,10 +100,10 @@ pub fn gain_marks(
     }
 }
 
-/// The phase margin on the strip drawing the loop's phase: tagged at the
-/// gain crossover on the inversion it is read from, −180° or the odd
-/// multiple of it the continuous phase stands nearest there, which the
-/// strip draws as a reference line.
+/// The phase margin on the strip drawing the loop's phase: a span at the
+/// gain crossover from the inversion it is read from, −180° or the odd
+/// multiple of it the continuous phase stands nearest there, to the curve,
+/// tagged beside it. The strip draws the inversion as a reference line.
 pub fn phase_marks(
     metrics: &AcBodeMetrics,
     color: egui::Color32,
@@ -113,9 +117,10 @@ pub fn phase_marks(
     };
     let inversion = phase - margin;
     MarginMarks {
-        markers: vec![plot::Marker::point(
+        markers: vec![plot::Marker::span(
             hertz,
             inversion,
+            phase,
             color,
             format!(
                 "PM {}",
@@ -225,5 +230,59 @@ mod tests {
         assert!(gain_marks(&unmeasured, color, 4).markers.is_empty());
         let none = phase_marks(&unmeasured, color, &policy, 4);
         assert!(none.markers.is_empty() && none.references.is_empty());
+    }
+
+    /// Each margin spans from its reference to the curve, where the closed
+    /// form of the loop puts them. For L(f) = 4 / (1 + jf/1 kHz)³ the phase
+    /// reaches −180° at f = √3 kHz, where |L| = 4/8, so the gain span runs
+    /// from 0 dB down to −20·log10(2) dB; the gain is unity where
+    /// (1 + x²)^(3/2) = 4, and the phase span runs from −180° up to
+    /// −3·atan(x) there.
+    #[test]
+    fn each_margin_spans_from_its_reference_to_the_curve_where_the_closed_form_puts_it() {
+        let policy = QuantityPresentationPolicy::default();
+        let frequency: Vec<f64> = (0..=250)
+            .map(|step| 10.0_f64 * 10.0_f64.powf(f64::from(step) / 50.0))
+            .collect();
+        let ratio = |hertz: f64| hertz / 1.0e3;
+        let gain_db: Vec<f64> = frequency
+            .iter()
+            .map(|&hertz| 20.0 * 4.0_f64.log10() - 30.0 * (1.0 + ratio(hertz).powi(2)).log10())
+            .collect();
+        let phase_deg: Vec<f64> = frequency
+            .iter()
+            .map(|&hertz| -3.0 * ratio(hertz).atan().to_degrees())
+            .collect();
+        let metrics =
+            rspice_results::bode::metrics_from_curves(&frequency, &gain_db, Some(&phase_deg));
+
+        let span_of = |marks: &MarginMarks| {
+            let [mark] = &marks.markers[..] else {
+                panic!("one margin span");
+            };
+            let plot::MarkerShape::Span { to } = mark.shape else {
+                panic!("a margin is drawn as a span");
+            };
+            (mark.x, mark.y, to)
+        };
+        let close = |actual: f64, expected: f64, tolerance: f64| {
+            assert!(
+                (actual - expected).abs() <= tolerance,
+                "{actual} is not within {tolerance} of {expected}"
+            );
+        };
+
+        let (hertz, reference, curve) = span_of(&gain_marks(&metrics, egui::Color32::RED, 4));
+        close(hertz, 3.0_f64.sqrt() * 1.0e3, 0.5);
+        assert_eq!(reference, 0.0);
+        close(curve, -20.0 * 2.0_f64.log10(), 1.0e-3);
+
+        let unity = (4.0_f64.powf(2.0 / 3.0) - 1.0).sqrt();
+        let marks = phase_marks(&metrics, egui::Color32::RED, &policy, 4);
+        let (hertz, reference, curve) = span_of(&marks);
+        close(hertz, unity * 1.0e3, 0.5);
+        close(reference, -180.0, 1.0e-9);
+        close(curve, -3.0 * unity.atan().to_degrees(), 1.0e-3);
+        assert_eq!(marks.references, [reference]);
     }
 }

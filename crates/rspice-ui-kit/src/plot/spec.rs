@@ -462,7 +462,7 @@ pub fn trace_cache_key(base: u64, index: usize) -> u64 {
 }
 
 /// How a [`Marker`] draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum MarkerShape {
     /// A hollow dot sitting on the curve at (`x`, `y`), tag beside it.
     #[default]
@@ -470,6 +470,10 @@ pub enum MarkerShape {
     /// A dashed limit line spanning the plot height at `x`, tag at the top.
     /// `y` is ignored — the callout is about the X position alone.
     LimitLine,
+    /// A distance read at `x`: a capped vertical bar from `y` to `to`, tag
+    /// beside its middle (a loop's gain or phase margin, from the curve to
+    /// the level it is measured against).
+    Span { to: f64 },
 }
 
 /// An analysis marker: a hollow dot on the curve plus a bordered tag, with
@@ -511,6 +515,14 @@ impl Marker {
         Self {
             shape: MarkerShape::LimitLine,
             ..Self::point(x, 0.0, color, label)
+        }
+    }
+
+    /// A capped vertical span at `x` from `from` to `to`, tagged beside it.
+    pub fn span(x: f64, from: f64, to: f64, color: Color32, label: impl Into<String>) -> Self {
+        Self {
+            shape: MarkerShape::Span { to },
+            ..Self::point(x, from, color, label)
         }
     }
 }
