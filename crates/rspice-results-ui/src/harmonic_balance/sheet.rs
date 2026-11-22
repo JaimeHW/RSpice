@@ -6,6 +6,7 @@
 //! pane's: a voltage and a current are never read against one axis.
 
 use super::{HarmonicBalanceModel, HarmonicTrace, SpectrumResponse};
+use crate::fft::view::phase_axis;
 use crate::presentation::{PlotView, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 use crate::waves::ReadoutPolicy;
@@ -25,16 +26,6 @@ const QUANTITIES: [CoefficientQuantity; 3] = [
     CoefficientQuantity::Current,
     CoefficientQuantity::Other,
 ];
-
-/// A phase strip's axis: a whole turn reads in quarter turns, as a phase is
-/// read; a zoomed span takes the plot's own ticks.
-fn phase_axis(lo: f64, hi: f64) -> Axis {
-    if (lo, hi) == (-180.0, 180.0) {
-        Axis::with_ticks(lo, hi, "°", &[-180.0, -90.0, 0.0, 90.0, 180.0])
-    } else {
-        Axis::linear_with(lo, hi, "°", 5)
-    }
-}
 
 /// How many periods of its lowest line the rebuilt waveform spans.
 const WAVEFORM_PERIODS: f64 = 2.0;
@@ -297,7 +288,6 @@ fn show_strip(
         SignalForm::Value => "Waveform rebuilt from the coefficient spectrum",
         _ => "Coefficient spectrum levels",
     });
-    spec.left_margin = 64.0;
     if form != SignalForm::Value {
         // The lines are discrete, drawn as a spectrum analyser draws them:
         // a stem to each line, from the strip's floor on a decibel scale and

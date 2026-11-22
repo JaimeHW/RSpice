@@ -435,9 +435,8 @@ pub fn show(
             })
             .inner;
         crate::chrome::pinned_readout::follow(ui, &response, spec.x_scale, pin, &readout);
-        let mut phase_spec =
-            PlotSpec::new(x_axis, x_scale, Axis::linear_with(-180.0, 180.0, "°", 5))
-                .accessible_name("FFT phase plot");
+        let mut phase_spec = PlotSpec::new(x_axis, x_scale, phase_axis(-180.0, 180.0))
+            .accessible_name("FFT phase plot");
         phase_spec.traces.push(
             Trace::new(&model.frequency, &model.phase, c.traces[1])
                 .thin()
@@ -648,6 +647,16 @@ pub fn right_panel(
             quantity_policy,
             level_unit,
         );
+    }
+}
+
+/// A phase axis: a whole turn reads in quarter turns, as a phase is read; a
+/// zoomed span takes the plot's own ticks.
+pub(crate) fn phase_axis(lo: f64, hi: f64) -> Axis {
+    if (lo, hi) == (-180.0, 180.0) {
+        Axis::with_ticks(lo, hi, "°", &[-180.0, -90.0, 0.0, 90.0, 180.0])
+    } else {
+        Axis::linear_with(lo, hi, "°", 5)
     }
 }
 
