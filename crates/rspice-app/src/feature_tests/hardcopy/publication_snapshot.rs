@@ -83,7 +83,8 @@ fn authored_presentation_and_disclosure_choices_are_sealed() {
             ..Default::default()
         },
     )
-    .expect("netlist publication builds");
+    .expect("netlist publication builds")
+    .snapshot;
 
     let presentation = snapshot.presentation.expect("v3 presentation");
     assert_eq!(
@@ -182,7 +183,8 @@ fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
         .assign_objects(catalog.revision(), second, [22])
         .unwrap();
 
-    let (sheets, plots) = collect_scenes(publication_reads(&state)).unwrap();
+    let PublicationScenes { sheets, plots, .. } =
+        collect_scenes(publication_reads(&state)).unwrap();
     let path = state.model.workspace.content.active_display_path();
     assert_eq!(
         sheets
@@ -210,7 +212,7 @@ fn a_published_sheet_lies_on_the_paper_it_prints_on() {
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
 
-    let (sheets, _) = collect_scenes(publication_reads(&state)).unwrap();
+    let PublicationScenes { sheets, .. } = collect_scenes(publication_reads(&state)).unwrap();
     let scene = &sheets[0].scene;
     // Beneath everything the sheet draws lies the white page of the print
     // whose inks it is drawn in, across the whole sheet.
@@ -379,7 +381,8 @@ fn run_results_and_deck_build_a_valid_snapshot() {
             ..Default::default()
         },
     )
-    .expect("snapshot builds");
+    .expect("snapshot builds")
+    .snapshot;
     assert!(snapshot.netlist.is_some());
     let results = snapshot.results.as_ref().expect("results");
     assert_eq!(results.analyses.len(), 1);

@@ -23,11 +23,12 @@ use crate::workbench::app::dialogs::unpublish_web::{
     UnpublishWebDialogState, open_unpublish_web_dialog,
 };
 use crate::workbench::app_state::Model;
-use crate::workbench::framework::feature::{DesignPort, HardcopyPort, PublicationDraft};
+use crate::workbench::framework::feature::{
+    BuiltPublication, DesignPort, HardcopyPort, PublicationDraft,
+};
 use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
-use rspice_publication_contract::PublicationSnapshot;
 
 /// What the open-time snapshot build proved about the publish scope.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -46,7 +47,14 @@ pub struct PublishScope {
     pub imported_model_sources: usize,
     /// Canonical `.rspicepub` byte count at review time.
     pub payload_bytes: usize,
+    /// A published sheet's owner logo is left off the page, which cannot
+    /// carry a picture yet.
+    pub owner_logo_left_out: bool,
 }
+
+/// What the review and the publish result say when a sheet's owner logo is
+/// left off the page.
+pub const OWNER_LOGO_LEFT_OUT: &str = "The owner logo is not published yet.";
 
 /// Publish-to-web dialog state. `scope` holds the reviewed build (or the
 /// builder's refusal); `submitted` means this dialog handed a request to the
@@ -97,7 +105,7 @@ pub struct SnapshotSource<'a> {
 impl<'a> SnapshotSource<'a> {
     /// The snapshot `draft` describes, as the hardcopy feature builds it,
     /// lettering the part labels the design workspace's canvas letters.
-    pub fn build(self, draft: &PublicationDraft) -> Result<PublicationSnapshot, String> {
+    pub fn build(self, draft: &PublicationDraft) -> Result<BuiltPublication, String> {
         self.hardcopy.build_publication_snapshot(
             self.model,
             self.workbench,
@@ -443,11 +451,19 @@ pub(crate) fn record_publish_receipt(
     model.record(
         LogSeverity::Info,
         LogSource::Studio,
-        format!(
-            "Published {}; the page is being prepared.",
-            receipt.url_path
-        ),
+        published_message(&receipt.url_path, dialog.scope.as_ref()),
     );
+}
+
+/// What the log says of a publish that reached `url_path`: the page, and
+/// what the published build `scope` left off it.
+fn published_message(url_path: &str, scope: Option<&Result<PublishScope, String>>) -> String {
+    let mut message = format!("Published {url_path}; the page is being prepared.");
+    if matches!(scope, Some(Ok(scope)) if scope.owner_logo_left_out) {
+        message.push(' ');
+        message.push_str(OWNER_LOGO_LEFT_OUT);
+    }
+    message
 }
 
 /// Say that a publish failed after its dialog was closed.
@@ -500,13 +516,20 @@ fn submit_publish(
         }
     };
     let draft = publication_draft(dialog);
-    let built = parts.source().build(&draft).and_then(|snapshot| {
-        snapshot
+    let built = parts.source().build(&draft).and_then(|built| {
+        let bytes = built
+            .snapshot
             .canonical_bytes()
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok((bytes, built.owner_logo_left_out))
     });
     match built {
-        Ok(snapshot_bytes) => {
+        Ok((snapshot_bytes, owner_logo_left_out)) => {
+            // The publish result says what this build, not the review,
+            // left off the page.
+            if let Some(Ok(scope)) = &mut parts.dialog.scope {
+                scope.owner_logo_left_out = owner_logo_left_out;
+            }
             parts.account.publish_snapshot(PublishRequest {
                 target,
                 title,
@@ -583,7 +606,10 @@ pub fn build_scope(
     source: SnapshotSource<'_>,
     draft: &PublicationDraft,
 ) -> Result<PublishScope, String> {
-    let snapshot = source.build(draft)?;
+    let BuiltPublication {
+        snapshot,
+        owner_logo_left_out,
+    } = source.build(draft)?;
     let payload_bytes = snapshot
         .canonical_bytes()
         .map_err(|error| error.to_string())?
@@ -636,6 +662,7 @@ pub fn build_scope(
             snapshot.netlist.is_some(),
         ),
         payload_bytes,
+        owner_logo_left_out,
     })
 }
 
@@ -662,6 +689,9 @@ fn render_scope_column(ui: &mut egui::Ui, scope: &PublishScope) {
     section_head(ui, "Scope");
     for sheet in &scope.sheets {
         scope_row(ui, sheet, "schematic · SVG scene");
+    }
+    if scope.owner_logo_left_out {
+        problem_note(ui, Problem::Warning, OWNER_LOGO_LEFT_OUT);
     }
     for plot in &scope.plots {
         scope_row(ui, plot, "plot · SVG scene");
@@ -1004,6 +1034,26 @@ fn format_bytes(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_publish_result_says_when_the_owner_logo_was_left_off() {
+        let scope = |owner_logo_left_out| {
+            Ok(PublishScope {
+                sheets: vec!["Sheet 1".to_owned()],
+                owner_logo_left_out,
+                ..Default::default()
+            })
+        };
+        assert_eq!(
+            published_message("/c/divider", Some(&scope(true))),
+            "Published /c/divider; the page is being prepared. The owner logo is not \
+             published yet."
+        );
+        assert_eq!(
+            published_message("/c/divider", Some(&scope(false))),
+            "Published /c/divider; the page is being prepared."
+        );
+    }
 
     #[test]
     fn byte_formatting_is_binary_scaled() {

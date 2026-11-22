@@ -418,7 +418,8 @@ fn the_console_reads_the_sheet_and_a_publication_keeps_the_sealed_verdict() {
             ..Default::default()
         },
     )
-    .expect("the run publishes");
+    .expect("the run publishes")
+    .snapshot;
     let results = snapshot.results.expect("the run's results");
     let [published] = results.measurements.as_slice() else {
         panic!("one measurement: {:?}", results.measurements);

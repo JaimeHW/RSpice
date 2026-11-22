@@ -1251,6 +1251,20 @@ impl PreparedRetainedHardcopyResolution {
         self.payload.validate_shape(nested)
     }
 
+    /// The same source with the project's owner logo taken out of a
+    /// schematic's title block, so its owner cell letters as a project
+    /// without one does, and the logo taken; `None` where the source carried
+    /// none.
+    pub fn without_owner_logo(mut self) -> (Self, Option<DrawingSheetOwnerLogo>) {
+        let logo = match &mut self.payload {
+            RetainedHardcopySourceInput::Schematic {
+                project_owner_logo, ..
+            } => project_owner_logo.take(),
+            _ => None,
+        };
+        (self, logo)
+    }
+
     /// Serialize the exact prepared owner snapshot for a browser dedicated
     /// worker. Consuming `self` avoids cloning large retained result arrays.
     /// The returned bytes are bounded and authenticated as one atomic unit.

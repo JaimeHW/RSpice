@@ -243,6 +243,17 @@ pub trait DesignPeer: DesignPort + CanvasGesturePort {}
 
 impl<T: DesignPort + CanvasGesturePort> DesignPeer for T {}
 
+/// A publication snapshot as the hardcopy feature built it, and what of the
+/// open project the build had to leave off the page.
+#[derive(Debug, Clone)]
+pub struct BuiltPublication {
+    pub snapshot: rspice_publication_contract::PublicationSnapshot,
+    /// A published sheet's title block would seat the project's owner logo,
+    /// which a published page cannot carry yet, so the sheet was published
+    /// as a project without a logo letters it.
+    pub owner_logo_left_out: bool,
+}
+
 /// Everything the caller decides about a publication snapshot; the snapshot
 /// builder derives the rest from project state. `created_utc` is supplied
 /// here so the builder itself stays clock-free and deterministic. A feature
@@ -271,7 +282,8 @@ pub trait HardcopyPort {
     /// every printable schematic sheet, lettering the part labels
     /// `parameter_labels` says the canvas letters, and every plot pane, the
     /// active run's analyses, datasets and measurements, and the effective
-    /// deck. A refusal names the boundary that refused.
+    /// deck; and whether a sheet's owner logo had to be left off it. A
+    /// refusal names the boundary that refused.
     fn build_publication_snapshot(
         &self,
         model: &Model,
@@ -280,7 +292,7 @@ pub trait HardcopyPort {
         runs: &RunsState,
         parameter_labels: SchematicParameterLabelVisibility,
         draft: &PublicationDraft,
-    ) -> Result<rspice_publication_contract::PublicationSnapshot, String>;
+    ) -> Result<BuiltPublication, String>;
 
     /// The UTC RFC 3339 stamp a publication records as its creation time,
     /// read from the clock as the hardcopy pipeline reads it.

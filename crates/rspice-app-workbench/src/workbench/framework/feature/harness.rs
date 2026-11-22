@@ -154,7 +154,7 @@ impl HardcopyPort for NullPorts {
         _runs: &RunsState,
         _parameter_labels: SchematicParameterLabelVisibility,
         _draft: &PublicationDraft,
-    ) -> Result<rspice_publication_contract::PublicationSnapshot, String> {
+    ) -> Result<super::BuiltPublication, String> {
         Err("a feature's own test builds no publication snapshot".to_owned())
     }
 

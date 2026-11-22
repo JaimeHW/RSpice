@@ -3,7 +3,7 @@
 //! builds for other features, from this state and the parts they lend.
 
 use crate::workbench::app_state::Model;
-use crate::workbench::framework::feature::{HardcopyPort, PublicationDraft};
+use crate::workbench::framework::feature::{BuiltPublication, HardcopyPort, PublicationDraft};
 use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::hardcopy_adapters::publication_snapshot::{
     PublicationReads, build_publication_snapshot, publication_timestamp_utc,
@@ -36,7 +36,7 @@ impl HardcopyPort for HardcopyState {
         runs: &RunsState,
         parameter_labels: SchematicParameterLabelVisibility,
         draft: &PublicationDraft,
-    ) -> Result<rspice_publication_contract::PublicationSnapshot, String> {
+    ) -> Result<BuiltPublication, String> {
         let reads = PublicationReads {
             sources: SourceReads {
                 model,

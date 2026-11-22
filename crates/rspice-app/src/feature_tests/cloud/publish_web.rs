@@ -66,7 +66,8 @@ fn a_published_design_letters_the_part_labels_the_canvas_shows() {
                 include_schematic: true,
                 ..Default::default()
             })
-            .expect("a placed part publishes");
+            .expect("a placed part publishes")
+            .snapshot;
         snapshot
             .schematic
             .expect("the schematic publishes")
@@ -104,6 +105,64 @@ fn a_published_design_letters_the_part_labels_the_canvas_shows() {
             "{labels:?}: {published:?}"
         );
     }
+}
+
+/// A project with an owner logo publishes: a published page cannot carry a
+/// picture yet, so its sheets publish as a project without a logo letters
+/// them, and the review says the logo is left out.
+#[test]
+fn a_project_with_an_owner_logo_publishes_without_it_and_says_so() {
+    let mut state = AppState::default();
+    state.model.schematic.add_component(
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
+    );
+    let reference = state.model.workspace.content.active_view.clone();
+    state.workbench.documents.activate(
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::CellView(
+            reference,
+        ),
+    );
+    let draft = PublicationDraft {
+        title: "Divider".to_owned(),
+        author_display: "Ada".to_owned(),
+        created_utc: "2026-08-06T00:00:00Z".to_owned(),
+        include_schematic: true,
+        ..Default::default()
+    };
+    let without = build_scope(snapshot_source(&state), &draft).expect("the design publishes");
+    assert!(!without.owner_logo_left_out);
+    let plain = snapshot_source(&state).build(&draft).unwrap().snapshot;
+
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, 6, 2);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[0x40; 6 * 2 * 4]).unwrap();
+    writer.finish().unwrap();
+    let designs = &mut state.model.workspace.content.design_management;
+    let mut settings = designs.drawing_sheet_settings().clone();
+    settings.owner_logo =
+        Some(rspice_app_state::state::DrawingSheetOwnerLogo::from_png(png, "Acme logo").unwrap());
+    let revision = designs.revision();
+    designs
+        .update_drawing_sheet_settings(revision, settings)
+        .unwrap();
+
+    let scope = build_scope(snapshot_source(&state), &draft)
+        .expect("a project with an owner logo publishes");
+    assert_eq!(scope.sheets, without.sheets);
+    assert!(
+        scope.owner_logo_left_out,
+        "the review says the logo is left out"
+    );
+    let built = snapshot_source(&state).build(&draft).unwrap();
+    assert!(built.owner_logo_left_out);
+    assert_eq!(
+        built.snapshot.schematic, plain.schematic,
+        "each sheet publishes as it does without a logo, its owner's name in the whole cell"
+    );
 }
 
 #[test]

@@ -22,7 +22,7 @@ use rspice_publication_contract::{
 
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
-use crate::workbench::framework::feature::PublicationDraft;
+use crate::workbench::framework::feature::{BuiltPublication, PublicationDraft};
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, SourceReads, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
@@ -119,8 +119,12 @@ pub struct PublicationReads<'a> {
 pub fn build_publication_snapshot(
     reads: PublicationReads<'_>,
     draft: &PublicationDraft,
-) -> Result<PublicationSnapshot, PublicationBuildError> {
-    let (mut sheets, mut plot_figures) = collect_scenes(reads)?;
+) -> Result<BuiltPublication, PublicationBuildError> {
+    let PublicationScenes {
+        mut sheets,
+        plots: mut plot_figures,
+        owner_logo_left_out,
+    } = collect_scenes(reads)?;
     if !draft.include_schematic {
         sheets.clear();
     }
@@ -267,7 +271,11 @@ pub fn build_publication_snapshot(
     snapshot
         .validate()
         .map_err(PublicationBuildError::Contract)?;
-    Ok(snapshot)
+    Ok(BuiltPublication {
+        // Only a published sheet can have left its logo off.
+        owner_logo_left_out: owner_logo_left_out && snapshot.schematic.is_some(),
+        snapshot,
+    })
 }
 
 /// UTC RFC 3339 stamp for snapshot provenance, from the wasm-safe clock and
@@ -572,14 +580,26 @@ pub struct PlotSceneSource {
     traces: Vec<PlotTraceSource>,
 }
 
+/// Every printable schematic sheet and plot pane, compiled to contract
+/// scenes, and whether a sheet's owner logo was left off.
+pub struct PublicationScenes {
+    pub sheets: Vec<SheetScene>,
+    pub plots: Vec<PlotSceneSource>,
+    /// A sheet's title block would seat the project's owner logo, which a
+    /// published scene has no primitive for yet; the sheet is published as a
+    /// project without a logo letters it, its owner's name in the whole cell.
+    pub owner_logo_left_out: bool,
+}
+
 /// Resolve every printable schematic sheet and plot pane through the
 /// hardcopy source registry, one source at a time so no aggregate clipping
 /// is ever involved, and compile each into a contract scene.
 pub fn collect_scenes(
     reads: PublicationReads<'_>,
-) -> Result<(Vec<SheetScene>, Vec<PlotSceneSource>), PublicationBuildError> {
+) -> Result<PublicationScenes, PublicationBuildError> {
     let mut sheets = Vec::new();
     let mut plots = Vec::new();
+    let mut owner_logo_left_out = false;
     for descriptor in enumerate_retained_hardcopy_sources(reads.sources) {
         let scope = if descriptor.supports_scope(&HardcopyScope::CurrentSheet) {
             // A cell view that offers "All sheets" lists each of its sheets
@@ -610,6 +630,9 @@ pub fn collect_scenes(
                 });
             }
         };
+        // A published page cannot carry a picture yet, so a sheet publishes
+        // as a project without a logo letters it rather than refusing.
+        let (prepared, owner_logo) = prepared.without_owner_logo();
         let resolved =
             prepared
                 .resolve_owned()
@@ -645,6 +668,14 @@ pub fn collect_scenes(
         let converted =
             convert_scene(scene.extent(), scene.primitives(), &descriptor.display_name)?;
         if is_schematic {
+            if let (Some(logo), HardcopySemanticDocument::Schematic(sheet)) =
+                (&owner_logo, resolved.semantic_document())
+            {
+                owner_logo_left_out |= sheet
+                    .drawing_sheet
+                    .as_ref()
+                    .is_some_and(|format| seats_owner_logo(format, logo));
+            }
             sheets.push(SheetScene {
                 name: descriptor.display_name.clone(),
                 page_label: None,
@@ -670,7 +701,23 @@ pub fn collect_scenes(
             });
         }
     }
-    Ok((sheets, plots))
+    Ok(PublicationScenes {
+        sheets,
+        plots,
+        owner_logo_left_out,
+    })
+}
+
+/// Whether a sheet printed on `format` seats `logo` in its title block: a
+/// block that letters an owner and draws no logo of its own.
+fn seats_owner_logo(
+    format: &crate::state::SchematicSheetFormat,
+    logo: &crate::state::DrawingSheetOwnerLogo,
+) -> bool {
+    format.geometry().ok().is_some_and(|geometry| {
+        crate::state::drawing_sheet_title_layout_with_owner_logo(format, &geometry, Some(logo))
+            .is_some_and(|(_, seat)| seat.is_some())
+    })
 }
 
 // ---------------------------------------------------------------------------
