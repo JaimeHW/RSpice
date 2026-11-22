@@ -7,6 +7,8 @@
 //! release, and that frame must ask for the next at once, so what the press
 //! changed is drawn without waiting for the reader to move the pointer.
 
+use std::time::{Duration, Instant};
+
 use egui::accesskit::Role;
 use egui::{Modifiers, Pos2};
 
@@ -34,6 +36,29 @@ fn repaints_at_once(output: &egui::FullOutput) -> bool {
         .is_some_and(|viewport| viewport.repaint_delay.is_zero())
 }
 
+/// How long a page may go on asking for its next frame at once before it is
+/// taken never to settle.
+const SETTLE_WITHIN: Duration = Duration::from_secs(20);
+
+/// The first frame that waits for input before its next, or the frame that
+/// still did not once `SETTLE_WITHIN` has passed.
+///
+/// The editor builds the typed deck's index on a thread of its own, and the
+/// finished build wakes the next frame at once, which egui answers with two.
+/// On a busy machine that build finishes frames after the typing, so a frame
+/// a fixed count after it can be one the build woke. A frame that waits says
+/// the page has settled.
+fn settled(replay: &mut Replay) -> egui::FullOutput {
+    let started = Instant::now();
+    loop {
+        let output = replay.frame(Vec::new());
+        if !repaints_at_once(&output) || started.elapsed() >= SETTLE_WITHIN {
+            return output;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// Whether a run of the deck was asked for, has started or has been kept.
 fn run_requested(replay: &Replay) -> bool {
     let simulation = &replay.app.state.model.simulation;
@@ -52,7 +77,7 @@ fn run_deck_runs_in_the_frame_it_is_released_and_repaints() {
     let at = run_deck(&replay.frames(Vec::new())).center;
     assert!(!run_requested(&replay), "nothing has run before the press");
     assert!(
-        !repaints_at_once(&replay.frame(Vec::new())),
+        !repaints_at_once(&settled(&mut replay)),
         "the settled page waits for input before its next frame"
     );
 
@@ -98,7 +123,7 @@ fn stop_stops_the_run_in_the_frame_it_is_released_and_repaints() {
         "nothing has asked the run to stop before the press"
     );
     assert!(
-        !repaints_at_once(&replay.frame(Vec::new())),
+        !repaints_at_once(&settled(&mut replay)),
         "the settled page waits for input before its next frame"
     );
 
