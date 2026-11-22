@@ -9,9 +9,10 @@ use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, Component, ComponentType,
     DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Junction, Library,
     LibraryCellInstance, LibraryManager, PortDirection, PortSpec, ResolvedCellSymbol,
-    SchematicProbe, SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View, ViewType,
-    Wire, WireConnection,
+    SchematicProbe, SchematicSnapshot, SchematicState, SymbolDocument, SymbolPin, SymbolResolver,
+    View, ViewType, Wire, WireConnection,
 };
+use rspice_design::connectivity::summary::net_names_by_terminal;
 use std::collections::HashMap;
 
 /// The moves under test, in documents with one sheet, which hide nothing.
@@ -1144,4 +1145,222 @@ fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
         Point::origin()
     );
     assert!(!read_only.session.is_dirty);
+}
+
+/// A sheet with something attached to every pin and wire R1 carries: the
+/// label OUT on R1's right pin, joined by name to the label on R3's pin; a
+/// typed tap whose wire end sits on R1's left pin; a probe on R1's output
+/// wire; and a dot where R2's wire tees into it. Nothing but R1 is selected.
+fn attached_sheet() -> SchematicState {
+    let mut state = SchematicState::default();
+    let document = state.design.document_mut_for_test();
+    document.components.push(Component::new(
+        1,
+        ComponentType::Resistor,
+        Point::new(100, 100),
+    ));
+    let mut r2 = Component::new(2, ComponentType::Resistor, Point::new(180, 180));
+    r2.rotation = crate::state::Rotation::R90;
+    document.components.push(r2);
+    document.components.push(Component::new(
+        3,
+        ComponentType::Resistor,
+        Point::new(400, 200),
+    ));
+    document.wires.push(Wire::segment(
+        10,
+        Point::new(120, 100),
+        Point::new(240, 100),
+    ));
+    document.wires.push(Wire::segment(
+        11,
+        Point::new(180, 100),
+        Point::new(180, 160),
+    ));
+    document
+        .wires
+        .push(Wire::segment(12, Point::new(80, 100), Point::new(80, 140)));
+    document
+        .junctions
+        .push(Junction::new(20, Point::new(180, 100)));
+    document
+        .net_labels
+        .push(NetLabel::new(30, Point::new(120, 100), "OUT"));
+    document
+        .net_labels
+        .push(NetLabel::new(31, Point::new(380, 200), "OUT"));
+    let bus = Bus::segment(
+        40,
+        Point::new(60, 60),
+        Point::new(60, 140),
+        Some(BusDeclaration::parse("D[1:0]").unwrap()),
+    )
+    .unwrap();
+    let tap = BusTap::new(
+        41,
+        &bus,
+        Point::new(60, 100),
+        Point::new(80, 100),
+        BusSlice::parse("D[0]").unwrap(),
+        BusTapOrientation::Right,
+    )
+    .unwrap();
+    document.buses.push(bus);
+    document.bus_taps.push(tap);
+    document.probes.push(
+        SchematicProbe::new(
+            50,
+            Point::new(150, 100),
+            "V(OUT)",
+            Some("V(OUT)".to_owned()),
+        )
+        .unwrap(),
+    );
+    state.session.editor.selection.select_only_component(1);
+    state
+}
+
+/// The edit left every pin on the net it had, under the name it had, with
+/// every wire square, the probe on a wire, the tap valid and the dot on the
+/// wires it joins.
+fn assert_nets_kept(
+    schematic: &SchematicState,
+    before: &HashMap<(u64, String), String>,
+    edit: &str,
+) {
+    let document = schematic.design.document();
+    assert_eq!(
+        &net_names_by_terminal(document),
+        before,
+        "{edit} changed the netlist"
+    );
+    for wire in &document.wires {
+        assert!(
+            wire.is_orthogonal(),
+            "{edit} left wire {} slanted: {:?}",
+            wire.id,
+            wire.points
+        );
+    }
+    let probe = document.probes[0].position;
+    assert!(
+        document.wires.iter().any(|wire| wire.contains_point(probe)),
+        "{edit} left the probe off its wire at {probe:?}"
+    );
+    let tap = &document.bus_taps[0];
+    assert!(
+        document.buses[0].contains_point(tap.bus_point)
+            && document
+                .wires
+                .iter()
+                .any(|wire| wire.contains_point(tap.connection_point)),
+        "{edit} left the tap off its bus or wire: {tap:?}"
+    );
+    for junction in &document.junctions {
+        assert!(
+            document
+                .wires
+                .iter()
+                .filter(|wire| wire.contains_point(junction.pos))
+                .count()
+                >= 2,
+            "{edit} left a dot off the wires it joined at {:?}",
+            junction.pos
+        );
+    }
+}
+
+/// What the editor does after a move: a pin taken off a pin keeps a wire to
+/// it, a pin dropped in a wire splits it, and the junction policy tidies.
+fn tidy_after_move(schematic: &mut SchematicState) {
+    let moved = schematic.session.editor.selection.components.clone();
+    let automatic_junctions = schematic.session.editor.automatic_junctions;
+    schematic.with_single_sheet_topology(|state, scope| {
+        state.connect_moved_pins(&moved, legacy_terminal_points, scope);
+        state.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
+    });
+}
+
+#[test]
+fn a_drag_carries_the_label_tap_and_probe_on_the_parts_pins_and_wires() {
+    let mut schematic = attached_sheet();
+    let before = net_names_by_terminal(schematic.design.document());
+    schematic.begin_operation("drag");
+    // Two frames, as a drag lays them: the second is laid from where the
+    // gesture began, not from the first.
+    schematic.rubber_band_on_one_sheet(Point::new(0, 30));
+    schematic.rubber_band_on_one_sheet(Point::new(40, 0));
+    tidy_after_move(&mut schematic);
+    assert!(schematic.end_operation());
+
+    let document = schematic.design.document();
+    assert_eq!(document.net_labels[0].pos, Point::new(160, 130));
+    assert_eq!(document.bus_taps[0].connection_point, Point::new(120, 130));
+    assert_eq!(document.net_labels[1].pos, Point::new(380, 200));
+    assert_nets_kept(&schematic, &before, "a drag");
+}
+
+#[test]
+fn a_move_carries_the_label_tap_and_probe_on_the_parts_pins_and_wires() {
+    let mut schematic = attached_sheet();
+    let before = net_names_by_terminal(schematic.design.document());
+    schematic.begin_operation("move selection");
+    assert_eq!(
+        schematic.move_with_mode_on_one_sheet(Point::new(40, 30), MoveSelectionMode::Connected),
+        Ok(true)
+    );
+    tidy_after_move(&mut schematic);
+    assert!(schematic.end_operation());
+
+    let document = schematic.design.document();
+    assert_eq!(document.net_labels[0].pos, Point::new(160, 130));
+    assert_eq!(document.bus_taps[0].connection_point, Point::new(120, 130));
+    assert_nets_kept(&schematic, &before, "Move");
+}
+
+/// Shove lays each wire on R1's pins afresh. The output wire, which R2's
+/// wire tees into, would lose the tee, so shove refuses it untouched; with
+/// the tee gone the rest moves and keeps its label and tap.
+#[test]
+fn a_shove_move_carries_the_label_and_tap_on_the_parts_pins() {
+    let mut teed = attached_sheet();
+    let untouched = SchematicSnapshot::capture(teed.design.document());
+    assert_eq!(
+        teed.move_with_mode_on_one_sheet(Point::new(0, 30), MoveSelectionMode::Shove),
+        Err(MoveSelectionError::UnsupportedInteriorConnection { wire_id: 10 })
+    );
+    assert!(untouched.is_equal(&SchematicSnapshot::capture(teed.design.document())));
+
+    let mut schematic = attached_sheet();
+    let document = schematic.design.document_mut_for_test();
+    document.wires.retain(|wire| wire.id != 11);
+    document.junctions.clear();
+    let before = net_names_by_terminal(schematic.design.document());
+    schematic.begin_operation("move selection");
+    assert_eq!(
+        schematic.move_with_mode_on_one_sheet(Point::new(0, 30), MoveSelectionMode::Shove),
+        Ok(true)
+    );
+    tidy_after_move(&mut schematic);
+    assert!(schematic.end_operation());
+
+    let document = schematic.design.document();
+    assert_eq!(document.net_labels[0].pos, Point::new(120, 130));
+    assert_eq!(document.bus_taps[0].connection_point, Point::new(80, 130));
+    assert_nets_kept(&schematic, &before, "a shove Move");
+}
+
+/// A Move that breaks connections pulls the pins out of their wires, and
+/// what sits on a wire stays with the wire.
+#[test]
+fn a_move_that_breaks_connections_leaves_the_label_with_the_wire() {
+    let mut schematic = attached_sheet();
+    assert_eq!(
+        schematic
+            .move_with_mode_on_one_sheet(Point::new(0, 30), MoveSelectionMode::BreakConnections),
+        Ok(true)
+    );
+    let document = schematic.design.document();
+    assert_eq!(document.net_labels[0].pos, Point::new(120, 100));
+    assert_eq!(document.bus_taps[0].connection_point, Point::new(80, 100));
 }

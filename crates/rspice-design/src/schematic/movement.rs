@@ -1,11 +1,14 @@
 //! Selection movement, guarded translation and bounded wire shove.
 
 use super::{
-    bus::BusTargetKind,
+    attachment::{self, Anchor, Attachable, Attached, Conductor, MovingGeometry, Scene},
+    bus::{Bus, BusTap, BusTargetKind},
     component::Component,
     document::SchematicDocument,
     documentation_shape::clamped_documentation_shape_translation,
     identity::SchematicIdentity,
+    net_label::{Junction, NetLabel},
+    probe::SchematicProbe,
     wire::{Wire, WireConnection, WireSegment},
     wire_edit,
 };
@@ -73,7 +76,7 @@ impl std::fmt::Display for MoveSelectionError {
             ),
             Self::UnsupportedInteriorConnection { wire_id } => write!(
                 formatter,
-                "Wire {wire_id} has an interior terminal connection that cannot be shoved safely."
+                "Wire {wire_id} has a pin or a wire joined along its length; shove cannot reroute it without breaking that join."
             ),
             Self::AttachedTapCannotBePreserved { tap_id } => write!(
                 formatter,
@@ -413,16 +416,62 @@ pub struct DragBaseline<'a> {
     pub components: &'a [Component],
     pub wires: &'a [Wire],
     pub connections: &'a [WireConnection],
+    pub buses: &'a [Bus],
+    pub bus_taps: &'a [BusTap],
+    pub junctions: &'a [Junction],
+    pub net_labels: &'a [NetLabel],
+    pub probes: &'a [SchematicProbe],
+}
+
+/// The records of a [`DragBaseline`], taken from a document before it moves.
+struct DragBaselineRecords {
+    components: Vec<Component>,
+    wires: Vec<Wire>,
+    connections: Vec<WireConnection>,
+    buses: Vec<Bus>,
+    bus_taps: Vec<BusTap>,
+    junctions: Vec<Junction>,
+    net_labels: Vec<NetLabel>,
+    probes: Vec<SchematicProbe>,
+}
+
+impl DragBaselineRecords {
+    fn of(document: &SchematicDocument) -> Self {
+        Self {
+            components: document.components.clone(),
+            wires: document.wires.clone(),
+            connections: document.connections.clone(),
+            buses: document.buses.clone(),
+            bus_taps: document.bus_taps.clone(),
+            junctions: document.junctions.clone(),
+            net_labels: document.net_labels.clone(),
+            probes: document.probes.clone(),
+        }
+    }
+
+    fn baseline(&self) -> DragBaseline<'_> {
+        DragBaseline {
+            components: &self.components,
+            wires: &self.wires,
+            connections: &self.connections,
+            buses: &self.buses,
+            bus_taps: &self.bus_taps,
+            junctions: &self.junctions,
+            net_labels: &self.net_labels,
+            probes: &self.probes,
+        }
+    }
 }
 
 /// One frame of a mouse drag.
 ///
 /// The selection moves by this frame's `delta`. Every unselected wire is
 /// then laid again from `baseline`, the document as the gesture found it,
-/// for the whole distance travelled: squaring each small step onto the one
-/// before would leave a jog per frame, and a wire whose end the part merely
-/// passed over would be picked up and carried. With no baseline, the
-/// document before this frame is the baseline.
+/// for the whole distance travelled, and whatever sat on the moved pins and
+/// wires there is put where they went: squaring each small step onto the
+/// one before would leave a jog per frame, and a wire end or a label the
+/// part merely passed over would be picked up and carried. With no
+/// baseline, the document before this frame is the baseline.
 pub fn drag_selection_with_rubber_band_resolved(
     document: &mut SchematicDocument,
     baseline: Option<DragBaseline<'_>>,
@@ -435,16 +484,8 @@ pub fn drag_selection_with_rubber_band_resolved(
     let baseline = match baseline {
         Some(baseline) => baseline,
         None => {
-            captured = (
-                document.components.clone(),
-                document.wires.clone(),
-                document.connections.clone(),
-            );
-            DragBaseline {
-                components: &captured.0,
-                wires: &captured.1,
-                connections: &captured.2,
-            }
+            captured = DragBaselineRecords::of(document);
+            captured.baseline()
         }
     };
     let mut state = MovementState {
@@ -454,27 +495,89 @@ pub fn drag_selection_with_rubber_band_resolved(
     };
     state.move_selection_with_rubber_band_resolved(delta, &mut terminal_points_for);
     if state.impact.changed {
-        lay_dragged_wires_from(
+        let travelled = selection_travel(state.document, baseline, selection);
+        follow_moved_parts(
             state.document,
             baseline,
             selection,
             rubber_band,
-            terminal_points_for,
+            travelled,
+            &mut terminal_points_for,
         );
     }
     state.impact
 }
 
-/// Lay every unselected wire for the distance the selection has travelled
-/// since `baseline`: a wire with both ends on moved pins travels whole, one
-/// with some vertices on them stretches, and every other wire stays exactly
-/// as it was drawn.
-fn lay_dragged_wires_from(
+/// How far the selection has come since `baseline`, read off the first
+/// selected part, wire or bus found in both.
+fn selection_travel(
+    document: &SchematicDocument,
+    baseline: DragBaseline<'_>,
+    selection: MovementSelection<'_>,
+) -> Point {
+    let difference = |before: Point, after: Point| {
+        Point::new(
+            after.x.saturating_sub(before.x),
+            after.y.saturating_sub(before.y),
+        )
+    };
+    let part = baseline
+        .components
+        .iter()
+        .filter(|component| selection.components.contains(&component.id))
+        .find_map(|before| {
+            document
+                .components
+                .iter()
+                .find(|after| after.id == before.id)
+                .map(|after| difference(before.pos, after.pos))
+        });
+    let first_point =
+        |before: &[Point], after: &[Point]| Some(difference(*before.first()?, *after.first()?));
+    let wire = || {
+        baseline
+            .wires
+            .iter()
+            .filter(|wire| selection.wires.contains(&wire.id))
+            .find_map(|before| {
+                let after = document.wires.iter().find(|after| after.id == before.id)?;
+                first_point(&before.points, &after.points)
+            })
+    };
+    let bus = || {
+        baseline
+            .buses
+            .iter()
+            .filter(|bus| selection.buses.contains(&bus.id))
+            .find_map(|before| {
+                let after = document.buses.iter().find(|after| after.id == before.id)?;
+                first_point(&before.points, &after.points)
+            })
+    };
+    part.or_else(wire)
+        .or_else(bus)
+        .unwrap_or_else(Point::origin)
+}
+
+/// Lay every unselected wire for the distance the selected parts have
+/// travelled since `baseline`, and put what sat on the moved pins and wires
+/// where they went.
+///
+/// A wire with both ends on pins that moved alike travels whole, one with
+/// some vertices on moved pins stretches, and every other wire stays
+/// exactly as it was drawn. A label, probe, tap end or dot on a moved pin
+/// goes where the pin went; one on a wire or bus that travels whole goes
+/// with it, the selected ones by `selected_travel`. Each part may have moved
+/// its own way, as Align moves them. Only what `document` still holds is
+/// laid: the baseline may hold another sheet's records, which stay out of
+/// reach.
+fn follow_moved_parts(
     document: &mut SchematicDocument,
     baseline: DragBaseline<'_>,
     selection: MovementSelection<'_>,
     rubber_band: DragRubberBand,
-    mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    selected_travel: Point,
+    terminal_points_for: &mut impl FnMut(&Component) -> Vec<Point>,
 ) {
     let moved_components = document
         .components
@@ -499,6 +602,14 @@ fn lay_dragged_wires_from(
             carried.entry(from).or_insert(to);
         }
     }
+    let attached = carry_from_baseline(
+        document,
+        baseline,
+        selection,
+        &carried,
+        selected_travel,
+        terminal_points_for,
+    );
     let baseline_wires = baseline
         .wires
         .iter()
@@ -513,7 +624,20 @@ fn lay_dragged_wires_from(
         let Some(before) = baseline_wires.get(&wire.id) else {
             continue;
         };
-        let (points, point_map) = dragged_wire_points(document, before, &carried, rubber_band);
+        // Where each tap that sat on this wire now is: the square route
+        // must pass every one of them.
+        let taps = baseline
+            .bus_taps
+            .iter()
+            .filter(|tap| {
+                tap.target_kind() == BusTargetKind::Wire
+                    && polyline_contains_point(&before.points, tap.connection_point)
+            })
+            .filter_map(|old| document.bus_taps.iter().find(|tap| tap.id == old.id))
+            .map(|tap| tap.connection_point)
+            .collect::<Vec<_>>();
+        let (points, point_map) =
+            dragged_wire_points(document, before, &carried, rubber_band, &taps);
         let wire = &mut document.wires[wire_index];
         if wire.points != points {
             wire.points = points;
@@ -554,32 +678,243 @@ fn lay_dragged_wires_from(
                 .unwrap_or(before);
         }
     }
+    let relaid = baseline
+        .wires
+        .iter()
+        .filter(|wire| point_maps.contains_key(&wire.id))
+        .map(|wire| (wire.id, wire.points.as_slice()))
+        .collect::<Vec<_>>();
+    attachment::settle_on_relaid_wires(document, &relaid, |item| {
+        movement_selects(selection, item)
+            || match item {
+                Attachable::NetLabel(id) => attached.net_labels.contains_key(&id),
+                Attachable::Probe(id) => attached.probes.contains_key(&id),
+                Attachable::BusTap(_) | Attachable::Junction(_) => true,
+            }
+    });
+}
+
+/// Put every unselected label, probe, tap and dot back where `baseline`
+/// had it, then carry the ones that sat on a moved pin or a wire or bus
+/// travelling whole to where that went, and say which those were.
+/// `carried` maps each moved pin's baseline point to its point now.
+fn carry_from_baseline(
+    document: &mut SchematicDocument,
+    baseline: DragBaseline<'_>,
+    selection: MovementSelection<'_>,
+    carried: &std::collections::HashMap<Point, Point>,
+    selected_travel: Point,
+    terminal_points_for: &mut impl FnMut(&Component) -> Vec<Point>,
+) -> Attached {
+    let live = |ids: &mut dyn Iterator<Item = u64>| ids.collect::<HashSet<u64>>();
+    let live_wires = live(&mut document.wires.iter().map(|item| item.id));
+    let live_buses = live(&mut document.buses.iter().map(|item| item.id));
+    let live_taps = live(&mut document.bus_taps.iter().map(|item| item.id));
+    let live_junctions = live(&mut document.junctions.iter().map(|item| item.id));
+    let live_labels = live(&mut document.net_labels.iter().map(|item| item.id));
+    let live_probes = live(&mut document.probes.iter().map(|item| item.id));
+    let scene = Scene {
+        wires: baseline
+            .wires
+            .iter()
+            .filter(|item| live_wires.contains(&item.id))
+            .collect(),
+        buses: baseline
+            .buses
+            .iter()
+            .filter(|item| live_buses.contains(&item.id))
+            .collect(),
+        net_labels: baseline
+            .net_labels
+            .iter()
+            .filter(|item| live_labels.contains(&item.id))
+            .collect(),
+        probes: baseline
+            .probes
+            .iter()
+            .filter(|item| live_probes.contains(&item.id))
+            .collect(),
+        junctions: baseline
+            .junctions
+            .iter()
+            .filter(|item| live_junctions.contains(&item.id))
+            .collect(),
+        bus_taps: baseline
+            .bus_taps
+            .iter()
+            .filter(|item| live_taps.contains(&item.id))
+            .collect(),
+    };
+    // A wire with both ends on pins that moved the same way travels whole.
+    let travel_of = |from: Point| {
+        carried
+            .get(&from)
+            .map(|to| Point::new(to.x.saturating_sub(from.x), to.y.saturating_sub(from.y)))
+    };
+    let mut wire_travel = std::collections::HashMap::new();
+    for wire in &scene.wires {
+        if selection.wires.contains(&wire.id) {
+            wire_travel.insert(wire.id, selected_travel);
+            continue;
+        }
+        let (Some(first), Some(last)) = (wire.points.first(), wire.points.last()) else {
+            continue;
+        };
+        if let (Some(travel), Some(other)) = (travel_of(*first), travel_of(*last))
+            && travel == other
+        {
+            wire_travel.insert(wire.id, travel);
+        }
+    }
+    let points = carried.keys().copied().collect::<HashSet<_>>();
+    let conductors = wire_travel
+        .keys()
+        .map(|id| Conductor::Wire(*id))
+        .chain(selection.buses.iter().map(|id| Conductor::Bus(*id)))
+        .collect::<HashSet<_>>();
+    // Only a pin under a wire or bus that travels whole can hold what sits
+    // there; a moved pin's own point is never another part's pin.
+    let fixed_points = if selection.wires.is_empty() && selection.buses.is_empty() {
+        HashSet::new()
+    } else {
+        baseline
+            .components
+            .iter()
+            .filter(|component| !selection.components.contains(&component.id))
+            .filter(|component| {
+                document
+                    .components
+                    .iter()
+                    .any(|live| live.id == component.id)
+            })
+            .flat_map(terminal_points_for)
+            .collect()
+    };
+    let attached = attachment::attached(
+        &scene,
+        MovingGeometry {
+            points: &points,
+            conductors: &conductors,
+            runs: &[],
+            carries_vertices: true,
+            fixed_points: &fixed_points,
+        },
+        |item| movement_selects(selection, item),
+    );
+    restore_unselected_attachables(document, &scene, selection);
+    attached.carry(document, |anchor, point| match anchor {
+        Anchor::Point(from) => carried.get(&from).copied().unwrap_or(point),
+        Anchor::Conductor(Conductor::Wire(id)) => offset_point(
+            point,
+            wire_travel.get(&id).copied().unwrap_or(selected_travel),
+        ),
+        Anchor::Conductor(Conductor::Bus(_)) => offset_point(point, selected_travel),
+    });
+    attached
+}
+
+/// Put every label, probe, dot and tap the selection does not hold back
+/// where `scene` has it.
+fn restore_unselected_attachables(
+    document: &mut SchematicDocument,
+    scene: &Scene<'_>,
+    selection: MovementSelection<'_>,
+) {
+    let labels = scene
+        .net_labels
+        .iter()
+        .map(|item| (item.id, item.pos))
+        .collect::<std::collections::HashMap<_, _>>();
+    for label in document
+        .net_labels
+        .iter_mut()
+        .filter(|label| !selection.net_labels.contains(&label.id))
+    {
+        if let Some(pos) = labels.get(&label.id) {
+            label.pos = *pos;
+        }
+    }
+    let probes = scene
+        .probes
+        .iter()
+        .map(|item| (item.id, item.position))
+        .collect::<std::collections::HashMap<_, _>>();
+    for probe in document
+        .probes
+        .iter_mut()
+        .filter(|probe| !selection.probes.contains(&probe.id))
+    {
+        if let Some(position) = probes.get(&probe.id) {
+            probe.position = *position;
+        }
+    }
+    let junctions = scene
+        .junctions
+        .iter()
+        .map(|item| (item.id, item.pos))
+        .collect::<std::collections::HashMap<_, _>>();
+    for junction in &mut document.junctions {
+        if let Some(pos) = junctions.get(&junction.id) {
+            junction.pos = *pos;
+        }
+    }
+    let taps = scene
+        .bus_taps
+        .iter()
+        .map(|item| (item.id, (item.bus_point, item.connection_point)))
+        .collect::<std::collections::HashMap<_, _>>();
+    for tap in document
+        .bus_taps
+        .iter_mut()
+        .filter(|tap| !selection.bus_taps.contains(&tap.id))
+    {
+        if let Some((bus_point, connection_point)) = taps.get(&tap.id) {
+            tap.bus_point = *bus_point;
+            tap.connection_point = *connection_point;
+        }
+    }
+}
+
+/// Whether `selection` itself moves `item`.
+fn movement_selects(selection: MovementSelection<'_>, item: Attachable) -> bool {
+    match item {
+        Attachable::NetLabel(id) => selection.net_labels.contains(&id),
+        Attachable::Probe(id) => selection.probes.contains(&id),
+        Attachable::BusTap(id) => selection.bus_taps.contains(&id),
+        Attachable::Junction(_) => false,
+    }
 }
 
 /// The vertices `before` takes once the pins in `carried` have moved, and
 /// where each of its old vertices went when the route renumbered them.
+/// `taps` are where the taps that sat on `before` are now; a square route
+/// that would leave one of them off the wire is not laid.
 fn dragged_wire_points(
     document: &SchematicDocument,
     before: &Wire,
     carried: &std::collections::HashMap<Point, Point>,
     rubber_band: DragRubberBand,
+    taps: &[Point],
 ) -> (Vec<Point>, Option<Vec<usize>>) {
     let carried_to = |point: &Point| carried.get(point).copied();
     let (Some(first), Some(last)) = (before.points.first(), before.points.last()) else {
         return (before.points.clone(), None);
     };
-    if let (Some(first_to), Some(_)) = (carried_to(first), carried_to(last)) {
-        // Both ends ride on moved pins: the whole wire travels with them.
+    if let (Some(first_to), Some(last_to)) = (carried_to(first), carried_to(last)) {
         let travelled = Point::new(
             first_to.x.saturating_sub(first.x),
             first_to.y.saturating_sub(first.y),
         );
-        let points = before
-            .points
-            .iter()
-            .map(|point| offset_point(*point, travelled))
-            .collect();
-        return (points, None);
+        if offset_point(*last, travelled) == last_to {
+            // Both ends ride on pins that moved alike: the whole wire
+            // travels with them.
+            let points = before
+                .points
+                .iter()
+                .map(|point| offset_point(*point, travelled))
+                .collect();
+            return (points, None);
+        }
     }
     let moved = before
         .points
@@ -594,15 +929,7 @@ fn dragged_wire_points(
     else {
         return (moved, None);
     };
-    let keeps_its_taps = document
-        .bus_taps
-        .iter()
-        .filter(|tap| {
-            tap.target_kind() == BusTargetKind::Wire
-                && polyline_contains_point(&before.points, tap.connection_point)
-        })
-        .all(|tap| polyline_contains_point(&route, tap.connection_point));
-    if keeps_its_taps {
+    if taps.iter().all(|tap| polyline_contains_point(&route, *tap)) {
         (route, Some(point_map))
     } else {
         (moved, None)
@@ -762,7 +1089,6 @@ impl MovementState<'_, '_> {
             delta,
         );
         let electrical_selection = has_live_electrical_selection(self.document, self.selection);
-        let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
 
         // Terminal positions of every selected component, BEFORE moving.
         let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
@@ -800,23 +1126,26 @@ impl MovementState<'_, '_> {
             }
         }
 
-        for tap in self
-            .document
-            .bus_taps
+        // What sits on the moved pins and on the wires and buses that
+        // travel whole goes with them.
+        let travelling = wires_to_move
             .iter()
-            .filter(|tap| tap.target_kind() == BusTargetKind::Wire)
-        {
-            let target_follows = wires_to_move
-                .iter()
-                .any(|index| self.document.wires[*index].contains_point(tap.connection_point))
-                || wire_updates.iter().any(|(wire_index, point_index, _)| {
-                    self.document.wires[*wire_index].points.get(*point_index)
-                        == Some(&tap.connection_point)
-                });
-            if target_follows {
-                tap_targets_moving_conductor.insert(tap.id);
-            }
-        }
+            .map(|index| self.document.wires[*index].id)
+            .chain(self.selection.wires.iter().copied())
+            .map(Conductor::Wire)
+            .chain(self.selection.buses.iter().copied().map(Conductor::Bus))
+            .collect::<HashSet<_>>();
+        let attached = attachment::attached(
+            &Scene::of(self.document),
+            MovingGeometry {
+                points: &terminals,
+                conductors: &travelling,
+                runs: &[],
+                carries_vertices: true,
+                fixed_points: &HashSet::new(),
+            },
+            |item| movement_selects(self.selection, item),
+        );
 
         // Move selected components.
         for comp in self
@@ -876,7 +1205,7 @@ impl MovementState<'_, '_> {
             }
         }
 
-        move_selected_bus_geometry(self, delta, &tap_targets_moving_conductor);
+        move_selected_bus_geometry(self, delta);
 
         // Move fully attached wires.
         for wire_index in wires_to_move {
@@ -895,6 +1224,7 @@ impl MovementState<'_, '_> {
                 wire.points[point_idx] = new_pos;
             }
         }
+        attached.carry(self.document, |_, point| offset_point(point, delta));
 
         self.impact.changed = true;
         if electrical_selection {
@@ -925,9 +1255,30 @@ impl MovementState<'_, '_> {
             .flatten()
             .copied()
             .collect::<std::collections::HashSet<_>>();
-        let tap_motion = tap_motion_for_rigid_selection(self);
-        let junctions_to_move = junctions_following_selected_wires(self);
-        preflight_rigid_translation(self, delta, &tap_motion, &junctions_to_move)?;
+        let fixed_terminals = self
+            .document
+            .components
+            .iter()
+            .filter(|component| !self.selection.components.contains(&component.id))
+            .filter_map(|component| terminal_points_by_component.get(&component.id))
+            .flatten()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        let rigid = rigid_attachments(
+            self,
+            &selected_terminals,
+            &fixed_terminals,
+            mode != MoveSelectionMode::BreakConnections,
+        );
+        let tap_motion = tap_motion_for_rigid_selection(self, &rigid);
+        let junctions_to_move = self
+            .document
+            .junctions
+            .iter()
+            .filter(|junction| rigid.junctions.contains_key(&junction.id))
+            .map(|junction| junction.pos)
+            .collect::<std::collections::HashSet<_>>();
+        preflight_rigid_translation(self, delta, &tap_motion, &junctions_to_move, &rigid)?;
         if mode == MoveSelectionMode::Connected {
             preflight_connected_translation(self, delta, &selected_terminals)?;
             let electrical_selection = has_live_electrical_selection(self.document, self.selection);
@@ -956,6 +1307,14 @@ impl MovementState<'_, '_> {
             impact: MovementImpact::default(),
         };
         apply_rigid_selection_translation(&mut candidate, delta, &tap_motion, &junctions_to_move);
+        // Labels and probes on what moved go with it; taps and dots moved
+        // above under their own checks.
+        let labels_and_probes = Attached {
+            net_labels: rigid.net_labels.clone(),
+            probes: rigid.probes.clone(),
+            ..Attached::default()
+        };
+        labels_and_probes.carry(candidate.document, |_, point| exact_offset(point, delta));
 
         if mode == MoveSelectionMode::Shove {
             let candidate_terminals =
@@ -970,6 +1329,20 @@ impl MovementState<'_, '_> {
             )?;
             reject_new_selected_conductor_overlaps(self, &candidate)?;
             reject_selected_wire_component_body_overlaps(&candidate, &candidate_terminals)?;
+            let relaid = self
+                .document
+                .wires
+                .iter()
+                .map(|wire| (wire.id, wire.points.as_slice()))
+                .collect::<Vec<_>>();
+            attachment::settle_on_relaid_wires(candidate.document, &relaid, |item| {
+                movement_selects(self.selection, item)
+                    || match item {
+                        Attachable::NetLabel(id) => rigid.net_labels.contains_key(&id),
+                        Attachable::Probe(id) => rigid.probes.contains_key(&id),
+                        Attachable::BusTap(_) | Attachable::Junction(_) => true,
+                    }
+            });
         } else {
             update_connections_after_rigid_move(&mut candidate);
         }
@@ -998,7 +1371,6 @@ impl MovementState<'_, '_> {
             delta,
         );
         let electrical_selection = has_live_electrical_selection(self.document, self.selection);
-        let mut tap_targets_moving_conductor = tap_targets_selected_conductor(self);
         // Union of selected components' terminals, BEFORE moving.
         let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
         for comp in self
@@ -1009,24 +1381,25 @@ impl MovementState<'_, '_> {
         {
             terminals.extend(terminal_points_for(comp));
         }
-
-        for tap in self
-            .document
-            .bus_taps
+        let travelling = self
+            .selection
+            .wires
             .iter()
-            .filter(|tap| tap.target_kind() == BusTargetKind::Wire)
-        {
-            let follows_rubber_band = self.document.wires.iter().any(|wire| {
-                !self.selection.wires.contains(&wire.id)
-                    && wire
-                        .points
-                        .iter()
-                        .any(|point| *point == tap.connection_point && terminals.contains(point))
-            });
-            if follows_rubber_band {
-                tap_targets_moving_conductor.insert(tap.id);
-            }
-        }
+            .copied()
+            .map(Conductor::Wire)
+            .chain(self.selection.buses.iter().copied().map(Conductor::Bus))
+            .collect::<HashSet<_>>();
+        let attached = attachment::attached(
+            &Scene::of(self.document),
+            MovingGeometry {
+                points: &terminals,
+                conductors: &travelling,
+                runs: &[],
+                carries_vertices: true,
+                fixed_points: &HashSet::new(),
+            },
+            |item| movement_selects(self.selection, item),
+        );
 
         // Rubber-band stretch: any unselected wire point on a selected
         // terminal follows it.
@@ -1091,33 +1464,20 @@ impl MovementState<'_, '_> {
             probe.position = offset_point(probe.position, delta);
         }
 
-        // Move selected wires entirely, tracking endpoints for junctions.
-        let mut wire_endpoints: Vec<Point> = Vec::new();
+        // Move selected wires entirely.
         for wire in self
             .document
             .wires
             .iter_mut()
             .filter(|w| self.selection.wires.contains(&w.id))
         {
-            if let Some(first) = wire.points.first() {
-                wire_endpoints.push(*first);
-            }
-            if let Some(last) = wire.points.last() {
-                wire_endpoints.push(*last);
-            }
             for point in &mut wire.points {
                 *point = offset_point(*point, delta);
             }
         }
 
-        move_selected_bus_geometry(self, delta, &tap_targets_moving_conductor);
-
-        // Move junctions at selected wire endpoints
-        for old_pt in wire_endpoints {
-            if let Some(junction) = self.document.junctions.iter_mut().find(|j| j.pos == old_pt) {
-                junction.pos = offset_point(junction.pos, delta);
-            }
-        }
+        move_selected_bus_geometry(self, delta);
+        attached.carry(self.document, |_, point| offset_point(point, delta));
 
         self.impact.changed = true;
         if electrical_selection {
@@ -1126,29 +1486,9 @@ impl MovementState<'_, '_> {
     }
 }
 
-fn tap_targets_selected_conductor(state: &MovementState<'_, '_>) -> std::collections::HashSet<u64> {
-    state
-        .document
-        .bus_taps
-        .iter()
-        .filter(|tap| match tap.target_kind() {
-            BusTargetKind::Wire => state.document.wires.iter().any(|wire| {
-                state.selection.wires.contains(&wire.id)
-                    && wire.contains_point(tap.connection_point)
-            }),
-            BusTargetKind::Bus => state.document.buses.iter().any(|bus| {
-                state.selection.buses.contains(&bus.id) && bus.contains_point(tap.connection_point)
-            }),
-        })
-        .map(|tap| tap.id)
-        .collect()
-}
-
-fn move_selected_bus_geometry(
-    state: &mut MovementState<'_, '_>,
-    delta: Point,
-    tap_targets_moving_conductor: &std::collections::HashSet<u64>,
-) {
+/// Translate the selected buses and the selected taps. A tap on a selected
+/// bus that is not itself selected follows its bus as an attachment.
+fn move_selected_bus_geometry(state: &mut MovementState<'_, '_>, delta: Point) {
     let selected_bus_ids = state.selection.buses;
     for bus in state
         .document
@@ -1158,15 +1498,16 @@ fn move_selected_bus_geometry(
     {
         bus.translate(delta);
     }
-    for tap in &mut state.document.bus_taps {
+    for tap in state
+        .document
+        .bus_taps
+        .iter_mut()
+        .filter(|tap| state.selection.bus_taps.contains(&tap.id))
+    {
         if selected_bus_ids.contains(&tap.bus_id) {
             tap.bus_point = offset_point(tap.bus_point, delta);
         }
-        if tap_targets_moving_conductor.contains(&tap.id)
-            || state.selection.bus_taps.contains(&tap.id)
-        {
-            tap.connection_point = offset_point(tap.connection_point, delta);
-        }
+        tap.connection_point = offset_point(tap.connection_point, delta);
     }
 }
 
@@ -1183,8 +1524,40 @@ struct TapMotion {
     target: bool,
 }
 
+/// What sits on the selection a rigid Move carries: the selected pins and
+/// whole selected wires and buses. `carries_vertices` says whether the
+/// wires on the selected pins move with them, as Shove moves their ends and
+/// Break connections does not; a pin left where it was keeps what is on it.
+fn rigid_attachments(
+    state: &MovementState<'_, '_>,
+    selected_terminals: &std::collections::HashSet<Point>,
+    fixed_terminals: &std::collections::HashSet<Point>,
+    carries_vertices: bool,
+) -> Attached {
+    let travelling = state
+        .selection
+        .wires
+        .iter()
+        .copied()
+        .map(Conductor::Wire)
+        .chain(state.selection.buses.iter().copied().map(Conductor::Bus))
+        .collect::<HashSet<_>>();
+    attachment::attached(
+        &Scene::of(state.document),
+        MovingGeometry {
+            points: selected_terminals,
+            conductors: &travelling,
+            runs: &[],
+            carries_vertices,
+            fixed_points: fixed_terminals,
+        },
+        |item| movement_selects(state.selection, item),
+    )
+}
+
 fn tap_motion_for_rigid_selection(
     state: &MovementState<'_, '_>,
+    attached: &Attached,
 ) -> std::collections::HashMap<u64, TapMotion> {
     state
         .document
@@ -1192,42 +1565,9 @@ fn tap_motion_for_rigid_selection(
         .iter()
         .map(|tap| {
             let selected = state.selection.bus_taps.contains(&tap.id);
-            let source = selected || state.selection.buses.contains(&tap.bus_id);
-            let target = selected
-                || match tap.target_kind() {
-                    BusTargetKind::Wire => state.document.wires.iter().any(|wire| {
-                        state.selection.wires.contains(&wire.id)
-                            && wire.contains_point(tap.connection_point)
-                    }),
-                    BusTargetKind::Bus => state.document.buses.iter().any(|bus| {
-                        state.selection.buses.contains(&bus.id)
-                            && bus.contains_point(tap.connection_point)
-                    }),
-                };
+            let source = selected || attached.tap_buses.contains_key(&tap.id);
+            let target = selected || attached.tap_connections.contains_key(&tap.id);
             (tap.id, TapMotion { source, target })
-        })
-        .collect()
-}
-
-fn junctions_following_selected_wires(
-    state: &MovementState<'_, '_>,
-) -> std::collections::HashSet<Point> {
-    state
-        .document
-        .junctions
-        .iter()
-        .filter_map(|junction| {
-            let incident = state
-                .document
-                .wires
-                .iter()
-                .filter(|wire| wire.contains_point(junction.pos))
-                .collect::<Vec<_>>();
-            (!incident.is_empty()
-                && incident
-                    .iter()
-                    .all(|wire| state.selection.wires.contains(&wire.id)))
-            .then_some(junction.pos)
         })
         .collect()
 }
@@ -1237,6 +1577,7 @@ fn preflight_rigid_translation(
     delta: Point,
     tap_motion: &std::collections::HashMap<u64, TapMotion>,
     junctions_to_move: &std::collections::HashSet<Point>,
+    attached: &Attached,
 ) -> Result<(), MoveSelectionError> {
     let selected_points = state
         .document
@@ -1304,6 +1645,23 @@ fn preflight_rigid_translation(
         if motion.target {
             checked_offset(tap.connection_point, delta)?;
         }
+    }
+    let attached_points = state
+        .document
+        .net_labels
+        .iter()
+        .filter(|label| attached.net_labels.contains_key(&label.id))
+        .map(|label| label.pos)
+        .chain(
+            state
+                .document
+                .probes
+                .iter()
+                .filter(|probe| attached.probes.contains_key(&probe.id))
+                .map(|probe| probe.position),
+        );
+    for point in attached_points {
+        checked_offset(point, delta)?;
     }
     Ok(())
 }
@@ -1420,6 +1778,49 @@ fn orthogonalize_connected_rubber_bands(
             }
         }
     }
+    let relaid = original
+        .document
+        .wires
+        .iter()
+        .filter(|wire| !original.selection.wires.contains(&wire.id))
+        .map(|wire| (wire.id, wire.points.as_slice()))
+        .collect::<Vec<_>>();
+    // Only what stayed where it was can have been left off a wire; what
+    // moved went with its pin or wire.
+    let label_was = original
+        .document
+        .net_labels
+        .iter()
+        .map(|label| (label.id, label.pos))
+        .collect::<std::collections::HashMap<_, _>>();
+    let probe_was = original
+        .document
+        .probes
+        .iter()
+        .map(|probe| (probe.id, probe.position))
+        .collect::<std::collections::HashMap<_, _>>();
+    let moved_labels = candidate
+        .document
+        .net_labels
+        .iter()
+        .filter(|label| label_was.get(&label.id) != Some(&label.pos))
+        .map(|label| label.id)
+        .collect::<HashSet<_>>();
+    let moved_probes = candidate
+        .document
+        .probes
+        .iter()
+        .filter(|probe| probe_was.get(&probe.id) != Some(&probe.position))
+        .map(|probe| probe.id)
+        .collect::<HashSet<_>>();
+    attachment::settle_on_relaid_wires(candidate.document, &relaid, |item| {
+        movement_selects(original.selection, item)
+            || match item {
+                Attachable::NetLabel(id) => moved_labels.contains(&id),
+                Attachable::Probe(id) => moved_probes.contains(&id),
+                Attachable::BusTap(_) | Attachable::Junction(_) => true,
+            }
+    });
     Ok(())
 }
 
@@ -1861,6 +2262,26 @@ fn shove_attached_wires(
         } else {
             old_end
         };
+        // Another wire teed into this one, or a dot on it, joins it there.
+        // Every new route is laid clear of other wires, so it would lose
+        // that join: refuse, as for a pin joined along the wire.
+        let teed = original
+            .document
+            .wires
+            .iter()
+            .filter(|wire| wire.id != wire_id)
+            .flat_map(|wire| wire.points.iter().copied())
+            .chain(
+                original
+                    .document
+                    .junctions
+                    .iter()
+                    .map(|junction| junction.pos),
+            )
+            .any(|point| point != old_start && point != old_end && old_wire.contains_point(point));
+        if teed {
+            return Err(MoveSelectionError::UnsupportedInteriorConnection { wire_id });
+        }
         let route =
             orthogonal_route_candidates(new_start, new_end, candidate.document.grid_size.max(1))
                 .into_iter()

@@ -41,6 +41,11 @@ impl Schematic {
                 components: &snapshot.components,
                 wires: &snapshot.wires,
                 connections: &snapshot.connections,
+                buses: &snapshot.buses,
+                bus_taps: &snapshot.bus_taps,
+                junctions: &snapshot.junctions,
+                net_labels: &snapshot.net_labels,
+                probes: &snapshot.probes,
             });
         let impact = movement::drag_selection_with_rubber_band_resolved(
             &mut self.document,
