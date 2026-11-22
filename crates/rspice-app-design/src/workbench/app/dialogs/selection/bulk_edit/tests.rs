@@ -1048,3 +1048,29 @@ fn a_refused_filter_name_is_explained_under_the_name() {
     act(&mut state, SelectionBulkBodyAction::SaveFilter);
     assert_eq!(state.design.schematic_bulk_edit_filters.saved().len(), 1);
 }
+
+/// The Display list opens on how the first ticked part is lettered, so the
+/// value it edits is in view; it opened blank, and Apply waited on a choice
+/// even to keep a mode.
+#[test]
+fn the_display_list_opens_on_the_current_value() {
+    let mut state = two_libraries();
+    state.model.schematic.document_mut_for_test().components[1].display_mode =
+        ComponentDisplayMode::NameOnly;
+    state.design.selection_bulk_edit.filter.query = "X2".to_owned();
+    act(&mut state, SelectionBulkBodyAction::FilterChanged);
+    state.design.selection_bulk_edit.property = SelectionBulkProperty::Display;
+    act(&mut state, SelectionBulkBodyAction::PropertyChanged);
+    assert_eq!(state.design.selection_bulk_edit.new_value, "name only");
+    assert_eq!(
+        missing_value_reason(&state.design.selection_bulk_edit),
+        None
+    );
+
+    state.design.selection_bulk_edit.selected.clear();
+    act(&mut state, SelectionBulkBodyAction::PropertyChanged);
+    assert_eq!(
+        state.design.selection_bulk_edit.new_value, "inherit",
+        "with nothing ticked the list opens on Inherit"
+    );
+}

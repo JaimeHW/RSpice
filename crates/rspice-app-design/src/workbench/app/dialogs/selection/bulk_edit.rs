@@ -453,6 +453,13 @@ fn handle_selection_bulk_body_action(
         SelectionBulkBodyAction::PropertyChanged | SelectionBulkBodyAction::TicksChanged => {
             let rows = build_rows(model, &bulk_edit.filter, bulk_edit.property);
             refresh_bound_sections(bulk_edit, model, &rows);
+            if action == SelectionBulkBodyAction::PropertyChanged
+                && bulk_edit.property == SelectionBulkProperty::Display
+            {
+                bulk_edit.new_value = first_ticked_display(model, &rows, &bulk_edit.selected)
+                    .label()
+                    .to_owned();
+            }
             bulk_edit.error = None;
         }
         SelectionBulkBodyAction::SaveFilter => {
@@ -487,6 +494,37 @@ fn handle_selection_bulk_body_action(
             }
         }
     }
+}
+
+/// How the first ticked part is lettered: what the Display list opens on,
+/// as a property list opens on the value it edits. With nothing ticked it
+/// opens on Inherit, what an untouched part is lettered by.
+fn first_ticked_display(
+    model: &Model,
+    rows: &[SelectionBulkRow],
+    selected: &BTreeSet<SelectionBulkRowKey>,
+) -> ComponentDisplayMode {
+    let active = model.workspace.content.active_schematic_reference().key();
+    rows.iter()
+        .filter(|row| row.key.kind != SelectionBulkRowKind::Pin && selected.contains(&row.key))
+        .find_map(|row| {
+            let document = if row.key.view_key.eq_ignore_ascii_case(&active) {
+                Some(model.schematic.document())
+            } else {
+                model
+                    .workspace
+                    .content
+                    .schematic_buffers
+                    .get(&row.key.view_key)
+                    .map(|buffer| buffer.document())
+            };
+            document?
+                .components
+                .iter()
+                .find(|component| component.id == row.key.object_id)
+                .map(|component| component.display_mode)
+        })
+        .unwrap_or(ComponentDisplayMode::Inherit)
 }
 
 /// After the filter changed, by typing or by loading a saved one: what it
