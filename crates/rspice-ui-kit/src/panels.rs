@@ -1043,13 +1043,21 @@ pub fn property_row_path(ui: &mut Ui, label: &str, path: &str) -> Response {
     property_row_with_tone(ui, label, path, t.color.text, None, elide_path, face)
 }
 
-/// One fact in a [`fact_rows`] list: its label, its value, and whether the
-/// value is a file's path.
+/// One fact in a [`fact_rows`] list: its label, its value, whether the
+/// value is a file's path, the problem it states, and what its hover says
+/// when the value is a short form of something longer.
 #[derive(Debug, Clone, Copy)]
 pub struct Fact<'a> {
     pub label: &'a str,
     pub value: &'a str,
     pub path: bool,
+    /// A problem the value states: its mark goes in front of the value, which
+    /// stays in the list's one face and ink.
+    pub problem: Option<Problem>,
+    /// The whole of what the value shortens, such as the absolute path of a
+    /// file named relative to its project. The hover says it instead of the
+    /// value.
+    pub whole: Option<&'a str>,
 }
 
 impl<'a> Fact<'a> {
@@ -1058,6 +1066,8 @@ impl<'a> Fact<'a> {
             label,
             value,
             path: false,
+            problem: None,
+            whole: None,
         }
     }
 
@@ -1066,7 +1076,21 @@ impl<'a> Fact<'a> {
             label,
             value,
             path: true,
+            problem: None,
+            whole: None,
         }
+    }
+
+    /// The fact states `problem`.
+    pub const fn problem(mut self, problem: Problem) -> Self {
+        self.problem = Some(problem);
+        self
+    }
+
+    /// The hover says `whole`, of which the value is a short form.
+    pub const fn whole(mut self, whole: &'a str) -> Self {
+        self.whole = Some(whole);
+        self
     }
 }
 
@@ -1106,16 +1130,40 @@ pub fn fact_rows(ui: &mut Ui, facts: &[Fact<'_>]) {
         } else {
             elide_text
         };
-        let value = elide(ui, fact.value, &font, slot.value.width());
+        let mark = if fact.problem.is_some() {
+            crate::widgets::PROBLEM_MARK_ADVANCE
+        } else {
+            0.0
+        };
+        if let Some(problem) = fact.problem {
+            let side = crate::widgets::PROBLEM_MARK_SIDE;
+            paint_problem_mark(
+                &painter.with_clip_rect(slot.value),
+                Rect::from_center_size(
+                    Pos2::new(slot.value.left() + side * 0.5, slot.rect.center().y),
+                    Vec2::splat(side),
+                ),
+                problem,
+            );
+        }
+        let value = elide(ui, fact.value, &font, (slot.value.width() - mark).max(1.0));
         painter.with_clip_rect(slot.value).text(
-            Pos2::new(slot.value.left(), slot.value.center().y),
+            Pos2::new(slot.value.left() + mark, slot.value.center().y),
             Align2::LEFT_CENTER,
             value,
             font.clone(),
             t.color.text,
         );
-        announce_row(ui, &response, fact.label, fact.value);
-        response.on_hover_text(format!("{}: {}", fact.label, fact.value));
+        let whole = fact.whole.unwrap_or(fact.value);
+        announce_row(ui, &response, fact.label, whole);
+        if let Some(problem) = fact.problem {
+            // The mark is the row's only statement of severity, and a screen
+            // reader cannot see it.
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_description(problem.announcement());
+            });
+        }
+        response.on_hover_text(format!("{}: {}", fact.label, whole));
     }
 }
 
