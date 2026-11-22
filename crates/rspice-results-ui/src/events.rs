@@ -4,7 +4,6 @@ use crate::{
     chrome::bars::bar_label,
     fft::view::columns::fitted_to,
     presentation::{panel_note, stat_table, table_row_menu, well_hint, with_table_state},
-    strip::StripHeader,
     waves::logic::RunMarkers,
 };
 use egui::{RichText, Ui};
@@ -498,6 +497,29 @@ fn kept_id() -> egui::Id {
     egui::Id::new("rspice.results.events.kept")
 }
 
+/// Where the list states how much of it is shown, for the bar to read out.
+fn status_id() -> egui::Id {
+    egui::Id::new("rspice.results.events.status")
+}
+
+/// What the bar reads out right: the whole count with its window, and the
+/// count alone for a bar too narrow for both.
+#[derive(Debug, Clone, Default)]
+struct EventStatus {
+    pass: u64,
+    full: String,
+    count: String,
+}
+
+fn set_status(ui: &Ui, count: String, rest: String) {
+    let status = EventStatus {
+        pass: ui.ctx().cumulative_pass_nr(),
+        full: format!("{count}{rest}"),
+        count,
+    };
+    ui.data_mut(|data| data.insert_temp(status_id(), status));
+}
+
 pub struct EventView<'a, W: AsRef<RetainedWaveform>> {
     pub analysis_key: AnalysisPresentationKey,
     pub analysis: &'a AnalysisResult<W>,
@@ -716,16 +738,11 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
         .window_words(numbers)
         .map(|window| format!(" · {window}"))
         .unwrap_or_default();
-    StripHeader::new(
-        "EVENTS",
-        &format!(
-            "{} · {counted}{window}{}",
-            analysis.label,
-            bus_subtitle(cache.buses()),
-        ),
-        &[],
-    )
-    .show(ui);
+    set_status(
+        ui,
+        counted,
+        format!("{window}{}", bus_subtitle(cache.buses())),
+    );
     if let Some(AnalysisResultPayload::TransientEvents {
         current_impulses: Some(history),
         ..
@@ -881,12 +898,7 @@ fn show_messages<W: AsRef<RetainedWaveform>>(
         .window_words(numbers)
         .map(|window| format!(" · {window}"))
         .unwrap_or_default();
-    StripHeader::new(
-        "EVENTS",
-        &format!("{} · {counted}{window}", analysis.label),
-        &[],
-    )
-    .show(ui);
+    set_status(ui, counted, window);
     if kept.is_empty() {
         well_hint(ui, "No message matches the search and window");
         return EventResponse::default();
@@ -1100,7 +1112,39 @@ pub fn domain_bar(ui: &mut Ui, bar: EventBar<'_>) -> EventBarResponse {
     {
         out.open_checks = true;
     }
+    status(ui);
     out
+}
+
+/// How much of the list is shown, at the bar's right end: with its window
+/// and buses when the bar holds them, the count alone when it holds only
+/// that. The list states it as it draws, so the bar reads the last frame's.
+fn status(ui: &mut Ui) {
+    let Some(status) = ui.data(|data| data.get_temp::<EventStatus>(status_id())) else {
+        return;
+    };
+    if status.pass + 1 < ui.ctx().cumulative_pass_nr() {
+        return;
+    }
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let room = ui.available_width() - ui.spacing().item_spacing.x;
+    let width = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    let text = if width(&status.full) <= room {
+        status.full
+    } else if width(&status.count) <= room {
+        status.count
+    } else {
+        return;
+    };
+    let faint = Tokens::get(ui.ctx()).color.text_faint;
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label(RichText::new(text).font(font).color(faint));
+    });
 }
 
 /// The Display menu: the time window, and the bus radix when there is one.
