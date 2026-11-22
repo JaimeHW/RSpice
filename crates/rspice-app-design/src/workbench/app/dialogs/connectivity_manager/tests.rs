@@ -132,6 +132,54 @@ fn an_open_pin_repair_row_offers_a_destination_and_no_apply_tick() {
     assert_eq!(ticks, applicable);
 }
 
+/// A pin's destinations are the nets and pins near it, named as the reader
+/// knows them, nearest first, however many the drawing holds.
+#[test]
+fn route_destinations_are_named_nets_and_pins_nearest_first_without_a_cut_off() {
+    let mut state = open_pins();
+    for row in 0..600 {
+        state
+            .model
+            .schematic
+            .add_wire(vec![Point::new(1000, row * 20), Point::new(1100, row * 20)])
+            .unwrap();
+    }
+    state.sync_active_schematic_to_workspace();
+    let report = build_report(&state.model, &ConnectivityPolicy::default()).unwrap();
+    let choices = &report
+        .repairs
+        .iter()
+        .find(|repair| !repair.endpoint_choices.is_empty())
+        .expect("an open pin")
+        .endpoint_choices;
+    assert!(choices.len() > 600, "{} destinations", choices.len());
+    let distance = |choice: &EndpointChoice| {
+        let dx = f64::from(choice.destination.x - choice.start.x);
+        let dy = f64::from(choice.destination.y - choice.start.y);
+        dx.hypot(dy)
+    };
+    assert!(
+        choices
+            .windows(2)
+            .all(|pair| distance(&pair[0]) <= distance(&pair[1])),
+        "nearest first"
+    );
+    for choice in choices {
+        assert!(
+            choice.label.starts_with("Net ") || choice.label.starts_with("Pin "),
+            "{}",
+            choice.label
+        );
+        assert!(choice.label.ends_with(" mm"), "{}", choice.label);
+        assert!(!choice.label.contains('#'), "{}", choice.label);
+    }
+    assert!(
+        choices[0].label.starts_with("Pin R"),
+        "{}",
+        choices[0].label
+    );
+}
+
 /// A supply symbol declares its rail global, so the Global nets tab lists
 /// it, beside a `!` label of the same rail, as one resolved global with
 /// nothing to rename.

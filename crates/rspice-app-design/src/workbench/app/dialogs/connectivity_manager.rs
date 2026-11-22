@@ -6,7 +6,7 @@
 //! as one undo transaction.
 
 use rspice_design::schematic::document::SchematicDocument;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui, Vec2};
 
@@ -202,6 +202,9 @@ struct LabelOccurrence {
 
 #[derive(Debug, Clone)]
 struct EndpointChoice {
+    /// The net or pin, as the reader knows it: `Net VOUT`, `Pin R3.2`.
+    name: String,
+    /// The name and how far it is from the pin, as the list shows it.
     label: String,
     start: Point,
     destination: Point,
@@ -474,7 +477,12 @@ fn build_report(model: &Model, policy: &ConnectivityPolicy) -> Result<Connectivi
         .collect::<Vec<_>>();
     let globals = build_global_rows(model, policy, &projection);
     let mut repairs = build_global_repairs(model, policy, &globals);
-    repairs.extend(build_manual_repairs(model, &drc, &bus_analysis));
+    repairs.extend(build_manual_repairs(
+        model,
+        &design_nets,
+        &drc,
+        &bus_analysis,
+    ));
     Ok(ConnectivityReport {
         nets,
         buses,
@@ -845,6 +853,7 @@ fn build_global_repairs(
 
 fn build_manual_repairs(
     model: &Model,
+    nets: &[DesignNet],
     drc: &DrcResult,
     bus_analysis: &rspice_design::connectivity::bus::BusConnectivityAnalysis,
 ) -> Vec<ConnectivityRepair> {
@@ -885,7 +894,7 @@ fn build_manual_repairs(
             identity_effect: "No automatic identity rewrite".to_owned(),
             validation: "Manual endpoint choice required".to_owned(),
             action: None,
-            endpoint_choices: endpoint_choices_for_violation(model, violation),
+            endpoint_choices: endpoint_choices_for_violation(model, nets, violation),
             reveal: RevealTarget::Violation(violation.location.clone()),
         });
     }
@@ -933,7 +942,11 @@ fn build_manual_repairs(
     repairs
 }
 
-fn endpoint_choices_for_violation(model: &Model, violation: &DrcViolation) -> Vec<EndpointChoice> {
+fn endpoint_choices_for_violation(
+    model: &Model,
+    nets: &[DesignNet],
+    violation: &DrcViolation,
+) -> Vec<EndpointChoice> {
     if !matches!(
         violation.violation_type,
         DrcViolationType::UnconnectedPin
@@ -971,51 +984,95 @@ fn endpoint_choices_for_violation(model: &Model, violation: &DrcViolation) -> Ve
         return Vec::new();
     };
 
-    let mut destinations = BTreeMap::<(i32, i32), String>::new();
-    for wire in &model.schematic.document().wires {
-        for point in &wire.points {
-            destinations
-                .entry((point.x, point.y))
-                .or_insert_with(|| format!("Wire #{} at {}, {}", wire.id, point.x, point.y));
+    // A destination is a net or a pin on this sheet, named as the reader
+    // knows it and offered nearest first: the wire a repair wants is almost
+    // always to something close by. A net is reached at its nearest drawn
+    // point; the pin's own net and the pin itself are not destinations.
+    let document = model.schematic.document();
+    let on_sheet =
+        |id| crate::schematic::view::sheet_visibility::object_is_on_active_sheet(model, id);
+    let millimetres = |point: Point| {
+        let dx = f64::from(point.x) - f64::from(start.x);
+        let dy = f64::from(point.y) - f64::from(start.y);
+        dx.hypot(dy) / rspice_schematic_editor::view::drawing_sheet::DRAWING_SHEET_UNITS_PER_MM
+    };
+    let nearest = |points: &mut dyn Iterator<Item = Point>| {
+        points.min_by(|left, right| millimetres(*left).total_cmp(&millimetres(*right)))
+    };
+    let wires_by_id: HashMap<u64, &crate::state::Wire> = document
+        .wires
+        .iter()
+        .filter(|wire| on_sheet(wire.id))
+        .map(|wire| (wire.id, wire))
+        .collect();
+    let mut labels_by_name = HashMap::<String, Vec<Point>>::new();
+    for label in document
+        .net_labels
+        .iter()
+        .filter(|label| on_sheet(label.id))
+    {
+        labels_by_name
+            .entry(label.name.to_ascii_lowercase())
+            .or_default()
+            .push(label.pos);
+    }
+    let mut choices = Vec::<(f64, EndpointChoice)>::new();
+    let mut offer = |name: String, destination: Point| {
+        if destination == start {
+            return;
+        }
+        let distance = millimetres(destination);
+        choices.push((
+            distance,
+            EndpointChoice {
+                label: format!("{name} \u{00b7} {distance:.1} mm"),
+                name,
+                start,
+                destination,
+            },
+        ));
+    };
+    for net in nets {
+        if net
+            .terminals
+            .iter()
+            .any(|terminal| terminal.component_id == *id && terminal.pin == *pin_name)
+        {
+            continue;
+        }
+        let wires = net.wire_ids.iter().filter_map(|id| wires_by_id.get(id));
+        let labels = labels_by_name
+            .get(&net.name.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .copied();
+        let mut points = wires
+            .flat_map(|wire| {
+                wire.points.windows(2).map(|segment| {
+                    rspice_design::schematic::bus::nearest_lattice_point_on_segment(
+                        start, segment[0], segment[1],
+                    )
+                })
+            })
+            .chain(labels);
+        if let Some(point) = nearest(&mut points) {
+            offer(format!("Net {}", net.name), point);
         }
     }
-    for junction in &model.schematic.document().junctions {
-        destinations
-            .entry((junction.pos.x, junction.pos.y))
-            .or_insert_with(|| {
-                format!(
-                    "Junction #{} at {}, {}",
-                    junction.id, junction.pos.x, junction.pos.y
-                )
-            });
-    }
-    for label in &model.schematic.document().net_labels {
-        destinations
-            .entry((label.pos.x, label.pos.y))
-            .or_insert_with(|| format!("Net {} at {}, {}", label.name, label.pos.x, label.pos.y));
-    }
-    for other in &model.schematic.document().components {
+    for other in &document.components {
+        if !on_sheet(other.id) {
+            continue;
+        }
         for (name, point) in symbol_context.named_terminal_points(other) {
-            if other.id == *id && point == start {
+            if other.id == *id && name == *pin_name {
                 continue;
             }
-            destinations
-                .entry((point.x, point.y))
-                .or_insert_with(|| format!("{}.{name} at {}, {}", other.name, point.x, point.y));
+            offer(format!("Pin {}.{name}", other.name), point);
         }
     }
-    destinations.remove(&(start.x, start.y));
-    if destinations.len() > 512 {
-        return Vec::new();
-    }
-    destinations
-        .into_iter()
-        .map(|((x, y), label)| EndpointChoice {
-            label,
-            start,
-            destination: Point::new(x, y),
-        })
-        .collect()
+    choices
+        .sort_by(|(left, a), (right, b)| left.total_cmp(right).then_with(|| a.name.cmp(&b.name)));
+    choices.into_iter().map(|(_, choice)| choice).collect()
 }
 
 /// The declaration is used exactly as authored: `DATA[7:0]` and `DATA[0:7]`
@@ -1286,15 +1343,20 @@ impl ConnectivityManager<'_> {
         if choice.start == choice.destination {
             return Err("The selected source and destination are identical.".to_owned());
         }
+        let pin = repair.object.clone();
         self.dialog.close();
         self.workbench.workspace = crate::workbench::state::Workspace::Design;
         self.model.schematic.arm_tool(Tool::Wire);
         start_canvas_wire(self.model, self.workbench, ctx, choice.start);
-        self.model.schematic.session.editor.center_request = Some(choice.destination);
+        // Both ends in view: the wire starts at the pin and the reader
+        // finishes it on the destination.
+        self.model.schematic.session.editor.center_request = Some(Point::new(
+            choice.start.x + (choice.destination.x - choice.start.x) / 2,
+            choice.start.y + (choice.destination.y - choice.start.y) / 2,
+        ));
         self.workbench.prompt(format!(
-            "Wire routing armed from {}, {} to {}. The destination is centred; finish the wire on \
-             its endpoint.",
-            choice.start.x, choice.start.y, choice.label
+            "Wire started at {pin}. Finish it on {}.",
+            choice.name
         ));
         Ok(())
     }
