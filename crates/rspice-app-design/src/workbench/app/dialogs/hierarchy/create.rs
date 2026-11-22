@@ -377,13 +377,15 @@ pub fn commit_create_hierarchy(
     let target_schematic_ref = CellViewRef::new(&library_name, &cell_name, "schematic");
     let target_open_ref =
         CellViewRef::new(&library_name, &cell_name, target_view_type.display_name());
+    // The instance always binds the schematic, which it is netlisted and
+    // descended through; the View choice decides only which view opens.
     let candidate = model
         .schematic
         .materialize_hierarchy_extraction(
             &plan,
             &library_name,
             &cell_name,
-            target_view_type.display_name(),
+            ViewType::Schematic.display_name(),
         )
         .map_err(|error| error.to_string())?;
 
@@ -836,6 +838,51 @@ mod tests {
             ),
             (2, 1, 1),
             "the parent keeps the third resistor beside the new instance"
+        );
+    }
+
+    /// Choosing the Symbol view bound the new instance to the cell's symbol,
+    /// and an instance bound to a symbol can never be descended into. The
+    /// instance binds the schematic; the choice decides which view opens.
+    #[test]
+    fn create_hierarchy_binds_the_schematic_whichever_view_opens() {
+        let (mut state, _) = two_resistors_boxed_with_their_wire();
+        let parent = state.model.workspace.content.active_view.clone();
+        open_create_hierarchy_dialog(
+            &mut state.design.create_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        );
+        state.design.create_hierarchy.target_view = ViewType::Symbol;
+        let child = state.design.create_hierarchy.cell_name.clone();
+        commit_create_hierarchy(
+            &mut state.design.create_hierarchy,
+            &mut state.design.symbol,
+            &mut state.model,
+            &state.workbench,
+        )
+        .expect("the block becomes a cell");
+
+        assert_eq!(
+            state.model.workspace.content.active_view,
+            CellViewRef::new(&parent.library, &child, "symbol"),
+            "the symbol opens, as chosen"
+        );
+        let binding = state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&parent.key())
+            .expect("parent buffer")
+            .document()
+            .components
+            .iter()
+            .find_map(|component| component.library_cell.clone())
+            .expect("the new instance");
+        assert_eq!(
+            (binding.cell.as_str(), binding.view.as_str()),
+            (child.as_str(), "schematic")
         );
     }
 
