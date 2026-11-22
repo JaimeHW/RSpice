@@ -125,6 +125,16 @@ impl SchematicArrayCount {
         self.member_count().saturating_sub(1)
     }
 
+    /// The grid this count lays out: one row or one column is linear, more
+    /// than one of each is rectangular.
+    pub const fn grid_kind(self) -> SchematicArrayKind {
+        if self.columns > 1 && self.rows > 1 {
+            SchematicArrayKind::Rectangular
+        } else {
+            SchematicArrayKind::Linear
+        }
+    }
+
     pub fn validate_for(self, kind: SchematicArrayKind) -> Result<(), SchematicArrayError> {
         Self::new(self.columns, self.rows)?;
         if self.member_count() < 2 {

@@ -1,8 +1,11 @@
-//! Create array: three questions, then the canvas takes the pitch.
+//! Create array: a count, then the canvas takes the pitch.
 //!
-//! The three controls are the whole design decision. Placement is acquired
-//! from the canvas after the draft has been parsed and the immutable
-//! schematic authority has been revalidated.
+//! The count says whether the array is a row, a column or a grid, as
+//! Virtuoso's Rows and Columns and Altium's Paste Array counts do, so there
+//! is no second control to disagree with it; only notes and shapes can also
+//! be arrayed around a centre. Placement is acquired from the canvas after
+//! the draft has been parsed and the immutable schematic authority has been
+//! revalidated.
 //!
 //! The model prints a count as `8 × 1` and a naming range as
 //! `U4…U11 · DATA[0]…DATA[7]`. None of `×`, `…` or `·` is on a keyboard, so
@@ -62,17 +65,20 @@ impl ArraySelectionDialogState {
     pub fn open(&mut self, authority: SchematicEditAuthority, count: String, naming: String) {
         let initial_count = count.clone();
         let initial_naming = naming.clone();
+        let kind = SchematicArrayCount::parse(&count)
+            .map(SchematicArrayCount::grid_kind)
+            .unwrap_or_default();
         *self = Self {
             open: true,
             armed: false,
-            kind: crate::state::SchematicArrayKind::default(),
+            kind,
             count,
             naming,
             authority: Some(authority),
             canvas: Default::default(),
             generation: self.generation.wrapping_add(1),
             preview_cache: None,
-            initial_kind: crate::state::SchematicArrayKind::default(),
+            initial_kind: kind,
             initial_count,
             initial_naming,
             dirty: false,
@@ -301,7 +307,9 @@ pub(in crate::workbench) fn render_array_selection_dialog(
             Some(message) => Err(message),
             None => Ok(None),
         })
-        .show(ctx, |rows| array_form(rows, &validation, &mut *dialog));
+        .show(ctx, |rows| {
+            array_form(rows, &validation, &mut *dialog, documentation_only(model))
+        });
     match choice {
         DialogChoice::Primary => {
             if validate_draft(dialog, model).can_commit() {
@@ -335,18 +343,11 @@ fn validate_draft(draft: &ArraySelectionDialogState, model: &Model) -> DraftVali
     if let Err(message) = authority.validate(model, TITLE) {
         errors.messages.push(message);
     }
-    if draft.kind == SchematicArrayKind::RadialDocumentation {
-        let selection = &model.schematic.session.editor.selection;
-        let documentation_count = selection
-            .documentation_shapes
-            .len()
-            .saturating_add(selection.design_notes.len());
-        if documentation_count == 0 || selection.count() != documentation_count {
-            errors.push_array(
-                "Radial documentation requires only complete design notes or documentation shapes."
-                    .to_owned(),
-            );
-        }
+    if draft.kind == SchematicArrayKind::RadialDocumentation && !documentation_only(model) {
+        errors.push_array(
+            "Radial documentation requires only complete design notes or documentation shapes."
+                .to_owned(),
+        );
     }
     let count = match SchematicArrayCount::parse(&draft.count) {
         Ok(count) => Some(count),
@@ -414,6 +415,17 @@ pub fn armed_array_selection_authority(
     }
 }
 
+/// Whether the selection is only notes and shapes, the one selection that
+/// can also be arrayed around a centre.
+fn documentation_only(model: &Model) -> bool {
+    let selection = &model.schematic.session.editor.selection;
+    let documentation = selection
+        .documentation_shapes
+        .len()
+        .saturating_add(selection.design_notes.len());
+    documentation > 0 && selection.count() == documentation
+}
+
 pub fn armed_array_selection_plan(
     draft: &ArraySelectionDialogState,
     model: &Model,
@@ -446,23 +458,51 @@ fn derive_naming_from_count(dialog: &mut ArraySelectionDialogState, model: &Mode
     }
 }
 
-/// The two rows: the kind of array, and its count with the names the count
-/// derives read off under it, or the count's refusal in their place. Returns
-/// the count field, which takes focus.
+/// The grid the count lays out, or the count's last good grid while it does
+/// not parse.
+fn grid_kind(draft: &ArraySelectionDialogState) -> SchematicArrayKind {
+    SchematicArrayCount::parse(&draft.count).map_or(
+        if draft.kind == SchematicArrayKind::RadialDocumentation {
+            SchematicArrayKind::Linear
+        } else {
+            draft.kind
+        },
+        SchematicArrayCount::grid_kind,
+    )
+}
+
+/// The rows: for notes and shapes alone, whether they repeat in rows and
+/// columns or around a centre; then the count, with the names the count
+/// derives read off under it, or the count's refusal in their place.
+/// Returns the count field, which takes focus.
 fn array_form(
     rows: &mut FormRows<'_>,
     validation: &DraftValidation,
     draft: &mut ArraySelectionDialogState,
+    documentation_only: bool,
 ) -> Option<Id> {
     let (_, count_error, _) = validation.field_error_details();
 
-    let labels = SchematicArrayKind::ALL.map(|kind| kind.label().to_owned());
-    if let Some(index) = rows.select("Array", "array-selection-kind", draft.kind.label(), &labels) {
-        let next = SchematicArrayKind::ALL[index];
-        if next != draft.kind {
-            draft.kind = next;
+    if documentation_only {
+        const ARRANGEMENTS: [&str; 2] = ["Rows and columns", "Around a centre"];
+        let radial = draft.kind == SchematicArrayKind::RadialDocumentation;
+        let labels = ARRANGEMENTS.map(str::to_owned);
+        if let Some(index) = rows.select(
+            "Array",
+            "array-selection-kind",
+            ARRANGEMENTS[usize::from(radial)],
+            &labels,
+        ) && (index == 1) != radial
+        {
+            draft.kind = if index == 1 {
+                SchematicArrayKind::RadialDocumentation
+            } else {
+                grid_kind(draft)
+            };
             draft.mark_edited();
         }
+    } else if draft.kind == SchematicArrayKind::RadialDocumentation {
+        draft.kind = grid_kind(draft);
     }
 
     let count_id = field_id("count");
@@ -471,6 +511,9 @@ fn array_form(
         .changed()
     {
         draft.count = canonical_count(&draft.count);
+        if draft.kind != SchematicArrayKind::RadialDocumentation {
+            draft.kind = grid_kind(draft);
+        }
         draft.mark_edited();
     }
     let names = naming_line(&draft.naming);
@@ -696,8 +739,10 @@ mod tests {
         );
     }
 
+    /// A part's array takes its kind from the count, and a count of a
+    /// row, a column or a grid each validates with nothing else to set.
     #[test]
-    fn rectangular_array_highlights_only_the_incompatible_count_field() {
+    fn the_kind_follows_the_count() {
         let mut state = DesignTestHost::default();
         state
             .model
@@ -722,13 +767,20 @@ mod tests {
             &mut state.model,
             &mut state.workbench,
         );
-        state.design.array_selection.kind = SchematicArrayKind::Rectangular;
-
-        let validation = validate_draft(&state);
-        assert_eq!(validation.field_errors(), (false, true, false));
-        // The refusal is the count row's, so nothing is said twice at the
-        // foot of the form.
-        assert_eq!(validation.form_refusal(), None);
+        assert_eq!(
+            state.design.array_selection.kind,
+            SchematicArrayKind::Linear
+        );
+        for (count, kind) in [
+            ("4 \u{00d7} 2", SchematicArrayKind::Rectangular),
+            ("1 \u{00d7} 6", SchematicArrayKind::Linear),
+        ] {
+            state.design.array_selection.count = count.to_owned();
+            state.design.array_selection.kind = grid_kind(&state.design.array_selection);
+            derive_naming_from_count(&mut state);
+            assert_eq!(state.design.array_selection.kind, kind, "{count}");
+            assert!(validate_draft(&state).can_commit(), "{count}");
+        }
     }
 
     #[test]
