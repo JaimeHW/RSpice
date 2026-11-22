@@ -29,6 +29,7 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
         sheet_id: None,
         project_default_drawing_sheet: Some(&project_settings.default_format),
         project_title_block_field_values: Some(&project_settings.title_block_field_values),
+        project_owner_logo: None,
         scope: HardcopyScope::ActiveDocument,
     })
     .unwrap();
@@ -45,6 +46,7 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
             sheet_id: None,
             project_default_drawing_sheet: project_settings.default_format,
             project_title_block_field_values: project_settings.title_block_field_values,
+            project_owner_logo: None,
             all_sheets: false,
             scope: HardcopyScope::ActiveDocument,
         })

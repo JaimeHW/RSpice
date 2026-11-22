@@ -824,6 +824,7 @@ mod drawing_sheet_geometry_tests {
             drawing_sheet: None,
             drawing_sheet_title_values: std::collections::BTreeMap::new(),
             drawing_sheet_page_numbering: None,
+            drawing_sheet_owner_logo: None,
             grid_pitch_units: 10,
             components: Vec::new(),
             wires: Vec::new(),

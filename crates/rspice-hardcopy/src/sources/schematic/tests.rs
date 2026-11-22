@@ -111,6 +111,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         sheet_id: Some(second_id),
         project_default_drawing_sheet: Some(&project_settings.default_format),
         project_title_block_field_values: Some(&project_settings.title_block_field_values),
+        project_owner_logo: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -177,6 +178,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         sheet_catalog: &catalog,
         project_default_drawing_sheet: &project_settings.default_format,
         project_title_block_field_values: &project_settings.title_block_field_values,
+        project_owner_logo: None,
     })
     .unwrap();
     let HardcopySemanticDocument::Aggregate(aggregate) = all.semantic_document() else {
@@ -340,6 +342,7 @@ fn authored_cell_symbol_is_frozen_into_the_semantic_source() {
         sheet_id: None,
         project_default_drawing_sheet: None,
         project_title_block_field_values: None,
+        project_owner_logo: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -389,6 +392,7 @@ fn a_printed_part_marks_the_pins_nothing_on_its_sheet_meets() {
             sheet_id: None,
             project_default_drawing_sheet: None,
             project_title_block_field_values: None,
+            project_owner_logo: None,
             scope,
         })
         .unwrap();
@@ -424,6 +428,7 @@ fn stale_schematic_authority_is_rejected_before_digesting() {
         sheet_id: None,
         project_default_drawing_sheet: None,
         project_title_block_field_values: None,
+        project_owner_logo: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap_err();
@@ -468,6 +473,7 @@ fn a_governed_selection_prints_only_the_active_sheet() {
         sheet_id: None,
         project_default_drawing_sheet: None,
         project_title_block_field_values: None,
+        project_owner_logo: None,
         scope: HardcopyScope::Selection,
     })
     .unwrap();
@@ -542,6 +548,7 @@ fn a_sheet_inserted_mid_catalog_prints_its_place_in_the_set() {
         sheet_catalog: &catalog,
         project_default_drawing_sheet: &project_settings.default_format,
         project_title_block_field_values: &project_settings.title_block_field_values,
+        project_owner_logo: None,
     })
     .unwrap();
 

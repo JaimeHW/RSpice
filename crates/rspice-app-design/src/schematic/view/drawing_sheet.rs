@@ -137,6 +137,7 @@ mod tests {
             format,
             design_name: "top".to_owned(),
             page_label: "1 of 1".to_owned(),
+            owner_logo: None,
         };
         assert_eq!(sheet.geometry.physical.drawing_area.x_um, 20_000);
 

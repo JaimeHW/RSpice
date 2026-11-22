@@ -3,7 +3,9 @@
 //! Managed logos and field layout are resolved here so every publication
 //! backend consumes identical geometry. The block always stands upright.
 
-use rspice_design_model::design_management::{DrawingSheetTitleAlign, DrawingSheetTitleMeasure};
+use rspice_design_model::design_management::{
+    DrawingSheetOwnerLogo, DrawingSheetTitleAlign, DrawingSheetTitleMeasure,
+};
 
 use super::*;
 
@@ -13,6 +15,7 @@ impl SemanticSceneCompiler<'_> {
         format: &SchematicSheetFormat,
         template: DrawingSheetTitleBlockTemplate,
         automatic_values: &BTreeMap<DrawingSheetTitleFieldId, String>,
+        owner_logo: Option<&DrawingSheetOwnerLogo>,
         block: DrawingSheetRect,
         stroke: StrokeStyle,
     ) -> Result<(), HardcopyRenderError> {
@@ -36,9 +39,11 @@ impl SemanticSceneCompiler<'_> {
         let geometry = format
             .geometry()
             .map_err(|error| conversion_error(format!("drawing-sheet geometry: {error}")))?;
-        let layout =
-            rspice_design_model::design_management::drawing_sheet_title_layout(format, &geometry)
-                .ok_or_else(|| conversion_error("title block has no authored grid"))?;
+        let (layout, owner_logo_seat) =
+            rspice_design_model::design_management::drawing_sheet_title_layout_with_owner_logo(
+                format, &geometry, owner_logo,
+            )
+            .ok_or_else(|| conversion_error("title block has no authored grid"))?;
         let at_x = |x_um: u64| {
             i64::try_from(x_um)
                 .ok()
@@ -90,6 +95,22 @@ impl SemanticSceneCompiler<'_> {
                     fill: primitive.filled().then_some(SceneFill::solid(stroke.color)),
                 });
             }
+        }
+        // The project's logo, where the form seats it in the owner's cell,
+        // as the PNG file it was imported as.
+        if let (Some(seat), Some(logo)) = (owner_logo_seat, owner_logo) {
+            let origin = self.drawing_sheet_point(at_x(seat.x_um)?, at_y(seat.y_um)?)?;
+            self.primitives.push(ScenePrimitive::RasterImage {
+                rect: SceneRect::try_new(
+                    origin.x,
+                    origin.y,
+                    Length::from_micrometres(seat.width_um),
+                    Length::from_micrometres(seat.height_um),
+                )?,
+                png: logo.png().to_vec(),
+                content_digest: logo.digest(),
+                alternative_text: logo.alternative_text().to_owned(),
+            });
         }
         let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
             format,

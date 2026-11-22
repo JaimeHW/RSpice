@@ -359,11 +359,17 @@ impl<'a> SemanticSceneCompiler<'a> {
             if let Some(page_label) = page_label {
                 let mut title_values = schematic.drawing_sheet_title_values.clone();
                 title_values.insert(DrawingSheetTitleFieldId::Page, page_label.to_owned());
-                self.drawing_sheet(format, &title_values, schematic.grid_pitch_units)?;
+                self.drawing_sheet(
+                    format,
+                    &title_values,
+                    schematic.drawing_sheet_owner_logo.as_ref(),
+                    schematic.grid_pitch_units,
+                )?;
             } else {
                 self.drawing_sheet(
                     format,
                     &schematic.drawing_sheet_title_values,
+                    schematic.drawing_sheet_owner_logo.as_ref(),
                     schematic.grid_pitch_units,
                 )?;
             }
@@ -561,6 +567,7 @@ impl<'a> SemanticSceneCompiler<'a> {
         &mut self,
         format: &SchematicSheetFormat,
         title_values: &BTreeMap<DrawingSheetTitleFieldId, String>,
+        owner_logo: Option<&rspice_design_model::design_management::DrawingSheetOwnerLogo>,
         grid_pitch_units: i32,
     ) -> Result<(), HardcopyRenderError> {
         let geometry = format
@@ -615,6 +622,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                 format,
                 geometry.effective_title_block_template,
                 title_values,
+                owner_logo,
                 title_block,
                 title_stroke,
             )?;

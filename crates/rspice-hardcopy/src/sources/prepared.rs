@@ -20,8 +20,8 @@ use rspice_design::schematic::{
     wire::Wire,
 };
 use rspice_design_model::design_management::{
-    DrawingSheetInheritance, DrawingSheetTitleFieldId, SheetCatalog, SheetId,
-    validate_project_drawing_sheet_title_field_values,
+    DrawingSheetInheritance, DrawingSheetOwnerLogo, DrawingSheetTitleFieldId, SheetCatalog,
+    SheetId, validate_project_drawing_sheet_title_field_values,
 };
 use rspice_formats::project_results::ProjectSimulationResults;
 use rspice_hardcopy_contract::sources::MAX_HARDCOPY_SOURCE_SET_MEMBERS;
@@ -57,6 +57,7 @@ pub enum RetainedHardcopySourceInput {
         project_default_drawing_sheet: SchematicSheetFormat,
         project_title_block_field_values:
             std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
+        project_owner_logo: Option<DrawingSheetOwnerLogo>,
         all_sheets: bool,
         scope: HardcopyScope,
         parameter_labels: SchematicParameterLabelVisibility,
@@ -249,6 +250,7 @@ enum PreparedRetainedHardcopyWorkerPayload {
         project_default_drawing_sheet: SchematicSheetFormat,
         project_title_block_field_values:
             std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
+        project_owner_logo: Option<DrawingSheetOwnerLogo>,
         all_sheets: bool,
         scope: HardcopyScope,
         parameter_labels: SchematicParameterLabelVisibility,
@@ -606,6 +608,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 sheet_id,
                 project_default_drawing_sheet,
                 project_title_block_field_values,
+                project_owner_logo,
                 all_sheets,
                 scope,
                 parameter_labels,
@@ -642,6 +645,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     sheet_id,
                     project_default_drawing_sheet,
                     project_title_block_field_values,
+                    project_owner_logo,
                     all_sheets,
                     scope,
                     parameter_labels,
@@ -743,6 +747,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 sheet_id,
                 project_default_drawing_sheet,
                 project_title_block_field_values,
+                project_owner_logo,
                 all_sheets,
                 scope,
                 parameter_labels,
@@ -781,6 +786,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     sheet_id,
                     project_default_drawing_sheet,
                     project_title_block_field_values,
+                    project_owner_logo,
                     all_sheets,
                     scope,
                     parameter_labels,
@@ -1314,6 +1320,7 @@ impl PreparedRetainedHardcopyResolution {
                 sheet_id,
                 project_default_drawing_sheet,
                 project_title_block_field_values,
+                project_owner_logo,
                 all_sheets,
                 scope,
                 parameter_labels,
@@ -1336,6 +1343,7 @@ impl PreparedRetainedHardcopyResolution {
                         sheet_catalog: catalog,
                         project_default_drawing_sheet: &project_default_drawing_sheet,
                         project_title_block_field_values: &project_title_block_field_values,
+                        project_owner_logo: project_owner_logo.as_ref(),
                         parameter_labels,
                     });
                 }
@@ -1349,6 +1357,7 @@ impl PreparedRetainedHardcopyResolution {
                     sheet_id,
                     project_default_drawing_sheet: Some(&project_default_drawing_sheet),
                     project_title_block_field_values: Some(&project_title_block_field_values),
+                    project_owner_logo: project_owner_logo.as_ref(),
                     scope,
                     parameter_labels,
                 })

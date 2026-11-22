@@ -262,6 +262,7 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
          Format from\nProject default\nFrame\nISO 5457 frame\nZones\n6 × 4\n\
          Centring marks\nDrawn\nUnits\nMillimetres\n\
          Title block\nTemplate\nCompact\nTitle\ntop\n\nCreated by\n\n\
+         Logo\nNone\nImport…\n\
          Document\nAll sheets\nLegal owner\n\nIdentification number\n\n\
          Revision\n\nDate of issue\nYYYY-MM-DD\n\n\
          Document status\nIn preparation\nChange reference\nECO or ticket\n\n\
@@ -1295,4 +1296,242 @@ fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.starts_with("Sheet\nSize\n"), "{painted}");
     assert!(!app.state.sheets.reveal_sheet_section);
+}
+
+/// A PNG file of a picture three times as wide as it is high, written where
+/// a picker can choose it.
+#[cfg(not(target_arch = "wasm32"))]
+fn logo_file() -> (std::path::PathBuf, Vec<u8>) {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 6, 2);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[0x40; 6 * 2 * 4]).unwrap();
+    writer.finish().unwrap();
+    let folder = std::env::temp_dir().join(format!("rspice-logo-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("acme.png");
+    std::fs::write(&path, &bytes).unwrap();
+    (path, bytes)
+}
+
+/// Every picture the canvas paints for `state`'s sheet, where it stands on
+/// screen, and the title block's rectangle there.
+fn canvas_pictures(state: &AppState) -> (Vec<egui::Rect>, egui::Rect) {
+    use rspice_schematic_editor::view::drawing_sheet::{DrawingSheetCanvas, draw_base};
+    use rspice_schematic_editor::view::viewport::Viewport;
+    let sheet = state.model.active_drawing_sheet();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(2_000.0, 1_400.0));
+    let viewport = Viewport {
+        offset: egui::vec2(200.0, 100.0).to_pos2(),
+        zoom: 1.0,
+        bounds,
+    };
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let frame = || {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(bounds),
+                ..Default::default()
+            },
+            |ui| {
+                draw_base(
+                    &ui.ctx().layer_painter(egui::LayerId::background()),
+                    bounds,
+                    &viewport,
+                    DrawingSheetCanvas {
+                        layers: Default::default(),
+                        grid: state.design.grid,
+                        grid_size: 10,
+                    },
+                    &sheet,
+                    || state.model.title_block_fields(&sheet),
+                );
+            },
+        )
+    };
+    drop(frame());
+    let pictures = frame()
+        .shapes
+        .into_iter()
+        .filter_map(|clipped| match clipped.shape {
+            egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                Some(mesh.calc_bounds())
+            }
+            _ => None,
+        })
+        .collect();
+    let block = sheet.geometry.title_block.unwrap().screen_rect(&viewport);
+    (pictures, block)
+}
+
+/// The logo the printed page of `state`'s sheet carries in its title block,
+/// where it stands on the page, and the owner's cell there, in micrometres
+/// from the paper's top-left corner.
+fn printed_logo(state: &AppState) -> Option<([u64; 4], [u64; 4])> {
+    use rspice_hardcopy::render::{HardcopySceneMetadata, ScenePrimitive, scene_from_resolved};
+    use rspice_hardcopy_contract::{
+        HardcopyScope, OutsideSheetContentPolicy, SchematicHardcopyExtent, SchematicHardcopySetup,
+    };
+    let source_key = format!(
+        "project:{}:cell-view:{}",
+        state.model.workspace.content.project.id().as_uuid(),
+        state.model.workspace.content.active_key()
+    );
+    let resolved = crate::feature_tests::hardcopy::resolve_retained_hardcopy_source(
+        state,
+        &source_key,
+        HardcopyScope::CurrentSheet,
+    )
+    .unwrap();
+    let scene = scene_from_resolved(
+        &resolved,
+        resolved.default_print_mapping(),
+        SchematicHardcopySetup::new(
+            SchematicHardcopyExtent::AuthoredDrawingSheet,
+            OutsideSheetContentPolicy::Ask,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+        ),
+        HardcopySceneMetadata::try_new("Logo", "RSpice feature tests").unwrap(),
+    )
+    .unwrap();
+    let rasters = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::RasterImage { rect, .. } => Some([
+                rect.x.micrometres(),
+                rect.y.micrometres(),
+                rect.width.micrometres(),
+                rect.height.micrometres(),
+            ]),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(rasters.len() <= 1, "{rasters:?}");
+    let sheet = state.model.active_drawing_sheet();
+    let block = sheet.geometry.physical.title_block.unwrap();
+    let (layout, _) = rspice_app_state::state::drawing_sheet_title_layout_with_owner_logo(
+        &sheet.format,
+        &sheet.geometry.physical,
+        sheet.owner_logo.as_ref(),
+    )
+    .unwrap();
+    let cell = layout.cell(DrawingSheetTitleFieldId::Organization).unwrap();
+    let owner_cell = [
+        block.x_um as u64 + cell.x_um,
+        block.y_um as u64 + cell.y_um,
+        cell.width_um,
+        cell.height_um,
+    ];
+    rasters.first().map(|raster| (*raster, owner_cell))
+}
+
+/// Title block's Logo row: Import… puts a PNG picture in the owner's cell of
+/// every form, on the canvas and on the printed page, Remove takes it out of
+/// both, and undo puts it back.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_imported_logo_stands_in_every_forms_owner_cell_until_it_is_removed() {
+    use rspice_app_services::io::file_exchange::{ScriptedChoice, script_next_choice};
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
+    let (path, bytes) = logo_file();
+    let mut panel = SheetPanel::new();
+    // The drawing is the document in view, which Print prints.
+    let reference = panel.app.state.model.workspace.content.active_view.clone();
+    panel
+        .app
+        .state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+    panel.pass(Vec::new());
+    assert!(panel.words().contains("Logo\nNone\n"), "{}", panel.words());
+    assert!(canvas_pictures(&panel.app.state).0.is_empty());
+    assert_eq!(printed_logo(&panel.app.state), None);
+
+    script_next_choice(ScriptedChoice::Chose(path));
+    panel.click_text("Import\u{2026}");
+    panel.pass(Vec::new());
+    let logo = panel
+        .app
+        .state
+        .model
+        .active_drawing_sheet()
+        .owner_logo
+        .expect("the picked picture is the project's logo");
+    assert_eq!(logo.png(), bytes.as_slice());
+    panel.pass(Vec::new());
+    assert!(
+        panel
+            .words()
+            .contains("Logo\n6 \u{d7} 2 px\nImport\u{2026}\nRemove\n"),
+        "{}",
+        panel.words()
+    );
+
+    let in_every_form = |state: &mut AppState| {
+        for edits in [
+            vec![DrawingSheetEdit::TitleBlock(
+                DrawingSheetTitleBlockTemplate::Compact,
+            )],
+            vec![DrawingSheetEdit::TitleBlock(
+                DrawingSheetTitleBlockTemplate::Standard,
+            )],
+            vec![
+                DrawingSheetEdit::Size(DrawingSheetStandard::AnsiB),
+                DrawingSheetEdit::TitleBlock(DrawingSheetTitleBlockTemplate::AsmeY141),
+            ],
+        ] {
+            for edit in edits {
+                let _ = apply_drawing_sheet_edit(state, edit);
+            }
+            let template = state
+                .model
+                .active_drawing_sheet()
+                .format
+                .title_block
+                .template;
+            let (pictures, block) = canvas_pictures(state);
+            let [picture] = pictures[..] else {
+                panic!("{template:?}: the canvas paints {pictures:?}");
+            };
+            assert!(block.contains_rect(picture), "{template:?}");
+            let ([x, y, width, height], [left, top, cell_width, cell_height]) =
+                printed_logo(state).unwrap_or_else(|| panic!("{template:?} prints no logo"));
+            assert!(
+                x > left
+                    && y > top
+                    && x + width < left + cell_width
+                    && y + height < top + cell_height,
+                "{template:?}: the printed logo stands outside the owner's cell"
+            );
+        }
+    };
+    in_every_form(&mut panel.app.state);
+
+    panel.pass(Vec::new());
+    panel.click_text("Remove");
+    panel.pass(Vec::new());
+    assert_eq!(
+        panel.app.state.model.active_drawing_sheet().owner_logo,
+        None
+    );
+    assert!(canvas_pictures(&panel.app.state).0.is_empty());
+    assert_eq!(printed_logo(&panel.app.state), None);
+
+    assert!(panel.app.state.undo_project_design().unwrap().is_some());
+    assert_eq!(
+        panel.app.state.model.active_drawing_sheet().owner_logo,
+        Some(logo)
+    );
+    assert_eq!(canvas_pictures(&panel.app.state).0.len(), 1);
+    assert!(printed_logo(&panel.app.state).is_some());
 }

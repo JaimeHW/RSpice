@@ -30,10 +30,11 @@ use rspice_design_model::design_management::{
     DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_BLOCK_LETTERING,
     DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetDisplayUnit, DrawingSheetFrameArtwork,
     DrawingSheetFrameLayer, DrawingSheetFrameMark,
-    DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
-    DrawingSheetTitleAlign, DrawingSheetTitleLettering, DrawingSheetTitleLetteringRole,
-    DrawingSheetTitleMeasure, DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField,
-    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
+    DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering,
+    DrawingSheetOwnerLogo, DrawingSheetRect, DrawingSheetTitleAlign, DrawingSheetTitleLettering,
+    DrawingSheetTitleLetteringRole, DrawingSheetTitleMeasure, DrawingSheetZoneLayout,
+    ResolvedDrawingSheetTitleField, SchematicSheetFormat, drawing_sheet_mono_em_um,
+    drawing_sheet_title_layout_with_owner_logo,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -214,6 +215,9 @@ pub struct ActiveDrawingSheet {
     /// every sheet of a multi-sheet drawing reads the same Title.
     pub design_name: String,
     pub page_label: String,
+    /// The project's logo, which the title block seats in the cell that
+    /// names the legal owner.
+    pub owner_logo: Option<DrawingSheetOwnerLogo>,
 }
 
 impl ActiveDrawingSheet {
@@ -1358,7 +1362,11 @@ fn draw_title_block(
     ));
     // The form hardcopy and the sheet previews draw too, in physical units on the
     // block, mapped onto the screen.
-    let Some(layout) = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical) else {
+    let Some((layout, logo_seat)) = drawing_sheet_title_layout_with_owner_logo(
+        &sheet.format,
+        &sheet.geometry.physical,
+        sheet.owner_logo.as_ref(),
+    ) else {
         return;
     };
     let x_at = |x_um: u64| block.left() + block.width() * x_um as f32 / layout.width_um as f32;
@@ -1378,6 +1386,23 @@ fn draw_title_block(
             Rect::from_min_max(block.left_top(), pos2(field_grid.left(), block.bottom())),
             logo,
             palette,
+        );
+    }
+    // The owner's logo, where the form seats it, as it prints.
+    if let (Some(seat), Some(logo)) = (logo_seat, &sheet.owner_logo)
+        && let Some(texture) = owner_logo_texture(painter.ctx(), logo)
+    {
+        painter.image(
+            texture.id(),
+            Rect::from_min_max(
+                pos2(x_at(seat.x_um), y_at(seat.y_um)),
+                pos2(
+                    x_at(seat.x_um + seat.width_um),
+                    y_at(seat.y_um + seat.height_um),
+                ),
+            ),
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            Color32::WHITE,
         );
     }
     // Each cell's own rules, each drawn once at its own width. They are the
@@ -1654,6 +1679,9 @@ fn draw_dimensions(
         palette.zone_ink,
     );
 }
+
+mod owner_logo;
+pub use owner_logo::{decode_owner_logo, owner_logo_texture};
 
 #[cfg(test)]
 mod tests;

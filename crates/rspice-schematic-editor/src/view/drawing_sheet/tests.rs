@@ -10,6 +10,7 @@ use rspice_design::schematic::{
 };
 use rspice_design_model::design_management::{
     DrawingSheetStandard, DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZones,
+    drawing_sheet_title_layout,
 };
 use rspice_design_model::{SchematicPageOrientation, SchematicPageSize};
 
@@ -20,6 +21,7 @@ fn test_sheet() -> ActiveDrawingSheet {
         format,
         design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
+        owner_logo: None,
     }
 }
 fn test_view(document: &SchematicDocument) -> DesignView<'_> {
@@ -108,6 +110,7 @@ fn a_frame_without_zones_letters_no_references_and_quotes_none() {
         format,
         design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
+        owner_logo: None,
     };
     let point = (
         sheet.geometry.drawing_area.min_x + 1.0,
@@ -153,6 +156,7 @@ fn active(format: SchematicSheetFormat) -> ActiveDrawingSheet {
         format,
         design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
+        owner_logo: None,
     }
 }
 
@@ -215,6 +219,7 @@ fn cursor_status_uses_the_configured_unit_and_explicit_sheet_context() {
         format,
         design_name: "top".to_owned(),
         page_label: "1 of 1".to_owned(),
+        owner_logo: None,
     };
     let one_inch = 25.4 * DRAWING_SHEET_UNITS_PER_MM;
 
@@ -364,6 +369,7 @@ fn sheet_one_of_several_on_the_asme_form_paints_the_same_revision_note() {
             format: format.clone(),
             design_name: "top".to_owned(),
             page_label: page.to_owned(),
+            owner_logo: None,
         };
         let viewport = Viewport {
             offset: Pos2::ZERO,
@@ -853,6 +859,110 @@ fn a_title_in_any_script_is_painted_cut_and_set_where_the_plot_sets_it() {
             (painted - laid_out).abs() < 0.5,
             "{:?} stands at {painted}, not {laid_out}",
             line.text
+        );
+    }
+}
+
+/// A PNG file of a picture three times as wide as it is high.
+fn wide_logo_png() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 6, 2);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[0x40; 6 * 2 * 4]).unwrap();
+    writer.finish().unwrap();
+    bytes
+}
+
+#[test]
+fn the_canvas_paints_the_owner_logo_in_every_forms_owner_cell_clear_of_the_name() {
+    use rspice_design_model::design_management::{
+        DrawingSheetTitleBlockTemplate as Template, DrawingSheetTitleFieldId as Field,
+        resolve_drawing_sheet_title_fields,
+    };
+    let logo = DrawingSheetOwnerLogo::from_png(wide_logo_png(), "Acme logo").unwrap();
+    for (standard, template) in [
+        (DrawingSheetStandard::IsoA4, Template::Compact),
+        (DrawingSheetStandard::IsoA4, Template::Standard),
+        (DrawingSheetStandard::AnsiB, Template::AsmeY141),
+    ] {
+        let format =
+            SchematicSheetFormat::from_standard(standard, SchematicPageOrientation::Landscape)
+                .try_update(|draft| draft.title_block.template = template)
+                .unwrap();
+        let fields = resolve_drawing_sheet_title_fields(
+            &format,
+            &[(Field::Organization, "Acme Instruments".to_owned())]
+                .into_iter()
+                .collect(),
+        );
+        let mut sheet = active(format);
+        let pictures = |shapes: &[Shape]| {
+            shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            pictures(&painted_title_block(&sheet, &fields)).is_empty(),
+            "{template:?}"
+        );
+
+        sheet.owner_logo = Some(logo.clone());
+        let shapes = painted_title_block(&sheet, &fields);
+        let [picture] = pictures(&shapes)[..] else {
+            panic!("{template:?} paints no logo");
+        };
+        // The owner's cell on screen, at one world unit per point.
+        let (layout, _) = drawing_sheet_title_layout_with_owner_logo(
+            &sheet.format,
+            &sheet.geometry.physical,
+            sheet.owner_logo.as_ref(),
+        )
+        .unwrap();
+        let block = sheet.geometry.title_block.unwrap();
+        let x_at = |x_um: u64| {
+            block.min_x as f32
+                + (block.max_x - block.min_x) as f32 * x_um as f32 / layout.width_um as f32
+        };
+        let y_at = |y_um: u64| {
+            block.min_y as f32
+                + (block.max_y - block.min_y) as f32 * y_um as f32 / layout.height_um as f32
+        };
+        let cell = layout.cell(Field::Organization).unwrap();
+        let cell = Rect::from_min_max(
+            pos2(x_at(cell.x_um), y_at(cell.y_um)),
+            pos2(
+                x_at(cell.x_um + cell.width_um),
+                y_at(cell.y_um + cell.height_um),
+            ),
+        );
+        assert!(
+            cell.contains_rect(picture),
+            "{template:?}: {picture:?} outside {cell:?}"
+        );
+        assert!(
+            (picture.width() - 3.0 * picture.height()).abs() < 0.1,
+            "{template:?}: {picture:?}"
+        );
+        let name = shapes
+            .iter()
+            .find_map(|shape| match shape {
+                Shape::Text(text) if text.galley.text() == "Acme Instruments" => {
+                    Some(text.visual_bounding_rect())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{template:?} letters no owner"));
+        assert!(
+            name.left() >= picture.right() || name.bottom() <= picture.top(),
+            "{template:?}: the name {name:?} overlaps the logo {picture:?}"
         );
     }
 }

@@ -8,8 +8,8 @@ use rspice_design::schematic::component_display::SchematicParameterLabelVisibili
 use rspice_design::schematic::{component_type::ComponentType, owned::Schematic};
 use rspice_design::symbol_resolver::SymbolResolver;
 use rspice_design_model::design_management::{
-    DesignSheet, DrawingSheetInheritance, DrawingSheetTitleFieldId, SheetCatalog, SheetId,
-    validate_project_drawing_sheet_title_field_values,
+    DesignSheet, DrawingSheetInheritance, DrawingSheetOwnerLogo, DrawingSheetTitleFieldId,
+    SheetCatalog, SheetId, validate_project_drawing_sheet_title_field_values,
 };
 use rspice_vocabulary::product::ObjectRevision;
 use std::collections::{BTreeMap, HashSet};
@@ -88,6 +88,9 @@ pub struct SchematicHardcopySource<'a> {
     /// Canonical project-owned values used by every sheet title block.
     pub project_title_block_field_values:
         Option<&'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>>,
+    /// The project's logo, which every sheet's title block seats in the
+    /// cell that names the legal owner.
+    pub project_owner_logo: Option<&'a DrawingSheetOwnerLogo>,
     pub scope: HardcopyScope,
     /// What the canvas letters on a part that inherits its labels, frozen
     /// into the page.
@@ -103,6 +106,7 @@ pub struct SchematicSheetSetHardcopySource<'a> {
     pub project_default_drawing_sheet: &'a SchematicSheetFormat,
     pub project_title_block_field_values:
         &'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
+    pub project_owner_logo: Option<&'a DrawingSheetOwnerLogo>,
     /// What the canvas letters on a part that inherits its labels, frozen
     /// into every page.
     pub parameter_labels: SchematicParameterLabelVisibility,
@@ -152,6 +156,7 @@ pub fn resolve_all_schematic_sheets(
             parameter_labels: source.parameter_labels,
             project_default_drawing_sheet: Some(source.project_default_drawing_sheet),
             project_title_block_field_values: Some(source.project_title_block_field_values),
+            project_owner_logo: source.project_owner_logo,
             scope: HardcopyScope::CurrentSheet,
         })?);
     }
@@ -306,6 +311,10 @@ pub fn resolve_schematic_source(
         }),
         drawing_sheet_page_numbering: governed_sheet
             .map(|(catalog, _)| catalog.settings().page_numbering),
+        drawing_sheet_owner_logo: drawing_sheet
+            .as_ref()
+            .and(source.project_owner_logo)
+            .cloned(),
         drawing_sheet,
         grid_pitch_units: source.schematic.document().grid_size.max(1),
         components: Vec::new(),

@@ -695,6 +695,14 @@ fn prepare_schematic_resolution(
             .drawing_sheet_settings()
             .title_block_field_values
             .clone(),
+        project_owner_logo: reads
+            .model
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .owner_logo
+            .clone(),
         all_sheets,
         scope,
         parameter_labels: reads.parameter_labels,

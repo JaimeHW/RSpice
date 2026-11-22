@@ -99,6 +99,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         sheet_id: None,
         project_default_drawing_sheet: None,
         project_title_block_field_values: None,
+        project_owner_logo: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -119,6 +120,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         sheet_id: None,
         project_default_drawing_sheet: None,
         project_title_block_field_values: None,
+        project_owner_logo: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -142,6 +144,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         sheet_id: None,
         project_default_drawing_sheet: None,
         project_title_block_field_values: None,
+        project_owner_logo: None,
         scope: HardcopyScope::CurrentSheet,
     })
     .unwrap();
@@ -234,6 +237,7 @@ fn schematic_selection_exports_only_selected_durable_objects() {
             sheet_id: None,
             project_default_drawing_sheet: None,
             project_title_block_field_values: None,
+            project_owner_logo: None,
             scope: HardcopyScope::Selection,
         })
         .unwrap();
@@ -280,6 +284,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
         sheet_id: None,
         project_default_drawing_sheet: None,
         project_title_block_field_values: None,
+        project_owner_logo: None,
         scope: HardcopyScope::Selection,
     })
     .unwrap_err();

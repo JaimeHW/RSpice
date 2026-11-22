@@ -28,6 +28,7 @@ impl Model {
                 format,
                 design_name: self.workspace.content.active_view.cell.clone(),
                 page_label: drawing_sheet_page_label(page, page_count),
+                owner_logo: self.owner_logo(),
             };
         }
 
@@ -43,7 +44,18 @@ impl Model {
             format,
             design_name: self.workspace.content.active_view.cell.clone(),
             page_label: drawing_sheet_page_label(1, 1),
+            owner_logo: self.owner_logo(),
         }
+    }
+
+    /// The logo the project gives every title block.
+    fn owner_logo(&self) -> Option<crate::state::DrawingSheetOwnerLogo> {
+        self.workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .owner_logo
+            .clone()
     }
 
     /// The unit the open view's sheet shows lengths in.

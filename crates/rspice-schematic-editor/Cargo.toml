@@ -21,6 +21,8 @@ rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-design-model.workspace = true
 rspice-ui-kit.workspace = true
 serde.workspace = true
+# The owner's logo is a PNG file the canvas decodes to paint.
+png = "0.18"
 
 [dev-dependencies]
 rspice-design = { workspace = true, features = ["schematic-test-fixtures", "test-support"] }

@@ -78,6 +78,7 @@ fn named_print_set_projects_per_set_sheet_numbers_without_mutating_child_authori
                 sheet_id: Some(sheet_id),
                 project_default_drawing_sheet: Some(&project_settings.default_format),
                 project_title_block_field_values: Some(&project_settings.title_block_field_values),
+                project_owner_logo: None,
                 scope: HardcopyScope::CurrentSheet,
             })
             .unwrap()
@@ -221,6 +222,7 @@ fn the_canvas_and_the_plot_letter_a_title_in_any_script_alike() {
         drawing_sheet: Some(format.clone()),
         drawing_sheet_title_values: title_values,
         drawing_sheet_page_numbering: None,
+        drawing_sheet_owner_logo: None,
         grid_pitch_units: 10,
         components: Vec::new(),
         wires: Vec::new(),

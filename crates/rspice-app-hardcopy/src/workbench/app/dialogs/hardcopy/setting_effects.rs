@@ -75,6 +75,7 @@ fn sheet_with(
         drawing_sheet_title_values: drawing_sheet_title_values(&identity, &format, None, None),
         drawing_sheet: Some(format.clone()),
         drawing_sheet_page_numbering: None,
+        drawing_sheet_owner_logo: None,
         grid_pitch_units: 10,
         components: Vec::new(),
         wires,

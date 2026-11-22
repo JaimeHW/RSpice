@@ -20,16 +20,19 @@ mod format;
 use egui::Ui;
 
 use super::super::shared::{
-    checks_status, count_label, findings_problem, sheet_floating_net_findings,
+    action_stack, checks_status, count_label, findings_problem, sheet_floating_net_findings,
     sheet_open_pin_findings,
 };
+use crate::io::file_exchange::{self, FileKind};
 use crate::state::policy_labels::grid_pitch_label;
 use crate::state::{
-    AuthoredDrawingSheetSize, DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY, DrawingSheetReleaseStatus,
+    AuthoredDrawingSheetSize, DRAWING_SHEET_OWNER_LOGO_MAX_BYTES,
+    DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY, DrawingSheetOwnerLogo, DrawingSheetReleaseStatus,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
     NetNamingPolicy, SchematicGridPitch, SchematicSheetFormat, SheetId, drawing_sheet_title_layout,
     entered_text,
 };
+use crate::ui::widgets::Button;
 use crate::workbench::app::drawing_sheet_edit::{
     DrawingSheetEdit, apply_drawing_sheet_edit_on, drawing_sheet_editable, format_sheet_length,
     parse_sheet_length,
@@ -44,7 +47,7 @@ use crate::workbench::design_system::{
 use crate::workbench::framework::requests::FollowSchematicGrid;
 use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
-use rspice_schematic_editor::view::drawing_sheet::ActiveDrawingSheet;
+use rspice_schematic_editor::view::drawing_sheet::{ActiveDrawingSheet, decode_owner_logo};
 use rspice_ui_kit::panels::{
     PropertyRowAction, WorkbenchIcon, property_row_input_action_with_default,
     property_row_input_action_with_hint, section_header, section_header_explained,
@@ -383,6 +386,126 @@ fn title_block_section(
         }
         cut_advisory(ui, cut, field);
     }
+    logo_rows(ui, model, sheet, editable, edit);
+}
+
+/// The picker the Logo row's Import… opens.
+const LOGO_FILE: FileKind = FileKind {
+    label: "PNG picture",
+    extensions: &["png"],
+    subject: "The logo",
+    fallback_name: "Logo",
+};
+
+fn logo_import_id() -> egui::Id {
+    egui::Id::new("sheet-inspector-logo-import")
+}
+
+/// The project a logo is being picked for, so a picture chosen after the
+/// project has closed goes nowhere.
+fn logo_import_owner_id() -> egui::Id {
+    egui::Id::new("sheet-inspector-logo-import-owner")
+}
+
+/// The project's logo, which every title block seats in the owner's cell,
+/// with Import… to put a PNG picture there and Remove to take it away. A
+/// block whose organization template draws its own logo seats no other.
+fn logo_rows(
+    ui: &mut Ui,
+    model: &Model,
+    sheet: &ActiveDrawingSheet,
+    editable: bool,
+    edit: &mut Option<PanelEdit>,
+) {
+    if let Some(picked) = take_picked_logo(ui.ctx(), model) {
+        *edit = Some(picked.map(DrawingSheetEdit::OwnerLogo));
+    }
+    if sheet
+        .format
+        .title_block_logo(sheet.geometry.physical.effective_title_block_template)
+        .is_some()
+    {
+        property_row(ui, "Logo", "The organization's");
+        return;
+    }
+    let logo = sheet.owner_logo.as_ref();
+    let shown = logo.map_or_else(
+        || "None".to_owned(),
+        |logo| {
+            let (width, height) = logo.pixel_size();
+            format!("{width} \u{00d7} {height} px")
+        },
+    );
+    property_row(ui, "Logo", &shown);
+    if !editable {
+        return;
+    }
+    action_stack(ui, |ui| {
+        if Button::new("Import\u{2026}")
+            .show(ui)
+            .on_hover_text(
+                "Puts a PNG picture in the owner's cell of every title block in the project.",
+            )
+            .clicked()
+        {
+            match file_exchange::open_binary_file(
+                ui.ctx(),
+                logo_import_id(),
+                LOGO_FILE,
+                DRAWING_SHEET_OWNER_LOGO_MAX_BYTES,
+            ) {
+                Ok(()) => ui.data_mut(|data| {
+                    data.insert_temp(logo_import_owner_id(), model.workspace.content.project.id());
+                }),
+                Err(error) => *edit = Some(Err(error)),
+            }
+        }
+        if logo.is_some() && Button::new("Remove").show(ui).clicked() {
+            *edit = Some(Ok(DrawingSheetEdit::OwnerLogo(None)));
+        }
+    });
+}
+
+/// The logo the picker has read, once it has: the picture as the project
+/// keeps it, read by the owner's name where it cannot be seen, or why it
+/// cannot be one. Nothing for a pick that was cancelled, is still open, or
+/// was made for a project since closed.
+fn take_picked_logo(
+    ctx: &egui::Context,
+    model: &Model,
+) -> Option<Result<Option<DrawingSheetOwnerLogo>, String>> {
+    let outcome = file_exchange::take_opened_binary(ctx, logo_import_id())?;
+    let owner = ctx.data_mut(|data| {
+        let owner = data.get_temp::<rspice_app_state::product::ProjectId>(logo_import_owner_id());
+        data.remove::<rspice_app_state::product::ProjectId>(logo_import_owner_id());
+        owner
+    });
+    if owner != Some(model.workspace.content.project.id()) {
+        return None;
+    }
+    let file = match outcome {
+        Ok(Some(file)) => file,
+        Ok(None) => return None,
+        Err(error) => return Some(Err(error)),
+    };
+    if let Err(refusal) = decode_owner_logo(&file.bytes) {
+        return Some(Err(refusal.to_owned()));
+    }
+    let owner_name = model
+        .workspace
+        .content
+        .design_management
+        .drawing_sheet_settings()
+        .title_block_field_values
+        .get(&DrawingSheetTitleFieldId::Organization)
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .map_or_else(|| "Logo".to_owned(), |name| format!("{name} logo"));
+    Some(
+        DrawingSheetOwnerLogo::from_png(file.bytes, &owner_name)
+            .map(Some)
+            .map_err(|error| error.to_string()),
+    )
 }
 
 /// The project's name for the signer `field` names, or nothing for any other

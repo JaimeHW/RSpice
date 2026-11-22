@@ -389,6 +389,7 @@ pub(super) fn sheet(components: Vec<Component>) -> SemanticSchematic {
         drawing_sheet: None,
         drawing_sheet_title_values: BTreeMap::new(),
         drawing_sheet_page_numbering: None,
+        drawing_sheet_owner_logo: None,
         grid_pitch_units: 10,
         components: components.into_iter().map(semantic).collect(),
         wires: Vec::new(),

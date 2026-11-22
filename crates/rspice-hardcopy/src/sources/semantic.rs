@@ -28,7 +28,8 @@ use rspice_design::schematic::{
 use rspice_design::symbol::SymbolDocument;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
-    DrawingSheetTitleFieldId, SchematicSheetFormat, SheetPageNumbering, SheetTextVariables,
+    DrawingSheetOwnerLogo, DrawingSheetTitleFieldId, SchematicSheetFormat, SheetPageNumbering,
+    SheetTextVariables,
 };
 use rspice_hardcopy_contract::sources::{
     DISPLAY_NAME_LIMIT, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, validate_label,
@@ -154,6 +155,10 @@ pub struct SemanticSchematic {
     /// publication uses this to project exact named-print-set page labels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawing_sheet_page_numbering: Option<SheetPageNumbering>,
+    /// The project's logo, frozen with the page, which its title block
+    /// seats in the cell that names the legal owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing_sheet_owner_logo: Option<DrawingSheetOwnerLogo>,
     /// Frozen authored snap-grid pitch in schematic world units. One world
     /// unit is exactly [`super::SCHEMATIC_UNIT_UM`] micrometres.
     #[serde(default = "default_schematic_grid_pitch_units")]

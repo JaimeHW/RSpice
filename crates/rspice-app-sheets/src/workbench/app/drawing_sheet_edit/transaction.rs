@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::state::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_MIXED_SIZES_ADVISORY, DrawingSheetBorderTemplate,
     DrawingSheetDisplayUnit, DrawingSheetDocumentControl, DrawingSheetFrameConvention,
-    DrawingSheetInheritance, DrawingSheetPreset, DrawingSheetPresetScope,
+    DrawingSheetInheritance, DrawingSheetOwnerLogo, DrawingSheetPreset, DrawingSheetPresetScope,
     DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
     DrawingSheetTitleFieldId, DrawingSheetTransactionKind, DrawingSheetTransactionReceipt,
     DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetId,
@@ -73,6 +73,8 @@ pub enum DrawingSheetEdit {
     /// The change order, ticket or release record the document's revision
     /// answers to.
     ChangeReference(String),
+    /// The logo the project gives every title block, or none.
+    OwnerLogo(Option<DrawingSheetOwnerLogo>),
 }
 
 /// Apply one property of the active sheet as one transaction, over the parts
@@ -90,8 +92,12 @@ pub fn apply_drawing_sheet_edit_on(
     if !drawing_sheet_editable(workbench, model) {
         return Err("The sheet can only be edited on a writable schematic.".to_owned());
     }
-    if let DrawingSheetEdit::ApplyToAllSheets(field, value) = edit {
-        return apply_title_value_to_all_sheets(model, field, &entered_text(&value));
+    match edit {
+        DrawingSheetEdit::ApplyToAllSheets(field, value) => {
+            return apply_title_value_to_all_sheets(model, field, &entered_text(&value));
+        }
+        DrawingSheetEdit::OwnerLogo(logo) => return apply_owner_logo(model, logo),
+        _ => {}
     }
     let paper = model.active_drawing_sheet().geometry.paper;
     let mut transaction = SheetTransaction::open(model);
@@ -206,6 +212,35 @@ fn apply_title_value_to_all_sheets(
     let personal = model.preferences.drawing_sheet_personal_preferences();
     commit_sheet_candidate(model, before, candidate, personal.clone(), personal)?;
     Ok(format!("{} applied to all sheets.", field.display_label()))
+}
+
+/// Give every title block in the project `logo`, or take the logo away, as
+/// one undo step. The logo is the project's, as the owner's name is.
+fn apply_owner_logo(
+    model: &mut Model,
+    logo: Option<DrawingSheetOwnerLogo>,
+) -> Result<String, String> {
+    let before = (*model.workspace.content.design_management).clone();
+    let mut settings = before.drawing_sheet_settings().clone();
+    if settings.owner_logo == logo {
+        return Ok(match logo {
+            Some(_) => "Every title block already carries that logo.",
+            None => "The title blocks carry no logo.",
+        }
+        .to_owned());
+    }
+    let outcome = match logo {
+        Some(_) => "Logo added to every title block.",
+        None => "Logo removed from every title block.",
+    };
+    settings.owner_logo = logo;
+    let mut candidate = before.clone();
+    candidate
+        .update_drawing_sheet_settings(candidate.revision(), settings)
+        .map_err(|error| error.to_string())?;
+    let personal = model.preferences.drawing_sheet_personal_preferences();
+    commit_sheet_candidate(model, before, candidate, personal.clone(), personal)?;
+    Ok(outcome.to_owned())
 }
 
 /// The governed sheet an edit lands on, as it stood when the edit began.
@@ -372,6 +407,9 @@ impl SheetTransaction {
             }
             DrawingSheetEdit::ApplyToAllSheets(..) => {
                 return Err("Apply to all sheets reaches beyond one sheet's draft.".to_owned());
+            }
+            DrawingSheetEdit::OwnerLogo(_) => {
+                return Err("The logo is the project's, not one sheet's.".to_owned());
             }
             DrawingSheetEdit::ChangeReference(reference) => {
                 self.stage_document_control(model, |control| {
