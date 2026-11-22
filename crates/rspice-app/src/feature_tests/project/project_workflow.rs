@@ -1666,7 +1666,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
                 DocumentEdit::AddScalarMeasurement {
                     pane_id,
                     expression: "rms(V(out))".to_owned(),
-                    value: 0.6454972243679028,
+                    window: rspice_app_state::results::visualization_document::MeasurementWindow::WholeRecord,
                 },
                 DocumentEdit::AddAnnotation {
                     pane_id,

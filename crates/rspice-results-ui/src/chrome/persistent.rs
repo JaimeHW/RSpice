@@ -3,7 +3,7 @@
 use egui::{Align, Layout, Rect, RichText, Sense, Ui, UiBuilder, pos2, vec2};
 use rspice_results::number_format::fmt_si_significant;
 use rspice_results::visualization_document::{
-    Annotation, FamilyMeasurementSummary, FamilyStatistic, Measurement, PageLayout, PaneId,
+    Annotation, FamilyMeasurementSummary, FamilyStatistic, PageLayout, PaneId,
 };
 use rspice_ui_kit::{
     panels::painted_label,
@@ -140,14 +140,25 @@ pub fn pane_frame<R>(
     .inner
 }
 
-/// The pane's kept measurements and notes, in one line above its viewer,
-/// after the plotted signals the run it reads does not have. Values carry
-/// the document's significant digits.
+/// One kept measurement as the pane read it on the run it shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeasurementReadout {
+    /// The measurement's name.
+    pub name: String,
+    /// What it read and in what unit, or why it read nothing.
+    pub reading: Result<(f64, String), String>,
+    /// Over a family, the statistic it reports and what the members read.
+    pub family: Option<FamilyMeasurementSummary>,
+}
+
+/// The pane's kept measurements, as read on its run, and its notes, in one
+/// line above its viewer, after the plotted signals the run it reads does
+/// not have. Values carry the document's significant digits.
 pub fn evidence_bar(
     ui: &mut Ui,
     pane_id: PaneId,
     missing_signals: &[&str],
-    measurements: &[Measurement],
+    measurements: &[MeasurementReadout],
     annotations: &[Annotation],
     significant_digits: usize,
 ) {
@@ -171,21 +182,29 @@ pub fn evidence_bar(
                             );
                         }
                         for measurement in measurements {
-                            let name = measurement.label.as_str();
-                            let name = measurement.family.as_ref().map_or_else(
-                                || name.to_owned(),
-                                |family| format!("{name} {}", family.statistic.label()),
+                            let statistic = measurement.family.as_ref().map(|f| f.statistic);
+                            let name = statistic.map_or_else(
+                                || measurement.name.clone(),
+                                |statistic| format!("{} {}", measurement.name, statistic.label()),
                             );
+                            let (text, color) = match &measurement.reading {
+                                Ok((value, unit)) => (
+                                    measurement_text(
+                                        &name,
+                                        Ok((*value, unit, statistic)),
+                                        significant_digits,
+                                    ),
+                                    t.color.text,
+                                ),
+                                Err(why) => (
+                                    measurement_text(&name, Err(why), significant_digits),
+                                    t.color.text_dim,
+                                ),
+                            };
                             ui.label(
-                                RichText::new(measurement_text(
-                                    &name,
-                                    measurement.value.map(|value| {
-                                        (value, measurement.family.as_ref().map(|f| f.statistic))
-                                    }),
-                                    significant_digits,
-                                ))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text),
+                                RichText::new(text)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .color(color),
                             );
                             if let Some(family) = &measurement.family {
                                 ui.label(
@@ -207,24 +226,26 @@ pub fn evidence_bar(
         });
 }
 
-/// One measurement as the evidence bar states it: what was measured, by the
-/// expression the reader wrote, and its value in engineering notation.
+/// One measurement as the evidence bar states it: its name, and what it
+/// read in engineering notation in its unit, or why it read nothing.
 ///
 /// A family measurement's value is the statistic it names; a yield is a
 /// percentage.
 fn measurement_text(
     name: &str,
-    value: Option<(f64, Option<FamilyStatistic>)>,
+    reading: Result<(f64, &str, Option<FamilyStatistic>), &str>,
     significant_digits: usize,
 ) -> String {
-    let value = value.map_or_else(
-        || "unevaluated".to_owned(),
-        |(value, statistic)| match statistic {
-            Some(FamilyStatistic::Yield) => percent(value),
-            _ => fmt_si_significant(value, "", significant_digits),
-        },
-    );
-    format!("{name} = {value}")
+    match reading {
+        Ok((value, _, Some(FamilyStatistic::Yield))) => format!("{name} = {}", percent(value)),
+        Ok((value, unit, _)) => {
+            format!(
+                "{name} = {}",
+                fmt_si_significant(value, unit, significant_digits)
+            )
+        }
+        Err(why) => format!("{name}: {why}"),
+    }
 }
 
 /// The most failing members a family measurement names before it counts

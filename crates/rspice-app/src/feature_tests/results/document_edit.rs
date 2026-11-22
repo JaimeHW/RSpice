@@ -66,6 +66,32 @@ fn retained(app: &RSpiceApp, document_id: ResultDocumentId) -> &VisualizationDoc
         .expect("the project retains the document")
 }
 
+/// What `measurement`, kept by the document, reads on the first run that
+/// reads it: the document keeps its definition, never a value.
+fn read(
+    app: &RSpiceApp,
+    document_id: ResultDocumentId,
+    measurement: &rspice_app_state::results::visualization_document::Measurement,
+) -> f64 {
+    app.state
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .find_map(|run| {
+            measurement_reading::read_kept(
+                app.state.results_reads(),
+                retained(app, document_id),
+                measurement,
+                run,
+            )
+            .ok()
+        })
+        .expect("the measurement reads on its run")
+        .value
+}
+
 fn ordered_panes(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Pane> {
     let document = retained(app, document_id);
     let page = &document.pages()[0];
@@ -587,7 +613,7 @@ fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
     assert_eq!(measurement.pane_id, panes[1].id);
     assert_eq!(measurement.expression.as_deref(), Some("rms(V(out))"));
     // ∫y² over the two linear segments 0 → 1 → 0 on [0, 1] is 1/3.
-    let value = measurement.value.expect("the value is kept");
+    let value = read(&app, document_id, measurement);
     assert!((value - (1.0_f64 / 3.0).sqrt()).abs() < 1e-14, "{value}");
     assert!(measurement.trace_ids.is_empty());
     show_document(&mut app, document_id);
@@ -736,7 +762,7 @@ fn measurements_over_a_fresh_result_name_their_nets_and_reopen() {
     for (measurement, expression, value) in [(first, analog, 1.0), (second, digital, 4e-9)] {
         assert_eq!(measurement.expression.as_deref(), Some(expression));
         assert!(measurement.trace_ids.is_empty(), "{measurement:?}");
-        let kept = measurement.value.expect("a value");
+        let kept = read(&reopened, document_id, measurement);
         assert!((kept - value).abs() <= 1e-21, "{expression}: {kept:e}");
     }
 }

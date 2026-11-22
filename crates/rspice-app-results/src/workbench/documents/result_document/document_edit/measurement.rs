@@ -11,12 +11,14 @@
 //! When the pane shows a family — a sweep, corners, Monte Carlo trials, or
 //! points of one analysis solved one by one — the expression is evaluated
 //! once per member instead, as ADE Assembler evaluates an output per point,
-//! and the document keeps the distribution (`AddFamilyMeasurement`): the
-//! statistic the reader picks as its value, with mean, sigma, min, max and a
-//! yield against the reader's limits naming the failing members.
+//! and the document keeps how to report it (`AddFamilyMeasurement`): the
+//! statistic the reader picks, and the limits a yield is judged against.
+//! What either reads is read again whenever it is shown, never kept.
 
 use rspice_results::family_measurements::{self, FamilyMeasurement};
-use rspice_results::visualization_document::{FamilyMeasurementSummary, FamilyStatistic};
+use rspice_results::visualization_document::{
+    FamilyMeasure, FamilyMeasurementSummary, FamilyStatistic, MeasurementWindow,
+};
 use rspice_results_ui::document_dialogs::measurement::{
     FamilyPreview, MeasurementDraft, MeasurementPreview,
 };
@@ -273,18 +275,25 @@ pub(super) fn commit(
         return Err("Enter an expression to measure.".to_owned());
     }
     let (run, analysis) = reading_analysis(state.results_reads())?;
+    // What could not be read now is refused, as the preview says why; what
+    // is kept is the definition alone.
     let family = match family_of(run, analysis) {
-        Some(_) => Some(
-            measure_family(run, analysis, &expression)
-                .and_then(|measured| summarize(&measured, draft))?,
-        ),
-        None => None,
-    };
-    let value = match &family {
-        Some(summary) => summary
-            .statistic_value()
-            .ok_or_else(|| "The family has no value for that statistic.".to_owned())?,
-        None => evaluate(analysis, &expression)?,
+        Some(_) => {
+            let summary = measure_family(run, analysis, &expression)
+                .and_then(|measured| summarize(&measured, draft))?;
+            summary
+                .statistic_value()
+                .ok_or_else(|| "The family has no value for that statistic.".to_owned())?;
+            Some(FamilyMeasure {
+                statistic: summary.statistic,
+                lower: summary.lower,
+                upper: summary.upper,
+            })
+        }
+        None => {
+            evaluate(analysis, &expression)?;
+            None
+        }
     };
     // Over a quick view the run's working view keeps it, on the pane of the
     // analysis shown, so it is read on every run of the plan.
@@ -315,17 +324,18 @@ pub(super) fn commit(
             (view, pane_id)
         }
     };
+    let window = MeasurementWindow::WholeRecord;
     let edit = match family {
         Some(family) => DocumentEdit::AddFamilyMeasurement {
             pane_id,
             expression,
-            value,
+            window,
             family,
         },
         None => DocumentEdit::AddScalarMeasurement {
             pane_id,
             expression,
-            value,
+            window,
         },
     };
     transact(state, document_id, vec![edit])?;
@@ -408,26 +418,57 @@ fn limits(draft: &MeasurementDraft) -> Result<(Option<f64>, Option<f64>), String
     Ok((lower, upper))
 }
 
-/// What the document keeps for `measured` under the draft's statistic and
-/// limits.
+/// What `measured` reads under the draft's statistic and limits.
 fn summarize(
     measured: &FamilyMeasurement,
     draft: &MeasurementDraft,
 ) -> Result<FamilyMeasurementSummary, String> {
+    let (lower, upper) = limits(draft)?;
+    summarize_as(
+        measured,
+        FamilyMeasure {
+            statistic: draft.statistic,
+            lower,
+            upper,
+        },
+    )
+}
+
+/// What a kept family measurement reads on the family `analysis` of `run`
+/// belongs to.
+pub(super) fn family_reading(
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    expression: &str,
+    family: FamilyMeasure,
+) -> Result<FamilyMeasurementSummary, String> {
+    summarize_as(&measure_family(run, analysis, expression)?, family)
+}
+
+/// What `measured` reads reported as `family` says: the statistic it names,
+/// the distribution, and the yield against its limits.
+fn summarize_as(
+    measured: &FamilyMeasurement,
+    family: FamilyMeasure,
+) -> Result<FamilyMeasurementSummary, String> {
     let statistics = measured
         .statistics()
         .ok_or_else(|| "No member could be measured.".to_owned())?;
-    let (lower, upper) = limits(draft)?;
+    let FamilyMeasure {
+        statistic,
+        lower,
+        upper,
+    } = family;
     let judged = measured.yield_against(lower, upper);
-    if draft.statistic == FamilyStatistic::Yield && judged.is_none() {
+    if statistic == FamilyStatistic::Yield && judged.is_none() {
         return Err("A yield needs a lower limit, an upper limit or both.".to_owned());
     }
-    if draft.statistic == FamilyStatistic::StdDev && statistics.std_dev.is_none() {
+    if statistic == FamilyStatistic::StdDev && statistics.std_dev.is_none() {
         return Err("A standard deviation needs two measured members.".to_owned());
     }
     let count = |count: usize| u32::try_from(count).map_err(|_| "The family is too large.");
     Ok(FamilyMeasurementSummary {
-        statistic: draft.statistic,
+        statistic,
         members: count(measured.members.len())?,
         measured: count(statistics.count)?,
         mean: statistics.mean,
@@ -530,11 +571,24 @@ fn kept_line(summary: &FamilyMeasurementSummary, format: impl Fn(f64) -> String)
 
 /// Reduce `expression` to one finite number over the analysis's waveforms.
 pub(super) fn evaluate(analysis: &AnalysisResult, expression: &str) -> Result<f64, String> {
+    evaluate_over(analysis, expression, None)
+}
+
+/// Reduce `expression` to one finite number over the analysis's waveforms,
+/// each read only between the two X of `window` when there is one, as
+/// `clip` reads a trace: every waveform the expression names, so `max`,
+/// `avg` or `cross` see only that part of the record.
+pub(super) fn evaluate_over(
+    analysis: &AnalysisResult,
+    expression: &str,
+    window: Option<(f64, f64)>,
+) -> Result<f64, String> {
     let parsed = calculator::parser::try_parse(expression)
         .map_err(|error| format!("Parse error: {error}"))?;
     let context = MeasuredOperands {
         values: calculator::WaveformsContext::new(&analysis.waveforms),
         analysis,
+        window,
     };
     match calculator::evaluator::evaluate(&parsed, &context)
         .and_then(calculator::CalcValue::into_real)
@@ -556,6 +610,9 @@ pub(super) fn evaluate(analysis: &AnalysisResult, expression: &str) -> Result<f6
 struct MeasuredOperands<'a> {
     values: calculator::WaveformsContext<'a>,
     analysis: &'a AnalysisResult,
+    /// The part of the x-axis every waveform is read over; all of it when
+    /// `None`.
+    window: Option<(f64, f64)>,
 }
 
 impl calculator::evaluator::EvaluationContext for MeasuredOperands<'_> {
@@ -564,16 +621,21 @@ impl calculator::evaluator::EvaluationContext for MeasuredOperands<'_> {
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<calculator::evaluator::CalcValue, calculator::evaluator::EvaluationError> {
-        match self.values.get_waveform(signal, dataset) {
+        let read = match self.values.get_waveform(signal, dataset) {
             Err(calculator::evaluator::EvaluationError::IdentifierNotFound(_))
                 if signal.starts_with("D(") =>
             {
-                let word = self.get_event_word(signal, dataset)?;
+                let word = super::super::waves::expression_evaluation::event_word(
+                    self.analysis,
+                    None,
+                    signal,
+                )?;
                 calculator::functions::measured_steps(&word)
                     .map(calculator::evaluator::CalcValue::Real)
             }
             read => read,
-        }
+        }?;
+        clipped(read, self.window)
     }
 
     fn get_magnitude(
@@ -581,7 +643,7 @@ impl calculator::evaluator::EvaluationContext for MeasuredOperands<'_> {
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<calculator::evaluator::CalcValue, calculator::evaluator::EvaluationError> {
-        self.values.get_magnitude(signal, dataset)
+        clipped(self.values.get_magnitude(signal, dataset)?, self.window)
     }
 
     fn get_event_word(
@@ -589,8 +651,95 @@ impl calculator::evaluator::EvaluationContext for MeasuredOperands<'_> {
         signal: &str,
         _dataset: Option<&str>,
     ) -> Result<calculator::functions::EventWord, calculator::evaluator::EvaluationError> {
+        // A window reads a net's steps, clipped like any other trace.
+        if self.window.is_some() {
+            return Err(calculator::evaluator::EvaluationError::IdentifierNotFound(
+                signal.to_owned(),
+            ));
+        }
         super::super::waves::expression_evaluation::event_word(self.analysis, None, signal)
     }
+}
+
+/// `value` read only between the two X of `window`, its ends interpolated
+/// where they fall between samples; a scalar is the same everywhere.
+fn clipped(
+    value: calculator::evaluator::CalcValue,
+    window: Option<(f64, f64)>,
+) -> Result<calculator::evaluator::CalcValue, calculator::evaluator::EvaluationError> {
+    use calculator::evaluator::CalcValue;
+    use calculator::{ComplexValue, RealValue};
+    let Some(window) = window else {
+        return Ok(value);
+    };
+    Ok(match value {
+        CalcValue::Real(RealValue::Waveform(x, y)) => {
+            let (x, y) = clip_samples(&x, &y, window, |a, b, t| a + (b - a) * t)?;
+            CalcValue::Real(RealValue::Waveform(x, y))
+        }
+        CalcValue::Complex(ComplexValue::Waveform(x, y)) => {
+            let (x, y) = clip_samples(&x, &y, window, |a, b, t| a + (b - a) * t)?;
+            CalcValue::Complex(ComplexValue::Waveform(x, y))
+        }
+        scalar => scalar,
+    })
+}
+
+/// The samples of `(x, y)` from `from` to `to`, with each end interpolated
+/// by `lerp`. Refused on an x-axis that does not run forward, and for a
+/// window that misses the trace.
+fn clip_samples<T: Copy>(
+    x: &[f64],
+    y: &[T],
+    (from, to): (f64, f64),
+    lerp: impl Fn(T, T, f64) -> T,
+) -> Result<(Vec<f64>, Vec<T>), calculator::evaluator::EvaluationError> {
+    use calculator::evaluator::EvaluationError;
+    let (Some(&first), Some(&last)) = (x.first(), x.last()) else {
+        return Err(EvaluationError::MathError(
+            "The trace has no samples to read.".to_owned(),
+        ));
+    };
+    if x.len() != y.len() || x.windows(2).any(|pair| pair[1] < pair[0]) {
+        return Err(EvaluationError::MathError(
+            "A window reads an x-axis that runs forward.".to_owned(),
+        ));
+    }
+    let (low, high) = (from.min(to).max(first), from.max(to).min(last));
+    if low.is_nan() || high.is_nan() || low > high {
+        return Err(EvaluationError::MathError(
+            "The window lies outside the trace.".to_owned(),
+        ));
+    }
+    let at = |position: f64| {
+        let after = x.partition_point(|&sample| sample < position);
+        if after == 0 {
+            return y[0];
+        }
+        if after == x.len() {
+            return y[x.len() - 1];
+        }
+        let (x0, x1) = (x[after - 1], x[after]);
+        let t = if x1 > x0 {
+            (position - x0) / (x1 - x0)
+        } else {
+            1.0
+        };
+        lerp(y[after - 1], y[after], t)
+    };
+    let mut xs = vec![low];
+    let mut ys = vec![at(low)];
+    for (&sample, &value) in x.iter().zip(y) {
+        if sample > low && sample < high {
+            xs.push(sample);
+            ys.push(value);
+        }
+    }
+    if high > low {
+        xs.push(high);
+        ys.push(at(high));
+    }
+    Ok((xs, ys))
 }
 
 #[cfg(test)]
@@ -978,20 +1127,33 @@ mod tests {
             .iter()
             .filter(|gain| (39.0..=41.2).contains(*gain))
             .count() as u32;
-        let kept = host
+        let held = host
             .model
             .workspace
             .content
             .visualization_document(document)
-            .unwrap()
-            .measurements()[0]
-            .clone();
+            .unwrap();
+        let kept = held.measurements()[0].clone();
         assert!(kept.trace_ids.is_empty());
-        let family = kept.family.expect("a family measurement");
+        assert_eq!(
+            kept.family,
+            Some(FamilyMeasure {
+                statistic: FamilyStatistic::Yield,
+                lower: Some(39.0),
+                upper: Some(41.2),
+            }),
+            "the document keeps how to report the trials, not what they read"
+        );
+        let run = host.model.simulation.active_run().unwrap();
+        let read =
+            super::super::measurement_reading::read_kept(host.results_reads(), held, &kept, run)
+                .expect("the yield reads on the trials");
+        let family = read.family.expect("a family reading");
         assert_eq!((family.members, family.measured), (300, 300));
         assert_eq!(family.passed, Some(passed));
         let share = 100.0 * f64::from(passed) / 300.0;
-        assert!((kept.value.unwrap() - share).abs() < 1e-12);
+        assert!((read.value - share).abs() < 1e-12);
+        assert_eq!(read.unit, "%");
 
         let text = picture(&mut host, document, crate::ui::Mode::Dark).1;
         let line = format!("yield {passed}/300");

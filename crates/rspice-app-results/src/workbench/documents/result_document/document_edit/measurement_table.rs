@@ -3,17 +3,19 @@
 //! run's first, then each run drawn behind it, as EZwave's measurement tool
 //! and ADE's results list one value per history.
 //!
-//! A kept measurement is its definition: it is evaluated on each run shown,
-//! once per revision of the view and of the data, and a run it cannot be
-//! read on says why. The netlist's own `.MEAS` results are rows of the same
-//! table, marked as the netlist's.
+//! A kept measurement is its definition: it is read on each run shown, over
+//! its window (the whole record, the visible range or between the cursors,
+//! as EZwave's measurement tool offers), once per revision of the view, the
+//! data, the zoom and the cursors, and a run it cannot be read on says why.
+//! The netlist's own `.MEAS` results are rows of the same table, under their
+//! own group.
 
 use egui::Ui;
 use rspice_app_workbench::workbench::docks::console;
-use rspice_results::visualization_document::MeasurementId;
+use rspice_results::visualization_document::{MeasurementId, MeasurementWindow};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::table::{
-    CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, TableState,
+    CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Group, TableState,
 };
 use rspice_ui_kit::widgets::{chip_width, compact_chip};
 
@@ -36,12 +38,14 @@ struct Row {
     name: String,
     /// The kept measurement the row reads; `None` for the netlist's own.
     kept: Option<MeasurementId>,
-    /// What it measures, as its hover says.
-    definition: String,
+    /// What a kept one measures, and over what part of the record.
+    definition: Option<(String, MeasurementWindow)>,
+    /// Whether a kept one reports a family's statistic.
+    family: bool,
     readings: Vec<Reading>,
 }
 
-/// The page's rows, read once per revision of the view and the data.
+/// The page's rows, read once per revision of what they read.
 #[derive(Debug, Clone, PartialEq)]
 struct Page {
     /// Each run's column head.
@@ -52,28 +56,45 @@ struct Page {
 }
 
 impl Page {
+    /// The table as tab-separated text, with where each row comes from.
     fn tsv(&self) -> String {
         let mut lines = vec![
-            std::iter::once("Measurement".to_owned())
+            ["Measurement", "Expression", "Window"]
+                .into_iter()
+                .map(str::to_owned)
                 .chain(self.runs.iter().cloned())
                 .chain(std::iter::once("From".to_owned()))
                 .collect::<Vec<_>>()
                 .join("\t"),
         ];
-        for row in &self.rows {
-            lines.push(
-                std::iter::once(row.name.clone())
-                    .chain(row.readings.iter().map(|reading| match reading {
-                        Reading::Value(value) => value.clone(),
-                        Reading::Failed(_) | Reading::Absent => String::new(),
-                    }))
-                    .chain(std::iter::once(from(row).to_owned()))
-                    .collect::<Vec<_>>()
-                    .join("\t"),
-            );
-        }
+        lines.extend(self.rows.iter().map(|row| row_text(row).join("\t")));
         lines.join("\n")
     }
+
+    /// How many rows are kept with the view; the netlist's follow.
+    fn kept(&self) -> usize {
+        self.rows
+            .iter()
+            .take_while(|row| row.kept.is_some())
+            .count()
+    }
+}
+
+/// One row as text: name, expression, window, a reading per run, and where
+/// it comes from.
+fn row_text(row: &Row) -> Vec<String> {
+    let (expression, window) = row.definition.as_ref().map_or_else(
+        || (String::new(), String::new()),
+        |(expression, window)| (expression.clone(), window.label().to_owned()),
+    );
+    [row.name.clone(), expression, window]
+        .into_iter()
+        .chain(row.readings.iter().map(|reading| match reading {
+            Reading::Value(value) => value.clone(),
+            Reading::Failed(_) | Reading::Absent => String::new(),
+        }))
+        .chain(std::iter::once(from(row).to_owned()))
+        .collect()
 }
 
 fn from(row: &Row) -> &'static str {
@@ -105,15 +126,6 @@ fn shown_runs(simulation: &crate::state::SimulationState) -> Vec<&SimulationRun>
         .collect()
 }
 
-/// The view whose measurements the page lists: the saved document shown,
-/// else the shown run's working view.
-fn shown_view(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
-    active_document_id(state).or_else(|| {
-        let run = state.model.simulation.active_run()?;
-        super::super::working_view::view_of_run(state, run.dataset_id)
-    })
-}
-
 /// What changes the page's rows: the view's revision, the data, the runs
 /// shown and the digits they are printed at.
 fn revision(state: ResultsReads<'_>) -> u64 {
@@ -125,6 +137,7 @@ fn revision(state: ResultsReads<'_>) -> u64 {
         .map(|document| format!("{:?}", document.revision()))
         .hash(&mut hasher);
     state.model.simulation.view.data_version.hash(&mut hasher);
+    super::measurement_reading::window_version(state).hash(&mut hasher);
     for run in shown_runs(&state.model.simulation) {
         run.dataset_id.hash(&mut hasher);
     }
@@ -143,21 +156,6 @@ fn digits(state: ResultsReads<'_>) -> usize {
     )
 }
 
-/// The analysis of `run` that `document`'s pane `pane_id` reads.
-fn pane_analysis<'a>(
-    document: &VisualizationDocument,
-    pane_id: PaneId,
-    run: &'a SimulationRun,
-) -> Option<&'a AnalysisResult> {
-    run.analyses.iter().find(|analysis| {
-        document
-            .pane_of_analysis(super::super::create_document::source_analysis_identity(
-                run, analysis,
-            ))
-            .is_some_and(|pane| pane.id == pane_id)
-    })
-}
-
 fn read_page(state: ResultsReads<'_>) -> Page {
     let runs = shown_runs(&state.model.simulation);
     let digits = digits(state);
@@ -166,29 +164,20 @@ fn read_page(state: ResultsReads<'_>) -> Page {
     if let Some(document) =
         view.and_then(|view| state.model.workspace.content.visualization_document(view))
     {
-        for measurement in document.measurements() {
+        for measurement in document.measurements_in_order() {
             let Some(expression) = measurement.expression.as_deref() else {
                 continue;
             };
             let readings = runs
                 .iter()
                 .map(|run| {
-                    let Some(analysis) = pane_analysis(document, measurement.pane_id, run) else {
-                        return Reading::Failed("This run has no such analysis.".to_owned());
-                    };
-                    match super::measurement::evaluate(analysis, expression) {
-                        Ok(value) => {
-                            let unit = super::super::waves::measurement_unit(
-                                expression,
-                                analysis,
-                                analysis.analysis_type.axis_info().1,
-                            )
-                            .unwrap_or_default();
+                    match super::measurement_reading::read_kept(state, document, measurement, run) {
+                        Ok(read) => {
                             Reading::Value(rspice_results::number_format::fmt_si_significant(
-                                value, &unit, digits,
+                                read.value, &read.unit, digits,
                             ))
                         }
-                        Err(error) => Reading::Failed(error),
+                        Err(why) => Reading::Failed(why),
                     }
                 })
                 .collect();
@@ -200,7 +189,8 @@ fn read_page(state: ResultsReads<'_>) -> Page {
                     label.to_owned()
                 },
                 kept: Some(measurement.id),
-                definition: expression.to_owned(),
+                definition: Some((expression.to_owned(), measurement.window)),
+                family: measurement.family.is_some(),
                 readings,
             });
         }
@@ -246,7 +236,8 @@ fn read_page(state: ResultsReads<'_>) -> Page {
         rows.push(Row {
             name: name.to_owned(),
             kept: None,
-            definition: format!("{name}, the netlist's .MEAS"),
+            definition: None,
+            family: false,
             readings,
         });
     }
@@ -271,10 +262,11 @@ fn page(ui: &Ui, state: ResultsReads<'_>) -> Page {
     page
 }
 
-/// A row's name as the reader renames it in place.
+/// A row's name or expression as the reader edits it in place.
 #[derive(Clone)]
-struct NameDraft {
+struct CellDraft {
     row: usize,
+    column: usize,
     text: String,
     focus: bool,
 }
@@ -282,6 +274,10 @@ struct NameDraft {
 /// What the reader asked of the page this frame.
 enum Asked {
     Rename(MeasurementId, String),
+    Expression(MeasurementId, String),
+    Window(MeasurementId, MeasurementWindow),
+    /// Move the first to where the second stands.
+    Move(MeasurementId, MeasurementId),
     Duplicate(MeasurementId),
     Delete(MeasurementId),
 }
@@ -335,14 +331,7 @@ pub fn measurements_page(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     if let Some(asked) = table(ui, &page)
         && let Some(view) = page.view
     {
-        let edits = match asked {
-            Asked::Rename(id, name) => vec![DocumentEdit::Rename {
-                entity: EntityRef::Measurement(id),
-                value: name,
-            }],
-            Asked::Delete(id) => vec![DocumentEdit::Remove(EntityRef::Measurement(id))],
-            Asked::Duplicate(id) => duplicate(state.results_reads(), view, id),
-        };
+        let edits = edits_for(state.results_reads(), view, asked);
         if !edits.is_empty()
             && let Err(error) = transact(state, view, edits)
         {
@@ -350,6 +339,54 @@ pub fn measurements_page(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         }
     }
     true
+}
+
+/// The view's edits for what the reader asked.
+fn edits_for(state: ResultsReads<'_>, view: ResultDocumentId, asked: Asked) -> Vec<DocumentEdit> {
+    let held = |id: MeasurementId| {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(view)
+            .and_then(|document| document.measurements().iter().find(|held| held.id == id))
+    };
+    let set = |id: MeasurementId, expression: Option<String>, window: Option<MeasurementWindow>| {
+        held(id).and_then(|measurement| {
+            Some(DocumentEdit::SetMeasurement {
+                measurement_id: id,
+                expression: expression.or_else(|| measurement.expression.clone())?,
+                window: window.unwrap_or(measurement.window),
+            })
+        })
+    };
+    match asked {
+        Asked::Rename(id, name) => vec![DocumentEdit::Rename {
+            entity: EntityRef::Measurement(id),
+            value: name,
+        }],
+        Asked::Expression(id, expression) => set(id, Some(expression), None).into_iter().collect(),
+        Asked::Window(id, window) => set(id, None, Some(window)).into_iter().collect(),
+        Asked::Move(id, neighbour) => state
+            .model
+            .workspace
+            .content
+            .visualization_document(view)
+            .and_then(|document| {
+                document
+                    .measurements_in_order()
+                    .iter()
+                    .position(|held| held.id == neighbour)
+            })
+            .map(|index| DocumentEdit::MoveMeasurement {
+                measurement_id: id,
+                index,
+            })
+            .into_iter()
+            .collect(),
+        Asked::Delete(id) => vec![DocumentEdit::Remove(EntityRef::Measurement(id))],
+        Asked::Duplicate(id) => duplicate(state, view, id),
+    }
 }
 
 /// A copy of the kept measurement `id`, read as it reads.
@@ -370,10 +407,18 @@ fn duplicate(
     let Some(expression) = measurement.expression.clone() else {
         return Vec::new();
     };
-    vec![DocumentEdit::AddScalarMeasurement {
-        pane_id: measurement.pane_id,
-        expression,
-        value: measurement.value.unwrap_or(0.0),
+    vec![match measurement.family {
+        Some(family) => DocumentEdit::AddFamilyMeasurement {
+            pane_id: measurement.pane_id,
+            expression,
+            window: measurement.window,
+            family,
+        },
+        None => DocumentEdit::AddScalarMeasurement {
+            pane_id: measurement.pane_id,
+            expression,
+            window: measurement.window,
+        },
     }]
 }
 
@@ -391,8 +436,31 @@ fn text_width(ui: &Ui, text: &str) -> f32 {
         .x
 }
 
+/// The table's fixed columns: name, expression, window; the runs follow.
+const NAME: usize = 0;
+const EXPRESSION: usize = 1;
+const WINDOW: usize = 2;
+
 fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
-    let mut columns = vec![Column::name("Measurement", 160.0).unsortable()];
+    let expression_width = page
+        .rows
+        .iter()
+        .filter_map(|row| row.definition.as_ref())
+        .map(|(expression, _)| text_width(ui, expression))
+        .fold(text_width(ui, "Expression"), f32::max);
+    let window_width = MeasurementWindow::ALL
+        .into_iter()
+        .map(|window| text_width(ui, window.label()))
+        .fold(0.0, f32::max);
+    let mut columns = vec![
+        Column::name("Measurement", 140.0).unsortable(),
+        Column::words("Expression", (expression_width + CELL_PAD * 2.0).min(320.0))
+            .unsortable()
+            .tooltip("What a kept measurement reads; click to edit it"),
+        Column::words("Window", window_width + CELL_PAD * 2.0)
+            .unsortable()
+            .tooltip("The part of the record it reads: all of it, the visible range, or between the cursors"),
+    ];
     for (index, run) in page.runs.iter().enumerate() {
         let width = page
             .rows
@@ -412,70 +480,117 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
                 }),
         );
     }
-    columns.push(
-        Column::words("From", 72.0)
-            .unsortable()
-            .tooltip("Kept with this view, or measured by the netlist's .MEAS"),
-    );
     let rows: Vec<Vec<Cell>> = page
         .rows
         .iter()
         .map(|row| {
-            let mut cells = vec![match row.kept {
-                Some(_) => Cell::text(&row.name).editable().hint(format!(
-                    "{}. Click to rename it; right-click for its menu",
-                    row.definition
-                )),
-                None => Cell::text(&row.name).hint(&row.definition),
-            }];
+            let mut cells = match &row.definition {
+                Some((expression, window)) => vec![
+                    Cell::text(&row.name)
+                        .editable()
+                        .hint("Click to rename; right-click for its menu"),
+                    Cell::text(expression)
+                        .editable()
+                        .hint("Click to edit what it reads"),
+                    if row.family {
+                        Cell::text(window.label())
+                            .hint("A family measurement reads each member's whole record")
+                    } else {
+                        Cell::text(window.label())
+                            .editable()
+                            .hint("Click to read it over another part of the record")
+                    },
+                ],
+                None => vec![
+                    Cell::text(&row.name).hint("Measured by the netlist's .MEAS"),
+                    Cell::absent(),
+                    Cell::absent(),
+                ],
+            };
             cells.extend(row.readings.iter().map(|reading| match reading {
                 Reading::Value(value) => Cell::number(value),
                 Reading::Failed(why) => Cell::absent().hint(why),
                 Reading::Absent => Cell::absent().hint("This run did not measure it"),
             }));
-            cells.push(Cell::text(from(row)));
             cells
         })
         .collect();
+    let kept = page.kept();
+    let mut groups = Vec::new();
+    if kept > 0 {
+        groups.push(Group::new("Kept with this view", 0));
+    }
+    if kept < page.rows.len() {
+        groups.push(Group::new("From the netlist", kept));
+    }
 
     let id = "rspice.results.measurements";
     let state_id = egui::Id::new(id);
     let draft_id = state_id.with("draft");
+    let window_menu = state_id.with("window menu");
     let mut table_state = ui
         .data(|data| data.get_temp::<TableState>(state_id))
         .unwrap_or_default();
-    let mut draft = ui.data(|data| data.get_temp::<NameDraft>(draft_id));
+    let mut draft = ui.data(|data| data.get_temp::<CellDraft>(draft_id));
     let editor = draft.as_mut().map(|draft| CellEditor {
         row: draft.row,
-        column: 0,
+        column: draft.column,
         text: &mut draft.text,
         focus: std::mem::take(&mut draft.focus),
     });
     let response = DataTable::new(id, &columns, rows.len())
         .state(&mut table_state)
+        .groups(&groups)
         .editing(editor)
         .show(ui, |row| rows[row].clone());
     ui.data_mut(|data| data.insert_temp(state_id, table_state));
 
+    let ctx = ui.ctx().clone();
     let mut asked = None;
-    if let Some((row, 0)) = response.edit
-        && page.rows.get(row).is_some_and(|row| row.kept.is_some())
+    if let Some((row, column)) = response.edit
+        && let Some(held) = page.rows.get(row)
+        && let Some((expression, _)) = &held.definition
     {
-        draft = Some(NameDraft {
-            row,
-            text: page.rows[row].name.clone(),
-            focus: true,
-        });
+        match column {
+            NAME => {
+                draft = Some(CellDraft {
+                    row,
+                    column,
+                    text: held.name.clone(),
+                    focus: true,
+                })
+            }
+            EXPRESSION => {
+                draft = Some(CellDraft {
+                    row,
+                    column,
+                    text: expression.clone(),
+                    focus: true,
+                });
+            }
+            WINDOW => {
+                let position = ctx.pointer_latest_pos().unwrap_or_default();
+                ctx.data_mut(|data| data.insert_temp(window_menu, (row, position)));
+                egui::Popup::open_id(&ctx, window_menu);
+            }
+            _ => {}
+        }
     }
     match response.edited {
         Some(EditOutcome::Cancel) => draft = None,
         Some(EditOutcome::Commit) => {
             if let Some(open) = draft.take()
                 && let Some(row) = page.rows.get(open.row)
-                && let Some(id) = row.kept
-                && open.text.trim() != row.name
+                && let (Some(id), Some((expression, _))) = (row.kept, &row.definition)
             {
-                asked = Some(Asked::Rename(id, open.text.trim().to_owned()));
+                let text = open.text.trim().to_owned();
+                asked = match open.column {
+                    NAME if !text.is_empty() && text != row.name => Some(Asked::Rename(id, text)),
+                    EXPRESSION if !text.is_empty() && text != *expression => {
+                        Some(Asked::Expression(id, text))
+                    }
+                    _ => None,
+                };
             }
         }
         None => {}
@@ -484,10 +599,44 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
         Some(draft) => {
             data.insert_temp(draft_id, draft);
         }
-        None => data.remove::<NameDraft>(draft_id),
+        None => data.remove::<CellDraft>(draft_id),
     });
 
-    let ctx = ui.ctx().clone();
+    let popup = |menu: egui::Id, position: egui::Pos2, body: &mut dyn FnMut(&mut Ui)| {
+        egui::Popup::new(
+            menu,
+            ctx.clone(),
+            egui::PopupAnchor::Position(position),
+            egui::LayerId::new(egui::Order::Foreground, menu),
+        )
+        .kind(egui::PopupKind::Menu)
+        .open_memory(None)
+        .show(|ui| body(ui));
+    };
+    let window_items = |ui: &mut Ui, id: MeasurementId, current: MeasurementWindow| {
+        let mut chosen = None;
+        for window in MeasurementWindow::ALL {
+            if ui.radio(current == window, window.label()).clicked() {
+                chosen = Some(Asked::Window(id, window));
+                ui.close();
+            }
+        }
+        chosen
+    };
+    if egui::Popup::is_id_open(&ctx, window_menu)
+        && let Some((row, position)) =
+            ctx.data(|data| data.get_temp::<(usize, egui::Pos2)>(window_menu))
+        && let Some(held) = page.rows.get(row)
+        && let (Some(id), Some((_, current))) = (held.kept, &held.definition)
+    {
+        let current = *current;
+        popup(window_menu, position, &mut |ui| {
+            if let Some(chosen) = window_items(ui, id, current) {
+                asked = Some(chosen);
+            }
+        });
+    }
+
     let menu = state_id.with("menu");
     if let Some(request) = response.context_menu {
         ctx.data_mut(|data| data.insert_temp(menu, (request.cell.row, request.position)));
@@ -497,27 +646,53 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
         && let Some((row, position)) = ctx.data(|data| data.get_temp::<(usize, egui::Pos2)>(menu))
         && let Some(held) = page.rows.get(row)
     {
-        egui::Popup::new(
-            menu,
-            ctx.clone(),
-            egui::PopupAnchor::Position(position),
-            egui::LayerId::new(egui::Order::Foreground, menu),
-        )
-        .kind(egui::PopupKind::Menu)
-        .open_memory(None)
-        .show(|ui| {
-            if let Some(id) = held.kept {
-                if ui.button("Rename").clicked() {
-                    ui.data_mut(|data| {
+        popup(menu, position, &mut |ui| {
+            if let (Some(id), Some((expression, window))) = (held.kept, &held.definition) {
+                let edit = |column: usize, text: &str| {
+                    ctx.data_mut(|data| {
                         data.insert_temp(
                             draft_id,
-                            NameDraft {
+                            CellDraft {
                                 row,
-                                text: held.name.clone(),
+                                column,
+                                text: text.to_owned(),
                                 focus: true,
                             },
                         );
                     });
+                };
+                if ui.button("Rename").clicked() {
+                    edit(NAME, &held.name);
+                    ui.close();
+                }
+                if ui.button("Edit expression").clicked() {
+                    edit(EXPRESSION, expression);
+                    ui.close();
+                }
+                if !held.family {
+                    ui.menu_button("Read over", |ui| {
+                        if let Some(chosen) = window_items(ui, id, *window) {
+                            asked = Some(chosen);
+                        }
+                    });
+                }
+                ui.separator();
+                let above = row.checked_sub(1).and_then(|above| page.rows[above].kept);
+                let below = page.rows.get(row + 1).and_then(|below| below.kept);
+                if ui
+                    .add_enabled(above.is_some(), egui::Button::new("Move up"))
+                    .clicked()
+                    && let Some(above) = above
+                {
+                    asked = Some(Asked::Move(id, above));
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(below.is_some(), egui::Button::new("Move down"))
+                    .clicked()
+                    && let Some(below) = below
+                {
+                    asked = Some(Asked::Move(id, below));
                     ui.close();
                 }
                 if ui.button("Duplicate").clicked() {
@@ -531,12 +706,7 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
                 ui.separator();
             }
             if ui.button("Copy row").clicked() {
-                let mut line = vec![held.name.clone()];
-                line.extend(held.readings.iter().map(|reading| match reading {
-                    Reading::Value(value) => value.clone(),
-                    Reading::Failed(_) | Reading::Absent => String::new(),
-                }));
-                ui.ctx().copy_text(line.join("\t"));
+                ui.ctx().copy_text(row_text(held).join("\t"));
                 ui.close();
             }
         });
@@ -633,7 +803,7 @@ mod tests {
             vec![DocumentEdit::AddScalarMeasurement {
                 pane_id,
                 expression: "max(V(out))".to_owned(),
-                value: 0.0,
+                window: MeasurementWindow::WholeRecord,
             }],
         )
         .expect("the view keeps the measurement");
@@ -670,7 +840,7 @@ mod tests {
                 DocumentEdit::AddScalarMeasurement {
                     pane_id,
                     expression: "max(V(gone))".to_owned(),
-                    value: 0.0,
+                    window: MeasurementWindow::WholeRecord,
                 },
                 DocumentEdit::Rename {
                     entity: EntityRef::Measurement(measurement),
@@ -691,5 +861,84 @@ mod tests {
         .expect("the view lets it go");
         let (_, rows) = page_rows(state.results_reads());
         assert_eq!(rows[0].0, "max(V(gone))");
+    }
+
+    /// A measurement over the visible range reads what the strip shows and
+    /// follows its zoom while one over the whole record does not; one
+    /// between the cursors reads from A to B and says why without them; and
+    /// Undo puts back a measurement deleted over the quick view.
+    #[test]
+    fn a_measurement_reads_over_its_window_and_a_delete_undoes() {
+        use crate::workbench::documents::result_document::AnalysisPresentationKey;
+        use crate::workbench::documents::result_document::view_edits;
+        let (plan, analysis) = (SimulationPlanId::new(), AnalysisInstanceId::new());
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![plan_run(plan, analysis, 2.0)].into();
+        assert!(state.model.simulation.select_run(0));
+        state.quick_frame();
+        let view = shown_view(state.results_reads()).expect("the run's working view");
+        let pane_id = state.working_view().expect("the view").panes()[0].id;
+        let edits = MeasurementWindow::ALL
+            .into_iter()
+            .map(|window| DocumentEdit::AddScalarMeasurement {
+                pane_id,
+                expression: "max(V(out))".to_owned(),
+                window,
+            })
+            .collect();
+        transact(&mut state.results_parts(), view, edits).expect("the view keeps all three");
+        let readings = |state: &ResultsTestHost| -> Vec<Vec<String>> {
+            page_rows(state.results_reads())
+                .1
+                .into_iter()
+                .filter(|(_, _, from)| *from == "view")
+                .map(|(_, readings, _)| readings)
+                .collect()
+        };
+        // V(out) ramps from 0 to 2 V over the millisecond.
+        let unzoomed = readings(&state);
+        assert_eq!(
+            unzoomed[..2],
+            [["2 V"], ["2 V"]],
+            "unzoomed, the strip shows it all"
+        );
+        assert!(
+            unzoomed[2][0].starts_with("failed: Place cursors A and B"),
+            "{unzoomed:?}"
+        );
+
+        let key = {
+            let run = state.model.simulation.active_run().unwrap();
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+        };
+        rspice_results_ui::waves::stack::set_shared_x_view(
+            &mut state.results.results.session,
+            key,
+            Some((0.0, 0.5e-3)),
+        );
+        let session = &mut state.results.results.session;
+        session.cursors.a = Some(0.75e-3);
+        session.cursors.b = Some(0.25e-3);
+        session.cursor_strip = Some(0);
+        assert_eq!(
+            readings(&state),
+            [["2 V"], ["1 V"], ["1.5 V"]],
+            "the whole record, the zoomed half, and A to B"
+        );
+
+        let first = state.working_view().expect("the view").measurements()[0].id;
+        transact(
+            &mut state.results_parts(),
+            view,
+            vec![DocumentEdit::Remove(EntityRef::Measurement(first))],
+        )
+        .expect("the view lets it go");
+        assert_eq!(readings(&state).len(), 2);
+        view_edits::step_shown_view(&mut state.results_parts(), view_edits::Step::Undo);
+        assert_eq!(
+            readings(&state).len(),
+            3,
+            "Undo over the quick view puts it back"
+        );
     }
 }

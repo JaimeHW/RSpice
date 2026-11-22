@@ -251,17 +251,32 @@ pub enum DocumentEdit {
         pane_id: PaneId,
         #[serde(deserialize_with = "deserialize_source_text_string")]
         expression: String,
-        value: f64,
+        #[serde(default)]
+        window: MeasurementWindow,
     },
-    /// A measurement evaluated once per member of the family the pane
-    /// shows; `value` is the statistic `family` names. Like a scalar one, it
-    /// names its signals in its expression.
+    /// A measurement read once per member of the family the pane shows,
+    /// reporting the statistic `family` names. Like a scalar one, it names
+    /// its signals in its expression.
     AddFamilyMeasurement {
         pane_id: PaneId,
         #[serde(deserialize_with = "deserialize_source_text_string")]
         expression: String,
-        value: f64,
-        family: FamilyMeasurementSummary,
+        #[serde(default)]
+        window: MeasurementWindow,
+        family: FamilyMeasure,
+    },
+    /// Change what an authored measurement reads, and over what window.
+    SetMeasurement {
+        measurement_id: MeasurementId,
+        #[serde(deserialize_with = "deserialize_source_text_string")]
+        expression: String,
+        window: MeasurementWindow,
+    },
+    /// Move one measurement to `index` in the document's order, which the
+    /// Measurements table lists them in.
+    MoveMeasurement {
+        measurement_id: MeasurementId,
+        index: usize,
     },
     AddAnnotation {
         pane_id: PaneId,

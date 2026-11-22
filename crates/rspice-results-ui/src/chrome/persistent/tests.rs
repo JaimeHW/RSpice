@@ -34,22 +34,22 @@ fn pane_slot_geometry_sanitizes_nonfinite_available_extents() {
     assert_slots_are_finite_and_bounded(stage, &slots, 4);
 }
 
-/// A kept measurement reads by the expression that was measured, in
-/// engineering notation at the document's digits, never as a fixed six
-/// decimals that print a microvolt as 0.000001.
+/// A kept measurement reads in engineering notation in its unit at the
+/// document's digits, never as a fixed six decimals that print a microvolt
+/// as 0.000001, and one that read nothing says why.
 #[test]
 fn a_measurement_reads_in_engineering_notation_at_the_document_digits() {
     assert_eq!(
-        measurement_text("rms(V(out))", Some((12.345_678, None)), 7),
-        "rms(V(out)) = 12.34568"
+        measurement_text("rms(V(out))", Ok((12.345_678, "V", None)), 7),
+        "rms(V(out)) = 12.34568 V"
     );
     assert_eq!(
-        measurement_text("max(V(out))", Some((1.234_567_8e-6, None)), 4),
-        "max(V(out)) = 1.235e\u{2212}6"
+        measurement_text("max(V(out))", Ok((1.234_567_8e-6, "V", None)), 4),
+        "max(V(out)) = 1.235 \u{b5}V"
     );
     assert_eq!(
-        measurement_text("Measurement 3", None, 7),
-        "Measurement 3 = unevaluated"
+        measurement_text("max(V(gone))", Err("This run has no such analysis."), 4),
+        "max(V(gone)): This run has no such analysis."
     );
 }
 
@@ -78,7 +78,7 @@ fn a_family_measurement_reads_its_distribution_and_yield() {
     assert_eq!(
         measurement_text(
             "avg(V(out)) yield",
-            Some((50.0, Some(FamilyStatistic::Yield))),
+            Ok((50.0, "%", Some(FamilyStatistic::Yield))),
             4
         ),
         "avg(V(out)) yield = 50 %"

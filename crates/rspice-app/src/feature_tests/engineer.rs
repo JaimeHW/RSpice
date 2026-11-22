@@ -789,16 +789,34 @@ impl Drop for Scratch {
     }
 }
 
-/// The value the project keeps for the measurement `expression`.
+/// What the project's kept measurement `expression` reads: on the run shown,
+/// else on the first run that reads it. The project keeps the definition,
+/// never a value.
 pub(super) fn kept(app: &RSpiceApp, expression: &str) -> f64 {
+    use rspice_app_results::workbench::documents::result_document::document_edit::measurement_reading::read_kept;
+    let simulation = &app.state.model.simulation;
     app.state
         .model
         .workspace
         .content
         .visualization_documents
         .iter()
-        .flat_map(|document| document.measurements())
-        .find(|measurement| measurement.expression.as_deref() == Some(expression))
-        .and_then(|measurement| measurement.value)
-        .unwrap_or_else(|| panic!("{expression} is kept"))
+        .flat_map(|document| {
+            document
+                .measurements()
+                .iter()
+                .map(move |measurement| (document, measurement))
+        })
+        .filter(|(_, measurement)| measurement.expression.as_deref() == Some(expression))
+        .find_map(|(document, measurement)| {
+            simulation
+                .active_run()
+                .into_iter()
+                .chain(simulation.retained.runs.iter())
+                .find_map(|run| {
+                    read_kept(app.state.results_reads(), document, measurement, run).ok()
+                })
+        })
+        .map(|read| read.value)
+        .unwrap_or_else(|| panic!("{expression} is kept and reads"))
 }

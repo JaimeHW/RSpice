@@ -747,11 +747,12 @@ fn render_pane(
             .filter(|trace| trace.missing)
             .map(|trace| trace.label.as_str())
             .collect::<Vec<_>>();
+        let readouts = measurement_readouts(ui, state.results_reads(), pane);
         persistent::evidence_bar(
             ui,
             pane.id,
             &missing_signals,
-            &pane.measurements,
+            &readouts,
             &pane.annotations,
             usize::from(digits),
         );
@@ -763,6 +764,65 @@ fn render_pane(
         );
         activated_pane_id
     })
+}
+
+/// What the pane's kept measurements read on the run it shows, read again
+/// only when the view, the data, the zoom or the cursors change.
+fn measurement_readouts(
+    ui: &Ui,
+    state: ResultsReads<'_>,
+    pane: &PaneProjection,
+) -> Vec<persistent::MeasurementReadout> {
+    use std::hash::{Hash, Hasher};
+    if pane.measurements.is_empty() {
+        return Vec::new();
+    }
+    let Some(document) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(pane.document_id)
+    else {
+        return Vec::new();
+    };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{:?}", document.revision()).hash(&mut hasher);
+    state.model.simulation.view.data_version.hash(&mut hasher);
+    super::document_edit::measurement_reading::window_version(state).hash(&mut hasher);
+    let version = hasher.finish();
+    let id = egui::Id::new(("rspice.results.pane-measurements", pane.id.get()));
+    if let Some((held, readouts)) =
+        ui.data(|data| data.get_temp::<(u64, Vec<persistent::MeasurementReadout>)>(id))
+        && held == version
+    {
+        return readouts;
+    }
+    let run = pane
+        .binding
+        .ok_or_else(|| "The pane shows no dataset.".to_owned())
+        .and_then(|binding| resolve_binding(state, binding))
+        .map(|(run, _)| &state.model.simulation.retained.runs[run]);
+    let readouts: Vec<_> = pane
+        .measurements
+        .iter()
+        .map(|measurement| {
+            let read = run.clone().and_then(|run| {
+                super::document_edit::measurement_reading::read_kept(
+                    state,
+                    document,
+                    measurement,
+                    run,
+                )
+            });
+            persistent::MeasurementReadout {
+                name: measurement.label.clone(),
+                family: read.as_ref().ok().and_then(|read| read.family.clone()),
+                reading: read.map(|read| (read.value, read.unit)),
+            }
+        })
+        .collect();
+    ui.data_mut(|data| data.insert_temp(id, (version, readouts.clone())));
+    readouts
 }
 
 fn pane_viewer(

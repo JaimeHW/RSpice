@@ -1997,14 +1997,98 @@ pub struct Measurement {
     /// Authored scalar expression for a retained Studio measurement.
     #[serde(default, deserialize_with = "deserialize_optional_source_text_string")]
     pub expression: Option<String>,
-    /// Exact finite result evaluated when the measurement was committed.
+    /// Over what part of the result an authored measurement is read. No
+    /// value is kept: it is read from the run shown, through this window,
+    /// whenever it is shown.
     #[serde(default)]
-    pub value: Option<f64>,
-    /// The distribution of the expression over the family the pane shows,
-    /// when it was evaluated once per member; `value` is then the statistic
-    /// it names. Absent when the measurement was one evaluation.
+    pub window: MeasurementWindow,
+    /// When the pane shows a family, the expression is read once per member
+    /// and the measurement reports the statistic this names, its yield
+    /// judged against these limits. Absent for one evaluation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub family: Option<FamilyMeasurementSummary>,
+    pub family: Option<FamilyMeasure>,
+    /// Where the reader put it in the measurements' order: before every
+    /// measurement of a higher place. Measurements of one place stand in
+    /// the order they were made.
+    #[serde(default, skip_serializing_if = "is_first_place")]
+    pub place: u64,
+}
+
+fn is_first_place(place: &u64) -> bool {
+    *place == 0
+}
+
+/// Over what part of its result an authored measurement is read: the three
+/// EZwave's measurement tool offers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MeasurementWindow {
+    /// Every sample of the result.
+    #[default]
+    WholeRecord,
+    /// The X range the pane shows, as it is zoomed.
+    VisibleRange,
+    /// From cursor A to cursor B on the pane.
+    BetweenCursors,
+}
+
+impl MeasurementWindow {
+    pub const ALL: [MeasurementWindow; 3] = [
+        MeasurementWindow::WholeRecord,
+        MeasurementWindow::VisibleRange,
+        MeasurementWindow::BetweenCursors,
+    ];
+
+    /// The window as a menu and a table name it.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            MeasurementWindow::WholeRecord => "Whole record",
+            MeasurementWindow::VisibleRange => "Visible range",
+            MeasurementWindow::BetweenCursors => "Between cursors",
+        }
+    }
+}
+
+/// How a measurement over a family reports what its members read: the
+/// statistic it shows, and the limits its yield is judged against.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FamilyMeasure {
+    pub statistic: FamilyStatistic,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lower: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upper: Option<f64>,
+}
+
+impl FamilyMeasure {
+    fn validate(&self) -> Result<(), VisualizationError> {
+        let invalid = |message: &str| VisualizationError::InvalidValue {
+            field: "measurement.family",
+            message: message.to_owned(),
+        };
+        if self
+            .lower
+            .into_iter()
+            .chain(self.upper)
+            .any(|limit| !limit.is_finite())
+        {
+            return Err(invalid("a family measurement's limits are finite numbers"));
+        }
+        if let (Some(lower), Some(upper)) = (self.lower, self.upper)
+            && lower > upper
+        {
+            return Err(invalid(
+                "a family measurement's lower limit is not above its upper",
+            ));
+        }
+        if self.statistic == FamilyStatistic::Yield && self.lower.is_none() && self.upper.is_none()
+        {
+            return Err(invalid("a yield is judged against at least one limit"));
+        }
+        Ok(())
+    }
 }
 
 /// Which statistic of a family measurement its value reports.
@@ -2043,8 +2127,8 @@ impl FamilyStatistic {
     }
 }
 
-/// A measurement evaluated once per member of a family, kept as the
-/// distribution its members' values formed when it was committed.
+/// What a family measurement reads on the family shown: the distribution
+/// its members' values form. It is read, never kept.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FamilyMeasurementSummary {
@@ -2089,59 +2173,6 @@ impl FamilyMeasurementSummary {
             FamilyStatistic::Max => Some(self.max),
             FamilyStatistic::Yield => self.yield_percent(),
         }
-    }
-
-    fn validate(&self, value: Option<f64>) -> Result<(), VisualizationError> {
-        let invalid = |message: &str| VisualizationError::InvalidValue {
-            field: "measurement.family",
-            message: message.to_owned(),
-        };
-        if self.measured == 0 || self.measured > self.members {
-            return Err(invalid(
-                "a family measurement measures 1 to all of its members",
-            ));
-        }
-        let finite = [self.mean, self.min, self.max]
-            .into_iter()
-            .chain(self.std_dev)
-            .chain(self.lower)
-            .chain(self.upper)
-            .all(f64::is_finite);
-        if !finite
-            || self.min > self.max
-            || self.std_dev.is_some_and(|sigma| sigma < 0.0)
-            || self.std_dev.is_some() != (self.measured >= 2)
-        {
-            return Err(invalid(
-                "a family measurement's statistics are inconsistent",
-            ));
-        }
-        let limited = self.lower.is_some() || self.upper.is_some();
-        let consistent_limits = match (self.lower, self.upper, self.passed) {
-            (Some(lower), Some(upper), _) if lower > upper => false,
-            (_, _, Some(passed)) => {
-                limited
-                    && passed <= self.members
-                    && self.failing.len() == (self.members - passed) as usize
-            }
-            (_, _, None) => !limited && self.failing.is_empty(),
-        };
-        if !consistent_limits {
-            return Err(invalid(
-                "a family measurement's yield needs its limits, and lists each failing member",
-            ));
-        }
-        for label in &self.failing {
-            validate_label("measurement.family.failing", label)?;
-        }
-        if value
-            .is_none_or(|value| Some(value.to_bits()) != self.statistic_value().map(f64::to_bits))
-        {
-            return Err(invalid(
-                "a family measurement's value is the statistic it names",
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -2875,6 +2906,24 @@ impl VisualizationDocument {
     #[must_use]
     pub fn measurements(&self) -> &[Measurement] {
         &self.measurements
+    }
+
+    /// The measurements in the order the reader put them in, which the
+    /// Measurements table lists them in.
+    #[must_use]
+    pub fn measurements_in_order(&self) -> Vec<&Measurement> {
+        let mut ordered: Vec<&Measurement> = self.measurements.iter().collect();
+        ordered.sort_by_key(|measurement| measurement.place);
+        ordered
+    }
+
+    /// The place a measurement made now takes: after every one held.
+    fn next_measurement_place(&self) -> u64 {
+        self.measurements
+            .iter()
+            .map(|measurement| measurement.place + 1)
+            .max()
+            .unwrap_or(0)
     }
 
     #[must_use]

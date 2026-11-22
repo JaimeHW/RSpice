@@ -26,6 +26,22 @@ use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use super::{ResultViewer, ResultsParts, ResultsReads};
 
+/// The view Results shows: the saved document in front, else the working
+/// view the quick view draws the shown run through. What the reader keeps
+/// or undoes there is kept or undone in it.
+pub(crate) fn shown_view(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
+    match state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => {
+            super::working_view::view_of_run(state, *dataset_id)
+        }
+        Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => Some(*document_id),
+        _ => {
+            let run = state.model.simulation.active_run()?;
+            super::working_view::view_of_run(state, run.dataset_id)
+        }
+    }
+}
+
 /// The project result document the Results workspace is showing, if any.
 pub(super) fn active_document_id(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
     match state.workbench.documents.active(Workspace::Results) {
@@ -597,6 +613,7 @@ pub mod compare;
 pub mod family;
 pub mod links;
 pub mod measurement;
+pub mod measurement_reading;
 pub mod measurement_table;
 mod properties;
 mod trace_pick;

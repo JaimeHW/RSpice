@@ -2388,52 +2388,38 @@ fn document_with_trace() -> (VisualizationDocument, PaneId, TraceId) {
     (document, pane, trace)
 }
 
-/// Five members measuring 1..5, judged against [1.5, 4.5].
-fn family_summary(statistic: FamilyStatistic) -> FamilyMeasurementSummary {
-    FamilyMeasurementSummary {
+/// A yield judged against [1.5, 4.5].
+fn family_measure(statistic: FamilyStatistic) -> FamilyMeasure {
+    FamilyMeasure {
         statistic,
-        members: 5,
-        measured: 5,
-        mean: 3.0,
-        std_dev: Some(2.5_f64.sqrt()),
-        min: 1.0,
-        max: 5.0,
         lower: Some(1.5),
         upper: Some(4.5),
-        passed: Some(3),
-        failing: vec!["Trial 0".to_owned(), "Trial 4".to_owned()],
     }
 }
 
+/// A family measurement keeps how it reports its members, never what they
+/// read, and reads back the same.
 #[test]
-fn a_family_measurement_keeps_its_distribution_and_reads_back() {
+fn a_family_measurement_keeps_its_statistic_and_limits_and_reads_back() {
     let (mut document, pane, _) = document_with_trace();
-    let summary = family_summary(FamilyStatistic::Yield);
-    assert_eq!(summary.statistic_value(), Some(60.0));
+    let measure = family_measure(FamilyStatistic::Yield);
     document
         .transact(
             document.revision(),
             vec![DocumentEdit::AddFamilyMeasurement {
                 pane_id: pane,
                 expression: "avg(V(out))".to_owned(),
-                value: 60.0,
-                family: summary.clone(),
+                window: MeasurementWindow::WholeRecord,
+                family: measure,
             }],
         )
         .unwrap();
-    let kept = &document.measurements()[0];
-    assert_eq!(
-        (kept.value, kept.family.as_ref()),
-        (Some(60.0), Some(&summary))
-    );
+    assert_eq!(document.measurements()[0].family, Some(measure));
 
     let encoded = serde_json::to_value(&document).unwrap();
-    assert_eq!(
-        encoded["schema_version"],
-        serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
-    );
+    assert!(encoded["measurements"][0].get("value").is_none());
     let decoded: VisualizationDocument = serde_json::from_value(encoded).unwrap();
-    assert_eq!(decoded.measurements()[0].family.as_ref(), Some(&summary));
+    assert_eq!(decoded.measurements()[0].family, Some(measure));
 }
 
 /// A measurement the reader authors is bound to the result, not to what the
@@ -2451,13 +2437,13 @@ fn an_authored_measurement_names_its_signals_and_no_trace() {
                     pane_id: pane,
                     expression: "delay(D(samp), D(eoc), 0.5, \"falling\", 1, 0.5, \"rising\", 1)"
                         .to_owned(),
-                    value: 9e-7,
+                    window: MeasurementWindow::WholeRecord,
                 },
                 DocumentEdit::AddFamilyMeasurement {
                     pane_id: pane,
                     expression: "gain_dc".to_owned(),
-                    value: 60.0,
-                    family: family_summary(FamilyStatistic::Yield),
+                    window: MeasurementWindow::WholeRecord,
+                    family: family_measure(FamilyStatistic::Yield),
                 },
             ],
         )
@@ -2488,53 +2474,44 @@ fn an_authored_measurement_names_its_signals_and_no_trace() {
     );
 }
 
+/// A family measurement's limits are finite and in order, and a yield has
+/// at least one to be judged against.
 #[test]
-fn a_family_measurement_value_is_the_statistic_it_names() {
+fn a_family_measurement_states_limits_a_yield_can_be_judged_against() {
     let (mut document, pane, _) = document_with_trace();
-    let add = |value: f64, family: FamilyMeasurementSummary| DocumentEdit::AddFamilyMeasurement {
+    let add = |family: FamilyMeasure| DocumentEdit::AddFamilyMeasurement {
         pane_id: pane,
         expression: "avg(V(out))".to_owned(),
-        value,
+        window: MeasurementWindow::WholeRecord,
         family,
     };
     let revision = document.revision();
-    // The mean is 3, not 60.
-    assert!(
-        document
-            .transact(
-                revision,
-                vec![add(60.0, family_summary(FamilyStatistic::Mean))]
-            )
-            .is_err()
-    );
-    // A yield needs a limit, and names every failing member.
-    let mut unlimited = family_summary(FamilyStatistic::Mean);
-    unlimited.lower = None;
-    unlimited.upper = None;
-    assert!(
-        document
-            .transact(revision, vec![add(3.0, unlimited)])
-            .is_err()
-    );
-    let mut unnamed = family_summary(FamilyStatistic::Mean);
-    unnamed.failing.pop();
-    assert!(
-        document
-            .transact(revision, vec![add(3.0, unnamed)])
-            .is_err()
-    );
-    // One measured member has no standard deviation.
-    let mut sigma = family_summary(FamilyStatistic::Mean);
-    sigma.measured = 1;
-    assert!(document.transact(revision, vec![add(3.0, sigma)]).is_err());
-
-    let mut unjudged = family_summary(FamilyStatistic::StdDev);
-    unjudged.lower = None;
-    unjudged.upper = None;
-    unjudged.passed = None;
-    unjudged.failing.clear();
+    let unlimited = FamilyMeasure {
+        lower: None,
+        upper: None,
+        ..family_measure(FamilyStatistic::Yield)
+    };
+    assert!(document.transact(revision, vec![add(unlimited)]).is_err());
+    let crossed = FamilyMeasure {
+        lower: Some(4.5),
+        upper: Some(1.5),
+        ..family_measure(FamilyStatistic::Mean)
+    };
+    assert!(document.transact(revision, vec![add(crossed)]).is_err());
+    let endless = FamilyMeasure {
+        upper: Some(f64::INFINITY),
+        ..family_measure(FamilyStatistic::Mean)
+    };
+    assert!(document.transact(revision, vec![add(endless)]).is_err());
     document
-        .transact(revision, vec![add(2.5_f64.sqrt(), unjudged)])
+        .transact(
+            revision,
+            vec![add(FamilyMeasure {
+                lower: None,
+                upper: None,
+                ..family_measure(FamilyStatistic::StdDev)
+            })],
+        )
         .unwrap();
 }
 
@@ -2739,4 +2716,66 @@ fn a_hostile_view_file_is_refused_quickly_and_reserves_nothing_it_claims() {
         "refused by the trace it names: {error}"
     );
     println!("refused in {:?}", started.elapsed());
+}
+
+/// A kept measurement is its definition: its expression and window change
+/// in place, it moves in the list, and none of it stores a value.
+#[test]
+fn a_measurement_changes_its_definition_and_its_place() {
+    let (mut document, pane, _) = document_with_trace();
+    let add = |expression: &str| DocumentEdit::AddScalarMeasurement {
+        pane_id: pane,
+        expression: expression.to_owned(),
+        window: MeasurementWindow::WholeRecord,
+    };
+    document
+        .transact(
+            document.revision(),
+            vec![add("max(V(out))"), add("min(V(out))")],
+        )
+        .unwrap();
+    let [first, second] = [0, 1].map(|index| document.measurements()[index].id);
+    assert_eq!(document.measurements()[0].label, "max(V(out))");
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetMeasurement {
+                    measurement_id: first,
+                    expression: "avg(V(out))".to_owned(),
+                    window: MeasurementWindow::VisibleRange,
+                },
+                DocumentEdit::MoveMeasurement {
+                    measurement_id: second,
+                    index: 0,
+                },
+            ],
+        )
+        .unwrap();
+    let order: Vec<_> = document
+        .measurements_in_order()
+        .iter()
+        .map(|kept| kept.id)
+        .collect();
+    assert_eq!(order, [second, first]);
+    let changed = document.measurements_in_order()[1];
+    assert_eq!(changed.expression.as_deref(), Some("avg(V(out))"));
+    assert_eq!(changed.window, MeasurementWindow::VisibleRange);
+    let refused = [
+        DocumentEdit::MoveMeasurement {
+            measurement_id: first,
+            index: 2,
+        },
+        DocumentEdit::SetMeasurement {
+            measurement_id: first,
+            expression: " ".to_owned(),
+            window: MeasurementWindow::WholeRecord,
+        },
+    ];
+    for edit in refused {
+        assert!(document.transact(document.revision(), vec![edit]).is_err());
+    }
+    let decoded: VisualizationDocument =
+        serde_json::from_value(serde_json::to_value(&document).unwrap()).unwrap();
+    assert_eq!(decoded.measurements(), document.measurements());
 }

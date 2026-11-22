@@ -1121,7 +1121,7 @@ fn horizontal_sections(
                 .find(|unit_pane| unit_pane.unit == pane.unit)
                 .map(|unit_pane| unit_pane.traces)
                 .unwrap_or_default();
-            for index in traces {
+            for &index in &traces {
                 let Some(trace) = model.traces.get(index).filter(|trace| trace.visible) else {
                     continue;
                 };

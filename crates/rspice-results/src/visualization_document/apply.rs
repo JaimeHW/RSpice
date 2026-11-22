@@ -559,26 +559,14 @@ impl VisualizationDocument {
     fn add_scalar_measurement(
         &mut self,
         pane_id: PaneId,
-        expression: String,
-        value: f64,
-        family: Option<FamilyMeasurementSummary>,
+        (expression, window): (String, MeasurementWindow),
+        family: Option<FamilyMeasure>,
         created: &mut Vec<EntityRef>,
     ) -> Result<(), VisualizationError> {
-        if expression.trim().is_empty()
-            || expression.len() > MAX_SOURCE_TEXT_BYTES
-            || expression.chars().any(char::is_control)
-            || !value.is_finite()
-        {
-            return Err(VisualizationError::InvalidValue {
-                field: "measurement.expression",
-                message: format!(
-                    "a scalar measurement requires a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
-                ),
-            });
-        }
+        validate_measurement_expression(&expression)?;
         self.require_pane(pane_id)?;
         if let Some(family) = &family {
-            family.validate(Some(value))?;
+            family.validate()?;
         }
         let id = MeasurementId::allocate(self.allocate_serial()?)?;
         // Named by what it measures until the reader names it, as ADE's
@@ -595,8 +583,9 @@ impl VisualizationDocument {
             kind: MeasurementKind::Point,
             label,
             expression: Some(expression),
-            value: Some(value),
+            window,
             family,
+            place: self.next_measurement_place(),
         });
         created.push(EntityRef::Measurement(id));
         Ok(())
@@ -1048,8 +1037,9 @@ impl VisualizationDocument {
                     kind,
                     label,
                     expression: None,
-                    value: None,
+                    window: MeasurementWindow::WholeRecord,
                     family: None,
+                    place: self.next_measurement_place(),
                 });
                 created.push(EntityRef::Measurement(id));
                 Ok(())
@@ -1280,14 +1270,64 @@ impl VisualizationDocument {
             DocumentEdit::AddScalarMeasurement {
                 pane_id,
                 expression,
-                value,
-            } => self.add_scalar_measurement(pane_id, expression, value, None, created),
+                window,
+            } => self.add_scalar_measurement(pane_id, (expression, window), None, created),
             DocumentEdit::AddFamilyMeasurement {
                 pane_id,
                 expression,
-                value,
+                window,
                 family,
-            } => self.add_scalar_measurement(pane_id, expression, value, Some(family), created),
+            } => self.add_scalar_measurement(pane_id, (expression, window), Some(family), created),
+            DocumentEdit::SetMeasurement {
+                measurement_id,
+                expression,
+                window,
+            } => {
+                validate_measurement_expression(&expression)?;
+                let measurement = self.measurement_mut(measurement_id)?;
+                if measurement.expression.is_none() {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "measurement.expression",
+                        message: "only a measurement the reader wrote has an expression to change"
+                            .to_owned(),
+                    });
+                }
+                measurement.expression = Some(expression);
+                measurement.window = window;
+                Ok(())
+            }
+            DocumentEdit::MoveMeasurement {
+                measurement_id,
+                index,
+            } => {
+                let mut order: Vec<MeasurementId> = self
+                    .measurements_in_order()
+                    .into_iter()
+                    .map(|measurement| measurement.id)
+                    .collect();
+                let from = order.iter().position(|id| *id == measurement_id).ok_or(
+                    VisualizationError::EntityNotFound(EntityRef::Measurement(measurement_id)),
+                )?;
+                if index >= order.len() {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "measurement.index",
+                        message: "a measurement moves to a place in the list".to_owned(),
+                    });
+                }
+                let moved = order.remove(from);
+                order.insert(index, moved);
+                // The list keeps the order the measurements were made in;
+                // each one's place carries the order the reader gave.
+                for (place, id) in (0_u64..).zip(order) {
+                    if let Some(at) = self.measurements.position(id.get())
+                        && self.measurements[at].place != place
+                    {
+                        self.measurements
+                            .update_unkeyed_at(at, |measurement| measurement.place = place);
+                    }
+                }
+                Ok(())
+            }
             DocumentEdit::SetMarker {
                 marker_id,
                 coordinate,
@@ -2579,24 +2619,21 @@ impl VisualizationDocument {
         measurement: &Measurement,
     ) -> Result<(), VisualizationError> {
         validate_label("measurement.label", &measurement.label)?;
-        match (measurement.expression.as_deref(), measurement.value) {
-            (Some(expression), Some(value))
-                if !expression.trim().is_empty()
-                    && expression.len() <= MAX_SOURCE_TEXT_BYTES
-                    && !expression.chars().any(char::is_control)
-                    && value.is_finite() => {}
-            (None, None) => {}
-            _ => {
+        match measurement.expression.as_deref() {
+            Some(expression) => validate_measurement_expression(expression)?,
+            None if measurement.family.is_some()
+                || measurement.window != MeasurementWindow::WholeRecord =>
+            {
                 return Err(VisualizationError::InvalidValue {
                     field: "measurement.expression",
-                    message: format!(
-                        "an authored scalar measurement requires both a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
-                    ),
+                    message: "only a measurement the reader wrote reads a family or a window"
+                        .to_owned(),
                 });
             }
+            None => {}
         }
         if let Some(family) = &measurement.family {
-            family.validate(measurement.value)?;
+            family.validate()?;
         }
         validate_measurement_traces(
             measurement.trace_ids.len(),
@@ -3445,4 +3482,21 @@ fn duplicate_xy_plot(plot: &XyPlot) -> VisualizationError {
             plot.abscissa.text()
         ),
     }
+}
+
+/// An authored measurement's expression: 1 to the source-text limit of
+/// non-control UTF-8 bytes, not blank.
+fn validate_measurement_expression(expression: &str) -> Result<(), VisualizationError> {
+    if expression.trim().is_empty()
+        || expression.len() > MAX_SOURCE_TEXT_BYTES
+        || expression.chars().any(char::is_control)
+    {
+        return Err(VisualizationError::InvalidValue {
+            field: "measurement.expression",
+            message: format!(
+                "an authored measurement requires 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
+            ),
+        });
+    }
+    Ok(())
 }
