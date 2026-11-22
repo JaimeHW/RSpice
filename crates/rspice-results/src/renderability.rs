@@ -556,10 +556,19 @@ pub fn viewer_can_render(
         }
         ResultViewer::HarmonicBalance => structural(StructuralGate::HarmonicSpectrum),
         ResultViewer::PhaseNoise => structural(StructuralGate::PhaseNoiseSpectrum),
-        // A loop gain and nothing else: an AC node response is a complex
-        // curve with no stability criterion to read on it.
+        // The sheet draws a stability run's loop gain, which it keeps as two
+        // real traces; a printed Nyquist page still draws any retained
+        // complex response. The sheet's own gate refuses the latter on
+        // screen.
         ResultViewer::Nyquist => {
             crate::nyquist::loop_gain_traces(analysis.analysis_type, &analysis.waveforms).is_some()
+                || analysis.waveforms.iter().any(|waveform| {
+                    waveform.complex.as_ref().is_some_and(|complex| {
+                        !complex.real.is_empty()
+                            && complex.real.len() == complex.imag.len()
+                            && complex.real.len() == waveform.x.len()
+                    })
+                })
         }
         // Network coefficients against their port impedances, or a complex
         // AC or harmonic-balance response against the pane's Z₀.
