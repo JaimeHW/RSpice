@@ -39,8 +39,8 @@ use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design_system::{PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, elide_text};
 use crate::workbench::docks::navigator::rail::{self, RailDisclosure, RailFold};
 use crate::workbench::docks::navigator::{
-    SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
-    empty_navigator_row, panel_search, row_context_menu, schematic_nav_row_indented_response,
+    PanelSearchKeys, SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
+    empty_navigator_row, panel_search_keys, row_context_menu, schematic_nav_row_indented_response,
     search_focus_requested,
 };
 use crate::workbench::state::{ConsolePage, Workspace};
@@ -239,6 +239,9 @@ fn occurrence_object_row(ui: &mut Ui, row: OccurrenceObjectRow<'_>) -> Response 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesignNavigatorSection {
+    /// Find's hits, above the rails while the search box holds text; see
+    /// `find_matches`.
+    Find,
     Masters,
     Occurrences,
     Ports,
@@ -258,6 +261,7 @@ impl DesignNavigatorSection {
     /// on them.
     pub fn title(self) -> &'static str {
         match self {
+            Self::Find => "Find",
             Self::Masters => "Masters",
             Self::Occurrences => "Occurrences",
             Self::Ports => "Ports",
@@ -424,7 +428,18 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
 }
 
 pub fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
-    let enter_rows = navigator_search(ui, cx.wb);
+    let keys = navigator_search(ui, cx.wb);
+    let enter_rows = keys.rows;
+    // Enter in the search box shows the next hit, Shift+Enter the one
+    // before, and the box keeps the keyboard for the next press.
+    if keys.submitted {
+        let find = cx.wb.navigator_filter().trim().to_owned();
+        let forward = !ui.input(|input| input.modifiers.shift);
+        crate::workbench::app::dialogs::find_replace::step_hit(
+            cx.state, cx.model, cx.wb, cx.runs, &find, forward,
+        );
+        cx.wb.outbox.push(FocusNavigatorSearch);
+    }
     let (occurrence, master, can_ascend) = navigator_path(&cx.model.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
@@ -492,9 +507,11 @@ pub fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         .id_salt("workbench.design.navigator")
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            find_matches::find_matches_section(ui, cx.state, cx.model);
+            find_matches::find_section(ui, cx);
             for section in DESIGN_NAVIGATOR_SECTION_ORDER {
                 match section {
+                    // Drawn above the rails, and only while there is a search.
+                    DesignNavigatorSection::Find => {}
                     DesignNavigatorSection::Masters => {
                         hierarchy_tree::masters_section(ui, cx.state, cx.model, cx.wb, cx.runs)
                     }
@@ -576,10 +593,10 @@ fn sheet_scope_control(ui: &mut Ui, scope: SheetScope) -> Option<SheetScope> {
     changed.then(|| SheetScope::OPTIONS[index])
 }
 
-fn navigator_search(ui: &mut Ui, wb: &mut WorkbenchSession) -> bool {
+fn navigator_search(ui: &mut Ui, wb: &mut WorkbenchSession) -> PanelSearchKeys {
     let workspace = wb.workspace;
     let mut focus = search_focus_requested::<FocusNavigatorSearch>(ui, &mut wb.outbox);
-    panel_search(
+    panel_search_keys(
         ui,
         wb.navigator_trees.filter_mut(workspace),
         "workbench.design.navigator.search",

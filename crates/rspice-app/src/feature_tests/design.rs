@@ -369,25 +369,32 @@ fn rename_opens_and_draws_in_the_frame() {
     assert!(app.state.design.rename_selection.open);
 }
 
+/// Find and replace is the Navigator's Find with its Replace row unfolded:
+/// the Navigator comes forward with the search box focused, and no dialog
+/// covers the canvas the hits are shown on.
 #[test]
-fn find_and_replace_opens_and_draws_in_the_frame() {
+fn find_and_replace_unfolds_the_navigators_replace_row() {
     let mut app = design_app();
     app.execute_command_key(DesignCommand::FindReplace.key());
-    assert!(draws_dialog(&mut app, "Find and replace"));
-    assert!(app.state.design.find_replace.open);
+    assert!(app.state.design.find_replace.replacing);
+    assert!(app.state.workbench.navigator_visible);
+    assert!(
+        app.state
+            .workbench
+            .outbox
+            .peek::<rspice_app_workbench::workbench::framework::requests::FocusNavigatorSearch>()
+            .is_some()
+    );
+    assert!(!draws_dialog(&mut app, "Find and replace"));
 }
 
-/// Find and replace waits for a dialog that holds the workbench: with About
-/// open the command leaves the form shut, and once About closes it opens.
+/// Find works on a view that can only be read; it is Replace that says why
+/// nothing there changes.
 #[test]
-fn find_and_replace_waits_for_an_open_dialog() {
+fn find_and_replace_is_offered_on_a_read_only_view() {
     let mut app = design_app();
-    app.state.shell.about = true;
-    app.execute_command_key(DesignCommand::FindReplace.key());
-    assert!(!app.state.design.find_replace.open);
-    app.state.shell.about = false;
-    app.execute_command_key(DesignCommand::FindReplace.key());
-    assert!(app.state.design.find_replace.open);
+    app.state.model.schematic.session.read_only = true;
+    assert!(app.command_key_enabled(DesignCommand::FindReplace.key()));
 }
 
 #[test]

@@ -476,9 +476,6 @@ const DIALOG_GATE: &[DialogRow] = &[
     ("rename_selection", |dialogs| {
         dialogs.design.rename_selection.open = true
     }),
-    ("find_replace", |dialogs| {
-        dialogs.design.find_replace.open = true
-    }),
     ("shared_properties", |dialogs| {
         dialogs.design.shared_properties.open = true;
     }),

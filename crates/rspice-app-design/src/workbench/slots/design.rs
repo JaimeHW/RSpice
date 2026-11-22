@@ -137,8 +137,8 @@ pub struct DesignState {
     pub rename_selection:
         crate::workbench::app::dialogs::selection::rename::RenameSelectionDialogState,
 
-    /// Find and replace on names, net labels and values.
-    pub find_replace: crate::workbench::app::dialogs::find_replace::FindReplaceDialogState,
+    /// Find over the whole design, and its Replace row.
+    pub find_replace: crate::workbench::app::dialogs::find_replace::FindState,
 
     /// One property form over several selected instances.
     pub shared_properties:

@@ -98,7 +98,6 @@ pub mod workbench {
         pub(crate) use dialogs::connectivity_manager::ConnectivityManagerDialogState;
         pub(crate) use dialogs::create_model_bound_symbol::CreateModelBoundSymbolDialogState;
         pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
-        pub(crate) use dialogs::find_replace::find_replace_matches;
         pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;
         pub(crate) use dialogs::placement::net_label::{
             open_net_label_placement_in, place_sequenced_net_label_in,

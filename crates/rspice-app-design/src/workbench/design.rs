@@ -77,8 +77,8 @@ use crate::workbench::app::dialogs::selection::commands::{
 };
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
-    create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
-    stimulus_link, symbol_definition, visibility_options,
+    create_model_bound_symbol, object_properties, placement, rule_setup, stimulus_link,
+    symbol_definition, visibility_options,
 };
 use crate::workbench::app::{
     arm_move_selection_in, arm_schematic_tool, arm_stretch_selection_in,
@@ -93,7 +93,7 @@ use crate::workbench::framework::feature::{
     FeatureSurface, NoHandles, Reads, held_back,
 };
 use crate::workbench::framework::requests::{
-    FocusPlacementSearch, OpenSymbolAuthoring, SubcircuitSymbolSource,
+    FocusNavigatorSearch, FocusPlacementSearch, OpenSymbolAuthoring, SubcircuitSymbolSource,
 };
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::{Drawer, WorkbenchSession, Workspace};
@@ -214,8 +214,8 @@ impl CommandSet for DesignCommand {
     /// which the registry already asks for. Rename names what it can act on; Replace instance and
     /// Create hierarchy name the first thing missing: the schematic, an
     /// editable one, then something in it to act on. Find and replace needs
-    /// an editable schematic or testbench in front of the reader and names
-    /// neither. A placement needs an
+    /// a schematic or testbench in front of the reader, editable or not, and
+    /// does not name it. A placement needs an
     /// editable schematic or testbench in front of the reader.
     ///
     /// Every library verb needs the instrument open, because they all act on
@@ -301,8 +301,9 @@ impl CommandSet for DesignCommand {
                 Some("the active schematic is read-only")
             }
             Self::ReplaceInstance | Self::CreateHierarchy => Some("select an editable object"),
-            Self::FindReplace => (!schematic || reads.model.schematic_edit_read_only())
-                .then_some("command is unavailable in this context"),
+            // Find works on what can only be read; its Replace row says why
+            // nothing there can change.
+            Self::FindReplace => (!schematic).then_some("command is unavailable in this context"),
             // A symbol edited in place is a level below its sheet: going up
             // leaves it, as Return does.
             Self::AscendHierarchy
@@ -757,14 +758,15 @@ impl CommandSet for DesignCommand {
             Self::CreateHierarchy => {
                 open_create_hierarchy_dialog(&mut cx.state.create_hierarchy, cx.model, cx.wb);
             }
-            // A dialog that holds the workbench keeps the form shut. The
-            // matches are listed in the Navigator, so it comes forward.
+            // Find and its Replace row are the Navigator's: it comes forward
+            // with the Replace row unfolded and the search box focused.
             Self::FindReplace => {
-                if !cx.dialog_modal_open() {
-                    cx.state.find_replace.open = true;
-                    cx.wb.navigator_visible = true;
-                    cx.state.show_navigator();
-                }
+                cx.state.find_replace.replacing = true;
+                cx.wb.activate(Workspace::Design);
+                cx.wb.navigator_visible = true;
+                cx.wb.drawer = Some(Drawer::Navigator);
+                cx.state.show_navigator();
+                cx.wb.outbox.push(FocusNavigatorSearch);
             }
             Self::PlaceInstance => {
                 cx.wb.activate(Workspace::Design);
@@ -1367,11 +1369,6 @@ const DIALOGS: &[FeatureDialog<DesignFeature>] = &[
         render: DesignFeature::render_rename_selection_dialog,
     },
     FeatureDialog {
-        key: DialogKey("design.find_replace"),
-        is_open: |design| design.find_replace.open,
-        render: DesignFeature::render_find_replace_dialog,
-    },
-    FeatureDialog {
         key: DialogKey("design.shared_properties"),
         is_open: |design| design.shared_properties.open,
         render: DesignFeature::render_shared_properties_dialog,
@@ -1648,18 +1645,6 @@ impl DesignFeature {
     fn render_rename_selection_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         rename::render_rename_selection_dialog(
             &mut cx.state.rename_selection,
-            cx.model,
-            cx.wb,
-            ctx,
-        );
-    }
-
-    /// Find and replace.
-    fn render_find_replace_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
-        let edit_in_progress = cx.state.schematic_edit_in_progress(cx.model);
-        find_replace::render_find_replace_dialog(
-            &mut cx.state.find_replace,
-            edit_in_progress,
             cx.model,
             cx.wb,
             ctx,

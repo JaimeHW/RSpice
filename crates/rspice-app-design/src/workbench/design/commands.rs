@@ -61,7 +61,7 @@ pub enum DesignCommand {
     ReplaceInstance,
     /// Open Create hierarchy over the selection.
     CreateHierarchy,
-    /// Open Find and replace over the schematic.
+    /// Bring Find forward with its Replace row unfolded.
     FindReplace,
     /// Pick an instance from the component shelf.
     PlaceInstance,
@@ -667,11 +667,12 @@ impl DesignCommand {
     /// needs an open project and keeps the global shortcut context; only
     /// Apply has a chord of its own. The project dialogs also wait for a
     /// project operation, and every schematic dialog but the object table is
-    /// a chord of the design workspace. Rename, Replace instance, Create
-    /// hierarchy and Find and replace edit the drawing, so each commits the
-    /// inspector's pending edit and is refused on a read-only schematic;
-    /// Rename and Find and replace have chords. Find and replace also needs
-    /// an open project and waits for a project operation.
+    /// a chord of the design workspace. Rename, Replace instance and Create
+    /// hierarchy edit the drawing, so each commits the inspector's pending
+    /// edit and is refused on a read-only schematic. Find and replace only
+    /// brings Find forward with its Replace row, which says itself why a
+    /// read-only view cannot change; it needs an open project and waits for
+    /// a project operation. Rename and Find and replace have chords.
     /// Every placement but the probe edits the drawing and is one Repeat
     /// last command runs again. The select tool, the grid and Fit content
     /// change only what the canvas shows, so none needs a project.
@@ -790,7 +791,7 @@ impl DesignCommand {
             Self::FindReplace => (
                 "Find and replace\u{2026}",
                 "Edit",
-                project_edits,
+                project,
                 canvas,
                 FIND_REPLACE,
             ),

@@ -505,9 +505,11 @@ fn finds_in_design(reads: &Reads<'_, DesignFeature>) -> bool {
 }
 
 /// Bring the Navigator forward on the Design workspace and focus its search
-/// box. The box is the Navigator tab's; the Component shelf that Place
-/// instance brings forward has none.
+/// box, which is Find's field, with the Replace row folded. The box is the
+/// Navigator tab's; the Component shelf that Place instance brings forward
+/// has none.
 fn find_in_design(cx: &mut Cx<'_, DesignFeature>) {
+    cx.state.find_replace.replacing = false;
     cx.wb.activate(Workspace::Design);
     cx.wb.navigator_visible = true;
     cx.wb.drawer = Some(Drawer::Navigator);
