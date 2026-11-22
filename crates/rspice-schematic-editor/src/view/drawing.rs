@@ -567,7 +567,8 @@ pub fn draw_probe(
     let status_color = match status {
         ProbeVisualStatus::Materialized => palette.ok,
         ProbeVisualStatus::Hidden => palette.text_faint,
-        ProbeVisualStatus::Pending => palette.warn,
+        // Waiting for its first run is a probe's normal state, not a problem.
+        ProbeVisualStatus::Pending => palette.text,
         ProbeVisualStatus::Unavailable => palette.err,
         ProbeVisualStatus::NotConnected | ProbeVisualStatus::Disabled => palette.text_faint,
     };
