@@ -111,9 +111,19 @@ impl EngineBridge {
         // The host draws the rows from the segment while the run writes them, until the run
         // returns.
         let live = crate::results_store::publish_live_segment(&path);
+        let mut engine_sink = UnclosedOnStop {
+            sink: &mut sink,
+            abort,
+        };
         let ran = if capture_times.is_empty() {
             engine
-                .run_tran_into_sink_with_abort(netlist, span.tstop, span.max_step, abort, &mut sink)
+                .run_tran_into_sink_with_abort(
+                    netlist,
+                    span.tstop,
+                    span.max_step,
+                    abort,
+                    &mut engine_sink,
+                )
                 .map(|run| (run, Vec::new()))
         } else {
             engine.run_tran_capturing_states_to_stop_into_sink(
@@ -122,7 +132,7 @@ impl EngineBridge {
                 startup_mode,
                 capture_times,
                 abort,
-                &mut sink,
+                &mut engine_sink,
             )
         };
         let ran = match ran {
@@ -154,6 +164,10 @@ impl EngineBridge {
                 stop @ (SinkStop::DiskFull { .. } | SinkStop::StorageBudget { .. }),
             )) if refused.is_none() => (None, None, Some(stop), Vec::new()),
             Err(source) => {
+                if matches!(source, rspice_core::SimulationError::Aborted) {
+                    discard_segment(inner, path);
+                    return Err(SimulationError::Aborted);
+                }
                 // The segment closes before it is deleted: a host may refuse to delete an open
                 // file.
                 drop(inner);
@@ -174,8 +188,7 @@ impl EngineBridge {
         // Stop answers after the solve too: reading a run of a million devices back is minutes
         // of work in itself, and none of it is worth finishing once the reader asked to stop.
         if abort.is_aborted() {
-            drop(inner);
-            let _ = std::fs::remove_file(&path);
+            discard_segment(inner, path);
             return Err(SimulationError::Aborted);
         }
         abort.observe_phase(rspice_core::EnginePhase::Finishing);
@@ -685,6 +698,85 @@ fn store_failure(path: &std::path::Path, error: StoreError) -> SimulationError {
                 path.display()
             ),
         }),
+    }
+}
+
+/// Close and delete, off the solve thread, the segment of a run that was stopped: its writer
+/// drains the chunks it still holds before it closes, seconds of work on a million-device run,
+/// and Stop is not kept waiting for a file nobody reads. A host that exits first leaves the
+/// segment to the sweep of abandoned stores.
+fn discard_segment<W: Send + 'static>(writer: W, path: std::path::PathBuf) {
+    let discard = move || {
+        // The segment closes before it is deleted: a host may refuse to delete an open file.
+        drop(writer);
+        let _ = std::fs::remove_file(&path);
+    };
+    let discarding = std::thread::Builder::new()
+        .name("rspice-segment-discard".to_owned())
+        .spawn(discard);
+    // A test reads the folder as the run returns, so it waits for the discard to be done.
+    #[cfg(test)]
+    if let Ok(discarding) = discarding {
+        let _ = discarding.join();
+    }
+    #[cfg(not(test))]
+    drop(discarding);
+}
+
+/// The run's sink as the engine writes it, except that a run stopped by the reader is not
+/// closed: its segment is deleted as the run returns, and closing it first would write `END`,
+/// a digest of every column, which on a million-device run is seconds of work thrown away.
+struct UnclosedOnStop<'a, S: rspice_core::result_sink::ResultSink> {
+    sink: &'a mut S,
+    abort: &'a dyn AbortSignal,
+}
+
+impl<S: rspice_core::result_sink::ResultSink> rspice_core::result_sink::ResultSink
+    for UnclosedOnStop<'_, S>
+{
+    fn begin(
+        &mut self,
+        schema: &rspice_core::result_sink::ResultSchema,
+        meta: &rspice_core::result_sink::RunMeta,
+    ) -> Result<(), SinkStop> {
+        self.sink.begin(schema, meta)
+    }
+
+    fn row(&mut self, x: f64, values: &[f64]) -> Result<(), SinkStop> {
+        self.sink.row(x, values)
+    }
+
+    fn amend_open_row(&mut self, row: u64, column: u32, value: f64) -> Result<(), SinkStop> {
+        self.sink.amend_open_row(row, column, value)
+    }
+
+    fn events(
+        &mut self,
+        changes: &[rspice_core::result_sink::EventChange],
+    ) -> Result<(), SinkStop> {
+        self.sink.events(changes)
+    }
+
+    fn end(
+        &mut self,
+        status: rspice_core::result_sink::RunStatus,
+    ) -> Result<rspice_core::result_sink::SinkReceipt, SinkStop> {
+        let stopped = matches!(
+            status,
+            rspice_core::result_sink::RunStatus::Stopped(
+                rspice_core::result_sink::StopReason::Cancelled
+            )
+        );
+        if stopped && self.abort.is_aborted() {
+            return Err(SinkStop::Io(
+                "the run was stopped before it closed".to_owned(),
+            ));
+        }
+        self.sink.end(status)
+    }
+
+    fn annotate(&mut self, key: &str, bytes: &[u8]) -> Result<(), SinkStop> {
+        self.sink.annotate(key, bytes)
     }
 }
 

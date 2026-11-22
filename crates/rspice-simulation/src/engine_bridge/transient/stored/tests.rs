@@ -420,3 +420,72 @@ fn stop_pressed_as_the_solve_ends_stops_the_run_before_it_is_read_back() {
         .expect("the run solved into a segment");
     assert!(!segment.exists(), "{} is left behind", segment.display());
 }
+
+/// A sink that keeps how each run it was given ended.
+#[derive(Default)]
+struct Endings(Vec<rspice_core::result_sink::RunStatus>);
+
+impl rspice_core::result_sink::ResultSink for Endings {
+    fn begin(
+        &mut self,
+        _schema: &rspice_core::result_sink::ResultSchema,
+        _meta: &rspice_core::result_sink::RunMeta,
+    ) -> Result<(), SinkStop> {
+        Ok(())
+    }
+
+    fn row(&mut self, _x: f64, _values: &[f64]) -> Result<(), SinkStop> {
+        Ok(())
+    }
+
+    fn amend_open_row(&mut self, _row: u64, _column: u32, _value: f64) -> Result<(), SinkStop> {
+        Ok(())
+    }
+
+    fn events(
+        &mut self,
+        _changes: &[rspice_core::result_sink::EventChange],
+    ) -> Result<(), SinkStop> {
+        Ok(())
+    }
+
+    fn end(
+        &mut self,
+        status: rspice_core::result_sink::RunStatus,
+    ) -> Result<rspice_core::result_sink::SinkReceipt, SinkStop> {
+        self.0.push(status);
+        Ok(rspice_core::result_sink::SinkReceipt::default())
+    }
+}
+
+#[test]
+fn a_run_the_reader_stopped_is_never_closed_and_every_other_ending_is() {
+    use rspice_core::abort_signal::ImmediateAbort;
+    use rspice_core::result_sink::{ResultSink, RunStatus as Ending, StopReason};
+    let cancelled = Ending::Stopped(StopReason::Cancelled);
+    let mut endings = Endings::default();
+    let refused = UnclosedOnStop {
+        sink: &mut endings,
+        abort: &ImmediateAbort,
+    }
+    .end(cancelled.clone());
+    assert!(
+        refused.is_err(),
+        "a stopped run's segment is deleted, not closed"
+    );
+    // A run that completed as Stop was pressed keeps its results; a run cancelled with no
+    // Stop pending (its engine's own stop) closes as before.
+    UnclosedOnStop {
+        sink: &mut endings,
+        abort: &ImmediateAbort,
+    }
+    .end(Ending::Completed)
+    .expect("a completed run closes");
+    UnclosedOnStop {
+        sink: &mut endings,
+        abort: &NoAbort,
+    }
+    .end(cancelled.clone())
+    .expect("a run nobody stopped closes");
+    assert_eq!(endings.0, vec![Ending::Completed, cancelled]);
+}
