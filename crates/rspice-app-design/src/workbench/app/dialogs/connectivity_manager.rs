@@ -1221,13 +1221,9 @@ impl ConnectivityManager<'_> {
         {
             return Err("The active schematic or project is read-only.".to_owned());
         }
+        // Drawing a bus changes no policy: a policy edited on the Buses tab
+        // reaches the project only through Apply.
         let declaration = validate_bus_draft(self.dialog)?;
-        let mut contract = (*self.model.workspace.content.connectivity).clone();
-        contract.policy = self.dialog.policy.clone();
-        validate_policy_authority(&contract.policy, &contract)?;
-        contract.validate()?;
-        *self.model.workspace.content.connectivity = contract;
-        self.model.workspace.content.project_metadata_dirty = true;
         self.model.schematic.session.editor.bus_drawing.cancel();
         self.model.schematic.session.editor.bus_drawing.declaration = Some(declaration);
         self.model.schematic.session.editor.tool = Tool::Bus;

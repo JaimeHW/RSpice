@@ -192,6 +192,31 @@ fn bus_draft_accepts_the_authored_declaration_and_rejects_a_malformed_one() {
     assert!(validate_bus_draft(&dialog).is_err());
 }
 
+/// Drawing a bus from Create bus changes no policy: a Width mismatch chosen
+/// on the Buses tab reaches the project only through Apply.
+#[test]
+fn creating_a_bus_leaves_the_project_policy_alone() {
+    let mut state = DesignTestHost::default();
+    let before = (*state.model.workspace.content.connectivity).clone();
+    let mut dialog = ConnectivityManagerDialogState::default();
+    dialog.bus_declaration = "DATA[7:0]".to_owned();
+    dialog.policy.width_mismatch = BundleWidthMismatchPolicy::ALL
+        .into_iter()
+        .find(|policy| *policy != before.policy.width_mismatch)
+        .expect("a second width policy");
+    ConnectivityManager {
+        dialog: &mut dialog,
+        model: &mut state.model,
+        workbench: &mut state.workbench,
+    }
+    .commit_connectivity_bus()
+    .expect("the bus tool arms");
+
+    assert_eq!(*state.model.workspace.content.connectivity, before);
+    assert!(!state.model.workspace.content.project_metadata_dirty);
+    assert_eq!(state.model.schematic.session.editor.tool, Tool::Bus);
+}
+
 /// The line under the declaration says what placement waits for, what the
 /// declaration declares, or why it is refused, and nothing true of every bus.
 #[test]
