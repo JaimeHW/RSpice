@@ -7,6 +7,8 @@ use egui::{Rect, Vec2};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
+use rspice_app_state::state::{DrawingSheetStandard, SchematicPageOrientation};
 use rspice_app_state::workbench::workspace::Workspace;
 
 const CANVAS: Vec2 = Vec2::new(1_200.0, 800.0);
@@ -87,4 +89,31 @@ fn an_empty_schematic_opens_framed_on_its_sheet() {
     editor.needs_fit = true;
     draw_canvas(&mut app.state, 1.0);
     assert_framed(&app.state, "an empty file just opened");
+}
+
+/// A new size or orientation frames the new sheet: going from A4 to A1, the
+/// new right and bottom part of the paper and the title block that moved to
+/// its corner are on screen without a fit.
+#[test]
+fn a_new_sheet_size_frames_the_new_sheet() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    draw_canvas(&mut app.state, 0.0);
+    assert_framed(&app.state, "the sheet as it opened");
+
+    super::apply_drawing_sheet_edit(
+        &mut app.state,
+        DrawingSheetEdit::Size(DrawingSheetStandard::IsoA1),
+    )
+    .expect("the size change publishes");
+    draw_canvas(&mut app.state, 1.0);
+    assert_framed(&app.state, "the sheet made A1");
+
+    super::apply_drawing_sheet_edit(
+        &mut app.state,
+        DrawingSheetEdit::Orientation(SchematicPageOrientation::Portrait),
+    )
+    .expect("the orientation change publishes");
+    draw_canvas(&mut app.state, 2.0);
+    assert_framed(&app.state, "the sheet turned upright");
 }

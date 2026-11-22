@@ -85,9 +85,19 @@ pub fn apply_drawing_sheet_edit_on(
     if !drawing_sheet_editable(workbench, model) {
         return Err("The sheet can only be edited on a writable schematic.".to_owned());
     }
+    let paper = model.active_drawing_sheet().geometry.paper;
     let mut transaction = SheetTransaction::open(model);
     transaction.stage(model, edit)?;
-    transaction.commit(model)
+    let outcome = transaction.commit(model)?;
+    // A new size or orientation moves the paper's far edges and the title
+    // block in its corner: the canvas frames the new sheet, so none of it is
+    // left off-screen until a fit.
+    if model.active_drawing_sheet().geometry.paper != paper {
+        let editor = &mut model.schematic.session.editor;
+        editor.needs_drawing_sheet_fit = true;
+        editor.needs_fit = false;
+    }
+    Ok(outcome)
 }
 
 /// The governed sheet an edit lands on, as it stood when the edit began.
