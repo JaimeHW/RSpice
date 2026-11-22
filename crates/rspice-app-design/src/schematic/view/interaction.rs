@@ -2040,15 +2040,7 @@ fn component_probe_expression(
     // engine knows the device by the element the deck writes: a resistor
     // drawn `C4` is `RC4`, a limited VCVS drawn `E1` is the `B1` card, and a
     // memristor `MR1` is `YMEMRISTOR!MR1`.
-    if matches!(
-        component.kind,
-        ComponentType::Ground
-            | ComponentType::Port
-            | ComponentType::Transformer
-            | ComponentType::CoupledInductor
-            | ComponentType::CellInstance
-    ) || component.kind.is_xspice()
-    {
+    if !component.carries_one_current() {
         return None;
     }
 

@@ -43,6 +43,45 @@ pub struct OccurrenceNets {
     /// key [`occurrence_at`] finds it by.
     scope: String,
     nets: Arc<Vec<DesignNet>>,
+    /// The parts its master draws that carry one current each, as the
+    /// drawing names them and as the deck writes them.
+    devices: Arc<Vec<OccurrenceDevice>>,
+}
+
+/// A part that carries one current, `I(R1)`: the name the drawing gives it
+/// and the element the deck writes it as, which can differ (a resistor drawn
+/// `C4` is the card `RC4`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OccurrenceDevice {
+    pub drawn: String,
+    pub written: String,
+}
+
+/// The parts of the cell view `cell_view_key` that carry one current, read
+/// off the projected drawing the deck is written from.
+fn current_carrying_devices(
+    projection: &DesignProjection,
+    cell_view_key: &str,
+) -> Arc<Vec<OccurrenceDevice>> {
+    Arc::new(
+        projection
+            .schematic_buffers()
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(cell_view_key))
+            .map(|(_, schematic)| {
+                schematic
+                    .document()
+                    .components
+                    .iter()
+                    .filter(|component| component.carries_one_current())
+                    .map(|component| OccurrenceDevice {
+                        drawn: component.spice_instance_name(),
+                        written: component.engine_element_name(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
 }
 
 impl OccurrenceNets {
@@ -81,10 +120,13 @@ pub fn projection_occurrence_nets(
         occurrence: InstancePath::root(),
         scope: String::new(),
         nets: root_nets,
+        devices: current_carrying_devices(projection, &projection.root().key()),
     }];
     // Every occurrence of one context shares its binding, so the binding's
     // address names the context.
-    let mut context_nets = HashMap::<*const _, Arc<Vec<DesignNet>>>::new();
+    #[allow(clippy::type_complexity)]
+    let mut context_nets =
+        HashMap::<*const _, (Arc<Vec<DesignNet>>, Arc<Vec<OccurrenceDevice>>)>::new();
     let mut below = projection
         .plan()
         .bindings_where(|binding| {
@@ -96,15 +138,20 @@ pub fn projection_occurrence_nets(
         .filter(|binding| !binding.instance_path().is_root())
         .filter_map(|binding| {
             let scope = binding.instance_path().to_engine_name().ok()?;
-            let nets = context_nets
+            let (nets, devices) = context_nets
                 .entry(std::ptr::from_ref(binding.binding()))
                 .or_insert_with(|| {
-                    projection_nets(libraries, projection, &binding.resolved_reference().key())
+                    let key = binding.resolved_reference().key();
+                    (
+                        projection_nets(libraries, projection, &key),
+                        current_carrying_devices(projection, &key),
+                    )
                 });
             Some(OccurrenceNets {
                 occurrence: binding.instance_path().clone(),
                 scope,
                 nets: Arc::clone(nets),
+                devices: Arc::clone(devices),
             })
         })
         .collect::<Vec<_>>();
@@ -372,6 +419,9 @@ fn effective_plan_saved_outputs(
 
 /// The bounded node-voltage set a plan with no outputs of its own falls back
 /// to, drawn from every occurrence rather than from the root sheet alone.
+/// A small design keeps every node and every part's current, as LTspice and
+/// QSPICE do, so a current can be plotted after the run without running
+/// again; the currents go to the data browser, not the plot.
 ///
 /// Shallower occurrences win the bound, because a design's own interface is
 /// what a reader looks at first and a deep instance's internals are what they
@@ -496,6 +546,46 @@ fn automatic_outputs(
         let identity = format!("rspice.automatic-node-voltage/v1/{}", candidate.canonical);
         output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
         outputs.push(output);
+    }
+    if include_unnamed {
+        for entry in &by_depth {
+            for device in entry.devices.iter() {
+                let Some(spelling) = OccurrenceProbeSpelling::for_element(
+                    &entry.occurrence,
+                    'I',
+                    &device.drawn,
+                    &device.written,
+                ) else {
+                    continue;
+                };
+                let mut output = SavedOutput::new(
+                    SavedOutputKind::RawVoltageOrCurrent,
+                    spelling.display().to_owned(),
+                    spelling.engine().to_owned(),
+                    SavedOutputCompatibility::AllCompatibleAnalyses,
+                    SavedOutputPolicy::EveryAcceptedPoint,
+                    SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+                    SavedOutputStreaming::StoreOnly,
+                )
+                .map_err(|error| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!(
+                            "Automatic output {} is invalid: {error}",
+                            spelling.display()
+                        ),
+                    )
+                })?
+                .with_origin(SavedOutputOrigin::Automatic)
+                .with_display_intent(SavedOutputDisplayIntent::DataBrowserOnly);
+                let identity = format!(
+                    "rspice.automatic-device-current/v1/{}",
+                    spelling.engine().to_ascii_lowercase()
+                );
+                output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
+                outputs.push(output);
+            }
+        }
     }
     Ok(outputs)
 }

@@ -16,7 +16,7 @@ use rspice_simulation_contract::options::NodeVoltage;
 
 /// The RC lowpass driven by 1 V DC: R1 1k from the drive to `out`, C1 159n
 /// from `out` to ground, its transient 500 µs in 1 µs steps.
-fn rc() -> RSpiceApp {
+pub(super) fn rc() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     enable_only(&mut app.state, &[]);

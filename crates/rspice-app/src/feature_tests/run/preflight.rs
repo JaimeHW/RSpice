@@ -23,6 +23,7 @@ mod connect_rules;
 mod engine;
 mod pipeline;
 mod rule_deck;
+mod saved_currents;
 mod setup_history;
 mod setup_page;
 mod specifications;

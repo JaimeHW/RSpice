@@ -25,6 +25,7 @@ fn root_occurrence(nets: Vec<DesignNet>) -> Vec<OccurrenceNets> {
         occurrence: InstancePath::root(),
         scope: String::new(),
         nets: std::sync::Arc::new(nets),
+        devices: std::sync::Arc::default(),
     }]
 }
 
@@ -35,6 +36,7 @@ fn instance_occurrence(path: &str, nets: Vec<DesignNet>) -> OccurrenceNets {
         scope: occurrence.to_engine_name().unwrap_or_default(),
         occurrence,
         nets: std::sync::Arc::new(nets),
+        devices: std::sync::Arc::default(),
     }
 }
 
@@ -224,6 +226,80 @@ fn a_probe_joins_the_automatic_set_rather_than_replacing_it() {
     assert!(!used_automatic);
     assert_eq!(outputs.len(), 1);
     assert_eq!(outputs[0].source_expression, "V(out)");
+}
+
+/// A small design keeps every part's current beside its nodes, for the data
+/// browser and not the plot, each occurrence's under its own name and the
+/// element the deck writes; a design past small keeps no currents.
+#[test]
+fn a_small_design_keeps_every_parts_current() {
+    let plan_id = SimulationPlanId::new();
+    let device = |drawn: &str, written: &str| OccurrenceDevice {
+        drawn: drawn.to_owned(),
+        written: written.to_owned(),
+    };
+    let mut occurrences =
+        root_occurrence(vec![output_test_net("out", true, NetClass::Signal, None)]);
+    occurrences[0].devices = std::sync::Arc::new(vec![device("V1", "V1"), device("C4", "RC4")]);
+    let mut block = instance_occurrence(
+        "/X1",
+        vec![output_test_net("n1", true, NetClass::Signal, None)],
+    );
+    block.devices = std::sync::Arc::new(vec![device("R1", "R1")]);
+    occurrences.push(block);
+
+    let (outputs, _) = effective_plan_saved_outputs(
+        OutputSelectionMode::Automatic,
+        &[],
+        &[],
+        &occurrences,
+        plan_id,
+    )
+    .expect("automatic selection");
+    let currents = outputs
+        .iter()
+        .filter(|output| output.source_expression.starts_with("I("))
+        .map(|output| {
+            (
+                output.name.as_str(),
+                output.source_expression.as_str(),
+                output.display_intent,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        currents,
+        [
+            ("I(V1)", "I(V1)", SavedOutputDisplayIntent::DataBrowserOnly),
+            ("I(C4)", "I(RC4)", SavedOutputDisplayIntent::DataBrowserOnly),
+            (
+                "I(/X1/R1)",
+                "I(x1.r1)",
+                SavedOutputDisplayIntent::DataBrowserOnly
+            ),
+        ]
+    );
+
+    let mut large = (0..20)
+        .map(|index| output_test_net(&format!("n{index}"), true, NetClass::Signal, None))
+        .collect::<Vec<_>>();
+    large.push(output_test_net("out", true, NetClass::Signal, None));
+    let mut occurrences = root_occurrence(large);
+    occurrences[0].devices = std::sync::Arc::new(vec![device("V1", "V1")]);
+    let (outputs, _) = effective_plan_saved_outputs(
+        OutputSelectionMode::Automatic,
+        &[],
+        &[],
+        &occurrences,
+        plan_id,
+    )
+    .expect("automatic selection");
+    assert!(
+        !outputs
+            .iter()
+            .any(|output| output.source_expression.starts_with("I(")),
+        "a design past small keeps its bounded node voltages only"
+    );
 }
 
 #[test]

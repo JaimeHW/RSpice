@@ -10,7 +10,7 @@ use rspice_app_state::state::{AnalysisType, SchematicAnnotationVisibility};
 use rspice_schematic_editor::view::scene::BadgeSubject;
 
 /// Press Run on the tab in front and let the run end.
-fn run(app: &mut RSpiceApp) {
+pub(super) fn run(app: &mut RSpiceApp) {
     app.invalidate_simulation_preflight();
     let _ = app.queued_by_its_check();
     let _ = app.dispatch_frame();

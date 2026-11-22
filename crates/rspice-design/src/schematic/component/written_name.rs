@@ -104,6 +104,24 @@ impl Component {
             None => written,
         }
     }
+
+    /// Whether the engine reads one current through this part as
+    /// `I(<element>)`: an emitted SPICE device, including a multi-terminal
+    /// one whose dialect defines that accessor (a MOS device's drain lead).
+    /// Ports, ground, couplings, transformers, blocks and code models own no
+    /// one current; each of their pins carries its own.
+    pub fn carries_one_current(&self) -> bool {
+        !self.kind.spice_prefix().is_empty()
+            && !matches!(
+                self.kind,
+                ComponentType::Ground
+                    | ComponentType::Port
+                    | ComponentType::Transformer
+                    | ComponentType::CoupledInductor
+                    | ComponentType::CellInstance
+            )
+            && !self.kind.is_xspice()
+    }
 }
 
 /// The component drawn on the sheet of `occurrence` that the engine names
