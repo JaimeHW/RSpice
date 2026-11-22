@@ -132,6 +132,7 @@ impl ProjectState {
         self.library_deletion_review.also = targets.collect();
         self.library_deletion_review.expected_library_revision = model.library_manager.revision();
         self.library_deletion_review.error = None;
+        self.library_deletion_review.placement_choice = DeletionInstanceResolution::default();
         Ok(())
     }
 
@@ -232,7 +233,7 @@ impl ProjectFeature {
         };
         let view_count = impact.views.to_string();
         let open_count = format!(
-            "{} ({} with working changes)",
+            "{} ({} with unsaved changes)",
             impact.open_views, impact.dirty_open_views
         );
         let reference_count = placements.to_string();
@@ -268,24 +269,12 @@ impl ProjectFeature {
                 "Remove these views and the sources they own, and close their tabs."
             }
         };
-        let these = if several { "these" } else { "this" };
-        let placement_question = (placements > 0).then(|| {
-            format!(
-                "{placements} {} of {these} {object} {} drawn in this project. Deleting {} does not decide what happens to {}.",
-                if placements == 1 {
-                    "placement"
-                } else {
-                    "placements"
-                },
-                if placements == 1 { "is" } else { "are" },
-                if several { "them" } else { "it" },
-                if placements == 1 { "it" } else { "them" }
-            )
-        });
-        let keep_label = if placements > 0 {
-            "Delete, keep placements"
-        } else {
-            "Delete"
+        // What becomes of the placements is answered in the form, beside the
+        // facts it weighs, and Delete confirms the answer: one footer, as
+        // every review has, rather than a button per answer.
+        let mut placement_choice = match cx.state.library_deletion_review.placement_choice {
+            DeletionInstanceResolution::KeepUnresolved => 0,
+            DeletionInstanceResolution::RemoveInstances => 1,
         };
         let labels = [
             "Target",
@@ -297,53 +286,57 @@ impl ProjectFeature {
             "Configurations starting here",
         ];
         let refusal = super::refused(&object);
-        let mut form = CommandForm::new(&title, keep_label)
+        let choice = CommandForm::new(&title, "Delete")
             .describe(description)
+            .reading_column()
             .fit_labels(ctx, &labels)
             .primary_enabled(deletable)
             .status(if displayed_error.is_some() {
                 Err(&refusal)
             } else {
                 Ok(Some(UNDOABLE))
+            })
+            .show(ctx, |rows| {
+                rows.value("Target", &target_path);
+                if matches!(target, LibraryDeletionTarget::Cell { .. }) {
+                    rows.value("Views removed", &view_count);
+                }
+                rows.value("Open views", &open_count);
+                rows.value("Layout placements", &layout_count);
+                rows.value("Source views", &source_count);
+                rows.value("Configurations starting here", &root_count);
+                rows.value("Placements in this project", &reference_count);
+                if placements > 0 {
+                    rows.choice(
+                        "Placements",
+                        &["Keep, unresolved", "Remove from sheets"],
+                        &mut placement_choice,
+                    );
+                    rows.derived(if placement_choice == 0 {
+                        "They stay on their sheets, still naming this master, and read as unresolved until you rebind or remove them."
+                    } else {
+                        "They come off every sheet with the deletion. Their wires stay where they are."
+                    });
+                }
+                if let Some(error) = displayed_error.as_deref() {
+                    rows.derived(error);
+                }
+                None
             });
-        if placements > 0 {
-            form = form
-                .secondary("Delete and remove placements")
-                .secondary_enabled(deletable);
-        }
-        let choice = form.show(ctx, |rows| {
-            rows.value("Target", &target_path);
-            if matches!(target, LibraryDeletionTarget::Cell { .. }) {
-                rows.value("Views removed", &view_count);
-            }
-            rows.value("Open views", &open_count);
-            rows.value("Placements in this project", &reference_count);
-            if let Some(question) = &placement_question {
-                rows.derived(question);
-                rows.derived(
-                    "Keep placements: they stay on their sheets, still naming this master, and read as unresolved until you rebind or remove them.",
-                );
-                rows.derived(
-                    "Remove placements: they come off every sheet with the deletion. Their wires stay where they are.",
-                );
-            }
-            rows.value("Layout placements", &layout_count);
-            rows.value("Source views", &source_count);
-            rows.value("Configurations starting here", &root_count);
-            if let Some(error) = displayed_error.as_deref() {
-                rows.derived(error);
-            }
-            None
-        });
+        let placement_choice = if placement_choice == 0 {
+            DeletionInstanceResolution::KeepUnresolved
+        } else {
+            DeletionInstanceResolution::RemoveInstances
+        };
+        cx.state.library_deletion_review.placement_choice = placement_choice;
 
         let resolution = match choice {
-            DialogChoice::Primary => Some(DeletionInstanceResolution::KeepUnresolved),
-            DialogChoice::Secondary => Some(DeletionInstanceResolution::RemoveInstances),
+            DialogChoice::Primary => Some(placement_choice),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 cx.state.library_deletion_review.close();
                 None
             }
-            DialogChoice::None => None,
+            DialogChoice::Secondary | DialogChoice::None => None,
         };
         if let Some(resolution) = resolution
             && let Err(error) = cx

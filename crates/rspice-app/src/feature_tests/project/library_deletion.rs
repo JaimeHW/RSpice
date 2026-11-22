@@ -14,7 +14,9 @@ use rspice_app_state::state::{
     Point, SchematicState, View, ViewType,
 };
 
+use super::super::replay::Replay;
 use super::with_cx;
+use egui::accesskit::Role;
 
 fn app_with_state(state: crate::workbench::app_state::AppState) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
@@ -1231,6 +1233,58 @@ fn removing_placements_across_two_drawings_undoes_as_one_step() {
     assert!(
         app.state.model.project_undo_sequence().is_none(),
         "both drawings came back on one step, not two"
+    );
+}
+
+/// The review asks what becomes of the placements in the form, and Delete
+/// carries out the answer: choosing to remove them takes them off both
+/// drawings, and the review's words count unsaved changes as unsaved.
+#[test]
+fn the_reviews_placement_choice_is_what_delete_carries_out() {
+    let mut replay = Replay::of(app_with_state(
+        default_project_with_two_drawings_instancing_amp(),
+    ));
+    let state = &mut replay.app.state;
+    state
+        .project
+        .open_library_cell_deletion_review(&state.model, "user", "amp")
+        .expect("the review opens");
+    let review = replay.frames(Vec::new());
+    assert!(
+        review
+            .iter()
+            .any(|control| control.value.contains("with unsaved changes")),
+        "the open views are counted with their unsaved changes: {:#?}",
+        review
+            .iter()
+            .map(|control| &control.value)
+            .collect::<Vec<_>>()
+    );
+
+    replay.click("Remove from sheets", Role::RadioButton);
+    replay.click("Delete", Role::Button);
+    replay.frames(Vec::new());
+
+    let top_key = CellViewRef::new("user", "top", "schematic").key();
+    let aux_key = CellViewRef::new("user", "aux", "schematic").key();
+    for key in [&top_key, &aux_key] {
+        assert!(
+            replay.app.state.model.workspace.content.schematic_buffers[key]
+                .document()
+                .components
+                .is_empty(),
+            "{key} still places the deleted master"
+        );
+    }
+    assert!(
+        replay
+            .app
+            .state
+            .project
+            .library_deletion_review
+            .target
+            .is_none(),
+        "the review closed with the deletion"
     );
 }
 

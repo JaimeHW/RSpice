@@ -224,6 +224,9 @@ pub struct LibraryDeletionReviewState {
     pub also: Vec<LibraryDeletionTarget>,
     pub(crate) expected_library_revision: u64,
     pub(crate) error: Option<String>,
+    /// What the reader has chosen, while the review is open, for the
+    /// object's placements; Delete confirms it.
+    pub placement_choice: DeletionInstanceResolution,
     /// The choice the reader confirmed for the object's placements. Set when
     /// the deletion is staged and taken exactly once by the staged deletion,
     /// so the two halves of one decision cannot come apart.
