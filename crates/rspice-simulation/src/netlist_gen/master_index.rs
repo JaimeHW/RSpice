@@ -349,6 +349,17 @@ impl<'a> MasterIndex<'a> {
                 source_data,
             );
             nested.extract_connectivity();
+            // Bodies that differ only in parameters share one drawing, so the
+            // drawing's nets are kept once per cell view.
+            if !emission.geometry.iter().any(|kept| {
+                kept.reference
+                    .key()
+                    .eq_ignore_ascii_case(&draft.reference.key())
+            }) {
+                emission
+                    .geometry
+                    .push(nested.net_geometry(draft.reference.clone()));
+            }
             // A port tied to ground inside the cell emits node 0 in the body
             // while the header still declares the port: the pin would float at
             // every instantiation.
@@ -455,6 +466,8 @@ pub(super) struct MasterEmission {
     pub(super) defects: Vec<NetlistDefect>,
     pub(super) errors: Vec<String>,
     pub(super) warnings: Vec<String>,
+    /// Each master cell view's nets, once however many bodies it emitted.
+    pub(super) geometry: Vec<MasterNetGeometry>,
 }
 
 /// The walk that decides master identity.

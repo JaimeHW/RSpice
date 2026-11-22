@@ -141,10 +141,7 @@ fn result_mapping_is_current(state: ResultsReads<'_>) -> bool {
     };
     run.prepared_receipt().is_some_and(|receipt| {
         receipt.project_revision() == state.model.workspace.content.project.revision()
-    }) && state.model.simulation.source.cross_probe.is_current_for(
-        &state.model.workspace.content.active_view,
-        state.model.schematic.topology_version(),
-    )
+    }) && state.model.result_mapping_is_current()
 }
 fn node_target_available(state: ResultsReads<'_>, name: &str) -> bool {
     if !result_mapping_is_current(state) {

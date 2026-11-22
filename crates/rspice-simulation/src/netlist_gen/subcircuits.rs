@@ -20,6 +20,7 @@ impl<'a> NetlistGenerator<'a> {
         self.emission_map = index.emission_map().clone();
         let emission = MasterIndex::emit(&index, hierarchy, self.source_data);
         self.masters = Some(index);
+        self.master_geometry = emission.geometry;
 
         self.errors.extend(emission.errors);
         self.warnings.extend(emission.warnings);

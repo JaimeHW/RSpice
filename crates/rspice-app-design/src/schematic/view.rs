@@ -182,8 +182,8 @@ pub(crate) fn drawn_failure_site_count(
         sheet_catalog: sheet_visibility::active_sheet_catalog(state),
         occurrence: &occurrence,
         net_to_points: model
-            .result_mapping_is_current()
-            .then_some(&model.active_sheet_net_geometry().net_to_points),
+            .active_sheet_net_geometry()
+            .map(|geometry| &geometry.net_to_points),
     };
     cross_probe::drawn_failure_site_count(&view, nets, devices)
 }
@@ -194,9 +194,9 @@ pub(crate) fn select_failure_sites(
     nets: &[String],
     devices: &[String],
 ) -> Result<FailureSiteSelection, LocateSignalError> {
-    let current = model.result_mapping_is_current();
     let occurrence = model.workspace.content.occurrence_path();
     let sheet = model.active_sheet_id();
+    let topology = model.schematic.topology_version();
     let key = model.workspace.content.active_schematic_reference().key();
     let (document, editor) = model.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
@@ -207,14 +207,17 @@ pub(crate) fn select_failure_sites(
             .design_management
             .sheet_catalog(&key),
         occurrence: &occurrence,
-        net_to_points: current.then_some(
-            &model
-                .simulation
-                .source
-                .cross_probe
-                .on_sheet(sheet)
-                .net_to_points,
-        ),
+        net_to_points: model
+            .simulation
+            .source
+            .cross_probe
+            .on_sheet_at(
+                &model.workspace.content.active_view,
+                &occurrence,
+                topology,
+                sheet,
+            )
+            .map(|geometry| &geometry.net_to_points),
     };
     cross_probe::select_failure_sites(&view, editor, nets, devices)
 }
@@ -680,12 +683,15 @@ mod tests {
 
     #[test]
     fn a_scoped_trace_name_locates_the_conductor_by_its_leaf() {
+        use rspice_simulation::netlist_gen::{MasterCrossProbe, SheetNetGeometry};
+
         let mut state = DesignTestHost::default();
-        state.model.workspace.descend_into(
-            "X1".to_owned(),
-            crate::state::CellViewRef::new("user", "amp", "schematic"),
-            ViewType::Schematic,
-        );
+        let top = state.model.workspace.content.active_view.clone();
+        let amp = crate::state::CellViewRef::new("user", "amp", "schematic");
+        state
+            .model
+            .workspace
+            .descend_into("X1".to_owned(), amp.clone(), ViewType::Schematic);
         let a = Point::new(0, 0);
         let b = Point::new(40, 0);
         state
@@ -694,12 +700,30 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
-        state.model.simulation.source.cross_probe.update(
-            state.model.workspace.content.active_view.clone(),
-            std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
-            std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
+        // The run read the block's own drawing beside the root's.
+        let topology = state.model.schematic.topology_version();
+        state.model.simulation.source.cross_probe.install(
+            top,
             std::collections::HashMap::new(),
-            state.model.schematic.topology_version(),
+            topology,
+            vec![MasterCrossProbe {
+                reference: amp,
+                sheets: std::collections::HashMap::from([(
+                    None,
+                    SheetNetGeometry {
+                        point_to_net: std::collections::HashMap::from([
+                            (a, "OUT".to_owned()),
+                            (b, "OUT".to_owned()),
+                        ]),
+                        net_to_points: std::collections::HashMap::from([(
+                            "OUT".to_owned(),
+                            vec![a, b],
+                        )]),
+                        net_segments: std::collections::HashMap::new(),
+                    },
+                )]),
+                topology_version: topology,
+            }],
         );
 
         let net = state

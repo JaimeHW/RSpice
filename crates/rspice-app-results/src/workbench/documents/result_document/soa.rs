@@ -376,10 +376,11 @@ fn result_mapping_is_current(
         && run.prepared_receipt().is_some_and(|receipt| {
             receipt.project_revision() == workspace.content.project.revision()
         })
-        && simulation
-            .source
-            .cross_probe
-            .is_current_for(&workspace.content.active_view, schematic.topology_version())
+        && simulation.source.cross_probe.is_current_at(
+            &workspace.content.active_view,
+            &workspace.content.occurrence_path(),
+            schematic.topology_version(),
+        )
 }
 
 fn soa_device_target(

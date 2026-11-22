@@ -689,6 +689,32 @@ where
                 source_reference: root_reference,
                 topology_version: root_schematic.topology_version(),
                 emission_map: generated.emission_map,
+                // Each master's nets on its own drawing, with the revision
+                // of the buffer the run read, so a descended block probes
+                // and annotates against its own geometry.
+                masters: generated
+                    .master_geometry
+                    .into_iter()
+                    .filter_map(|master| {
+                        let key = master.reference.key();
+                        let topology_version = execution_projection
+                            .schematic_buffers()
+                            .iter()
+                            .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?
+                            .1
+                            .topology_version();
+                        Some(crate::netlist_gen::MasterCrossProbe {
+                            sheets: crate::netlist_gen::net_geometry_by_sheet(
+                                inputs.design_management.sheet_catalog(&key),
+                                master.point_to_net,
+                                master.net_to_points,
+                                master.net_segments,
+                            ),
+                            reference: master.reference,
+                            topology_version,
+                        })
+                    })
+                    .collect(),
             }),
             touchstone_export,
             sealed_source_dependencies,

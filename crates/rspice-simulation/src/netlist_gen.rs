@@ -111,6 +111,20 @@ pub struct NetlistResult {
 
     /// What each line of `netlist` was written for, one entry per line.
     pub line_map: Vec<WrittenLine>,
+
+    /// Each emitted master's net geometry, in its own drawing's coordinates,
+    /// once per master cell view: what a probe on a descended block reads.
+    pub master_geometry: Vec<MasterNetGeometry>,
+}
+
+/// One master's nets as its `.SUBCKT` body was generated: the same three maps
+/// the top level keeps, read off the master's own drawing.
+#[derive(Debug, Clone)]
+pub struct MasterNetGeometry {
+    pub reference: CellViewRef,
+    pub point_to_net: HashMap<Point, String>,
+    pub net_to_points: HashMap<String, Vec<Point>>,
+    pub net_segments: HashMap<String, Vec<(Point, Point)>>,
 }
 
 /// What one generation pass learned about the design it netlisted. The one
@@ -126,6 +140,17 @@ pub struct CrossProbeSnapshot {
     /// The master each occurrence was emitted against. Cross probing never
     /// reads it; it is captured here because the same pass produces it.
     pub emission_map: EmissionMap,
+    /// Each emitted master's net geometry, sheet by sheet, with the topology
+    /// revision of the drawing it was read off.
+    pub masters: Vec<MasterCrossProbe>,
+}
+
+/// One master's share of a run's cross-probe geometry.
+#[derive(Debug, Clone)]
+pub struct MasterCrossProbe {
+    pub reference: CellViewRef,
+    pub sheets: SheetNetGeometries,
+    pub topology_version: u64,
 }
 
 /// Generate a flat SPICE netlist from a schematic.
@@ -245,41 +270,12 @@ impl NetlistGenerator<'_> {
         analysis_lines: &[String],
         parameter_lines: &[String],
     ) -> NetlistResult {
-        let schematic = self.schematic;
         let generator = &mut self;
 
         let (netlist, line_map) =
             generator.generate_with_analysis_and_parameters(analysis_lines, parameter_lines);
 
-        // Build the nets map from the generator's data
-        let mut nets: HashMap<String, Vec<Point>> = HashMap::new();
-        let mut point_to_net: HashMap<Point, String> = HashMap::new();
-
-        for net in generator.nets() {
-            let name = net.spice_name();
-            let points: Vec<Point> = net.points.iter().copied().collect();
-            for &p in &points {
-                point_to_net.insert(p, name.clone());
-            }
-            nets.insert(name, points);
-        }
-
-        // A wire belongs to exactly one net; index its segments under that
-        // net's name so probes between nodes resolve.
-        let mut net_segments: HashMap<String, Vec<(Point, Point)>> = HashMap::new();
-        for wire in &schematic.wires {
-            let Some(name) = wire
-                .points
-                .first()
-                .and_then(|first| point_to_net.get(first))
-            else {
-                continue;
-            };
-            net_segments
-                .entry(name.clone())
-                .or_default()
-                .extend(wire.points.windows(2).map(|w| (w[0], w[1])));
-        }
+        let (point_to_net, nets, net_segments) = generator.net_maps();
 
         NetlistResult {
             netlist,
@@ -291,6 +287,7 @@ impl NetlistGenerator<'_> {
             defects: generator.defects.clone(),
             emission_map: generator.emission_map.clone(),
             line_map,
+            master_geometry: std::mem::take(&mut generator.master_geometry),
         }
     }
 }
@@ -352,6 +349,8 @@ pub struct NetlistGenerator<'a> {
     defects: Vec<NetlistDefect>,
     /// Which master each occurrence was emitted against.
     emission_map: EmissionMap,
+    /// Each emitted master's net geometry, published by the definition pass.
+    master_geometry: Vec<MasterNetGeometry>,
 }
 
 impl<'a> NetlistGenerator<'a> {
@@ -379,6 +378,7 @@ impl<'a> NetlistGenerator<'a> {
             masters: None,
             defects: Vec::new(),
             emission_map: EmissionMap::default(),
+            master_geometry: Vec::new(),
         }
     }
 
@@ -486,6 +486,7 @@ impl<'a> NetlistGenerator<'a> {
         self.errors.clear();
         self.defects.clear();
         self.emission_map = EmissionMap::default();
+        self.master_geometry.clear();
         self.masters = None;
     }
 
@@ -578,6 +579,56 @@ impl<'a> NetlistGenerator<'a> {
 
     pub fn nets(&self) -> &[Net] {
         &self.nets
+    }
+
+    /// The extracted nets as geometry: the net at each node point, each net's
+    /// node points, and the wire segments each net owns. A wire belongs to
+    /// exactly one net, so its segments are indexed under that net's name and
+    /// a probe between nodes resolves.
+    #[allow(clippy::type_complexity)]
+    fn net_maps(
+        &self,
+    ) -> (
+        HashMap<Point, String>,
+        HashMap<String, Vec<Point>>,
+        HashMap<String, Vec<(Point, Point)>>,
+    ) {
+        let mut net_to_points: HashMap<String, Vec<Point>> = HashMap::new();
+        let mut point_to_net: HashMap<Point, String> = HashMap::new();
+        for net in &self.nets {
+            let name = net.spice_name();
+            let points: Vec<Point> = net.points.iter().copied().collect();
+            for &point in &points {
+                point_to_net.insert(point, name.clone());
+            }
+            net_to_points.insert(name, points);
+        }
+        let mut net_segments: HashMap<String, Vec<(Point, Point)>> = HashMap::new();
+        for wire in &self.schematic.wires {
+            let Some(name) = wire
+                .points
+                .first()
+                .and_then(|first| point_to_net.get(first))
+            else {
+                continue;
+            };
+            net_segments
+                .entry(name.clone())
+                .or_default()
+                .extend(wire.points.windows(2).map(|w| (w[0], w[1])));
+        }
+        (point_to_net, net_to_points, net_segments)
+    }
+
+    /// [`Self::net_maps`] for the master drawn at `reference`.
+    fn net_geometry(&self, reference: CellViewRef) -> MasterNetGeometry {
+        let (point_to_net, net_to_points, net_segments) = self.net_maps();
+        MasterNetGeometry {
+            reference,
+            point_to_net,
+            net_to_points,
+            net_segments,
+        }
     }
 
     /// Get net for a point. Node points resolve directly; points between

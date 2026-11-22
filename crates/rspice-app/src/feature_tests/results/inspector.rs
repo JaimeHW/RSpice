@@ -283,6 +283,43 @@ pub(crate) fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     app
 }
 
+/// The fixture's map as a run of `root` reads it, with `block` emitted as a
+/// master of its own: the OUT conductor drawn on the block's sheet, and on
+/// the root's at the same place.
+fn install_block_map(
+    app: &mut RSpiceApp,
+    root: rspice_app_state::state::CellViewRef,
+    block: rspice_app_state::state::CellViewRef,
+) {
+    use rspice_simulation::netlist_gen::{MasterCrossProbe, SheetNetGeometry};
+    let a = rspice_app_state::state::Point::new(0, 0);
+    let b = rspice_app_state::state::Point::new(40, 0);
+    let out = || {
+        std::collections::HashMap::from([(
+            None,
+            SheetNetGeometry {
+                point_to_net: std::collections::HashMap::from([
+                    (a, "OUT".to_owned()),
+                    (b, "OUT".to_owned()),
+                ]),
+                net_to_points: std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
+                net_segments: std::collections::HashMap::new(),
+            },
+        )])
+    };
+    let topology = app.state.model.schematic.topology_version();
+    app.state.model.simulation.source.cross_probe.install(
+        root,
+        out(),
+        topology,
+        vec![MasterCrossProbe {
+            reference: block,
+            sheets: out(),
+            topology_version: topology,
+        }],
+    );
+}
+
 /// Cross-probe `signal` as the inspector's button does, then answer what the
 /// gesture raised, as the shell does once the inspector returns: Design
 /// opens there.
@@ -494,11 +531,15 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     // One level down, the root-scoped trace is the one out of scope — even
     // though the open sheet happens to carry a conductor of that name.
     let parent = rspice_app_state::state::CellViewRef::new(&view.library, "tb", &view.view);
-    app.state.model.workspace.open_as_root(parent, view_type);
     app.state
         .model
         .workspace
-        .descend_into("X1".to_owned(), view, view_type);
+        .open_as_root(parent.clone(), view_type);
+    app.state
+        .model
+        .workspace
+        .descend_into("X1".to_owned(), view.clone(), view_type);
+    install_block_map(&mut app, parent, view);
 
     let error = cross_probe(&mut app, "V(out)")
         .expect_err("a root-scoped trace does not name a conductor inside X1");
@@ -531,11 +572,15 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
         .active_view_type()
         .expect("the result app has its testbench open");
     let parent = rspice_app_state::state::CellViewRef::new(&view.library, "tb", &view.view);
-    app.state.model.workspace.open_as_root(parent, view_type);
     app.state
         .model
         .workspace
-        .descend_into("amp".to_owned(), view, view_type);
+        .open_as_root(parent.clone(), view_type);
+    app.state
+        .model
+        .workspace
+        .descend_into("amp".to_owned(), view.clone(), view_type);
+    install_block_map(&mut app, parent, view);
 
     let net = cross_probe(&mut app, "V(xamp.out)").expect("the written scope is this occurrence");
 

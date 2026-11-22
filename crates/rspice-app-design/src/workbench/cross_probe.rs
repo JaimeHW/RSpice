@@ -205,10 +205,7 @@ fn compatible_result_trace(
     model: &Model,
     target: &SchematicCrossProbeTarget,
 ) -> Option<SelectedResultTrace> {
-    if !model.simulation.source.cross_probe.is_current_for(
-        &model.workspace.content.active_view,
-        model.schematic.topology_version(),
-    ) {
+    if !model.result_mapping_is_current() {
         return None;
     }
     let run = model.simulation.active_run()?;

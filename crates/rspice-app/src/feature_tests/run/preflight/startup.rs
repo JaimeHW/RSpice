@@ -539,7 +539,7 @@ fn an_initial_condition_written_as_a_design_variable_moves_with_its_sweep() {
 /// The RC with R1 and C1 made into a block through Create hierarchy: the
 /// root keeps VIN on `net1` and places the block as X1, inside which `out`
 /// is the block's own net and `R1_p` its port.
-fn rc_in_a_block() -> RSpiceApp {
+pub(super) fn rc_in_a_block() -> RSpiceApp {
     use rspice_app_design::workbench::app::dialogs::hierarchy::create::{
         commit_create_hierarchy, open_create_hierarchy_dialog,
     };

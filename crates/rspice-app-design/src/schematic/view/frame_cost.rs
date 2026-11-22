@@ -277,6 +277,7 @@ pub fn install_projected_run_geometry(model: &mut Model, nets: HashMap<String, V
         model.workspace.content.active_view.clone(),
         sheets,
         model.schematic.topology_version(),
+        Vec::new(),
     );
 }
 

@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock};
 
 use super::*;
 use crate::state::{CellViewRef, InstancePath, SheetId};
-use rspice_simulation::netlist_gen::{SheetNetGeometries, SheetNetGeometry};
+use rspice_simulation::netlist_gen::{MasterCrossProbe, SheetNetGeometries, SheetNetGeometry};
 
 /// What a sheet the run captured nothing for reads: no nets at all.
 static NO_GEOMETRY: LazyLock<SheetNetGeometry> = LazyLock::new(SheetNetGeometry::default);
@@ -63,6 +63,20 @@ pub struct CrossProbeMapping {
     /// Exact schematic topology revision from which this map was generated.
     /// Consumers must reject the map after any structural edit.
     pub source_topology_version: Option<u64>,
+
+    /// Each master the run emitted, keyed by its folded cell view key: its
+    /// nets on its own drawing and the revision of the drawing they were
+    /// read off. A block descended into reads these, never the root's.
+    masters: Arc<BTreeMap<String, MasterGeometry>>,
+}
+
+/// One emitted master's geometry, as the run read it off that master's own
+/// drawing.
+#[derive(Debug, Clone)]
+struct MasterGeometry {
+    reference: CellViewRef,
+    sheets: Arc<SheetNetGeometries>,
+    topology_version: u64,
 }
 
 /// Does `p` lie exactly on segment `(a, b)` (inclusive)?
@@ -71,6 +85,22 @@ pub struct CrossProbeMapping {
 /// geometry so diagonal and extreme-coordinate conductors resolve exactly.
 fn on_segment(p: Point, a: Point, b: Point) -> bool {
     crate::state::WireSegment::new(a, b).contains_point(p)
+}
+
+/// The net under a drawn point of one sheet's geometry.
+///
+/// Node points answer from the hash; anything else scans the net segment
+/// lists (probe clicks are rare — this is not a frame path).
+fn net_in(geometry: &SheetNetGeometry, point: Point) -> Option<&String> {
+    if let Some(name) = geometry.point_to_net.get(&point) {
+        return Some(name);
+    }
+    geometry.net_segments.iter().find_map(|(name, segments)| {
+        segments
+            .iter()
+            .any(|&(a, b)| on_segment(point, a, b))
+            .then_some(name)
+    })
 }
 
 /// The engine's name for every net that has geometry on any sheet, read at
@@ -111,12 +141,28 @@ impl CrossProbeMapping {
         source_reference: CellViewRef,
         sheets: SheetNetGeometries,
         source_topology_version: u64,
+        masters: Vec<MasterCrossProbe>,
     ) {
         self.source_reference = Some(source_reference);
         self.occurrence = None;
         self.engine_names = engine_names_at(&InstancePath::root(), &sheets);
         self.sheets = Arc::new(sheets);
         self.source_topology_version = Some(source_topology_version);
+        self.masters = Arc::new(
+            masters
+                .into_iter()
+                .map(|master| {
+                    (
+                        master.reference.key().to_ascii_lowercase(),
+                        MasterGeometry {
+                            reference: master.reference,
+                            sheets: Arc::new(master.sheets),
+                            topology_version: master.topology_version,
+                        },
+                    )
+                })
+                .collect(),
+        );
         self.version += 1;
     }
 
@@ -142,6 +188,7 @@ impl CrossProbeMapping {
                 },
             )]),
             source_topology_version,
+            Vec::new(),
         );
     }
 
@@ -158,16 +205,58 @@ impl CrossProbeMapping {
     /// segment lists (probe clicks are rare — this is not a frame path).
     /// Returns None if the point is not on a net (e.g., empty space).
     pub fn net_at(&self, sheet: Option<SheetId>, point: Point) -> Option<&String> {
-        let geometry = self.on_sheet(sheet);
-        if let Some(name) = geometry.point_to_net.get(&point) {
-            return Some(name);
+        net_in(self.on_sheet(sheet), point)
+    }
+
+    /// The geometry the run captured for the drawing `reference` as it stands
+    /// at `topology_version`: the root's, or the master's when `reference` is
+    /// a master the run emitted. `None` once that drawing has changed, or
+    /// when the run captured nothing for it.
+    fn sheets_for(
+        &self,
+        reference: &CellViewRef,
+        topology_version: u64,
+    ) -> Option<&SheetNetGeometries> {
+        if self.is_captured_from(reference) {
+            return (self.source_topology_version == Some(topology_version))
+                .then_some(self.sheets.as_ref());
         }
-        geometry.net_segments.iter().find_map(|(name, segments)| {
-            segments
-                .iter()
-                .any(|&(a, b)| on_segment(point, a, b))
-                .then_some(name)
-        })
+        self.masters
+            .get(&reference.key().to_ascii_lowercase())
+            .filter(|master| master.topology_version == topology_version)
+            .map(|master| master.sheets.as_ref())
+    }
+
+    /// Whether this map answers for the tab in front: `reference` drawn as it
+    /// was at `topology_version`, edited at `occurrence`. The root's geometry
+    /// answers at the design root; a master's answers in a block descended
+    /// into, where the occurrence names which instance's signals it reads.
+    /// A master opened on its own stands at no one occurrence, so nothing
+    /// answers for it.
+    pub fn is_current_at(
+        &self,
+        reference: &CellViewRef,
+        occurrence: &InstancePath,
+        topology_version: u64,
+    ) -> bool {
+        self.sheets_for(reference, topology_version).is_some()
+            && occurrence.is_root() == self.is_captured_from(reference)
+    }
+
+    /// The geometry `reference` draws on `sheet`, when the map answers for it
+    /// at `occurrence` ([`Self::is_current_at`]).
+    pub fn on_sheet_at(
+        &self,
+        reference: &CellViewRef,
+        occurrence: &InstancePath,
+        topology_version: u64,
+        sheet: Option<SheetId>,
+    ) -> Option<&SheetNetGeometry> {
+        if !self.is_current_at(reference, occurrence, topology_version) {
+            return None;
+        }
+        self.sheets_for(reference, topology_version)
+            .map(|sheets| sheets.get(&sheet).unwrap_or(&NO_GEOMETRY))
     }
 
     /// Resolve a net only when both the owning cell/view and topology receipt
@@ -179,9 +268,8 @@ impl CrossProbeMapping {
         sheet: Option<SheetId>,
         point: Point,
     ) -> Option<&String> {
-        self.is_current_for(reference, topology_version)
-            .then(|| self.net_at(sheet, point))
-            .flatten()
+        let sheets = self.sheets_for(reference, topology_version)?;
+        net_in(sheets.get(&sheet).unwrap_or(&NO_GEOMETRY), point)
     }
 
     pub fn is_current_for(&self, reference: &CellViewRef, topology_version: u64) -> bool {
@@ -255,8 +343,22 @@ impl CrossProbeIndex {
             let Ok(occurrence) = InstancePath::parse(row.occurrence()) else {
                 continue;
             };
+            let master = captured
+                .masters
+                .get(&row.master_reference().key().to_ascii_lowercase());
             let mapping = if captured.is_captured_from(row.master_reference()) {
                 captured.at_occurrence(&occurrence)
+            } else if let Some(master) = master {
+                // The master's own drawing, read at this occurrence: its
+                // points, and the engine names the occurrence gives them.
+                CrossProbeMapping {
+                    source_reference: Some(master.reference.clone()),
+                    occurrence: Some(occurrence.clone()),
+                    engine_names: engine_names_at(&occurrence, &master.sheets),
+                    sheets: Arc::clone(&master.sheets),
+                    source_topology_version: Some(master.topology_version),
+                    ..captured.clone()
+                }
             } else {
                 CrossProbeMapping {
                     source_reference: Some(row.master_reference().clone()),
@@ -398,6 +500,7 @@ mod tests {
                 HashMap::new(),
             ),
             3,
+            Vec::new(),
         );
 
         let net = |sheet| mapping.net_at_in(&source, 3, Some(sheet), drawn).cloned();
@@ -405,6 +508,72 @@ mod tests {
         assert_eq!(net(sheets[1]).as_deref(), Some("BIAS"));
         assert!(mapping.on_sheet(None).net_to_points.is_empty());
         assert_eq!(mapping.engine_name("bias"), Some("bias"));
+    }
+
+    /// A block descended into is read off its own drawing at its own
+    /// revision; the design root reads the root's; a master opened on its own
+    /// stands at no occurrence, so the run answers for nothing there.
+    #[test]
+    fn a_descended_block_reads_its_own_drawings_geometry() {
+        let one_net = |net: &str, point: Point| {
+            HashMap::from([(
+                None,
+                SheetNetGeometry {
+                    point_to_net: HashMap::from([(point, net.to_owned())]),
+                    net_to_points: HashMap::from([(net.to_owned(), vec![point])]),
+                    net_segments: HashMap::new(),
+                },
+            )])
+        };
+        let top = CellViewRef::new("user", "top", "schematic");
+        let amp = amp_reference();
+        let root_point = Point::new(0, 0);
+        let block_point = Point::new(50, 0);
+        let mut mapping = CrossProbeMapping::new();
+        mapping.install(
+            top.clone(),
+            one_net("OUT", root_point),
+            3,
+            vec![MasterCrossProbe {
+                reference: amp.clone(),
+                sheets: one_net("N1", block_point),
+                topology_version: 7,
+            }],
+        );
+        let root = InstancePath::root();
+        let x1 = InstancePath::parse("/X1").expect("instance path");
+
+        assert!(mapping.is_current_at(&top, &root, 3));
+        assert!(
+            !mapping.is_current_at(&top, &root, 4),
+            "the root was edited"
+        );
+        assert!(mapping.is_current_at(&amp, &x1, 7));
+        assert!(!mapping.is_current_at(&amp, &x1, 8), "the block was edited");
+        assert!(
+            !mapping.is_current_at(&amp, &root, 7),
+            "a master opened on its own is no occurrence the run solved"
+        );
+        assert!(!mapping.is_current_at(&top, &x1, 3));
+
+        let nets_at = |reference: &CellViewRef, occurrence: &InstancePath, topology| {
+            mapping
+                .on_sheet_at(reference, occurrence, topology, None)
+                .map(|geometry| geometry.net_to_points.keys().cloned().collect::<Vec<_>>())
+        };
+        assert_eq!(nets_at(&amp, &x1, 7), Some(vec!["N1".to_owned()]));
+        assert_eq!(nets_at(&top, &root, 3), Some(vec!["OUT".to_owned()]));
+        assert_eq!(nets_at(&amp, &root, 7), None);
+        assert_eq!(
+            mapping
+                .net_at_in(&amp, 7, None, block_point)
+                .map(String::as_str),
+            Some("N1")
+        );
+        assert!(
+            mapping.net_at_in(&amp, 7, None, root_point).is_none(),
+            "the root's conductor is not on the block's drawing"
+        );
     }
 
     #[test]

@@ -134,6 +134,7 @@ fn selected_net_highlights_only_a_current_exact_retained_trace() {
 fn a_descended_tab_selects_the_trace_named_for_its_occurrence() {
     let mut state = AppState::default();
     let child = rspice_app_state::state::CellViewRef::new("user", "amp", "schematic");
+    let top = state.model.workspace.content.active_view.clone();
     state.model.workspace.descend_into(
         "X1".to_owned(),
         child.clone(),
@@ -156,7 +157,29 @@ fn a_descended_tab_selects_the_trace_named_for_its_occurrence() {
         .editor
         .selection
         .select_net_label(7);
-    install_current_map(&mut state, "n1");
+    // The run read the root and, for the block, the block's own drawing.
+    let point = rspice_app_state::state::Point::new(0, 0);
+    let topology = state.model.schematic.topology_version();
+    state.model.simulation.source.cross_probe.install(
+        top,
+        std::collections::HashMap::new(),
+        topology,
+        vec![rspice_simulation::netlist_gen::MasterCrossProbe {
+            reference: child.clone(),
+            sheets: std::collections::HashMap::from([(
+                None,
+                rspice_simulation::netlist_gen::SheetNetGeometry {
+                    point_to_net: std::collections::HashMap::from([(point, "n1".to_owned())]),
+                    net_to_points: std::collections::HashMap::from([(
+                        "n1".to_owned(),
+                        vec![point],
+                    )]),
+                    net_segments: std::collections::HashMap::new(),
+                },
+            )]),
+            topology_version: topology,
+        }],
+    );
     let revision = state.model.workspace.content.project.revision();
     state.model.simulation.retained.runs.push(prepared_run_in(
         revision,

@@ -605,6 +605,7 @@ impl SimulationController {
                 cross_probe.source_reference,
                 cross_probe.sheets,
                 cross_probe.topology_version,
+                cross_probe.masters,
             );
         }
         let mut analyses: Vec<&str> = Vec::new();

@@ -688,9 +688,7 @@ fn schematic_cross_probe_unavailability(
             "{signal} is a device current or derived quantity; no single schematic net carries it."
         ));
     };
-    let map = &model.simulation.source.cross_probe;
-    let topology = model.schematic.topology_version();
-    if !map.is_current_for(&model.workspace.content.active_view, topology) {
+    if !model.result_mapping_is_current() {
         return Some(
             "The schematic changed since this result was produced; run again to cross-probe it."
                 .to_owned(),

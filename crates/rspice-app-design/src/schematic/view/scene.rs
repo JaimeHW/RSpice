@@ -690,8 +690,9 @@ fn occurrence_cross_probe_index(state: &CanvasFacts<'_>) -> Option<CrossProbeInd
         })
 }
 
-/// Every solved node's points on the active sheet, keyed by the engine's
-/// folded name for it, read at the active tab's occurrence and at no other.
+/// Every solved node's local name and points on the active sheet, keyed by
+/// the engine's folded name for it, read at the active tab's occurrence and at
+/// no other.
 ///
 /// A net name is only half an address: `n1` inside `/X1` and `n1` inside `/X2`
 /// are two different nodes and the engine solved neither of them by that name.
@@ -713,7 +714,7 @@ fn occurrence_cross_probe_index(state: &CanvasFacts<'_>) -> Option<CrossProbeInd
 fn occurrence_engine_points<'a>(
     state: &CanvasFacts<'a>,
     index: Option<&'a CrossProbeIndex>,
-) -> HashMap<String, &'a Vec<Point>> {
+) -> HashMap<String, (&'a str, &'a Vec<Point>)> {
     let occurrence = state.model.workspace.content.occurrence_path();
     let selected = match index {
         Some(index) => index.for_occurrence(&occurrence),
@@ -726,12 +727,18 @@ fn occurrence_engine_points<'a>(
     // another sheet's points mean nothing on this one.
     let sheet = super::sheet_visibility::active_sheet_id(state);
     let mut points_by_engine = HashMap::new();
-    for mapping in selected {
+    // Only a mapping read off the drawing in front: an occurrence of another
+    // master carries no points that mean anything here.
+    let view = &state.model.workspace.content.active_view;
+    for mapping in selected
+        .iter()
+        .filter(|mapping| mapping.is_captured_from(view))
+    {
         for (leaf, points) in &mapping.on_sheet(sheet).net_to_points {
             if let Some(engine) = mapping.engine_name(leaf) {
                 points_by_engine
                     .entry(engine.to_ascii_lowercase())
-                    .or_insert(points);
+                    .or_insert((leaf.as_str(), points));
             }
         }
     }
@@ -747,7 +754,7 @@ fn occurrence_net_points<'a>(
 ) -> Option<&'a Vec<Point>> {
     occurrence_engine_points(state, index)
         .get(&engine_name.to_ascii_lowercase())
-        .copied()
+        .map(|(_, points)| *points)
 }
 
 /// The analysis whose operating point the canvas annotates, with what it
@@ -772,8 +779,9 @@ fn annotated_operating_point<'a>(
         SchematicAnnotationVisibility::OperatingPoint
             | SchematicAnnotationVisibility::TransientVoltages
     ) || !state.model.simulation.source.cross_probe.is_populated()
-        || !state.model.simulation.source.cross_probe.is_current_for(
+        || !state.model.simulation.source.cross_probe.is_current_at(
             &state.model.workspace.content.active_view,
+            &state.model.workspace.content.occurrence_path(),
             state.model.schematic.topology_version(),
         )
     {
@@ -995,6 +1003,7 @@ fn voltage_badges(
     // annotates the conductor the drawing shows, so it quotes the drawing's
     // own spelling of it.
     let notations = bus_notations(&state.model.workspace, &state.model.schematic);
+    let in_block = !state.model.workspace.content.occurrence_path().is_root();
     let mut badges = Vec::new();
     for voltage in &dc_op.node_voltages {
         if !voltage.value.is_finite() {
@@ -1004,22 +1013,30 @@ fn voltage_badges(
             continue;
         };
         let key = net_name.to_ascii_lowercase();
-        let Some(anchor) = points_by_engine.get(&key).and_then(|points| {
-            points
-                .iter()
-                .copied()
-                .filter(|point| {
-                    anchors.contains(point) || state.design_view().active_wire_at(*point).is_some()
-                })
-                .min_by_key(|point| (point.y, point.x))
-        }) else {
+        let Some((leaf, points)) = points_by_engine.get(&key) else {
+            continue;
+        };
+        let Some(anchor) = points
+            .iter()
+            .copied()
+            .filter(|point| {
+                anchors.contains(point) || state.design_view().active_wire_at(*point).is_some()
+            })
+            .min_by_key(|point| (point.y, point.x))
+        else {
             continue;
         };
         // A named net's value sits right after its own label, so it reads
-        // `OUT 912.4 mV`; an unnamed net's badge carries its name.
-        let label = labels.get(&key).copied();
+        // `OUT 912.4 mV`; an unnamed net's badge carries its name. Inside a
+        // block that is the name the block's drawing gives the net, as its
+        // label spells it, not the path the engine flattened it to.
+        let label = labels.get(&leaf.to_ascii_lowercase()).copied();
         let display = notations.display(&voltage.name);
-        let shown = wrapped_signal_name(&display, 'V').unwrap_or(net_name);
+        let shown = if in_block {
+            leaf
+        } else {
+            wrapped_signal_name(&display, 'V').unwrap_or(net_name)
+        };
         let value = badge_quantity(voltage.value, &voltage.unit);
         let highlighted = editor_net_is_highlighted(state, net_name);
         badges.push(OperatingPointCanvasAnnotation {
@@ -1709,20 +1726,33 @@ pub mod tests {
     /// Two instances of one master share every point on the drawing and not one
     /// signal name, so the node the engine solved as `x1.n1` may reach the
     /// drawing only on the tab opened at `/X1` — never at the design root and
-    /// never at `/X2`.
+    /// never at `/X2`. The descended tab reads the block's own drawing, never
+    /// the design root's points under the same net name.
     #[test]
     fn the_annotation_path_reads_only_the_active_occurrences_mappings() {
         use crate::state::InstancePath;
+        use rspice_simulation::netlist_gen::{MasterCrossProbe, SheetNetGeometry};
 
+        let one_net = |point: Point| SheetNetGeometry {
+            point_to_net: HashMap::from([(point, "n1".to_owned())]),
+            net_to_points: HashMap::from([("n1".to_owned(), vec![point])]),
+            net_segments: HashMap::new(),
+        };
         let master = CellViewRef::new("user", "amp", "schematic");
         let point = Point::new(10, 20);
+        let root_point = Point::new(30, 40);
         let mut state = DesignTestHost::default();
-        state.model.simulation.source.cross_probe.update(
-            master.clone(),
-            HashMap::from([(point, "n1".to_owned())]),
-            HashMap::from([("n1".to_owned(), vec![point])]),
-            HashMap::new(),
-            state.model.schematic.topology_version(),
+        let top = state.model.workspace.content.active_view.clone();
+        let topology = state.model.schematic.topology_version();
+        state.model.simulation.source.cross_probe.install(
+            top,
+            HashMap::from([(None, one_net(root_point))]),
+            topology,
+            vec![MasterCrossProbe {
+                reference: master.clone(),
+                sheets: HashMap::from([(None, one_net(point))]),
+                topology_version: topology,
+            }],
         );
 
         let unprepared = occurrence_cross_probe_index(&canvas_facts(&state));
@@ -1732,7 +1762,7 @@ pub mod tests {
         );
         assert_eq!(
             occurrence_net_points(&canvas_facts(&state), unprepared.as_ref(), "n1"),
-            Some(&vec![point]),
+            Some(&vec![root_point]),
             "the retained map is the design root's own reading"
         );
         assert_eq!(
@@ -1756,7 +1786,7 @@ pub mod tests {
 
         assert_eq!(
             occurrence_net_points(&canvas_facts(&state), Some(&index), "n1"),
-            Some(&vec![point]),
+            Some(&vec![root_point]),
             "the root tab reads the root's own spelling"
         );
         assert_eq!(
@@ -1772,7 +1802,7 @@ pub mod tests {
         assert_eq!(
             occurrence_net_points(&canvas_facts(&state), Some(&index), "x1.n1"),
             Some(&vec![point]),
-            "the descended tab reads its own occurrence"
+            "the descended tab reads its own occurrence on the block's drawing"
         );
         assert_eq!(
             occurrence_net_points(&canvas_facts(&state), Some(&index), "x2.n1"),

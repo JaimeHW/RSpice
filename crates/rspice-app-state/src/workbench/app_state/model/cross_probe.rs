@@ -61,54 +61,68 @@ impl Model {
     }
 
     fn sheet_draws_net(&self, sheet: Option<SheetId>, leaf: &str) -> bool {
-        self.simulation
-            .source
-            .cross_probe
-            .on_sheet(sheet)
-            .net_to_points
-            .iter()
-            .any(|(name, points)| name.eq_ignore_ascii_case(leaf) && !points.is_empty())
+        self.current_sheet_net_geometry(sheet)
+            .is_some_and(|geometry| {
+                geometry
+                    .net_to_points
+                    .iter()
+                    .any(|(name, points)| name.eq_ignore_ascii_case(leaf) && !points.is_empty())
+            })
     }
 
     fn select_signal_conductor_on_active_sheet(
         &mut self,
         signal: &str,
     ) -> Result<String, LocateSignalError> {
-        let current = self.result_mapping_is_current();
         let occurrence = self.workspace.content.occurrence_path();
         let sheet = self.active_sheet_id();
+        let topology = self.schematic.topology_version();
         let key = self.workspace.content.active_schematic_reference().key();
         let (document, editor) = self.schematic.document_and_editor();
         let view = cross_probe::CrossProbeView {
             document,
             sheet_catalog: self.workspace.content.design_management.sheet_catalog(&key),
             occurrence: &occurrence,
-            net_to_points: current.then_some(
-                &self
-                    .simulation
-                    .source
-                    .cross_probe
-                    .on_sheet(sheet)
-                    .net_to_points,
-            ),
+            net_to_points: self
+                .simulation
+                .source
+                .cross_probe
+                .on_sheet_at(
+                    &self.workspace.content.active_view,
+                    &occurrence,
+                    topology,
+                    sheet,
+                )
+                .map(|geometry| &geometry.net_to_points),
         };
         cross_probe::select_signal_conductor(&view, editor, signal)
     }
 
     /// Whether the retained cross-probe map belongs to the open cell as it is
-    /// drawn right now.
+    /// drawn right now, at the occurrence the tab is editing: the design root,
+    /// or a block descended into.
     pub fn result_mapping_is_current(&self) -> bool {
-        self.simulation.source.cross_probe.is_current_for(
+        self.simulation.source.cross_probe.is_current_at(
             &self.workspace.content.active_view,
+            &self.workspace.content.occurrence_path(),
             self.schematic.topology_version(),
         )
     }
 
-    /// The net geometry the active sheet draws, in its own coordinates.
-    pub fn active_sheet_net_geometry(&self) -> &SheetNetGeometry {
-        self.simulation
-            .source
-            .cross_probe
-            .on_sheet(self.active_sheet_id())
+    /// The net geometry the active sheet draws, in its own coordinates, while
+    /// the retained map is current for it.
+    pub fn active_sheet_net_geometry(&self) -> Option<&SheetNetGeometry> {
+        self.current_sheet_net_geometry(self.active_sheet_id())
+    }
+
+    /// The net geometry `sheet` of the open drawing draws, while the retained
+    /// map is current for the drawing at the occurrence in front.
+    fn current_sheet_net_geometry(&self, sheet: Option<SheetId>) -> Option<&SheetNetGeometry> {
+        self.simulation.source.cross_probe.on_sheet_at(
+            &self.workspace.content.active_view,
+            &self.workspace.content.occurrence_path(),
+            self.schematic.topology_version(),
+            sheet,
+        )
     }
 }
