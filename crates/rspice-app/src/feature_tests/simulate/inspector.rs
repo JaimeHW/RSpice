@@ -336,13 +336,7 @@ fn the_verify_inspector_states_the_monte_carlo_run_without_its_dataset_identity(
 
     assert_states(
         &painted,
-        &[
-            "Monte Carlo",
-            "40 / 40",
-            "6699",
-            "Pseudo-random",
-            "12.4 s",
-        ],
+        &["Monte Carlo", "40 / 40", "6699", "Pseudo-random", "12.4 s"],
         &[
             "Run definition",
             "Wilson",
