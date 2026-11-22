@@ -19,8 +19,6 @@ use crate::tokens::{self, Tokens};
 pub const X_AXIS_ROW_HEIGHT: f32 = 17.0;
 /// Where the tick values' tops stand below the row's top edge.
 const LABEL_TOP: f32 = 3.0;
-/// How far a tick's stub reaches down from the plot.
-const STUB: f32 = 3.0;
 /// The least space between two tick values that are both drawn.
 const LABEL_GAP: f32 = 6.0;
 /// The gap between the gutter caption and the plot it stands under.
@@ -75,7 +73,7 @@ pub fn paint_x_axis_band(painter: &Painter, rect: Rect, t: &Tokens) {
 
 /// Paint `row` into `rect`, whose top edge is the plot's bottom edge and
 /// whose left edge is the plot's gutter's, over its band
-/// ([`paint_x_axis_band`]): the tick stubs and values, the offset anchor
+/// ([`paint_x_axis_band`]): the tick values, the offset anchor
 /// when the values are offsets from one, and the caption in the gutter,
 /// which breaks at its unit and wraps within `rect` when the gutter is too
 /// narrow for one line. Returns where the caption stands.
@@ -113,14 +111,10 @@ pub fn paint_x_axis_row(painter: &Painter, rect: Rect, row: XAxisRow<'_>, t: &To
             continue;
         }
         let x = plot.min + plot.span() * fraction as f32;
-        painter.vline(
-            x,
-            Rangef::new(rect.top(), rect.top() + STUB),
-            egui::Stroke::new(1.0, c.border_strong),
-        );
         let galley = painter.layout_no_wrap(label.clone(), font.clone(), c.text_dim);
-        // The stub marks the true position; the value itself is held inside
-        // the plot's span, so an edge value never reaches into the gutter
+        // No stub under the frame: the tick's gridline already runs to it and
+        // marks the true position, and a stub read as that gridline drawn past
+        // the plot. The value itself is held inside the plot's span, so an edge value never reaches into the gutter
         // and collides with the caption, nor past the plot's right edge.
         let half = galley.size().x * 0.5 + 2.0;
         let centre = x.clamp(plot.min + half, (plot.max - half).max(plot.min + half));
