@@ -5,7 +5,9 @@
 //! another owner holds are shown but locked.
 
 use super::*;
-use crate::state::{LibraryCellInstance, Point, SchematicState};
+#[cfg(test)]
+use crate::state::SchematicState;
+use crate::state::{LibraryCellInstance, Point};
 #[cfg(test)]
 use crate::workbench::design::test_host::DesignTestHost;
 
@@ -1035,6 +1037,7 @@ fn a_bom_edit_reports_no_analyses_affected() {
 
 /// Two parts bound to libraries with different sections, nothing selected,
 /// and the dialog open.
+#[cfg(test)]
 fn two_libraries() -> DesignTestHost {
     let mut state = DesignTestHost::default();
     let mut second = component(2, "X2", None);
@@ -1064,6 +1067,7 @@ fn two_libraries() -> DesignTestHost {
     state
 }
 
+#[cfg(test)]
 fn act(state: &mut DesignTestHost, action: SelectionBulkBodyAction) {
     handle_selection_bulk_body_action(
         &mut state.design.selection_bulk_edit,
