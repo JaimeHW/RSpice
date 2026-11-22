@@ -917,3 +917,71 @@ fn a_bom_edit_reports_no_analyses_affected() {
     );
     assert!(changes_the_circuit(SelectionBulkProperty::Value));
 }
+
+/// Two parts bound to libraries with different sections, nothing selected,
+/// and the dialog open.
+fn two_libraries() -> DesignTestHost {
+    let mut state = DesignTestHost::default();
+    let mut second = component(2, "X2", None);
+    second.library_cell.as_mut().expect("bound").library = "digital".to_owned();
+    state.model.schematic.document_mut_for_test().components =
+        vec![component(1, "X1", None), second];
+    state.model.schematic.init_undo_history();
+    for (name, sections) in [("analog", ["tt", "ff"]), ("digital", ["TT", "ss"])] {
+        let mut library = crate::state::model_library::ModelLibrary::new(name);
+        for (index, section) in sections.into_iter().enumerate() {
+            library.corners.insert(
+                section.to_owned(),
+                rspice_model_library::ProcessCorner::from_composite_section(
+                    section,
+                    std::path::PathBuf::from(format!("{name}.lib")),
+                    index == 0,
+                ),
+            );
+        }
+        state.model.model_library_manager.add_library(library);
+    }
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
+    state
+}
+
+fn act(state: &mut DesignTestHost, action: SelectionBulkBodyAction) {
+    handle_selection_bulk_body_action(
+        &mut state.design.selection_bulk_edit,
+        &mut state.design.schematic_bulk_edit_filters,
+        &state.model,
+        action,
+    );
+}
+
+/// Loading a saved filter lists the sections of what it finds, as typing
+/// the same filter does. The list kept the sections of the rows found
+/// before, until a filter field was edited.
+#[test]
+fn loading_a_saved_filter_lists_the_sections_of_what_it_finds() {
+    let mut state = two_libraries();
+    state.design.selection_bulk_edit.property = SelectionBulkProperty::ModelSection;
+    act(&mut state, SelectionBulkBodyAction::PropertyChanged);
+    assert_eq!(state.design.selection_bulk_edit.bound_sections, ["tt"]);
+
+    state.design.selection_bulk_edit.filter.query = "X2".to_owned();
+    act(&mut state, SelectionBulkBodyAction::FilterChanged);
+    state.design.selection_bulk_edit.save_filter_name = "Digital".to_owned();
+    act(&mut state, SelectionBulkBodyAction::SaveFilter);
+    state.design.selection_bulk_edit.filter.query.clear();
+    act(&mut state, SelectionBulkBodyAction::FilterChanged);
+    assert_eq!(state.design.selection_bulk_edit.bound_sections, ["tt"]);
+
+    state.design.selection_bulk_edit.selected_saved_filter = Some("Digital".to_owned());
+    act(&mut state, SelectionBulkBodyAction::LoadFilter);
+    assert_eq!(state.design.selection_bulk_edit.filter.query, "X2");
+    assert_eq!(
+        state.design.selection_bulk_edit.bound_sections,
+        ["ss", "TT"],
+        "the loaded filter finds X2 alone, so its library's sections are offered"
+    );
+}

@@ -442,18 +442,8 @@ fn handle_selection_bulk_body_action(
     match action {
         SelectionBulkBodyAction::None => {}
         SelectionBulkBodyAction::FilterChanged => {
-            let filter = bulk_edit.filter.clone();
-            filters.active = filter.clone();
-            let property = bulk_edit.property;
-            let rows = build_rows(model, &filter, property);
-            bulk_edit.selected = rows
-                .iter()
-                .filter(|row| row.editable())
-                .map(|row| row.key.clone())
-                .collect();
-            refresh_bound_sections(bulk_edit, model, &rows);
-            bulk_edit.error = None;
-            bulk_edit.authority = Some(SelectionBulkEditAuthority::capture(model));
+            filters.active = bulk_edit.filter.clone();
+            tick_what_the_filter_finds(bulk_edit, model);
         }
         SelectionBulkBodyAction::PropertyChanged | SelectionBulkBodyAction::TicksChanged => {
             let rows = build_rows(model, &bulk_edit.filter, bulk_edit.property);
@@ -478,16 +468,8 @@ fn handle_selection_bulk_body_action(
             if let Some(name) = name
                 && filters.load(&name)
             {
-                let filter = filters.active.clone();
-                bulk_edit.filter = filter.clone();
-                let property = bulk_edit.property;
-                bulk_edit.selected = build_rows(model, &filter, property)
-                    .into_iter()
-                    .filter(SelectionBulkRow::editable)
-                    .map(|row| row.key)
-                    .collect();
-                bulk_edit.authority = Some(SelectionBulkEditAuthority::capture(model));
-                bulk_edit.error = None;
+                bulk_edit.filter = filters.active.clone();
+                tick_what_the_filter_finds(bulk_edit, model);
             }
         }
         SelectionBulkBodyAction::DeleteFilter => {
@@ -500,6 +482,21 @@ fn handle_selection_bulk_body_action(
             }
         }
     }
+}
+
+/// After the filter changed, by typing or by loading a saved one: what it
+/// finds is ticked, and everything read from the ticks is read again, the
+/// model sections they can take among it.
+fn tick_what_the_filter_finds(bulk_edit: &mut SelectionBulkEditDialogState, model: &Model) {
+    let rows = build_rows(model, &bulk_edit.filter, bulk_edit.property);
+    bulk_edit.selected = rows
+        .iter()
+        .filter(|row| row.editable())
+        .map(|row| row.key.clone())
+        .collect();
+    refresh_bound_sections(bulk_edit, model, &rows);
+    bulk_edit.error = None;
+    bulk_edit.authority = Some(SelectionBulkEditAuthority::capture(model));
 }
 
 fn commit_selection_bulk_edit(
