@@ -13,6 +13,7 @@ pub mod model_evidence;
 /// and a review that only ever opened one of them would not see them disagree.
 pub mod stimulus;
 pub mod symbol;
+pub mod variant;
 
 pub use component::bind_component_model_from_catalog;
 
@@ -717,6 +718,11 @@ fn multi_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         )
     });
     object_title(ui, &format!("{total} selected"), instances.as_deref(), None);
+    variant::variant_set_rows(
+        ui,
+        cx,
+        &selected.iter().map(|(id, ..)| *id).collect::<Vec<_>>(),
+    );
 
     // The set's instances, one row each: a click picks that one out of the
     // set. The toolbar, the context menu and the keys act on the set itself,

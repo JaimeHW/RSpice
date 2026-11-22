@@ -81,6 +81,17 @@ pub struct ComponentSubstitution {
     pub qualification: VariantQualificationState,
 }
 
+impl ComponentSubstitution {
+    /// The digest a substitute records for the terminal mapping it was
+    /// chosen with: each terminal of the part and the replacement terminal
+    /// it lands on, in the part's order.
+    pub fn port_equivalence_of(
+        mapping: &[(String, String)],
+    ) -> Result<ContentDigest, DesignManagementError> {
+        digest("rspice-variant-port-equivalence/v1", &mapping)
+    }
+}
+
 /// What one variant does to one part of the base design.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]

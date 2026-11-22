@@ -87,7 +87,6 @@ pub mod workbench {
 
         pub(crate) use crate::workbench::slots::PlatformState;
         pub(crate) use design_checks::DesignCheckStatus;
-        pub(crate) use design_history::DesignManagementHistoryEntry;
         pub(crate) use model::{Model, SlotFacts};
         pub(crate) use sim_setup::SimSetupState;
         pub(crate) use sim_setup::plan_catalog::SimulationPlanLineage;

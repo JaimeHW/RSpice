@@ -237,41 +237,16 @@ fn publish_design_management_draft(parts: &mut DesignManagementParts<'_>) -> Res
         .draft
         .clone()
         .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-    draft.validate().map_err(|error| error.to_string())?;
-    let schematic_tx = parts
-        .model
-        .prepare_design_management_schematic_transaction(&draft)?;
-    let owner = parts.model.workspace.content.active_schematic_reference();
-    let committed_revision = parts
-        .model
-        .workspace
-        .content
-        .replace_design_management(draft)
-        .map_err(|error| error.to_string())?;
-    parts
-        .model
-        .apply_design_management_schematic_transaction(&schematic_tx);
+    let committed_revision = parts.model.publish_design_management_candidate(
+        "apply reviewed design-management changes",
+        before,
+        draft,
+    )?;
     let candidate = (*parts.model.workspace.content.design_management).clone();
-    parts
-        .model
-        .record_design_management_transaction(DesignManagementHistoryEntry {
-            description: "apply reviewed design-management changes".to_owned(),
-            owner,
-            before,
-            after: candidate.clone(),
-            before_schematics: schematic_tx.before,
-            after_schematics: schematic_tx.after,
-            references: schematic_tx.references,
-            committed_revision,
-        });
-    parts.model.design_execution_epoch = parts.model.design_execution_epoch.wrapping_add(1);
-    // The next two calls are what RSpiceApp::invalidate_simulation_preflight does.
-    parts.runs.preflight.invalidate();
-    parts.run_controller.clear_prepared_run();
-    parts
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    rspice_app_runs::workbench::preflight::invalidate(
+        &mut parts.runs.preflight,
+        parts.run_controller,
+    );
     parts.model.record(
         LogSeverity::Info,
         LogSource::Studio,

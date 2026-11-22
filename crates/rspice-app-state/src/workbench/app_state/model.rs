@@ -8,6 +8,7 @@
 //! application holds it inline, so moving a state carries what it carried
 //! before these fields were gathered here.
 
+mod assembly_variants;
 mod cross_probe;
 mod definition_index;
 mod design_net;
@@ -36,6 +37,7 @@ mod veriloga_compile;
 mod veriloga_interface;
 mod veriloga_parameters;
 
+pub use assembly_variants::BASE_DESIGN;
 pub use definition_index::DefinitionRow;
 pub use generated_instance::{GeneratedInstanceLocation, GeneratedNetLocation};
 pub use in_place_layout::InPlaceLayout;

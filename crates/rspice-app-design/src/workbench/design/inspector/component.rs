@@ -37,6 +37,7 @@ pub fn component_panel(
         (occurrence != "/").then_some(occurrence.as_str()),
     );
 
+    super::variant::variant_section(ui, cx, &component);
     identity_section(ui, cx, &component);
     terminals_section(ui, cx, &component, sheet);
     parameters_section(ui, cx, &component, &evidence);

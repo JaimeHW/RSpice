@@ -26,7 +26,7 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::{property_row, property_row_problem, section_header};
 
 use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
-use crate::workbench::app_state::{DesignManagementHistoryEntry, Model, PlatformState};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::project::configuration_state::ConfigurationTab;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::WorkbenchSession;

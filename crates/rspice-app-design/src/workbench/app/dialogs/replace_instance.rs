@@ -295,7 +295,7 @@ pub fn open_replace_instance_dialog(
     };
     let ranked = ranked_replacements(registry, model, &replacement_authority);
     let Some(resolved) = best_replacement(model, &replacement_authority, &ranked) else {
-        workbench.prompt("No other ready master keeps every connection of the selected instance.");
+        workbench.prompt(NO_SUBSTITUTE);
         return;
     };
     let current = current_display(replacement_authority.source_component());
@@ -625,6 +625,70 @@ fn authored_source_spec(
         .with_terminals(terminals)
         .with_parameter_keys(parameter_keys))
 }
+
+/// A master a variant can put in place of the selected instance.
+#[derive(Debug, Clone)]
+pub(crate) struct VariantSubstitute {
+    /// How the Replace instance form names it.
+    pub(crate) display: String,
+    pub(crate) library: String,
+    pub(crate) cell: String,
+    pub(crate) view: String,
+    /// Every pin and every parameter of the instance carries to it.
+    pub(crate) carries_everything: bool,
+    /// Each terminal of the instance and the master's terminal it lands on.
+    pub(crate) terminal_mapping: Vec<(String, String)>,
+    target: SchematicReplacementTargetSpec,
+}
+
+/// The masters a variant can substitute for the selected instance, in the
+/// order Replace instance ranks them: only masters that name a library cell,
+/// which is what a variant records, and that keep every terminal.
+pub(crate) fn variant_substitutes(
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) -> Result<Vec<VariantSubstitute>, String> {
+    let authority = replacement_authority(registry, model)?;
+    Ok(ranked_replacements(registry, model, &authority)
+        .into_iter()
+        .filter_map(|candidate| {
+            let binding = candidate.entry.template.library_cell.as_ref()?;
+            let fit = &candidate.preview.compatibility;
+            let keeps_every_terminal = fit.source_terminal_count == fit.target_terminal_count
+                && fit.mapped_terminal_count == fit.source_terminal_count;
+            keeps_every_terminal.then(|| VariantSubstitute {
+                display: candidate.entry.display.clone(),
+                library: binding.library.clone(),
+                cell: binding.cell.clone(),
+                view: binding.view.clone(),
+                carries_everything: fit.mapped_parameter_count == fit.source_parameter_count,
+                terminal_mapping: fit
+                    .terminal_mappings
+                    .iter()
+                    .filter_map(|mapping| Some((mapping.source.clone(), mapping.target.clone()?)))
+                    .collect(),
+                target: candidate.target,
+            })
+        })
+        .collect())
+}
+
+/// Which of `substitutes` a variant opens on: the first whose replacement
+/// also passes the checks Replace instance makes before it offers one.
+pub(crate) fn opening_variant_substitute(
+    registry: &PropertyEditorSchema,
+    model: &Model,
+    substitutes: &[VariantSubstitute],
+) -> Option<usize> {
+    let authority = replacement_authority(registry, model).ok()?;
+    substitutes
+        .iter()
+        .position(|substitute| validate_downstream(model, &authority, &substitute.target).is_ok())
+}
+
+/// What a variant says when no master can stand in for the instance.
+pub(crate) const NO_SUBSTITUTE: &str =
+    "No other ready master keeps every connection of the selected instance.";
 
 /// One master that can stand in for the selected instance, with the
 /// replacement it would make.
