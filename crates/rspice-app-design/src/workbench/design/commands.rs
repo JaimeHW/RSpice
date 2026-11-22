@@ -61,6 +61,9 @@ pub enum DesignCommand {
     ReplaceInstance,
     /// Open Create hierarchy over the selection.
     CreateHierarchy,
+    /// Open Create symbol for one of the project's models or subcircuits,
+    /// ending with the new part on the cursor in the drawing in front.
+    SymbolFromModel,
     /// Bring Find forward with its Replace row unfolded.
     FindReplace,
     /// Show the next hit of what the Navigator's search box finds.
@@ -435,7 +438,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 105] = [
+    pub const ALL: [Self; 106] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -454,6 +457,7 @@ impl DesignCommand {
         Self::RenameSelection,
         Self::ReplaceInstance,
         Self::CreateHierarchy,
+        Self::SymbolFromModel,
         Self::FindReplace,
         Self::FindNext,
         Self::FindPrevious,
@@ -564,6 +568,7 @@ impl DesignCommand {
             Self::RenameSelection => CommandKey::new("rename-selection"),
             Self::ReplaceInstance => CommandKey::new("replace-instance"),
             Self::CreateHierarchy => CommandKey::new("create-hierarchy"),
+            Self::SymbolFromModel => CommandKey::new("symbol-from-model"),
             Self::FindReplace => CommandKey::new("find-replace"),
             Self::FindNext => CommandKey::new("find-next"),
             Self::FindPrevious => CommandKey::new("find-previous"),
@@ -697,7 +702,9 @@ impl DesignCommand {
     /// project operation, and every schematic dialog but the object table is
     /// a chord of the design workspace. Rename, Replace instance and Create
     /// hierarchy edit the drawing, so each commits the inspector's pending
-    /// edit and is refused on a read-only schematic. Find and replace only
+    /// edit and is refused on a read-only schematic. A symbol from a model or
+    /// subcircuit is made in the project's library and placed on the drawing,
+    /// so it also commits that edit. Find and replace only
     /// brings Find forward with its Replace row, which says itself why a
     /// read-only view cannot change; it needs an open project and waits for
     /// a project operation. Rename and Find and replace have chords.
@@ -814,6 +821,13 @@ impl DesignCommand {
                 "Design",
                 project_edits,
                 canvas,
+                NONE,
+            ),
+            Self::SymbolFromModel => (
+                "Symbol from model or subcircuit\u{2026}",
+                "Design",
+                project.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true),
+                design,
                 NONE,
             ),
             Self::FindReplace => (

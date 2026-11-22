@@ -422,6 +422,8 @@ const DESIGN_MENU: &[MenuEntry] = &[
     ),
     design(DesignCommand::CreateHierarchy).access('H'),
     project(ProjectCommand::CreateSymbol).access('F'),
+    // No letter of "Symbol from model or subcircuit" is left on this menu.
+    design(DesignCommand::SymbolFromModel),
     // A symbol places no instances, so it has none to bring up to date.
     // No letter of "Update all instances" is left on this menu.
     MenuEntry::Only(

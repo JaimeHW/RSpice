@@ -708,6 +708,7 @@ pub mod ids {
         STIMULUS_WORKSPACE = "stimulus";
         STOP_SIMULATION = "stop-run";
         SUPPORT_BUNDLE = "support-bundle";
+        SYMBOL_FROM_MODEL = "symbol-from-model";
         TOGGLE_CONSOLE = "console";
         TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";

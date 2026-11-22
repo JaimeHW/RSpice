@@ -466,16 +466,16 @@ fn a_vendor_amplifier_subcircuit_opens_with_the_amplifier_template() {
     );
 }
 
-/// Create symbol started from a drawing for one of the project's
-/// subcircuits ends where a shelf row does: the new part on the cursor of
-/// that drawing, with the subcircuit's ports in its own order, and the
-/// Design workspace still in front.
+/// Symbol from model or subcircuit, run from a drawing, ends where a shelf
+/// row does: the new part on the cursor of that drawing, with the
+/// subcircuit's ports in its own order, and the Design workspace still in
+/// front.
 #[test]
-fn a_symbol_made_from_a_subcircuit_ends_on_the_cursor_of_the_drawing_it_was_started_from() {
+fn a_symbol_made_from_a_subcircuit_ends_on_the_cursor_of_the_drawing_it_was_run_from() {
     use crate::feature_tests::replay::Replay;
     use crate::workbench::RSpiceApp;
     use egui::accesskit::Role;
-    use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_symbol_from_model_or_subcircuit;
+    use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_state::state::Tool;
     use rspice_app_state::state::model_library::{
         ModelLibrary, ModelLibraryManager, ModelSubcircuitInterface,
@@ -506,14 +506,14 @@ fn a_symbol_made_from_a_subcircuit_ends_on_the_cursor_of_the_drawing_it_was_star
     state.model.model_library_manager = models;
     let drawing = state.model.workspace.content.active_view.clone();
 
-    open_symbol_from_model_or_subcircuit(
-        &mut state.design.create_model_bound_symbol,
-        &state.model,
-        &mut state.workbench,
-        None,
-    );
+    replay
+        .app
+        .execute_command_key(DesignCommand::SymbolFromModel.key());
     let draft = &mut replay.app.state.design.create_model_bound_symbol;
-    assert!(draft.open, "Create symbol opens over the drawing");
+    assert!(
+        draft.open,
+        "the command opens Create symbol over the drawing"
+    );
     let target = draft.target.clone();
     assert!(target.ends_with(" / opa_core"), "{target}");
     // The author confirms the pin order the subcircuit gave.

@@ -511,6 +511,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::UpdateInstanceInterface.key(),
     DesignCommand::UpdateAllInstanceInterfaces.key(),
     DesignCommand::CreateHierarchy.key(),
+    DesignCommand::SymbolFromModel.key(),
     ProjectCommand::CreateSymbol.key(),
     ProjectCommand::DesignManagement.key(),
     ProjectCommand::Variants.key(),

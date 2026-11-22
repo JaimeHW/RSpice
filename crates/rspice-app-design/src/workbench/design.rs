@@ -310,6 +310,18 @@ impl CommandSet for DesignCommand {
                 Some("the active schematic is read-only")
             }
             Self::ReplaceInstance | Self::CreateHierarchy => Some("select an editable object"),
+            // The new part is placed on the drawing in front.
+            Self::SymbolFromModel if !schematic => Some("open an editable schematic or testbench"),
+            Self::SymbolFromModel if reads.model.schematic_edit_read_only() => {
+                Some("the active schematic is read-only")
+            }
+            Self::SymbolFromModel => (!reads
+                .model
+                .model_library_manager
+                .catalog()
+                .libraries()
+                .any(|library| !library.models.is_empty() || !library.subcircuits.is_empty()))
+            .then_some("this project holds no model or subcircuit"),
             // Find works on what can only be read; its Replace row says why
             // nothing there can change.
             Self::FindReplace => (!schematic).then_some("command is unavailable in this context"),
@@ -793,6 +805,14 @@ impl CommandSet for DesignCommand {
             ),
             Self::CreateHierarchy => {
                 open_create_hierarchy_dialog(&mut cx.state.create_hierarchy, cx.model, cx.wb);
+            }
+            Self::SymbolFromModel => {
+                create_model_bound_symbol::open_symbol_from_model_or_subcircuit(
+                    &mut cx.state.create_model_bound_symbol,
+                    cx.model,
+                    cx.wb,
+                    cx.peers.models().selected_model(),
+                )
             }
             // Find and its Replace row are the Navigator's: it comes forward
             // with the Replace row unfolded and the search box focused.

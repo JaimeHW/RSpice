@@ -62,6 +62,8 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             DesignCommand::PlacePin => Some(Icon::Pin),
             DesignCommand::ReplaceInstance => Some(Icon::Refresh),
             DesignCommand::CreateHierarchy => Some(Icon::Folder),
+            // It makes a part from a model library's definition.
+            DesignCommand::SymbolFromModel => Some(Icon::Library),
             DesignCommand::CheckCellview | DesignCommand::CheckDesign => Some(Icon::Check),
             DesignCommand::JoinCollinearWires => Some(Icon::Wire),
             DesignCommand::MoveSelection | DesignCommand::StretchSelection => Some(Icon::Select),
