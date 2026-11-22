@@ -2096,7 +2096,9 @@ pub(super) fn probe_context_target(
                 .map_or(click_pos, |(point, _)| point);
             (on_wire, ProbeSubject::Wire(wire_id))
         }
-        ContextTarget::Component(part) => (click_pos, ProbeSubject::Part(part)),
+        ContextTarget::Component(part) | ContextTarget::Pin(part) => {
+            (click_pos, ProbeSubject::Part(part))
+        }
     };
     probe_subject(state, position, Some(subject), symbol_context);
 }

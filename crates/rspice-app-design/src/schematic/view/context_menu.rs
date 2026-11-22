@@ -9,7 +9,7 @@
 use egui::{Context, Response};
 
 use crate::state::command_catalog::CommandKey;
-use crate::state::{Point, ViewType};
+use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app::dialogs::hierarchy::subcircuit_source;
 use crate::workbench::app::dialogs::selection::shared_properties;
 use crate::workbench::app_state::ContextTarget;
@@ -103,6 +103,21 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         icon: ContextIcon::Text,
         label: "Place text or note…",
         shortcut_command: Some(DesignCommand::PlaceText.key()),
+    }),
+    ContextEntry::Separator,
+    // What starts where the menu was opened on a wire, a junction or a pin
+    // end: the places a wire or a label is started from.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::DrawWireFromHere,
+        icon: ContextIcon::Wire,
+        label: "Draw wire from here",
+        shortcut_command: None,
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::NameNet,
+        icon: ContextIcon::Label,
+        label: "Name this net…",
+        shortcut_command: None,
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
@@ -355,6 +370,8 @@ enum MenuSubject {
     VerilogAInstance,
     /// Any other instance.
     Instance,
+    /// The end of a part's pin.
+    Pin,
     /// A wire, or a piece of one.
     Wire,
     Junction,
@@ -372,6 +389,9 @@ fn menu_subject(state: &CanvasFacts<'_>, target: ContextTarget) -> MenuSubject {
     if route_is_live(state) {
         return MenuSubject::Route;
     }
+    if let ContextTarget::Pin(_) = target {
+        return MenuSubject::Pin;
+    }
     let selection = &state.model.schematic.session.editor.selection;
     if selection.count() > 1 {
         return MenuSubject::Selection;
@@ -388,6 +408,7 @@ fn menu_subject(state: &CanvasFacts<'_>, target: ContextTarget) -> MenuSubject {
     };
     match target {
         ContextTarget::Component(id) => instance(id),
+        ContextTarget::Pin(_) => MenuSubject::Pin,
         ContextTarget::Wire(_) => MenuSubject::Wire,
         // A right-click selects what it lands on, and names a part or a
         // wire as the target; anything else is named by what it selected.
@@ -531,9 +552,14 @@ fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
         | ContextAction::ReadoptStimulus
         | ContextAction::SaveStimulus
         | ContextAction::OpenStimulusDefinition => subject == S::Source,
-        ContextAction::Cut | ContextAction::Copy | ContextAction::Delete => subject != S::Canvas,
+        ContextAction::DrawWireFromHere | ContextAction::NameNet => {
+            matches!(subject, S::Wire | S::Junction | S::Pin)
+        }
+        ContextAction::Cut | ContextAction::Copy | ContextAction::Delete => {
+            !matches!(subject, S::Canvas | S::Pin)
+        }
         // A junction alone has nowhere to be copied to at a fixed offset.
-        ContextAction::Duplicate => !matches!(subject, S::Canvas | S::Junction),
+        ContextAction::Duplicate => !matches!(subject, S::Canvas | S::Junction | S::Pin),
         ContextAction::DescendHierarchy => subject == S::Instance,
         ContextAction::OpenVerilogAView => subject == S::VerilogAInstance,
         ContextAction::EditSymbolInPlace
@@ -545,7 +571,7 @@ fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
         ContextAction::CreateHierarchy => part || subject == S::Selection,
         ContextAction::ShowInNetlist => part,
         // A probe goes on a part or a wire; the canvas's own probe is the tool.
-        ContextAction::Probe => part || subject == S::Wire,
+        ContextAction::Probe => part || matches!(subject, S::Wire | S::Pin),
         ContextAction::OperatingPoint => part || subject == S::Canvas,
         ContextAction::ArrangeCommand(_)
         | ContextAction::Choose(_)
@@ -668,7 +694,7 @@ pub(super) fn handle_context_menu(
             binding,
             action: ContextAction::Choose(target),
         }) => choose_target(state, &view, &binding, target),
-        Some(request) => apply_context_request(state, request, symbol_context),
+        Some(request) => apply_context_request(state, request, symbol_context, &response.ctx),
         None => {}
     }
     if !output.open {
@@ -717,8 +743,40 @@ fn capture_pointer_target(
             pos,
         )
     };
-    state.design.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
+    // On a part's pin end the menu is the pin's, opened at the pin.
+    let (target, at) = match target {
+        ContextTarget::Component(id) => {
+            pin_end_near(&state.facts(), symbol_context, id, hit_pos, hit_radius)
+                .map_or((target, grid_pos), |pin| (ContextTarget::Pin(id), pin))
+        }
+        _ => (target, grid_pos),
+    };
+    state.design.interaction.context_target = Some((target, (at.x, at.y)));
     Some(pos)
+}
+
+/// The end of one of part `id`'s pins within `radius` of `hit`.
+fn pin_end_near(
+    state: &CanvasFacts<'_>,
+    symbol_context: &SchematicSymbolContext,
+    id: u64,
+    hit: Point,
+    radius: i32,
+) -> Option<Point> {
+    let component = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)?;
+    symbol_context
+        .terminal_points(component)
+        .into_iter()
+        .find(|pin| {
+            i64::from(pin.x).abs_diff(i64::from(hit.x)) <= u64::from(radius.unsigned_abs())
+                && i64::from(pin.y).abs_diff(i64::from(hit.y)) <= u64::from(radius.unsigned_abs())
+        })
 }
 
 /// What a long press opens the menu on: of the objects under the finger,
@@ -1227,7 +1285,7 @@ pub fn selection_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> Stri
         .or_else(|| selection.single_wire().map(ContextTarget::Wire))
         .unwrap_or(target);
     match target {
-        ContextTarget::Component(id) => state
+        ContextTarget::Component(id) | ContextTarget::Pin(id) => state
             .model
             .schematic
             .document()
@@ -1307,6 +1365,8 @@ fn changes_the_view(action: ContextAction) -> bool {
             | ContextAction::PlaceWire
             | ContextAction::PlaceLabel
             | ContextAction::PlaceText
+            | ContextAction::DrawWireFromHere
+            | ContextAction::NameNet
     )
 }
 
@@ -1669,6 +1729,7 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
         ),
+        ContextAction::DrawWireFromHere | ContextAction::NameNet => (true, ""),
         ContextAction::FinishRoute => (
             route_points(state) >= 2,
             "Click a second point to finish the route",
@@ -1701,6 +1762,20 @@ pub fn execute_context_action(
             state.model.schematic.retract_route();
         }
         ContextAction::CancelRoute => state.model.schematic.cancel_interaction_step(),
+        ContextAction::NameNet => {
+            let at = conductor_point(&state.facts(), click_pos);
+            let dialog_modal_open = state.dialog_modal_open();
+            crate::workbench::app::open_net_label_placement_in(
+                &mut state.design.net_label_placement,
+                state.model,
+                state.workbench,
+                dialog_modal_open,
+                at,
+            );
+        }
+        // Started by `apply_context_request`, which holds the frame's
+        // context a route is bound to.
+        ContextAction::DrawWireFromHere => {}
         ContextAction::ZoomBox => {
             state.model.schematic.session.editor.zoom_box.arm();
             state.prompt("Drag a box to zoom to it.");
@@ -1843,6 +1918,37 @@ const fn row_command(action: ContextAction) -> Option<CommandKey> {
         ContextAction::FitContent => DesignCommand::FitSchematicContent.key(),
         _ => return None,
     })
+}
+
+/// Where on what the menu was opened on a wire or a label starts: the point
+/// of the right-clicked wire nearest the click, the selected junction, or
+/// the pin end the menu was opened at.
+fn conductor_point(state: &CanvasFacts<'_>, click_pos: Point) -> Point {
+    let target = state
+        .design
+        .interaction
+        .context_target
+        .map(|(target, _)| target);
+    if let Some(ContextTarget::Wire(id)) = target {
+        return state
+            .model
+            .schematic
+            .document()
+            .wires
+            .iter()
+            .find(|wire| wire.id == id)
+            .and_then(|wire| wire.closest_point(click_pos))
+            .map_or(click_pos, |(point, _)| point);
+    }
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_junction()
+        .filter(|_| target == Some(ContextTarget::Canvas))
+        .unwrap_or(click_pos)
 }
 
 /// The points the route being drawn has placed.
@@ -2095,6 +2201,7 @@ pub fn apply_context_request(
     state: &mut CanvasParts<'_>,
     request: ContextMenuRequest,
     symbol_context: &SchematicSymbolContext,
+    ctx: &Context,
 ) {
     let offered = |entries: &[ContextEntry]| {
         entries.iter().any(|entry| {
@@ -2107,6 +2214,12 @@ pub fn apply_context_request(
         || !(offered(&menu_entries(&state.facts(), request.binding.target))
             || offered(ARRANGE_ENTRIES))
     {
+        return;
+    }
+    if request.action == ContextAction::DrawWireFromHere {
+        let at = conductor_point(&state.facts(), request.binding.click_pos);
+        state.model.schematic.arm_tool(Tool::Wire);
+        state.start_canvas_wire(ctx, at);
         return;
     }
     execute_context_action(

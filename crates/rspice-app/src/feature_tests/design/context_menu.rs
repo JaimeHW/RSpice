@@ -99,6 +99,7 @@ fn apply_context_request(
         &mut state.canvas_parts(),
         request,
         symbol_context,
+        &Context::default(),
     );
     answer_surface_requests(state);
 }

@@ -351,6 +351,8 @@ fn each_target_gets_the_catalog_its_kind_calls_for() {
     assert_eq!(
         catalog_of(&menu_entries(&resistor, ContextTarget::Wire(17))),
         vec![
+            ("Draw wire from here", None),
+            ("Name this net…", None),
             ("Cut selection", Some(ids::CUT)),
             ("Copy selection", Some(ids::COPY)),
             ("Duplicate", Some(ids::DUPLICATE)),
@@ -449,7 +451,16 @@ fn an_annotation_menu_holds_only_what_applies_to_it() {
     let junction = menu(&mut state, &|selection| {
         selection.select_only_junction(Point::new(0, 0))
     });
-    assert_eq!(junction, vec!["Cut selection", "Copy selection", "Delete"]);
+    assert_eq!(
+        junction,
+        vec![
+            "Draw wire from here",
+            "Name this net…",
+            "Cut selection",
+            "Copy selection",
+            "Delete"
+        ]
+    );
 
     for labels in [label, note, probe, junction] {
         for absent in [
@@ -1141,6 +1152,7 @@ fn a_right_click_while_routing_finishes_shortens_or_cancels_the_route() {
             &mut canvas_parts(state),
             ContextMenuRequest { binding, action },
             &symbol_context,
+            &Context::default(),
         );
     };
 
@@ -1172,5 +1184,97 @@ fn a_right_click_while_routing_finishes_shortens_or_cancels_the_route() {
         state.model.schematic.session.editor.tool,
         crate::state::Tool::Wire,
         "Cancel lets the route go and keeps the tool, as Escape does"
+    );
+}
+
+/// A right-click on a wire or a pin end, the places a wire or a label is
+/// started from, offers both there: Draw wire from here starts the route at
+/// the point of the wire nearest the click, or at the pin end, and Name this
+/// net opens the label entry anchored there. Both were rows of the empty
+/// canvas only, and only armed the tool.
+#[test]
+fn a_wire_or_a_pin_end_starts_a_wire_or_a_label_where_it_was_clicked() {
+    let mut state = DesignTestHost::default();
+    let document = state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document.wires.clear();
+    document
+        .wires
+        .push(Wire::new(5, vec![Point::new(0, 0), Point::new(200, 0)]));
+    let part = state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(400, 0));
+    let symbol_context = schematic_symbol_context(&state);
+    let run = |state: &mut DesignTestHost, action| {
+        let binding = context_menu_binding(&canvas_facts(state)).expect("the menu is open");
+        super::apply_context_request(
+            &mut canvas_parts(state),
+            ContextMenuRequest { binding, action },
+            &symbol_context,
+            &Context::default(),
+        );
+    };
+
+    // The wire, right-clicked a little above it at x 100.
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_wire(5);
+    state.design.interaction.context_target = Some((ContextTarget::Wire(5), (100, -10)));
+    let labels = labels_of(&menu_entries(&state, ContextTarget::Wire(5)));
+    assert_eq!(&labels[..2], ["Draw wire from here", "Name this net…"]);
+    run(&mut state, ContextAction::NameNet);
+    assert!(state.design.net_label_placement.open);
+    assert_eq!(
+        state.design.net_label_placement.anchor,
+        Some(Point::new(100, 0))
+    );
+    state.design.net_label_placement = Default::default();
+    run(&mut state, ContextAction::DrawWireFromHere);
+    let editor = &state.model.schematic.session.editor;
+    assert_eq!(editor.tool, crate::state::Tool::Wire);
+    assert!(editor.wire_drawing.active);
+    assert_eq!(editor.wire_drawing.points, vec![Point::new(100, 0)]);
+    state.model.schematic.cancel_tool();
+
+    // A pin end of the part: the pin's rows, and the route starts on it.
+    let component = state.model.schematic.document().components[0].clone();
+    let pin = symbol_context.terminal_points(&component)[0];
+    let near = Point::new(pin.x + 2, pin.y - 2);
+    assert_eq!(
+        super::pin_end_near(&canvas_facts(&state), &symbol_context, part, near, 6),
+        Some(pin)
+    );
+    assert_eq!(
+        super::pin_end_near(
+            &canvas_facts(&state),
+            &symbol_context,
+            part,
+            component.pos,
+            6
+        ),
+        None,
+        "the part's middle is the part's"
+    );
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(part);
+    state.design.interaction.context_target = Some((ContextTarget::Pin(part), (pin.x, pin.y)));
+    assert_eq!(
+        labels_of(&menu_entries(&state, ContextTarget::Pin(part))),
+        vec!["Draw wire from here", "Name this net…", "Probe"]
+    );
+    run(&mut state, ContextAction::DrawWireFromHere);
+    assert_eq!(
+        state.model.schematic.session.editor.wire_drawing.points,
+        vec![pin]
     );
 }

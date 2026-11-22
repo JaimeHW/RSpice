@@ -120,6 +120,11 @@ pub enum ContextAction {
     RemoveRoutePoint,
     /// Let go of the route, as Escape does.
     CancelRoute,
+    /// Start a wire where the menu was opened on a wire, a junction or a
+    /// pin end.
+    DrawWireFromHere,
+    /// Name the net where the menu was opened, with a label there.
+    NameNet,
 }
 
 /// The Arrange page's commands, in the Design menu's order: turn and flip,
@@ -185,6 +190,8 @@ pub enum ContextIcon {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextTarget {
     Component(u64),
+    /// The end of one of part `0`'s pins, where a wire or a label starts.
+    Pin(u64),
     Wire(u64),
     Canvas,
 }
