@@ -13,6 +13,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, SortKey, Tone};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
 
 use crate::presentation::well_hint;
@@ -24,10 +25,6 @@ use rspice_results::population::{
 
 /// What the reader is told when the run carries no sampled population.
 const ABSENT_STATE: &str = "No Monte Carlo population in this run — run a Monte Carlo analysis";
-
-/// The most brushed trials the register lists before it stops listing and
-/// states the count instead.
-const MAX_LISTED_TRIALS: usize = 12;
 
 /// Session controls for the scatter sheet.
 #[derive(Debug, Clone)]
@@ -833,43 +830,139 @@ pub fn right_panel(
     if selection.is_empty() {
         return;
     }
-    section_header(ui, "Brushed trials", None);
-    let listed = selection.len().min(MAX_LISTED_TRIALS);
-    let mut rows = Vec::with_capacity(listed);
-    for row in selection.iter().take(listed) {
-        let Some((_, x, y)) = points.iter().copied().find(|(index, _, _)| index == row) else {
-            continue;
-        };
-        let label = plan
-            .trials
-            .get(*row)
-            .map_or_else(|| format!("Trial {row}"), |trial| trial.label.clone());
-        let status = match plan.status.get(*row) {
-            Some(TrialStatus::Failing) => "fail",
-            Some(TrialStatus::Unmeasured) => "no result",
-            Some(TrialStatus::NotEvaluated) => "no requirement",
-            _ => "pass",
-        };
-        rows.push((
-            label,
-            format!(
-                "{} \u{b7} {} \u{b7} {status}",
-                fmt_si_significant(x, &x_column.unit, significant_digits),
-                fmt_si_significant(y, &y_column.unit, significant_digits)
-            ),
-        ));
-    }
-    let rows = rows
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    rspice_ui_kit::widgets::measurement_table(ui, &rows);
-    if selection.len() > listed {
-        crate::presentation::panel_note(ui, &format!("+{} more", selection.len() - listed));
-    }
+    section_header(ui, "Brushed trials", Some(&selection.len().to_string()));
+    // The table fills the pane above the button that clears it.
+    let button = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+    brushed_table(
+        ui,
+        plan,
+        &points,
+        &selection,
+        (x_column, y_column),
+        significant_digits,
+        ui.available_height() - button,
+    );
     if ui.button("Clear selection").clicked() {
         clear_selection(state, members);
     }
+}
+
+/// Every brushed trial: its two values, in the units the heads name, and
+/// its verdict, in trial order. The table scrolls rather than stopping at a
+/// count, so a brush over a hundred trials lists a hundred.
+fn brushed_table(
+    ui: &mut Ui,
+    plan: &PopulationData,
+    points: &[(usize, f64, f64)],
+    selection: &[usize],
+    (x_column, y_column): (&PopulationColumn, &PopulationColumn),
+    significant_digits: usize,
+    max_height: f32,
+) {
+    let mut brushed: Vec<(usize, f64, f64)> = selection
+        .iter()
+        .filter_map(|row| {
+            points
+                .binary_search_by_key(row, |(index, ..)| *index)
+                .ok()
+                .map(|at| points[at])
+        })
+        .collect();
+    brushed.sort_by_key(|(row, ..)| *row);
+    brushed.dedup_by_key(|(row, ..)| *row);
+    let rows: Vec<BrushedRow> = brushed
+        .iter()
+        .map(|&(row, x, y)| {
+            let trial = plan.trials.get(row).map_or(row, |trial| trial.index);
+            let (status, tone) = match plan.status.get(row) {
+                Some(TrialStatus::Failing) => ("fail", Tone::Error),
+                Some(TrialStatus::Unmeasured) => ("no result", Tone::Caution),
+                Some(TrialStatus::NotEvaluated) => ("no requirement", Tone::Neutral),
+                _ => ("pass", Tone::Neutral),
+            };
+            BrushedRow {
+                trial,
+                x,
+                y,
+                text: [
+                    trial.to_string(),
+                    fmt_si_significant(x, "", significant_digits),
+                    fmt_si_significant(y, "", significant_digits),
+                ],
+                status,
+                tone,
+            }
+        })
+        .collect();
+    let head = |column: &PopulationColumn| {
+        if column.unit.is_empty() {
+            column.name.clone()
+        } else {
+            format!("{} \u{b7} {}", column.name, column.unit)
+        }
+    };
+    let heads = ["Trial".to_owned(), head(x_column), head(y_column)];
+    // Each column as wide as its widest words, so nothing is cut short.
+    let head_font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let number_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let measure = |text: &str, font: &egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    let pad = 2.0 * rspice_ui_kit::widgets::table::CELL_PAD + 2.0;
+    let width = |index: usize| {
+        rows.iter()
+            .map(|row| measure(&row.text[index], &number_font))
+            .fold(measure(&heads[index], &head_font), f32::max)
+            + pad
+    };
+    let status_width = ["Status", "no requirement"]
+        .iter()
+        .map(|text| measure(text, &head_font))
+        .fold(0.0, f32::max)
+        + pad;
+    let columns = [
+        Column::number(heads[0].clone(), width(0)),
+        Column::number(heads[1].clone(), width(1)),
+        Column::number(heads[2].clone(), width(2)),
+        Column::name("Status", status_width),
+    ];
+    let revision = egui::Id::new((
+        "scatter-brushed",
+        &x_column.name,
+        &y_column.name,
+        selection,
+        significant_digits,
+    ))
+    .value();
+    crate::presentation::with_table_state(ui, "scatter-brushed", |ui, state| {
+        DataTable::new("rspice.results.scatter.brushed", &columns, rows.len())
+            .state(state)
+            .revision(revision)
+            .max_height(max_height.max(0.0))
+            .show(ui, |index| {
+                let row = &rows[index];
+                vec![
+                    Cell::number(row.text[0].clone()).sort_by(SortKey::Number(row.trial as f64)),
+                    Cell::number(row.text[1].clone()).sort_by(SortKey::Number(row.x)),
+                    Cell::number(row.text[2].clone()).sort_by(SortKey::Number(row.y)),
+                    Cell::text(row.status).toned(row.tone),
+                ]
+            });
+    });
+}
+
+/// One brushed trial as its table row reads it.
+struct BrushedRow {
+    trial: usize,
+    x: f64,
+    y: f64,
+    /// The trial number and the two values, as printed.
+    text: [String; 3],
+    status: &'static str,
+    tone: Tone,
 }
 
 fn register_rows(
@@ -1206,5 +1299,48 @@ mod tests {
         assert_eq!(slope_unit(&column("%"), &column("V")), "V/%");
         assert_eq!(slope_unit(&column(""), &column("V")), "V");
         assert_eq!(slope_unit(&column("%"), &column("")), "1/%");
+    }
+
+    /// A brush over thirty trials lists thirty, each once, with its values
+    /// at the reader's digits; nothing is cut to a count.
+    #[test]
+    fn every_brushed_trial_is_listed() {
+        fn collect(shape: &egui::Shape, text: &mut String) {
+            match shape {
+                egui::Shape::Text(value) => {
+                    text.push_str(value.galley.text());
+                    text.push('\n');
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, text)),
+                _ => {}
+            }
+        }
+        let (plan, mut sheet) = fixture(40, None);
+        let mut members: Vec<usize> = (0..30).rev().collect();
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut text = String::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(
+                rspice_ui_kit::raster::display_input(egui::vec2(420.0, 2400.0), 1.0),
+                |root| {
+                    egui::CentralPanel::default().show(root, |ui| {
+                        right_panel(ui, Some(&plan), &mut sheet, &mut members, 4);
+                    });
+                },
+            );
+            text.clear();
+            for shape in &output.shapes {
+                collect(&shape.shape, &mut text);
+            }
+        }
+        // One verdict per listed trial, and no word cut short.
+        let verdicts = text
+            .lines()
+            .filter(|line| *line == "no requirement")
+            .count();
+        assert_eq!(verdicts, 30, "{text}");
+        assert!(!text.contains("more"), "{text}");
+        assert!(!text.contains('\u{2026}'), "{text}");
     }
 }
