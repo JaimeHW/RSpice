@@ -811,3 +811,40 @@ fn compare_lists_each_difference_and_a_double_click_shows_the_part() {
         "R2 is not selected on arrival"
     );
 }
+
+/// The Variants tab says which variant is active, counts each variant's
+/// substitutes, values and DNP parts, and offers the base design as the
+/// active choice beside the variants.
+#[test]
+fn the_variants_tab_marks_the_active_variant_and_offers_the_base_design() {
+    let ctx = themed_context();
+    let (mut harness, _, _) = two_variants_over_three_parts();
+    let dialog = &mut harness.state.design_management;
+    dialog.reset_inputs_for_page(DesignManagementPage::Manager, None, None);
+    dialog.active_tab = DesignManagementTab::Variants;
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = frame(&ctx, &mut harness, Vec::new());
+    }
+    assert!(says(&nodes, "Industrial, base, 0, 0, 1, Yes"));
+    assert!(says(&nodes, "Automotive, Industrial, 1, 1, 0, "));
+    assert!(!says(&nodes, "Qualification"));
+    let _ = node(&nodes, egui::accesskit::Role::ComboBox, "Model equivalence");
+
+    let (active, _) = node(
+        &nodes,
+        egui::accesskit::Role::ComboBox,
+        "Active assembly variant",
+    );
+    let _ = frame(&ctx, &mut harness, vec![click(*active)]);
+    let nodes = frame(&ctx, &mut harness, Vec::new());
+    let (base, _) = node(&nodes, egui::accesskit::Role::ListBoxOption, "Base design");
+    let _ = frame(&ctx, &mut harness, vec![click(*base)]);
+    let _ = frame(&ctx, &mut harness, Vec::new());
+    let draft = harness.state.design_management.draft.as_ref().unwrap();
+    assert_eq!(
+        draft.variants().active_variant_id(),
+        None,
+        "the base design cannot be made active"
+    );
+}

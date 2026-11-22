@@ -3,6 +3,7 @@
 
 use super::widgets::*;
 use super::*;
+use crate::workbench::app_state::model::BASE_DESIGN;
 
 pub(super) fn design_management_manager_body(
     ui: &mut Ui,
@@ -257,8 +258,15 @@ pub(super) fn variants_manager_body(
         );
         paint_table_header(
             left,
-            &[0.25, 0.20, 0.19, 0.12, 0.24],
-            &["Variant", "Parent", "Substitutions", "DNP", "Qualification"],
+            &VARIANT_COLUMNS,
+            &[
+                "Variant",
+                "Parent",
+                "Substitutions",
+                "Values",
+                "DNP",
+                "Active",
+            ],
         );
         if variants.is_empty() {
             empty_table_row(
@@ -270,37 +278,38 @@ pub(super) fn variants_manager_body(
                 let parent_name = parent
                     .and_then(|parent| names.iter().find(|(id, _)| *id == parent))
                     .map_or_else(|| "base".to_owned(), |(_, name)| name.clone());
-                let substitutions = overrides
-                    .values()
-                    .filter(|value| {
-                        matches!(
-                            value,
-                            crate::state::VariantObjectOverride::Substitute { .. }
-                        )
-                    })
-                    .count();
-                let dnp = overrides
-                    .values()
-                    .filter(|value| {
-                        matches!(
-                            value,
-                            crate::state::VariantObjectOverride::DoNotPopulate { .. }
-                        )
-                    })
-                    .count();
+                let count = |kind: fn(&crate::state::VariantObjectOverride) -> bool| {
+                    overrides.values().filter(|value| kind(value)).count()
+                };
+                let substitutions = count(|value| {
+                    matches!(
+                        value,
+                        crate::state::VariantObjectOverride::Substitute { .. }
+                    )
+                });
+                let revalued = count(|value| {
+                    matches!(
+                        value,
+                        crate::state::VariantObjectOverride::Fitted {
+                            value_override: Some(_)
+                        }
+                    )
+                });
+                let dnp = count(|value| {
+                    matches!(
+                        value,
+                        crate::state::VariantObjectOverride::DoNotPopulate { .. }
+                    )
+                });
                 let values = [
                     name.clone(),
                     parent_name,
                     substitutions.to_string(),
+                    revalued.to_string(),
                     dnp.to_string(),
-                    if Some(*id) == active {
-                        "current"
-                    } else {
-                        "governed"
-                    }
-                    .to_owned(),
+                    if Some(*id) == active { "Yes" } else { "" }.to_owned(),
                 ];
-                paint_table_row(left, &[0.25, 0.20, 0.19, 0.12, 0.24], &values, None);
+                paint_table_row(left, &VARIANT_COLUMNS, &values, None);
             }
         }
         toolbar(left, |ui| {
@@ -333,13 +342,22 @@ pub(super) fn variants_manager_body(
         if names.is_empty() {
             fact_row(right, ACTIVE_VARIANT, "None");
         } else {
+            // The base design is a choice as every variant is, as the
+            // document bar offers it.
+            let choices = std::iter::once((None, BASE_DESIGN))
+                .chain(names.iter().map(|(id, name)| (Some(*id), name.as_str())))
+                .collect::<Vec<_>>();
             let mut selected = active;
-            if setting_combo_by_id(right, ACTIVE_VARIANT, &names, &mut selected, write_allowed)
-                && let Some(id) = selected
-            {
+            if setting_combo(
+                right,
+                ACTIVE_VARIANT,
+                &choices,
+                &mut selected,
+                write_allowed,
+            ) {
                 apply_domain_result(
                     &mut dialog.error,
-                    draft.variants_mut().set_active(id),
+                    draft.variants_mut().choose(selected),
                     "Active variant changed.",
                 );
             }
@@ -448,6 +466,9 @@ pub(super) fn variants_manager_body(
 
 /// The Variants tab's row naming the variant the design builds.
 const ACTIVE_VARIANT: &str = "Active assembly variant";
+/// The Variants table's columns: the variant, its parent, how many parts it
+/// substitutes, revalues and leaves off, and whether it is the one chosen.
+const VARIANT_COLUMNS: [f32; 6] = [0.22, 0.18, 0.19, 0.13, 0.10, 0.18];
 
 pub(super) fn annotation_manager_body(
     ui: &mut Ui,

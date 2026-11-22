@@ -497,37 +497,6 @@ pub(super) fn id_combo<T: Copy + PartialEq + std::fmt::Display>(
     .inner
 }
 
-/// [`setting_combo`] over identified choices, any of which may be unset.
-pub(super) fn setting_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(
-    ui: &mut Ui,
-    label: &str,
-    options: &[(T, String)],
-    selected: &mut Option<T>,
-    enabled: bool,
-) -> bool {
-    let shown = selected
-        .and_then(|id| options.iter().find(|(candidate, _)| *candidate == id))
-        .map_or("", |(_, name)| name.as_str());
-    let labels = options
-        .iter()
-        .map(|(_, name)| name.clone())
-        .collect::<Vec<_>>();
-    match setting_select(
-        ui,
-        "design-management-setting-id",
-        label,
-        shown,
-        &labels,
-        enabled,
-    ) {
-        Some(index) if *selected != Some(options[index].0) => {
-            *selected = Some(options[index].0);
-            true
-        }
-        _ => false,
-    }
-}
-
 pub(super) fn field_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(
     ui: &mut Ui,
     label: &str,
