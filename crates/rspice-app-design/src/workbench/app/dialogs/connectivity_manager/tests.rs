@@ -34,6 +34,54 @@ fn global_alias_repairs_are_derived_from_real_label_ids() {
     }
 }
 
+/// Two resistors, nothing wired: every pin is open.
+fn open_pins() -> DesignTestHost {
+    let mut state = DesignTestHost::default();
+    for x in [0, 400] {
+        state
+            .model
+            .schematic
+            .add_component(crate::state::ComponentType::Resistor, Point::new(x, 0));
+    }
+    state.sync_active_schematic_to_workspace();
+    state
+}
+
+/// An open pin's repair is a wire only the reader can draw: its row offers a
+/// destination and no Apply tick, while a repair Apply carries out keeps its
+/// tick.
+#[test]
+fn an_open_pin_repair_row_offers_a_destination_and_no_apply_tick() {
+    let state = open_pins();
+    let mut dialog = ConnectivityManagerDialogState {
+        report: build_report(&state.model, &ConnectivityPolicy::default()).unwrap(),
+        active_tab: ConnectivityManagerTab::RepairPreview,
+        ..ConnectivityManagerDialogState::default()
+    };
+    assert!(
+        dialog
+            .report
+            .repairs
+            .iter()
+            .any(|repair| !repair.endpoint_choices.is_empty()),
+        "an open pin offers destinations"
+    );
+    let applicable = dialog
+        .report
+        .repairs
+        .iter()
+        .filter(|repair| repair_takes_apply(repair))
+        .count();
+    let nodes = crate::workbench::design::inspector::tests::accesskit_nodes(|ui| {
+        repair_preview_tab(ui, &mut dialog, true, true);
+    });
+    let ticks = nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::CheckBox)
+        .count();
+    assert_eq!(ticks, applicable);
+}
+
 /// A supply symbol declares its rail global, so the Global nets tab lists
 /// it, beside a `!` label of the same rail, as one resolved global with
 /// nothing to rename.

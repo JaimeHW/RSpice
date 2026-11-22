@@ -133,7 +133,9 @@ impl ConnectivityManagerDialogState {
         self.report
             .repairs
             .iter()
-            .filter(|repair| repair.action.is_some() && self.selected_repairs.contains(&repair.id))
+            .filter(|repair| {
+                repair_takes_apply(repair) && self.selected_repairs.contains(&repair.id)
+            })
             .count()
     }
 
@@ -216,6 +218,13 @@ struct ConnectivityRepair {
     action: Option<ConnectivityRepairAction>,
     endpoint_choices: Vec<EndpointChoice>,
     reveal: RevealTarget,
+}
+
+/// Whether Apply can carry `repair` out. An open pin's repair is a wire only
+/// the reader can draw, so its row offers Draw wire and no Apply tick: a tick
+/// Apply then skipped was a control that did nothing.
+fn repair_takes_apply(repair: &ConnectivityRepair) -> bool {
+    repair.action.is_some()
 }
 
 #[derive(Debug, Clone)]
@@ -1420,7 +1429,7 @@ pub fn apply_selected_connectivity_repairs(
         .report
         .repairs
         .iter()
-        .filter(|repair| repair.action.is_some() && dialog.selected_repairs.contains(&repair.id))
+        .filter(|repair| repair_takes_apply(repair) && dialog.selected_repairs.contains(&repair.id))
         .cloned()
         .collect::<Vec<_>>();
     let policy_changed = dialog.policy_changed();
@@ -2044,9 +2053,11 @@ fn repair_preview_tab(
                             let actionable =
                                 repair.action.is_some() || !repair.endpoint_choices.is_empty();
                             let mut selected = dialog.selected_repairs.contains(&repair.id);
-                            if ui
+                            if !repair_takes_apply(repair) {
+                                ui.label("\u{2014}");
+                            } else if ui
                                 .add_enabled(
-                                    actionable && write_allowed && current,
+                                    write_allowed && current,
                                     egui::Checkbox::without_text(&mut selected),
                                 )
                                 .changed()
@@ -2111,7 +2122,7 @@ fn repair_preview_tab(
                         .report
                         .repairs
                         .iter()
-                        .filter(|repair| repair.action.is_some())
+                        .filter(|repair| repair_takes_apply(repair))
                         .map(|repair| repair.id.clone()),
                 );
             }
