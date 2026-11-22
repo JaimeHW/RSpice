@@ -443,10 +443,10 @@ const ACTIVE_VARIANT: &str = "Active assembly variant";
 
 pub(super) fn annotation_manager_body(
     ui: &mut Ui,
-    dialog: &mut DesignManagementDialogState,
+    dialog: &DesignManagementDialogState,
     write_allowed: bool,
 ) -> DesignManagementBodyAction {
-    let Some(draft) = dialog.draft.as_mut() else {
+    let Some(draft) = dialog.draft.as_ref() else {
         return DesignManagementBodyAction::None;
     };
     let mut action = DesignManagementBodyAction::None;
@@ -498,81 +498,38 @@ pub(super) fn annotation_manager_body(
             }
         });
 
-        let mut definition = policy.definition().clone();
-        let mut changed = false;
-        changed |= setting_combo(
+        // The policy in force, which Edit annotation policy changes, and
+        // what the last renumbering did.
+        section_header(right, "Policy", None);
+        let allocation = policy.definition().prefix_allocation;
+        fact_row(
             right,
-            "Reference designators",
-            &[
-                (
-                    crate::state::ReferenceDesignatorBehavior::StableAcrossVariants,
-                    "Stable across variants",
-                ),
-                (
-                    crate::state::ReferenceDesignatorBehavior::RenumberSelectedScope,
-                    "Renumber selected scope",
-                ),
-            ],
-            &mut definition.reference_designators,
-            write_allowed,
+            "Prefix allocation",
+            PREFIX_ALLOCATIONS
+                .iter()
+                .find(|(value, _)| *value == allocation)
+                .map_or("", |(_, label)| label),
         );
-        changed |= setting_combo(
-            right,
-            "Annotation scope",
-            &[
-                (
-                    crate::state::DefaultAnnotationScope::WholeProject,
-                    "Whole project",
-                ),
-                (
-                    crate::state::DefaultAnnotationScope::CurrentHierarchy,
-                    "Current hierarchy",
-                ),
-                (
-                    crate::state::DefaultAnnotationScope::CurrentSheet,
-                    "Current sheet",
-                ),
-            ],
-            &mut definition.default_scope,
-            write_allowed,
-        );
-        changed |= setting_combo(
-            right,
-            "Collision policy",
-            &[
-                (
-                    AnnotationCollisionPolicy::PreviewAndBlock,
-                    "Preview and block",
-                ),
-                (
-                    AnnotationCollisionPolicy::AllocateNextFreeRange,
-                    "Allocate next free range",
-                ),
-            ],
-            &mut definition.collision_policy,
-            write_allowed,
-        );
-        changed |= setting_combo(
-            right,
-            "Backannotation",
-            &[
-                (
-                    crate::state::BackannotationPolicy::GenerateReviewedMapping,
-                    "Generate reviewed mapping",
-                ),
-                (crate::state::BackannotationPolicy::Disabled, "Disabled"),
-            ],
-            &mut definition.backannotation,
-            write_allowed,
-        );
-        if changed {
-            let revision = policy.revision();
-            apply_domain_result(
-                &mut dialog.error,
-                draft.annotation_mut().update_policy(revision, definition),
-                "Annotation contract updated.",
+        let last = draft
+            .annotation()
+            .journal()
+            .iter()
+            .rev()
+            .find(|entry| {
+                entry.origin() == crate::state::AnnotationJournalOrigin::ReviewedRenumbering
+            })
+            .map_or_else(
+                || "None".to_owned(),
+                |entry| {
+                    let changed = entry
+                        .mappings()
+                        .values()
+                        .filter(|mapping| mapping.old_reference != mapping.new_reference)
+                        .count();
+                    format!("{} changed", counted(changed, "name"))
+                },
             );
-        }
+        fact_row(right, "Last renumbering", &last);
     });
     action
 }

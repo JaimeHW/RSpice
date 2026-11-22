@@ -149,6 +149,17 @@ pub(super) fn toolbar(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
 /// already keep, so labels, selects, notes, buttons and table text share it.
 pub(super) const PANE_INSET: f32 = crate::workbench::design_system::PANEL_INSET;
 
+/// How the annotation policy can allocate prefixes, as the policy page
+/// offers them and the Annotation tab states the one in force.
+pub(super) const PREFIX_ALLOCATIONS: [(AnnotationPrefixAllocation, &str); 3] = [
+    (
+        AnnotationPrefixAllocation::ByDeviceFamily,
+        "By device family",
+    ),
+    (AnnotationPrefixAllocation::BySheet, "By sheet"),
+    (AnnotationPrefixAllocation::ByHierarchy, "By hierarchy"),
+];
+
 /// `count` of `noun`, which takes an "s" for any count but one.
 pub fn counted(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })

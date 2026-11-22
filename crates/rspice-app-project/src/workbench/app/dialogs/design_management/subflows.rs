@@ -408,14 +408,7 @@ pub(super) fn subflow_fields(
             let response = field_combo(
                 ui,
                 "Prefix allocation",
-                &[
-                    (
-                        AnnotationPrefixAllocation::ByDeviceFamily,
-                        "By device family",
-                    ),
-                    (AnnotationPrefixAllocation::BySheet, "By sheet"),
-                    (AnnotationPrefixAllocation::ByHierarchy, "By hierarchy"),
-                ],
+                &PREFIX_ALLOCATIONS,
                 &mut dialog.inputs.prefix_allocation,
                 write_allowed,
             );
@@ -426,22 +419,6 @@ pub(super) fn subflow_fields(
                 "None",
                 range_error.as_deref(),
                 "Project-owned prefix ranges separated by semicolons.",
-            );
-            field_combo(
-                ui,
-                "Imported IDs",
-                &[
-                    (
-                        ImportedReferencePolicy::PreserveWithSourceMap,
-                        "Preserve with source map",
-                    ),
-                    (
-                        ImportedReferencePolicy::NormalizeAfterReview,
-                        "Normalize after review",
-                    ),
-                ],
-                &mut dialog.inputs.imported_ids,
-                write_allowed,
             );
             response
         }

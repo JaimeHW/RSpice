@@ -9,12 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use egui::{Align, Context, Frame, Layout, Margin, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::state::{
-    AnnotationCollisionPolicy, AnnotationObject, AnnotationPosition, AnnotationPrefixAllocation,
-    AnnotationRangeScope, AnnotationReservedRange, AssemblyVariantDraft, AssemblyVariantId,
-    CrossSheetPortDefinition, DesignManagementCatalog, DrawingSheetInheritance,
-    DrawingSheetNewSheetPolicy, DrawingSheetStandard, HierarchyAuditConfiguration,
-    HierarchyAuditRequest, HierarchyAuditSubject, ImportedReferencePolicy,
-    MissingReplacementPolicy, ModelEquivalencePolicy, MoveSelectionRequest,
+    AnnotationObject, AnnotationPosition, AnnotationPrefixAllocation, AnnotationRangeScope,
+    AnnotationReservedRange, AssemblyVariantDraft, AssemblyVariantId, CrossSheetPortDefinition,
+    DesignManagementCatalog, DrawingSheetInheritance, DrawingSheetNewSheetPolicy,
+    DrawingSheetStandard, HierarchyAuditConfiguration, HierarchyAuditRequest,
+    HierarchyAuditSubject, MissingReplacementPolicy, ModelEquivalencePolicy, MoveSelectionRequest,
     ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope, SchematicObjectKey,
     SchematicSheetFormat, SheetDefinition, SheetDeleteBehavior, SheetId, SheetPageNumbering,
     SheetPortPolicy, VariantInheritance, VariantMatrixEdit, VariantQualificationPlan,
@@ -210,7 +209,6 @@ pub struct SubflowInputs {
     renumber_keep: BTreeSet<SchematicObjectKey>,
     prefix_allocation: AnnotationPrefixAllocation,
     reserved_ranges: String,
-    imported_ids: ImportedReferencePolicy,
     audit_configuration: Option<crate::state::ConfigurationSetId>,
     audit_view_checks: HierarchyViewChecks,
     audit_protected_boundaries: ProtectedBoundaryChecks,
@@ -241,7 +239,6 @@ impl Default for SubflowInputs {
             renumber_keep: BTreeSet::new(),
             prefix_allocation: AnnotationPrefixAllocation::ByDeviceFamily,
             reserved_ranges: String::new(),
-            imported_ids: ImportedReferencePolicy::PreserveWithSourceMap,
             audit_configuration: None,
             audit_view_checks: HierarchyViewChecks::AllDeclaredFallbacks,
             audit_protected_boundaries: ProtectedBoundaryChecks::SignaturesAndPins,
@@ -452,7 +449,6 @@ impl DesignManagementDialogState {
                 .find(|id| Some(*id) != inputs.compare_reference);
             let policy = draft.annotation().policy().definition();
             inputs.prefix_allocation = policy.prefix_allocation;
-            inputs.imported_ids = policy.imported_ids;
             inputs.reserved_ranges = format_reserved_ranges(&policy.reserved_ranges);
         }
         if let Some(configurations) = configurations {

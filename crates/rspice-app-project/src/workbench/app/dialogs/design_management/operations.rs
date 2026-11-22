@@ -365,7 +365,6 @@ pub(super) fn commit_design_management_subflow(
             let mut definition = policy.definition().clone();
             definition.prefix_allocation = inputs.prefix_allocation;
             definition.reserved_ranges = ranges;
-            definition.imported_ids = inputs.imported_ids;
             draft
                 .annotation_mut()
                 .update_policy(policy.revision(), definition)

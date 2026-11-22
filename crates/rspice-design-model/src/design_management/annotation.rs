@@ -23,39 +23,6 @@ pub enum ImportedReferencePolicy {
     NormalizeAfterReview,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AnnotationCollisionPolicy {
-    #[default]
-    PreviewAndBlock,
-    AllocateNextFreeRange,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReferenceDesignatorBehavior {
-    #[default]
-    StableAcrossVariants,
-    RenumberSelectedScope,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DefaultAnnotationScope {
-    #[default]
-    WholeProject,
-    CurrentHierarchy,
-    CurrentSheet,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BackannotationPolicy {
-    #[default]
-    GenerateReviewedMapping,
-    Disabled,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum AnnotationRangeScope {
@@ -76,16 +43,9 @@ pub struct AnnotationReservedRange {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnnotationPolicyDefinition {
-    #[serde(default)]
-    pub reference_designators: ReferenceDesignatorBehavior,
-    #[serde(default)]
-    pub default_scope: DefaultAnnotationScope,
     pub prefix_allocation: AnnotationPrefixAllocation,
     pub reserved_ranges: Vec<AnnotationReservedRange>,
     pub imported_ids: ImportedReferencePolicy,
-    pub collision_policy: AnnotationCollisionPolicy,
-    #[serde(default)]
-    pub backannotation: BackannotationPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
