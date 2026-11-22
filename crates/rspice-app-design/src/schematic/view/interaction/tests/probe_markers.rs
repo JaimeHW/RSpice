@@ -5,35 +5,25 @@
 use super::*;
 use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 
+/// A probe-tool click on the bare sheet probes nothing: it leaves no marker
+/// and no undo step, and the status line says what to click.
 #[test]
-fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
+fn a_probe_click_on_the_bare_sheet_places_nothing_and_says_what_to_click() {
     let mut state = DesignTestHost::default();
-    let position = Point::new(30, 40);
+    let symbol_context = schematic_symbol_context(&state);
 
-    let id = retain_probe_flag(&mut canvas_parts(&mut state), position, None, None)
-        .expect("editable active schematic");
-    assert_eq!(state.model.schematic.document().probes.len(), 1);
-    assert_eq!(state.model.schematic.document().probes[0].id, id);
-    assert_eq!(
-        state.model.schematic.document().probes[0].position,
-        position
-    );
-    assert_eq!(
-        state.model.schematic.document().probes[0].reference,
-        format!("P{id}")
-    );
-    assert!(
-        state.model.schematic.document().probes[0]
-            .source_expression
-            .is_none()
-    );
-    assert_eq!(
-        state.model.schematic.undo_description(),
-        Some("place schematic probe")
+    handle_probe_click(
+        &mut canvas_parts(&mut state),
+        Point::new(30, 40),
+        &symbol_context,
     );
 
-    assert!(state.model.schematic.undo());
     assert!(state.model.schematic.document().probes.is_empty());
+    assert!(!state.model.schematic.can_undo());
+    assert_eq!(
+        state.prompt_text(),
+        Some("Nothing probed: click a wire, a pin or a part to probe it.")
+    );
 }
 
 #[test]

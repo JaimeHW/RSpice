@@ -2062,14 +2062,11 @@ fn probe_subject(
             state.prompt("Nothing probed: this wire does not resolve to one net.");
         }
     } else {
+        // A probe is always on a signal: a click on the bare sheet places
+        // nothing, and the status line says what to click.
         let Some(ProbeSubject::Part(comp_id)) = subject else {
             state.model.schematic.session.editor.net_highlight.clear();
-            match retain_probe_flag(state, grid_pos, None, None) {
-                Ok(id) => state.prompt(format!(
-                    "Placed probe P{id}; move it onto a conductor to bind it to a signal."
-                )),
-                Err(reason) => state.prompt(format!("Probe not placed: {reason}")),
-            }
+            state.prompt("Nothing probed: click a wire, a pin or a part to probe it.");
             return;
         };
         handle_component_probe(state, comp_id, grid_pos, symbol_context, read_only);
