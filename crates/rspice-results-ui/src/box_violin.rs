@@ -14,7 +14,7 @@ use egui::Ui;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si_significant};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select, select_with_disabled};
+use rspice_ui_kit::widgets::{Button, SegmentedWidth, chip, segmented, select};
 
 use crate::presentation::well_hint;
 use crate::requirement_lines::{self, PlotWithRequirements, RequirementLine};
@@ -26,10 +26,6 @@ use rspice_results::population::{
 
 /// What the reader is told when the run carries no sampled population.
 const ABSENT_STATE: &str = "No family distribution in this run — run a Monte Carlo analysis";
-
-/// Why the corner grouping cannot be chosen.
-const CORNER_REASON: &str = "A box per corner needs a sampled population at each corner. A corner sweep retains one \
-     value per corner, and no runner produces a Monte Carlo per corner.";
 
 /// What the columns are grouped by.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -262,13 +258,19 @@ fn normalized_column(
 // the sheet bar
 // ---------------------------------------------------------------------------
 
-const GROUP_OPTIONS: [&str; 3] = [
-    "All measurements",
-    "One measurement",
-    "Corners \u{b7} none in this run",
-];
+const GROUP_OPTIONS: [&str; 2] = ["All measurements", "One measurement"];
+/// The grouping select: the width of its longer choice.
+const GROUP_WIDTH: f32 = 150.0;
+/// The measured-column select: the width of a long measurement name.
+const MEASUREMENT_WIDTH: f32 = 150.0;
 
-/// The domain controls this sheet owns, drawn left-aligned in the sheet bar.
+/// The domain controls this sheet owns, drawn left-aligned in the sheet bar:
+/// what the columns are, how their margins read, how each column is drawn
+/// and whether the requirement is.
+///
+/// How a column is drawn — its body, its whiskers and the samples beyond
+/// them — sits in the Display menu, so the bar keeps one row clear of the
+/// Export button at the narrowest window the workspace supports.
 pub fn domain_bar(
     ui: &mut Ui,
     population: Option<&PopulationData>,
@@ -280,18 +282,14 @@ pub fn domain_bar(
     };
     let sheet = state.clone();
     let options = GROUP_OPTIONS.map(str::to_owned).to_vec();
-    let selected = match sheet.grouping {
-        BoxGrouping::AllMeasurements => 0,
-        BoxGrouping::OneMeasurement => 1,
-    };
-    if let Some(picked) = select_with_disabled(
+    let selected = usize::from(sheet.grouping == BoxGrouping::OneMeasurement);
+    if let Some(picked) = select(
         ui,
         "rspice.results.box.grouping",
         "Distribution grouping",
         &options[selected],
         &options,
-        &[(2, CORNER_REASON)],
-        176.0,
+        GROUP_WIDTH,
     ) {
         state.grouping = if picked == 1 {
             BoxGrouping::OneMeasurement
@@ -330,48 +328,14 @@ pub fn domain_bar(
                 "Measured column",
                 names.get(index).map_or("", String::as_str),
                 &names,
-                150.0,
+                MEASUREMENT_WIDTH,
             ) {
                 state.measurement = names.get(picked).cloned();
             }
         }
     }
 
-    let mut body = usize::from(sheet.violin);
-    if segmented(
-        ui,
-        "rspice.results.box.body",
-        &["Box", "Box + violin"],
-        &mut body,
-        SegmentedWidth::Natural,
-    ) {
-        state.violin = body == 1;
-    }
-
-    let mut whiskers = usize::from(sheet.whiskers == Whiskers::Extremes);
-    if segmented(
-        ui,
-        "rspice.results.box.whiskers",
-        &["1.5 IQR", "min\u{2013}max"],
-        &mut whiskers,
-        SegmentedWidth::Natural,
-    ) {
-        state.whiskers = if whiskers == 1 {
-            Whiskers::Extremes
-        } else {
-            Whiskers::Tukey
-        };
-    }
-
-    let outliers = sheet.outliers;
-    let response = chip(ui, "OUT", outliers).on_hover_text(if outliers {
-        "Samples beyond the whiskers drawn individually"
-    } else {
-        "Samples beyond the whiskers hidden"
-    });
-    if response.clicked() {
-        state.outliers = !outliers;
-    }
+    display_menu(ui, state);
 
     let limits = *show_limits;
     let response = chip(ui, "LIM", limits).on_hover_text(if limits {
@@ -382,11 +346,44 @@ pub fn domain_bar(
     if response.clicked() {
         *show_limits = !limits;
     }
-
-    // No trailing readout: with the grouping select, two segmented controls
-    // and the two toggles, the bar already fills the 1024 pt gate, and the
-    // run's own facts read better beside the yield they qualify.
     true
+}
+
+/// How each column is drawn: a box alone or with its violin, whiskers at
+/// 1.5 IQR or the extremes, and the samples beyond them.
+fn display_menu(ui: &mut Ui, state: &mut BoxViolinSheetState) {
+    let display = Button::new("Display")
+        .menu()
+        .accessible_label("Display options")
+        .show(ui);
+    egui::Popup::menu(&display)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            crate::chrome::bars::bar_label(ui, "Body");
+            if ui.radio(!state.violin, "Box").clicked() {
+                state.violin = false;
+            }
+            if ui.radio(state.violin, "Box + violin").clicked() {
+                state.violin = true;
+            }
+            ui.separator();
+            crate::chrome::bars::bar_label(ui, "Whiskers");
+            if ui
+                .radio(state.whiskers == Whiskers::Tukey, "1.5 IQR")
+                .clicked()
+            {
+                state.whiskers = Whiskers::Tukey;
+            }
+            if ui
+                .radio(state.whiskers == Whiskers::Extremes, "Min\u{2013}max")
+                .clicked()
+            {
+                state.whiskers = Whiskers::Extremes;
+            }
+            ui.separator();
+            ui.checkbox(&mut state.outliers, "Outliers")
+                .on_hover_text("Samples beyond the whiskers drawn one by one");
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -941,9 +938,16 @@ fn statistics_rows(
     let yield_row = column.yield_percent().map_or_else(
         || "No requirement bounds this column".to_owned(),
         |percent| {
-            population::wilson_interval(column.passing, column.values.len()).map_or_else(
-                || format!("{percent:.2} %"),
-                |(low, high)| format!("{percent:.2} % \u{b7} 95 % CI {low:.2}\u{2013}{high:.2}"),
+            let share = fmt_si_significant(percent, "%", significant_digits);
+            population::wilson_interval(column.passing, column.values.len()).map_or(
+                share.clone(),
+                |(low, high)| {
+                    format!(
+                        "{share} \u{b7} 95 % CI {} to {}",
+                        fmt_si_significant(low, "", significant_digits),
+                        fmt_si_significant(high, "%", significant_digits)
+                    )
+                },
             )
         },
     );
@@ -1152,7 +1156,7 @@ mod tests {
         let rows = statistics_rows(&column, &plan, 4);
         assert!(
             rows.iter()
-                .any(|row| row.0 == "Yield" && row.1 == "66.67 % · 95 % CI 20.77–93.85")
+                .any(|row| row.0 == "Yield" && row.1 == "66.67 % · 95 % CI 20.77 to 93.85 %")
         );
         specs.clear();
         let plan = population::build(
