@@ -17,7 +17,8 @@
 use super::cursor_values::{marker_x, slope_text, x_delta, x_reciprocal};
 use super::dock::{MarkerActions, MarkerMove, ReadoutInput, marker_color, visible_markers};
 use super::readout::{
-    READOUT_ABSENT, ReadingLayout, TableRow, readout_branch_note, readout_traces, trace_table_rows,
+    READOUT_ABSENT, ReadingLayout, TableRow, reading_resolution, readout_branch_note,
+    readout_traces, settled, trace_table_rows,
 };
 use super::{StripModel, StripTrace, anchor_key};
 use crate::session::{HorizontalCursors, MarkerSelector, ReadingColumnId, ResultViewerState};
@@ -302,7 +303,7 @@ fn build_table(
         .iter()
         .find(|column| matches!(column.id, ReadingColumnId::Cursor(_)))
         .map(|column| column.model);
-    let mut bands: Vec<TableBand> = point_row(source, &columns, &layout)
+    let mut bands: Vec<TableBand> = point_row(state, source, &columns, &layout)
         .map(|row| TableBand {
             title: "Markers".to_owned(),
             rows: vec![row],
@@ -364,7 +365,10 @@ fn build_table(
 /// The row that reads each point marker's Y on the trace it rides, with
 /// each difference against the base taken across traces and, for a pair,
 /// its slope: what a delta marker reads. `None` when no column is a point.
+/// Each reading and difference is settled as the trace's own row settles
+/// it, so the two rows read one point alike.
 fn point_row(
+    state: &mut ResultViewerState,
     source: ReadoutInput<'_>,
     columns: &[ReadingColumn],
     layout: &ReadingLayout<'_>,
@@ -372,24 +376,37 @@ fn point_row(
     let models = source.models;
     let digits = usize::from(source.presentation.displayed_significant_digits().get());
     let interpolation = super::cursor_interpolation(source.presentation.cursor_interpolation());
-    let points: Vec<Option<(&StripModel, &StripTrace, f64)>> = columns
+    // Each point's model, trace, settled reading and the trace's resolution.
+    let points: Vec<Option<(&StripModel, &StripTrace, f64, f64)>> = columns
         .iter()
         .zip(layout.positions)
         .map(|(column, x)| {
             let anchor = column.anchor.as_ref().filter(|_| column.point)?;
+            let x = (*x)?;
             let model = &models[column.model];
-            let trace = model
+            let index = model
                 .traces
                 .iter()
-                .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)?;
-            Some((model, trace, model.trace_value(trace, (*x)?, interpolation)))
+                .position(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)?;
+            let trace = &model.traces[index];
+            let resolution = super::stack::pane_trace_extremes(
+                &mut state.derived,
+                model,
+                &[index],
+                None,
+                |_| {},
+            )
+            .range()
+            .map_or(0.0, |extent| reading_resolution(extent, digits));
+            let value = settled(model.trace_value(trace, x, interpolation), resolution);
+            Some((model, trace, value, resolution))
         })
         .collect();
     if points.iter().all(Option::is_none) {
         return None;
     }
     let absent = || READOUT_ABSENT.to_owned();
-    let format = |(model, trace, value): (&StripModel, &StripTrace, f64)| {
+    let format = |(model, trace, value, _): (&StripModel, &StripTrace, f64, f64)| {
         model.format_trace_value(trace, value, digits, source.quantity_policy)
     };
     let mut cells: Vec<String> = points
@@ -402,7 +419,13 @@ fn point_row(
         // Volts less amps is not a difference.
         let difference = match (base, points[column]) {
             (Some(from), Some(to)) if from.0.trace_unit(from.1) == to.0.trace_unit(to.1) => {
-                Some((from.0, from.1, to.2 - from.2))
+                let resolution = from.3.max(to.3);
+                Some((
+                    from.0,
+                    from.1,
+                    settled(to.2 - from.2, resolution),
+                    resolution,
+                ))
             }
             _ => None,
         };
@@ -419,7 +442,7 @@ fn point_row(
             (Some(a), Some(b)) => Some((a, b)),
             _ => None,
         };
-        let slope = first.zip(run).and_then(|((model, trace, dy), (a, b))| {
+        let slope = first.zip(run).and_then(|((model, trace, dy, _), (a, b))| {
             let (dx, x_unit) = match model.x_scale {
                 XScale::Log10 if a > 0.0 && b > 0.0 => (b.log10() - a.log10(), "dec"),
                 XScale::Log10 => return None,

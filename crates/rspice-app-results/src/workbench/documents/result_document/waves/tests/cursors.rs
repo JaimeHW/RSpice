@@ -317,6 +317,48 @@ fn a_base_marker_reads_the_analytic_differences() {
     }
 }
 
+/// A marker on a sine's zero crossing reads 0 on the Markers row, as the
+/// trace's own row reads it there, not the floating point's 122.5 aV, and
+/// the difference from it reads alike on both rows.
+#[test]
+fn the_markers_row_reads_a_point_as_its_trace_row_does() {
+    let time = time();
+    let sine: Vec<f64> = time
+        .iter()
+        .map(|t| (std::f64::consts::TAU * 1.0e3 * t).sin())
+        .collect();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = rspice_results::run::SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", time.clone(), sine, "#00aaff").with_unit("V"),
+        ]),
+    );
+    let mut state = host_on(run);
+    strip(&mut state);
+    state.quick_frame();
+    let crossing = state
+        .place_marker("V(out)", time[400])
+        .expect("a marker on the zero crossing");
+    state
+        .place_marker("V(out)", time[200])
+        .expect("a marker on the crest");
+    state.results.results.session.readout_base = Some(
+        rspice_results_ui::session::ReadingColumnId::Marker(crossing),
+    );
+
+    let tables = super::super::readout::cursor_tables(&mut state.results_parts());
+    let markers = &tables[0].bands[0];
+    assert_eq!(markers.title, "Markers");
+    let trace_row = tables[0].bands[1..]
+        .iter()
+        .flat_map(|band| &band.rows)
+        .find(|row| row.name == "V(out)")
+        .expect("the trace's row");
+    assert_eq!(markers.rows[0].cells[0], "0 V");
+    assert_eq!(markers.rows[0].cells[..3], trace_row.cells[..3]);
+}
+
 /// Two markers on different traces read across them, as a delta marker
 /// does: the X row's Δx and 1/Δx, and the marker row's Δy and slope.
 #[test]
