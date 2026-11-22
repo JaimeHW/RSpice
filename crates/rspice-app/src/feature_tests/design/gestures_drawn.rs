@@ -1145,3 +1145,109 @@ fn key(key: egui::Key) -> egui::Event {
         modifiers: egui::Modifiers::NONE,
     }
 }
+
+/// With nothing selected, M, Ctrl+R and Delete act on the part under the
+/// pointer, as KiCad's keys do, and take it as a click would; over empty
+/// sheet they still do nothing. They were disabled with "select an editable
+/// object" until the part had been clicked first.
+#[test]
+fn with_nothing_selected_the_keys_act_on_the_part_under_the_pointer() {
+    let mut fixture = Fixture::new(false);
+    fixture.ctx.set_os(egui::os::OperatingSystem::Nix);
+    let part = fixture.app.state.model.schematic.document().components[0].clone();
+    let selection = |fixture: &Fixture| {
+        fixture
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .clone()
+    };
+    let rest = |fixture: &mut Fixture, x: f32, y: f32| {
+        let at = fixture.origin + egui::vec2(x, y);
+        fixture.frame(vec![egui::Event::PointerMoved(at)], true);
+        fixture.frame(vec![], true);
+    };
+    let press = |fixture: &mut Fixture, key: egui::Key, modifiers: egui::Modifiers| {
+        for pressed in [true, false] {
+            fixture.frame(
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed,
+                    repeat: false,
+                    modifiers,
+                }],
+                true,
+            );
+        }
+    };
+    let ctrl = egui::Modifiers {
+        command: true,
+        ctrl: true,
+        ..egui::Modifiers::NONE
+    };
+
+    // A click on empty sheet gives the canvas the keyboard; over empty
+    // sheet, M has nothing to act on.
+    rest(&mut fixture, 400.0, 100.0);
+    fixture.frame(vec![fixture.button(400.0, true)], true);
+    fixture.frame(vec![fixture.button(400.0, false)], true);
+    press(&mut fixture, egui::Key::M, egui::Modifiers::NONE);
+    assert!(!fixture.app.state.design.move_selection.armed);
+
+    // M over the part: Move carries it.
+    rest(&mut fixture, 100.0, 100.0);
+    assert!(selection(&fixture).is_empty());
+    press(&mut fixture, egui::Key::M, egui::Modifiers::NONE);
+    assert!(fixture.app.state.design.move_selection.armed);
+    assert_eq!(
+        fixture.app.state.model.schematic.session.editor.tool,
+        Tool::MoveSelection
+    );
+    assert_eq!(selection(&fixture).single_component(), Some(part.id));
+    press(&mut fixture, egui::Key::Escape, egui::Modifiers::NONE);
+    fixture
+        .app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .clear();
+
+    // Ctrl+R over the part turns it.
+    rest(&mut fixture, 100.0, 100.0);
+    press(&mut fixture, egui::Key::R, ctrl);
+    assert_eq!(
+        fixture.app.state.model.schematic.document().components[0].rotation,
+        part.rotation.rotate_cw()
+    );
+    fixture
+        .app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .clear();
+
+    // Delete over the part takes it away.
+    rest(&mut fixture, 100.0, 100.0);
+    press(&mut fixture, egui::Key::Delete, egui::Modifiers::NONE);
+    assert!(
+        fixture
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .is_empty()
+    );
+}

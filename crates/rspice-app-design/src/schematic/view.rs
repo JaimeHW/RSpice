@@ -564,6 +564,15 @@ pub fn render_schematic_view(
         &drawing_sheet,
     );
 
+    let hover = scene::canvas_hover(
+        ui.ctx(),
+        available,
+        &viewport,
+        &canvas.facts(),
+        &symbol_context,
+    );
+    canvas.design.canvas_hover_target =
+        hover.filter(|_| canvas.model.schematic.session.editor.tool == crate::state::Tool::Select);
     draw_scene(
         &painter,
         available,
@@ -572,6 +581,7 @@ pub fn render_schematic_view(
         symbol_library,
         &symbol_context,
         &drawing_sheet,
+        hover,
     );
     if let Some(at) = crosshair {
         rspice_schematic_editor::view::preview::draw_full_crosshair(&painter, available, at);

@@ -18,6 +18,7 @@ use rspice_schematic_editor::symbol_editor::commands::{
 };
 use rspice_schematic_editor::symbol_editor::interaction::arm_stretch;
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
+use rspice_schematic_editor::view::pointer_target::{PointerTarget, select_pointer_target};
 
 use crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid;
 use crate::schematic::view::label_reset::{reset_block_reason, run_reset_label_position};
@@ -439,7 +440,8 @@ impl CommandSet for DesignCommand {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
                 (!schematic_selection_has_live_object(&reads.model.schematic)
-                    && !something_floats(reads.state, &reads.model.schematic))
+                    && !something_floats(reads.state, &reads.model.schematic)
+                    && hover_fallback(reads.state, reads.model).is_none())
                 .then_some("select an editable object")
             }
             Self::SnapSelectionToGrid => reads
@@ -498,10 +500,15 @@ impl CommandSet for DesignCommand {
             {
                 Some("the active schematic is read-only")
             }
-            Self::MoveSelection => (!reads.model.schematic.has_live_movable_selection())
-                .then_some("select an editable object"),
+            Self::MoveSelection => (!reads.model.schematic.has_live_movable_selection()
+                && hover_fallback(reads.state, reads.model).is_none())
+            .then_some("select an editable object"),
             Self::StretchSelection => {
-                crate::workbench::app::dialogs::selection::stretch::stretch_refusal(reads.model)
+                if hover_fallback(reads.state, reads.model).is_some() {
+                    None
+                } else {
+                    crate::workbench::app::dialogs::selection::stretch::stretch_refusal(reads.model)
+                }
             }
             Self::ArraySelection => {
                 crate::workbench::app::dialogs::selection::array::array_source_refusal(reads.model)
@@ -1002,6 +1009,7 @@ impl CommandSet for DesignCommand {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical => {
+                take_hover_fallback(cx.state, cx.model);
                 turn_what_floats_or_selection(
                     &mut crate::schematic::view::canvas_parts_in(cx),
                     selection_transform(self),
@@ -1090,12 +1098,15 @@ impl CommandSet for DesignCommand {
                     cx.wb,
                 );
             }
-            Self::MoveSelection => arm_move_selection_in(
-                &mut cx.state.move_selection,
-                &mut cx.state.stretch_selection,
-                &mut cx.state.array_selection,
-                cx.model,
-            ),
+            Self::MoveSelection => {
+                take_hover_fallback(cx.state, cx.model);
+                arm_move_selection_in(
+                    &mut cx.state.move_selection,
+                    &mut cx.state.stretch_selection,
+                    &mut cx.state.array_selection,
+                    cx.model,
+                );
+            }
             // The handle under the pointer follows it until a click.
             Self::StretchSelection if routed::symbol_editor(cx.wb.workspace, cx.model) => {
                 if !arm_stretch(&mut cx.state.symbol.editor) {
@@ -1105,14 +1116,17 @@ impl CommandSet for DesignCommand {
                     );
                 }
             }
-            Self::StretchSelection => arm_stretch_selection_in(
-                &mut cx.state.stretch_selection,
-                &mut cx.state.move_selection,
-                &mut cx.state.array_selection,
-                cx.state.schematic_visibility.wire_routing,
-                cx.model,
-                cx.wb,
-            ),
+            Self::StretchSelection => {
+                take_hover_fallback(cx.state, cx.model);
+                arm_stretch_selection_in(
+                    &mut cx.state.stretch_selection,
+                    &mut cx.state.move_selection,
+                    &mut cx.state.array_selection,
+                    cx.state.schematic_visibility.wire_routing,
+                    cx.model,
+                    cx.wb,
+                );
+            }
             Self::ArraySelection => open_array_selection_dialog_in(
                 &mut cx.state.array_selection,
                 &mut cx.state.move_selection,
@@ -1346,6 +1360,46 @@ fn schematic_editor(reads: &Reads<'_, DesignFeature>) -> bool {
             reads.model.workspace.content.active_view_type(),
             Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
         )
+}
+
+/// With nothing selected and nothing floating, the object the pointer rests
+/// on over the canvas: Move, Stretch, the turns and flips and Delete act on
+/// it, as KiCad's keys do, rather than asking for a click first.
+pub(crate) fn hover_fallback(
+    state: &DesignState,
+    model: &crate::workbench::app_state::Model,
+) -> Option<PointerTarget> {
+    // The canvas reports what it rests on only while it draws, so a symbol
+    // or a Verilog-A view in front has none.
+    let schematic_in_front = matches!(
+        model.workspace.content.active_view_type(),
+        Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
+    );
+    let schematic = &model.schematic;
+    if schematic_in_front
+        && schematic.session.editor.selection.is_empty()
+        && !something_floats(state, schematic)
+    {
+        state.canvas_hover_target
+    } else {
+        None
+    }
+}
+
+/// Select what [`hover_fallback`] names, as a click on it would, so the
+/// command that follows acts on it and shows what it acted on.
+pub(crate) fn take_hover_fallback(
+    state: &DesignState,
+    model: &mut crate::workbench::app_state::Model,
+) {
+    if let Some(target) = hover_fallback(state, model) {
+        select_pointer_target(
+            &mut model.schematic.session.editor,
+            Some(target),
+            false,
+            false,
+        );
+    }
 }
 
 /// What a turn or flip does to the schematic's selection.

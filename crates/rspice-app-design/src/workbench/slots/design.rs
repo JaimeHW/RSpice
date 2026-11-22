@@ -152,6 +152,10 @@ pub struct DesignState {
     /// canvas renders; paste targets fall back to it when the cursor is not
     /// over the canvas (menu-driven paste).
     pub canvas_view_center: Option<(f64, f64)>,
+    /// The object the pointer rests on over the schematic canvas with the
+    /// Select tool, reported each frame the canvas renders. With nothing
+    /// selected, Move, Stretch, Rotate, Mirror and Delete act on it.
+    pub canvas_hover_target: Option<rspice_schematic_editor::view::pointer_target::PointerTarget>,
     /// Canvas grid style (dots / lines / off).
     pub grid: GridStyle,
     /// Last non-Off display style retained for backward-compatible session
@@ -365,6 +369,7 @@ impl DesignState {
         if workspace != crate::workbench::state::Workspace::Design {
             self.canvas_hover = None;
             self.canvas_view_center = None;
+            self.canvas_hover_target = None;
         }
     }
 

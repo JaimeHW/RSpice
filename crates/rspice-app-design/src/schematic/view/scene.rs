@@ -35,7 +35,7 @@ use std::collections::HashMap;
 /// overlap chooser is open. Nothing while
 /// a button is down (a drag or a band), a popup is open, or the canvas is
 /// driven by touch, which has no hover.
-fn canvas_hover(
+pub(super) fn canvas_hover(
     ctx: &egui::Context,
     available: Rect,
     viewport: &Viewport,
@@ -124,9 +124,9 @@ pub(super) fn draw_scene(
     symbol_library: Option<&SymbolLibrary>,
     symbol_context: &SchematicSymbolContext,
     drawing_sheet: &ActiveDrawingSheet,
+    hover: Option<PointerTarget>,
 ) {
     super::drawing_sheet::draw_base(painter, available, viewport, state, drawing_sheet);
-    let hover = canvas_hover(painter.ctx(), available, viewport, state, symbol_context);
     if hover.is_none()
         && let Some(block) =
             title_block_hover(painter.ctx(), available, viewport, state, drawing_sheet)
@@ -157,7 +157,6 @@ pub(super) fn draw_scene(
     let probe_status =
         |probe: &crate::state::SchematicProbe| probe_visual_status(probe, &probe_statuses);
     let selected_trace_expression = || state.selected_trace().map(|trace| trace.source_name());
-    let hover = canvas_hover(painter.ctx(), available, viewport, state, symbol_context);
     scene::draw_content(
         painter,
         available,

@@ -399,7 +399,8 @@ fn can_delete(reads: &Reads<'_, DesignFeature>) -> bool {
         symbol_selection_editable(reads)
     } else {
         !reads.model.schematic_edit_read_only()
-            && schematic_selection_has_deletable_object(&reads.model.schematic)
+            && (schematic_selection_has_deletable_object(&reads.model.schematic)
+                || super::hover_fallback(reads.state, reads.model).is_some())
     }
 }
 
@@ -460,6 +461,7 @@ fn delete_selection(cx: &mut Cx<'_, DesignFeature>) {
         let modal_open = cx.application_modal_open();
         delete_selected_symbol_item(&mut cx.state.symbol, cx.model, cx.wb, modal_open, false);
     } else {
+        super::take_hover_fallback(cx.state, cx.model);
         delete_schematic_selection(cx.model, cx.wb);
     }
 }
