@@ -1337,7 +1337,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {needle} row"))
         };
 
-        assert!(by_name("95 % CI (Wilson)").ends_with(" %"), "{}", by_name("95 % CI (Wilson)"));
+        assert!(
+            by_name("95 % CI (Wilson)").ends_with(" %"),
+            "{}",
+            by_name("95 % CI (Wilson)")
+        );
         assert!(
             by_name("Worst trial").starts_with("Trial 0 \u{b7} seed 29604"),
             "{}",

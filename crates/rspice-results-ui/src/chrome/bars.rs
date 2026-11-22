@@ -401,7 +401,9 @@ fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
     // up the bar's control height.
     let font = theme::field_mono();
     let line = ui.fonts_mut(|fonts| fonts.row_height(&font));
-    let pad = ((ui.spacing().interact_size.y - line) * 0.5).round().max(0.0) as i8;
+    let pad = ((ui.spacing().interact_size.y - line) * 0.5)
+        .round()
+        .max(0.0) as i8;
     let field = ui.add(
         egui::TextEdit::singleline(filter)
             .id(operating_point_filter_id())
