@@ -62,6 +62,10 @@ impl EditorSession {
     }
 
     /// Handle one local Escape stage when the host has no pending document transaction.
+    ///
+    /// With nothing in flight, Escape lets go of the selection and the net
+    /// highlight together: a click leaves the highlight lit, so this is the
+    /// one gesture that puts it out.
     pub fn cancel_interaction_step(&mut self) {
         if self.wire_drawing.active || self.bus_drawing.active {
             self.cancel_routing_gestures();
@@ -79,6 +83,7 @@ impl EditorSession {
         }
         self.selection.clear();
         self.selection_rect.cancel();
+        self.net_highlight.clear();
     }
 }
 

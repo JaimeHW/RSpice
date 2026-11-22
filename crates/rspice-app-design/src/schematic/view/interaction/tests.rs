@@ -1880,29 +1880,25 @@ fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
         Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
     ];
     state.model.schematic.bump_topology_version();
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .highlight_wires([1].into_iter().collect());
+    state.sync_active_schematic_to_workspace();
+    assert_eq!(lit_net(&mut state, 1).1, [1].into_iter().collect());
 
     assert_eq!(
         commit_explicit_junction(&mut canvas_parts(&mut state), Point::new(20, 20)),
         JunctionPlacementOutcome::Placed(Point::new(20, 20))
     );
     assert!(state.model.schematic.has_junction(Point::new(20, 20)));
-    assert!(!state.model.schematic.session.editor.net_highlight.active);
-    assert!(
+    // The light follows the net the junction grew rather than going out.
+    state.model.follow_net_highlight();
+    assert_eq!(
         state
             .model
             .schematic
             .session
             .editor
             .net_highlight
-            .highlighted_wires
-            .is_empty()
+            .highlighted_wires,
+        [1, 2].into_iter().collect()
     );
     assert!(state.model.schematic.can_undo());
     assert!(state.model.schematic.undo());
@@ -1923,21 +1919,17 @@ fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
         Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
     ];
     state.model.schematic.add_junction(Point::new(20, 20));
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .highlight_wires([1, 2].into_iter().collect());
+    state.sync_active_schematic_to_workspace();
+    assert_eq!(lit_net(&mut state, 1).1, [1, 2].into_iter().collect());
 
     assert_eq!(
         commit_explicit_junction(&mut canvas_parts(&mut state), Point::new(20, 20)),
         JunctionPlacementOutcome::Removed(Point::new(20, 20))
     );
     assert!(!state.model.schematic.has_junction(Point::new(20, 20)));
-    assert!(!state.model.schematic.session.editor.net_highlight.active);
-    assert!(
+    // The light splits with the net: one of the two wires is still lit.
+    state.model.follow_net_highlight();
+    assert_eq!(
         state
             .model
             .schematic
@@ -1945,7 +1937,8 @@ fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
             .editor
             .net_highlight
             .highlighted_wires
-            .is_empty()
+            .len(),
+        1
     );
     let disconnected = extract(&state.model.schematic, None);
     assert_eq!(

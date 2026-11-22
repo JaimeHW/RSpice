@@ -459,6 +459,9 @@ pub fn render_schematic_view(
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.
     canvas.model.schematic.ensure_canvas_cache();
+    // The net highlight is read again after an edit, so it lights what is on
+    // its net now rather than the wires it covered when it was lit.
+    canvas.model.follow_net_highlight();
     // Badges are placed against the wires the canvas cache indexes, so they
     // are refreshed after it.
     scene::refresh_voltage_badges(&mut canvas.parts());

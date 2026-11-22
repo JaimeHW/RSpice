@@ -269,7 +269,10 @@ pub mod tests {
         assert_eq!(state.model.schematic.topology_version(), topology);
         assert_eq!(state.model.schematic.can_undo(), could_undo);
         assert!(!state.model.schematic.session.is_dirty);
-        assert!(!state.model.schematic.session.editor.net_highlight.active);
+        assert!(
+            state.model.schematic.session.editor.net_highlight.active,
+            "moving the focus leaves the net highlight lit, as a click does"
+        );
         assert!(
             state
                 .model
@@ -278,7 +281,7 @@ pub mod tests {
                 .editor
                 .net_highlight
                 .highlighted_wires
-                .is_empty()
+                .contains(&777)
         );
     }
 

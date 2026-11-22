@@ -1030,7 +1030,6 @@ fn commit_explicit_junction(
             .with_undo("remove junction", |schematic| {
                 schematic.remove_junction(junction_id);
             });
-        state.model.schematic.session.editor.net_highlight.clear();
         return JunctionPlacementOutcome::Removed(target);
     }
 
@@ -1040,7 +1039,6 @@ fn commit_explicit_junction(
         .with_undo("place junction", |schematic| {
             schematic.add_junction(target);
         });
-    state.model.schematic.session.editor.net_highlight.clear();
     JunctionPlacementOutcome::Placed(target)
 }
 
@@ -2066,7 +2064,6 @@ fn probe_subject(
         // A probe is always on a signal: a click on the bare sheet places
         // nothing, and the status line says what to click.
         let Some(ProbeSubject::Part(comp_id)) = subject else {
-            state.model.schematic.session.editor.net_highlight.clear();
             state.prompt("Nothing probed: click a wire, a pin or a part to probe it.");
             return;
         };

@@ -390,6 +390,11 @@ pub enum PointerSelectionEffect {
 }
 
 /// Apply local selection; return any net-highlighting request to the app.
+///
+/// A click selects and leaves the net highlight alone, so the lit net can be
+/// acted on (shown in the netlist, its properties opened) without going out;
+/// Escape clears it, and an Alt+click on a wire lights that wire's net
+/// instead. KiCad's highlighted net likewise stays until it is cleared.
 pub fn select_pointer_target(
     session: &mut crate::session::EditorSession,
     target: Option<PointerTarget>,
@@ -398,7 +403,6 @@ pub fn select_pointer_target(
 ) -> PointerSelectionEffect {
     match target {
         Some(PointerTarget::Component(id)) => {
-            session.net_highlight.clear();
             if additive {
                 session.selection.toggle_component(id);
             } else {
@@ -407,7 +411,6 @@ pub fn select_pointer_target(
             }
         }
         Some(PointerTarget::DesignNote(id)) => {
-            session.net_highlight.clear();
             if additive {
                 session.selection.toggle_design_note(id);
             } else {
@@ -415,7 +418,6 @@ pub fn select_pointer_target(
             }
         }
         Some(PointerTarget::DocumentationShape(id)) => {
-            session.net_highlight.clear();
             if additive {
                 session.selection.toggle_documentation_shape(id);
             } else {
@@ -423,7 +425,6 @@ pub fn select_pointer_target(
             }
         }
         Some(PointerTarget::Probe(id)) => {
-            session.net_highlight.clear();
             if additive {
                 session.selection.toggle_probe(id);
             } else {
@@ -431,7 +432,6 @@ pub fn select_pointer_target(
             }
         }
         Some(PointerTarget::NetLabel(id)) => {
-            session.net_highlight.clear();
             if additive {
                 session.selection.toggle_net_label(id);
             } else {
@@ -439,7 +439,6 @@ pub fn select_pointer_target(
             }
         }
         Some(PointerTarget::BusTap(id)) => {
-            session.net_highlight.clear();
             if additive {
                 session.selection.toggle_bus_tap(id);
             } else {
@@ -447,7 +446,6 @@ pub fn select_pointer_target(
             }
         }
         Some(PointerTarget::Junction(pos)) => {
-            session.net_highlight.clear();
             if additive {
                 if session.selection.has_junction(pos) {
                     session.selection.deselect_junction(pos);
@@ -459,7 +457,6 @@ pub fn select_pointer_target(
             }
         }
         Some(PointerTarget::Bus(id)) => {
-            session.net_highlight.clear();
             if additive {
                 session.selection.toggle_bus(id);
             } else {
@@ -471,17 +468,14 @@ pub fn select_pointer_target(
                 session.selection.clear();
                 return PointerSelectionEffect::HighlightWire(id);
             } else if additive {
-                session.net_highlight.clear();
                 session.selection.toggle_wire(id);
             } else {
-                session.net_highlight.clear();
                 session.selection.clear();
                 session.selection.select_wire(id);
             }
         }
         None if !additive => {
             session.selection.clear();
-            session.net_highlight.clear();
         }
         None => {}
     }

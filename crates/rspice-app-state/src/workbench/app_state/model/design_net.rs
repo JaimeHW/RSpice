@@ -30,6 +30,32 @@ impl Model {
         }
     }
 
+    /// Keep the net highlight on its net after an edit: a wire drawn onto the
+    /// lit net lights, and a cut leaves lit only the part that is still that
+    /// net. Reads the nets only when the document changed since the light was
+    /// last read.
+    pub fn follow_net_highlight(&mut self) {
+        let version = (
+            self.schematic.topology_version(),
+            self.schematic.content_version(),
+        );
+        if self
+            .schematic
+            .session
+            .editor
+            .net_highlight
+            .is_followed_at(version)
+        {
+            return;
+        }
+        let nets = self.active_design_nets();
+        self.schematic
+            .session
+            .editor
+            .net_highlight
+            .follow(&nets, version);
+    }
+
     /// Select the net of this name on the drawing on screen, light it, and
     /// centre the view on it: its label, else its first wire, else the first
     /// instance on it. A net with no wire drawn is selected by the instances

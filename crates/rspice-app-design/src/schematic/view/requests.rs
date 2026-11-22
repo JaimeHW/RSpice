@@ -2,27 +2,17 @@
 
 use super::parts::CanvasParts;
 use crate::workbench::{
-    app::{delete_schematic_selection, hierarchy_master_for_component},
-    app_state::Model,
+    app::delete_schematic_selection,
     framework::requests::{Drain, Request},
 };
 use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 use rspice_schematic_editor::view::keyboard_navigation;
 use rspice_schematic_editor::view::pointer_target::{
-    PointerSelectionEffect, PointerTarget, select_pointer_target,
+    PointerSelectionEffect, select_pointer_target,
 };
 
 pub use crate::workbench::app::schematic_editor_request_source as editor_request_source;
-
-/// Whether `target` is an instance the user can descend into. Picking one
-/// leaves a net highlight lit, so the descent (the descend key, the second
-/// click of a double-click, or the menu's Descend) carries it into the
-/// instance and back out.
-pub(super) fn picks_instance_to_descend(model: &Model, target: Option<PointerTarget>) -> bool {
-    matches!(target, Some(PointerTarget::Component(id))
-        if hierarchy_master_for_component(model, id).is_some())
-}
 
 pub fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest) {
     if request.source != editor_request_source(state)
@@ -42,15 +32,12 @@ pub fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest)
             let (document, editor) = state.model.schematic.document_and_editor();
             keyboard_navigation::focus_keyboard_object(document, &mut editor.selection, object);
             state.design.interaction.schematic_keyboard_focus = Some(object);
-            state.model.schematic.session.editor.net_highlight.clear();
         }
         EditorAction::SelectPointer {
             target,
             additive,
             alt_held,
         } => {
-            let kept = (!additive && picks_instance_to_descend(state.model, target))
-                .then(|| state.model.schematic.session.editor.net_highlight.clone());
             if let PointerSelectionEffect::HighlightWire(id) = select_pointer_target(
                 &mut state.model.schematic.session.editor,
                 target,
@@ -60,9 +47,6 @@ pub fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest)
                 super::interaction::highlight_canvas_net(state.model, |net| {
                     net.wire_ids.contains(&id)
                 });
-            }
-            if let Some(kept) = kept {
-                state.model.schematic.session.editor.net_highlight = kept;
             }
         }
     }

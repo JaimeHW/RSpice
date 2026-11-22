@@ -1180,7 +1180,7 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
 /// cleared it first: the click before the descend key or a double-click,
 /// and the context menu that offers Descend, so the child lit nothing and
 /// neither did the parent on the way back up. Picking a descendable
-/// instance now leaves it lit; picking an ordinary part still clears it.
+/// instance now leaves it lit, and so does picking an ordinary part.
 #[test]
 fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
     use crate::workbench::examples::hierarchy_reference::{self, AMP_INSTANCES};
@@ -1276,5 +1276,9 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
         .map(|component| component.id)
         .expect("top places an ordinary part");
     click(&mut state, part);
-    assert_eq!(lit(&state), None, "an ordinary part still clears it");
+    assert_eq!(
+        lit(&state).as_deref(),
+        Some("in"),
+        "an ordinary part keeps it"
+    );
 }

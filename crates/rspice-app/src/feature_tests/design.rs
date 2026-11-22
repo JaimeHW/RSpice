@@ -48,6 +48,7 @@ mod navigator_drawn;
 mod navigator_rails;
 mod navigator_shelf;
 mod navigator_shelf_search;
+mod net_highlight;
 mod net_label_placement_drawn;
 mod object_properties_drawn;
 mod physical_layout_transactions;

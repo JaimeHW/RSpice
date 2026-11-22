@@ -731,8 +731,8 @@ fn select_pointer_target(
 }
 
 /// Select what the menu opens on, unless it is already in the selection,
-/// and name it as the menu's target. A net highlight stays lit on an
-/// instance the menu can descend into, so Descend carries it.
+/// and name it as the menu's target. A net highlight stays lit, so the menu
+/// can act on the lit net and Descend carries it into an instance.
 pub fn select_context_target(
     state: &mut CanvasParts<'_>,
     target: Option<PointerTarget>,
@@ -740,9 +740,6 @@ pub fn select_context_target(
     let Some(target) = target else {
         return ContextTarget::Canvas;
     };
-    if !super::requests::picks_instance_to_descend(state.model, Some(target)) {
-        state.model.schematic.session.editor.net_highlight.clear();
-    }
     match target {
         PointerTarget::Component(id) => {
             if !state
