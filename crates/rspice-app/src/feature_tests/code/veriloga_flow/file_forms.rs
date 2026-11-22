@@ -65,10 +65,7 @@ fn new_file_on_the_rail_is_a_compact_form_and_enter_creates_the_file() {
     let main = main_file(&user);
     new_file(&mut user, "stage");
     user.expect(NEW_FORM);
-    assert!(
-        user.find(MANAGE).is_none(),
-        "Files and includes stays shut"
-    );
+    assert!(user.find(MANAGE).is_none(), "Files and includes stays shut");
     user.expect(&format!("Adds an `include at the top of {main}"));
 
     user.key(Key::Enter, NONE);
