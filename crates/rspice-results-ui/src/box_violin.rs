@@ -487,7 +487,6 @@ pub fn show(
     let mut spec = PlotSpec::new(x_axis, XScale::Linear, Axis::linear(y0, y1, unit.clone()))
         .accessible_name("Population distribution")
         .accessible_detail(&accessible);
-    spec.left_margin = 68.0;
 
     // The bounds drawn across each column's slot, by the measurement they
     // bound: the same ones `PaintedColumns::draw_bounds` paints.

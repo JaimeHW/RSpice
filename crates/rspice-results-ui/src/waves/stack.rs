@@ -266,8 +266,9 @@ fn gutter_columns(ui: &Ui, host: &impl StackHost, model: &StripModel) -> (f32, f
     )
 }
 
-// A 64 px left gutter carries the Y ticks and the X ruler's caption.
-const WAVE_SHARED_LEFT_MARGIN: f32 = 64.0;
+// The left gutter every plot keeps carries the Y ticks and the X ruler's
+// caption.
+const WAVE_SHARED_LEFT_MARGIN: f32 = plot::PLOT_GUTTER;
 
 /// The mockup's per-sheet left gutter: the noise sheet's nV/√Hz tick
 /// labels need 88 px where the shared 64 px gutter suffices elsewhere.
@@ -361,26 +362,13 @@ fn expressions_range(exprs: &[ResolvedExpr]) -> Option<(f64, f64)> {
         .reduce(|(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
 }
 
-/// The share of its span a fit leaves free on each side: enough that no
-/// curve runs along the frame, little enough that the curves fill the strip,
-/// as ViVA's and EZwave's fits leave them.
-pub(crate) const FIT_HEADROOM: f64 = 0.04;
-
-/// A linear fit's span, padded by [`FIT_HEADROOM`] each side.
-fn padded((min, max): (f64, f64)) -> (f64, f64) {
-    let pad = (max - min) * FIT_HEADROOM;
-    // A span that cannot survive its own padding is flat as far as any axis
-    // can draw it: exactly constant, or constant to within a few ulps. Both
-    // widen the same way, because a range finer than the tick ladder can
-    // subdivide leaves the pane with no labels at all.
-    if pad <= 0.0 {
-        return (min - 1.0, max + 1.0);
-    }
-    (min - pad, max + pad)
+/// A linear fit's span, padded as every plot's fit is.
+fn padded(range: (f64, f64)) -> (f64, f64) {
+    plot::padded_fit(range)
 }
 
 /// Y range of one pane's traces over the whole record, padded by
-/// [`FIT_HEADROOM`].
+/// [`plot::FIT_HEADROOM`].
 pub fn pane_y_range(
     derived: &mut DerivedSeries,
     model: &StripModel,

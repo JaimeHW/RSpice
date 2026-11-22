@@ -322,7 +322,9 @@ pub fn show(
         well_hint(ui, if silent { ZERO_SIGNAL } else { NO_FINITE_LEVEL });
         return out;
     };
-    let (y_lo, y_hi) = view.y.unwrap_or(((lo - 8.0).max(-200.0), hi + 12.0));
+    let (y_lo, y_hi) = view
+        .y
+        .unwrap_or_else(|| plot::padded_fit((lo.max(-200.0), hi)));
     let y = Axis::linear_with(y_lo, y_hi, level_unit, 7);
 
     let (x_lo, x_hi) = view.x.unwrap_or((0.0, x1));
@@ -334,7 +336,6 @@ pub fn show(
         frequency_unit,
     );
     let mut spec = PlotSpec::new(x_axis, XScale::Linear, y).accessible_name("FFT magnitude plot");
-    spec.left_margin = 60.0;
     spec.traces.push(
         Trace::new(&model.frequency, &model.magnitude_db, c.traces[0])
             .thin()

@@ -23,8 +23,6 @@ use crate::ui::tokens::Tokens;
 /// The count axis's headroom over the tallest bar, as the Results histogram
 /// leaves it, so the tags at the top stand clear of the bars.
 const HEADROOM: f64 = 1.18;
-/// Room left of the plot for the count ticks, as the Results histogram has.
-const COUNT_GUTTER_W: f32 = 48.0;
 /// How far below the limits' tags the ±3σ tags sit, so the two rows never
 /// collide.
 const SIGMA_TAG_DROP: f32 = 20.0;
@@ -220,7 +218,6 @@ pub(super) fn histogram_spec<'a>(
     )
     .accessible_name(accessible.0)
     .accessible_detail(accessible.1);
-    spec.left_margin = COUNT_GUTTER_W;
     if model.std_dev > 0.0 {
         for (side, tag) in [(-3.0, "\u{2212}3\u{03c3}"), (3.0, "+3\u{03c3}")] {
             spec.markers.push(Marker {

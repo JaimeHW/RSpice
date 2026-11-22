@@ -16,7 +16,8 @@ pub struct Axis {
     pub max: f64,
     /// Tick positions with preformatted labels.
     pub ticks: Vec<(f64, String)>,
-    /// Unit label drawn once at the axis end ("V", "dB", "Hz", "UI").
+    /// The axis' unit ("V", "dB", "Hz", "UI"), stated once: in the X row's
+    /// gutter caption, or on the Y axis' top tick label.
     pub unit: String,
     /// Semantic quantity label (for example a swept device parameter name, or
     /// `Temperature`).
@@ -143,15 +144,6 @@ impl Axis {
         let label = label.into();
         self.label = (!label.trim().is_empty()).then_some(label);
         self
-    }
-
-    #[must_use]
-    pub fn end_label(&self) -> String {
-        match (self.label.as_deref(), self.unit.as_str()) {
-            (Some(label), "") => label.to_owned(),
-            (Some(label), unit) => format!("{label} · {unit}"),
-            (None, unit) => unit.to_owned(),
-        }
     }
 
     /// The value this axis' tick labels are stated as offsets from, already
@@ -528,6 +520,31 @@ impl PlotMapper {
     }
 }
 
+/// The left gutter every plot keeps at least: room for the Y tick labels
+/// and, under them, the X row's caption.
+pub const PLOT_GUTTER: f32 = 64.0;
+
+/// The share of its span a fit leaves free on each side: enough that no
+/// curve runs along the frame, little enough that the curves fill the plot,
+/// as ViVA's and EZwave's fits leave them.
+pub const FIT_HEADROOM: f64 = 0.04;
+
+/// A linear fit of the values spanning `min..max`, padded by
+/// [`FIT_HEADROOM`] each side.
+///
+/// A span that cannot survive its own padding is flat as far as any axis
+/// can draw it: exactly constant, or constant to within a few ulps. Both
+/// widen by one either side, because a range finer than the tick ladder can
+/// subdivide leaves the plot with no labels at all.
+#[must_use]
+pub fn padded_fit((min, max): (f64, f64)) -> (f64, f64) {
+    let pad = (max - min) * FIT_HEADROOM;
+    if pad <= 0.0 {
+        return (min - 1.0, max + 1.0);
+    }
+    (min - pad, max + pad)
+}
+
 /// Custom drawing under the traces (histogram bars, eye acquisitions).
 /// Receives a painter clipped to the plot area and the data→screen mapper.
 pub type Underlay<'a> = Box<dyn Fn(&egui::Painter, &PlotMapper) + 'a>;
@@ -563,10 +580,6 @@ pub struct PlotSpec<'a> {
     /// canvas' dim text: the colour of the only curves the axis carries,
     /// when the plot reads several axes and each says whose it is.
     pub y_ink: Option<Color32>,
-    /// A strip of a stack: the plot fills its rect but for a few points top
-    /// and bottom, reserving no row for its unit and, without X chrome, no
-    /// band under it; the Y unit rides on the top tick label.
-    pub packed: bool,
     /// Horizontal measurement cursors H1 and H2 on the left Y axis.
     pub horizontal_cursors: [Option<f64>; 2],
     /// Whether primary click/drag places or moves a horizontal cursor.
@@ -575,22 +588,25 @@ pub struct PlotSpec<'a> {
     pub bands: Vec<Band>,
     /// Custom content drawn after the grid, under the traces.
     pub underlay: Option<Underlay<'a>>,
-    /// Left margin in points (56 default; widen for long tick labels).
+    /// The least left gutter, in points: the waveform stack's, so a plot
+    /// standing on its own keeps the stack's left edge. The renderer widens
+    /// it to the widest Y label, its unit included, so no label is clipped.
     pub left_margin: f32,
     /// Right margin in points. `None` selects the renderer default. A stack
     /// uses one explicit margin so every pane's X grid stays aligned.
     pub right_margin: Option<f32>,
-    /// Whether this plot owns labeled X-axis chrome. Unit-scoped waveform
-    /// panes disable it and render one shared X strip beneath the stack.
+    /// Whether this plot draws its own X axis row under it (see
+    /// [`super::paint_x_axis_row`]). The strips of a waveform stack leave it
+    /// to the one ruler under the stack, which paints the same row.
     pub x_axis_chrome: bool,
     /// Whether the left and bottom axis lines are drawn. A chart read on its
     /// own grid (a Smith chart, a polar disc) has no Cartesian axes for them
     /// to stand for.
     pub frame: bool,
-    /// Where the Y axis states its unit: `None` at the top of its tick
-    /// column, where the top tick label gives way to it, or a row of its own
-    /// above the column, where every tick label is drawn.
-    pub y_caption_row: Option<YCaptionRow>,
+    /// What the Y axis says at the head of its column when it has no unit
+    /// to put on its top tick label ("unit unknown"). Left out, such an axis
+    /// goes unmarked, as a plain number's axis does in ViVA and ADS.
+    pub y_without_unit: Option<String>,
     /// Whether a trackpad pinch zooms both axes about the pointer, as on a
     /// chart read on its own grid (Smith, Nyquist, pole-zero, scatter),
     /// rather than X alone, as on a waveform read against time.
@@ -600,22 +616,7 @@ pub struct PlotSpec<'a> {
     pub significant_digits: usize,
 }
 
-/// The row above the Y tick column that states the axis' unit.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct YCaptionRow {
-    /// What the row says for an axis with no unit of its own. Left out, such
-    /// an axis has no caption and gives the row back to the plot, as a plain
-    /// number's axis goes unmarked in ViVA and ADS.
-    pub without_unit: Option<String>,
-}
-
 impl<'a> PlotSpec<'a> {
-    /// Pack the plot into its strip: see [`Self::packed`].
-    pub fn packed(mut self) -> Self {
-        self.packed = true;
-        self
-    }
-
     /// A plot with the given axes and defaults for everything else.
     pub fn new(x: Axis, x_scale: XScale, y: Axis) -> Self {
         Self {
@@ -631,16 +632,15 @@ impl<'a> PlotSpec<'a> {
             limit_lines: Vec::new(),
             minor_grid: false,
             y_ink: None,
-            packed: false,
             horizontal_cursors: [None; 2],
             horizontal_cursor_interactive: false,
             bands: Vec::new(),
             underlay: None,
-            left_margin: 56.0,
+            left_margin: PLOT_GUTTER,
             right_margin: None,
             x_axis_chrome: true,
             frame: true,
-            y_caption_row: None,
+            y_without_unit: None,
             pinch_zooms_both_axes: false,
             significant_digits: 4,
         }
@@ -681,10 +681,11 @@ impl<'a> PlotSpec<'a> {
         self
     }
 
-    /// State the Y axis' unit in a row of its own above the tick column.
+    /// What the Y axis says at the head of its column without a unit: see
+    /// [`Self::y_without_unit`].
     #[must_use]
-    pub fn with_y_caption_row(mut self, row: YCaptionRow) -> Self {
-        self.y_caption_row = Some(row);
+    pub fn with_y_without_unit(mut self, text: impl Into<String>) -> Self {
+        self.y_without_unit = Some(text.into());
         self
     }
 

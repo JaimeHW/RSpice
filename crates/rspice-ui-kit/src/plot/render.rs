@@ -106,15 +106,25 @@ pub type ReadoutRow = (String, String);
 /// space — for callers that pre-bake size-dependent resources (textures)
 /// before handing the spec over.
 pub fn plot_rect(ui: &Ui, spec: &PlotSpec<'_>) -> Rect {
-    inner_rect(ui.available_rect_before_wrap(), spec)
+    on_whole_rows(
+        inner_rect(ui.available_rect_before_wrap(), spec, left_margin(ui, spec)),
+        ui.pixels_per_point(),
+    )
 }
 
-/// Margins around the inner plot area (tick labels, axis units).
+/// `plot` with its bottom edge on a pixel boundary at or above where it
+/// was, so the frame's bottom line falls on the plot's own last row and
+/// whatever stands under the plot (the X row's rule, the next strip) starts
+/// on the row after it, crisp, however the layout divided the height.
+fn on_whole_rows(mut plot: Rect, pixels_per_point: f32) -> Rect {
+    plot.max.y = ((plot.max.y * pixels_per_point).floor() / pixels_per_point).max(plot.min.y);
+    plot
+}
+
+/// What a chart read on its own grid (a Smith chart, a polar disc) keeps
+/// above and below it. A framed plot keeps nothing: its frame stands on its
+/// rect's edges and the fit's headroom keeps a curve off the frame.
 const MARGIN_TOP: f32 = 12.0;
-/// The top margin of a plot whose Y unit has a row of its own: the caption's
-/// row, centred on [`Y_CAPTION_CENTER`], then room for half of a tick label
-/// standing on the plot's top edge, so the two never touch.
-const MARGIN_TOP_CAPTIONED: f32 = 24.0;
 /// Where the Y caption's middle sits below the well's top.
 const Y_CAPTION_CENTER: f32 = 8.0;
 /// How far a drag must travel along an axis before it pans that axis.
@@ -125,13 +135,9 @@ const Y_TICK_FONT_SIZE: f32 = 10.0;
 pub const Y_LABEL_GAP: f32 = 7.0;
 /// The least gap between two Y tick labels that are both drawn.
 const Y_TICK_LABEL_GAP: f32 = 2.0;
-const MARGIN_BOTTOM: f32 = 26.0;
-/// What a packed strip keeps above and below its plot: nothing. Its frame
-/// stands on the strip's edges, the bottom line the strip's separator, and
-/// the fit's own headroom keeps a curve off the frame, so a strip spends its
-/// height on its curves.
-const PACKED_MARGIN: f32 = 0.0;
 const MARGIN_RIGHT_PLAIN: f32 = 16.0;
+/// The least space between the widest Y label and the plot's left edge.
+const GUTTER_EDGE: f32 = 2.0;
 
 /// A point marker a curve carries besides its colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -880,15 +886,19 @@ fn paint_trace_markers(
     }
 }
 
+/// A framed plot runs to its rect's right edge unless it is told to keep a
+/// gutter there (an axis standing beside it); the X row holds its last value
+/// inside the plot rather than keeping room for half of it.
 fn right_margin(spec: &PlotSpec<'_>) -> f32 {
-    spec.right_margin.unwrap_or(MARGIN_RIGHT_PLAIN)
+    spec.right_margin
+        .unwrap_or(if spec.frame { 0.0 } else { MARGIN_RIGHT_PLAIN })
 }
 
 fn bottom_margin(spec: &PlotSpec<'_>) -> f32 {
     if spec.x_axis_chrome {
-        MARGIN_BOTTOM
-    } else if spec.packed {
-        PACKED_MARGIN
+        super::X_AXIS_ROW_HEIGHT
+    } else if spec.frame {
+        0.0
     } else {
         MARGIN_TOP
     }
@@ -902,11 +912,7 @@ fn y_caption_text(spec: &PlotSpec<'_>) -> Option<String> {
         .offset_anchor
         .clone()
         .or_else(|| (!spec.y.unit.is_empty()).then(|| spec.y.unit.clone()))
-        .or_else(|| {
-            spec.y_caption_row
-                .as_ref()
-                .and_then(|row| row.without_unit.clone())
-        })
+        .or_else(|| spec.y_without_unit.clone())
 }
 
 /// How close two Y tick labels may stand and both be drawn: a label's
@@ -924,21 +930,61 @@ pub fn y_tick_pitch(ui: &Ui) -> f32 {
 }
 
 fn top_margin(spec: &PlotSpec<'_>) -> f32 {
-    if spec.packed {
-        PACKED_MARGIN
-    } else if spec.y_caption_row.is_some() && y_caption_text(spec).is_some() {
-        MARGIN_TOP_CAPTIONED
-    } else {
-        MARGIN_TOP
-    }
+    if spec.frame { 0.0 } else { MARGIN_TOP }
 }
 
-fn inner_rect(rect: Rect, spec: &PlotSpec<'_>) -> Rect {
+/// Whether the Y axis names a plain unit on its top tick label, as ViVA and
+/// EZwave do, rather than at the head of its column: an anchor the ticks are
+/// offsets from, or a caption for an axis without a unit, stands there
+/// instead, and a chart read on its own grid keeps its own labelling.
+fn unit_on_tick(spec: &PlotSpec<'_>) -> bool {
+    spec.frame && spec.y.offset_anchor.is_none() && !spec.y.unit.is_empty()
+}
+
+/// The left gutter the plot draws with: the spec's, widened to its widest Y
+/// label (the top one with its unit on it) or its column's caption, so a
+/// long unit ("dBV rms") never clips or drops a label.
+fn left_margin(ui: &Ui, spec: &PlotSpec<'_>) -> f32 {
+    if !spec.frame {
+        return spec.left_margin;
+    }
+    let font = theme::mono(Y_TICK_FONT_SIZE, FontWeight::Regular);
+    let width = |text: String| {
+        ui.painter()
+            .layout_no_wrap(text, font.clone(), Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    let top = spec
+        .y
+        .ticks
+        .iter()
+        .filter(|(value, _)| *value >= spec.y.min && *value <= spec.y.max)
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(value, _)| *value);
+    let widest = spec
+        .y
+        .ticks
+        .iter()
+        .map(|(value, label)| {
+            if unit_on_tick(spec) && Some(*value) == top {
+                width(tick_with_unit(label, &spec.y.unit))
+            } else {
+                width(label.clone())
+            }
+        })
+        .chain(
+            y_caption_text(spec)
+                .filter(|_| !unit_on_tick(spec))
+                .map(width),
+        )
+        .fold(0.0, f32::max);
+    spec.left_margin.max(widest + Y_LABEL_GAP + GUTTER_EDGE)
+}
+
+fn inner_rect(rect: Rect, spec: &PlotSpec<'_>, left: f32) -> Rect {
     Rect::from_min_max(
-        pos2(
-            rect.left() + spec.left_margin,
-            rect.top() + top_margin(spec),
-        ),
+        pos2(rect.left() + left, rect.top() + top_margin(spec)),
         pos2(
             rect.right() - right_margin(spec),
             rect.bottom() - bottom_margin(spec),
@@ -1052,7 +1098,10 @@ pub fn show(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::GraphicsDocument);
     });
-    let plot_rect = inner_rect(rect, spec);
+    let plot_rect = on_whole_rows(
+        inner_rect(rect, spec, left_margin(ui, spec)),
+        ui.pixels_per_point(),
+    );
 
     let mut out = PlotResponse {
         response,
@@ -1132,20 +1181,6 @@ pub fn show(
     }
 
     // ---- grid + ticks
-    // The x-axis unit owns the right end of the tick row; a tick label that
-    // would run into it is dropped (its gridline stays).
-    let x_end_label = if spec.x_axis_chrome {
-        spec.x.end_label()
-    } else {
-        String::new()
-    };
-    let x_unit_left = if x_end_label.is_empty() {
-        f32::INFINITY
-    } else {
-        let unit =
-            painter.layout_no_wrap(x_end_label.clone(), tick_font.clone(), c.canvas_text_dim);
-        plot_rect.right() - unit.size().x - 8.0
-    };
     // Labels skip when they would collide with the previous label (dense
     // log decades at deep zoom) — every gridline still draws.
     // A logarithmic axis is read against its mantissas, 2 … 9 in each decade,
@@ -1171,50 +1206,15 @@ pub fn show(
     // top of the column, so tick labels give way to it; with one, the plot
     // starts below it and every label is drawn.
     let y_ink = spec.y_ink.unwrap_or(c.canvas_text_dim);
-    // A packed strip names a plain unit on its top tick label, as ViVA and
-    // EZwave do, rather than in a row of its own; an anchor, or a caption
-    // for an axis without a unit, stands at the top of the column instead.
-    let unit_on_tick = spec.packed && spec.y.offset_anchor.is_none() && !spec.y.unit.is_empty();
+    let unit_on_tick = unit_on_tick(spec);
     let y_chrome = y_caption_text(spec)
         .filter(|_| !unit_on_tick)
         .map(|text| painter.layout_no_wrap(text, tick_font.clone(), y_ink));
-    let y_chrome_bottom = match (&y_chrome, &spec.y_caption_row) {
-        (Some(galley), row) if row.is_none() || spec.packed => {
-            rect.top() + Y_CAPTION_CENTER + galley.size().y * 0.5
-        }
-        _ => f32::NEG_INFINITY,
-    };
-    let mut last_label_right = f32::NEG_INFINITY;
-    if spec.x_axis_chrome
-        && let Some(anchor) = &spec.x.offset_anchor
-    {
-        // Stated once, in the gutter the Y labels leave free, and brighter
-        // than the ticks: it is the value, and they are only the differences.
-        let galley = painter.layout_no_wrap(anchor.clone(), tick_font.clone(), c.canvas_text);
-        let width = galley.size().x;
-        painter.galley(
-            pos2(
-                rect.left() + 2.0,
-                rect.bottom() - 9.0 - galley.size().y * 0.5,
-            ),
-            galley,
-            c.canvas_text,
-        );
-        last_label_right = rect.left() + 2.0 + width;
-    }
-    for (xv, label) in &spec.x.ticks {
-        let px = mx(*xv);
-        painter.vline(px, plot_rect.y_range(), grid);
-        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.canvas_text_dim);
-        let half = galley.size().x * 0.5;
-        if spec.x_axis_chrome && px + half <= x_unit_left && px - half >= last_label_right + 6.0 {
-            last_label_right = px + half;
-            painter.galley(
-                pos2(px - half, rect.bottom() - 9.0 - galley.size().y * 0.5),
-                galley,
-                c.canvas_text_dim,
-            );
-        }
+    let y_chrome_bottom = y_chrome.as_ref().map_or(f32::NEG_INFINITY, |galley| {
+        rect.top() + Y_CAPTION_CENTER + galley.size().y * 0.5
+    });
+    for (xv, _) in &spec.x.ticks {
+        painter.vline(mx(*xv), plot_rect.y_range(), grid);
     }
     // Y labels skip on collision exactly as the X row does. A pane a few
     // rows tall carries the same tick count as a full-height one, and
@@ -1226,11 +1226,14 @@ pub fn show(
         painter.hline(plot_rect.x_range(), py, grid);
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), y_ink);
         let (height, mut top) = (galley.size().y, py - galley.size().y * 0.5);
-        // A packed strip's margins are thinner than half a label: the label
-        // of a tick on the plot's very edge is nudged inside the strip, so a
-        // short strip keeps its scale and no label is clipped by its header.
-        if spec.packed {
-            top = top.clamp(rect.top(), (rect.bottom() - height).max(rect.top()));
+        // A framed plot keeps no margin above or below its frame: the label
+        // of a tick on its very edge is nudged inside it, so a short plot
+        // keeps its scale and no label is clipped by what stands beside it.
+        if spec.frame {
+            top = top.clamp(
+                plot_rect.top(),
+                (plot_rect.bottom() - height).max(plot_rect.top()),
+            );
         }
         if top + height <= last_label_top - Y_TICK_LABEL_GAP
             && top >= y_chrome_bottom + Y_TICK_LABEL_GAP
@@ -1255,6 +1258,27 @@ pub fn show(
             out.y_caption = Some(Rect::from_min_size(at, galley.size()));
         }
         painter.galley(at, galley, y_ink);
+    }
+    // After the grid: a grid line on the plot's bottom edge (a range that
+    // starts at zero) falls on the row's rule, and the row stands over it.
+    if spec.x_axis_chrome {
+        let row = Rect::from_min_max(pos2(rect.left(), plot_rect.bottom()), rect.right_bottom());
+        super::paint_x_axis_band(&painter, row, &t);
+        out.x_label_rect = Some(super::paint_x_axis_row(
+            &painter,
+            row,
+            super::XAxisRow {
+                axis: &spec.x,
+                scale: spec.x_scale,
+                plot: plot_rect.x_range(),
+                caption: &super::x_axis_caption(
+                    spec.x.label.as_deref().unwrap_or(""),
+                    &spec.x.unit,
+                ),
+                keep_clear: &[],
+            },
+            &t,
+        ));
     }
     // ---- reference lines
     let ref_stroke = Stroke::new(hair, c.canvas_text_faint);
@@ -1491,9 +1515,9 @@ pub fn show(
     // ---- frame + axis units
     if spec.frame {
         painter.vline(plot_rect.left(), plot_rect.y_range(), frame);
-        // On the plot's last row rather than the row under it: a packed
-        // strip's bottom line is the separator from the strip below, which
-        // starts on that next row and would paint over it.
+        // On the plot's last row rather than the row under it: a stacked
+        // strip's bottom line is the separator from the strip below, and an
+        // X row's rule stands on that next row.
         painter.hline(plot_rect.x_range(), plot_rect.bottom() - 0.5, frame);
     }
     if let Some(galley) = y_chrome {
@@ -1506,15 +1530,6 @@ pub fn show(
         );
         painter.galley(caption.min, galley, y_ink);
         out.y_caption = Some(caption);
-    }
-    if !x_end_label.is_empty() {
-        out.x_label_rect = Some(painter.text(
-            pos2(plot_rect.right(), rect.bottom() - 9.0),
-            Align2::RIGHT_CENTER,
-            x_end_label,
-            tick_font.clone(),
-            c.canvas_text_dim,
-        ));
     }
 
     // ---- markers
@@ -2894,7 +2909,12 @@ mod tests {
         let y = [2.0, 2.0];
         let spec = degenerate_spec(&x, &y, 1.0, 1.0);
         let size = vec2(400.0, 240.0);
-        let inside = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec).center();
+        let inside = inner_rect(
+            Rect::from_min_size(pos2(0.0, 0.0), size),
+            &spec,
+            spec.left_margin,
+        )
+        .center();
         let (_, view) = plot_frames(
             &spec,
             size,
@@ -2946,7 +2966,11 @@ mod tests {
         );
         spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
         let size = vec2(420.0, 260.0);
-        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
+        let plot = inner_rect(
+            Rect::from_min_size(pos2(0.0, 0.0), size),
+            &spec,
+            spec.left_margin,
+        );
         let (from, to) = (
             plot.left_top() + vec2(20.0, 20.0),
             plot.left_top() + vec2(180.0, 140.0),

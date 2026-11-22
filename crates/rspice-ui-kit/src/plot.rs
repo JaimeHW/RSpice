@@ -23,6 +23,7 @@ mod cursor;
 mod decimate;
 mod render;
 mod spec;
+mod x_row;
 
 pub use rspice_results::{number_format as format, plot_axis as scale};
 
@@ -47,6 +48,9 @@ pub use render::{
 pub use render::{TraceLook, TraceMarkerShape, paint_min_max_band, paint_trace_swatch};
 pub use scale::{MAX_AXIS_TICKS, XScale, anchor_label, linear_ticks};
 pub use spec::{
-    Axis, Band, DrawMode, LimitLine, Marker, MarkerShape, PlotMapper, PlotSpec, RefLine,
-    StoredSamples, Trace, TraceAxis, YCaptionRow, trace_cache_key,
+    Axis, Band, DrawMode, FIT_HEADROOM, LimitLine, Marker, MarkerShape, PLOT_GUTTER, PlotMapper,
+    PlotSpec, RefLine, StoredSamples, Trace, TraceAxis, padded_fit, trace_cache_key,
+};
+pub use x_row::{
+    X_AXIS_ROW_HEIGHT, X_CAPTION_GAP, XAxisRow, paint_x_axis_band, paint_x_axis_row, x_axis_caption,
 };

@@ -175,7 +175,6 @@ pub fn show(
     .accessible_detail(
         "Exact retained harmonic-balance magnitude coefficients. Solver tone configuration, harmonic order, convergence iterations, fundamental, and THD are shown only when retained.",
     );
-    spec.left_margin = 64.0;
     if decades.is_some() {
         spec = spec.with_log_y();
     } else {

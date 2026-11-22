@@ -284,7 +284,6 @@ pub fn show(
         Axis::linear_with(y0, y1, mode.unit(), 5),
     )
     .accessible_name("Statistical histogram");
-    spec.left_margin = 48.0;
 
     // Descriptive ±1σ band and mean marker from exact retained sample
     // moments. This is deliberately not called a distribution fit: no fit

@@ -219,7 +219,7 @@ pub fn pane_auto_log_y(
     if lo > hi {
         return None;
     }
-    let pad = (hi / lo).log10() * super::stack::FIT_HEADROOM;
+    let pad = (hi / lo).log10() * plot::FIT_HEADROOM;
     if !(pad > 0.0 && pad.is_finite()) || hi - lo <= FLAT_FIT_RELATIVE_SPAN * hi {
         return Some((lo / 1.1, hi * 1.1));
     }
@@ -459,12 +459,15 @@ pub(crate) const UNKNOWN_UNIT: &str = "unit unknown";
 /// How a pane of plain numbers, a ratio say, is named.
 pub(crate) const NO_UNIT: &str = "no unit";
 
-/// The row above a pane's tick column, where its unit is stated: an
-/// expression whose unit cannot be stated says so there, while a plain
-/// number's axis goes unmarked.
-fn y_caption_row(pane: &UnitPane) -> plot::YCaptionRow {
-    plot::YCaptionRow {
-        without_unit: pane.unlabeled.then(|| UNKNOWN_UNIT.to_owned()),
+/// A pane's plot as its axes read: an expression whose unit cannot be
+/// stated says so at the head of its column, while a plain number's axis
+/// goes unmarked.
+fn pane_spec<'a>(spec: PlotSpec<'a>, pane: &UnitPane) -> PlotSpec<'a> {
+    let spec = spec.without_x_axis_chrome();
+    if pane.unlabeled {
+        spec.with_y_without_unit(UNKNOWN_UNIT)
+    } else {
+        spec
     }
 }
 
@@ -787,10 +790,10 @@ pub fn show_plot<'a>(
     } else {
         let plot_height = plot::plot_rect(
             ui,
-            &PlotSpec::new(Axis::linear(0.0, 1.0, ""), model.x_scale, densest)
-                .without_x_axis_chrome()
-                .with_y_caption_row(y_caption_row(pane))
-                .packed(),
+            &pane_spec(
+                PlotSpec::new(Axis::linear(0.0, 1.0, ""), model.x_scale, densest),
+                pane,
+            ),
         )
         .height();
         labelled_y_axis(plot_height, plot::y_tick_pitch(ui), y_axis_with)
@@ -864,11 +867,8 @@ pub fn show_plot<'a>(
                 .x
         })
         .fold(0.0, f32::max);
-    let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
+    let mut spec = pane_spec(PlotSpec::new(x_axis, model.x_scale, y_axis), pane)
         .accessible_name("Waveform plot")
-        .without_x_axis_chrome()
-        .with_y_caption_row(y_caption_row(pane))
-        .packed()
         .with_right_margin(input.right_margin)
         .with_significant_digits(significant_digits);
     if !detail.is_empty() {

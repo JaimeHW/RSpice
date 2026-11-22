@@ -95,9 +95,10 @@ pub fn show(
         );
         return requested;
     };
-    let y_pad = ((level_max - level_min) * 0.1).max(3.0);
     let (x0, x1) = view.x.unwrap_or((x0, x1));
-    let (y0, y1) = view.y.unwrap_or((level_min - y_pad, level_max + y_pad));
+    let (y0, y1) = view
+        .y
+        .unwrap_or_else(|| plot::padded_fit((level_min, level_max)));
     let (frequency_scale, frequency_offset, frequency_unit) = quantities.frequency_axis_transform();
     let x_axis = Axis::log_decades(x0, x1, "Hz").with_display_transform(
         frequency_scale,

@@ -4,7 +4,7 @@ use super::{StripModel, StripTrace, trace_key};
 use crate::derived::DerivedSeries;
 use egui::Ui;
 use rspice_results::waveform::Fetched;
-use rspice_ui_kit::plot::{Axis, CursorPair, XScale, floored_span};
+use rspice_ui_kit::plot::{self, Axis, CursorPair, XScale, floored_span};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -23,16 +23,10 @@ pub const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
 /// flags both read the panes' zoomed viewport, so they sit directly against
 /// the panes; the full-range overview lane is the outermost band, and
 /// nothing viewport-scaled is ever drawn across it.
-const SHARED_X_LABEL_TOP: f32 = 3.0;
-const SHARED_X_FLAG_TOP: f32 = 17.0;
+const SHARED_X_FLAG_TOP: f32 = plot::X_AXIS_ROW_HEIGHT;
 const SHARED_X_FLAG_HEIGHT: f32 = 13.0;
 const SHARED_X_LANE_TOP: f32 = 35.0;
 const SHARED_X_LANE_HEIGHT: f32 = 14.0;
-/// The gap between a ruler's gutter caption, or its overview's name, and the
-/// plot it stands under.
-const RULER_CAPTION_GAP: f32 = 8.0;
-/// The least space between a ruler's gutter caption and the strip's edge.
-const RULER_CAPTION_EDGE: f32 = 2.0;
 
 /// Points the overview lane's mini-trace is drawn from, whatever the run
 /// retained. The lane is fourteen pixels tall and a plot wide, so a denser
@@ -218,7 +212,7 @@ pub fn show_shared_x_axis(
             axis: model_x_axis(model, input.current.0, input.current.1, quantity_policy),
             scale: model.x_scale,
             name: model.x_label(),
-            caption: shared_x_gutter_label(model.x_label(), &model.x_unit),
+            caption: plot::x_axis_caption(model.x_label(), &model.x_unit),
             cursor_text: &cursor_text,
             overview: Some(Overview { derived, model }),
             hover: None,
@@ -303,12 +297,10 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
         node.set_label(accessibility_label.clone());
     });
     let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_filled(rect, 0.0, c.bg_panel);
-    painter.hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.border));
+    plot::paint_x_axis_band(&painter, rect, &t);
 
     let plot_left = (rect.left() + input.left_margin).min(rect.right());
     let plot_right = (rect.right() - right_margin).max(plot_left);
-    let label_top = rect.top() + SHARED_X_LABEL_TOP;
     let flag_top = rect.top() + SHARED_X_FLAG_TOP;
     let flag_bottom = flag_top + SHARED_X_FLAG_HEIGHT;
     // The lane spans exactly the panes' plot area, so the overview sits
@@ -537,82 +529,29 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     });
 
     // Tick values for the zoomed viewport sit at the top of the strip, right
-    // against the panes they describe, and their stubs point up toward the
-    // plot.
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let mut last_right = f32::NEG_INFINITY;
-    // Past a certain zoom the tick labels stop being values and become
-    // differences from one. This strip draws its own tick row instead of
-    // letting a plot draw one, so it also owes the reader that value: a row
-    // reading "−40n … 0 … +40n" with nothing to subtract them from states a
-    // window somewhere near zero, which is not where the reader is. Stated
-    // once, at the head of the row and brighter than the ticks, exactly as
-    // the plot's own axis states it.
-    if let Some(anchor) = axis.offset_anchor() {
-        let galley = painter.layout_no_wrap(anchor.to_owned(), font.clone(), c.text);
-        last_right = plot_left + galley.size().x;
-        painter.galley(egui::pos2(plot_left, label_top), galley, c.text);
-    }
-    for (value, label) in &axis.ticks {
-        let fraction = scale.normalize(*value, axis.min, axis.max);
-        if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
-            continue;
-        }
-        let x = plot_left + (plot_right - plot_left) * fraction as f32;
-        painter.vline(
-            x,
-            egui::Rangef::new(rect.top(), rect.top() + 3.0),
-            egui::Stroke::new(1.0, c.border_strong),
-        );
-        let galley = painter.layout_no_wrap(label.clone(), font.clone(), c.text_dim);
-        // The stub marks the true position; the label itself is held inside
-        // the plot area so an edge value never reaches into the gutter
-        // column and collides with the row's own name.
-        let half = galley.size().x * 0.5 + 2.0;
-        let centre = x.clamp(plot_left + half, (plot_right - half).max(plot_left + half));
-        let left = centre - galley.size().x * 0.5;
-        // A tick value in a cursor box's column gives way to the box: the
-        // two would read as one number.
-        let label = egui::Rangef::new(left, left + galley.size().x);
-        let under_a_flag = flags
-            .iter()
-            .any(|flag| flag.rect.x_range().expand(RULER_FLAG_PAD).intersects(label));
-        if left >= last_right + 6.0 && !under_a_flag {
-            last_right = left + galley.size().x;
-            painter.galley(egui::pos2(left, label_top), galley, c.text_dim);
-        }
-    }
-    // The gutter is the sheet's whatever the caption, so every plot keeps one
-    // left edge. A caption too long for it breaks at its unit, the quantity
-    // over the unit, and a quantity too long for a line wraps within it.
-    let gutter_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    let ruler_font = gutter_font.clone();
-    let right = plot_left - RULER_CAPTION_GAP;
-    let column = (right - rect.left() - RULER_CAPTION_EDGE).max(1.0);
-    let one_line = painter.layout_no_wrap(caption.clone(), gutter_font.clone(), c.text_faint);
-    let caption_top = label_top + font.size * 0.5 - one_line.size().y * 0.5;
-    let caption_galley = if one_line.size().x <= column {
-        one_line
-    } else {
-        let row = one_line.size().y.max(1.0);
-        let text = caption.rsplit_once(" \u{b7} ").map_or_else(
-            || caption.clone(),
-            |(quantity, unit)| format!("{quantity}\n{unit}"),
-        );
-        let mut job = egui::text::LayoutJob::simple(text, gutter_font, c.text_faint, column);
-        job.halign = egui::Align::RIGHT;
-        job.wrap.break_anywhere = true;
-        job.wrap.max_rows = (((rect.bottom() - caption_top) / row).floor() as usize).max(1);
-        painter.layout_job(job)
-    };
-    // A left-aligned galley spans 0..width, a right-aligned one -width..0:
-    // either way its right end lands on the caption's edge.
-    let caption_at = egui::pos2(right - caption_galley.rect.max.x, caption_top);
-    output.caption_rect = Some(caption_galley.rect.translate(caption_at.to_vec2()));
-    painter.galley(caption_at, caption_galley, c.text_faint);
+    // against the panes they describe, in the row every plot reads its
+    // abscissa from; a value in a cursor box's column gives way to the box,
+    // as the two would read as one number.
+    let keep_clear: Vec<egui::Rangef> = flags
+        .iter()
+        .map(|flag| flag.rect.x_range().expand(RULER_FLAG_PAD))
+        .collect();
+    output.caption_rect = Some(plot::paint_x_axis_row(
+        &painter,
+        rect,
+        plot::XAxisRow {
+            axis: &axis,
+            scale,
+            plot: egui::Rangef::new(plot_left, plot_right),
+            caption: &caption,
+            keep_clear: &keep_clear,
+        },
+        &t,
+    ));
+    let ruler_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
     if has_overview {
         painter.text(
-            egui::pos2(plot_left - RULER_CAPTION_GAP, track.center().y),
+            egui::pos2(plot_left - plot::X_CAPTION_GAP, track.center().y),
             egui::Align2::RIGHT_CENTER,
             "Full",
             ruler_font,
@@ -1082,27 +1021,6 @@ pub fn resized_shared_x_view(
         scale.denormalize(next_start, full.0, full.1),
         scale.denormalize(next_end, full.0, full.1),
     ))
-}
-
-/// The name the strip prints into the panes' left gutter beside the tick
-/// values, following the mockup's axis vocabulary: TIME and FREQ, and for
-/// any other sweep the quantity swept, as a DC sweep of VD reads "VD · V"
-/// and a temperature sweep "TEMP · °C".
-///
-/// The tick values themselves are SI-prefixed bare numbers, so the gutter is
-/// where the axis states its unit — once, for the whole row.
-pub fn shared_x_gutter_label(quantity: &str, unit: &str) -> String {
-    let name = match unit {
-        "s" => "TIME".to_owned(),
-        "Hz" => "FREQ".to_owned(),
-        _ if quantity.trim().is_empty() => "X".to_owned(),
-        _ => quantity.trim().to_uppercase(),
-    };
-    if unit.is_empty() {
-        name
-    } else {
-        format!("{name} · {unit}")
-    }
 }
 
 pub fn recentered_shared_x_view(

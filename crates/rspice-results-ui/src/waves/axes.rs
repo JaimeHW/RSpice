@@ -300,10 +300,6 @@ struct Column {
     width: f32,
 }
 
-/// How far a label may stand past the plot's top or bottom edge: the few
-/// points a packed strip keeps there.
-const LABEL_OVERHANG: f32 = 4.0;
-
 /// Measure every axis of `axes` beside the plot spanning `plot_rect`, draw
 /// those `gutter` has room for, and report what the reader did with them.
 /// The first axis' labels take `primary` left of the plot.
@@ -361,9 +357,8 @@ pub(crate) fn secondary_axes(
                 // inside the strip, as the first axis' is.
                 let half = 0.5 * label_height;
                 let label_y = y.clamp(
-                    plot_rect.top() - LABEL_OVERHANG + half,
-                    (plot_rect.bottom() + LABEL_OVERHANG - half)
-                        .max(plot_rect.top() - LABEL_OVERHANG + half),
+                    plot_rect.top() + half,
+                    (plot_rect.bottom() - half).max(plot_rect.top() + half),
                 );
                 let held = labels
                     .last()

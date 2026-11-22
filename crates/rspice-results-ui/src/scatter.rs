@@ -381,7 +381,6 @@ pub fn show(
     .accessible_name("Monte Carlo correlation")
     .accessible_detail(&accessible)
     .pinch_zooms_both_axes();
-    spec.left_margin = 68.0;
 
     let fit = sheet
         .fit
