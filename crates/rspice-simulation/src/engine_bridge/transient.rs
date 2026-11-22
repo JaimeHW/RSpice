@@ -567,7 +567,9 @@ fn convert_stored_transient(
     // The names, counts and identities the in-memory check reads, over the first and last rows;
     // the pass below checks every sample.
     stored.read_span()?;
+    ensure_not_aborted(abort)?;
     validate_transient_result_shape(&stored.shell)?;
+    ensure_not_aborted(abort)?;
     let quality = engine.convergence_quality();
     let scan = stored.scan(start_time, &quality.force_accepted_indices, abort)?;
     let mut forced_times = Some(scan.forced_times);

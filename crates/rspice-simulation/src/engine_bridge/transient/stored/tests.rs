@@ -76,9 +76,15 @@ fn bits(values: &[f64]) -> Vec<u64> {
     values.iter().map(|value| value.to_bits()).collect()
 }
 
+/// What runs as a stored run's solve returns, if anything does.
+type AfterSolve = Option<Box<dyn Fn(&std::path::Path)>>;
+
 thread_local! {
     /// How many times a stored run on this thread was read back whole.
     pub(super) static READ_BACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// What runs as a stored run's solve returns, before anything reads the run back.
+    pub(super) static AFTER_SOLVE: std::cell::RefCell<AfterSolve> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// The deck's `.ASSERT` reports over its whole accepted trajectory, as the in-memory route
@@ -378,4 +384,39 @@ fn a_volume_that_fills_stops_the_run_keeping_the_rows_it_wrote_and_names_the_sto
             .values()
             .all(|waveform| waveform.y_values.len() == kept)
     );
+}
+
+/// Stop pressed as the solve ends answers there: the run reports that it stopped, reads nothing
+/// back and leaves no segment, where it used to read every row and device of the run back first.
+#[test]
+fn stop_pressed_as_the_solve_ends_stops_the_run_before_it_is_read_back() {
+    let stop = std::sync::Arc::new(rspice_core::abort_signal::AtomicAbort::new());
+    let pressed = std::sync::Arc::clone(&stop);
+    let segment = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let written = std::sync::Arc::clone(&segment);
+    AFTER_SOLVE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |path: &std::path::Path| {
+            *written.lock().unwrap() = Some(path.to_path_buf());
+            pressed.set();
+        }));
+    });
+    READ_BACKS.with(|count| count.set(0));
+    let result = EngineBridge::new().run_with_abort(
+        &AnalysisConfig::Transient(config(300e-6, 0.0, None)),
+        DECK,
+        &*stop,
+    );
+    AFTER_SOLVE.with(|hook| *hook.borrow_mut() = None);
+    assert!(
+        matches!(result, Err(SimulationError::Aborted)),
+        "a run stopped as its solve ended is a stopped run, got {:?}",
+        result.map(|_| "a result")
+    );
+    assert_eq!(READ_BACKS.with(std::cell::Cell::get), 0);
+    let segment = segment
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the run solved into a segment");
+    assert!(!segment.exists(), "{} is left behind", segment.display());
 }

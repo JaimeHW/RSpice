@@ -20,8 +20,8 @@ use rspice_core::engine::{SinkTransient, TransientResult, TransientState};
 use rspice_core::result_sink::SinkStop;
 use rspice_results::store_reader::{SegmentBytes, StoreReader};
 use rspice_results::stored_transient::{
-    SlotTarget, clear_rows, fill_event_traces, fill_impulses, fill_rows, fill_span,
-    instance_parameters, slot_targets,
+    InstanceParameterAdoption, SlotTarget, clear_rows, fill_event_traces, fill_impulses, fill_rows,
+    fill_span, instance_parameters, slot_targets,
 };
 use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
 use rspice_results_store::{
@@ -137,6 +137,12 @@ impl EngineBridge {
             Err(source) => Err(source),
         };
         drop(live);
+        #[cfg(test)]
+        tests::AFTER_SOLVE.with(|hook| {
+            if let Some(hook) = hook.borrow().as_ref() {
+                hook(&path);
+            }
+        });
         let refused = sink.refused();
         let rows_needed = sink.rows_needed();
         let (inner, free) = sink.into_parts();
@@ -165,6 +171,13 @@ impl EngineBridge {
                 });
             }
         };
+        // Stop answers after the solve too: reading a run of a million devices back is minutes
+        // of work in itself, and none of it is worth finishing once the reader asked to stop.
+        if abort.is_aborted() {
+            drop(inner);
+            let _ = std::fs::remove_file(&path);
+            return Err(SimulationError::Aborted);
+        }
         let reader = match inner.into_io() {
             Some(io) => SegmentReader::open(Box::new(io.into_inner().into_file()) as SegmentBytes),
             None => FileIo::open(&path)
@@ -218,6 +231,8 @@ impl EngineBridge {
         });
         let bytes = std::fs::metadata(&path).map_or(0, |meta| meta.len());
         let run = StoredRun::temporary(StoreReader::new(reader), path.clone()).shared();
+        // Dropping the run deletes its segment.
+        ensure_not_aborted(abort)?;
         let (shell, targets, parameters) = run
             .with_reader(|reader| {
                 // A run that ended with an error returned no result: the segment names it.
@@ -285,6 +300,7 @@ impl EngineBridge {
             return Ok((StoredOutcome::Stored(stored), states));
         }
         // The deck's `.FFT` spectra and lead powers read the whole waveforms once the run ends.
+        ensure_not_aborted(abort)?;
         stored.read_rows()?;
         engine
             .finish_transient_from_rows(netlist, &mut stored.shell, span.tstop, abort)
@@ -310,13 +326,14 @@ impl StoredTransient {
         run.with_reader(|reader| {
             fill_rows(reader, targets, shell, 0, rows)?;
             fill_event_traces(reader, shell)?;
+            let mut adoption = InstanceParameterAdoption::of(shell);
             for (slot, &target) in targets.iter().enumerate() {
                 let SlotTarget::Parameter(index) = target else {
                     continue;
                 };
                 let values = reader.read_slot(slot, 0, rows)?;
                 let (device, parameter) = &parameters[index];
-                shell.adopt_instance_parameter(device, parameter, values);
+                adoption.adopt(shell, device, parameter, values);
             }
             Ok(())
         })
@@ -391,6 +408,7 @@ impl StoredTransient {
             fill_span(reader, targets, shell)?;
             let rows = reader.rows();
             let ends: &[u64] = if rows > 1 { &[0, rows - 1] } else { &[0] };
+            let mut adoption = InstanceParameterAdoption::of(shell);
             for (slot, &target) in targets.iter().enumerate() {
                 let SlotTarget::Parameter(index) = target else {
                     continue;
@@ -400,7 +418,7 @@ impl StoredTransient {
                     values.extend(reader.read_slot(slot, row, 1)?);
                 }
                 let (device, parameter) = &parameters[index];
-                shell.adopt_instance_parameter(device, parameter, values);
+                adoption.adopt(shell, device, parameter, values);
             }
             Ok(())
         })
