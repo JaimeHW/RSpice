@@ -16,7 +16,9 @@ use rspice_app_project::workbench::project::workspace_state::{LibraryCellviewPag
 use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::workbench::state::workbench_session::{ConsolePage, WorkspaceDocumentId};
+use rspice_app_workbench::workbench::state::workbench_session::{
+    ConsolePage, ResultsSplitAxis, ResultsSplitLayout, WorkspaceDocumentId,
+};
 
 /// A session in mid-work with every persisted field moved off its default:
 /// a closed project that left its documents, a run and an unsaved model edit
@@ -302,6 +304,11 @@ fn populate_workbench(
     workbench.console_maximized = true;
     workbench.focus_mode = true;
     workbench.split_with_results = true;
+    workbench.results_split = ResultsSplitLayout {
+        axis: ResultsSplitAxis::Beside,
+        document_share: 0.45,
+        closed_by_reader: true,
+    };
     workbench.navigator_width = 311.0;
     workbench.navigator_width_custom = true;
     workbench.inspector_width = 287.0;
