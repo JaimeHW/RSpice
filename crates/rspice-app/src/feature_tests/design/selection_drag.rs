@@ -522,7 +522,19 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
             "change {change}"
         );
         assert_eq!(state.model.schematic.document().components, before);
-        assert!(state.model.schematic.session.editor.selection.is_empty());
+        // A read-only view selects what the drag began on, and moves nothing.
+        assert_eq!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(id),
+            change == 3,
+            "change {change}"
+        );
+        state.model.schematic.session.editor.selection.clear();
 
         state.model.schematic.session.read_only = false;
         dispatch(&mut state.canvas_parts(), &ctx, &symbols, action);
@@ -557,4 +569,52 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
         assert_eq!(state.model.schematic.pending_operation_id(), replacement);
         state.cancel_schematic_drag();
     }
+}
+
+/// A drag on a read-only view moved nothing and said nothing. It selects
+/// the part it began on and says why the part stays where it is, as a
+/// drawing tool on the same view does.
+#[test]
+fn a_drag_on_a_read_only_view_selects_the_part_and_says_why_it_stays() {
+    let ctx = egui::Context::default();
+    let mut state = AppState::default();
+    let id = state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(100, 100));
+    state.model.schematic.session.read_only = true;
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
+    let before = state.model.schematic.document().components.clone();
+
+    dispatch(
+        &mut state.canvas_parts(),
+        &ctx,
+        &symbols,
+        SelectionDragAction::BeginSelection {
+            target: PointerTarget::Component(id),
+            position: Point::new(100, 100),
+        },
+    );
+
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(id)
+    );
+    assert!(!state.model.schematic.has_pending_operation());
+    assert_eq!(state.model.schematic.document().components, before);
+    let said = state
+        .workbench
+        .prompt
+        .as_ref()
+        .map(|prompt| prompt.text.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        said,
+        "The active schematic is read-only; no design data was changed."
+    );
 }

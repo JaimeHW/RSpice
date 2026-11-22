@@ -165,9 +165,9 @@ pub fn start(
         };
         return Some(start.action(view, target));
     }
-    if read_only {
-        return Some(SelectionDragAction::BeginMarquee(band));
-    }
+    // On a read-only view a drag that starts on an object still asks to
+    // move it, so the owner can select it and say why it stays put; a drag
+    // from empty canvas draws the selection box as anywhere else.
     Some(match target {
         Some(
             target @ (PointerTarget::Component(_)

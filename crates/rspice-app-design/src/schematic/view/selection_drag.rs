@@ -106,15 +106,17 @@ pub fn apply(
         return;
     }
     match request.action {
+        // A read-only view selects what the drag began on and says why it
+        // does not move, as a drawing tool there does.
         SelectionDragAction::BeginSelection { target, position } => {
-            if state.schematic_edit_read_only() {
+            select_drag_target(&mut state.model.schematic.session.editor.selection, target);
+            if state.deny_read_only_edit() {
                 return;
             }
-            select_drag_target(&mut state.model.schematic.session.editor.selection, target);
             state.begin_schematic_drag((position.x, position.y), DragType::MoveSelection, ctx);
         }
         SelectionDragAction::BeginWireVertex(position) => {
-            if state.schematic_edit_read_only() {
+            if state.deny_read_only_edit() {
                 return;
             }
             state.begin_schematic_drag((position.x, position.y), DragType::WireVertex, ctx);
