@@ -50,6 +50,19 @@ fn hold_drawing_still(ui: &Ui, model: &mut Model, height: f32) {
 fn options(ui: &mut Ui, model: &mut Model, design: &mut DesignState) {
     match model.schematic.session.editor.tool {
         Tool::Bus => strip(ui, "Bus", |ui| bus_name(ui, model)),
+        // A supply rail armed from the shelf places its one name; it has no
+        // count to turn off.
+        tool @ (Tool::Label | Tool::OffSheetConnector)
+            if model
+                .schematic
+                .session
+                .editor
+                .pending_net_label_sequence
+                .as_ref()
+                .is_none_or(|sequence| sequence.repeated_name().is_none()) =>
+        {
+            strip(ui, tool.display_name(), |ui| label_count_up(ui, model));
+        }
         Tool::MoveSelection if design.move_selection.armed => {
             strip(ui, "Move", |ui| {
                 let mode = &mut design.move_selection.mode;
@@ -86,6 +99,22 @@ fn options(ui: &mut Ui, model: &mut Model, design: &mut DesignState) {
             });
         }
         _ => {}
+    }
+}
+
+/// The Label strip's Count up: a name ending in a number counts up on each
+/// click (OUT1, OUT2, OUT3), or with it off places again (OUT1, OUT1), the
+/// usual way to join two points by name. A count already armed follows the
+/// box at once, and the ghost shows the name the next click places.
+fn label_count_up(ui: &mut Ui, model: &mut Model) {
+    let editor = &mut model.schematic.session.editor;
+    let mut count_up = editor.net_label_count_up;
+    if ui
+        .checkbox(&mut count_up, "Count up")
+        .on_hover_text("A name ending in a number counts up on each click; off, it places again")
+        .changed()
+    {
+        editor.set_net_label_count_up(count_up);
     }
 }
 

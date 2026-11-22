@@ -229,6 +229,44 @@ fn a_numbered_label_keeps_the_tool_armed_with_the_next_name() {
     assert_eq!(next_name(&app), None);
 }
 
+/// With the Label strip's Count up off, a numbered name places again on the
+/// next click, the usual way to join two points by name: OUT1, then OUT1.
+/// Ticking it mid-sequence counts on from the name placed last.
+#[test]
+fn with_count_up_off_a_numbered_label_places_the_same_name_again() {
+    let mut app = RSpiceApp::test_instance();
+    let place = |app: &mut RSpiceApp, y: i32| {
+        let dialog_modal_open = app.state.dialog_modal_open();
+        assert!(place_sequenced_net_label_in(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            dialog_modal_open,
+            Point::new(0, y)
+        ));
+    };
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .set_net_label_count_up(false);
+    commit_entry(&mut app.state, Point::new(0, 0), "OUT1");
+    assert_eq!(next_name(&app).as_deref(), Some("OUT1"));
+    place(&mut app, 20);
+    assert_eq!(label_names(&app), ["OUT1", "OUT1"]);
+
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .set_net_label_count_up(true);
+    assert_eq!(next_name(&app).as_deref(), Some("OUT2"));
+    place(&mut app, 40);
+    assert_eq!(label_names(&app), ["OUT1", "OUT1", "OUT2"]);
+    assert!(!app.state.design.net_label_placement.open);
+}
+
 /// A list or a bus range places one name per click, then the next click
 /// asks for a name again; a range typed onto a bus names the bus.
 #[test]

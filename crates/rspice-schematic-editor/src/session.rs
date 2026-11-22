@@ -106,6 +106,11 @@ pub struct EditorSession {
     /// Names the Label tool places on its next clicks, without the entry.
     pub pending_net_label_sequence: Option<net_label_sequence::NetLabelSequence>,
 
+    /// Whether a label name ending in a number counts up on the next click
+    /// (`OUT1`, `OUT2`) or places again (`OUT1`, `OUT1`); the Label strip's
+    /// Count up. See [`Self::set_net_label_count_up`].
+    pub net_label_count_up: bool,
+
     /// Validated one-shot documentation object used while the text tool is armed.
     pub pending_design_note: Option<PendingDesignNotePlacement>,
 
@@ -191,6 +196,7 @@ impl Default for EditorSession {
             pending_bus_tap: Default::default(),
             pending_port_sequence: Default::default(),
             pending_net_label_sequence: Default::default(),
+            net_label_count_up: true,
             pending_design_note: Default::default(),
             pending_documentation_shape: Default::default(),
             documentation_shape_drawing: Default::default(),
@@ -222,5 +228,15 @@ impl EditorSession {
 
     pub fn canvas_cache(&self, version: u64) -> Option<&canvas_cache::CanvasCache> {
         self.canvas_cache.fresh(version)
+    }
+
+    /// Turn the Label tool's counting up on or off, for the name the entry
+    /// takes next and for a count already armed, whose ghost shows the
+    /// change at once: off, the next click places the name placed last.
+    pub fn set_net_label_count_up(&mut self, count_up: bool) {
+        self.net_label_count_up = count_up;
+        if let Some(sequence) = &mut self.pending_net_label_sequence {
+            sequence.set_count_up(count_up);
+        }
     }
 }

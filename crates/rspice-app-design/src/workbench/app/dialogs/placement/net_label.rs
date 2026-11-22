@@ -254,7 +254,11 @@ fn validate_draft(draft: &NetLabelPlacementDialogState, model: &Model) -> DraftV
         anchor,
         name: first.clone(),
         kind: draft.kind,
-        following: NetLabelSequence::following(&names, draft.kind),
+        following: NetLabelSequence::following(
+            &names,
+            draft.kind,
+            model.schematic.session.editor.net_label_count_up,
+        ),
     }))
 }
 

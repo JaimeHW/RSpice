@@ -2,7 +2,8 @@
 //! Name places them.
 //!
 //! The entry is typed into once. A name ending in a number counts on from
-//! it (`D0`, then `D1`, `D2`, ...), a list (`a b c`) or a bus range
+//! it (`D0`, then `D1`, `D2`, ...), or with counting up turned off places
+//! again on every click (`OUT1`, `OUT1`), a list (`a b c`) or a bus range
 //! (`D<0:7>`) is placed one name per click, and the canvas ghost shows the
 //! name the next click will place. A supply symbol armed from the shelf
 //! places its one rail name on every click until the tool is cancelled. Runtime only: what reaches the document is
@@ -28,12 +29,14 @@ enum SequenceOrder {
         names: VecDeque<String>,
         total: usize,
     },
-    /// A numbered name counting on: `stem` then `next`, padded to `width`
-    /// digits as the typed name was.
-    Counting {
+    /// A numbered name: `stem` then `last`, the number the last click
+    /// placed, padded to `width` digits as the typed name was. Counting, the
+    /// next click places the number after it; held, the same name again.
+    Numbered {
         stem: String,
-        next: u64,
+        last: u64,
         width: usize,
+        counting: bool,
     },
     /// One name placed on every click: a supply rail armed from the shelf.
     Repeating { name: String },
@@ -59,17 +62,22 @@ pub fn entry_names(entry: &str, keep_bus_ranges: bool) -> Vec<String> {
 
 impl NetLabelSequence {
     /// The sequence that follows the first of `names` (the one the entry
-    /// places itself), if any: the rest of a list, or the count after a
-    /// single numbered name. A single name with no number places once.
-    pub fn following(names: &[String], kind: NetLabelKind) -> Option<Self> {
+    /// places itself), if any: the rest of a list, or after a single numbered
+    /// name the count on from it (`count_up`) or the same name again. A
+    /// single name with no number places once.
+    pub fn following(names: &[String], kind: NetLabelKind, count_up: bool) -> Option<Self> {
         let order = match names {
             [] => return None,
             [only] => {
                 let (stem, number, width) = trailing_number(only)?;
-                SequenceOrder::Counting {
+                if count_up {
+                    number.checked_add(1)?;
+                }
+                SequenceOrder::Numbered {
                     stem: stem.to_owned(),
-                    next: number.checked_add(1)?,
+                    last: number,
                     width,
+                    counting: count_up,
                 }
             }
             [_, rest @ ..] => SequenceOrder::Listed {
@@ -93,7 +101,16 @@ impl NetLabelSequence {
     pub fn repeated_name(&self) -> Option<&str> {
         match &self.order {
             SequenceOrder::Repeating { name } => Some(name),
-            SequenceOrder::Listed { .. } | SequenceOrder::Counting { .. } => None,
+            SequenceOrder::Listed { .. } | SequenceOrder::Numbered { .. } => None,
+        }
+    }
+
+    /// Count a numbered name up from the one placed last, or hold it there so
+    /// the next click places the same name again; the Label strip's Count
+    /// up. A list or a repeated rail name has no count to change.
+    pub fn set_count_up(&mut self, count_up: bool) {
+        if let SequenceOrder::Numbered { last, counting, .. } = &mut self.order {
+            *counting = count_up && last.checked_add(1).is_some();
         }
     }
 
@@ -101,7 +118,19 @@ impl NetLabelSequence {
     pub fn next_name(&self) -> Option<String> {
         match &self.order {
             SequenceOrder::Listed { names, .. } => names.front().cloned(),
-            SequenceOrder::Counting { stem, next, width } => Some(format!("{stem}{next:0width$}")),
+            SequenceOrder::Numbered {
+                stem,
+                last,
+                width,
+                counting,
+            } => {
+                let number = if *counting {
+                    last.checked_add(1)?
+                } else {
+                    *last
+                };
+                Some(format!("{stem}{number:0width$}"))
+            }
             SequenceOrder::Repeating { name } => Some(name.clone()),
         }
     }
@@ -110,7 +139,7 @@ impl NetLabelSequence {
     pub fn position(&self) -> Option<(usize, usize)> {
         match &self.order {
             SequenceOrder::Listed { names, total } => Some((total - names.len() + 1, *total)),
-            SequenceOrder::Counting { .. } | SequenceOrder::Repeating { .. } => None,
+            SequenceOrder::Numbered { .. } | SequenceOrder::Repeating { .. } => None,
         }
     }
 
@@ -121,13 +150,22 @@ impl NetLabelSequence {
                 names.pop_front();
                 !names.is_empty()
             }
-            SequenceOrder::Counting { next, .. } => match next.checked_add(1) {
-                Some(following) => {
-                    *next = following;
-                    true
+            SequenceOrder::Numbered {
+                last,
+                counting: true,
+                ..
+            } => match last.checked_add(1) {
+                // The number after the one just placed is the next click's,
+                // if there is one.
+                Some(placed) => {
+                    *last = placed;
+                    placed.checked_add(1).is_some()
                 }
                 None => false,
             },
+            SequenceOrder::Numbered {
+                counting: false, ..
+            } => true,
             SequenceOrder::Repeating { .. } => true,
         }
     }
@@ -155,30 +193,34 @@ mod tests {
     #[test]
     fn a_numbered_name_counts_on_keeping_its_padding() {
         let mut sequence =
-            NetLabelSequence::following(&names("D0"), NetLabelKind::Local).expect("counts");
+            NetLabelSequence::following(&names("D0"), NetLabelKind::Local, true).expect("counts");
         assert_eq!(sequence.next_name().as_deref(), Some("D1"));
         assert!(sequence.advance());
         assert_eq!(sequence.next_name().as_deref(), Some("D2"));
         assert_eq!(sequence.position(), None);
 
         let padded =
-            NetLabelSequence::following(&names("A009"), NetLabelKind::Local).expect("counts");
+            NetLabelSequence::following(&names("A009"), NetLabelKind::Local, true).expect("counts");
         assert_eq!(padded.next_name().as_deref(), Some("A010"));
-        let carry = NetLabelSequence::following(&names("n9"), NetLabelKind::Local).expect("counts");
+        let carry =
+            NetLabelSequence::following(&names("n9"), NetLabelKind::Local, true).expect("counts");
         assert_eq!(carry.next_name().as_deref(), Some("n10"));
     }
 
     #[test]
     fn a_plain_name_or_a_bare_number_places_once() {
         assert_eq!(
-            NetLabelSequence::following(&names("vout"), NetLabelKind::Local),
+            NetLabelSequence::following(&names("vout"), NetLabelKind::Local, true),
             None
         );
         assert_eq!(
-            NetLabelSequence::following(&names("0"), NetLabelKind::Local),
+            NetLabelSequence::following(&names("0"), NetLabelKind::Local, true),
             None
         );
-        assert_eq!(NetLabelSequence::following(&[], NetLabelKind::Local), None);
+        assert_eq!(
+            NetLabelSequence::following(&[], NetLabelKind::Local, true),
+            None
+        );
     }
 
     #[test]
@@ -186,7 +228,7 @@ mod tests {
         let typed = names("a b  c");
         assert_eq!(typed, ["a", "b", "c"]);
         let mut sequence =
-            NetLabelSequence::following(&typed, NetLabelKind::Local).expect("listed");
+            NetLabelSequence::following(&typed, NetLabelKind::Local, true).expect("listed");
         assert_eq!(sequence.next_name().as_deref(), Some("b"));
         assert_eq!(sequence.position(), Some((2, 3)));
         assert!(sequence.advance());
@@ -201,5 +243,22 @@ mod tests {
         assert_eq!(names("D<0:3>"), ["D<0>", "D<1>", "D<2>", "D<3>"]);
         assert_eq!(names("Q[2:1] en"), ["Q[2]", "Q[1]", "en"]);
         assert_eq!(entry_names("D<0:3>", true), ["D<0:3>"]);
+    }
+
+    /// With counting up off, a numbered name places again on every click,
+    /// and turning it back on counts on from the name placed last.
+    #[test]
+    fn a_held_count_repeats_the_name_until_counting_resumes() {
+        let mut sequence =
+            NetLabelSequence::following(&names("OUT1"), NetLabelKind::Local, false).expect("held");
+        assert_eq!(sequence.next_name().as_deref(), Some("OUT1"));
+        assert!(sequence.advance());
+        assert_eq!(sequence.next_name().as_deref(), Some("OUT1"));
+        sequence.set_count_up(true);
+        assert_eq!(sequence.next_name().as_deref(), Some("OUT2"));
+        assert!(sequence.advance());
+        sequence.set_count_up(false);
+        assert_eq!(sequence.next_name().as_deref(), Some("OUT2"));
+        assert_eq!(sequence.repeated_name(), None, "a count is not a rail");
     }
 }
