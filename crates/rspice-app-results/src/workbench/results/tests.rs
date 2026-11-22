@@ -338,6 +338,45 @@ fn fit_y_to_visible_x_needs_a_waveform_sheet() {
 /// dialog; Q opens the nearest marker's, and L begins a note on the point
 /// under it. With the pointer off the plot, A goes where the Cursors
 /// page's pair puts it. G turns the minor grid on and off.
+/// A reading kept from the details pane is a measurement of the view that
+/// keeps the strip, read over the span it was read over.
+#[test]
+fn a_kept_reading_is_a_measurement_of_the_view() {
+    use crate::workbench::documents::result_document::document_edit::measurement;
+    use rspice_results::visualization_document::MeasurementWindow;
+    let mut harness = harness_on(damped_run());
+    let ctx = theme_context();
+    harness_frame(&ctx, &mut harness, Vec::new());
+    let pane = harness.state.results.session.working_view_panes[0];
+    let mut parts = harness.state.parts(
+        &mut harness.model,
+        &mut harness.wb,
+        &harness.platform,
+        &mut harness.runs.preflight,
+        harness.commands,
+    );
+    measurement::keep(
+        &mut parts,
+        pane.analysis,
+        "max(V(out))".to_owned(),
+        MeasurementWindow::BetweenCursors,
+    )
+    .expect("the view keeps the reading");
+    let document = harness
+        .model
+        .workspace
+        .content
+        .visualization_document(pane.document_id)
+        .expect("the working view is in the project");
+    let kept = document
+        .measurements()
+        .last()
+        .expect("a measurement is kept");
+    assert_eq!(kept.pane_id, pane.pane_id);
+    assert_eq!(kept.expression.as_deref(), Some("max(V(out))"));
+    assert_eq!(kept.window, MeasurementWindow::BetweenCursors);
+}
+
 #[test]
 fn the_pointer_keys_act_where_the_pointer_stands() {
     use crate::workbench::results::commands::AtPointer;

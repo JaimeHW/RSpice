@@ -1690,8 +1690,8 @@ pub fn show_plot<'a>(
                 x,
                 y: frame.data_y((frame.y, frame.y_scale), at.y),
                 trace: nearest_on_axes(
-                    &pane_traces,
-                    &secondary_traces,
+                    pane_traces(),
+                    &secondary_traces(),
                     (x, Some(at.y)),
                     response.plot_rect,
                     (y_scale, (y0, y1)),

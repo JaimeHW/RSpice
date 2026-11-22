@@ -323,7 +323,21 @@ pub(crate) fn horizontal_pane_name(
 ///
 /// The A/B/Δ readout itself lives in the stage's readout strip; repeating it
 /// one panel away is what the results de-duplication pass removed.
-pub fn right_panel(ui: &mut Ui, state: &mut ResultViewerState, source: ReadoutInput<'_>) {
+/// A reading of the details pane's measurements the reader kept: its
+/// expression, the strip it was read on, and whether between the cursors or
+/// over the whole record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeptReading {
+    pub analysis: AnalysisPresentationKey,
+    pub expression: String,
+    pub between_cursors: bool,
+}
+
+pub fn right_panel(
+    ui: &mut Ui,
+    state: &mut ResultViewerState,
+    source: ReadoutInput<'_>,
+) -> Option<KeptReading> {
     let presentation = source.presentation;
     let quantity_policy = source.quantity_policy;
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
@@ -334,26 +348,29 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultViewerState, source: ReadoutIn
 
     // Statistics over the cursor window (or the full range).
     let cursors = state.cursors;
-    let measured_model = cursor_model.or_else(|| (!models.is_empty()).then_some(0));
-    if let Some(measured) = measured_model {
-        let window = match (cursors.a, cursors.b) {
-            (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
-            _ => None,
-        };
-        super::readout::measurement_panel(
-            ui,
-            &mut state.derived,
-            models,
-            measured,
-            source.models_generation,
-            window,
-            super::readout::MeasurementWording {
-                significant_digits,
-                quantity_policy,
-                display_name: source.display_name,
-            },
-        );
-    }
+    let measured = cursor_model.or_else(|| (!models.is_empty()).then_some(0))?;
+    let window = match (cursors.a, cursors.b) {
+        (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
+        _ => None,
+    };
+    let expression = super::readout::measurement_panel(
+        ui,
+        &mut state.derived,
+        models,
+        measured,
+        source.models_generation,
+        window,
+        super::readout::MeasurementWording {
+            significant_digits,
+            quantity_policy,
+            display_name: source.display_name,
+        },
+    )?;
+    Some(KeptReading {
+        analysis: models.get(measured)?.analysis_key,
+        expression,
+        between_cursors: window.is_some(),
+    })
 }
 
 #[cfg(test)]

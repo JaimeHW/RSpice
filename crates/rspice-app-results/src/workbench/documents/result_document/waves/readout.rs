@@ -384,10 +384,30 @@ pub(crate) fn inline_cursor_readout(
     with_readout(state, tokens, true, dock::inline_cursor_readout)
 }
 
+/// The details pane over a waveform sheet: what the cursors' span, or the
+/// whole record, measures; a reading kept there becomes a measurement of
+/// the view, over the same span.
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    with_readout(state, &Tokens::get(ui.ctx()), true, |session, source| {
+    let Some(kept) = with_readout(state, &Tokens::get(ui.ctx()), true, |session, source| {
         dock::right_panel(ui, session, source)
-    });
+    }) else {
+        return;
+    };
+    let window = if kept.between_cursors {
+        rspice_results::visualization_document::MeasurementWindow::BetweenCursors
+    } else {
+        rspice_results::visualization_document::MeasurementWindow::WholeRecord
+    };
+    let said = match super::super::document_edit::measurement::keep(
+        state,
+        kept.analysis,
+        kept.expression.clone(),
+        window,
+    ) {
+        Ok(()) => format!("Kept {} in the Measurements table", kept.expression),
+        Err(error) => format!("Could not keep the measurement: {error}"),
+    };
+    state.prompt(said);
 }
 
 #[cfg(test)]

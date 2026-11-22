@@ -342,6 +342,32 @@ pub(super) fn commit(
     Ok(None)
 }
 
+/// Keep `expression` as a measurement of the view that keeps the strip of
+/// `analysis`, read over `window`: what Keep on the details pane's readings
+/// does.
+pub(crate) fn keep(
+    state: &mut ResultsParts<'_>,
+    analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+    expression: String,
+    window: MeasurementWindow,
+) -> Result<(), String> {
+    let context = state
+        .results
+        .session
+        .pane_for(analysis)
+        .ok_or_else(|| "no view keeps this strip".to_owned())?;
+    transact(
+        state,
+        context.document_id,
+        vec![DocumentEdit::AddScalarMeasurement {
+            pane_id: context.pane_id,
+            expression,
+            window,
+        }],
+    )?;
+    Ok(())
+}
+
 /// What family `analysis` belongs to, named with its member count, or
 /// `None` when it belongs to none.
 fn family_of(run: &SimulationRun, analysis: &AnalysisResult) -> Option<String> {

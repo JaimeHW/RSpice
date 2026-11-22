@@ -58,12 +58,15 @@ pub struct MeasurementWording<'a> {
     pub display_name: DisplayName<'a>,
 }
 
-/// Paint retained-sample measurements for the selected strip and cursor span.
+/// Paint retained-sample measurements for the selected strip and cursor
+/// span, and return the expression of the reading the reader kept.
 ///
 /// The strip's plotted traces are measured once for each build of the strip
 /// models (`generation`) and window, off the frame, and the table lays out
 /// only the rows it shows, each named and worded as it is shown: a strip of a
 /// hundred thousand ticked signals costs a frame what a strip of ten does.
+/// Enter, a double click or the row's menu keeps a reading as a measurement
+/// of the view, read over the same span.
 pub fn measurement_panel(
     ui: &mut Ui,
     derived: &mut DerivedSeries,
@@ -72,10 +75,8 @@ pub fn measurement_panel(
     generation: u64,
     window: Option<(f64, f64)>,
     wording: MeasurementWording<'_>,
-) {
-    let Some(model) = models.get(measured) else {
-        return;
-    };
+) -> Option<String> {
+    let model = models.get(measured)?;
     let title = if window.is_some() {
         "Measurements · A–B"
     } else {
@@ -102,12 +103,54 @@ pub fn measurement_panel(
     ];
     match shown {
         Shown::Measured(measured) => {
-            let _ = DataTable::new("results.measurements", &columns, measured.rows)
-                .list()
-                .show(ui, |row| {
-                    let (name, value) = measured.row(model, row, wording);
-                    vec![Cell::faint(name), Cell::number(value)]
-                });
+            let keep = if window.is_some() {
+                "Keep between the cursors"
+            } else {
+                "Keep over the whole record"
+            };
+            let mut kept = None;
+            crate::presentation::with_table_state(ui, "waves.measurements", |ui, state| {
+                let response = DataTable::new("results.measurements", &columns, measured.rows)
+                    .list()
+                    .state(state)
+                    .show(ui, |row| {
+                        let row = measured.row(model, row, wording);
+                        let name = Cell::faint(row.label);
+                        vec![
+                            if row.keep.is_some() {
+                                name.hint(format!(
+                                    "{keep}: Enter, a double click or the row's menu"
+                                ))
+                            } else {
+                                name
+                            },
+                            Cell::number(row.value),
+                        ]
+                    });
+                if let Some(index) = response.activate {
+                    kept = measured.row(model, index, wording).keep;
+                }
+                crate::presentation::table_row_menu(
+                    ui,
+                    "waves.measurements",
+                    response.context_menu,
+                    |ui, index| {
+                        let row = measured.row(model, index, wording);
+                        if ui
+                            .add_enabled(row.keep.is_some(), egui::Button::new(keep))
+                            .clicked()
+                        {
+                            kept.clone_from(&row.keep);
+                            ui.close();
+                        }
+                        if ui.button("Copy").clicked() {
+                            ui.ctx().copy_text(format!("{}\t{}", row.label, row.value));
+                            ui.close();
+                        }
+                    },
+                );
+            });
+            kept
         }
         Shown::Measuring(signals) => {
             let _ = DataTable::new("results.measurements", &columns[..1], 1)
@@ -118,8 +161,9 @@ pub fn measurement_panel(
                         if signals == 1 { "" } else { "s" }
                     ))]
                 });
+            None
         }
-        Shown::Nothing => {}
+        Shown::Nothing => None,
     }
 }
 
@@ -152,7 +196,77 @@ struct MeasuredTrace {
     trace: usize,
     branch: Option<usize>,
     stats: WindowStats,
+    /// Whether its kind reads an average and an rms.
+    rms: bool,
+    /// Its mean period over the window, where it repeats there and is a
+    /// time signal a reading keeps.
+    period: Option<f64>,
     first_row: usize,
+}
+
+/// One reading the Measurements table lists of a measured trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    Min,
+    Max,
+    PeakToPeak,
+    Average,
+    Rms,
+    Period,
+    Frequency,
+}
+
+impl Reading {
+    /// Its name in the table, and the calculator's function that keeps it.
+    fn names(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Min => ("min", "min"),
+            Self::Max => ("max", "max"),
+            Self::PeakToPeak => ("p-p", "pp"),
+            Self::Average => ("avg", "avg"),
+            Self::Rms => ("rms", "rms"),
+            Self::Period => ("period", "period"),
+            Self::Frequency => ("freq", "freq"),
+        }
+    }
+}
+
+impl MeasuredTrace {
+    /// The readings it lists, in row order: min, max and p-p; its average
+    /// and rms where its kind has them; its period and frequency where it
+    /// repeats.
+    fn readings(&self) -> impl Iterator<Item = Reading> + use<> {
+        const SPREAD: [Reading; 3] = [Reading::Min, Reading::Max, Reading::PeakToPeak];
+        const LEVEL: [Reading; 2] = [Reading::Average, Reading::Rms];
+        const REPEAT: [Reading; 2] = [Reading::Period, Reading::Frequency];
+        let (rms, repeats) = (self.rms, self.period.is_some());
+        SPREAD
+            .into_iter()
+            .chain(LEVEL.into_iter().filter(move |_| rms))
+            .chain(REPEAT.into_iter().filter(move |_| repeats))
+    }
+
+    /// How many rows it takes: one saying why it was not measured, or one
+    /// for each of its readings.
+    fn rows(&self) -> usize {
+        if self.stats.is_err() {
+            1
+        } else {
+            self.readings().count()
+        }
+    }
+}
+
+/// Whether a reading of `trace`, or of `branch` of it, keeps as a
+/// measurement of the view: only where the calculator names the trace. A
+/// branch, a run drawn behind or a projection of a complex quantity has no
+/// name the calculator reads, and a family's member is measured member by
+/// member from Add measurement.
+fn keeps(trace: &StripTrace, branch: Option<usize>) -> bool {
+    branch.is_none()
+        && !trace.overlay
+        && trace.family_group_ordinal.is_none()
+        && trace.kind == TraceKind::Value
 }
 
 /// A strip's plotted traces measured over one window, in row order.
@@ -170,16 +284,21 @@ impl Measurements {
         model: &StripModel,
         row: usize,
         wording: MeasurementWording<'_>,
-    ) -> (String, String) {
+    ) -> MeasurementRow {
+        let absent = || MeasurementRow {
+            label: String::new(),
+            value: READOUT_ABSENT.to_owned(),
+            keep: None,
+        };
         let at = self
             .traces
             .partition_point(|measured| measured.first_row <= row)
             .saturating_sub(1);
         let Some(measured) = self.traces.get(at) else {
-            return (String::new(), READOUT_ABSENT.to_owned());
+            return absent();
         };
         let Some(trace) = model.traces.get(measured.trace) else {
-            return (String::new(), READOUT_ABSENT.to_owned());
+            return absent();
         };
         let mut name = (wording.display_name)(&trace.name).into_owned();
         if let Some(branch) = measured.branch {
@@ -192,32 +311,45 @@ impl Measurements {
         }
         let stats = match measured.stats {
             Ok(stats) => stats,
-            Err(error) => return (name, format!("Unavailable: {error}")),
+            Err(error) => {
+                return MeasurementRow {
+                    label: name,
+                    value: format!("Unavailable: {error}"),
+                    keep: None,
+                };
+            }
         };
-        let (statistic, value) = match row - measured.first_row {
-            0 => ("min", stats.min),
-            1 => ("max", stats.max),
-            _ => ("rms", stats.rms),
+        let Some(reading) = measured.readings().nth(row - measured.first_row) else {
+            return absent();
         };
-        (
-            format!("{name} {statistic}"),
-            model.format_trace_value(
-                trace,
-                value,
-                wording.significant_digits,
-                wording.quantity_policy,
-            ),
-        )
-    }
-}
-
-/// How many rows a measured trace takes: one saying why it was not measured,
-/// or its min and max, and its RMS where its kind has one (`rms`).
-fn rows_of(stats: &WindowStats, rms: bool) -> usize {
-    match stats {
-        Err(_) => 1,
-        Ok(_) if rms => 3,
-        Ok(_) => 2,
+        let digits = wording.significant_digits;
+        let fmt = |value| model.format_trace_value(trace, value, digits, wording.quantity_policy);
+        let period = measured.period.unwrap_or(f64::NAN);
+        let value = match reading {
+            Reading::Min => fmt(stats.min),
+            Reading::Max => fmt(stats.max),
+            Reading::PeakToPeak => fmt(stats.max - stats.min),
+            Reading::Average => fmt(stats.mean),
+            Reading::Rms => fmt(stats.rms),
+            Reading::Period => model.format_x(period, digits, wording.quantity_policy),
+            // In the unit Frequency display chooses.
+            Reading::Frequency => {
+                let (scale, offset, unit) = wording.quantity_policy.frequency_axis_transform();
+                rspice_ui_kit::plot::fmt_si_significant(
+                    period.recip() * scale + offset,
+                    unit,
+                    digits,
+                )
+            }
+        };
+        let (what, function) = reading.names();
+        // A reading is kept as the calculator's function of the trace's own
+        // name, read over the same window.
+        MeasurementRow {
+            label: format!("{name} {what}"),
+            value,
+            keep: keeps(trace, measured.branch).then(|| format!("{function}({})", trace.name)),
+        }
     }
 }
 
@@ -275,10 +407,13 @@ struct PlannedTrace {
     y: SharedWaveformValues,
     shape: Arc<SweepShape>,
     rms: bool,
+    /// Whether its period is read: a time signal's, that a reading keeps.
+    period: bool,
 }
 
 impl MeasurementPlan {
     fn of(model: &StripModel, window: Option<(f64, f64)>) -> Self {
+        let time = model.x_unit == "s";
         let mut traces = Vec::new();
         for (index, trace) in model.traces.iter().enumerate() {
             if !trace.visible {
@@ -292,6 +427,7 @@ impl MeasurementPlan {
                     y: trace.y.clone(),
                     shape: Arc::clone(&trace.shape),
                     rms: has_rms(trace.kind),
+                    period: time && keeps(trace, branch),
                 });
             }
         }
@@ -313,13 +449,19 @@ impl MeasurementPlan {
                 self.window,
                 planned.branch,
             );
-            traces.push(MeasuredTrace {
+            let period = (planned.period && stats.is_ok())
+                .then(|| interval_period(&planned.x, &planned.y, &planned.shape, self.window))
+                .flatten();
+            let measured = MeasuredTrace {
                 trace: planned.trace,
                 branch: planned.branch,
                 stats,
+                rms: planned.rms,
+                period,
                 first_row: rows,
-            });
-            rows += rows_of(&stats, planned.rms);
+            };
+            rows += measured.rows();
+            traces.push(measured);
         }
         Some(Measurements { traces, rows })
     }
@@ -479,6 +621,17 @@ impl MeasurementsMemo {
         }
     }
 }
+
+/// One reading of the measurements panel: its name, its value, and the
+/// expression that keeps it as a measurement of the view, when the view can
+/// keep it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeasurementRow {
+    pub label: String,
+    pub value: String,
+    pub keep: Option<String>,
+}
+
 /// The traces the readout lists, in row order.
 ///
 /// Every per-row producer reads this one predicate, so the value, delta,
@@ -885,6 +1038,48 @@ fn interval_statistics(
     measure_interval(&xs, &ys, window)
 }
 
+/// The mean period of the samples `x` and `y` hold over `window`, or over
+/// the whole of them, as the calculator's `period()` reads that part of
+/// them: `None` where they do not repeat, or are not one ascending sweep.
+fn interval_period(
+    x: &WaveformValues,
+    y: &WaveformValues,
+    shape: &SweepShape,
+    window: Option<(f64, f64)>,
+) -> Option<f64> {
+    use rspice_results::calculator::functions::FunctionRegistry;
+    use rspice_results::calculator::value::RealValue;
+
+    if !shape.is_single_ascending()
+        || x.len() != y.len()
+        || window.is_some_and(|(a, b)| !a.is_finite() || !b.is_finite())
+    {
+        return None;
+    }
+    let range = match window {
+        Some((a, b)) => window_rows(x, 0..x.len(), a.min(b), a.max(b)),
+        None => 0..x.len(),
+    };
+    let xs = x.read_range(range.clone()).ok()?;
+    let ys = y.read_range(range).ok()?;
+    let mut wave = RealValue::create_waveform(xs.to_vec(), ys.to_vec());
+    if let Some((a, b)) = window {
+        wave = FunctionRegistry::dispatch(
+            "clip",
+            vec![
+                wave,
+                RealValue::Scalar(a.min(b)),
+                RealValue::Scalar(a.max(b)),
+            ],
+        )
+        .ok()?;
+    }
+    match FunctionRegistry::dispatch("period", vec![wave]) {
+        Ok(RealValue::Scalar(period)) if period.is_finite() && period > 0.0 => Some(period),
+        _ => None,
+    }
+}
+
 /// The samples of `range` of the ascending axis `x` that a measurement over
 /// `low ..= high` reads: those inside it and the nearest one either side,
 /// found by bisection over single samples.
@@ -920,6 +1115,9 @@ fn window_rows(
     start..end.max(start)
 }
 
+/// Each trace's readings over `window`, or its whole record: min, max,
+/// peak-to-peak, average and rms, and its period and frequency when it
+/// repeats there, as the calculator's functions of the same names read it.
 pub fn measurement_values(
     derived: &mut DerivedSeries,
     model: &StripModel,
@@ -927,7 +1125,8 @@ pub fn measurement_values(
     significant_digits: usize,
     quantity_policy: QuantityPresentationPolicy,
     display_name: DisplayName<'_>,
-) -> Vec<(String, String)> {
+) -> Vec<MeasurementRow> {
+    let time = model.x_unit == "s";
     let mut rows = 0;
     let mut traces = Vec::new();
     for (index, trace) in model.traces.iter().enumerate() {
@@ -936,13 +1135,19 @@ pub fn measurement_values(
         }
         for branch in measured_branches(trace) {
             let stats = trace_interval_statistics(derived, model, trace, window, branch);
-            traces.push(MeasuredTrace {
+            let period = (time && keeps(trace, branch) && stats.is_ok())
+                .then(|| interval_period(&trace.x, &trace.y, &trace.shape, window))
+                .flatten();
+            let measured = MeasuredTrace {
                 trace: index,
                 branch,
                 stats,
+                rms: has_rms(trace.kind),
+                period,
                 first_row: rows,
-            });
-            rows += rows_of(&stats, has_rms(trace.kind));
+            };
+            rows += measured.rows();
+            traces.push(measured);
         }
     }
     let measured = Measurements { traces, rows };
