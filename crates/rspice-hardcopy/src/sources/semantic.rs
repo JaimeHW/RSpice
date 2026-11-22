@@ -20,7 +20,7 @@ use rspice_design::schematic::component_display::SchematicParameterLabelVisibili
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
     component::Component,
-    design_note::DesignNote,
+    design_note::{DesignNote, DesignNoteRenderContext},
     documentation_shape::DocumentationShape,
     net_label::{Junction, NetLabel},
     wire::Wire,
@@ -28,7 +28,7 @@ use rspice_design::schematic::{
 use rspice_design::symbol::SymbolDocument;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
-    DrawingSheetTitleFieldId, SchematicSheetFormat, SheetPageNumbering,
+    DrawingSheetTitleFieldId, SchematicSheetFormat, SheetPageNumbering, SheetTextVariables,
 };
 use rspice_hardcopy_contract::sources::{
     DISPLAY_NAME_LIMIT, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, validate_label,
@@ -177,6 +177,35 @@ pub struct SemanticSchematic {
     /// keeps it, so it letters what the canvas showed.
     #[serde(default, skip_serializing_if = "letters_names_and_values")]
     pub parameter_labels: SchematicParameterLabelVisibility,
+}
+
+impl SemanticSchematic {
+    /// What the sheet's text letters by name, with `page_label` standing in
+    /// for the sheet's own Sheet value where a print set numbers its pages.
+    pub fn sheet_text_variables(&self, page_label: Option<&str>) -> SheetTextVariables {
+        let mut values = std::borrow::Cow::Borrowed(&self.drawing_sheet_title_values);
+        if let Some(page_label) = page_label {
+            values
+                .to_mut()
+                .insert(DrawingSheetTitleFieldId::Page, page_label.to_owned());
+        }
+        match &self.drawing_sheet {
+            Some(format) => SheetTextVariables::new(format, &values),
+            None => SheetTextVariables::new(&SchematicSheetFormat::default(), &values),
+        }
+    }
+
+    /// What the sheet's notes letter their fields from.
+    pub fn note_render_context<'a>(
+        &self,
+        variables: &'a SheetTextVariables,
+    ) -> DesignNoteRenderContext<'a> {
+        DesignNoteRenderContext {
+            variables,
+            component_count: self.components.len(),
+            conductor_count: self.wires.len() + self.buses.len(),
+        }
+    }
 }
 
 const fn default_schematic_grid_pitch_units() -> i32 {

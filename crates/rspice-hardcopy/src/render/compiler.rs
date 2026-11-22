@@ -499,9 +499,12 @@ impl<'a> SemanticSceneCompiler<'a> {
                 None,
             )?,
         );
+        let variables = schematic.sheet_text_variables(page_label);
+        let note_context = schematic.note_render_context(&variables);
         for note in &schematic.design_notes {
+            let text = note.rendered_text(&note_context);
             if let Some(lettering) = note.lettering {
-                self.lettered_note(note, lettering)?;
+                self.lettered_note(note, lettering, &text)?;
                 continue;
             }
             let scale = f64::from(note.text_scale());
@@ -512,7 +515,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                 SymbolTextAlign::Center => TextAnchor::Middle,
                 SymbolTextAlign::Right => TextAnchor::End,
             };
-            for line in note.text.lines() {
+            for line in text.lines() {
                 self.add_text_placed(
                     origin,
                     line,

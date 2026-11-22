@@ -61,7 +61,7 @@ pub(super) fn handle_select_dragging(
         viewport,
         symbols,
         state.schematic_edit_read_only(),
-        || state.model.workspace.content.active_view.display_path(),
+        || state.model.sheet_text_variables(),
     );
     if let Some(action) = action {
         dispatch(state, ui.ctx(), symbols, action);

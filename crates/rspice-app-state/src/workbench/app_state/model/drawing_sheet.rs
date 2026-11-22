@@ -4,10 +4,11 @@
 
 use super::Model;
 use crate::state::{DesignSheet, DrawingSheetTitleFieldId, SchematicSheetFormat, SheetId};
+use rspice_design_model::design_management::SheetTextVariables;
 use rspice_schematic_editor::view::drawing_sheet::{
     ActiveDrawingSheet, DrawingSheetGeometry, zone_on_format,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 impl Model {
     /// The sheet the active cell view's catalog has active, with the format
@@ -177,11 +178,27 @@ impl Model {
         &self,
         sheet: &ActiveDrawingSheet,
     ) -> Vec<crate::state::ResolvedDrawingSheetTitleField> {
-        let authority_values = DrawingSheetTitleFieldId::ALL
+        crate::state::resolve_drawing_sheet_title_fields(
+            &sheet.format,
+            &self.title_authority_values(sheet),
+        )
+    }
+
+    /// What the open sheet's text letters by name: its title-block values,
+    /// as its block letters them.
+    pub fn sheet_text_variables(&self) -> SheetTextVariables {
+        let sheet = self.active_drawing_sheet();
+        SheetTextVariables::new(&sheet.format, &self.title_authority_values(&sheet))
+    }
+
+    fn title_authority_values(
+        &self,
+        sheet: &ActiveDrawingSheet,
+    ) -> BTreeMap<DrawingSheetTitleFieldId, String> {
+        DrawingSheetTitleFieldId::ALL
             .into_iter()
             .map(|id| (id, self.title_field_value(id, sheet)))
-            .collect();
-        crate::state::resolve_drawing_sheet_title_fields(&sheet.format, &authority_values)
+            .collect()
     }
 
     fn title_field_value(

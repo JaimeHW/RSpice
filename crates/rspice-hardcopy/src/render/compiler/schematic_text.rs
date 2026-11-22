@@ -74,15 +74,17 @@ impl SemanticSceneCompiler<'_> {
         )
     }
 
-    /// A note from another tool's drawing, in the proportional face, every
-    /// line justified about its point as the drawing set it.
+    /// A note from another tool's drawing, reading `text`, in the
+    /// proportional face, every line justified about its point as the
+    /// drawing set it.
     pub(super) fn lettered_note(
         &mut self,
         note: &DesignNote,
         lettering: NoteLettering,
+        text: &str,
     ) -> Result<(), HardcopyRenderError> {
         let class = SchematicTextClass::Value;
-        for (placed, line) in note.lettered_lines(lettering, &note.text) {
+        for (placed, line) in note.lettered_lines(lettering, text) {
             if !line.trim().is_empty() {
                 self.placed_lines(
                     placed,

@@ -364,58 +364,62 @@ pub fn resolve_drawing_sheet_title_fields(
         .into_iter()
         .filter_map(|id| {
             let authored = format.title_block.fields.get(&id)?;
-            format.title_field_shown(id).then(|| {
-                let authority = id.policy().value_authority;
-                let governed = authority_values
-                    .get(&id)
-                    .map(String::as_str)
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or(id.default_value());
-                let value = match authority {
-                    DrawingSheetTitleFieldValueAuthority::Automatic => governed,
-                    DrawingSheetTitleFieldValueAuthority::Authored if id.is_project_owned() => {
-                        if governed.trim().is_empty() {
-                            authored.value.as_str()
-                        } else {
-                            governed
-                        }
-                    }
-                    DrawingSheetTitleFieldValueAuthority::Authored
-                        if authored.value.trim().is_empty() =>
-                    {
-                        governed
-                    }
-                    DrawingSheetTitleFieldValueAuthority::Authored => authored.value.as_str(),
-                };
-                ResolvedDrawingSheetTitleField {
-                    id,
-                    value: match authority {
-                        _ if !value.trim().is_empty() => value.to_owned(),
-                        // ASME Y14.35 letters a dash in REV for a drawing's
-                        // initial release, so on the ASME form a revision not
-                        // yet issued is a blank cell: a dash there would read
-                        // as released.
-                        DrawingSheetTitleFieldValueAuthority::Automatic
-                            if id == DrawingSheetTitleFieldId::Revision
-                                && format.title_block.template
-                                    == DrawingSheetTitleBlockTemplate::AsmeY141 =>
-                        {
-                            String::new()
-                        }
-                        // A value RSpice supplies and does not have yet, such
-                        // as the date of a document never issued, reads as
-                        // not yet known.
-                        DrawingSheetTitleFieldValueAuthority::Automatic => "—".to_owned(),
-                        // A title block is a form: an empty authored cell is a
-                        // box to fill in or sign on the print. A dash there
-                        // would read as an answer, such as no approval needed.
-                        DrawingSheetTitleFieldValueAuthority::Authored => String::new(),
-                    },
-                    authority,
-                }
-            })
+            format
+                .title_field_shown(id)
+                .then(|| lettered_title_field(format, authority_values, id, &authored.value))
         })
         .collect()
+}
+
+/// The value a sheet of `format` letters for `id`, whose own typed value is
+/// `authored`, whether or not its block shows the field.
+pub(super) fn lettered_title_field(
+    format: &SchematicSheetFormat,
+    authority_values: &BTreeMap<DrawingSheetTitleFieldId, String>,
+    id: DrawingSheetTitleFieldId,
+    authored: &str,
+) -> ResolvedDrawingSheetTitleField {
+    let authority = id.policy().value_authority;
+    let governed = authority_values
+        .get(&id)
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(id.default_value());
+    let value = match authority {
+        DrawingSheetTitleFieldValueAuthority::Automatic => governed,
+        DrawingSheetTitleFieldValueAuthority::Authored if id.is_project_owned() => {
+            if governed.trim().is_empty() {
+                authored
+            } else {
+                governed
+            }
+        }
+        DrawingSheetTitleFieldValueAuthority::Authored if authored.trim().is_empty() => governed,
+        DrawingSheetTitleFieldValueAuthority::Authored => authored,
+    };
+    ResolvedDrawingSheetTitleField {
+        id,
+        value: match authority {
+            _ if !value.trim().is_empty() => value.to_owned(),
+            // ASME Y14.35 letters a dash in REV for a drawing's initial
+            // release, so on the ASME form a revision not yet issued is a
+            // blank cell: a dash there would read as released.
+            DrawingSheetTitleFieldValueAuthority::Automatic
+                if id == DrawingSheetTitleFieldId::Revision
+                    && format.title_block.template == DrawingSheetTitleBlockTemplate::AsmeY141 =>
+            {
+                String::new()
+            }
+            // A value RSpice supplies and does not have yet, such as the date
+            // of a document never issued, reads as not yet known.
+            DrawingSheetTitleFieldValueAuthority::Automatic => "—".to_owned(),
+            // A title block is a form: an empty authored cell is a box to fill
+            // in or sign on the print. A dash there would read as an answer,
+            // such as no approval needed.
+            DrawingSheetTitleFieldValueAuthority::Authored => String::new(),
+        },
+        authority,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

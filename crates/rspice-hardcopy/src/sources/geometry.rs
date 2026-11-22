@@ -213,16 +213,19 @@ pub fn schematic_bounds(
             bounds.include_layout_rect(rect);
         }
     }
+    let variables = schematic.sheet_text_variables(None);
+    let note_context = schematic.note_render_context(&variables);
     for note in &schematic.design_notes {
+        let text = note.rendered_text(&note_context);
         if let Some(lettering) = note.lettering {
-            bounds.include_layout_rect(note.lettered_box(lettering, &note.text));
+            bounds.include_layout_rect(note.lettered_box(lettering, &text));
             continue;
         }
         bounds.include(note.pos);
         // At the note's own size, by the canvas's measure of its lines, which
         // reaches past the print's: every line's anchor, the last one's too,
         // stands inside.
-        let (width, height) = note.text_extent_world(&note.text);
+        let (width, height) = note.text_extent_world(&text);
         let reach = f64::from(width).ceil() as i64;
         // The lines run on from the point, about it, or up to it.
         let (left, right) = match note.align {

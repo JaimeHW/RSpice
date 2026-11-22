@@ -20,6 +20,7 @@ use crate::{
 use egui::{Response, Ui};
 use rspice_design::schematic::{movement::MoveSelectionMode, selection::Selection};
 use rspice_design_model::Point;
+use rspice_design_model::design_management::SheetTextVariables;
 
 #[derive(Debug, Clone)]
 pub struct MoveInputRequest {
@@ -44,7 +45,7 @@ pub fn input(
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
     view: MoveInputView<'_>,
-    view_path: impl Fn() -> String,
+    sheet_variables: impl Fn() -> SheetTextVariables,
 ) -> Option<TransformInputTransition> {
     let mut next = view.canvas.clone();
     let commit = apply_input(
@@ -54,7 +55,7 @@ pub fn input(
         symbol_context,
         &view,
         &mut next,
-        &view_path,
+        &sheet_variables,
     );
     (commit || next != *view.canvas).then(|| TransformInputTransition {
         expected: view.canvas.clone(),
@@ -70,7 +71,7 @@ fn apply_input(
     symbol_context: &SchematicSymbolContext,
     view: &MoveInputView<'_>,
     draft: &mut TransformCanvasSession,
-    view_path: &impl Fn() -> String,
+    sheet_variables: &impl Fn() -> SheetTextVariables,
 ) -> bool {
     retain_canvas_focus_from_pointer(response);
     let (keyboard_step, keyboard_commit) =
@@ -107,7 +108,7 @@ fn apply_input(
             symbol_context,
             position,
             anchor,
-            view_path,
+            sheet_variables,
         ) {
             draft.anchor = Some(anchor);
             draft.preview_delta = Point::origin();
@@ -166,7 +167,7 @@ fn apply_input(
             symbol_context,
             position,
             point,
-            view_path,
+            sheet_variables,
         ) {
             draft.anchor = Some(point);
             draft.preview_delta = Point::origin();
@@ -197,7 +198,7 @@ fn pointer_is_in_frozen_move_selection(
     symbol_context: &SchematicSymbolContext,
     position: egui::Pos2,
     grid_position: Point,
-    view_path: impl FnOnce() -> String,
+    sheet_variables: impl FnOnce() -> SheetTextVariables,
 ) -> bool {
     let hit_position = screen_to_schematic(viewport, position);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
@@ -212,7 +213,7 @@ fn pointer_is_in_frozen_move_selection(
         symbol_context,
         context,
         viewport,
-        view_path,
+        sheet_variables,
     ) else {
         return false;
     };
@@ -293,7 +294,7 @@ mod tests {
                                     filter: Default::default(),
                                     snap_engine: &snap,
                                 },
-                                || "user/top/schematic".to_owned(),
+                                SheetTextVariables::default,
                             ) {
                                 assert_eq!(transition.expected, canvas);
                                 commit = transition.commit;

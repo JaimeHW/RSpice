@@ -32,6 +32,7 @@ use egui::{Painter, Rect, Stroke};
 use rspice_design::schematic::design_note::DesignNoteRenderContext;
 use rspice_design::schematic::probe::SchematicProbe;
 use rspice_design_model::Point;
+use rspice_design_model::design_management::SheetTextVariables;
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -98,7 +99,7 @@ pub fn draw_content(
     view: &SceneView<'_>,
     symbols: SceneSymbols<'_>,
     overlays: SceneOverlays<'_>,
-    view_path: impl Fn() -> String,
+    sheet_variables: impl Fn() -> SheetTextVariables,
 ) {
     let symbol_library = symbols.library;
     let symbol_context = symbols.context;
@@ -457,6 +458,8 @@ pub fn draw_content(
 
     // Documentation objects are painted above electrical names but below
     // validation markers. They never participate in conductor rendering.
+    // The sheet's values are read once, and only when a note is drawn.
+    let mut note_variables = None;
     for note in &view.design.document.design_notes {
         if !view.design.object_is_visible(note.id) {
             continue;
@@ -474,11 +477,12 @@ pub fn draw_content(
         }
         let selected = view.editor.selection.has_design_note(note.id)
             || band_annotations.is_some_and(|band| band.takes_bounds(min, max));
+        let variables = note_variables.get_or_insert_with(&sheet_variables);
         draw_design_note(
             painter,
             viewport,
             note,
-            &DesignNoteRenderContext::for_document(view.design.document, &view_path()),
+            &DesignNoteRenderContext::for_document(view.design.document, variables),
             selected,
             view.hover == Some(PointerTarget::DesignNote(note.id)),
             palette,
@@ -721,7 +725,7 @@ mod band_tests {
                 stale_instances: &HashSet::new(),
                 off_sheet_references: &HashMap::new(),
             },
-            String::new,
+            SheetTextVariables::default,
         );
         let select = Tokens::get(painter.ctx()).color.canvas_select;
         let mut count = 0;
@@ -852,7 +856,7 @@ mod hover_tests {
                 stale_instances: &HashSet::new(),
                 off_sheet_references: &HashMap::new(),
             },
-            String::new,
+            SheetTextVariables::default,
         );
         let mut shapes = Vec::new();
         painter.for_each_shape(|shape| shapes.push(shape.shape.clone()));

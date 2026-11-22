@@ -4,7 +4,9 @@
 //! the note itself once the tool is armed, so the form draws no second copy
 //! of it.
 
-use rspice_design::schematic::design_note::{DesignNoteKind, SymbolTextAlign};
+use rspice_design::schematic::design_note::{
+    DesignNoteField, DesignNoteKind, SymbolTextAlign, name_property_field, named_property_field,
+};
 use rspice_ui_kit::widgets::FormRows;
 
 /// Three lines: enough for a note worth placing, short enough that the form
@@ -27,9 +29,32 @@ pub fn show(
     if let Some(index) = rows.select("Type", "design-note-kind", kind.label(), &labels) {
         *kind = DesignNoteKind::ALL[index];
     }
+    if *kind == DesignNoteKind::PropertyDisplay {
+        field_row(rows, text);
+    }
     let response = rows.text_multiline("Text", text_id(), text, sample(*kind), TEXT_LINES);
     crate::object_properties::note_lettering_rows(rows, size_percent, align);
     Some(response.id)
+}
+
+/// A Property display note's Field row: the field its text names, picked
+/// from the list of every field it can show. Picking one writes it into the
+/// text, where the words around it can be typed. Returns `true` when the
+/// text changed.
+pub fn field_row(rows: &mut FormRows<'_>, text: &mut String) -> bool {
+    let fields = DesignNoteField::all().collect::<Vec<_>>();
+    let labels = fields
+        .iter()
+        .map(|field| field.label().to_owned())
+        .collect::<Vec<_>>();
+    let shown = named_property_field(text).map_or("Choose a field", DesignNoteField::label);
+    let Some(index) = rows.select("Field", "design-note-field", shown, &labels) else {
+        return false;
+    };
+    let named = name_property_field(text, fields[index]);
+    let changed = named != *text;
+    *text = named;
+    changed
 }
 
 /// The shape of a note of this kind, as the field's hint.
@@ -40,8 +65,11 @@ pub fn show(
 /// hint, and only the kinds with a syntax of their own show it.
 const fn sample(kind: DesignNoteKind) -> &'static str {
     match kind {
-        DesignNoteKind::PlainText | DesignNoteKind::ReviewNote => "",
-        DesignNoteKind::PropertyDisplay => "${property} text",
+        // A Property display note's field is picked in the row above, and
+        // the text takes any words around it.
+        DesignNoteKind::PlainText
+        | DesignNoteKind::ReviewNote
+        | DesignNoteKind::PropertyDisplay => "",
         DesignNoteKind::RequirementLink => "Requirement ID",
     }
 }

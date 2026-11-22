@@ -12,6 +12,7 @@ use super::{design_view::DesignView, symbol_context::SchematicSymbolContext, vie
 use crate::session::selection::SchematicSelectionFilter;
 use rspice_design::schematic::{design_note::DesignNoteRenderContext, wire::Wire};
 use rspice_design_model::Point;
+use rspice_design_model::design_management::SheetTextVariables;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PointerTarget {
@@ -53,7 +54,7 @@ pub fn pointer_target(
     symbol_context: &SchematicSymbolContext,
     ctx: &egui::Context,
     viewport: &Viewport,
-    view_path: impl FnOnce() -> String,
+    sheet_variables: impl FnOnce() -> SheetTextVariables,
 ) -> Option<PointerTarget> {
     let picks = PickInputs {
         view,
@@ -63,7 +64,9 @@ pub fn pointer_target(
         ctx,
         viewport,
     };
-    collect_targets(&picks, view_path, false).into_iter().next()
+    collect_targets(&picks, sheet_variables, false)
+        .into_iter()
+        .next()
 }
 
 /// Every object a click at `query` hits, in pick order: the kinds in the
@@ -79,7 +82,7 @@ pub fn pointer_targets_all(
     symbol_context: &SchematicSymbolContext,
     ctx: &egui::Context,
     viewport: &Viewport,
-    view_path: impl FnOnce() -> String,
+    sheet_variables: impl FnOnce() -> SheetTextVariables,
 ) -> Vec<PointerTarget> {
     let picks = PickInputs {
         view,
@@ -89,7 +92,7 @@ pub fn pointer_targets_all(
         ctx,
         viewport,
     };
-    collect_targets(&picks, view_path, true)
+    collect_targets(&picks, sheet_variables, true)
 }
 
 struct PickInputs<'a, 'v> {
@@ -129,7 +132,7 @@ fn hits<T: Clone>(
 
 fn collect_targets(
     picks: &PickInputs<'_, '_>,
-    view_path: impl FnOnce() -> String,
+    sheet_variables: impl FnOnce() -> SheetTextVariables,
     all: bool,
 ) -> Vec<PointerTarget> {
     let PickInputs {
@@ -163,8 +166,8 @@ fn collect_targets(
             return targets;
         }
         let notes = view.visible_design_notes();
-        let path = view_path();
-        let context = DesignNoteRenderContext::for_document(view.document, &path);
+        let variables = sheet_variables();
+        let context = DesignNoteRenderContext::for_document(view.document, &variables);
         targets.extend(
             hits(
                 notes.as_ref(),
@@ -554,7 +557,7 @@ mod tests {
             &SchematicSymbolContext::default(),
             &egui::Context::default(),
             viewport,
-            String::new,
+            SheetTextVariables::default,
         )
     }
 
@@ -673,7 +676,7 @@ mod tests {
             &SchematicSymbolContext::default(),
             &egui::Context::default(),
             &zoom,
-            String::new,
+            SheetTextVariables::default,
         );
         assert_eq!(
             all,
@@ -744,7 +747,7 @@ mod tests {
                     &symbols,
                     &ctx,
                     &zoom,
-                    String::new,
+                    SheetTextVariables::default,
                 )
             } else {
                 pointer_target(
@@ -754,7 +757,7 @@ mod tests {
                     &symbols,
                     &ctx,
                     &zoom,
-                    String::new,
+                    SheetTextVariables::default,
                 )
                 .into_iter()
                 .collect()

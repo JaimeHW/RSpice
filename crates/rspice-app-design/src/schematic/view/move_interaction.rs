@@ -47,7 +47,7 @@ pub(super) fn handle_armed_move_selection(
             filter: state.design.schematic_selection_filter,
             snap_engine: &state.model.schematic.session.editor.snap_engine,
         },
-        || state.model.workspace.content.active_view.display_path(),
+        || state.model.sheet_text_variables(),
     ) {
         let request = capture(state, transition);
         apply(state, symbol_context, request);

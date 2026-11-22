@@ -76,7 +76,7 @@ pub(super) fn draw_interaction_previews(
     preview::draw_junction_preview(painter, response, &view, viewport);
     preview::draw_net_label_preview(painter, response, &view, viewport, symbol_context);
     preview::draw_design_note_preview(painter, response, &view, viewport, || {
-        state.model.workspace.content.active_view.display_path()
+        state.model.sheet_text_variables()
     });
     preview::draw_documentation_shape_preview(painter, response, &view, viewport);
     preview::draw_component_preview(
@@ -163,7 +163,7 @@ fn draw_move_selection_preview(
             &preview_view(state.model, state.design),
             diff,
             &transform_preview_style(state.design, symbol_context, symbol_library),
-            || state.model.workspace.content.active_view.display_path(),
+            || state.model.sheet_text_variables(),
         );
     }
 
@@ -466,7 +466,7 @@ fn draw_array_selection_preview(
         &preview_view(state.model, state.design),
         preview,
         &transform_preview_style(state.design, symbol_context, symbol_library),
-        || state.model.workspace.content.active_view.display_path(),
+        || state.model.sheet_text_variables(),
     );
 
     let impact = preview.impact();

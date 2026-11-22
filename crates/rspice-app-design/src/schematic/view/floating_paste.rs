@@ -147,7 +147,7 @@ pub(super) fn draw_floating_paste_preview(
             &preview_view(state.model, state.design),
             &preview_state.diff,
             &transform_preview_style(state.design, symbol_context, symbol_library),
-            || state.model.workspace.content.active_view.display_path(),
+            || state.model.sheet_text_variables(),
         );
     }
     preview::draw_transform_feedback(painter, response, valid, detail);

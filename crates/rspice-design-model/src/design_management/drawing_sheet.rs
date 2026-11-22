@@ -2016,6 +2016,9 @@ pub use presets::*;
 pub(super) mod title_fields;
 pub use title_fields::*;
 
+pub(super) mod text_variables;
+pub use text_variables::*;
+
 pub(super) mod title_layout;
 pub use title_layout::*;
 

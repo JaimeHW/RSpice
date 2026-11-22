@@ -21,7 +21,7 @@ fn design_notes_never_change_generated_spice_or_connectivity() {
             90_001,
             Point::new(25, 30),
             DesignNoteKind::PropertyDisplay,
-            "${component_count} components",
+            "${PART_COUNT} parts",
         )
         .unwrap(),
     );

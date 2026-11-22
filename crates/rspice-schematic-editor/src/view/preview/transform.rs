@@ -24,6 +24,7 @@ use rspice_design::schematic::{
     net_label::{Junction, NetLabel},
     wire::Wire,
 };
+use rspice_design_model::design_management::SheetTextVariables;
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 use std::collections::HashMap;
 
@@ -93,7 +94,7 @@ pub fn draw_move_diff(
     view: &PreviewView<'_>,
     diff: &TransformCandidateDiff,
     style: &TransformPreviewStyle<'_>,
-    view_path: impl Fn() -> String,
+    sheet_variables: impl Fn() -> SheetTextVariables,
 ) {
     let tokens = Tokens::get(painter.ctx());
     let palette = &tokens.color;
@@ -129,8 +130,8 @@ pub fn draw_move_diff(
         draw_net_label(painter, viewport, label, true, false, true, palette);
     }
     if !diff.design_notes.is_empty() {
-        let path = view_path();
-        let context = DesignNoteRenderContext::for_document(view.design.document, &path);
+        let variables = sheet_variables();
+        let context = DesignNoteRenderContext::for_document(view.design.document, &variables);
         for note in &diff.design_notes {
             draw_design_note(painter, viewport, note, &context, true, false, palette);
         }
@@ -151,7 +152,7 @@ pub fn draw_array_candidate(
     view: &PreviewView<'_>,
     preview: &SchematicArrayPreview,
     style: &TransformPreviewStyle<'_>,
-    view_path: impl Fn() -> String,
+    sheet_variables: impl Fn() -> SheetTextVariables,
 ) {
     let tokens = Tokens::get(painter.ctx());
     let palette = &tokens.color;
@@ -192,16 +193,12 @@ pub fn draw_array_candidate(
     for label in preview.net_labels() {
         draw_net_label(painter, viewport, label, true, false, true, palette);
     }
-    for note in preview.design_notes() {
-        draw_design_note(
-            painter,
-            viewport,
-            note,
-            &DesignNoteRenderContext::for_document(view.design.document, &view_path()),
-            true,
-            false,
-            palette,
-        );
+    if !preview.design_notes().is_empty() {
+        let variables = sheet_variables();
+        let context = DesignNoteRenderContext::for_document(view.design.document, &variables);
+        for note in preview.design_notes() {
+            draw_design_note(painter, viewport, note, &context, true, false, palette);
+        }
     }
     for shape in preview.documentation_shapes() {
         draw_documentation_shape(painter, viewport, shape, true, false, palette);

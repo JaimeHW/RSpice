@@ -47,6 +47,6 @@ pub(super) fn pointer_target_with_filter(
         symbol_context,
         ctx,
         viewport,
-        || state.model.workspace.content.active_view.display_path(),
+        || state.model.sheet_text_variables(),
     )
 }

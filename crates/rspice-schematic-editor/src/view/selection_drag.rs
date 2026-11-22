@@ -22,6 +22,7 @@ use crate::{
 use egui::{PointerButton, Response, Ui};
 use rspice_design::schematic::selection::Selection;
 use rspice_design_model::Point;
+use rspice_design_model::design_management::SheetTextVariables;
 
 /// A host-validated transaction owned by this canvas context.
 #[derive(Debug, Clone, Copy)]
@@ -128,7 +129,7 @@ pub fn start(
     viewport: &Viewport,
     symbols: &SchematicSymbolContext,
     read_only: bool,
-    view_path: impl FnOnce() -> String,
+    sheet_variables: impl FnOnce() -> SheetTextVariables,
 ) -> Option<SelectionDragAction> {
     if !response.drag_started_by(PointerButton::Primary) {
         return None;
@@ -165,7 +166,7 @@ pub fn start(
         symbols,
         ui.ctx(),
         viewport,
-        view_path,
+        sheet_variables,
     );
     // The rubber band follows the pointer, not the grid.
     let band = screen_to_schematic(viewport, position);

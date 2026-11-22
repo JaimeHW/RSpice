@@ -69,7 +69,7 @@ fn canvas_hover(
             symbol_context,
             ctx,
             viewport,
-            || state.model.workspace.content.active_view.display_path(),
+            || state.model.sheet_text_variables(),
         ),
         ToolPointerAction::Probe(grid) => state
             .design_view()
@@ -199,7 +199,7 @@ pub(super) fn draw_scene(
             stale_instances: &stale_instances(painter.ctx(), state),
             off_sheet_references: &off_sheet_references(painter.ctx(), state.model),
         },
-        || state.model.workspace.content.active_view.display_path(),
+        || state.model.sheet_text_variables(),
     );
     show_probe_unavailable_reason(painter, state, hover, &probe_statuses);
 

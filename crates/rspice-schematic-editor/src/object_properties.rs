@@ -520,6 +520,9 @@ pub fn show(
                     edited = true;
                 }
             }
+            if draft.kind == DesignNoteKind::PropertyDisplay {
+                edited |= crate::annotations::note_placement::field_row(rows, &mut draft.text);
+            }
             let text = field_id(NOTE_TEXT_FIELD);
             let response = rows.text_multiline("Text", text, &mut draft.text, "", 3);
             focus = Some(text);

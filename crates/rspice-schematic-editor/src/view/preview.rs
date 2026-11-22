@@ -21,7 +21,10 @@ use rspice_design::schematic::{
     documentation_shape::geometry_from_points,
     net_label::NetLabel,
 };
-use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
+use rspice_design_model::{
+    Point,
+    design_management::{CrossSheetPortDirection, SheetTextVariables},
+};
 use rspice_ui_kit::tokens::Tokens;
 
 mod component;
@@ -136,7 +139,7 @@ pub fn draw_design_note_preview(
     response: &Response,
     view: &PreviewView<'_>,
     viewport: &Viewport,
-    view_path: impl FnOnce() -> String,
+    sheet_variables: impl FnOnce() -> SheetTextVariables,
 ) {
     if !view.can_edit || view.editor.tool != Tool::DesignNote {
         return;
@@ -164,7 +167,7 @@ pub fn draw_design_note_preview(
         painter,
         viewport,
         &note,
-        &DesignNoteRenderContext::for_document(view.design.document, &view_path()),
+        &DesignNoteRenderContext::for_document(view.design.document, &sheet_variables()),
         false,
         false,
         &Tokens::get(painter.ctx()).color,

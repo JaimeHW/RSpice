@@ -220,7 +220,9 @@ fn draw_parent(
             stale_instances: &Default::default(),
             off_sheet_references: &Default::default(),
         },
-        || session.parent.display_path(),
+        // The parent's sheet is not the open one, so its notes letter
+        // their field names.
+        rspice_design_model::design_management::SheetTextVariables::default,
     );
 }
 

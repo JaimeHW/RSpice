@@ -174,3 +174,29 @@ fn a_notes_size_and_alignment_print_as_the_canvas_letters_them() {
         assert_eq!(size * 2, standard * 3);
     }
 }
+
+/// A Property display note prints the field it names as the sheet letters
+/// it, as the canvas shows it, not the field's name.
+#[test]
+fn a_property_display_note_prints_its_sheets_title() {
+    let mut printed = sheet(Vec::new());
+    printed.drawing_sheet_title_values = BTreeMap::from([(
+        rspice_design_model::design_management::DrawingSheetTitleFieldId::SheetTitle,
+        "Power stage".to_owned(),
+    )]);
+    printed.design_notes = vec![
+        DesignNote::new(
+            1,
+            rspice_design_model::Point::new(100, 40),
+            DesignNoteKind::PropertyDisplay,
+            "Title: ${TITLE}",
+        )
+        .unwrap(),
+    ];
+    let compiled = compile(&printed);
+    let texts = compiled.texts();
+    assert!(
+        texts.iter().any(|(text, ..)| *text == "Title: Power stage"),
+        "the note prints the title: {texts:?}"
+    );
+}

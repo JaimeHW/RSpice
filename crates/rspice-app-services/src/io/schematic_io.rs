@@ -768,7 +768,7 @@ mod tests {
                 92,
                 crate::state::Point::new(-10, 30),
                 crate::state::DesignNoteKind::PropertyDisplay,
-                "${component_count} components",
+                "${PART_COUNT} parts",
             )
             .unwrap(),
             crate::state::DesignNote::new(

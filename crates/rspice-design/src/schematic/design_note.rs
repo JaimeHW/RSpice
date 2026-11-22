@@ -11,7 +11,11 @@ use super::label_layout::{
 };
 
 use rspice_design_model::Point;
+use rspice_design_model::design_management::{
+    SheetTextVariable, SheetTextVariables, expand_text_variables, text_variable_names,
+};
 pub use rspice_design_model::symbol_geometry::SymbolTextAlign;
+use std::borrow::Cow;
 
 /// Maximum authored note source retained in a schematic document.
 pub const MAX_DESIGN_NOTE_TEXT_LEN: usize = 4096;
@@ -756,20 +760,93 @@ impl DesignNote {
     }
 }
 
-/// Context used to resolve safe property-display tokens. Only documented,
-/// read-only schematic properties are accepted; arbitrary expressions are
-/// never evaluated.
+/// One value a Property display note letters: one of its sheet's, or a count
+/// of what the schematic holds. The note writes it as `${NAME}`; the note's
+/// form picks it from a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesignNoteField {
+    Sheet(SheetTextVariable),
+    PartCount,
+    ConductorCount,
+}
+
+impl DesignNoteField {
+    /// Every field, in the order the form lists them.
+    pub fn all() -> impl Iterator<Item = Self> {
+        SheetTextVariable::ALL
+            .into_iter()
+            .map(Self::Sheet)
+            .chain([Self::PartCount, Self::ConductorCount])
+    }
+
+    /// The name the note writes the field by, inside `${` and `}`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Sheet(variable) => variable.name(),
+            Self::PartCount => "PART_COUNT",
+            Self::ConductorCount => "CONDUCTOR_COUNT",
+        }
+    }
+
+    /// What the form's list calls the field.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Sheet(variable) => variable.label(),
+            Self::PartCount => "Part count",
+            Self::ConductorCount => "Conductor count",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::all().find(|field| field.name() == name)
+    }
+
+    /// The field as the note's text writes it.
+    pub fn token(self) -> String {
+        format!("${{{}}}", self.name())
+    }
+}
+
+/// The first field a Property display note's `text` names.
+pub fn named_property_field(text: &str) -> Option<DesignNoteField> {
+    text_variable_names(text)
+        .ok()?
+        .into_iter()
+        .find_map(DesignNoteField::from_name)
+}
+
+/// `text` naming `field`, as the form's Field list picks it: in place of the
+/// first field the text names, keeping the words around it, or after the
+/// text when it names none.
+pub fn name_property_field(text: &str, field: DesignNoteField) -> String {
+    if let Some(current) = named_property_field(text) {
+        return text.replacen(&current.token(), &field.token(), 1);
+    }
+    let separator = if text.is_empty() || text.ends_with(char::is_whitespace) {
+        ""
+    } else {
+        " "
+    };
+    format!("{text}{separator}{}", field.token())
+}
+
+/// What a Property display note's fields read: its sheet's values and the
+/// schematic's counts. Only these named, read-only values are lettered;
+/// nothing a note says is evaluated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesignNoteRenderContext<'a> {
-    pub view_path: &'a str,
+    pub variables: &'a SheetTextVariables,
     pub component_count: usize,
     pub conductor_count: usize,
 }
 
 impl<'a> DesignNoteRenderContext<'a> {
-    pub fn for_document(document: &super::document::SchematicDocument, view_path: &'a str) -> Self {
+    pub fn for_document(
+        document: &super::document::SchematicDocument,
+        variables: &'a SheetTextVariables,
+    ) -> Self {
         Self {
-            view_path,
+            variables,
             component_count: document.components.len(),
             conductor_count: document.wires.len() + document.buses.len(),
         }
@@ -792,6 +869,7 @@ pub enum DesignNoteError {
     TextTooLong,
     InvalidControlCharacter,
     NonCanonicalText,
+    NoProperty,
     UnknownProperty(String),
     UnterminatedProperty,
     InvalidRequirementReference,
@@ -827,12 +905,13 @@ impl std::fmt::Display for DesignNoteError {
             Self::NonCanonicalText => {
                 formatter.write_str("Text has uncommitted leading or trailing whitespace.")
             }
+            Self::NoProperty => formatter.write_str("Pick a field for the note to show."),
             Self::UnknownProperty(name) => write!(
                 formatter,
-                "Unknown property \"{name}\". Supported properties are view, component_count, and conductor_count."
+                "No field is called \"{name}\". Pick one from the Field list."
             ),
             Self::UnterminatedProperty => {
-                formatter.write_str("Property displays must close every ${property} token.")
+                formatter.write_str("A field name is not closed: end it with }.")
             }
             Self::InvalidRequirementReference => formatter.write_str(
                 "Requirement links must be a stable identifier or URI without whitespace.",
@@ -994,7 +1073,7 @@ fn canonical_review_single_line(
 /// Validate the authored text against its note semantics.
 pub fn validate_kind_text(kind: DesignNoteKind, text: &str) -> Result<(), DesignNoteError> {
     match kind {
-        DesignNoteKind::PropertyDisplay => parse_property_template(text).map(|_| ()),
+        DesignNoteKind::PropertyDisplay => validate_property_template(text),
         DesignNoteKind::RequirementLink => {
             if requirement_target(text).is_some() {
                 Ok(())
@@ -1027,44 +1106,28 @@ fn requirement_target(source: &str) -> Option<RequirementTarget<'_>> {
     valid.then_some(RequirementTarget::ProjectSpecification(source))
 }
 
-fn parse_property_template(source: &str) -> Result<Vec<(&str, &str)>, DesignNoteError> {
-    let mut tokens = Vec::new();
-    let mut remainder = source;
-    while let Some(start) = remainder.find("${") {
-        let after_start = &remainder[start + 2..];
-        let Some(end) = after_start.find('}') else {
-            return Err(DesignNoteError::UnterminatedProperty);
-        };
-        let property = &after_start[..end];
-        if !matches!(property, "view" | "component_count" | "conductor_count") {
-            return Err(DesignNoteError::UnknownProperty(property.to_owned()));
-        }
-        tokens.push((&remainder[..start], property));
-        remainder = &after_start[end + 1..];
+/// A Property display note names at least one field, and only fields.
+fn validate_property_template(source: &str) -> Result<(), DesignNoteError> {
+    let names = text_variable_names(source).map_err(|_| DesignNoteError::UnterminatedProperty)?;
+    if names.is_empty() {
+        return Err(DesignNoteError::NoProperty);
     }
-    if tokens.is_empty() {
-        return Err(DesignNoteError::UnknownProperty(source.to_owned()));
+    match names
+        .into_iter()
+        .find(|name| DesignNoteField::from_name(name).is_none())
+    {
+        Some(unknown) => Err(DesignNoteError::UnknownProperty(unknown.to_owned())),
+        None => Ok(()),
     }
-    tokens.push((remainder, ""));
-    Ok(tokens)
 }
 
 fn render_property_template(source: &str, context: &DesignNoteRenderContext<'_>) -> String {
-    let Ok(tokens) = parse_property_template(source) else {
-        return source.to_owned();
-    };
-    let mut rendered = String::new();
-    for (literal, property) in tokens {
-        rendered.push_str(literal);
-        match property {
-            "view" => rendered.push_str(context.view_path),
-            "component_count" => rendered.push_str(&context.component_count.to_string()),
-            "conductor_count" => rendered.push_str(&context.conductor_count.to_string()),
-            "" => {}
-            _ => unreachable!("validated property token"),
-        }
-    }
-    rendered
+    expand_text_variables(source, |name| match DesignNoteField::from_name(name)? {
+        DesignNoteField::Sheet(variable) => context.variables.value(variable).map(Cow::Borrowed),
+        DesignNoteField::PartCount => Some(Cow::Owned(context.component_count.to_string())),
+        DesignNoteField::ConductorCount => Some(Cow::Owned(context.conductor_count.to_string())),
+    })
+    .into_owned()
 }
 
 #[cfg(test)]
@@ -1072,21 +1135,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn property_display_resolves_only_documented_read_only_tokens() {
+    fn property_display_resolves_only_its_named_fields() {
+        use rspice_design_model::design_management::{
+            DrawingSheetTitleFieldId, SchematicSheetFormat,
+        };
         let note = DesignNote::new(
             7,
             Point::origin(),
             DesignNoteKind::PropertyDisplay,
-            "${view} / ${component_count} parts",
+            "${TITLE} / ${PART_COUNT} parts",
         )
         .unwrap();
+        let variables = SheetTextVariables::new(
+            &SchematicSheetFormat::default(),
+            &std::collections::BTreeMap::from([(
+                DrawingSheetTitleFieldId::SheetTitle,
+                "top".to_owned(),
+            )]),
+        );
         assert_eq!(
             note.rendered_text(&DesignNoteRenderContext {
-                view_path: "user/top/schematic",
+                variables: &variables,
                 component_count: 12,
                 conductor_count: 8,
             }),
-            "user/top/schematic / 12 parts"
+            "top / 12 parts"
         );
         assert!(matches!(
             DesignNote::new(
@@ -1097,6 +1170,27 @@ mod tests {
             ),
             Err(DesignNoteError::UnknownProperty(_))
         ));
+        assert_eq!(
+            validate_kind_text(DesignNoteKind::PropertyDisplay, "Revision"),
+            Err(DesignNoteError::NoProperty)
+        );
+    }
+
+    /// The form's Field list writes the field into the text: after it when
+    /// the text names none, in place of the field it names otherwise, keeping
+    /// the words around it.
+    #[test]
+    fn picking_a_field_names_it_in_the_text() {
+        let title = DesignNoteField::from_name("TITLE").unwrap();
+        let revision = DesignNoteField::from_name("REVISION").unwrap();
+        assert_eq!(name_property_field("", title), "${TITLE}");
+        assert_eq!(name_property_field("Rev", revision), "Rev ${REVISION}");
+        assert_eq!(
+            name_property_field("Rev ${TITLE} issued", revision),
+            "Rev ${REVISION} issued"
+        );
+        assert_eq!(named_property_field("Rev ${REVISION}"), Some(revision));
+        assert_eq!(named_property_field("${NOPE}"), None);
     }
 
     #[test]

@@ -69,7 +69,7 @@ pub(super) fn candidates_at(
         symbol_context,
         ctx,
         viewport,
-        || model.workspace.content.active_view.display_path(),
+        || model.sheet_text_variables(),
     )
 }
 

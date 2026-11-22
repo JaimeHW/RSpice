@@ -1,14 +1,18 @@
 //! Exact canvas geometry and paint for durable non-electrical design notes.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
 use rspice_design::schematic::design_note::{
     DESIGN_NOTE_FONT_WORLD, DESIGN_NOTE_LINE_ADVANCE_WORLD, DESIGN_NOTE_TEXT_OFFSET_WORLD,
-    DesignNote, DesignNoteKind, DesignNoteRenderContext, NoteLettering,
+    DesignNote, DesignNoteField, DesignNoteKind, DesignNoteRenderContext, NoteLettering,
 };
 use rspice_design_model::Point;
+#[cfg(test)]
+use rspice_design_model::design_management::SheetTextVariables;
+use rspice_design_model::design_management::expand_text_variables;
 use rspice_ui_kit::palette::Palette;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::Tokens;
@@ -283,16 +287,24 @@ pub fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Point) {
     )
 }
 
+/// [`world_bounds`] before the note's fields are known: each count as eight
+/// digits, and any other field as wide as 64 of the widest letter.
 pub fn conservative_world_bounds(note: &DesignNote) -> (Point, Point) {
-    let source = note
-        .text
-        .replace("${view}", &"W".repeat(64))
-        .replace("${component_count}", "00000000")
-        .replace("${conductor_count}", "00000000");
-    let source = if note.kind == DesignNoteKind::RequirementLink {
-        format!("REQ · {source}")
-    } else {
-        source
+    let source = match note.kind {
+        DesignNoteKind::PropertyDisplay => {
+            let widest = "W".repeat(64);
+            expand_text_variables(&note.text, |name| {
+                Some(Cow::Borrowed(match DesignNoteField::from_name(name) {
+                    Some(DesignNoteField::PartCount | DesignNoteField::ConductorCount) => {
+                        "00000000"
+                    }
+                    _ => widest.as_str(),
+                }))
+            })
+            .into_owned()
+        }
+        DesignNoteKind::RequirementLink => format!("REQ · {}", note.text),
+        DesignNoteKind::PlainText | DesignNoteKind::ReviewNote => note.text.clone(),
     };
     world_bounds(note, &source)
 }
@@ -329,7 +341,7 @@ mod tests {
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
         };
         let context = DesignNoteRenderContext {
-            view_path: "work/top/schematic",
+            variables: &SheetTextVariables::default(),
             component_count: 0,
             conductor_count: 0,
         };
@@ -372,7 +384,7 @@ mod tests {
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(800.0)),
         };
         let context = DesignNoteRenderContext {
-            view_path: "work/top/schematic",
+            variables: &SheetTextVariables::default(),
             component_count: 0,
             conductor_count: 0,
         };
@@ -423,7 +435,7 @@ mod tests {
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
         };
         let context = DesignNoteRenderContext {
-            view_path: "work/top/schematic",
+            variables: &SheetTextVariables::default(),
             component_count: 0,
             conductor_count: 0,
         };
@@ -457,7 +469,7 @@ mod tests {
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
         };
         let context = DesignNoteRenderContext {
-            view_path: "work/top/schematic",
+            variables: &SheetTextVariables::default(),
             component_count: 0,
             conductor_count: 0,
         };
