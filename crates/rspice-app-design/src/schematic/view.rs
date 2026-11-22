@@ -348,6 +348,17 @@ fn keep_the_drawing_in_sight(
             f64::from(size.y),
             min_zoom,
         );
+        // Keeping the drawing in sight never magnifies it: a drawing that
+        // fits at the zoom the reader chose stays at that zoom, centred.
+        let editor = &mut canvas.model.schematic.session.editor;
+        if editor.zoom > zoom {
+            let (min_x, min_y, max_x, max_y) = bounds;
+            editor.zoom = zoom;
+            editor.pan = (
+                f64::from(size.x) * 0.5 - f64::from(min_x + max_x) * 0.5 * zoom,
+                f64::from(size.y) * 0.5 - f64::from(min_y + max_y) * 0.5 * zoom,
+            );
+        }
     }
 }
 
