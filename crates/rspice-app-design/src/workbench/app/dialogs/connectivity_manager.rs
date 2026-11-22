@@ -1225,7 +1225,8 @@ impl ConnectivityManager<'_> {
         // reaches the project only through Apply.
         let declaration = validate_bus_draft(self.dialog)?;
         self.model.schematic.session.editor.bus_drawing.cancel();
-        self.model.schematic.session.editor.bus_drawing.declaration = Some(declaration);
+        // The Bus strip holds the name, so every bus drawn next takes it.
+        self.model.schematic.session.editor.bus_drawing.name = declaration.to_string();
         self.model.schematic.session.editor.tool = Tool::Bus;
         self.dialog.close();
         self.workbench

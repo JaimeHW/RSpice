@@ -196,16 +196,16 @@ pub fn handle_tool_interactions(
                         finish_bus_on(state, bus_id);
                     }
                 } else {
-                    let declaration = state
-                        .model
-                        .schematic
-                        .session
-                        .editor
-                        .bus_drawing
-                        .declaration
-                        .clone();
-                    if let Err(error) = state.start_canvas_bus(ui.ctx(), bus_pos, declaration) {
-                        state.prompt(format!("Bus not started: {error}"));
+                    // The bus takes the name the Bus strip holds.
+                    match state.model.schematic.session.editor.bus_drawing.named() {
+                        Ok(declaration) => {
+                            if let Err(error) =
+                                state.start_canvas_bus(ui.ctx(), bus_pos, declaration)
+                            {
+                                state.prompt(format!("Bus not started: {error}"));
+                            }
+                        }
+                        Err(error) => state.prompt(format!("Bus not started: Name: {error}.")),
                     }
                 }
             }

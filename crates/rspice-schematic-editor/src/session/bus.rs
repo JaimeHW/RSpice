@@ -79,6 +79,10 @@ pub struct BusDrawing {
     pub preview_pos: Option<Point>,
     pub routing_mode: WireRoutingMode,
     pub declaration: Option<BusDeclaration>,
+    /// What the Bus strip's Name field holds. Every bus started while it
+    /// holds a declaration takes it, and it outlasts the route, so a run of
+    /// strokes draws one named bus after another.
+    pub name: String,
     /// How many of `points` stood after each vertex the user placed, so
     /// taking one back also takes the corner routed to reach it.
     placed: Vec<usize>,
@@ -111,6 +115,16 @@ impl BusDrawing {
         if self.points.is_empty() {
             self.cancel();
         }
+    }
+
+    /// The declaration the Name field holds: `None` while it is empty, and
+    /// why it is refused when it does not parse.
+    pub fn named(&self) -> Result<Option<BusDeclaration>, BusParseError> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Ok(None);
+        }
+        BusDeclaration::parse(name).map(Some)
     }
 
     pub fn update_preview(&mut self, position: Point) {

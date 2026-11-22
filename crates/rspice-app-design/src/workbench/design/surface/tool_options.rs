@@ -47,8 +47,9 @@ fn hold_drawing_still(ui: &Ui, model: &mut Model, height: f32) {
     }
 }
 
-fn options(ui: &mut Ui, model: &Model, design: &mut DesignState) {
+fn options(ui: &mut Ui, model: &mut Model, design: &mut DesignState) {
     match model.schematic.session.editor.tool {
+        Tool::Bus => strip(ui, "Bus", |ui| bus_name(ui, model)),
         Tool::MoveSelection if design.move_selection.armed => {
             strip(ui, "Move", |ui| {
                 let mode = &mut design.move_selection.mode;
@@ -85,6 +86,41 @@ fn options(ui: &mut Ui, model: &Model, design: &mut DesignState) {
             });
         }
         _ => {}
+    }
+}
+
+/// The Bus strip's Name: what every bus drawn next is called, typed before
+/// the first click, as Virtuoso's Add Wire form takes a wire name. A bus
+/// being routed takes a name typed while it is drawn. Beside it, the width
+/// the name declares or why it is refused.
+fn bus_name(ui: &mut Ui, model: &mut Model) {
+    let t = Tokens::get(ui.ctx());
+    let drawing = &mut model.schematic.session.editor.bus_drawing;
+    ui.label("Name");
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut drawing.name)
+            .id(egui::Id::new("bus-strip-name"))
+            .hint_text(rspice_schematic_editor::bus_tap_placement::BUS_SHAPE)
+            .desired_width(140.0),
+    );
+    let named = drawing.named();
+    if response.changed()
+        && drawing.active
+        && let Ok(declaration) = &named
+    {
+        drawing.declaration = declaration.clone();
+    }
+    match named {
+        Ok(Some(declaration)) => {
+            ui.label(
+                egui::RichText::new(format!("{} bits", declaration.width()))
+                    .color(t.color.text_dim),
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            ui.label(egui::RichText::new(format!("{error}")).color(t.color.warn));
+        }
     }
 }
 
@@ -177,6 +213,9 @@ mod tests {
         assert!(!painted(&mut DesignTestHost::default()));
         assert!(painted(&mut armed_move()));
         assert!(painted(&mut armed_stretch()));
+        let mut bus = DesignTestHost::default();
+        bus.model.schematic.arm_tool(Tool::Bus);
+        assert!(painted(&mut bus), "the bus tool shows its Name");
 
         let mut cancelled = armed_move();
         crate::workbench::app::cancel_armed_move_selection_in(

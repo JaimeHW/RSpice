@@ -243,3 +243,40 @@ fn a_click_on_a_bus_ends_the_bus_route_on_it() {
         Some("D[3:0]")
     );
 }
+
+/// The Bus strip's Name names every bus drawn while it holds one, stroke
+/// after stroke, rather than the first bus alone.
+#[test]
+fn every_bus_drawn_takes_the_name_the_strip_holds() {
+    let ctx = egui::Context::default();
+    let mut state = AppState::default();
+    state.model.schematic.init_undo_history();
+    state.model.schematic.arm_tool(Tool::Bus);
+    state.model.schematic.session.editor.bus_drawing.name = "D[3:0]".to_owned();
+    canvas_frame(&ctx, &mut state, 0.0, Vec::new());
+    for (stroke, y) in [100, 300].into_iter().enumerate() {
+        let time = 1.0 + stroke as f64 * 2.0;
+        click(&ctx, &mut state, time, Point::new(100, y));
+        click(&ctx, &mut state, time + 0.5, Point::new(300, y));
+        canvas_frame(
+            &ctx,
+            &mut state,
+            time + 0.6,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: Some(egui::Key::Enter),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    let buses = &state.model.schematic.document().buses;
+    assert_eq!(buses.len(), 2, "{buses:?}");
+    for bus in buses {
+        assert_eq!(
+            bus.declaration.as_ref().map(ToString::to_string).as_deref(),
+            Some("D[3:0]")
+        );
+    }
+}
