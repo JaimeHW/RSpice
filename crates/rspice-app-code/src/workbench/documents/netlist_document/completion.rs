@@ -202,6 +202,14 @@ pub(crate) fn directive_signature_at(
 /// typed: it then takes Esc alone, so ⇥ and ↑↓ still reach the line.
 const PINS_ONLY: &str = "netlist_completion_pins_only";
 
+/// The token the popover's list was made for in the frame before.
+const SHOWN_FOR: &str = "netlist_completion_shown_for";
+
+/// One row of the popover, and how many show at once; the rest of the list
+/// scrolls.
+const ROW_HEIGHT: f32 = 24.0;
+const VISIBLE_ROWS: usize = 8;
+
 /// Pre-consume the popover's keys. Must run *before* the `TextEdit` so
 /// ⇥ and ↑↓ never reach the buffer while the popover is open. While the
 /// editor's right-click menu is open (`menu_open`) the keys are the menu's,
@@ -268,13 +276,30 @@ pub fn show(
         return None;
     }
 
-    let candidates = collect_candidates(state, &token, token_start == line_start, pins, messages);
+    let parameters = parameter_site(state, buffer, token_start);
+    let candidates = collect_candidates(
+        state,
+        &token,
+        token_start == line_start,
+        pins,
+        parameters,
+        messages,
+    );
     if candidates.is_empty() {
         state.completion_open = false;
         return None;
     }
     ui.ctx()
         .data_mut(|data| data.insert_temp(egui::Id::new(PINS_ONLY), token.is_empty()));
+    // A list the typing changed shows its selected row, as a key moving the
+    // selection does; the wheel scrolls it freely otherwise.
+    let shown = (token_start, token.clone());
+    let retyped = ui.ctx().data_mut(|data| {
+        let id = egui::Id::new(SHOWN_FOR);
+        let before = data.get_temp::<(usize, String)>(id);
+        data.insert_temp(id, shown.clone());
+        before != Some(shown)
+    });
 
     state.completion_index =
         (state.completion_index as i32 + move_delta).rem_euclid(candidates.len() as i32) as usize;
@@ -285,6 +310,7 @@ pub fn show(
         screen_position,
         &candidates,
         selected,
+        move_delta != 0 || retyped,
         !token.is_empty(),
         messages,
     );
@@ -475,16 +501,210 @@ fn pin_help(
     })
 }
 
-/// Filter both sources against the typed prefix.
+/// The parameters the engine reads where a name is being written: on a
+/// `.model` card, its type's, from the engine's table of model parameters;
+/// on an element's line past its pins and model, the instance parameters
+/// its device reads, from the table its build checks the line against.
+enum ParameterSite {
+    Model {
+        /// The card's type, as the card writes it.
+        written_type: String,
+        parameters: &'static [rspice_core::library::ModelParameterDefault],
+    },
+    Instance {
+        /// The element's name, as its line writes it.
+        element: String,
+        parameters: &'static [&'static str],
+    },
+}
+
+/// The card the token starting at byte `start` of `buffer` is on, from the
+/// start of its first line up to the token: a line `+` continues is read
+/// with the line it continues, past any comment between them.
+fn card_before(buffer: &str, start: usize) -> &str {
+    let mut head = buffer[..start].rfind('\n').map_or(0, |at| at + 1);
+    while head > 0 && buffer[head..].trim_start().starts_with('+') {
+        let mut above = head;
+        loop {
+            let previous = buffer[..above - 1].rfind('\n').map_or(0, |at| at + 1);
+            let text = buffer[previous..above - 1].trim();
+            above = previous;
+            if previous == 0 || !(text.is_empty() || text.starts_with('*')) {
+                break;
+            }
+        }
+        head = above;
+    }
+    &buffer[head..start]
+}
+
+/// The level a `.model` card states before the caret, if it states one.
+fn stated_level(card: &str) -> Option<u32> {
+    let upper = card.to_ascii_uppercase();
+    upper.match_indices("LEVEL").find_map(|(at, word)| {
+        let starts_word = upper[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|before| !before.is_ascii_alphanumeric() && before != '_');
+        let value = upper[at + word.len()..]
+            .trim_start()
+            .strip_prefix('=')?
+            .trim_start();
+        let digits = value
+            .find(|ch: char| !ch.is_ascii_digit())
+            .unwrap_or(value.len());
+        starts_word.then(|| value[..digits].parse().ok()).flatten()
+    })
+}
+
+/// Which parameters a name started at char `token_start` of `buffer` would
+/// be, when it starts a field: the token follows a blank, `(` or `,`, never
+/// `=` or `{`, so a value or an expression is never offered a parameter.
+fn parameter_site(
+    state: &NetlistDocumentState,
+    buffer: &str,
+    token_start: usize,
+) -> Option<ParameterSite> {
+    let start = char_to_byte(buffer, token_start);
+    let before = buffer[..start].chars().next_back()?;
+    if !(before.is_whitespace() || before == '(' || before == ',') {
+        return None;
+    }
+    let card = card_before(buffer, start);
+    let words = card
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, '(' | ')' | ','))
+        .map(|word| word.trim_start_matches('+'))
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    let head = *words.first()?;
+    if head.eq_ignore_ascii_case(".model") {
+        // Past the card's name and type.
+        let written_type = *words.get(2)?;
+        let defaults = rspice_core::library::device_model_defaults(written_type)?;
+        if stated_level(card).is_some_and(|level| level != defaults.level.unwrap_or(1)) {
+            return None;
+        }
+        return Some(ParameterSite::Model {
+            written_type: written_type.to_owned(),
+            parameters: defaults.parameters,
+        });
+    }
+    let letter = head.chars().next().filter(char::is_ascii_alphabetic)?;
+    let parameters = rspice_core::engine::native_instance_parameters(letter);
+    if parameters.is_empty() {
+        return None;
+    }
+    // Past the pins and the model: more words than the device has pins, or
+    // a word already naming a model the caret's scope sees.
+    let past_pins = words.len() - 1 > device_terminals(letter).len();
+    let names_a_model = || {
+        state.project_index.last_built().is_some_and(|project| {
+            let scope = project.scope_at(state.front.include(), state.cursor_line + 1);
+            let models =
+                project.defined_in_reach(scope, &[rspice_core::netlist::DeckSymbolKind::Model]);
+            words[1..].iter().any(|word| {
+                models
+                    .iter()
+                    .any(|model| model.name.eq_ignore_ascii_case(word))
+            })
+        })
+    };
+    (past_pins || names_a_model()).then(|| ParameterSite::Instance {
+        element: head.to_owned(),
+        parameters,
+    })
+}
+
+/// `value` as a card would write it: plainly, or with an exponent when it
+/// is very small or very large.
+fn card_number(value: f64) -> String {
+    if value != 0.0 && !(1e-3..1e6).contains(&value.abs()) {
+        format!("{value:e}")
+    } else {
+        format!("{value}")
+    }
+}
+
+/// The rows a parameter site offers for the typed prefix `lower`: each
+/// inserts the name and its `=`, in the case the writer is typing in.
+fn parameter_candidates(
+    site: &ParameterSite,
+    token: &str,
+    messages: MessageCatalog,
+) -> Vec<Candidate> {
+    let lower = token.to_ascii_lowercase();
+    let spelled = |name: &str| {
+        if token.chars().any(|ch| ch.is_ascii_uppercase()) {
+            format!("{name}=")
+        } else {
+            format!("{}=", name.to_ascii_lowercase())
+        }
+    };
+    let kind = messages.text(MessageId::NetlistCompletionParameter);
+    let offered = |name: &str| name.to_ascii_lowercase().starts_with(&lower);
+    match site {
+        ParameterSite::Model {
+            written_type,
+            parameters,
+        } => parameters
+            .iter()
+            .filter(|parameter| offered(parameter.name))
+            .map(|parameter| Candidate {
+                kind: kind.clone(),
+                label: parameter.name.to_owned(),
+                detail: format!("{} {}", card_number(parameter.default), parameter.unit)
+                    .trim_end()
+                    .to_owned(),
+                doc: messages.format(
+                    MessageId::NetlistCompletionModelParameterNote,
+                    &[
+                        ("type", written_type),
+                        ("name", parameter.name),
+                        ("description", parameter.description),
+                    ],
+                ),
+                insert: spelled(parameter.name),
+            })
+            .collect(),
+        ParameterSite::Instance {
+            element,
+            parameters,
+        } => parameters
+            .iter()
+            .filter(|name| offered(name))
+            .map(|name| Candidate {
+                kind: kind.clone(),
+                label: (*name).to_owned(),
+                detail: element.clone(),
+                doc: messages.format(
+                    MessageId::NetlistCompletionInstanceParameterNote,
+                    &[("element", element), ("name", name)],
+                ),
+                insert: spelled(name),
+            })
+            .collect(),
+    }
+}
+
+/// Filter both sources against the typed prefix. Where a parameter is being
+/// written, the parameters the engine reads there are what is offered, and
+/// the deck's names only when none of them starts so.
 fn collect_candidates(
     state: &NetlistDocumentState,
     token: &str,
     at_line_start: bool,
     pins: Option<PinHelp>,
+    parameters: Option<ParameterSite>,
     messages: MessageCatalog,
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     let lower = token.to_ascii_lowercase();
+    if let Some(site) = parameters.filter(|_| !token.is_empty()) {
+        let offered = parameter_candidates(&site, token, messages);
+        if !offered.is_empty() {
+            return offered;
+        }
+    }
 
     // On a pin: the subcircuit's port name, then the nodes the scope has,
     // each saying which pin it would connect.
@@ -542,7 +762,6 @@ fn collect_candidates(
             }
         }
         if token.is_empty() {
-            out.truncate(8);
             return out;
         }
     }
@@ -620,7 +839,6 @@ fn collect_candidates(
             });
         }
     }
-    out.truncate(8);
     out
 }
 
@@ -641,14 +859,27 @@ fn completion_popover_geometry(
     }
 }
 
+/// Where the list scrolled to `offset` scrolls so the row `selected` shows:
+/// not at all when it shows already, else just far enough.
+fn revealing(offset: f32, selected: usize) -> f32 {
+    let top = selected as f32 * ROW_HEIGHT;
+    let view = ROW_HEIGHT * VISIBLE_ROWS as f32;
+    offset.min(top).max(top + ROW_HEIGHT - view)
+}
+
+/// The salt of the popover's list, which scrolls.
+const ROWS: &str = "rspice.netlist.completion.rows";
+
 /// The popover itself: items grid + selected-item doc footer, which says
-/// ⇥ accepts when the popover takes the keys (`takes_keys`). Returns the row
-/// index the pointer accepted, if any.
+/// ⇥ accepts when the popover takes the keys (`takes_keys`). The list
+/// brings the selected row into view when `reveal`. Returns the row index
+/// the pointer accepted, if any.
 fn draw_popover(
     ui: &Ui,
     anchor: egui::Pos2,
     candidates: &[Candidate],
     selected: usize,
+    reveal: bool,
     takes_keys: bool,
     messages: MessageCatalog,
 ) -> Option<usize> {
@@ -674,62 +905,79 @@ fn draw_popover(
                 })
                 .show(ui, |ui| {
                     ui.set_min_width(geometry.width);
+                    ui.set_max_width(geometry.width);
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
-                    for (idx, candidate) in candidates.iter().enumerate() {
-                        let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(geometry.width, 24.0),
-                            egui::Sense::click(),
-                        );
-                        response.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::SelectableLabel,
-                                ui.is_enabled(),
-                                messages.format(
-                                    MessageId::NetlistCompletionAccessible,
-                                    &[
-                                        ("kind", &candidate.kind),
-                                        ("label", &candidate.label),
-                                        ("detail", &candidate.detail),
-                                    ],
-                                ),
-                            )
-                        });
-                        ui.ctx().accesskit_node_builder(response.id, |node| {
-                            node.set_role(egui::accesskit::Role::ListBoxOption);
-                            node.set_selected(idx == selected);
-                        });
-                        if response.clicked() {
-                            clicked = Some(idx);
-                        }
-                        if idx == selected {
-                            ui.painter().rect_filled(rect, 0.0, c.accent_dim);
-                        } else if response.hovered() {
-                            ui.painter().rect_filled(rect, 0.0, c.bg_hover);
-                        }
-                        ui.painter().text(
-                            egui::pos2(rect.left() + 10.0, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            &candidate.kind,
-                            theme::mono(tokens::FS_0, FontWeight::Regular),
-                            c.text_faint,
-                        );
-                        ui.painter().text(
-                            egui::pos2(rect.left() + 58.0, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            &candidate.label,
-                            theme::mono(tokens::FS_1, FontWeight::Regular),
-                            c.text,
-                        );
-                        ui.painter().text(
-                            egui::pos2(rect.right() - 10.0, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            &candidate.detail,
-                            theme::mono(tokens::FS_0, FontWeight::Regular),
-                            c.text_faint,
-                        );
-                        theme::paint_focus_ring(ui, &response, rect);
+                    // Every row the engine offers is in the list; eight show at
+                    // once and the rest scroll, the selected row brought into
+                    // view when a key or the typing moved it.
+                    let rows_id = ui.make_persistent_id(ROWS);
+                    let mut rows = egui::ScrollArea::vertical()
+                        .id_salt(ROWS)
+                        .max_height(ROW_HEIGHT * VISIBLE_ROWS as f32)
+                        .auto_shrink([false, true]);
+                    if reveal {
+                        let offset = egui::scroll_area::State::load(ui.ctx(), rows_id)
+                            .map_or(0.0, |state| state.offset.y);
+                        rows = rows.vertical_scroll_offset(revealing(offset, selected));
                     }
+                    rows.show_rows(ui, ROW_HEIGHT, candidates.len(), |ui, shown| {
+                        for idx in shown {
+                            let candidate = &candidates[idx];
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), ROW_HEIGHT),
+                                egui::Sense::click(),
+                            );
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::SelectableLabel,
+                                    ui.is_enabled(),
+                                    messages.format(
+                                        MessageId::NetlistCompletionAccessible,
+                                        &[
+                                            ("kind", &candidate.kind),
+                                            ("label", &candidate.label),
+                                            ("detail", &candidate.detail),
+                                        ],
+                                    ),
+                                )
+                            });
+                            ui.ctx().accesskit_node_builder(response.id, |node| {
+                                node.set_role(egui::accesskit::Role::ListBoxOption);
+                                node.set_selected(idx == selected);
+                            });
+                            if response.clicked() {
+                                clicked = Some(idx);
+                            }
+                            if idx == selected {
+                                ui.painter().rect_filled(rect, 0.0, c.accent_dim);
+                            } else if response.hovered() {
+                                ui.painter().rect_filled(rect, 0.0, c.bg_hover);
+                            }
+                            ui.painter().text(
+                                egui::pos2(rect.left() + 10.0, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                &candidate.kind,
+                                theme::mono(tokens::FS_0, FontWeight::Regular),
+                                c.text_faint,
+                            );
+                            ui.painter().text(
+                                egui::pos2(rect.left() + 58.0, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                &candidate.label,
+                                theme::mono(tokens::FS_1, FontWeight::Regular),
+                                c.text,
+                            );
+                            ui.painter().text(
+                                egui::pos2(rect.right() - 10.0, rect.center().y),
+                                egui::Align2::RIGHT_CENTER,
+                                &candidate.detail,
+                                theme::mono(tokens::FS_0, FontWeight::Regular),
+                                c.text_faint,
+                            );
+                            theme::paint_focus_ring(ui, &response, rect);
+                        }
+                    });
 
                     // Doc footer for the selected item.
                     let doc = &candidates[selected].doc;
@@ -811,8 +1059,7 @@ mod tests {
         assert!(super::super::language::project_index_now(&harness.model, state).is_some());
         state.cursor_line = deck.matches('\n').count();
         let caret = deck.chars().count() - token.chars().count();
-        let pins = pin_help(state, deck, caret, english());
-        let rows = collect_candidates(state, token, false, pins, english());
+        let rows = rows_offered(state, deck, caret, token);
         let note = rows.first().map(|row| row.doc.clone()).unwrap_or_default();
         (
             rows.into_iter()
@@ -821,6 +1068,130 @@ mod tests {
             note,
         )
     }
+
+    /// The rows the popover offers for `token` ending at the end of `deck`,
+    /// starting at char `caret`, as `show` makes them.
+    fn rows_offered(
+        state: &NetlistDocumentState,
+        deck: &str,
+        caret: usize,
+        token: &str,
+    ) -> Vec<Candidate> {
+        let pins = pin_help(state, deck, caret, english());
+        let parameters = parameter_site(state, deck, caret);
+        collect_candidates(state, token, false, pins, parameters, english())
+    }
+
+    /// What `token`, typed at the end of `deck`, would insert, row by row.
+    fn inserted(deck: &str, token: &str) -> Vec<String> {
+        let mut harness = crate::workbench::code::tests::harness();
+        super::super::fixtures::seed_deck(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            deck,
+            "* models\n",
+        );
+        let state = &mut harness.state.netlist;
+        assert!(super::super::language::project_index_now(&harness.model, state).is_some());
+        state.cursor_line = deck.matches('\n').count();
+        let caret = deck.chars().count() - token.chars().count();
+        rows_offered(state, deck, caret, token)
+            .into_iter()
+            .map(|row| row.insert)
+            .collect()
+    }
+
+    #[test]
+    fn a_model_card_completes_its_types_parameters_from_the_engines_table() {
+        let (rows, note) = offered(&format!("{HEAD}.model d1 D(I"), "I");
+        let param =
+            |name: &str, detail: &str| ("param".to_owned(), name.to_owned(), detail.to_owned());
+        assert_eq!(
+            rows,
+            [param("IS", "1e-14 A"), param("ISR", "0 A")],
+            "a diode card is offered the diode's parameters"
+        );
+        assert_eq!(note, "D model parameter IS: saturation current.");
+        // A line the card's `+` continues, past a comment, is the card's.
+        let (rows, _) = offered(&format!("{HEAD}.model q1 npn (bf=50\n* gain\n+ vj"), "vj");
+        assert_eq!(
+            rows,
+            [
+                param("VJE", "0.75 V"),
+                param("VJC", "0.75 V"),
+                param("VJS", "0.75 V")
+            ],
+            "a BJT card continued is offered the BJT's parameters"
+        );
+        assert_eq!(
+            inserted(&format!("{HEAD}.model d1 d(n"), "n"),
+            ["n=", "nr="],
+            "the name is written as the writer types, with its ="
+        );
+    }
+
+    #[test]
+    fn a_model_card_of_another_level_or_a_value_is_offered_no_parameter() {
+        // The table is the level 1 MOSFET's; a level 3 card reads others.
+        let (rows, _) = offered(&format!("{HEAD}.model n1 nmos level=3 v"), "v");
+        assert!(rows.is_empty(), "{rows:?}");
+        let (rows, _) = offered(&format!("{HEAD}.model n1 nmos (level=1 v"), "v");
+        assert!(rows.iter().any(|(_, label, _)| label == "VTO"), "{rows:?}");
+        // A value is never a parameter's name.
+        let (rows, _) = offered(&format!("{HEAD}.model d1 D(IS=1"), "1");
+        assert!(rows.is_empty(), "{rows:?}");
+    }
+
+    #[test]
+    fn an_element_past_its_model_completes_the_instance_parameters_its_device_reads() {
+        let deck = format!("{SUBCIRCUIT_DECK}.model nm nmos\nM1 a a 0 0 nm w");
+        let (rows, note) = offered(&deck, "w");
+        assert_eq!(
+            rows,
+            [
+                ("param".to_owned(), "W".to_owned(), "M1".to_owned()),
+                ("param".to_owned(), "WIDTH".to_owned(), "M1".to_owned()),
+            ]
+        );
+        assert_eq!(note, "M1 reads W as an instance parameter.");
+        // A diode's model is its third word, after its two pins.
+        let deck = format!("{SUBCIRCUIT_DECK}.model dm d\nD1 a 0 dm AR");
+        assert_eq!(inserted(&deck, "AR"), ["AREA="]);
+        // Where its model goes, the models are what is offered.
+        let deck = format!("{SUBCIRCUIT_DECK}.model dmod d\nD1 a 0 dm");
+        let (rows, _) = offered(&deck, "dm");
+        assert!(rows.iter().any(|(_, label, _)| label == "dmod"), "{rows:?}");
+        assert!(!rows.iter().any(|(kind, _, _)| kind == "param"), "{rows:?}");
+    }
+
+    #[test]
+    fn every_row_that_matches_is_offered_however_many() {
+        let nodes = (1..=12)
+            .map(|index| format!("R{index} n{index} 0 1k\n"))
+            .collect::<String>();
+        let (rows, _) = offered(&format!("{HEAD}{nodes}R0 n"), "n");
+        assert_eq!(rows.len(), 12, "{rows:?}");
+    }
+
+    #[test]
+    fn a_key_scrolls_the_list_just_far_enough_to_show_the_selected_row() {
+        let row = ROW_HEIGHT;
+        assert_eq!(revealing(0.0, 3), 0.0, "a row in view moves nothing");
+        assert_eq!(revealing(0.0, 8), row, "the ninth row scrolls one row");
+        assert_eq!(
+            revealing(5.0 * row, 2),
+            2.0 * row,
+            "a row above scrolls up to it"
+        );
+        assert_eq!(
+            revealing(9.0 * row, 0),
+            0.0,
+            "wrapping to the first goes to the top"
+        );
+    }
+
+    /// A deck's title and the include every deck the tests seed names.
+    const HEAD: &str = "amp test\n.include \"models/resistor.inc\"\n";
 
     const SUBCIRCUIT_DECK: &str = "amp test\n.include \"models/resistor.inc\"\n\
         .subckt amp in out vdd\nR1 in out 1k\n.ends amp\nV1 a 0 1\n";

@@ -974,6 +974,8 @@ define_messages! {
     NetlistCompletionPinDetail => "{subcircuit} pin {position} of {count}",
     NetlistCompletionAsPin => "as {pin}",
     NetlistCompletionParameterNote => "Deck parameter {name} (.param).",
+    NetlistCompletionModelParameterNote => "{type} model parameter {name}: {description}.",
+    NetlistCompletionInstanceParameterNote => "{element} reads {name} as an instance parameter.",
     NetlistCompletionAccessible => "{kind} completion: {label}, {detail}",
     NetlistCompletionAccept => "{note}\u{a0}\u{a0}·\u{a0}\u{a0}⇥\u{a0}to\u{a0}accept",
     StimulusLibraryEmpty => "No stimulus definitions",

@@ -1181,6 +1181,19 @@ pub(super) const FET_INSTANCE_PARAMS: &[&str] = &[
     "NOISELESS",
 ];
 
+/// The instance parameters the native device an element of `letter` builds
+/// reads: the table its build checks the element's line against. Empty for
+/// an element whose build reads its parameters some other way.
+pub fn native_instance_parameters(letter: char) -> &'static [&'static str] {
+    match letter.to_ascii_uppercase() {
+        'D' => DIODE_INSTANCE_PARAMS,
+        'Q' => BJT_INSTANCE_PARAMS,
+        'M' => CLASSIC_MOS_INSTANCE_PARAMS,
+        'J' | 'Z' => FET_INSTANCE_PARAMS,
+        _ => &[],
+    }
+}
+
 /// Report each instance parameter the native device does not read, once per
 /// run, and go on without it, as QSPICE does.
 pub(super) fn warn_unknown_instance_params(
