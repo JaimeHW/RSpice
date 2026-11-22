@@ -28,6 +28,37 @@ fn view<'a>(state: &'a CanvasParts<'_>, ctx: &egui::Context) -> SelectionDragVie
     }
 }
 
+/// Whether a second finger holds the canvas for a pinch this frame. The
+/// pinch owns the gesture from the frame the second finger lands until the
+/// first lifts: what the first finger had begun is put down where it
+/// started and its selection box goes, and none of the gesture reaches the
+/// tools, its lift included. The symbol canvas guards its pinch the same way.
+pub(super) fn pinch_holds_canvas(ctx: &egui::Context, state: &mut CanvasParts<'_>) -> bool {
+    let id = egui::Id::new("rspice.schematic-canvas.pinch");
+    let (pinching, pressed) = ctx.input(|input| {
+        (
+            input.multi_touch().is_some(),
+            input.pointer.primary_down() || input.pointer.primary_released(),
+        )
+    });
+    let held = ctx.data(|data| data.get_temp::<bool>(id)) == Some(true);
+    if pinching && !held {
+        state
+            .design
+            .interaction
+            .drag
+            .cancel_schematic_drag(state.model);
+        state.model.schematic.session.editor.selection_rect.cancel();
+        ctx.data_mut(|data| data.insert_temp(id, true));
+        return true;
+    }
+    if held && !pinching && !pressed {
+        ctx.data_mut(|data| data.remove::<bool>(id));
+        return false;
+    }
+    held || pinching
+}
+
 pub(super) fn handle_select_dragging(
     ui: &egui::Ui,
     response: &egui::Response,

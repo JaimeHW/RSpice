@@ -146,13 +146,36 @@ impl Finger {
     }
 
     fn touch(phase: TouchPhase, pos: Pos2) -> Event {
+        Self::touch_id(1, phase, pos)
+    }
+
+    fn touch_id(id: u64, phase: TouchPhase, pos: Pos2) -> Event {
         Event::Touch {
             device_id: egui::TouchDeviceId(1),
-            id: egui::TouchId(1),
+            id: egui::TouchId(id),
             phase,
             pos,
             force: None,
         }
+    }
+
+    /// Two fingers land at `a` and `b`, move to `a2` and `b2` in four steps,
+    /// and lift. The platform drives the pointer from the first finger only.
+    fn pinch(&mut self, (a, b): (Pos2, Pos2), (a2, b2): (Pos2, Pos2)) {
+        self.down(a);
+        self.frame(vec![Self::touch_id(2, TouchPhase::Start, b)]);
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            let (at, bt) = (a + (a2 - a) * t, b + (b2 - b) * t);
+            self.frame(vec![
+                Self::touch(TouchPhase::Move, at),
+                Self::touch_id(2, TouchPhase::Move, bt),
+                Event::PointerMoved(at),
+            ]);
+        }
+        self.frame(vec![Self::touch_id(2, TouchPhase::End, b2)]);
+        self.up(a2);
+        self.frame(Vec::new());
     }
 
     /// A finger lands at `pos`: the touch, and the primary pointer the
@@ -454,6 +477,35 @@ fn a_finger_drag_on_the_selection_moves_it() {
         Point::new(260, 200)
     );
     assert_eq!(finger.pan(), before, "a move does not pan");
+}
+
+/// A pinch whose first finger lands on the selection zooms and leaves the
+/// selection where it was. The first finger's drag carried the selected
+/// part while the view zoomed, and the lift landed it as a Move.
+#[test]
+fn a_pinch_that_starts_on_the_selection_zooms_and_leaves_it() {
+    let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
+    let id = finger.resistor(Point::new(200, 200));
+    let at = finger.screen(Point::new(200, 200));
+    finger.tap(at);
+    assert!(finger.selection().has_component(id));
+    let zoom = finger.app.state.model.schematic.session.editor.zoom;
+
+    finger.pinch(
+        (at, at + egui::vec2(120.0, 0.0)),
+        (at - egui::vec2(40.0, 0.0), at + egui::vec2(200.0, 0.0)),
+    );
+
+    assert_eq!(
+        finger.app.state.model.schematic.document().components[0].pos,
+        Point::new(200, 200),
+        "the part stayed"
+    );
+    assert!(finger.app.state.model.schematic.session.editor.zoom > zoom * 1.2);
+    assert!(
+        !finger.app.state.model.schematic.can_undo(),
+        "the pinch left no Move to undo"
+    );
 }
 
 /// The add latch stands in for Shift: a tap takes an object into the

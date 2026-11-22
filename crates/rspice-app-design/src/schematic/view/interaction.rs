@@ -54,7 +54,9 @@ pub fn handle_tool_interactions(
         return;
     }
     state.model.retain_selection_on_active_sheet();
-    if primary_pan_gesture_active(ui, response) {
+    if super::selection_drag::pinch_holds_canvas(ui.ctx(), state)
+        || primary_pan_gesture_active(ui, response)
+    {
         return;
     }
     // The armed zoom box owns the next primary drag, whatever the tool.
