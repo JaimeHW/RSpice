@@ -601,6 +601,65 @@ fn actions_are_truthfully_disabled_without_a_compatible_selection() {
     assert!(!action_availability(ContextAction::Duplicate, &junction_state).0);
 }
 
+/// On a read-only view, the rows that would change it say that the view is
+/// read-only. They said the part was not selected while it was, and that
+/// nothing had been copied while the clipboard was full.
+#[test]
+fn a_read_only_view_is_why_its_edit_rows_are_off() {
+    let mut state = DesignTestHost::default();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    let id = state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(40, 0));
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(id);
+    assert!(copy_active_schematic_selection(
+        &mut state.design.schematic_clipboard,
+        &state.model
+    ));
+    state.model.schematic.session.read_only = true;
+    for action in [
+        ContextAction::Rotate,
+        ContextAction::Mirror,
+        ContextAction::Arrange,
+        ContextAction::Cut,
+        ContextAction::Paste,
+        ContextAction::Duplicate,
+        ContextAction::Delete,
+        ContextAction::PlaceWire,
+    ] {
+        assert_eq!(
+            action_availability(action, &state),
+            (false, READ_ONLY_VIEW),
+            "{action:?}"
+        );
+    }
+    assert!(
+        action_availability(ContextAction::Copy, &state).0,
+        "copying leaves the view as it was"
+    );
+
+    // Delete names every kind it takes, documentation shapes too.
+    state.model.schematic.session.read_only = false;
+    state.model.schematic.session.editor.selection.clear();
+    assert!(
+        action_availability(ContextAction::Delete, &state)
+            .1
+            .ends_with("design note, or documentation shape")
+    );
+}
+
 #[test]
 fn properties_context_action_is_available_for_one_live_bus_or_tap() {
     let mut state = DesignTestHost::default();

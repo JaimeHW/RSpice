@@ -1225,6 +1225,39 @@ pub fn selection_summary(state: &CanvasFacts<'_>, target: ContextTarget) -> Stri
     }
 }
 
+/// Why a row that would change the drawing is off on a view that cannot be
+/// changed.
+const READ_ONLY_VIEW: &str =
+    "The active schematic view is read-only; reopen it in an editable context to change it";
+
+/// Whether `action` changes the drawing in front, so that a read-only view
+/// is the first reason it cannot run.
+fn changes_the_view(action: ContextAction) -> bool {
+    matches!(
+        action,
+        ContextAction::Rotate
+            | ContextAction::Mirror
+            | ContextAction::MirrorVertical
+            | ContextAction::Arrange
+            | ContextAction::ArrangeCommand(_)
+            | ContextAction::SnapToStandardValue
+            | ContextAction::ResetLabelPosition
+            | ContextAction::Cut
+            | ContextAction::Paste
+            | ContextAction::Duplicate
+            | ContextAction::Delete
+            | ContextAction::UpdateInstanceInterface
+            | ContextAction::UpdateAllInstanceInterfaces
+            | ContextAction::ReplaceInstance
+            | ContextAction::CreateHierarchy
+            | ContextAction::SheetProperties
+            | ContextAction::PlaceInstance
+            | ContextAction::PlaceWire
+            | ContextAction::PlaceLabel
+            | ContextAction::PlaceText
+    )
+}
+
 pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (bool, &'static str) {
     let selection = &state.model.schematic.session.editor.selection;
     // Components, complete wires, and explicit junctions are clipboard and
@@ -1399,6 +1432,11 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
         && all_junctions_are_live
         && !has_wire_sub_object;
     let writable = !state.model.schematic.session.read_only && !state.active_view_read_only();
+    // A read-only view is why every row that would change it is off, whatever
+    // the selection or the clipboard holds.
+    if !writable && changes_the_view(action) {
+        return (false, READ_ONLY_VIEW);
+    }
     match action {
         ContextAction::Properties => (
             crate::workbench::app::selected_object_properties_available_in(
@@ -1450,10 +1488,7 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
         ContextAction::PlaceInstance
         | ContextAction::PlaceWire
         | ContextAction::PlaceLabel
-        | ContextAction::PlaceText => (
-            writable,
-            "The active schematic view is read-only; reopen it in an editable context to add to it",
-        ),
+        | ContextAction::PlaceText => (true, ""),
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
         | ContextAction::SaveStimulus
@@ -1476,7 +1511,7 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
         ),
         ContextAction::Delete => (
             writable && deletable_objects_only,
-            "Select at least one editable component, wire, bus, tap, junction, net label, probe, or design note",
+            "Select at least one editable component, wire, bus, tap, junction, net label, probe, design note, or documentation shape",
         ),
         ContextAction::DescendHierarchy => (
             state.selected_hierarchy_master().is_some()
