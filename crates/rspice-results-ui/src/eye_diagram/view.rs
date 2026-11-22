@@ -740,7 +740,7 @@ fn metric_rows(m: &EyeMeasurements, rate: f64, significant_digits: usize) -> Vec
         "BER from Q".to_owned(),
         match m.ber {
             BerEstimate::FromQ(ber) => value(ber, ""),
-            BerEstimate::NoRandomNoise => "none: spread is not Gaussian".to_owned(),
+            BerEstimate::NoRandomNoise => "none: not Gaussian".to_owned(),
             BerEstimate::Unmeasured => "—".to_owned(),
         },
     ));
