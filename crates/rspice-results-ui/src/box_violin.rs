@@ -446,12 +446,14 @@ pub fn show(
         name: "quartile box",
         color: c.traces[0],
         on: true,
+        glyph: strip::LegendGlyph::Line,
     }];
     if sheet.violin {
         legend.push(LegendChip {
             name: "kernel density",
             color: c.traces[4 % c.traces.len()],
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     if failing > 0 {
@@ -459,6 +461,7 @@ pub fn show(
             name: "failing trial",
             color: c.err,
             on: true,
+            glyph: strip::LegendGlyph::Cross,
         });
     }
     if show_limits {
@@ -466,6 +469,7 @@ pub fn show(
             name: "requirement",
             color: c.err,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     strip::StripHeader::new("DIST", &subtitle, &legend).show(ui);

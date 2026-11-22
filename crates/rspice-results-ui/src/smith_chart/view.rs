@@ -780,6 +780,7 @@ pub fn show(
             name,
             color: c.traces[slot % c.traces.len()],
             on: prepared.visible,
+            glyph: strip::LegendGlyph::Line,
         })
         .collect();
     let mut references = traces

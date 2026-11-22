@@ -465,12 +465,14 @@ fn show_bars(
         name: mode.label(),
         color: c.accent,
         on: true,
+        glyph: strip::LegendGlyph::Line,
     }];
     if fit.is_some() {
         legend.push(LegendChip {
             name: "normal fit",
             color: c.text,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     if moments.is_some_and(|moments| moments.std_dev > 0.0) {
@@ -478,6 +480,7 @@ fn show_bars(
             name: "\u{b1}1\u{3c3}",
             color: c.text_dim,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     if spec_limits.is_some() {
@@ -485,6 +488,7 @@ fn show_bars(
             name: "spec limit",
             color: c.err,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     let selected_count = model
@@ -498,6 +502,7 @@ fn show_bars(
             name: &selected_name,
             color: c.warn,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     let header = strip::StripHeader::new("MC", &subtitle, &legend)
@@ -803,12 +808,14 @@ fn show_probability(
         name: "samples",
         color: c.accent,
         on: true,
+        glyph: strip::LegendGlyph::Line,
     }];
     if fit.is_some() {
         legend.push(LegendChip {
             name: "normal fit",
             color: c.text,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     if limits.is_some() {
@@ -816,6 +823,7 @@ fn show_probability(
             name: "spec limit",
             color: c.err,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     let header = strip::StripHeader::new("MC", &subtitle, &legend)

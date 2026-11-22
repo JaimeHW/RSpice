@@ -332,14 +332,16 @@ pub fn show(
 
     let legend = [
         LegendChip {
-            name: "poles x",
+            name: "poles",
             color: c.traces[5],
             on: true,
+            glyph: strip::LegendGlyph::Cross,
         },
         LegendChip {
             name: "zeros",
             color: c.traces[1],
             on: true,
+            glyph: strip::LegendGlyph::Ring,
         },
     ];
     let drawing_view = *view;

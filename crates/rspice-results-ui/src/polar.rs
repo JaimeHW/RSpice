@@ -592,6 +592,7 @@ pub fn show(
         name: &locus.label,
         color: c.traces[0],
         on: true,
+        glyph: strip::LegendGlyph::Line,
     }];
     let inks = overlay_inks(&c);
     let overlays = &overlays[..overlays.len().min(inks.len())];
@@ -600,12 +601,14 @@ pub fn show(
             name: &overlay.label,
             color: *ink,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     legend.push(LegendChip {
         name: "A \u{b7} B frequency markers",
         color: c.canvas_cursor_a,
         on: true,
+        glyph: strip::LegendGlyph::Dot,
     });
     let mut subtitle = rule.head_note(&locus.unit, sheet.normalize);
     if let Some(reference) = locus.reference_impedance_ohm {

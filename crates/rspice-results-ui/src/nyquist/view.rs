@@ -211,11 +211,13 @@ pub fn show(
             name,
             color: c.traces[0],
             on: true,
+            glyph: strip::LegendGlyph::Line,
         },
         LegendChip {
             name: MIRROR_LABEL,
             color: c.traces[0],
             on: true,
+            glyph: strip::LegendGlyph::Line,
         },
     ];
     strip::StripHeader::new("NYQ", &format!("{point_count} pts"), &legend).show(ui);

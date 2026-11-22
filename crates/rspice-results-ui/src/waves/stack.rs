@@ -968,6 +968,7 @@ pub fn show(
                                     name: &expr_labels[i],
                                     color: expr_color(&t, expr_palette_slot(model, i)),
                                     on: expr.visible,
+                                    glyph: crate::strip::LegendGlyph::Line,
                                 })
                                 .collect();
 

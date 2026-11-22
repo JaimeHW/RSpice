@@ -204,6 +204,7 @@ fn show_recorded(
             name: &trace.name,
             color: trace.color,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         })
         .collect::<Vec<_>>();
     let header = strip::StripHeader::new(

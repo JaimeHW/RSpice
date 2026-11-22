@@ -232,6 +232,7 @@ fn show_strip(
             name: &curve.trace.name,
             color: curve.trace.color,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         })
         .collect::<Vec<_>>();
     let kind = match form {

@@ -317,6 +317,7 @@ pub fn show(
             name: trace.label,
             color: color(index),
             on: true,
+            glyph: strip::LegendGlyph::Line,
         })
         .collect();
     if guides_on {
@@ -324,6 +325,7 @@ pub fn show(
             name,
             color: colors.text_dim,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         }));
     }
     let header = strip::StripHeader::new("PNOISE", "", &legend)

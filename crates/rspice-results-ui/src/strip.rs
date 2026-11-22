@@ -265,6 +265,47 @@ pub struct LegendChip<'a> {
     pub color: egui::Color32,
     /// Whether the trace is visible.
     pub on: bool,
+    /// The mark the series is drawn with, which the swatch draws.
+    pub glyph: LegendGlyph,
+}
+
+/// What a legend chip's swatch draws: the mark its series is drawn with,
+/// so a series of points is told by its mark and not shown as a curve.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LegendGlyph {
+    /// A short line, for a curve.
+    #[default]
+    Line,
+    /// A diagonal cross, for points drawn as crosses.
+    Cross,
+    /// An open circle, for points drawn as rings.
+    Ring,
+    /// A filled dot, for points drawn as dots.
+    Dot,
+}
+
+impl LegendGlyph {
+    /// Paint the mark centred on `center`, at the size a plot draws its
+    /// points.
+    fn paint(self, painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
+        const ARM: f32 = 4.5;
+        let stroke = egui::Stroke::new(1.8, color);
+        match self {
+            Self::Line => {
+                painter.rect_filled(Rect::from_center_size(center, vec2(14.0, 3.0)), 1.0, color);
+            }
+            Self::Cross => {
+                painter.line_segment([center + vec2(-ARM, -ARM), center + vec2(ARM, ARM)], stroke);
+                painter.line_segment([center + vec2(-ARM, ARM), center + vec2(ARM, -ARM)], stroke);
+            }
+            Self::Ring => {
+                painter.circle_stroke(center, ARM, stroke);
+            }
+            Self::Dot => {
+                painter.circle_filled(center, 3.5, color);
+            }
+        }
+    }
 }
 
 /// What strip-header interactions happened this frame.
@@ -873,7 +914,8 @@ fn legend_natural_width(ui: &mut Ui, legend: &[LegendChip<'_>], expr_action: boo
     chips + action
 }
 
-/// A legend chip: 14×3 color swatch + mono name; dimmed when off.
+/// A legend chip: the series' mark in its colour, then its mono name;
+/// dimmed when off.
 fn legend_chip(
     ui: &mut Ui,
     chip: &LegendChip<'_>,
@@ -938,9 +980,9 @@ fn legend_chip(
         );
     }
     let swatch_color = if chip.on { chip.color } else { c.text_faint };
-    painter.rect_filled(
-        Rect::from_center_size(swatch.center(), vec2(14.0, 3.0)),
-        1.0,
+    chip.glyph.paint(
+        painter,
+        swatch.center(),
         swatch_color.gamma_multiply(opacity),
     );
     painter.galley(
@@ -980,6 +1022,7 @@ mod tests {
             name: "V(out)",
             color: egui::Color32::from_rgb(0x4c, 0x9a, 0xff),
             on: true,
+            glyph: LegendGlyph::Line,
         }];
         let ctx = egui::Context::default();
         rspice_ui_kit::Theme::default().apply(&ctx);

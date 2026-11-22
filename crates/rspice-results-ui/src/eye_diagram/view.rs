@@ -346,11 +346,13 @@ fn show_bathtub(
                 name: "counted",
                 color: c.traces[0],
                 on: true,
+                glyph: strip::LegendGlyph::Dot,
             },
             LegendChip {
                 name: "fitted",
                 color: c.traces[1],
                 on: bathtub.fit.is_some(),
+                glyph: strip::LegendGlyph::Line,
             },
         ],
     )

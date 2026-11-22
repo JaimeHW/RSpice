@@ -297,6 +297,7 @@ pub fn show(
         name: &model.source,
         color: c.traces[0],
         on: true,
+        glyph: strip::LegendGlyph::Line,
     }];
     let header = strip::StripHeader::new("FFT", "", &legend)
         .zoomed(view.is_zoomed())

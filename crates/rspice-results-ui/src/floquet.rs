@@ -199,16 +199,19 @@ pub fn show(
             name: "stable",
             color: colour(ModeVerdict::Stable),
             on: true,
+            glyph: strip::LegendGlyph::Cross,
         },
         LegendChip {
             name: "marginal",
             color: colour(ModeVerdict::Marginal),
             on: true,
+            glyph: strip::LegendGlyph::Cross,
         },
         LegendChip {
             name: "unstable",
             color: colour(ModeVerdict::Unstable),
             on: true,
+            glyph: strip::LegendGlyph::Cross,
         },
     ];
     let drawing_view = *view;

@@ -336,12 +336,14 @@ pub fn show(
         name: "trial",
         color: c.traces[0],
         on: true,
+        glyph: strip::LegendGlyph::Dot,
     }];
     if sheet.color_by_status && failing > 0 {
         legend.push(LegendChip {
             name: "failing trial",
             color: c.err,
             on: true,
+            glyph: strip::LegendGlyph::Cross,
         });
     }
     if sheet.fit {
@@ -349,6 +351,7 @@ pub fn show(
             name: "least-squares fit",
             color: c.text,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     if show_limits && (x_column.limit.is_some() || y_column.limit.is_some()) {
@@ -356,6 +359,7 @@ pub fn show(
             name: "requirement window",
             color: c.err,
             on: true,
+            glyph: strip::LegendGlyph::Line,
         });
     }
     strip::StripHeader::new("MC", &subtitle, &legend).show(ui);
