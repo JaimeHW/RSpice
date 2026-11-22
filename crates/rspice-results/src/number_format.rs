@@ -199,6 +199,48 @@ pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> 
     format!("{number} {prefix}{unit}").trim_end().to_owned()
 }
 
+/// Significant digits a swept coordinate is spelled to: as many as a `.step`
+/// legend prints, so two points a deck declares a digit apart are never
+/// named alike. A coordinate names a point the netlist stated; it is not a
+/// reading, so the reader's digits do not round it.
+const COORDINATE_DIGITS: usize = 6;
+
+/// A swept value spelled as a netlist states it, the way LTspice's `.step`
+/// legend and ADE's design-point labels name a point: the scale suffix on
+/// the number, `2k`, `1.5Meg`, `10µ`, and the unit after it where the swept
+/// thing names one, `2kΩ`, `1MΩ`, `27°C`. A bare number keeps SPICE's
+/// `Meg`, where a lone `M` is milli; before a unit the letters are SI's.
+pub fn spice_coordinate(value: f64, unit: &str) -> String {
+    let prefixed = unit.is_empty() || unit_takes_prefix(unit);
+    let (number, prefix) = significant_number(value, COORDINATE_DIGITS, prefixed);
+    let prefix = if unit.is_empty() && prefix == "M" {
+        "Meg"
+    } else {
+        prefix
+    };
+    format!("{number}{prefix}{unit}")
+}
+
+/// The unit a `.STEP` of a device's own value sweeps, read from the
+/// device's letter as SPICE reads it: a resistor in ohms, a capacitor in
+/// farads, an inductor in henries, a voltage source in volts and a current
+/// source in amperes. A device of any other kind names no unit.
+#[must_use]
+pub fn swept_device_unit(device: &str) -> &'static str {
+    match device
+        .chars()
+        .next()
+        .map(|letter| letter.to_ascii_lowercase())
+    {
+        Some('r') => "Ω",
+        Some('c') => "F",
+        Some('l') => "H",
+        Some('v') => "V",
+        Some('i') => "A",
+        _ => "",
+    }
+}
+
 /// Whether a value in `unit` is written with an SI prefix.
 ///
 /// A dimensionless value (no unit, a ratio stated as `/V` or `1/V`, a count
@@ -530,6 +572,42 @@ fn tick_label_with_decimals(value: f64, decimals: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `.step` point reads as the netlist wrote it: `.STEP PARAM r LIST
+    /// 1k 2k 1Meg` names its points `1k`, `2k` and `1Meg`, never `2000`, and
+    /// a swept device or temperature carries its unit.
+    #[test]
+    fn a_swept_value_reads_as_the_netlist_states_it() {
+        assert_eq!(spice_coordinate(2000.0, ""), "2k");
+        assert_eq!(spice_coordinate(1500.0, ""), "1.5k");
+        assert_eq!(spice_coordinate(1.0e6, ""), "1Meg");
+        assert_eq!(spice_coordinate(1.0e-5, ""), "10µ");
+        assert_eq!(spice_coordinate(10.0e-12, ""), "10p");
+        assert_eq!(spice_coordinate(0.5, ""), "500m");
+        assert_eq!(spice_coordinate(0.0, ""), "0");
+        assert_eq!(spice_coordinate(-2.5, ""), "−2.5");
+        assert_eq!(spice_coordinate(2000.0, "Ω"), "2kΩ");
+        assert_eq!(spice_coordinate(1.0e6, "Ω"), "1MΩ");
+        assert_eq!(spice_coordinate(1.5, "V"), "1.5V");
+        assert_eq!(spice_coordinate(27.0, "°C"), "27°C");
+        assert_eq!(spice_coordinate(-40.0, "°C"), "−40°C");
+        // A `.STEP DEC` point keeps the digits a legend prints, not twelve.
+        assert_eq!(spice_coordinate(10f64.powf(1.0 / 3.0), ""), "2.15443");
+        // Points a digit apart in the deck stay apart.
+        assert_ne!(spice_coordinate(1000.1, ""), spice_coordinate(1000.2, ""));
+    }
+
+    #[test]
+    fn a_swept_device_names_its_unit_by_its_letter() {
+        assert_eq!(swept_device_unit("R1"), "Ω");
+        assert_eq!(swept_device_unit("rload"), "Ω");
+        assert_eq!(swept_device_unit("C2"), "F");
+        assert_eq!(swept_device_unit("L1"), "H");
+        assert_eq!(swept_device_unit("V1"), "V");
+        assert_eq!(swept_device_unit("Ibias"), "A");
+        assert_eq!(swept_device_unit("Q1"), "");
+        assert_eq!(swept_device_unit(""), "");
+    }
 
     /// A ladder tick and an off-ladder tick of the same number read alike,
     /// which is the whole reason the first one has a spelling of its own.

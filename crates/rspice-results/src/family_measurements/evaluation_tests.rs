@@ -105,6 +105,7 @@ fn a_step_member_that_is_also_a_pvt_point_keeps_its_family_name() {
                 coordinate: vec![AnalysisResultStepCoordinate {
                     name: "temp".to_owned(),
                     value: 25.0 * index as f64,
+                    unit: "°C".to_owned(),
                 }],
             };
             let label = member.titled("Transient");
@@ -126,8 +127,8 @@ fn a_step_member_that_is_also_a_pvt_point_keeps_its_family_name() {
     assert_eq!(
         labels,
         [
-            "Transient \u{00b7} temp = 0",
-            "Transient \u{00b7} temp = 25"
+            "Transient \u{00b7} temp=0°C",
+            "Transient \u{00b7} temp=25°C"
         ]
     );
 }

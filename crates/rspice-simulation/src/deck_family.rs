@@ -42,10 +42,12 @@ const STATISTICAL_FUNCTIONS: [&str; 5] = ["agauss(", "aunif(", "gauss(", "unif("
 pub struct DeckFamilyMember {
     /// The member a transient task names.
     pub member: FamilyMember,
-    /// For a `.STEP` point, the value each swept axis takes there, in axis
-    /// order: `("r", 2000.0)` for `.STEP PARAM r LIST 1k 2k`, every column
-    /// of the row for a `.STEP DATA` table. Empty for a Monte Carlo trial.
-    pub coordinate: Vec<(String, f64)>,
+    /// For a `.STEP` point, the value each swept axis takes there and the
+    /// unit it is measured in where the swept thing names one, in axis
+    /// order: `("r", 2000.0, "")` for `.STEP PARAM r LIST 1k 2k`,
+    /// `("R1", 2000.0, "Ω")` for `.STEP R1 LIST 1k 2k`, every column of the
+    /// row for a `.STEP DATA` table. Empty for a Monte Carlo trial.
+    pub coordinate: Vec<(String, f64, &'static str)>,
     /// For a `.STEP` point whose only swept axis is the temperature, the
     /// temperature it solves at. Such a point is a PVT point: the run's own
     /// models and supply at one temperature, which a specification can be
@@ -214,7 +216,7 @@ pub fn step_members(
                         } else {
                             varies_more_than_temperature = true;
                         }
-                        values.push((axis_label(assignment), *value));
+                        values.push((axis_label(assignment), *value, axis_unit(assignment)));
                     }
                     RunAxisValue::Numeric(_) => {}
                     RunAxisValue::DataRow(bindings) => {
@@ -222,7 +224,7 @@ pub fn step_members(
                         values.extend(
                             bindings
                                 .iter()
-                                .map(|binding| (binding.name().to_owned(), binding.value())),
+                                .map(|binding| (binding.name().to_owned(), binding.value(), "")),
                         );
                     }
                     RunAxisValue::AlterVariant { label, .. } => {
@@ -261,6 +263,23 @@ fn axis_label(assignment: &rspice_core::execution::AxisAssignment) -> String {
             "temp".to_owned()
         }
         None => assignment.name().to_owned(),
+    }
+}
+
+/// The unit a swept axis is measured in where the swept thing names one: a
+/// device's own value by its letter (`R1` in ohms, `V1` in volts) and the
+/// temperature in degrees Celsius. A parameter, a model parameter or a
+/// device's named parameter states none.
+fn axis_unit(assignment: &rspice_core::execution::AxisAssignment) -> &'static str {
+    use rspice_core::execution::{AxisKind, StepAxisTarget};
+    match assignment.step_target() {
+        Some(StepAxisTarget::Device {
+            name,
+            parameter: None,
+        }) => rspice_results::number_format::swept_device_unit(name),
+        Some(StepAxisTarget::Temperature) => "°C",
+        None if assignment.kind() == AxisKind::Temperature => "°C",
+        _ => "",
     }
 }
 

@@ -103,7 +103,7 @@ pub(super) fn parse_native_bundle(
     .map_err(|error| adapter_error(format, error))?;
     let mut parsed = finish_numeric_dataset(format, dataset)?;
     // A bundle of one member of a `.step` sweep or Monte Carlo study reads back as that member,
-    // titled the way every route titles one: `Transient · r = 2000`.
+    // titled the way every route titles one: `Transient · r=2k`.
     if let Some(member) = member.map(|member| member.into_family_member()) {
         let analysis = match parsed.analysis_type {
             AnalysisType::Ac => "AC",
@@ -306,19 +306,30 @@ pub(super) fn parse_spice_raw(
     for (index, plot) in decoded.into_iter().enumerate() {
         // Each run of a stepped plot is its own analysis, titled by its run,
         // and the runs of the file draw as one family.
-        let family_member =
-            plot.step.map(|step| {
-                rspice_results::provenance::AnalysisResultFamilyMember::StepPoint {
-                    index: step.index,
-                    coordinate: step
-                        .coordinate
-                        .into_iter()
-                        .map(|(name, value)| {
-                            rspice_results::provenance::AnalysisResultStepCoordinate { name, value }
-                        })
-                        .collect(),
-                }
-            });
+        let family_member = plot.step.map(|step| {
+            rspice_results::provenance::AnalysisResultFamilyMember::StepPoint {
+                index: step.index,
+                coordinate: step
+                    .coordinate
+                    .into_iter()
+                    .map(|(name, value)| {
+                        // The file names a swept parameter and a swept
+                        // source alike, so only the temperature states
+                        // its unit.
+                        let unit = if name.eq_ignore_ascii_case("temp") {
+                            "°C".to_owned()
+                        } else {
+                            String::new()
+                        };
+                        rspice_results::provenance::AnalysisResultStepCoordinate {
+                            name,
+                            value,
+                            unit,
+                        }
+                    })
+                    .collect(),
+            }
+        });
         let plot_name = match &family_member {
             Some(member) => member.titled(&plot.plot_name),
             None => plot.plot_name,

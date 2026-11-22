@@ -59,6 +59,7 @@ fn a_family_member_survives_the_project_file() {
         coordinate: vec![AnalysisResultStepCoordinate {
             name: "r".into(),
             value: 2e3,
+            unit: String::new(),
         }],
     };
     let provenance = state_provenance(AnalysisInstanceId::new(), None)
@@ -83,6 +84,7 @@ fn a_family_member_survives_the_project_file() {
         coordinate: vec![AnalysisResultStepCoordinate {
             name: "r".into(),
             value: f64::NAN,
+            unit: String::new(),
         }],
     };
     assert!(plain.with_family_member(Some(unnamed)).is_err());

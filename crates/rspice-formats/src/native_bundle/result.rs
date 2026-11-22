@@ -28,6 +28,7 @@ impl NativeBundleMember {
                     .map(|axis| NativeBundleStepValue {
                         name: axis.name.clone(),
                         value: axis.value,
+                        unit: axis.unit.clone(),
                     })
                     .collect(),
             },
@@ -48,6 +49,7 @@ impl NativeBundleMember {
                     .map(|axis| AnalysisResultStepCoordinate {
                         name: axis.name,
                         value: axis.value,
+                        unit: axis.unit,
                     })
                     .collect(),
             },
@@ -176,10 +178,12 @@ mod tests {
                 AnalysisResultStepCoordinate {
                     name: "r".to_owned(),
                     value: 2000.0,
+                    unit: String::new(),
                 },
                 AnalysisResultStepCoordinate {
                     name: "temp".to_owned(),
                     value: -40.0,
+                    unit: "°C".to_owned(),
                 },
             ],
         };

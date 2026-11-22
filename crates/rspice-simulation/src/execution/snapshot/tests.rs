@@ -1581,6 +1581,7 @@ fn a_temperature_family_member_is_a_point_of_the_pvt_set() {
                 coordinate: vec![AnalysisResultStepCoordinate {
                     name: "temp".to_owned(),
                     value: temperature,
+                    unit: "°C".to_owned(),
                 }],
             });
             task.attribute_temperature_member(temperature, ProcessCorner::TT, 27.0)

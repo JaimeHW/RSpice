@@ -254,12 +254,30 @@ pub enum AnalysisResultFamilyMember {
     },
 }
 
-/// The value one swept axis takes at a `.STEP` point: `r = 2000`.
+/// The value one swept axis takes at a `.STEP` point: `r=2k`, `R1=2kΩ`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisResultStepCoordinate {
     pub name: String,
     pub value: f64,
+    /// The unit the swept thing is measured in where it names one: ohms
+    /// for a resistor's value, degrees Celsius for the temperature. Empty
+    /// for a parameter, whose unit the deck never states.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
+}
+
+impl AnalysisResultStepCoordinate {
+    /// The coordinate spelled as the netlist states it: `r=2k`, `R1=2kΩ`,
+    /// `temp=27°C`.
+    #[must_use]
+    pub fn label(&self) -> String {
+        format!(
+            "{}={}",
+            self.name,
+            crate::number_format::spice_coordinate(self.value, &self.unit)
+        )
+    }
 }
 
 /// Bitwise, like [`AnalysisResultPvtPoint`], so the record is `Eq`; attaching
@@ -315,9 +333,10 @@ impl AnalysisResultFamilyMember {
     }
 
     /// The member spelled the way a legend names it: `trial 3`, or the swept
-    /// values, `r = 2000`: a swept value's unit is not recorded, so it takes
-    /// no prefix. A point whose values no one stated is numbered from 1,
-    /// `point 1`, as a results table numbers its points.
+    /// values as the netlist states them, `r=2k, c=10p`, as LTspice's `.step`
+    /// legend and ADS's subtrace labels name a point. A point whose values
+    /// no one stated is numbered from 1, `point 1`, as a results table
+    /// numbers its points.
     #[must_use]
     pub fn label(&self) -> String {
         match self {
@@ -327,13 +346,7 @@ impl AnalysisResultFamilyMember {
             }
             Self::StepPoint { coordinate, .. } => coordinate
                 .iter()
-                .map(|axis| {
-                    format!(
-                        "{} = {}",
-                        axis.name,
-                        crate::number_format::fmt_si_significant(axis.value, "", 4)
-                    )
-                })
+                .map(AnalysisResultStepCoordinate::label)
                 .collect::<Vec<_>>()
                 .join(", "),
         }
@@ -341,7 +354,7 @@ impl AnalysisResultFamilyMember {
 
     /// A result of this member titled the way every route names it, solved
     /// or imported: its analysis's own title, then the member,
-    /// `Transient · r = 2000`.
+    /// `Transient · r=2k`.
     #[must_use]
     pub fn titled(&self, title: &str) -> String {
         format!("{title} \u{00b7} {}", self.label())

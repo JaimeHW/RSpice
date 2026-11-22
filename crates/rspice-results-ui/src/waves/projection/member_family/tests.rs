@@ -134,6 +134,7 @@ fn point(
         coordinate: vec![AnalysisResultStepCoordinate {
             name: "c".to_owned(),
             value: c,
+            unit: String::new(),
         }],
     };
     let provenance = AnalysisResultProvenance::new(
@@ -177,7 +178,7 @@ fn a_stepped_dc_sweep_draws_its_points_as_one_family_on_one_strip() {
         .iter()
         .map(|trace| trace.name.as_str())
         .collect();
-    assert_eq!(names, ["I(VD) · c = 1", "I(VD) · c = 2", "I(VD) · c = 3"]);
+    assert_eq!(names, ["I(VD) · c=1", "I(VD) · c=2", "I(VD) · c=3"]);
     for (index, trace) in strip.traces.iter().enumerate() {
         assert_eq!(trace.family_group_ordinal, Some(index));
         assert!(SharedWaveformValues::ptr_eq(
@@ -230,10 +231,7 @@ fn a_stepped_ac_sweep_draws_each_points_decibels_and_phase() {
         .collect();
     assert_eq!(
         decibels,
-        [
-            ("|V(out)| · c = 1e\u{2212}9", -20.0),
-            ("|V(out)| · c = 10e\u{2212}9", -40.0)
-        ]
+        [("|V(out)| · c=1n", -20.0), ("|V(out)| · c=10n", -40.0)]
     );
     let phases: Vec<_> = built[0]
         .traces
@@ -280,6 +278,7 @@ fn the_runs_of_an_imported_stepped_rawfile_draw_as_one_family() {
             coordinate: vec![AnalysisResultStepCoordinate {
                 name: "r".to_owned(),
                 value: r,
+                unit: String::new(),
             }],
         };
         run.analyses.push(imported_run(index, member));
@@ -294,14 +293,7 @@ fn the_runs_of_an_imported_stepped_rawfile_draw_as_one_family() {
         .iter()
         .map(|trace| trace.name.as_str())
         .collect();
-    assert_eq!(
-        names,
-        [
-            "V(out) · r = 1000",
-            "V(out) · r = 2000",
-            "V(out) · r = 4000"
-        ]
-    );
+    assert_eq!(names, ["V(out) · r=1k", "V(out) · r=2k", "V(out) · r=4k"]);
 }
 
 #[test]

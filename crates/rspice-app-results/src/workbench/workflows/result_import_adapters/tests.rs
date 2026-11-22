@@ -60,6 +60,7 @@ fn a_member_bundle_imports_as_that_member() {
         coordinate: vec![NativeBundleStepValue {
             name: "r".to_owned(),
             value: 2000.0,
+            unit: String::new(),
         }],
     };
     for (kind, format) in [
@@ -97,10 +98,7 @@ fn a_member_bundle_imports_as_that_member() {
             Some(&member.clone().into_family_member()),
             "{format:?}"
         );
-        assert_eq!(
-            analysis.label,
-            "Imported \u{00b7} Transient \u{00b7} r = 2000"
-        );
+        assert_eq!(analysis.label, "Imported \u{00b7} Transient \u{00b7} r=2k");
     }
 }
 
@@ -1098,19 +1096,19 @@ fn an_ltspice_stepped_rawfile_imports_one_analysis_per_run_named_by_its_log() {
         analyses,
         [
             (
-                "Imported \u{b7} Transient Analysis \u{b7} r = 1000",
+                "Imported \u{b7} Transient Analysis \u{b7} r=1k",
                 0,
                 1000.0,
                 55
             ),
             (
-                "Imported \u{b7} Transient Analysis \u{b7} r = 2000",
+                "Imported \u{b7} Transient Analysis \u{b7} r=2k",
                 1,
                 2000.0,
                 31
             ),
             (
-                "Imported \u{b7} Transient Analysis \u{b7} r = 4000",
+                "Imported \u{b7} Transient Analysis \u{b7} r=4k",
                 2,
                 4000.0,
                 19

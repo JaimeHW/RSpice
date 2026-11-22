@@ -543,6 +543,7 @@ fn a_family_member_needs_version_four_and_named_finite_values() {
             coordinate: vec![NativeBundleStepValue {
                 name: "r".to_owned(),
                 value: 2000.0,
+                unit: String::new(),
             }],
         })
     );
@@ -569,6 +570,7 @@ fn a_family_member_needs_version_four_and_named_finite_values() {
             coordinate: vec![NativeBundleStepValue {
                 name: String::new(),
                 value: 1.0,
+                unit: String::new(),
             }],
         }),
     };

@@ -76,12 +76,15 @@ pub enum NativeBundleMember {
     },
 }
 
-/// The value one swept parameter takes at a `.step` point: `r = 2000`.
+/// The value one swept parameter takes at a `.step` point, `r=2k`, and its
+/// unit where the swept thing names one, `R1=2kΩ`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeBundleStepValue {
     pub name: String,
     pub value: f64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
 }
 
 impl NativeBundleMember {

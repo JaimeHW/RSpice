@@ -2079,7 +2079,7 @@ fn a_temperature_step_answers_a_specification_at_each_of_its_own_temperatures() 
         .filter_map(|analysis| analysis.provenance.as_ref()?.family_member())
         .map(rspice_results::provenance::AnalysisResultFamilyMember::label)
         .collect();
-    assert_eq!(family, ["temp = 27", "temp = 125"]);
+    assert_eq!(family, ["temp=27°C", "temp=125°C"]);
 }
 
 /// A temperature crossed with a parameter is not a PVT point: the members
@@ -2116,10 +2116,10 @@ fn a_temperature_crossed_with_a_parameter_answers_no_point_scoped_specification(
             .map(|(label, _)| label.as_str())
             .collect::<Vec<_>>(),
         [
-            "temp = 27, r = 1000",
-            "temp = 125, r = 1000",
-            "temp = 27, r = 2000",
-            "temp = 125, r = 2000"
+            "temp=27°C, r=1k",
+            "temp=125°C, r=1k",
+            "temp=27°C, r=2k",
+            "temp=125°C, r=2k"
         ]
     );
     assert!(

@@ -1349,9 +1349,10 @@ fn attach_family_members(
                     coordinate: point
                         .coordinate
                         .iter()
-                        .map(|(name, value)| AnalysisResultStepCoordinate {
+                        .map(|(name, value, unit)| AnalysisResultStepCoordinate {
                             name: name.clone(),
                             value: *value,
+                            unit: (*unit).to_owned(),
                         })
                         .collect(),
                 }

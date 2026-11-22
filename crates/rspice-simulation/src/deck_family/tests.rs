@@ -51,10 +51,44 @@ fn points_carry_the_value_each_swept_axis_takes() {
     assert_eq!(members.len(), 3);
     for (index, (member, value)) in members.iter().zip([1e3, 2e3, 3e3]).enumerate() {
         assert_eq!(member.member, FamilyMember::StepPoint { index });
-        assert_eq!(member.coordinate, [("r".to_owned(), value)]);
+        assert_eq!(member.coordinate, [("r".to_owned(), value, "")]);
     }
     let resolved = member_parameters(&Engine::new(Default::default()), &netlist, &members).unwrap();
     assert_eq!(resolved[2]["r"], 3e3);
+}
+
+/// A swept device's value and the temperature carry the unit the swept thing
+/// names, so a legend reads `r1=2kΩ` and `temp=125°C`; a parameter's unit is
+/// never stated, so it carries none.
+#[test]
+fn a_swept_device_or_temperature_carries_its_unit() {
+    let coordinates = |deck: &str| {
+        step_members(&parsed(deck), &ResourceLimits::default())
+            .unwrap()
+            .into_iter()
+            .map(|member| member.coordinate)
+            .collect::<Vec<_>>()
+    };
+    let base = "units\n.param r=1k\nV1 a 0 1\nR1 a 0 {r}\nC1 a 0 1p\n.tran 1n 10n\n";
+    assert_eq!(
+        coordinates(&format!("{base}.step R1 list 1k 2k\n.end\n")),
+        [
+            vec![("r1".to_owned(), 1e3, "Ω")],
+            vec![("r1".to_owned(), 2e3, "Ω")]
+        ]
+    );
+    assert_eq!(
+        coordinates(&format!("{base}.step V1 list 1 2\n.end\n"))[1],
+        [("v1".to_owned(), 2.0, "V")]
+    );
+    assert_eq!(
+        coordinates(&format!("{base}.step temp list 27 125\n.end\n"))[1],
+        [("temp".to_owned(), 125.0, "°C")]
+    );
+    assert_eq!(
+        coordinates(&format!("{base}.step param r list 1k 2k\n.end\n"))[1],
+        [("r".to_owned(), 2e3, "")]
+    );
 }
 
 /// Only a point whose one swept axis is the temperature names a PVT point. A

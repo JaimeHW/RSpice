@@ -691,7 +691,7 @@ fn a_domain_the_matlab_layout_has_no_coordinate_for_refuses_and_writes_nothing()
 /// One member of a `.step` family names its point in every export that keeps a title or a
 /// note: the CSV and TSV metadata title, the rawfile's `Title:`, the HDF5 document title and the
 /// MATLAB header. NumPy keeps arrays and nothing else, so its export tells the reader which run
-/// it was. The member is titled as a solved or imported member is, `Transient · r = 2k`.
+/// it was. The member is titled as a solved or imported member is, `Transient · r=2k`.
 #[test]
 fn a_stepped_member_names_its_step_in_every_export() {
     use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
@@ -702,6 +702,7 @@ fn a_stepped_member_names_its_step_in_every_export() {
         coordinate: vec![AnalysisResultStepCoordinate {
             name: "r".to_owned(),
             value: 2000.0,
+            unit: String::new(),
         }],
     };
     let point = member.label();
