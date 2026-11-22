@@ -15,7 +15,7 @@ use rspice_app_project::workbench::surfaces::project::library_publication::{
     PROJECT_ARTIFACT_EXTENSION, PUBLICATION_DIALOG_ID, ProjectLibraryPublicationCandidate,
     PublicationDraft, PublicationReadiness, RESTORE_DIALOG_ID, RestoreDraft, clear_restore_file,
     publication_fields, remember_identity, restore_fields, restore_publication_selector,
-    safe_file_stem, selected_receipt, transaction_status,
+    safe_file_stem, selected_receipt,
 };
 use rspice_app_services::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
@@ -26,8 +26,7 @@ use rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::product::ContentDigest;
 use rspice_app_state::state::workspace::ProjectLibraryPublicationReceipt;
-use rspice_app_workbench::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
-use rspice_ui_kit::panels::{property_card, property_row};
+use rspice_app_workbench::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
@@ -51,9 +50,38 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
         || live_library_revision != draft.source_library_revision;
     let lifecycle_error = publication_lifecycle_error(&app.state);
     let field_error = draft.field_error();
-    let primary_enabled =
-        !draft.busy && lifecycle_error.is_none() && field_error.is_none() && !stale;
-    let choice = Dialog::new(
+    // A field the reader has not reached yet is being filled in, not wrong:
+    // Publish stays pressable, and pressing it names the first field missing.
+    let shown_field_error = draft.shown_field_error();
+    let primary_enabled = !draft.busy && lifecycle_error.is_none() && !stale;
+    let refusal = if stale {
+        Some(
+            "The project changed while this dialog was open. Close it and publish again."
+                .to_owned(),
+        )
+    } else {
+        draft
+            .error
+            .clone()
+            .or(lifecycle_error.map(str::to_owned))
+            .or(shown_field_error)
+    };
+    let status = match refusal.as_deref() {
+        Some(refusal) => Err(refusal),
+        None => Ok(draft
+            .busy
+            .then_some("Waiting for the browser to save the file.")),
+    };
+    let project = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .display_name()
+        .to_owned();
+    let revision = draft.source_project_revision.to_string();
+    let choice = CommandForm::new(
         "Publish project",
         if draft.busy {
             "Publishing\u{2026}"
@@ -61,41 +89,25 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
             "Publish"
         },
     )
-    .description(
+    .describe(
         "Write the project as it stands to a file and record the publication, so the project can be restored to it later.",
     )
-    .size(DialogSize::Manager)
-    .secondary("Cancel")
+    .reading_column()
     .primary_enabled(primary_enabled)
-    .show(ctx, |ui| {
-        property_card(ui, "Project", |ui| {
-            property_row(
-                ui,
-                "Project",
-                app.state.model.workspace.content.project.display_name(),
-            );
-            property_row(
-                ui,
-                "Revision",
-                &draft.source_project_revision.to_string(),
-            );
-        });
-        ui.add_space(8.0);
-        publication_fields(ui, &mut draft);
-        if stale {
-            transaction_status(
-                ui,
-                "The project changed while this dialog was open. Close it and publish again.",
-                true,
-            );
-        } else if let Some(error) = draft.error.as_deref().or(lifecycle_error).or(field_error.as_deref()) {
-            transaction_status(ui, error, true);
-        } else if draft.busy {
-            transaction_status(ui, "Waiting for the browser to save the file.", false);
-        }
+    .fields_enabled(!draft.busy)
+    .status(status)
+    .show(ctx, |rows| {
+        rows.section("Project");
+        rows.value("Project", &project);
+        rows.value("Revision", &revision);
+        rows.section("Publication");
+        publication_fields(rows, &mut draft)
     });
 
     match choice {
+        DialogChoice::Primary if primary_enabled && field_error.is_some() => {
+            draft.visited.submit();
+        }
         DialogChoice::Primary if primary_enabled => {
             draft.error = None;
             remember_identity(ctx, &draft.actor_id, &draft.authority_id);
@@ -124,13 +136,13 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 Err(error) => draft.error = Some(error),
             }
         }
-        DialogChoice::Secondary | DialogChoice::Cancelled => {
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
             ctx.data_mut(|data| {
                 data.remove::<PublicationDraft>(id);
             });
             return;
         }
-        DialogChoice::None | DialogChoice::Ghost | DialogChoice::Primary => {}
+        DialogChoice::None | DialogChoice::Secondary | DialogChoice::Primary => {}
     }
     ctx.data_mut(|data| data.insert_temp(id, draft));
 }
@@ -169,34 +181,31 @@ pub(crate) fn restore_replaces(
     }
 }
 
-fn restore_replaces_card(ui: &mut egui::Ui, replaces: &RestoreReplaces) {
-    property_card(ui, "Replaced in the open project", |ui| {
-        if replaces.unsaved_views.is_empty() {
-            property_row(ui, "Unsaved views", "None");
-        } else {
-            for view in &replaces.unsaved_views {
-                property_row(ui, "Unsaved view", view);
-            }
+fn restore_replaces_rows(rows: &mut FormRows<'_>, replaces: &RestoreReplaces) {
+    rows.section("Replaced in the open project");
+    if replaces.unsaved_views.is_empty() {
+        rows.value("Unsaved views", "None");
+    } else {
+        for view in &replaces.unsaved_views {
+            rows.value_mono("Unsaved view", view);
         }
-        property_row(ui, "Simulation setup", "Replaced by the published setup");
-        property_row(
-            ui,
-            "Model libraries",
-            &format!(
-                "{} now, replaced by the published ones",
-                replaces.model_libraries
-            ),
-        );
-        property_row(
-            ui,
-            "Newer results",
-            &match replaces.newer_runs {
-                0 => "None".to_owned(),
-                1 => "1 run since the publication is removed".to_owned(),
-                runs => format!("{runs} runs since the publication are removed"),
-            },
-        );
-    });
+    }
+    rows.value("Simulation setup", "Replaced by the published setup");
+    rows.value(
+        "Model libraries",
+        &format!(
+            "{} now, replaced by the published ones",
+            replaces.model_libraries
+        ),
+    );
+    rows.value(
+        "Newer results",
+        &match replaces.newer_runs {
+            0 => "None".to_owned(),
+            1 => "1 run since the publication is removed".to_owned(),
+            runs => format!("{runs} runs since the publication are removed"),
+        },
+    );
 }
 
 fn show_restore_dialog(ctx: &Context, app: &mut RSpiceApp) {
@@ -234,52 +243,47 @@ fn show_restore_dialog(ctx: &Context, app: &mut RSpiceApp) {
     );
     let lifecycle_error = restore_lifecycle_error(&app.state);
     let field_error = draft.field_error();
-    let primary_enabled = !draft.busy && lifecycle_error.is_none() && field_error.is_none();
+    let shown_field_error = draft.shown_field_error();
+    let primary_enabled = !draft.busy && lifecycle_error.is_none();
+    let refusal = draft
+        .error
+        .clone()
+        .or(lifecycle_error.map(str::to_owned))
+        .or(shown_field_error);
+    let status = match refusal.as_deref() {
+        Some(refusal) => Err(refusal),
+        None => Ok(draft.busy.then_some("Waiting for the browser.")),
+    };
+    let size = selected_receipt(&receipts, draft.publication_id)
+        .expect("selected publication remains retained")
+        .snapshot_byte_len();
     let mut choose_file = false;
-    let choice = Dialog::new("Restore project from publication", "Restore project")
-        .description(
+    let choice = CommandForm::new("Restore project from publication", "Restore project")
+        .describe(
             "Replace the open project with the copy saved when it was published. A checkpoint of the project as it stands is taken first, so the Recovery page can put it back.",
         )
-        .size(DialogSize::Manager)
-        .secondary("Cancel")
+        .reading_column()
         .primary_enabled(primary_enabled)
+        .fields_enabled(!draft.busy)
         .destructive()
-        .show(ctx, |ui| {
-            restore_publication_selector(ui, &receipts, &mut draft);
-            ui.add_space(8.0);
-            restore_replaces_card(ui, &replaces);
-            ui.add_space(8.0);
-            property_card(ui, "Published file", |ui| {
-                let selected = selected_receipt(&receipts, draft.publication_id)
-                    .expect("selected publication remains retained");
-                property_row(
-                    ui,
-                    "Size",
-                    &format!("{} bytes", selected.snapshot_byte_len()),
-                );
-                property_row(
-                    ui,
-                    "Chosen file",
-                    draft.artifact_name.as_deref().unwrap_or("None"),
-                );
-                let choose = Button::new(if draft.artifact_bytes.is_some() {
-                    "Choose another file\u{2026}"
-                } else {
-                    "Choose file\u{2026}"
-                })
-                .enabled(!draft.busy)
-                .show(ui);
-                if choose.clicked() {
-                    choose_file = true;
-                }
-            });
-            ui.add_space(8.0);
-            restore_fields(ui, &mut draft);
-            if let Some(error) = draft.error.as_deref().or(lifecycle_error).or(field_error.as_deref()) {
-                transaction_status(ui, error, true);
-            } else if draft.busy {
-                transaction_status(ui, "Waiting for the browser.", false);
+        .status(status)
+        .show(ctx, |rows| {
+            rows.section("Publication");
+            restore_publication_selector(rows, &receipts, &mut draft);
+            restore_replaces_rows(rows, &replaces);
+            rows.section("Published file");
+            rows.value("Size", &format!("{size} bytes"));
+            let chosen = draft.artifact_name.as_deref().unwrap_or("None").to_owned();
+            let action = if draft.artifact_bytes.is_some() {
+                "Choose another file\u{2026}"
+            } else {
+                "Choose file\u{2026}"
+            };
+            if rows.value_action("Chosen file", &chosen, action) {
+                choose_file = true;
             }
+            rows.section("Restore");
+            restore_fields(rows, &mut draft)
         });
 
     if choose_file {
@@ -306,6 +310,9 @@ fn show_restore_dialog(ctx: &Context, app: &mut RSpiceApp) {
     }
 
     match choice {
+        DialogChoice::Primary if primary_enabled && field_error.is_some() => {
+            draft.visited.submit();
+        }
         DialogChoice::Primary if primary_enabled => {
             remember_identity(ctx, &draft.actor_id, &draft.authority_id);
             #[cfg(not(target_arch = "wasm32"))]
@@ -332,13 +339,13 @@ fn show_restore_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 Err(error) => draft.error = Some(error),
             }
         }
-        DialogChoice::Secondary | DialogChoice::Cancelled => {
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
             ctx.data_mut(|data| {
                 data.remove::<RestoreDraft>(id);
             });
             return;
         }
-        DialogChoice::None | DialogChoice::Ghost | DialogChoice::Primary => {}
+        DialogChoice::None | DialogChoice::Secondary | DialogChoice::Primary => {}
     }
     ctx.data_mut(|data| data.insert_temp(id, draft));
 }

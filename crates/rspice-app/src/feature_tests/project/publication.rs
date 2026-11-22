@@ -391,6 +391,85 @@ fn the_publisher_and_approver_are_remembered_for_the_session() {
     assert!(restore.reason.is_empty(), "a reason is the restore's own");
 }
 
+/// A Publish form opened with its people unnamed is being filled in, not
+/// wrong: no field says what it lacks until the reader leaves it or presses
+/// Publish, and then the first missing one does, and nothing is recorded.
+#[test]
+fn publish_names_a_missing_field_only_once_the_reader_reaches_it() {
+    use super::super::replay::{Control, controls, only};
+    use egui::accesskit::Role;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| -> Vec<Control> {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| show(ctx, app),
+        );
+        controls(
+            &output
+                .platform_output
+                .accesskit_update
+                .expect("the dialog publishes its tree"),
+        )
+    };
+    let published_by = |controls: &[Control]| {
+        only(controls, "Published by", Role::TextInput)
+            .description
+            .clone()
+    };
+    let before = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .library_publications()
+        .len();
+    open_publication(&ctx, &app.state.model);
+
+    frame(&mut app, Vec::new());
+    let opened = frame(&mut app, Vec::new());
+    assert_eq!(published_by(&opened), "", "an untouched field says nothing");
+
+    let at = only(&opened, "Publish", Role::Button).center;
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut app, vec![egui::Event::PointerMoved(at), press(true)]);
+    frame(&mut app, vec![press(false)]);
+    let pressed = frame(&mut app, Vec::new());
+    assert_eq!(
+        published_by(&pressed),
+        "Enter who publishes.",
+        "pressing Publish names the first field missing"
+    );
+    assert_eq!(
+        app.state
+            .model
+            .workspace
+            .content
+            .project
+            .library_publications()
+            .len(),
+        before,
+        "nothing was published"
+    );
+}
+
 /// Restore project from publication takes a checkpoint of the project as it
 /// stands, then puts the published project back: the library added since is
 /// gone, and the checkpoint holding it is on the Recovery page's list.

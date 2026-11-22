@@ -11,7 +11,9 @@ use super::*;
 use crate::product::ContentDigest;
 use crate::product::ObjectRevision;
 use crate::state::workspace::ProjectLibraryPublicationReceipt;
+use crate::ui::widgets::FormRows;
 use crate::workbench::app_state::Model;
+use egui::Id;
 
 pub const PUBLICATION_DIALOG_ID: &str = "workbench.project.library.publication";
 pub const RESTORE_DIALOG_ID: &str = "workbench.project.library.publication.restore";
@@ -45,20 +47,59 @@ fn remembered_identity(ctx: &Context) -> RememberedIdentity {
         .unwrap_or_default()
 }
 
+/// Why `value`, the field the reader knows as `label`, cannot be recorded:
+/// each is required and on one line. Spaces around a value are dropped when
+/// it is recorded.
+fn field_refusal(label: &str, value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        Some(format!("Enter {label}."))
+    } else if !audit_text_valid(value) {
+        Some(format!("Put {label} on one line."))
+    } else {
+        None
+    }
+}
+
 /// The first field of `fields` the dialog cannot record, as the reader is
-/// told it: each is required and on one line. Spaces around a value are
-/// dropped when it is recorded.
+/// told it.
 fn first_field_error(fields: &[(&'static str, &str)]) -> Option<String> {
-    fields.iter().find_map(|(label, value)| {
-        let value = value.trim();
-        if value.is_empty() {
-            Some(format!("Enter {label}."))
-        } else if !audit_text_valid(value) {
-            Some(format!("Put {label} on one line."))
-        } else {
-            None
-        }
-    })
+    fields
+        .iter()
+        .find_map(|(label, value)| field_refusal(label, value))
+}
+
+/// Which of a form's fields the reader has left, and whether they have
+/// asked to commit it. A required field reads as missing only after one of
+/// the two: a form opened with empty fields is being filled in, not wrong.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Visited {
+    left: u8,
+    submitted: bool,
+}
+
+impl Visited {
+    fn leave(&mut self, field: usize) {
+        self.left |= 1 << field;
+    }
+
+    /// The reader asked to commit: every field now says what it lacks.
+    pub fn submit(&mut self) {
+        self.submitted = true;
+    }
+
+    fn shows(self, field: usize) -> bool {
+        self.submitted || self.left & (1 << field) != 0
+    }
+
+    /// The first refusal among `fields` the reader has reached.
+    fn first_error(self, fields: &[(&'static str, &str)]) -> Option<String> {
+        fields
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.shows(*index))
+            .find_map(|(_, (label, value))| field_refusal(label, value))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +114,7 @@ pub struct PublicationDraft {
     #[cfg(target_arch = "wasm32")]
     pub active_publication_id: Option<uuid::Uuid>,
     pub error: Option<String>,
+    pub visited: Visited,
 }
 
 impl PublicationDraft {
@@ -92,16 +134,28 @@ impl PublicationDraft {
             #[cfg(target_arch = "wasm32")]
             active_publication_id: None,
             error: None,
+            visited: Visited::default(),
         }
     }
 
-    pub fn field_error(&self) -> Option<String> {
-        first_field_error(&[
+    fn fields(&self) -> [(&'static str, &str); 4] {
+        [
             ("a label", &self.label),
             ("who publishes", &self.actor_id),
             ("who approved it", &self.authority_id),
             ("a reason", &self.reason),
-        ])
+        ]
+    }
+
+    /// Why the draft cannot be recorded, if it cannot.
+    pub fn field_error(&self) -> Option<String> {
+        first_field_error(&self.fields())
+    }
+
+    /// [`Self::field_error`] as far as the reader has reached: a field they
+    /// have left, or any once they asked to publish.
+    pub fn shown_field_error(&self) -> Option<String> {
+        self.visited.first_error(&self.fields())
     }
 }
 
@@ -117,6 +171,7 @@ pub struct RestoreDraft {
     #[cfg(target_arch = "wasm32")]
     pub active_picker_id: Option<uuid::Uuid>,
     pub error: Option<String>,
+    pub visited: Visited,
 }
 
 impl RestoreDraft {
@@ -132,20 +187,35 @@ impl RestoreDraft {
             #[cfg(target_arch = "wasm32")]
             active_picker_id: None,
             error: None,
+            visited: Visited::default(),
         }
     }
 
-    pub fn field_error(&self) -> Option<String> {
-        first_field_error(&[
+    fn fields(&self) -> [(&'static str, &str); 3] {
+        [
             ("who restores", &self.actor_id),
             ("who approved it", &self.authority_id),
             ("a reason", &self.reason),
-        ])
-        .or_else(|| {
-            self.artifact_bytes
-                .is_none()
-                .then(|| "Choose the published file.".to_owned())
-        })
+        ]
+    }
+
+    fn file_error(&self) -> Option<String> {
+        self.artifact_bytes
+            .is_none()
+            .then(|| "Choose the published file.".to_owned())
+    }
+
+    /// Why the restore cannot run, if it cannot.
+    pub fn field_error(&self) -> Option<String> {
+        first_field_error(&self.fields()).or_else(|| self.file_error())
+    }
+
+    /// [`Self::field_error`] as far as the reader has reached: a field they
+    /// have left, or any, the file included, once they asked to restore.
+    pub fn shown_field_error(&self) -> Option<String> {
+        self.visited
+            .first_error(&self.fields())
+            .or_else(|| self.visited.submitted.then(|| self.file_error()).flatten())
     }
 }
 
@@ -299,134 +369,128 @@ pub fn restore_dialog_open(ctx: &Context) -> bool {
     })
 }
 
-pub fn publication_fields(ui: &mut Ui, draft: &mut PublicationDraft) {
-    property_card(ui, "Publication", |ui| {
-        transaction_field(
-            ui,
-            "workbench.project.library.publication.label",
-            "Label",
-            &mut draft.label,
-            "analog-core-1.0.0",
-        );
-        transaction_field(
-            ui,
-            "workbench.project.library.publication.actor",
-            "Published by",
-            &mut draft.actor_id,
-            "Your name",
-        );
-        transaction_field(
-            ui,
-            "workbench.project.library.publication.authority",
-            "Approved by",
-            &mut draft.authority_id,
-            "Who approved it",
-        );
-        transaction_field(
-            ui,
-            "workbench.project.library.publication.reason",
-            "Reason",
-            &mut draft.reason,
-            "Handed to layout",
-        );
-    });
+/// The Publish dialog's audit fields, as rows of its form, in the body face
+/// down one label column. Returns the field the keyboard starts in and a
+/// refusal marks: the first that cannot be recorded, else the first.
+pub fn publication_fields(rows: &mut FormRows<'_>, draft: &mut PublicationDraft) -> Option<Id> {
+    let ids = [
+        "workbench.project.library.publication.label",
+        "workbench.project.library.publication.actor",
+        "workbench.project.library.publication.authority",
+        "workbench.project.library.publication.reason",
+    ]
+    .map(Id::new);
+    let principal = principal_field(&ids, &draft.fields());
+    let PublicationDraft {
+        label,
+        actor_id,
+        authority_id,
+        reason,
+        visited,
+        ..
+    } = draft;
+    audit_fields(
+        rows,
+        visited,
+        [
+            ("Label", ids[0], label, "analog-core-1.0.0"),
+            ("Published by", ids[1], actor_id, "Your name"),
+            ("Approved by", ids[2], authority_id, "Who approved it"),
+            ("Reason", ids[3], reason, "Handed to layout"),
+        ],
+    );
+    principal
 }
 
-pub fn restore_fields(ui: &mut Ui, draft: &mut RestoreDraft) {
-    property_card(ui, "Restore", |ui| {
-        transaction_field(
-            ui,
-            "workbench.project.library.restore.actor",
-            "Restored by",
-            &mut draft.actor_id,
-            "Your name",
-        );
-        transaction_field(
-            ui,
-            "workbench.project.library.restore.authority",
-            "Approved by",
-            &mut draft.authority_id,
-            "Who approved it",
-        );
-        transaction_field(
-            ui,
-            "workbench.project.library.restore.reason",
-            "Reason",
-            &mut draft.reason,
-            "Back to the layout handoff",
-        );
-    });
+/// The Restore dialog's audit fields, as [`publication_fields`] sets
+/// Publish's.
+pub fn restore_fields(rows: &mut FormRows<'_>, draft: &mut RestoreDraft) -> Option<Id> {
+    let ids = [
+        "workbench.project.library.restore.actor",
+        "workbench.project.library.restore.authority",
+        "workbench.project.library.restore.reason",
+    ]
+    .map(Id::new);
+    let principal = principal_field(&ids, &draft.fields());
+    let RestoreDraft {
+        actor_id,
+        authority_id,
+        reason,
+        visited,
+        ..
+    } = draft;
+    audit_fields(
+        rows,
+        visited,
+        [
+            ("Restored by", ids[0], actor_id, "Your name"),
+            ("Approved by", ids[1], authority_id, "Who approved it"),
+            ("Reason", ids[2], reason, "Back to the layout handoff"),
+        ],
+    );
+    principal
 }
 
-fn transaction_field(
-    ui: &mut Ui,
-    id: &'static str,
-    label: &'static str,
-    value: &mut String,
-    hint: &'static str,
+/// The first of `ids` whose field cannot be recorded, else the first.
+fn principal_field(ids: &[Id], fields: &[(&'static str, &str)]) -> Option<Id> {
+    fields
+        .iter()
+        .position(|(label, value)| field_refusal(label, value).is_some())
+        .and_then(|index| ids.get(index))
+        .or(ids.first())
+        .copied()
+}
+
+/// One text row a field, noting each field the reader leaves.
+fn audit_fields<const N: usize>(
+    rows: &mut FormRows<'_>,
+    visited: &mut Visited,
+    fields: [(&str, Id, &mut String, &str); N],
 ) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.set_min_height(t.metrics.ctl_h.max(32.0));
-        ui.add_sized(
-            [142.0, t.metrics.ctl_h],
-            egui::Label::new(
-                egui::RichText::new(label)
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text_dim),
-            ),
-        );
-        let response = ui.add_sized(
-            [ui.available_width().max(180.0), t.metrics.ctl_h],
-            egui::TextEdit::singleline(value)
-                .id_source(id)
-                .hint_text(hint),
-        );
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_label(label);
-        });
-    });
+    for (index, (label, id, value, hint)) in fields.into_iter().enumerate() {
+        if rows.text_sans(label, id, value, hint).lost_focus() {
+            visited.leave(index);
+        }
+    }
 }
 
+/// The publication a restore puts back, picked by its sequence and label,
+/// with what was recorded when it was published.
 pub fn restore_publication_selector(
-    ui: &mut Ui,
+    rows: &mut FormRows<'_>,
     receipts: &[ProjectLibraryPublicationReceipt],
     draft: &mut RestoreDraft,
 ) {
-    property_card(ui, "Publication", |ui| {
-        let selected = selected_receipt(receipts, draft.publication_id)
-            .expect("the restore's publication is normalized before rendering");
-        let prior = draft.publication_id;
-        crate::ui::widgets::Combo::from_id_salt("workbench.project.library.restore.publication")
-            .selected_text(format!(
-                "#{:04} \u{00b7} {}",
-                selected.sequence(),
-                selected.label()
-            ))
-            .width(ui.available_width().max(220.0))
-            .show_ui(ui, |ui| {
-                for receipt in receipts.iter().rev() {
-                    ui.selectable_value(
-                        &mut draft.publication_id,
-                        receipt.publication_id(),
-                        format!("#{:04} \u{00b7} {}", receipt.sequence(), receipt.label()),
-                    );
-                }
-            });
-        if draft.publication_id != prior {
-            clear_restore_file(draft);
-        }
-        let selected = selected_receipt(receipts, draft.publication_id)
-            .expect("the selected publication remains retained");
-        property_row(
-            ui,
-            "Revision",
-            &selected.source_project_revision().get().to_string(),
-        );
-        property_row(ui, "Published by", selected.actor_id());
-        property_row(ui, "Approved by", selected.authority_id());
-        property_row(ui, "Reason", selected.reason());
-    });
+    let name = |receipt: &ProjectLibraryPublicationReceipt| {
+        format!("#{:04} \u{00b7} {}", receipt.sequence(), receipt.label())
+    };
+    let newest_first = receipts.iter().rev().collect::<Vec<_>>();
+    let selected = selected_receipt(receipts, draft.publication_id)
+        .expect("the restore's publication is normalized before rendering");
+    let options = newest_first
+        .iter()
+        .map(|receipt| name(receipt))
+        .collect::<Vec<_>>();
+    if let Some(picked) = rows.select(
+        "Publication",
+        "workbench.project.library.restore.publication",
+        &name(selected),
+        &options,
+    ) && let Some(receipt) = newest_first.get(picked)
+        && receipt.publication_id() != draft.publication_id
+    {
+        draft.publication_id = receipt.publication_id();
+        clear_restore_file(draft);
+    }
+    let selected = selected_receipt(receipts, draft.publication_id)
+        .expect("the selected publication remains retained");
+    rows.value(
+        "Revision",
+        &selected.source_project_revision().get().to_string(),
+    );
+    rows.value("Published by", selected.actor_id());
+    rows.value("Approved by", selected.authority_id());
+    rows.value("Reason", selected.reason());
 }
 
 pub fn selected_receipt(
@@ -440,26 +504,6 @@ pub fn selected_receipt(
 
 pub fn audit_text_valid(value: &str) -> bool {
     !value.is_empty() && value == value.trim() && !value.chars().any(char::is_control)
-}
-
-/// What stopped the transaction, or what it is waiting for.
-///
-/// A refusal is a problem line: the kit's cross in front of neutral words.
-/// A wait is neither a problem nor news, so it is a line of dim text with no
-/// frame around it — the blue box it used to sit in read as an alert for
-/// something that is simply in progress.
-pub fn transaction_status(ui: &mut Ui, message: &str, error: bool) {
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(8.0);
-    if error {
-        problem_line(ui, Problem::Failure, message);
-    } else {
-        ui.label(
-            egui::RichText::new(message)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

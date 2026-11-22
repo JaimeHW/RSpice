@@ -1762,6 +1762,7 @@ pub struct CommandForm<'a> {
     cancel_enabled: bool,
     size: DialogSize,
     first_field: Option<Id>,
+    destructive: bool,
 }
 
 impl<'a> CommandForm<'a> {
@@ -1782,6 +1783,7 @@ impl<'a> CommandForm<'a> {
             cancel_enabled: true,
             size: DialogSize::CommandForm,
             first_field: None,
+            destructive: false,
         }
     }
 
@@ -1896,6 +1898,13 @@ impl<'a> CommandForm<'a> {
         self
     }
 
+    /// The primary in the destructive treatment, for a form whose command
+    /// replaces or removes what the reader has.
+    pub fn destructive(mut self) -> Self {
+        self.destructive = true;
+        self
+    }
+
     /// Disable every row, for a form that can still be read but not filled —
     /// a read-only document, or one that changed under an open form.
     pub fn fields_enabled(mut self, enabled: bool) -> Self {
@@ -1939,6 +1948,9 @@ impl<'a> CommandForm<'a> {
             dialog = dialog
                 .secondary(secondary)
                 .secondary_enabled(self.secondary_enabled);
+        }
+        if self.destructive {
+            dialog = dialog.destructive();
         }
         if let Some(describe) = self.describe {
             dialog = dialog.description(describe);
