@@ -168,7 +168,10 @@ fn split_divider(
         t.color.border_strong
     };
     ui.painter().rect_filled(divider, 0.0, color);
+    rspice_ui_kit::theme::paint_focus_ring(ui, &response, divider);
     let share = layout.document_share;
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), "Plot divider"));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Splitter);
         node.set_label("Plot divider");

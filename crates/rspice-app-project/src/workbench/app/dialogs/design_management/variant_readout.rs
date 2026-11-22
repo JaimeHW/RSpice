@@ -402,9 +402,19 @@ pub(super) fn variant_readout_list(
                     .collect::<Vec<_>>();
                 let response = paint_table_row_sensed(ui, &weights, &values, None, sense);
                 if readout.navigable {
+                    // A row that opens its part is a control: it names itself
+                    // to assistive technology, shows focus, and opens on Enter
+                    // as on a double-click.
+                    let name = format!("Show {} in {shown_in}", row.part);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+                    });
+                    rspice_ui_kit::theme::paint_focus_ring(ui, &response, response.rect);
+                    let entered = response.has_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter));
                     let response = response
                         .on_hover_text(format!("Double-click to show {} in {shown_in}", row.part));
-                    if response.double_clicked() {
+                    if response.double_clicked() || entered {
                         opened = Some(row.object.clone());
                     }
                 }
