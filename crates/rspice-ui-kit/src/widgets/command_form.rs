@@ -487,6 +487,46 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// A name and one choice about it side by side in the control column,
+    /// each half of it: a port's name and its direction, say. Returns the
+    /// field, and the option picked this frame.
+    pub fn text_with_select(
+        &mut self,
+        label: &str,
+        id: Id,
+        value: &mut String,
+        choice_label: &str,
+        selected: &str,
+        options: &[String],
+    ) -> (Response, Option<usize>) {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            let half = ((width - POINT_GAP) * 0.5).max(1.0);
+            ui.spacing_mut().item_spacing.x = POINT_GAP;
+            let field = ui.add_sized(
+                vec2(half, t.metrics.ctl_h),
+                egui::TextEdit::singleline(value)
+                    .id(id)
+                    .font(theme::field_mono())
+                    .text_color(t.color.text)
+                    .vertical_align(Align::Center)
+                    .margin(egui::Margin::symmetric(8, 4)),
+            );
+            form::name_control(ui, &field, label);
+            select_all_until_focused(ui, &field, value);
+            let salt = format!("{:?}", id.with("choice"));
+            let choice = select_with_response(
+                ui,
+                &salt,
+                &format!("{label} {choice_label}"),
+                selected,
+                options,
+                half,
+            );
+            (field, choice.picked)
+        })
+    }
+
     /// One contiguous group of exclusive options across the whole control
     /// column in equal segments: as wide as the fields above it, with its
     /// options standing in the columns a [`Self::check_columns`] row of as

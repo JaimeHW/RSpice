@@ -568,6 +568,7 @@ fn rc_in_a_block() -> RSpiceApp {
         &app.state.model,
         &mut app.state.workbench,
     );
+    app.state.design.create_hierarchy.descend = true;
     commit_create_hierarchy(
         &mut app.state.design.create_hierarchy,
         &mut app.state.design.symbol,

@@ -53,6 +53,7 @@ fn commit_publishes_synchronized_cell_and_exact_project_history() {
     );
     assert!(state.design.create_hierarchy.open);
     let child = state.design.create_hierarchy.cell_name.clone();
+    state.design.create_hierarchy.descend = true;
     commit_create_hierarchy(
         &mut state.design.create_hierarchy,
         &mut state.design.symbol,

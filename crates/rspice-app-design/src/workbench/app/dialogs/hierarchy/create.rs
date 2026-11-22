@@ -11,9 +11,10 @@ use egui::Context;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
-    Cell, CellViewRef, HierarchyExtractionPlan, NetLabel, PortDirection, PortSpec, View, ViewType,
+    Cell, CellViewRef, HierarchyExtractionPlan, NetLabel, PortDirection, PortDiscipline, PortSpec,
+    View, ViewType,
 };
-use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use rspice_design::drc::{DrcConfig, DrcViolation, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
 
@@ -45,6 +46,14 @@ pub(crate) struct CreateHierarchyPortDraft {
 pub struct CreateHierarchyDialogState {
     pub open: bool,
     pub cell_name: String,
+    /// The library the new cell goes into: the parent's, or another the
+    /// reader may write.
+    pub library: String,
+    /// The libraries the reader may write, the choices for `library`.
+    pub(crate) libraries: Vec<String>,
+    /// Whether the extraction then opens the new cell, which "Create and
+    /// descend" asks and "Create" does not.
+    pub descend: bool,
     pub(crate) target_view: crate::state::ViewType,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) plan: Option<crate::state::HierarchyExtractionPlan>,
@@ -60,6 +69,7 @@ impl CreateHierarchyDialogState {
         plan: crate::state::HierarchyExtractionPlan,
         library_revision: u64,
         cell_name: String,
+        (library, libraries): (String, Vec<String>),
     ) {
         let ports = plan
             .ports
@@ -74,6 +84,9 @@ impl CreateHierarchyDialogState {
         *self = Self {
             open: true,
             cell_name,
+            library,
+            libraries,
+            descend: false,
             target_view: crate::state::ViewType::Schematic,
             authority: Some(authority),
             plan: Some(plan),
@@ -89,28 +102,19 @@ impl CreateHierarchyDialogState {
 }
 
 const TITLE: &str = "Create hierarchical cell";
-const PRIMARY: &str = "Create and descend";
+/// The primary leaves the reader on the parent with the new instance in
+/// place, as Virtuoso's Make Cell does; the secondary then opens the cell.
+const PRIMARY: &str = "Create";
+const SECONDARY: &str = "Create and descend";
 /// The sentence assistive technology reads for the whole form.
 const DESCRIPTION: &str = "Move the selected instances into a new cell, with a port for every net that crosses the selection's edge.";
 pub const VIEW_OPTIONS: [&str; 2] = ["Schematic", "Symbol"];
-/// The ports table: each port, and the parent net it carries.
-const PORT_COLUMNS: [TableColumn<'static>; 4] = [
-    TableColumn {
-        header: "Port",
-        mono: true,
-    },
-    TableColumn {
-        header: "Direction",
-        mono: true,
-    },
-    TableColumn {
-        header: "Discipline",
-        mono: true,
-    },
-    TableColumn {
-        header: "Net",
-        mono: true,
-    },
+/// A port's directions, in the order its select lists them.
+const DIRECTIONS: [PortDirection; 4] = [
+    PortDirection::In,
+    PortDirection::Out,
+    PortDirection::InOut,
+    PortDirection::Supply,
 ];
 
 pub fn open_create_hierarchy_dialog(
@@ -129,24 +133,45 @@ pub fn open_create_hierarchy_dialog(
             return;
         }
     };
-    let cell_name = default_cell_name(model);
+    let libraries = writable_libraries(model);
+    let parent_library = &model.workspace.content.active_view.library;
+    let library = libraries
+        .iter()
+        .find(|library| *library == parent_library)
+        .or_else(|| libraries.first())
+        .cloned()
+        .unwrap_or_else(|| parent_library.clone());
+    let cell_name = default_cell_name(model, &library);
     dialog.open(
         SchematicEditAuthority::capture(model),
         plan,
         model.library_manager.revision(),
         cell_name,
+        (library, libraries),
     );
 }
 
+/// The libraries a new cell can go into: every one the reader may write, by
+/// name.
+fn writable_libraries(model: &Model) -> Vec<String> {
+    model
+        .library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| !library.read_only)
+        .map(|library| library.name.clone())
+        .collect()
+}
+
 /// The new cell's first name: the parent cell's with "_sub", numbered from 2
-/// when that is taken in the parent's library or among the open documents.
-/// A fixed sample name was offered whatever the design was.
-fn default_cell_name(model: &Model) -> String {
+/// when that is taken in `library` or among the open documents. A fixed
+/// sample name was offered whatever the design was.
+fn default_cell_name(model: &Model, library: &str) -> String {
     let parent = &model.workspace.content.active_view;
     let taken = |name: &str| {
         model
             .library_manager
-            .get_library(&parent.library)
+            .get_library(library)
             .is_some_and(|library| {
                 library
                     .cells_sorted()
@@ -158,7 +183,7 @@ fn default_cell_name(model: &Model) -> String {
                     .workspace
                     .content
                     .schematic_buffers
-                    .contains_key(&CellViewRef::new(&parent.library, name, view).key())
+                    .contains_key(&CellViewRef::new(library, name, view).key())
             })
     };
     let base = format!("{}_sub", parent.cell);
@@ -189,42 +214,66 @@ impl CreateHierarchy<'_> {
             .plan
             .as_ref()
             .map_or_else(String::new, |plan| plan.source_instance_names.join(", "));
-        let ports = draft
-            .ports
-            .iter()
-            .map(|port| {
-                vec![
-                    port.name.clone(),
-                    direction_label(port.direction).to_owned(),
-                    port.discipline.keyword().to_owned(),
-                    port.source_net.clone(),
-                ]
-            })
-            .collect::<Vec<_>>();
+        let directions = DIRECTIONS.map(|direction| direction_label(direction).to_owned());
         let mut view = usize::from(draft.target_view == ViewType::Symbol);
         let mut edited = false;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .wide()
             .describe(DESCRIPTION)
+            .secondary(SECONDARY)
             .primary_enabled(validation.is_ok())
+            .secondary_enabled(validation.is_ok())
             .status(validation.as_ref().map(|_| None).map_err(String::as_str))
             .show(ctx, |rows| {
                 let name = egui::Id::new("create-hierarchy-cell-name");
                 edited |= rows
                     .text("Cell name", name, &mut draft.cell_name, "")
                     .changed();
-                // View spans the column Cell name spans.
+                let library = rows.select_with_response(
+                    "Library",
+                    "create-hierarchy-library",
+                    &draft.library,
+                    &draft.libraries,
+                );
+                if let Some(picked) = library.picked.and_then(|index| draft.libraries.get(index)) {
+                    draft.library = picked.clone();
+                    edited = true;
+                }
+                // Both views are made; this picks the one Create and descend
+                // opens. It spans the column Cell name spans.
                 edited |= rows.segmented_columns(
-                    "View",
+                    "Descend into",
                     "create-hierarchy-view",
                     &VIEW_OPTIONS,
                     &mut view,
                 );
                 rows.value_mono("Instances", &instances);
-                if ports.is_empty() {
+                if draft.ports.is_empty() {
                     rows.value("Ports", "None: no net crosses the selection's edge");
                 } else {
-                    rows.table(&PORT_COLUMNS, &ports);
+                    // Each port by the parent net it carries: its name, which
+                    // starts as the net's or a pin's, and its direction.
+                    rows.section("Ports");
+                    for (index, port) in draft.ports.iter_mut().enumerate() {
+                        let label = if port.discipline == PortDiscipline::default() {
+                            port.source_net.clone()
+                        } else {
+                            format!("{} ({})", port.source_net, port.discipline.keyword())
+                        };
+                        let (field, picked) = rows.text_with_select(
+                            &label,
+                            egui::Id::new(("create-hierarchy-port", index)),
+                            &mut port.name,
+                            "direction",
+                            direction_label(port.direction),
+                            &directions,
+                        );
+                        edited |= field.changed();
+                        if let Some(direction) = picked.and_then(|index| DIRECTIONS.get(index)) {
+                            port.direction = *direction;
+                            edited = true;
+                        }
+                    }
                 }
                 Some(name)
             });
@@ -237,15 +286,16 @@ impl CreateHierarchy<'_> {
             draft.validation_error = None;
         }
         match choice {
-            DialogChoice::Primary => {
-                // The shell extracts it straight after this step draws; the
-                // footer states a refusal.
+            // The shell extracts it straight after this step draws; the
+            // footer states a refusal.
+            DialogChoice::Primary | DialogChoice::Secondary => {
+                self.dialog.descend = choice == DialogChoice::Secondary;
                 self.workbench.outbox.push(DesignRequest::CreateHierarchy);
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.dialog.close();
             }
-            DialogChoice::Secondary | DialogChoice::None => {}
+            DialogChoice::None => {}
         }
     }
 }
@@ -254,7 +304,8 @@ const fn direction_label(direction: PortDirection) -> &'static str {
     match direction {
         PortDirection::In => "input",
         PortDirection::Out => "output",
-        PortDirection::InOut | PortDirection::Supply => "inout",
+        PortDirection::InOut => "inout",
+        PortDirection::Supply => "supply",
     }
 }
 
@@ -302,7 +353,7 @@ fn validate_draft(
 
     let cell_name = dialog.cell_name.trim();
     let target = CellViewRef::new(
-        &model.workspace.content.active_view.library,
+        &dialog.library,
         cell_name,
         dialog.target_view.display_name(),
     );
@@ -352,7 +403,7 @@ pub fn commit_create_hierarchy(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &WorkbenchSession,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let plan = validate_draft(dialog, model)?;
     let authority = dialog
         .authority
@@ -371,12 +422,17 @@ pub fn commit_create_hierarchy(
     }
 
     let parent_ref = model.workspace.content.active_view.clone();
-    let library_name = parent_ref.library.clone();
+    let library_name = dialog.library.clone();
     let cell_name = dialog.cell_name.trim().to_owned();
     let target_view_type = dialog.target_view;
+    let descend = dialog.descend;
     let target_schematic_ref = CellViewRef::new(&library_name, &cell_name, "schematic");
-    let target_open_ref =
-        CellViewRef::new(&library_name, &cell_name, target_view_type.display_name());
+    // What the step leaves in front: the view descended into, or the parent.
+    let target_open_ref = if descend {
+        CellViewRef::new(&library_name, &cell_name, target_view_type.display_name())
+    } else {
+        parent_ref.clone()
+    };
     // The instance always binds the schematic, which it is netlisted and
     // descended through; the View choice decides only which view opens.
     let candidate = model
@@ -483,23 +539,34 @@ pub fn commit_create_hierarchy(
         )
         .map_err(|error| error.to_string())?;
 
-    next_workspace.descend_into(
-        candidate.instance_name.clone(),
-        target_open_ref.clone(),
-        target_view_type,
-    );
+    if descend {
+        next_workspace.descend_into(
+            candidate.instance_name.clone(),
+            target_open_ref.clone(),
+            target_view_type,
+        );
+    }
     let open_views_after = next_workspace.content.open_views.clone();
     let hierarchy_stack_after = next_workspace.content.hierarchy_stack.clone();
     let hierarchy_instances_after = next_workspace.content.hierarchy_instances.clone();
 
     model.library_manager = next_libraries;
     model.workspace = next_workspace;
-    model.schematic = candidate.child.clone();
+    model.schematic = if descend {
+        candidate.child.clone()
+    } else {
+        candidate.parent.clone()
+    };
     rebuild_active_connections_from_symbols(model);
     bump_active_schematic_epoch(symbol, model, wb);
-    model
-        .library_manager
-        .select_view(&library_name, &cell_name, target_view_type.display_name());
+    if descend {
+        model.library_manager.select_view(
+            &library_name,
+            &cell_name,
+            target_view_type.display_name(),
+        );
+    }
+    let instance_name = candidate.instance_name.clone();
     model.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
         parent_ref,
         target_schematic_ref,
@@ -516,15 +583,16 @@ pub fn commit_create_hierarchy(
         hierarchy_instances_after,
     });
     dialog.close();
-    model.record(
-        LogSeverity::Info,
-        LogSource::Studio,
+    let summary = if descend {
         format!(
             "Created hierarchical cell {library_name}/{cell_name} and descended into its {}.",
             target_view_type.display_name()
-        ),
-    );
-    Ok(())
+        )
+    } else {
+        format!("Created hierarchical cell {library_name}/{cell_name}, placed as {instance_name}.")
+    };
+    model.record(LogSeverity::Info, LogSource::Studio, summary.clone());
+    Ok(summary)
 }
 
 fn source_schematic_with_canonical_connections(model: &Model) -> crate::state::SchematicState {
@@ -796,6 +864,7 @@ mod tests {
             &mut state.workbench,
         );
         assert!(state.design.create_hierarchy.open);
+        state.design.create_hierarchy.descend = true;
         commit_create_hierarchy(
             &mut state.design.create_hierarchy,
             &mut state.design.symbol,
@@ -838,6 +907,70 @@ mod tests {
         );
     }
 
+    /// Create leaves the reader on the parent with the new instance in place,
+    /// the cell in the library chosen, its ports named and directed as typed.
+    #[test]
+    fn create_stays_on_the_parent_with_the_ports_as_typed_in_the_chosen_library() {
+        let (mut state, _) = two_resistors_boxed_with_their_wire();
+        let parent = state.model.workspace.content.active_view.clone();
+        state
+            .model
+            .library_manager
+            .add_library(crate::state::Library::new("blocks"));
+        open_create_hierarchy_dialog(
+            &mut state.design.create_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        );
+        let dialog = &mut state.design.create_hierarchy;
+        assert_eq!(dialog.library, parent.library, "the parent's library first");
+        assert!(dialog.libraries.contains(&"blocks".to_owned()));
+        assert!(!dialog.descend, "Create is the primary");
+        dialog.library = "blocks".to_owned();
+        let port = dialog.ports.first_mut().expect("a net crosses the box");
+        port.name = "OUT".to_owned();
+        port.direction = PortDirection::Out;
+        let cell = dialog.cell_name.clone();
+
+        let summary = commit_create_hierarchy(
+            &mut state.design.create_hierarchy,
+            &mut state.design.symbol,
+            &mut state.model,
+            &state.workbench,
+        )
+        .expect("the block becomes a cell");
+
+        assert!(summary.contains(&format!("blocks/{cell}")), "{summary}");
+        assert_eq!(state.model.workspace.content.active_view, parent);
+        let binding = state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find_map(|component| component.library_cell.clone())
+            .expect("the new instance is on the parent in front");
+        assert_eq!(
+            (binding.library.as_str(), binding.cell.as_str()),
+            ("blocks", cell.as_str())
+        );
+        let ports = state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&CellViewRef::new("blocks", &cell, "schematic").key())
+            .expect("the child schematic")
+            .document()
+            .interface_ports();
+        assert!(
+            ports
+                .iter()
+                .any(|port| port.name == "OUT" && port.direction == PortDirection::Out),
+            "{ports:?}"
+        );
+    }
+
     /// Choosing the Symbol view bound the new instance to the cell's symbol,
     /// and an instance bound to a symbol can never be descended into. The
     /// instance binds the schematic; the choice decides which view opens.
@@ -851,6 +984,7 @@ mod tests {
             &mut state.workbench,
         );
         state.design.create_hierarchy.target_view = ViewType::Symbol;
+        state.design.create_hierarchy.descend = true;
         let child = state.design.create_hierarchy.cell_name.clone();
         commit_create_hierarchy(
             &mut state.design.create_hierarchy,

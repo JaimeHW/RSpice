@@ -1651,13 +1651,14 @@ impl DesignFeature {
     /// dialog why it cannot.
     pub fn create_hierarchy(cx: &mut Cx<'_, Self>) {
         let design = &mut *cx.state;
-        if let Err(error) = commit_create_hierarchy(
+        match commit_create_hierarchy(
             &mut design.create_hierarchy,
             &mut design.symbol,
             cx.model,
             cx.wb,
         ) {
-            design.create_hierarchy.validation_error = Some(error);
+            Ok(summary) => cx.wb.prompt(summary),
+            Err(error) => design.create_hierarchy.validation_error = Some(error),
         }
     }
 }
