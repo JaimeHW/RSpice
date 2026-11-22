@@ -103,7 +103,8 @@ pub struct SpectrumAnalysis {
     pub fundamental_frequency: Option<f64>,
     /// Fundamental magnitude (dB)
     pub fundamental_db: Option<f64>,
-    /// Total Harmonic Distortion (%)
+    /// Total Harmonic Distortion (%), over the harmonics that rise out of
+    /// the noise floor
     pub thd_percent: Option<f64>,
     /// THD in dB
     pub thd_db: Option<f64>,
@@ -232,8 +233,9 @@ impl SpectrumAnalysis {
             None => num_harmonics,
         };
         let analyzed_through = num_harmonics.min(max_observable_order);
-        let mut harmonic_norm = LogSumSquares::default();
-        let mut harmonic_binary_norm = BinaryScaledNorm::default();
+        // Each harmonic's RMS, beside its measurement: THD sums those that
+        // rise out of the floor, which is known only once the noise is.
+        let mut harmonic_rms = Vec::new();
         let mut coverage = if analyzed_through == num_harmonics {
             HarmonicCoverage::Complete {
                 requested_order: num_harmonics,
@@ -283,8 +285,14 @@ impl SpectrumAnalysis {
             let peaks_at_its_bin = fft.points[start.max(1)..=end]
                 .iter()
                 .all(|point| point.magnitude <= own);
-            harmonic_norm.add_log(physical_log_magnitude(fft, harm_idx, harm_mag)?);
-            harmonic_binary_norm.add(physical_binary_magnitude(fft, harm_idx, harm_mag)?);
+            try_reserve_for_push(
+                &mut harmonic_rms,
+                SpectrumAnalysisAllocationStage::Harmonics,
+            )?;
+            harmonic_rms.push((
+                physical_log_magnitude(fft, harm_idx, harm_mag)?,
+                physical_binary_magnitude(fft, harm_idx, harm_mag)?,
+            ));
             try_reserve_for_push(
                 &mut analysis.harmonics,
                 SpectrumAnalysisAllocationStage::Harmonics,
@@ -298,22 +306,6 @@ impl SpectrumAnalysis {
             Self::exclude_bin_region(&mut excluded_for_noise, harm_idx, guard_bins);
         }
         analysis.harmonic_coverage = coverage;
-
-        if matches!(coverage, HarmonicCoverage::Complete { .. }) {
-            match harmonic_norm.log_norm() {
-                Some(harmonic_log_rms) => {
-                    let log_ratio = harmonic_log_rms - fund_log_rms;
-                    let thd_percent =
-                        materialize_thd_percent(&harmonic_binary_norm, fund_binary_rms, log_ratio)?;
-                    analysis.thd_percent = Some(thd_percent);
-                    analysis.thd_db = Some(db_from_log_amplitude_ratio(log_ratio)?);
-                }
-                None => {
-                    analysis.thd_percent = Some(0.0);
-                    analysis.thd_db = Some(f64::NEG_INFINITY);
-                }
-            }
-        }
 
         // SFDR includes harmonics: only DC and the selected carrier are
         // excluded from the spur search. Noise metrics separately exclude
@@ -402,6 +394,33 @@ impl SpectrumAnalysis {
             };
             for harmonic in &mut analysis.harmonics {
                 harmonic.above_floor &= harmonic.level_db > floor_read;
+            }
+        }
+
+        // THD and SINAD's distortion sum the harmonics that rise out of the
+        // floor. One under it is the floor read at its bin: its bins are
+        // already counted as noise, at the noise's typical power.
+        let mut harmonic_norm = LogSumSquares::default();
+        let mut harmonic_binary_norm = BinaryScaledNorm::default();
+        for (harmonic, (log_rms, binary_rms)) in analysis.harmonics.iter().zip(&harmonic_rms) {
+            if harmonic.above_floor {
+                harmonic_norm.add_log(*log_rms);
+                harmonic_binary_norm.add(*binary_rms);
+            }
+        }
+        if matches!(coverage, HarmonicCoverage::Complete { .. }) {
+            match harmonic_norm.log_norm() {
+                Some(harmonic_log_rms) => {
+                    let log_ratio = harmonic_log_rms - fund_log_rms;
+                    let thd_percent =
+                        materialize_thd_percent(&harmonic_binary_norm, fund_binary_rms, log_ratio)?;
+                    analysis.thd_percent = Some(thd_percent);
+                    analysis.thd_db = Some(db_from_log_amplitude_ratio(log_ratio)?);
+                }
+                None => {
+                    analysis.thd_percent = Some(0.0);
+                    analysis.thd_db = Some(f64::NEG_INFINITY);
+                }
             }
         }
 
@@ -1758,7 +1777,7 @@ mod tests {
     /// at its own bin: HD2 at 1 % and HD3 at 0.1 % rise out of 1 mV of
     /// noise, while HD4 to HD10, which the record does not hold, read the
     /// floor and say so rather than a noise bin's level at a noise bin's
-    /// frequency.
+    /// frequency, and THD sums HD2 and HD3 alone.
     #[test]
     fn a_harmonic_stands_at_its_order_and_one_under_the_floor_says_so() {
         let (samples, _) =
@@ -1778,5 +1797,26 @@ mod tests {
         let fundamental_db = analysis.fundamental_db.expect("a level");
         let hd2 = analysis.harmonics[0].level_db - fundamental_db;
         assert!((hd2 + 40.0).abs() < 0.05, "HD2 {hd2} dBc");
+        let thd_of = |counted: &dyn Fn(&HarmonicMeasurement) -> bool| {
+            100.0
+                * analysis
+                    .harmonics
+                    .iter()
+                    .filter(|harmonic| counted(harmonic))
+                    .map(|harmonic| 10f64.powf((harmonic.level_db - fundamental_db) / 10.0))
+                    .sum::<f64>()
+                    .sqrt()
+        };
+        let thd = analysis.thd_percent.expect("THD");
+        let above = thd_of(&|harmonic| harmonic.above_floor);
+        let every = thd_of(&|_| true);
+        assert!(
+            (thd - above).abs() <= 1.0e-9 * above,
+            "THD {thd} against {above}"
+        );
+        assert!(
+            (every - above).abs() > 1.0e-9 * above,
+            "the floor reads nothing"
+        );
     }
 }
