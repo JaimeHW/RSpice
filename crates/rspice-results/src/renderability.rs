@@ -635,6 +635,18 @@ pub fn viewer_can_render(
                 Some(AnalysisResultPayload::PoleZero { .. })
             )
         }
+        // An orbit with no dynamic modes has no multiplier to draw; the
+        // table states it.
+        ResultViewer::Floquet => {
+            analysis.success
+                && match &analysis.result_payload {
+                    Some(AnalysisResultPayload::Pstb { modes, .. }) => !modes.is_empty(),
+                    Some(AnalysisResultPayload::PssFloquet { multipliers, .. }) => {
+                        !multipliers.is_empty()
+                    }
+                    _ => false,
+                }
+        }
         ResultViewer::Events => matches!(
             analysis.result_payload,
             Some(AnalysisResultPayload::TransientEvents {

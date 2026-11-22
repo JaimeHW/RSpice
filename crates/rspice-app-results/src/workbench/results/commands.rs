@@ -158,7 +158,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 69] = [
+    pub const ALL: [Self; 70] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -194,6 +194,7 @@ impl ResultsCommand {
         Self::ResultViewer(ResultViewer::Polar),
         Self::ResultViewer(ResultViewer::NetworkMatrix),
         Self::ResultViewer(ResultViewer::PoleZero),
+        Self::ResultViewer(ResultViewer::Floquet),
         Self::ResultViewer(ResultViewer::Scatter),
         Self::ResultViewer(ResultViewer::BoxViolin),
         Self::ResultViewer(ResultViewer::Events),
@@ -583,6 +584,7 @@ const fn viewer_key(viewer: ResultViewer) -> CommandKey {
         ResultViewer::Polar => CommandKey::new("result-polar"),
         ResultViewer::NetworkMatrix => CommandKey::new("result-network-matrix"),
         ResultViewer::PoleZero => CommandKey::new("result-pole-zero"),
+        ResultViewer::Floquet => CommandKey::new("result-floquet"),
         ResultViewer::Scatter => CommandKey::new("result-scatter"),
         ResultViewer::BoxViolin => CommandKey::new("result-distribution"),
         ResultViewer::Events => CommandKey::new("result-events"),
@@ -617,6 +619,7 @@ const fn viewer_label(viewer: ResultViewer) -> &'static str {
         ResultViewer::Polar => "Open polar-response viewer",
         ResultViewer::NetworkMatrix => "Open network matrix viewer",
         ResultViewer::PoleZero => "Open pole-zero viewer",
+        ResultViewer::Floquet => "Open Floquet viewer",
         ResultViewer::Scatter => "Open correlation scatter viewer",
         ResultViewer::BoxViolin => "Open box and violin distribution viewer",
         ResultViewer::Events => "Open event history viewer",

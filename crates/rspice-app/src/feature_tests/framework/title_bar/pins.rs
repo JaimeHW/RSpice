@@ -533,6 +533,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Smith chart | result-smith |  | hidden",
             "  Polar response | result-polar |  | hidden",
             "  Pole-zero | result-pole-zero |  | hidden",
+            "  Floquet | result-floquet |  | hidden",
             "  Transfer function | result-transfer-function |  | hidden",
             "  Network matrix | result-network-matrix |  | hidden",
             "  FFT | result-fft |  | hidden",

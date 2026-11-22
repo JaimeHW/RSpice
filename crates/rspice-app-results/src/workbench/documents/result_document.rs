@@ -16,6 +16,7 @@ pub(crate) use document_edit::show as show_document_dialog;
 mod events;
 mod eye;
 mod fft;
+mod floquet;
 pub mod frame_work;
 mod harmonic_balance;
 mod hist;
@@ -2428,6 +2429,7 @@ fn show_viewer_well(
         ResultViewer::Polar => polar::show(ui, &mut SheetContext::of(state)),
         ResultViewer::NetworkMatrix => network_matrix::show(ui, &mut SheetContext::of(state)),
         ResultViewer::PoleZero => pz::show(ui, state),
+        ResultViewer::Floquet => floquet::show(ui, state),
         ResultViewer::Scatter => {
             let followed = scatter::show(ui, &mut SheetContext::of(state));
             if followed.is_some() {
@@ -2997,6 +2999,7 @@ fn run_viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> Vie
             }
         }
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
+        ResultViewer::Floquet => floquet::availability(state),
         ResultViewer::NetworkMatrix => network_matrix::availability(state),
         ResultViewer::Scatter | ResultViewer::BoxViolin => {
             if active_run.is_some_and(|run| {
@@ -3171,6 +3174,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::Polar => polar::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
+        ResultViewer::Floquet => floquet::right_panel(ui, state),
         ResultViewer::TransferFunction => transfer_function::right_panel(ui, state),
         // The table and network-matrix panels held nothing but what their
         // own sheet already states.

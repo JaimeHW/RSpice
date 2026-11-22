@@ -8,7 +8,7 @@ use rspice_results_ui::soa::SoaRuleSelection;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::test_fixtures::{
-    events_analysis, network_matrix_analysis, optimization_analysis, soa_analysis,
+    events_analysis, network_matrix_analysis, optimization_analysis, pstb_analysis, soa_analysis,
 };
 use rspice_app_results::workbench::documents::result_document::{
     ActivePaneFacts, AnalysisPresentationKey, WavePanePresentationKey, active_axis_is_pinned,
@@ -714,6 +714,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 },
                 gain: Some(10.0),
             }),
+        ResultViewer::Floquet => pstb_analysis(),
         ResultViewer::Events => events_analysis(),
         ResultViewer::Soa => soa_analysis(),
         ResultViewer::Optimization => optimization_analysis(),

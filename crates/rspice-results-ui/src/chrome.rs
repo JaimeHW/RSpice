@@ -31,7 +31,8 @@ const fn viewer_tab_icon(viewer: ResultViewer) -> WorkbenchIcon {
         | ResultViewer::Nyquist
         | ResultViewer::Smith
         | ResultViewer::Polar
-        | ResultViewer::PoleZero => WorkbenchIcon::Target,
+        | ResultViewer::PoleZero
+        | ResultViewer::Floquet => WorkbenchIcon::Target,
         ResultViewer::Op
         | ResultViewer::NetworkMatrix
         | ResultViewer::TransferFunction

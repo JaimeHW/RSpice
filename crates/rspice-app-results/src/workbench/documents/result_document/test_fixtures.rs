@@ -152,6 +152,69 @@ pub fn events_analysis() -> AnalysisResult {
     )
 }
 
+/// A driven orbit's stability run over a 0.5 s period: one real multiplier
+/// at -1.25 past the unit circle, a complex pair inside it at 0.4 ± 0.3j and
+/// a fast mode at 0.1, read off a probe at `PROBE1`.
+pub fn pstb_analysis() -> AnalysisResult {
+    use crate::state::{
+        ComplexResultValue, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
+        FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, PstbFloquetModeEvidence,
+        PstbStabilityClassificationEvidence,
+    };
+    let period_s = 0.5;
+    let mode = |real: f64, imaginary: f64, participation: f64| {
+        let magnitude: f64 = real.hypot(imaginary);
+        PstbFloquetModeEvidence {
+            multiplier: ComplexResultValue { real, imaginary },
+            exponent: ComplexResultValue {
+                real: magnitude.ln() / period_s,
+                imaginary: imaginary.atan2(real) / period_s,
+            },
+            probe_participation: participation,
+            is_unstable: magnitude > 1.0,
+            is_trivial: false,
+            subharmonic_order: None,
+        }
+    };
+    let modes = vec![
+        mode(-1.25, 0.0, 0.7),
+        mode(0.4, -0.3, 0.1),
+        mode(0.4, 0.3, 0.1),
+        mode(0.1, 0.0, 0.1),
+    ];
+    AnalysisResult::new(1, AnalysisType::Pstb, "PSTB").with_result_payload(
+        AnalysisResultPayload::Pstb {
+            period_s,
+            fundamental_frequency_hz: 1.0 / period_s,
+            stability_threshold: 1.0,
+            probe_instance: "PROBE1".to_owned(),
+            detect_subharmonics: false,
+            floquet_evidence: FloquetSpectrumEvidence::Qualified {
+                certificate: FloquetSpectrumCertificateEvidence {
+                    problem_order: modes.len() as u64,
+                    max_backward_error: 0.0,
+                    qualification_tolerance:
+                        FloquetSpectrumCertificateEvidence::canonical_qualification_tolerance(
+                            modes.len() as u64,
+                        )
+                        .expect("a canonical tolerance"),
+                },
+            },
+            modes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Unstable,
+            stability_classification: PstbStabilityClassificationEvidence::UnstableReal,
+            min_stability_margin_db: Some(-20.0 * 1.25_f64.log10()),
+            max_multiplier_magnitude: 1.25,
+            num_unstable: 1,
+            subharmonics: Vec::new(),
+            converged: true,
+            iterations: 12,
+        },
+    )
+}
+
 pub fn network_matrix_analysis(mixed: bool) -> AnalysisResult {
     let mut traces = Vec::new();
     let ports = if mixed { 4 } else { 2 };

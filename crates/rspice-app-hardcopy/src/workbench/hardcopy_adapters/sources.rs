@@ -882,6 +882,10 @@ pub fn quick_result_availability(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::PoleZero { .. })
         ),
+        ResultViewer::Floquet => matches!(
+            analysis.result_payload.as_ref(),
+            Some(AnalysisResultPayload::PssFloquet { .. } | AnalysisResultPayload::Pstb { .. })
+        ),
         // Periodic payloads have an exact semantic table even when a
         // zero-order map or a payload-only result retained no display curve.
         ResultViewer::Table => {

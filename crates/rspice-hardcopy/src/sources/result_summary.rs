@@ -306,7 +306,9 @@ pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
                 ],
             });
         }
-        ResultViewer::Table => {
+        // A printed page has no plane to pin a mode on: the Floquet sheet
+        // prints the spectrum its table lists.
+        ResultViewer::Table | ResultViewer::Floquet => {
             let Some(payload) = analysis.result_payload.as_ref() else {
                 return Err(HardcopySourceError::MissingViewerEvidence(
                     "typed periodic result",

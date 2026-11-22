@@ -15,6 +15,7 @@ pub mod document_dialogs;
 pub mod events;
 pub mod eye_diagram;
 pub mod fft;
+pub mod floquet;
 pub mod harmonic_balance;
 pub mod histogram;
 pub mod network_matrix;

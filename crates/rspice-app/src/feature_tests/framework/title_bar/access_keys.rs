@@ -29,6 +29,7 @@ const KEYLESS_ROWS: [&str; 13] = [
     "update-all-instances",
     // Every letter of its label is taken on the Design menu.
     "symbol-from-model",
+    "result-floquet",
 ];
 
 fn key_press(key: Key, modifiers: Modifiers) -> egui::Event {

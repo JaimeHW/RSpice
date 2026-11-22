@@ -780,6 +780,8 @@ const fn viewer(viewer: ResultViewer) -> CommandKey {
 
 /// The other viewers the selected result can be read in, each offered only
 /// while it fits that result. The operating-point table is Simulate's.
+/// Floquet goes without an access key: an earlier row holds each of its
+/// letters.
 const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::DcSweep), "DC sweep").access('D'),
     MenuEntry::offered(viewer(ResultViewer::Bode), "Bode").access('B'),
@@ -788,6 +790,7 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::Smith), "Smith chart").access('S'),
     MenuEntry::offered(viewer(ResultViewer::Polar), "Polar response").access('R'),
     MenuEntry::offered(viewer(ResultViewer::PoleZero), "Pole-zero").access('Z'),
+    MenuEntry::offered(viewer(ResultViewer::Floquet), "Floquet"),
     MenuEntry::offered(viewer(ResultViewer::TransferFunction), "Transfer function").access('U'),
     MenuEntry::offered(viewer(ResultViewer::NetworkMatrix), "Network matrix").access('K'),
     MenuEntry::offered(viewer(ResultViewer::Fft), "FFT").access('F'),

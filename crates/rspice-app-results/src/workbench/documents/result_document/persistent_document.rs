@@ -1700,6 +1700,7 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
         "viewer-histogram" => analysis.analysis_type == AnalysisType::MonteCarlo,
         "eye-viewer" => analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty(),
         "viewer-pz" => analysis.analysis_type == AnalysisType::PoleZero,
+        "viewer-floquet" => super::floquet::analysis_is_renderable(analysis),
         "viewer-contribution" => matches!(
             analysis.analysis_type,
             AnalysisType::Sensitivity | AnalysisType::DcMismatch

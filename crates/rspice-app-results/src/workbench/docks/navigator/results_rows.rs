@@ -343,7 +343,7 @@ pub fn retained_result_artifacts(
                     floquet_orbit_navigator_label(*orbit_kind),
                     floquet_verdict_navigator_label(*stability_verdict),
                 )),
-                ResultViewer::Table,
+                floquet_sheet(multipliers.is_empty()),
             ),
             AnalysisResultPayload::Pstb {
                 modes,
@@ -364,7 +364,7 @@ pub fn retained_result_artifacts(
                     floquet_verdict_navigator_label(*stability_verdict),
                     pstb_classification_navigator_label(*stability_classification),
                 )),
-                ResultViewer::Table,
+                floquet_sheet(modes.is_empty()),
             ),
             AnalysisResultPayload::Sensitivity { rows, .. } => (
                 "payload/sensitivity",
@@ -602,6 +602,16 @@ fn harmonic_tuple(indices: &[i32]) -> String {
 }
 
 /// Which orbit the multipliers were taken about.
+/// A Floquet spectrum opens on the unit circle; an empty one has nothing to
+/// draw and lists as a table.
+const fn floquet_sheet(empty: bool) -> crate::workbench::ResultViewer {
+    if empty {
+        crate::workbench::ResultViewer::Table
+    } else {
+        crate::workbench::ResultViewer::Floquet
+    }
+}
+
 fn floquet_orbit_navigator_label(orbit: crate::state::FloquetOrbitKindEvidence) -> String {
     match orbit {
         crate::state::FloquetOrbitKindEvidence::Driven => " · driven orbit".to_owned(),

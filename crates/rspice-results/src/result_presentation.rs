@@ -53,6 +53,9 @@ pub enum ResultViewer {
     Table,
     /// Nyquist loop-gain stability surface.
     Nyquist,
+    /// A periodic orbit's Floquet multipliers on the unit circle, beside
+    /// their magnitudes, exponents, verdicts and margins.
+    Floquet,
     /// A network's S-parameters, and the two-port figures read from them,
     /// against frequency on rectangular axes.
     SParameters,
@@ -94,6 +97,7 @@ impl ResultViewer {
             ResultViewer::TransferFunction => "XF",
             ResultViewer::Table => "TABLE",
             ResultViewer::Nyquist => "NYQ",
+            ResultViewer::Floquet => "FLOQUET",
             ResultViewer::SParameters => "SPARAM",
             ResultViewer::Smith => "SMITH",
             ResultViewer::Polar => "POLAR",
@@ -107,7 +111,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 24] = [
+    const PRIMARY: [ResultViewer; 25] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -129,6 +133,7 @@ impl ResultViewer {
         ResultViewer::BoxViolin,
         ResultViewer::Eye,
         ResultViewer::PoleZero,
+        ResultViewer::Floquet,
         // Specialist sheets last: each needs evidence an ordinary run does not
         // produce — XSPICE event nodes, or a whole campaign analysis kind — so
         // leading with them would push the everyday sheets rightward for the
@@ -159,6 +164,7 @@ impl ResultViewer {
             ResultViewer::TransferFunction => "Transfer Function",
             ResultViewer::Table => "Table",
             ResultViewer::Nyquist => "Nyquist",
+            ResultViewer::Floquet => "Floquet",
             ResultViewer::SParameters => "S-Parameters",
             ResultViewer::Smith => "Smith",
             ResultViewer::Polar => "Polar",
@@ -198,6 +204,7 @@ impl ResultViewer {
             ResultViewer::Polar => "viewer-polar",
             ResultViewer::NetworkMatrix => "viewer-mixed-mode-network",
             ResultViewer::PoleZero => "viewer-pz",
+            ResultViewer::Floquet => "viewer-floquet",
             ResultViewer::Scatter => "viewer-scatter",
             ResultViewer::BoxViolin => "viewer-box-violin",
             ResultViewer::Events => "viewer-digital-events",
@@ -228,6 +235,7 @@ impl ResultViewer {
             "viewer-box-violin" => ResultViewer::BoxViolin,
             "eye-viewer" => ResultViewer::Eye,
             "viewer-pz" => ResultViewer::PoleZero,
+            "viewer-floquet" => ResultViewer::Floquet,
             "viewer-contribution" => ResultViewer::Contribution,
             "viewer-transfer-function" => ResultViewer::TransferFunction,
             "viewer-digital-events" => ResultViewer::Events,
@@ -253,11 +261,12 @@ impl ResultViewer {
             A::Ac | A::Disto | A::Pac | A::Pxf | A::Qpac | A::Qpxf => &[V::Bode, V::Table],
             A::Stb => &[V::Bode, V::Nyquist, V::Table],
             // A periodic stability result is indexed by Floquet mode, not by
-            // frequency: its multipliers are listed.
-            A::Pstb => &[V::Table],
-            A::Transient | A::TransientNoise | A::Envelope | A::Pss => {
-                &[V::Waves, V::Events, V::Table]
-            }
+            // frequency: its multipliers are drawn on the unit circle.
+            A::Pstb => &[V::Floquet, V::Table],
+            A::Transient | A::TransientNoise | A::Envelope => &[V::Waves, V::Events, V::Table],
+            // A steady state opens on its waveforms; its stability, where
+            // the run computed it, is a sheet beside them.
+            A::Pss => &[V::Waves, V::Floquet, V::Events, V::Table],
             A::Soa => &[V::Soa, V::Waves, V::Table],
             A::Noise | A::Hbnoise | A::Qpnoise => &[V::NoiseContrib, V::PhaseNoise, V::Table],
             A::Pnoise => &[V::PhaseNoise, V::NoiseContrib, V::Table],

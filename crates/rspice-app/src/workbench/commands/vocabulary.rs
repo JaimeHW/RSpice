@@ -737,6 +737,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
     )
     .key(),
     ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Floquet,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
         rspice_app_results::workbench::documents::result_document::ResultViewer::Scatter,
     )
     .key(),

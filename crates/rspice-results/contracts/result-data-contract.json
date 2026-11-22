@@ -747,6 +747,27 @@
       }
     },
     {
+      "id": "viewer-floquet",
+      "canonical": {
+        "group": "Specialized",
+        "art": "pz",
+        "title": "Floquet multipliers",
+        "domain": "PSTB · PSS · unit circle",
+        "x": "Real part",
+        "y": "Imaginary part"
+      },
+      "capability": {
+        "classification": "release-target"
+      },
+      "inputAuthority": {
+        "analysisIds": [
+          "pstb",
+          "pss"
+        ],
+        "externalCapabilityId": null
+      }
+    },
+    {
       "id": "field-viewer-3d",
       "canonical": {
         "group": "Fields & physical",
@@ -886,6 +907,7 @@
         "viewer-spectrogram",
         "viewer-transfer-function",
         "viewer-pz",
+        "viewer-floquet",
         "viewer-phase-noise"
       ],
       "quickModeIds": [
@@ -1005,7 +1027,7 @@
     }
   },
   "counts": {
-    "viewerDocuments": 41,
+    "viewerDocuments": 42,
     "creationFamilies": 9
   }
 }
