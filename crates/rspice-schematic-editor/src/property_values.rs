@@ -19,6 +19,51 @@ use rspice_vocabulary::quantity::{
     format_engineering_value,
 };
 
+/// The engineering spelling of a value written in resistor code, where the
+/// scale letter stands in the decimal point (IEC 60062): `4k7` is `4.7k`,
+/// `1R5` is `1.5`, `2M2` is `2.2Meg`, `6n8` is `6.8n`. `None` for any other
+/// text, so `1N4148`, `10k` and `1.5k` are left to the ordinary parser.
+///
+/// A value field reads this spelling when a value is committed; the number
+/// parser itself does not, so the deck, the plan and a measurement never
+/// take `4k7` for a number.
+pub fn resistor_code_spelling(text: &str) -> Option<String> {
+    let text = text.trim();
+    let (index, letter) = text.char_indices().find(|(_, c)| !c.is_ascii_digit())?;
+    let whole = &text[..index];
+    let fraction = &text[index + letter.len_utf8()..];
+    if whole.is_empty() || fraction.is_empty() || !fraction.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let scale = match letter {
+        'R' | 'r' => "",
+        'p' => "p",
+        'n' => "n",
+        'u' | '\u{b5}' | '\u{3bc}' => "u",
+        'm' => "m",
+        'k' | 'K' => "k",
+        'M' => "Meg",
+        'G' => "G",
+        'T' => "T",
+        _ => return None,
+    };
+    Some(format!("{whole}.{fraction}{scale}"))
+}
+
+/// `parse` over `text`, or over its resistor-code spelling when `text` is
+/// written that way and does not parse as it stands. The first error is the
+/// one reported.
+pub fn read_resistor_code<T>(
+    text: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+) -> Result<T, String> {
+    parse(text).or_else(|error| {
+        resistor_code_spelling(text)
+            .and_then(|spelled| parse(&spelled).ok())
+            .ok_or(error)
+    })
+}
+
 /// Step a focused value field's text to the next standard value of `series`:
 /// Up and Down step up and down, and so does the wheel while the pointer is
 /// over the field. Returns whether the text moved.
@@ -268,13 +313,18 @@ fn render_number_editor(
     );
 
     if response.changed() && new_text != text {
-        return match parse_number_source(def, &new_text, quantity_policy, number_locale) {
+        return match read_resistor_code(&new_text, |text| {
+            parse_number_source(def, text, quantity_policy, number_locale)
+        }) {
             Ok(value) => ValueEditorOutput::numeric(response.id, Some(value), new_text, None),
             Err(error) => ValueEditorOutput::numeric(response.id, None, new_text, Some(error)),
         };
     }
 
-    let parse_error = parse_number_source(def, &new_text, quantity_policy, number_locale).err();
+    let parse_error = read_resistor_code(&new_text, |text| {
+        parse_number_source(def, text, quantity_policy, number_locale)
+    })
+    .err();
     ValueEditorOutput::numeric(response.id, None, new_text, parse_error)
 }
 
@@ -323,13 +373,18 @@ fn render_expression_editor(
     );
 
     if response.changed() && new_text != text {
-        return match parse_expression_source(def, &new_text, quantity_policy, number_locale) {
+        return match read_resistor_code(&new_text, |text| {
+            parse_expression_source(def, text, quantity_policy, number_locale)
+        }) {
             Ok(value) => ValueEditorOutput::numeric(response.id, Some(value), new_text, None),
             Err(error) => ValueEditorOutput::numeric(response.id, None, new_text, Some(error)),
         };
     }
 
-    let parse_error = parse_expression_source(def, &new_text, quantity_policy, number_locale).err();
+    let parse_error = read_resistor_code(&new_text, |text| {
+        parse_expression_source(def, text, quantity_policy, number_locale)
+    })
+    .err();
     ValueEditorOutput::numeric(response.id, None, new_text, parse_error)
 }
 
@@ -729,5 +784,52 @@ mod tests {
                 "offered text {text:?} does not restore {stored}"
             );
         }
+    }
+
+    /// A resistance, a capacitance and an inductance written in resistor
+    /// code read as the value the code stands for; text that is not resistor
+    /// code is refused as before, with the parser's own reason.
+    #[test]
+    fn a_value_field_reads_resistor_code() {
+        let policy = QuantityPresentationPolicy::default();
+        let locale = UiNumberLocale::default();
+        let catalog = PropertyCatalog::new();
+        let primary = |kind: ComponentType, name: &str| {
+            catalog
+                .get(kind)
+                .and_then(|sheet| sheet.get(name))
+                .cloned()
+                .expect("the primary property")
+        };
+        let read = |definition: &PropertyDefinition, text: &str| {
+            read_resistor_code(text, |text| {
+                parse_expression_source(definition, text, policy, locale)
+            })
+        };
+        let resistance = primary(ComponentType::Resistor, "r");
+        let capacitance = primary(ComponentType::Capacitor, "c");
+        for (definition, text, expected) in [
+            (&resistance, "4k7", 4.7e3),
+            (&resistance, "1R5", 1.5),
+            (&resistance, "2M2", 2.2e6),
+            (&capacitance, "6n8", 6.8e-9),
+            (&capacitance, "4u7", 4.7e-6),
+        ] {
+            let Ok(PropertyValue::Number { value, .. }) = read(definition, text) else {
+                panic!("{text} reads as a number");
+            };
+            assert!(
+                (value - expected).abs() <= 1e-12 * expected,
+                "{text} reads {value}"
+            );
+        }
+        assert_eq!(resistor_code_spelling("4k7").as_deref(), Some("4.7k"));
+        assert_eq!(resistor_code_spelling("1N4148"), None);
+        assert_eq!(resistor_code_spelling("10k"), None);
+        assert_eq!(resistor_code_spelling("1.5k"), None);
+        assert_eq!(
+            read(&resistance, "1k5k").err(),
+            parse_expression_source(&resistance, "1k5k", policy, locale).err()
+        );
     }
 }

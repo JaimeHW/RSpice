@@ -61,6 +61,18 @@ pub(super) fn field_rejection(
     prepare_field_edit(design, model, wb, component, field, candidate).err()
 }
 
+/// The property an inline field edits: a parameter its own, the part's value
+/// its sheet's primary property; the name and the parameter line none.
+fn field_property<'a>(field: &'a InlineEditField, component: &Component) -> Option<&'a str> {
+    match field {
+        InlineEditField::Parameter(key) => Some(key.as_str()),
+        InlineEditField::Value => {
+            Some(crate::properties::property_bridge::get_primary_property_name(component.kind))
+        }
+        InlineEditField::Instance | InlineEditField::Parameters => None,
+    }
+}
+
 pub fn prepare_field_edit(
     design: &DesignState,
     model: &Model,
@@ -71,7 +83,11 @@ pub fn prepare_field_edit(
 ) -> Result<Component, String> {
     let mut authored = source.to_owned();
     let mut typed_value = None;
-    if let InlineEditField::Parameter(key) = field
+    // The part's value is its sheet's primary property, and is held to that
+    // property's type and range as the component editor holds it; it keeps
+    // the text it was typed in, which the deck reads as written.
+    let key = field_property(field, component);
+    if let Some(key) = key
         && let Some(sheet) = crate::workbench::app::authoritative_component_property_sheet(
             &design.property_registry,
             model,
@@ -79,16 +95,32 @@ pub fn prepare_field_edit(
         )?
         && let Some(definition) = sheet.get(key)
     {
-        let source = if definition.verilog_numbers {
+        let mut source = if definition.verilog_numbers {
             deck_number_spelling(source)
         } else {
             source.to_owned()
         };
+        // A value in resistor code is stored as the number it stands for:
+        // `4k7` is kept as `4.7k`, which the deck reads, where it would read
+        // `4k7` as 4k.
+        if matches!(
+            definition.prop_type,
+            PropertyType::Number | PropertyType::Expression
+        ) && parameter_source_value(model, wb, definition, &source).is_err()
+            && let Some(spelled) =
+                rspice_schematic_editor::property_values::resistor_code_spelling(&source)
+            && parameter_source_value(model, wb, definition, &spelled).is_ok()
+        {
+            source = spelled;
+        }
         typed_value = parameter_source_value(model, wb, definition, &source)?;
-        authored = typed_value
-            .as_ref()
-            .map(|value| parameter_source_text(definition, &source, value))
-            .unwrap_or_default();
+        authored = match field {
+            InlineEditField::Value => source.trim().to_owned(),
+            _ => typed_value
+                .as_ref()
+                .map(|value| parameter_source_text(definition, &source, value))
+                .unwrap_or_default(),
+        };
     }
     let candidate = edited_component(component, field, &authored)?;
     if let Some(refusal) =
@@ -152,10 +184,11 @@ fn source_contract_rejection(
     // gate saw the raw parameter text, and the waveform rules read that with a
     // bare engineering parser: `td=-1ns` carries its unit into the parameter
     // string, fails that parse, and became a field the contract could not see.
-    if let InlineEditField::Parameter(key) = field
+    let key = field_property(field, component);
+    if let Some(key) = key
         && let Some(value) = typed_value
     {
-        values.insert(key.clone(), value.clone());
+        values.insert(key.to_owned(), value.clone());
     }
     crate::properties::property_bridge::source_commit_refusal(component, &values, sheet)
 }

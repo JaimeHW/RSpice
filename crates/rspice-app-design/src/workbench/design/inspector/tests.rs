@@ -707,6 +707,7 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
         )
         .is_none()
     );
+    // The resistance is required, as the component editor requires it.
     assert!(
         field_rejection(
             &state.design,
@@ -716,7 +717,7 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
             &InlineEditField::Value,
             ""
         )
-        .is_none()
+        .is_some()
     );
     assert!(
         field_rejection(
@@ -751,6 +752,32 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
         )
         .is_none()
     );
+}
+
+/// The value field commits what the component editor would: a resistance in
+/// resistor code becomes the number it stands for, and text the editor
+/// refuses for a resistance is refused here, where it used to reach the
+/// drawing and fail only when the deck was written.
+#[test]
+fn the_value_field_holds_a_value_to_the_component_editors_rules() {
+    let state = state_with_two_components();
+    let subject = state.model.schematic.document().components[0].clone();
+    assert_eq!(subject.kind, ComponentType::Resistor);
+    let commit = |text: &str| {
+        prepare_field_edit(
+            &state.design,
+            &state.model,
+            &state.workbench,
+            &subject,
+            &InlineEditField::Value,
+            text,
+        )
+    };
+
+    assert_eq!(commit("4k7").expect("4k7 commits").value, "4.7k");
+    assert_eq!(commit("2M2").expect("2M2 commits").value, "2.2Meg");
+    assert_eq!(commit(" 10k ").expect("10k commits").value, "10k");
+    assert!(commit("1k+").is_err());
 }
 
 /// A source value the component editor refuses is refused by the inline field
