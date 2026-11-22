@@ -364,12 +364,6 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.rename_selection")),
     },
     DialogSpec {
-        key: DialogKey("design.find_replace"),
-        modality: Modality::Dialog,
-        is_open: Some(|state| features::dialog_open(state, DialogKey("design.find_replace"))),
-        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.find_replace")),
-    },
-    DialogSpec {
         key: DialogKey("design.shared_properties"),
         modality: Modality::Dialog,
         is_open: Some(|state| features::dialog_open(state, DialogKey("design.shared_properties"))),

@@ -128,7 +128,6 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
     ("design.selection_bulk_edit", DocsTopic::SchematicEntry),
     ("design.object_properties", DocsTopic::SchematicEntry),
     ("design.rename_selection", DocsTopic::SchematicEntry),
-    ("design.find_replace", DocsTopic::SchematicEntry),
     ("design.shared_properties", DocsTopic::SchematicEntry),
     ("design.stimulus_link", DocsTopic::SimulationSetup),
     ("simulate.workflow_dialogs", DocsTopic::SimulationSetup),
