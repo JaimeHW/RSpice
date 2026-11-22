@@ -712,7 +712,7 @@ pub fn trace_table_rows(
 
     let sample = |x: f64, branch: Option<usize>| -> Option<f64> {
         match branch {
-            None => Some(super::trace_value_at(trace, x, interpolation)),
+            None => Some(model.trace_value(trace, x, interpolation)),
             Some(branch) => {
                 let (xs, ys) = trace.held()?;
                 let mut out = Vec::new();
@@ -984,7 +984,7 @@ pub fn append_copied_cursor(
         // The copy has to say what the table says. Read unshaped, a loop's
         // line pasted a value off the far side of its turnaround while the
         // register on screen reported each branch.
-        let value = super::trace_value_at(trace, x, interpolation);
+        let value = model.trace_value(trace, x, interpolation);
         let copied = copied_trace_value(policy, trace.kind, value, model.trace_unit(trace));
         let _ = writeln!(target, "{} = {}", trace.name, copied.trim_end());
     }

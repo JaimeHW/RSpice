@@ -451,7 +451,7 @@ pub fn plot_markers<'a>(
             );
         }
         if trace.shape.branch_count() <= 1 || samples.is_empty() {
-            let y = super::trace_value_at(trace, marker.x, interpolation);
+            let y = model.trace_value(trace, marker.x, interpolation);
             if y.is_finite() {
                 projected.push(plot::Marker::point(marker.x, y, color, label));
             }
@@ -1179,7 +1179,7 @@ pub fn show_plot<'a>(
             .filter(|nearest| {
                 // Only a member the pointer is on: a pointer anywhere else in
                 // the plot is placing a cursor or reading the axis.
-                let value = super::trace_value_at(nearest, x, interpolation);
+                let value = model.trace_value(nearest, x, interpolation);
                 let y = plot_rect.bottom()
                     - (y_scale.normalize(value, spec.y.min, spec.y.max) as f32)
                         * plot_rect.height();
@@ -1459,7 +1459,7 @@ pub fn show_plot<'a>(
                 || samples.is_empty()
                 || samples.len() > MAX_READOUT_BRANCHES
             {
-                let value = super::trace_value_at(trace, x, interpolation);
+                let value = model.trace_value(trace, x, interpolation);
                 rows.push((
                     trace.name.clone(),
                     model.format_trace_value(trace, value, significant_digits, quantity_policy),

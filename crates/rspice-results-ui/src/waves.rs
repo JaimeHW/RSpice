@@ -507,6 +507,25 @@ pub fn stable_hash(value: &impl std::hash::Hash) -> u64 {
 }
 
 impl StripModel {
+    /// What `trace` of this strip reads at `x` by `interpolation`: the point
+    /// of its drawn line there. The line runs straight between samples on
+    /// screen, so on a log X axis a reading between two samples is linear in
+    /// the logarithm of X, as the line is, and not in X.
+    pub fn trace_value(
+        &self,
+        trace: &StripTrace,
+        x: f64,
+        interpolation: rspice_ui_kit::plot::SampleInterpolation,
+    ) -> f64 {
+        if self.x_scale == XScale::Log10
+            && interpolation == rspice_ui_kit::plot::SampleInterpolation::Linear
+            && let Some(value) = log_x_reading(trace, x)
+        {
+            return value;
+        }
+        trace_value_at(trace, x, interpolation)
+    }
+
     pub fn cursor_domain(&self) -> CursorDomain {
         CursorDomain {
             analysis_type: self.analysis_type,
@@ -1400,6 +1419,29 @@ pub(crate) fn grid_is_ascending(model: &StripModel) -> bool {
             ordered
         })
     })
+}
+
+/// `trace`'s line at `x` between the two samples around it, straight in the
+/// logarithm of X. `None` off its samples' range, for an X no log axis
+/// draws, and for a trace that is not one ascending sweep.
+fn log_x_reading(trace: &StripTrace, x: f64) -> Option<f64> {
+    if !trace.shape.is_single_ascending()
+        || x.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+    {
+        return None;
+    }
+    let rows = trace.x.len().min(trace.y.len());
+    let at = trace.x.partition_point(|sample| sample < x);
+    if at == 0 || at >= rows {
+        return None;
+    }
+    let (x0, x1) = (trace.x.sample(at - 1)?, trace.x.sample(at)?);
+    let (y0, y1) = (trace.y.sample(at - 1)?, trace.y.sample(at)?);
+    if !(x0 > 0.0 && x1 > x0) {
+        return None;
+    }
+    let t = (x / x0).ln() / (x1 / x0).ln();
+    Some(y0 + t * (y1 - y0))
 }
 
 /// `trace`'s value at `x` by `interpolation`, as a cursor reads it. A trace whose samples a

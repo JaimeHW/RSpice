@@ -117,6 +117,51 @@ fn a_startup_transient_reads_over_decades_of_time_from_its_first_positive_sample
     assert_eq!(model(&mut reopened)[0].x_scale, XScale::Log10);
 }
 
+/// One rule per trace: on a log-frequency axis the line runs straight in
+/// log f between samples, and a cursor between two samples reads that line,
+/// as its closed form gives it, under the default cursor interpolation.
+#[test]
+fn a_cursor_between_samples_on_a_log_frequency_axis_reads_the_drawn_line() {
+    let pole = |f: f64| -10.0 * (1.0 + (f / 1.0e4).powi(2)).log10();
+    let x = vec![1.0e3, 1.0e4, 1.0e5];
+    let y: Vec<f64> = x.iter().map(|f| pole(*f)).collect();
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+            RetainedTrace::new("V(out)", x, y, "#fff").with_unit("dB"),
+        ]),
+    );
+    state.quick_frame();
+    let interpolation = rspice_results_ui::waves::cursor_interpolation(
+        state
+            .model
+            .preferences
+            .result_presentation_policy()
+            .cursor_interpolation(),
+    );
+    let models = model(&mut state);
+    let strip = &models[0];
+    assert_eq!(strip.x_scale, XScale::Log10);
+    let trace = strip.traces.first().unwrap_or_else(|| {
+        panic!(
+            "the strip draws no trace: {} strips, {} complex",
+            models.len(),
+            strip.complex_sources.len()
+        )
+    });
+    for decades in [0.5, 1.0 / 3.0, 0.9] {
+        let f = 1.0e4 * 10f64.powf(decades);
+        let line = pole(1.0e4) + decades * (pole(1.0e5) - pole(1.0e4));
+        let read = strip.trace_value(trace, f, interpolation);
+        assert!(
+            (read - line).abs() < 1e-12,
+            "at {f} Hz the cursor reads {read} where the line is drawn at {line}"
+        );
+    }
+    // On a sample it reads the sample.
+    assert_eq!(strip.trace_value(trace, 1.0e4, interpolation), pole(1.0e4));
+}
+
 #[test]
 fn a_frequency_sweep_reads_linearly_when_the_reader_asks() {
     let x = vec![1.0e3, 2.0e3, 3.0e3, 4.0e3];

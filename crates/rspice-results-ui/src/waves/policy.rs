@@ -3,10 +3,18 @@
 use rspice_results::display_preferences::{CursorInterpolation, DisplayedSignificantDigits};
 use rspice_ui_kit::plot::SampleInterpolation;
 
+/// How a cursor reads between samples under Results ▸ Cursor interpolation.
+///
+/// A reading is a point of the drawn line, and the line runs straight from
+/// sample to sample, so the smooth choice reads it as the straight choice
+/// does: a monotone cubic between two samples would read a value no curve on
+/// screen passes through. It reads smooth again once the line is drawn
+/// smooth. The nearest choice reads a sample, which the line passes through.
 pub const fn cursor_interpolation(policy: CursorInterpolation) -> SampleInterpolation {
     match policy {
-        CursorInterpolation::MonotoneCubicWhereValid => SampleInterpolation::MonotoneCubic,
-        CursorInterpolation::Linear => SampleInterpolation::Linear,
+        CursorInterpolation::MonotoneCubicWhereValid | CursorInterpolation::Linear => {
+            SampleInterpolation::Linear
+        }
         CursorInterpolation::NearestAcceptedPoint => SampleInterpolation::Nearest,
     }
 }
@@ -44,8 +52,8 @@ impl ReadoutPolicy {
 mod tests {
     use super::*;
 
-    /// A spectrum cursor between two bins reads by the chosen rule, not
-    /// always by a straight line.
+    /// A spectrum cursor between two bins reads the drawn line, or the
+    /// nearest bin when that is the choice.
     #[test]
     fn a_cursor_sample_follows_the_chosen_interpolation() {
         let x = [1.0, 2.0, 3.0, 4.0];
@@ -59,7 +67,6 @@ mod tests {
         };
         assert!((read(CursorInterpolation::Linear) - 22.0).abs() < 1e-12);
         assert!((read(CursorInterpolation::NearestAcceptedPoint) - 10.0).abs() < 1e-12);
-        let cubic = read(CursorInterpolation::MonotoneCubicWhereValid);
-        assert!(cubic > 10.0 && cubic < 40.0 && (cubic - 22.0).abs() > 1e-6);
+        assert!((read(CursorInterpolation::MonotoneCubicWhereValid) - 22.0).abs() < 1e-12);
     }
 }

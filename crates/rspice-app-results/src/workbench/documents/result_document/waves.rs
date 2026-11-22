@@ -371,7 +371,7 @@ fn cursor_marker_target(
     // Only a finiteness gate — the marker carries the X, not this value — but
     // it is gated on the reading the strip will make, so it is taken the same
     // way the strip takes it.
-    let sampled = rspice_results_ui::waves::trace_value_at(
+    let sampled = model.trace_value(
         trace,
         cursor_x,
         cursor_interpolation(

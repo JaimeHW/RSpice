@@ -232,7 +232,7 @@ pub(super) fn level_at(
         .traces
         .iter()
         .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)?;
-    let value = super::trace_value_at(
+    let value = model.trace_value(
         trace,
         x,
         cursor_interpolation(presentation.cursor_interpolation()),

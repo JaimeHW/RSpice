@@ -65,7 +65,7 @@ fn capture_quick_view_overlay(
             .cursor_interpolation()
         {
             CursorInterpolation::MonotoneCubicWhereValid => {
-                RetainedCursorInterpolation::MonotoneCubic
+                RetainedCursorInterpolation::Linear
             }
             CursorInterpolation::Linear => RetainedCursorInterpolation::Linear,
             CursorInterpolation::NearestAcceptedPoint => RetainedCursorInterpolation::Nearest,

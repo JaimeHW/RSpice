@@ -597,7 +597,7 @@ fn legend_entry(
     let label = match cursor_a {
         Some((x, presentation, policy)) => {
             let digits = usize::from(presentation.displayed_significant_digits().get());
-            let value = super::trace_value_at(
+            let value = model.trace_value(
                 trace,
                 *x,
                 cursor_interpolation(presentation.cursor_interpolation()),
