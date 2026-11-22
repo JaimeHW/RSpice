@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 mod axes;
 pub mod cache;
+pub mod cursor_table;
 pub mod cursor_values;
 pub mod dock;
 pub mod expression_editor;

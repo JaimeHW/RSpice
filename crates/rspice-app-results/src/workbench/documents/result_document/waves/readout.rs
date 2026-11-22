@@ -72,6 +72,9 @@ fn with_readout<R>(
 }
 
 fn apply_marker_actions(state: &mut ResultsParts<'_>, actions: MarkerActions) {
+    if let Some(moved) = actions.moved {
+        super::super::move_marker(state, moved);
+    }
     if let Some(selector) = actions.remove {
         super::super::remove_marker(state, selector);
     }
@@ -94,8 +97,8 @@ fn cursors_page_shown(workbench: &WorkbenchSession) -> bool {
         && workbench.console_page == ConsolePage::Cursors
 }
 
-/// The dock's Cursors page: the strip it follows on its toolbar band, then
-/// what the cursors and markers read, or how to place one.
+/// The dock's Cursors page: its controls on the toolbar band, then what
+/// the cursors and markers read, or how to place one.
 pub fn cursors_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let session = &state.results.session;
     let need_models = (session.cursor_readout_active() && session.cursor_strip.is_some())
@@ -111,27 +114,27 @@ pub fn cursors_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             if !dock::page_has_readings(session, source) {
                 return None;
             }
-            let followed = dock::followed_strip(session, source);
-            console::toolbar(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.set_min_height(Tokens::get(ui.ctx()).metrics.ctl_h);
-                    if let Some(strip) = followed {
-                        ui.label(
-                            egui::RichText::new(strip)
-                                .font(rspice_ui_kit::theme::mono(
-                                    rspice_ui_kit::tokens::FS_1,
-                                    rspice_ui_kit::theme::FontWeight::Regular,
-                                ))
-                                .color(Tokens::get(ui.ctx()).color.text_dim),
-                        );
-                    }
-                });
-            });
-            dock::cursors_page(ui, session, source)
+            let tables = dock::cursor_tables(session, source, &Tokens::get(ui.ctx()));
+            let copied = console::toolbar(ui, |ui| cursors_toolbar(ui, session, &tables));
+            if copied {
+                ui.ctx().copy_text(
+                    tables
+                        .iter()
+                        .map(rspice_results_ui::waves::cursor_table::CursorTable::tsv)
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                );
+            }
+            dock::cursors_page(ui, session, source, &tables).map(|actions| (actions, copied))
         },
     );
     match shown {
-        Some(actions) => apply_marker_actions(state, actions),
+        Some((actions, copied)) => {
+            if copied {
+                state.prompt("Copied the cursor table");
+            }
+            apply_marker_actions(state, actions);
+        }
         None => {
             ui.add_space(console::CONSOLE_BODY_PADDING_TOP);
             if console::prose_fits(ui) {
@@ -144,6 +147,65 @@ pub fn cursors_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             }
         }
     }
+}
+
+/// The Cursors page's controls: the base every difference is read
+/// against, and Copy at the right. Says whether Copy was pressed.
+fn cursors_toolbar(
+    ui: &mut Ui,
+    session: &mut ResultViewerState,
+    tables: &[rspice_results_ui::waves::cursor_table::CursorTable],
+) -> bool {
+    use rspice_ui_kit::widgets::{
+        chip_width, compact_chip, compact_select_mono_width, compact_select_mono_with_response,
+    };
+    let mut copied = false;
+    ui.horizontal(|ui| {
+        ui.set_min_height(Tokens::get(ui.ctx()).metrics.ctl_h);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        // Every column of every table can be the base; a table without it
+        // reads against its own first column.
+        let columns: Vec<_> = tables
+            .iter()
+            .flat_map(|table| table.columns.iter().map(|column| (column.id, &column.name)))
+            .collect();
+        if columns.len() > 1 {
+            let options: Vec<String> = columns
+                .iter()
+                .map(|(_, name)| format!("Base {name}"))
+                .collect();
+            let base = tables
+                .first()
+                .map(|table| table.columns[table.base].id)
+                .and_then(|id| columns.iter().position(|(column, _)| *column == id))
+                .unwrap_or(0);
+            let width = compact_select_mono_width(ui, &options);
+            let picked = compact_select_mono_with_response(
+                ui,
+                "results.cursors.base",
+                "The column the differences are read against",
+                &options[base],
+                &options,
+                width,
+            )
+            .picked;
+            if let Some(picked) = picked {
+                session.readout_base = Some(columns[picked].0);
+            }
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if !tables.is_empty()
+                && compact_chip(ui, "Copy", false, chip_width(ui, "Copy"))
+                    .on_hover_text(
+                        "Copy the table as tab-separated text, as a spreadsheet pastes it",
+                    )
+                    .clicked()
+            {
+                copied = true;
+            }
+        });
+    });
+    copied
 }
 
 pub(crate) fn inline_cursor_readout(
@@ -181,13 +243,4 @@ pub(super) fn readout_row_count(state: &mut ResultsTestHost) -> usize {
         need_models,
         dock::readout_row_count,
     )
-}
-
-#[cfg(test)]
-pub(super) fn marker_section(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    let mut actions = MarkerActions::default();
-    with_readout(state, &Tokens::get(ui.ctx()), true, |session, source| {
-        dock::marker_section(ui, session, source, &mut actions)
-    });
-    apply_marker_actions(state, actions);
 }

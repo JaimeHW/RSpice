@@ -14,7 +14,7 @@ use rspice_results::calculator::value::RealValue;
 use rspice_results::feature_search::Direction;
 use rspice_results::result_presentation::{MarkerKind, WavePanePresentationKey};
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
-use rspice_results_ui::waves::cursor_values::{marker_position, x_separation};
+use rspice_results_ui::waves::cursor_values::marker_position;
 use rspice_results_ui::waves::navigation::CursorJump;
 use std::f64::consts::PI;
 
@@ -241,10 +241,10 @@ fn a_step_past_the_last_peak_says_so_and_moves_nothing() {
 }
 
 /// Three peak markers placed off their peaks land on them, and with the
-/// first as the reference the others read Δx and Δy equal to the analytic
-/// differences between the damped sine's peaks.
+/// first as the base the others' difference columns read Δx and Δy equal
+/// to the analytic differences between the damped sine's peaks.
 #[test]
-fn a_reference_marker_reads_the_analytic_differences() {
+fn a_base_marker_reads_the_analytic_differences() {
     let mut state = host_on(damped_run());
     let models = strip(&mut state);
     let model = &models[0];
@@ -258,11 +258,8 @@ fn a_reference_marker_reads_the_analytic_differences() {
         state.mark(marker, "", MarkerKind::Peak);
         ids.push(marker);
     }
-    state
-        .results
-        .results
-        .session
-        .toggle_reference_marker(ids[0]);
+    state.results.results.session.readout_base =
+        Some(rspice_results_ui::session::ReadingColumnId::Marker(ids[0]));
 
     let found: Vec<f64> = state.results.results.session.document_markers[..3]
         .iter()
@@ -293,21 +290,31 @@ fn a_reference_marker_reads_the_analytic_differences() {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let quantity = state.model.preferences.quantity_presentation_policy();
     for index in [1, 2] {
-        let dx = x_separation(model, found[0], found[index], digits, quantity);
+        let head = format!(
+            "M{}-M{}",
+            ids[index].marker_id.get(),
+            ids[0].marker_id.get()
+        );
+        let dx = rspice_results_ui::waves::cursor_values::x_delta(
+            model,
+            found[0],
+            found[index],
+            digits,
+            quantity,
+        );
         let dy = model.format_trace_value(
             trace,
             damped(found[index]) - damped(found[0]),
             digits,
             quantity,
         );
-        let expected = format!("\u{0394}x {dx}  \u{0394}y {dy}");
-        assert!(
-            painted.contains(&expected),
-            "M{} reads {expected}: {painted:?}",
-            ids[index].marker_id.get()
-        );
+        for expected in [&head, &dx, &dy] {
+            assert!(
+                painted.contains(expected),
+                "{head} reads {expected}: {painted:?}"
+            );
+        }
     }
-    assert!(painted.iter().any(|text| text == "Reference"));
 }
 
 /// With the horizontal-cursor tool, a click on the pane places H1, a second

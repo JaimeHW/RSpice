@@ -1251,8 +1251,70 @@ pub fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
     {
         state.results.session.marker_edit = None;
     }
-    if state.results.session.reference_marker == Some(selector) {
-        state.results.session.reference_marker = None;
+    if state.results.session.readout_base
+        == Some(rspice_results_ui::session::ReadingColumnId::Marker(
+            selector,
+        ))
+    {
+        state.results.session.readout_base = None;
+    }
+}
+
+/// Move one marker on the view that keeps it: a working view to where it
+/// was asked, a saved document to the retained sample nearest.
+pub fn move_marker(
+    state: &mut ResultsParts<'_>,
+    moved: rspice_results_ui::waves::dock::MarkerMove,
+) {
+    let rspice_results_ui::waves::dock::MarkerMove {
+        selector,
+        x,
+        nearest_sample,
+    } = moved;
+    let MarkerSelector {
+        document_id,
+        marker_id,
+        ..
+    } = selector;
+    let Some((revision, at)) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .map(|document| {
+            let at = if document.working_view().is_some() {
+                x
+            } else {
+                nearest_sample.unwrap_or(x)
+            };
+            (document.revision(), at)
+        })
+    else {
+        return;
+    };
+    if let Err(error) = view_edits::apply(
+        state,
+        document_id,
+        revision,
+        vec![
+            crate::results::visualization_document::DocumentEdit::MoveMarker {
+                marker_id,
+                coordinate: crate::results::visualization_document::TypedValue::Real(at),
+            },
+        ],
+    ) {
+        state.prompt(format!("Could not move the marker: {error}"));
+        return;
+    }
+    // The overlay follows in the frame the reader moved it.
+    if let Some(marker) = state
+        .results
+        .session
+        .document_markers
+        .iter_mut()
+        .find(|marker| marker.retained_id == marker_id)
+    {
+        marker.x = at;
     }
 }
 

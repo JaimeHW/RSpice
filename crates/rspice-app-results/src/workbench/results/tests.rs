@@ -234,8 +234,8 @@ fn the_cursor_commands_move_the_stepping_cursor_to_each_feature() {
         "the Δ column reads one period: {painted:?}"
     );
     assert!(
-        painted.iter().any(|text| text == "1/\u{0394} 1 kHz"),
-        "and 1/Δ its frequency: {painted:?}"
+        painted.iter().any(|text| text == "1/\u{0394}x 1 kHz"),
+        "and 1/Δx its frequency: {painted:?}"
     );
 
     harness.execute(ResultsCommand::MarkerAtCursor.key());

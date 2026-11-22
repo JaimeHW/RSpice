@@ -353,7 +353,7 @@ fn a_marker_row_states_a_value_the_marked_branch_takes() {
     state.quick_frame();
     state.place_marker("V(out)", 0.25).expect("a marker");
 
-    let painted = super::interaction::painted_texts(&mut state, marker_section);
+    let painted = super::interaction::painted_texts(&mut state, cursors_page);
 
     assert!(
         painted.iter().any(|text| text == &forward),

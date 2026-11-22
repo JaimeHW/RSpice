@@ -1,6 +1,6 @@
 //! Cursor values, branch readings and retained-sample measurements.
 
-use super::cursor_values::{slope_text, x_delta, x_reciprocal};
+use super::cursor_values::slope_text;
 use super::pane::SwatchStyle;
 use super::{
     DisplayName, NOISE_DENSITY_UNIT, ReadoutPolicy, StripModel, StripTrace, TraceKind,
@@ -13,11 +13,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_branches_into,
 };
-use rspice_ui_kit::plot::{
-    CursorId, CursorPair, SampleInterpolation, TraceLook, XScale, paint_trace_swatch,
-};
-use rspice_ui_kit::theme::{self, FontWeight};
-use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::plot::{CursorPair, SampleInterpolation, XScale};
 use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,7 +23,6 @@ use std::sync::{Arc, OnceLock};
 
 pub const READOUT_ROW_H: f32 = 20.0;
 pub const READOUT_PAD_X: f32 = 10.0;
-const READOUT_SWATCH_W: f32 = 22.0;
 
 /// How many branches of one trace the readout will name separately.
 ///
@@ -53,226 +48,6 @@ pub fn branch_tag(shape: &SweepShape, run: usize) -> String {
     } else {
         format!("r{} {direction}", run + 1)
     }
-}
-
-/// Paint the selected strip's cursor table, including its accessible reading.
-///
-/// The A and B column heads say which cursor the arrow keys and the jumps
-/// move, in that cursor's colour; a click on the other head hands them to
-/// it, and is returned for the host to apply. `rows` are the table's rows,
-/// [`readout_rows`] then the strip's lane rows.
-pub fn cursor_readout_table(
-    ui: &mut Ui,
-    model: &StripModel,
-    cursors: CursorPair,
-    stepping: CursorId,
-    presentation: ReadoutPolicy,
-    quantity_policy: QuantityPresentationPolicy,
-    rows: Vec<ReadoutRow>,
-) -> Option<CursorId> {
-    let rect = ui.available_rect_before_wrap();
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
-    let a = cursors.a?;
-    // Fixed columns keep focus/hover/value-length changes from shifting
-    // neighboring fields. At compact widths the table scrolls horizontally.
-    let name_column = (rect.width() * 0.24).clamp(150.0, 220.0);
-    let value_column = ((rect.width() - name_column - READOUT_PAD_X * 2.0) / 4.0).max(108.0);
-    let columns = [
-        rect.left() + READOUT_PAD_X,
-        rect.left() + READOUT_PAD_X + name_column,
-        rect.left() + READOUT_PAD_X + name_column + value_column,
-        rect.left() + READOUT_PAD_X + name_column + value_column * 2.0,
-        rect.left() + READOUT_PAD_X + name_column + value_column * 3.0,
-    ];
-    // A trace row leads with its own line swatch, so a reader ties the row to
-    // a curve without matching names; the header and X rows keep the bare
-    // column so the table still reads as one grid.
-    let draw_row = |row_index: usize,
-                    values: [&str; 5],
-                    colors: [egui::Color32; 5],
-                    font: egui::FontId,
-                    swatch: Option<(egui::Color32, Option<SwatchStyle>)>| {
-        let top = rect.top() + row_index as f32 * READOUT_ROW_H;
-        let row = egui::Rect::from_min_max(
-            egui::pos2(rect.left(), top),
-            egui::pos2(rect.right(), top + READOUT_ROW_H),
-        );
-        let painter = ui.painter().with_clip_rect(row);
-        if let Some((color, style)) = swatch {
-            let rect = egui::Rect::from_x_y_ranges(
-                columns[0]..=columns[0] + READOUT_SWATCH_W - 4.0,
-                row.y_range(),
-            );
-            let look = style.map_or(
-                TraceLook {
-                    dash: None,
-                    marker: None,
-                },
-                |style| style.look(t.color_safe_traces),
-            );
-            paint_trace_swatch(&painter, rect, color, look, c.bg_panel);
-        }
-        for (index, ((text, x), color)) in values.into_iter().zip(columns).zip(colors).enumerate() {
-            let x = if index == 0 && swatch.is_some() {
-                x + READOUT_SWATCH_W
-            } else {
-                x
-            };
-            painter.text(
-                egui::pos2(x, row.center().y),
-                egui::Align2::LEFT_CENTER,
-                text,
-                font.clone(),
-                color,
-            );
-        }
-    };
-
-    let head = |id: CursorId, color| if stepping == id { color } else { c.text_faint };
-    draw_row(
-        0,
-        ["TRACE", "A", "B", "\u{0394}", "SLOPE"],
-        [
-            c.text_faint,
-            head(CursorId::A, c.canvas_cursor_a),
-            head(CursorId::B, c.canvas_cursor_b),
-            c.text_faint,
-            c.text_faint,
-        ],
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        None,
-    );
-    let a_x = model.format_x(a, significant_digits, quantity_policy);
-    let b_x = cursors
-        .b
-        .map(|b| model.format_x(b, significant_digits, quantity_policy))
-        .unwrap_or_else(|| "Place cursor B".to_owned());
-    let delta_x = cursors
-        .b
-        .map(|b| x_delta(model, a, b, significant_digits, quantity_policy))
-        .unwrap_or_default();
-    // The X row's last cell carries 1/Δx — the frequency of a period
-    // measured between the cursors — and states the sweep's own shape: a
-    // reader looking at two rows per signal is owed the reason there are two.
-    let reciprocal = cursors
-        .b
-        .and_then(|b| x_reciprocal(model, a, b, significant_digits, quantity_policy))
-        .map(|reciprocal| format!("1/\u{0394} {reciprocal}"));
-    let x_note = [reciprocal.clone(), readout_branch_note(model)]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" \u{00b7} ");
-    draw_row(
-        1,
-        [model.x_label(), &a_x, &b_x, &delta_x, &x_note],
-        [c.text_dim, c.accent, c.text, c.text, c.text_dim],
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        None,
-    );
-
-    // Each row as the host listed it: the traces', then the event lanes'.
-    for (index, row) in rows.iter().enumerate() {
-        draw_row(
-            index + 2,
-            [&row.name, &row.a, &row.b, &row.delta, &row.slope],
-            [c.text_dim, c.text, c.text, c.text_dim, c.text_dim],
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            Some((row.swatch, row.swatch_style)),
-        );
-    }
-
-    // The table is painted, not built from widgets, so nothing about it
-    // reaches a screen reader on its own. The marker half of the strip
-    // already publishes its rows; this half stated the same numbers to a
-    // sighted reader and nothing at all to anyone else.
-    let response = ui.interact(rect, ui.id().with("cursor-readout"), egui::Sense::hover());
-    let summary = readout_accessibility_text(
-        model,
-        cursors,
-        &a_x,
-        &b_x,
-        &delta_x,
-        reciprocal.as_deref(),
-        &rows,
-    );
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, summary.clone()));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Table);
-        node.set_label(summary.clone());
-    });
-
-    // The A and B heads hand the arrow keys and the jumps to their cursor.
-    let mut chosen = None;
-    for (id, left, right) in [
-        (CursorId::A, columns[1], columns[2]),
-        (CursorId::B, columns[2], columns[3]),
-    ] {
-        let head = egui::Rect::from_x_y_ranges(
-            left..=right - 4.0,
-            rect.top()..=rect.top() + READOUT_ROW_H,
-        );
-        let response = ui
-            .interact(
-                head,
-                ui.id().with(("cursor-readout-head", id.letter())),
-                egui::Sense::click(),
-            )
-            .on_hover_text(if stepping == id {
-                format!(
-                    "The arrow keys and the cursor jumps move cursor {}: arrows by sample, \
-                     Shift by peak, Alt by crossing",
-                    id.letter()
-                )
-            } else {
-                format!(
-                    "Click to move cursor {} with the arrow keys and the cursor jumps",
-                    id.letter()
-                )
-            });
-        if response.clicked() {
-            chosen = Some(id);
-        }
-    }
-    chosen
-}
-
-/// The A/B/Δ/slope table, spoken.
-///
-/// One string rather than a node per cell: the table is a single painted
-/// grid, so there is no per-cell rect to attach a node to, and a reader who
-/// asks what the cursors say wants the reading, not a walk of the widget.
-fn readout_accessibility_text(
-    model: &StripModel,
-    cursors: CursorPair,
-    a_x: &str,
-    b_x: &str,
-    delta_x: &str,
-    reciprocal: Option<&str>,
-    rows: &[ReadoutRow],
-) -> String {
-    let mut text = format!("Cursor readout. {} A {a_x}", model.x_label());
-    if cursors.b.is_some() {
-        text.push_str(&format!(", B {b_x}, \u{0394} {delta_x}"));
-        if let Some(reciprocal) = reciprocal {
-            text.push_str(&format!(", 1/\u{0394} {reciprocal}"));
-        }
-    } else {
-        text.push_str(", cursor B not placed");
-    }
-    if let Some(note) = readout_branch_note(model) {
-        text.push_str(&format!(", {note}"));
-    }
-    for row in rows {
-        text.push_str(&format!(
-            ". {}: A {}, B {}, \u{0394} {}, slope {}",
-            row.name, row.a, row.b, row.delta, row.slope
-        ));
-    }
-    text
 }
 
 /// How the Measurements table words what it measured.
@@ -767,17 +542,63 @@ pub fn readout_rows_within(
     display_name: DisplayName<'_>,
     extent: &dyn Fn(&StripTrace) -> Option<(f64, f64)>,
 ) -> Vec<ReadoutRow> {
+    let positions = [cursors.a, cursors.b];
+    let layout = ReadingLayout {
+        positions: &positions,
+        base: 0,
+        deltas: &[1],
+        pair: true,
+    };
     readout_traces(model)
         .flat_map(|trace| {
-            trace_readout_rows(
+            trace_table_rows(
                 model,
                 trace,
-                cursors,
+                &layout,
                 (presentation, quantity_policy, extent(trace)),
                 display_name,
             )
         })
+        .map(|row| {
+            let mut cells = row.cells.into_iter();
+            let mut next = || cells.next().unwrap_or_else(|| READOUT_ABSENT.to_owned());
+            ReadoutRow {
+                name: row.name,
+                swatch: row.swatch,
+                swatch_style: row.swatch_style,
+                a: next(),
+                b: next(),
+                delta: next(),
+                slope: next(),
+            }
+        })
         .collect()
+}
+
+/// Where a table reads and what it reads against.
+pub struct ReadingLayout<'a> {
+    /// Each column's X, `None` for a column that stands nowhere: a cursor
+    /// not placed, or a search that finds nothing.
+    pub positions: &'a [Option<f64>],
+    /// The column every difference is taken from.
+    pub base: usize,
+    /// The columns read against the base, in the order their differences
+    /// are listed.
+    pub deltas: &'a [usize],
+    /// Exactly two columns: their difference has a slope as well.
+    pub pair: bool,
+}
+
+/// One row of a cursor table: what a trace, or one branch of it, reads at
+/// every column, then each difference against the base, then the pair's
+/// slope.
+pub struct TableRow {
+    pub name: String,
+    pub swatch: egui::Color32,
+    /// The trace's dash and marker, for a swatch that is its curve; `None`
+    /// for an event lane, whose swatch is its colour.
+    pub swatch_style: Option<SwatchStyle>,
+    pub cells: Vec<String>,
 }
 
 /// The finest reading a trace reaching from `low` to `high` states at
@@ -828,17 +649,20 @@ fn run_ordinal(model: &StripModel, trace: &StripTrace) -> usize {
         .map_or(1, |index| index + 1)
 }
 
-fn trace_readout_rows(
+/// Every row a trace puts on a cursor table laid out as `layout`: one, or
+/// one per branch of a sweep that turns around. Each reading, difference
+/// and slope is settled against the trace's resolution over `extent`.
+pub fn trace_table_rows(
     model: &StripModel,
     trace: &StripTrace,
-    cursors: CursorPair,
+    layout: &ReadingLayout<'_>,
     (presentation, quantity_policy, extent): (
         ReadoutPolicy,
         QuantityPresentationPolicy,
         Option<(f64, f64)>,
     ),
     display_name: DisplayName<'_>,
-) -> Vec<ReadoutRow> {
+) -> Vec<TableRow> {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let resolution = extent.map_or(0.0, |extent| reading_resolution(extent, significant_digits));
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
@@ -858,6 +682,8 @@ fn trace_readout_rows(
     };
     let format =
         |value: f64| model.format_trace_value(trace, value, significant_digits, quantity_policy);
+    let absent = || READOUT_ABSENT.to_owned();
+    let differences = layout.deltas.len() + usize::from(layout.pair);
 
     // Past the branch budget — or with no branch model at all — the honest
     // answer is the nearest retained sample, and the row says so rather than
@@ -874,14 +700,13 @@ fn trace_readout_rows(
                 },
             )
         };
-        return vec![ReadoutRow {
+        let mut cells: Vec<String> = layout.positions.iter().map(|x| approximate(*x)).collect();
+        cells.extend(std::iter::repeat_with(absent).take(differences));
+        return vec![TableRow {
             name: qualifiers(None),
             swatch: trace.color,
             swatch_style: Some(SwatchStyle::of(trace)),
-            a: approximate(cursors.a),
-            b: approximate(cursors.b),
-            delta: READOUT_ABSENT.to_owned(),
-            slope: READOUT_ABSENT.to_owned(),
+            cells,
         }];
     }
 
@@ -898,8 +723,11 @@ fn trace_readout_rows(
             }
         }
     };
-    let denominator = match (cursors.a, cursors.b) {
-        (Some(a), Some(b)) => match model.x_scale {
+    // The pair's run, from the base to the other column.
+    let position = |column: usize| layout.positions.get(column).copied().flatten();
+    let other = layout.deltas.first().copied();
+    let denominator = match (position(layout.base), other.and_then(position)) {
+        (Some(a), Some(b)) if layout.pair => match model.x_scale {
             XScale::Log10 if a > 0.0 && b > 0.0 => b.log10() - a.log10(),
             XScale::Log10 => f64::NAN,
             XScale::Linear => b - a,
@@ -915,44 +743,56 @@ fn trace_readout_rows(
     branch_list
         .into_iter()
         .map(|branch| {
-            let at = |cursor: Option<f64>| {
-                cursor
-                    .and_then(|x| sample(x, branch))
-                    .map(|value| settled(value, resolution))
-            };
-            let (a_value, b_value) = (at(cursors.a), at(cursors.b));
+            let values: Vec<Option<f64>> = layout
+                .positions
+                .iter()
+                .map(|cursor| {
+                    cursor
+                        .and_then(|x| sample(x, branch))
+                        .map(|value| settled(value, resolution))
+                })
+                .collect();
+            let mut cells: Vec<String> = values
+                .iter()
+                .map(|value| value.map_or_else(absent, &format))
+                .collect();
+            let base = values.get(layout.base).copied().flatten();
             // A slope is taken from the settled difference, so two equal
             // readings have none rather than one in fV/s.
-            let difference = match (a_value, b_value) {
-                (Some(a), Some(b)) => Some(settled(b - a, resolution)),
-                _ => None,
-            };
-            let slope = difference
-                .filter(|_| denominator.is_finite() && denominator != 0.0)
-                .map(|difference| difference / denominator)
-                .filter(|slope| slope.is_finite());
-            ReadoutRow {
+            let mut first_difference = None;
+            for (order, &column) in layout.deltas.iter().enumerate() {
+                let difference = match (base, values.get(column).copied().flatten()) {
+                    (Some(base), Some(value)) => Some(settled(value - base, resolution)),
+                    _ => None,
+                };
+                if order == 0 {
+                    first_difference = difference;
+                }
+                cells.push(difference.map_or_else(absent, &format));
+            }
+            if layout.pair {
+                let slope = first_difference
+                    .filter(|_| denominator.is_finite() && denominator != 0.0)
+                    .map(|difference| difference / denominator)
+                    .filter(|slope| slope.is_finite());
+                cells.push(slope.map_or_else(absent, |slope| {
+                    // A trace names its slope in its own unit, never the
+                    // strip's: a current sharing a sheet with voltages must
+                    // not report mA/ms of rise as volts. `trace_unit` is the
+                    // one owner of that mapping.
+                    let x_unit = match model.x_scale {
+                        XScale::Log10 => "dec",
+                        XScale::Linear if model.x_unit.is_empty() => "x",
+                        XScale::Linear => model.x_unit.as_str(),
+                    };
+                    slope_text(slope, model.trace_unit(trace), x_unit, significant_digits)
+                }));
+            }
+            TableRow {
                 name: qualifiers(branch),
                 swatch: trace.color,
                 swatch_style: Some(SwatchStyle::of(trace)),
-                a: a_value.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
-                b: b_value.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
-                delta: difference.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
-                slope: slope.map_or_else(
-                    || READOUT_ABSENT.to_owned(),
-                    |slope| {
-                        // A trace names its slope in its own unit, never the
-                        // strip's: a current sharing a sheet with voltages must
-                        // not report mA/ms of rise as volts. `trace_unit` is the
-                        // one owner of that mapping.
-                        let x_unit = match model.x_scale {
-                            XScale::Log10 => "dec",
-                            XScale::Linear if model.x_unit.is_empty() => "x",
-                            XScale::Linear => model.x_unit.as_str(),
-                        };
-                        slope_text(slope, model.trace_unit(trace), x_unit, significant_digits)
-                    },
-                ),
+                cells,
             }
         })
         .collect()

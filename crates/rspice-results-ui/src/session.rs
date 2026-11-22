@@ -164,6 +164,13 @@ impl<'a> MarkerView<'a> {
     }
 }
 
+/// One column of the Cursors table: a vertical cursor or a marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadingColumnId {
+    Cursor(CursorId),
+    Marker(MarkerSelector),
+}
+
 /// A waveform pane's horizontal measurement cursors, H1 and H2, as values
 /// on the Y axis that pane draws.
 pub type HorizontalCursors = [Option<f64>; 2];
@@ -826,8 +833,9 @@ pub struct ResultViewerState {
     /// axis of the pane it was placed on: placing them on one pane leaves
     /// another pane's where they were.
     pub horizontal_cursors: HashMap<WavePanePresentationKey, HorizontalCursors>,
-    /// The marker the other markers read their Δx and Δy against.
-    pub reference_marker: Option<MarkerSelector>,
+    /// The column the Cursors table reads every other column's differences
+    /// against: the first column while `None` or once it is gone.
+    pub readout_base: Option<ReadingColumnId>,
     /// Unit-scoped panes the user put on a logarithmic Y axis.
     ///
     /// This lived in egui's persisted memory under a hand-built id, which put
@@ -1066,11 +1074,6 @@ impl ResultViewerState {
         {
             *cursor = y.is_finite().then_some(y);
         }
-    }
-
-    /// Make `selector` the reference marker, or stop it being one.
-    pub fn toggle_reference_marker(&mut self, selector: MarkerSelector) {
-        self.reference_marker = (self.reference_marker != Some(selector)).then_some(selector);
     }
 
     /// Arm or disarm the A│B tool. Disarming clears the pair, because a

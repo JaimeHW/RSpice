@@ -434,7 +434,7 @@ fn the_cursor_table_publishes_what_it_paints() {
 
     let spoken = labels
         .iter()
-        .find(|label| label.starts_with("Cursor readout"))
+        .find(|label| label.starts_with("Cursor table"))
         .unwrap_or_else(|| panic!("the cursor table published no table node: {labels:?}"));
     assert!(
         spoken.contains("fwd") && spoken.contains("rev"),
@@ -445,7 +445,7 @@ fn the_cursor_table_publishes_what_it_paints() {
         "the spoken table did not state the shape of the sweep: {spoken}"
     );
     assert!(
-        spoken.contains("slope"),
+        spoken.contains("Slope"),
         "the spoken table named no columns: {spoken}"
     );
 }
