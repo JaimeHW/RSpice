@@ -664,12 +664,9 @@ fn a_measured_distribution_reads_in_its_unit_against_its_requirement() {
         format(moments.mean, "V", 4),
         format(moments.std_dev, "V", 4),
         format(cpk, "", 4),
-        format!(
-            "{} \u{b7} 95 % CI {} to {}",
-            format(100.0 * passing as f64 / trials as f64, "%", 4),
-            format(low, "", 4),
-            format(high, "%", 4)
-        ),
+        format(100.0 * passing as f64 / trials as f64, "%", 4),
+        "95 % CI".to_owned(),
+        format!("{} to {}", format(low, "", 4), format(high, "%", 4)),
         format!("{passing} of {trials}"),
         "the project's requirement".to_owned(),
     ] {

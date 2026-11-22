@@ -195,26 +195,26 @@ fn percent(value: f64, digits: usize) -> String {
     fmt_si_significant(value, "%", digits)
 }
 
-/// The yield figure with its 95 % Wilson interval and the population it was
-/// measured over.
+/// The yield figure, over the trials the population holds.
 ///
 /// A percentage alone reads as a property of the run, and it is not: the
 /// denominator is the trials the population holds, and a Monte Carlo that
-/// requested a hundred and completed ninety reports a yield over ninety. The
-/// interval says how far the figure can be trusted at that size.
+/// requested a hundred and completed ninety reports a yield over ninety.
 fn yield_label(count: YieldCount, digits: usize) -> String {
-    let Some(share) = count.percent() else {
-        return "\u{2014}".to_owned();
-    };
-    let mut label = percent(share, digits);
-    if let Some((low, high)) = population::wilson_interval(count.passing, count.total) {
-        label.push_str(&format!(
-            " \u{b7} 95 % CI {} to {}",
-            plain(low, digits),
-            percent(high, digits)
-        ));
-    }
-    label
+    count
+        .percent()
+        .map_or_else(|| "\u{2014}".to_owned(), |share| percent(share, digits))
+}
+
+/// The yield's 95 % Wilson interval, which says how far the figure can be
+/// trusted at the population's size.
+fn interval_label(count: YieldCount, digits: usize) -> Option<String> {
+    let (low, high) = population::wilson_interval(count.passing, count.total)?;
+    Some(format!(
+        "{} to {}",
+        plain(low, digits),
+        percent(high, digits)
+    ))
 }
 
 /// The trials the yield was counted over.
@@ -824,7 +824,7 @@ fn show_probability(
     out.fit_requested = header.fit_clicked;
 
     let mut spec = PlotSpec::new(
-        Axis::linear(z0, z1, "").with_label("Normal quantile"),
+        Axis::linear(z0, z1, "").with_label("z"),
         XScale::Linear,
         Axis::linear_with(y0, y1, unit, 5),
     )
@@ -1120,8 +1120,10 @@ pub fn right_panel(
                 population::capability(moments.mean, moments.std_dev, limits.lower, limits.upper)
             })
             .unwrap_or_default();
+        let interval = interval_label(count, digits).unwrap_or_else(|| "\u{2014}".to_owned());
         let rows = [
             ("Yield", yield_label(count, digits), true),
+            ("95 % CI", interval, false),
             ("Passing", evaluated_label(count), false),
             (
                 "Cp",
@@ -1233,11 +1235,12 @@ mod tests {
             excluded: 0,
         };
         // Wilson at 97 of 100: 91.548 % to 98.975 %.
+        assert_eq!(yield_label(count, 4), "97 %");
         assert_eq!(
-            yield_label(count, 4),
-            "97 % \u{b7} 95 % CI 91.55 to 98.97 %"
+            interval_label(count, 4).as_deref(),
+            Some("91.55 to 98.97 %")
         );
-        assert_eq!(yield_label(count, 3), "97 % \u{b7} 95 % CI 91.5 to 99.0 %");
+        assert_eq!(interval_label(count, 3).as_deref(), Some("91.5 to 99.0 %"));
         assert_eq!(evaluated_label(count), "97 of 100");
         assert_eq!(
             evaluated_label(YieldCount {

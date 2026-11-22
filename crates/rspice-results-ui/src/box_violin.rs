@@ -937,20 +937,20 @@ fn statistics_rows(
         .count();
     let yield_row = column.yield_percent().map_or_else(
         || "No requirement bounds this column".to_owned(),
-        |percent| {
-            let share = fmt_si_significant(percent, "%", significant_digits);
-            population::wilson_interval(column.passing, column.values.len()).map_or(
-                share.clone(),
-                |(low, high)| {
-                    format!(
-                        "{share} \u{b7} 95 % CI {} to {}",
-                        fmt_si_significant(low, "", significant_digits),
-                        fmt_si_significant(high, "%", significant_digits)
-                    )
-                },
-            )
-        },
+        |percent| fmt_si_significant(percent, "%", significant_digits),
     );
+    // The yield's 95 % Wilson interval: how far the figure can be trusted
+    // at this many trials.
+    let interval = column
+        .yield_percent()
+        .and_then(|_| population::wilson_interval(column.passing, column.values.len()))
+        .map(|(low, high)| {
+            format!(
+                "{} to {}",
+                fmt_si_significant(low, "", significant_digits),
+                fmt_si_significant(high, "%", significant_digits)
+            )
+        });
     let capability = column.capability;
     let worst = worst_trial(column, plan, significant_digits);
 
@@ -962,7 +962,7 @@ fn statistics_rows(
         run.push_str(&format!(" \u{b7} {} diverged", plan.failures));
     }
 
-    vec![
+    let mut rows = vec![
         (
             "Trials",
             format!("{} measured of {}", column.measured, plan.trial_count()),
@@ -1000,6 +1000,11 @@ fn statistics_rows(
         ),
         ("Outliers", outliers.to_string(), false),
         ("Yield", yield_row, true),
+    ];
+    if let Some(interval) = interval {
+        rows.push(("95 % CI", interval, false));
+    }
+    rows.extend([
         (
             "Cpk",
             capability.map_or_else(
@@ -1013,7 +1018,8 @@ fn statistics_rows(
             worst.unwrap_or_else(|| "\u{2014}".to_owned()),
             false,
         ),
-    ]
+    ]);
+    rows
 }
 
 /// The trial furthest into the violating side, named the way it is reproduced.
@@ -1156,7 +1162,11 @@ mod tests {
         let rows = statistics_rows(&column, &plan, 4);
         assert!(
             rows.iter()
-                .any(|row| row.0 == "Yield" && row.1 == "66.67 % · 95 % CI 20.77 to 93.85 %")
+                .any(|row| row.0 == "Yield" && row.1 == "66.67 %")
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.0 == "95 % CI" && row.1 == "20.77 to 93.85 %")
         );
         specs.clear();
         let plan = population::build(
@@ -1327,7 +1337,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {needle} row"))
         };
 
-        assert!(by_name("Yield").contains("95 % CI"), "{}", by_name("Yield"));
+        assert!(by_name("95 % CI").ends_with(" %"), "{}", by_name("95 % CI"));
         assert!(
             by_name("Worst trial").starts_with("Trial 0 \u{b7} seed 29604"),
             "{}",
