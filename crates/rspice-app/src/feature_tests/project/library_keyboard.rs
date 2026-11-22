@@ -316,7 +316,8 @@ fn library_page_with_analog() -> Replay {
     replay
 }
 
-/// The labels of the listed rows: a library's reads "name, cells".
+/// The labels of the listed rows: a library's reads its name, and while a
+/// find runs how many cells it turns up there.
 fn rows(controls: &[super::super::replay::Control]) -> Vec<&str> {
     controls
         .iter()
@@ -345,7 +346,7 @@ fn the_find_searches_every_library_and_selects_what_it_finds() {
     );
     let controls = replay.frames(Vec::new());
     let listed = rows(&controls);
-    assert!(listed.contains(&"analog, 1"), "{listed:?}");
+    assert!(listed.contains(&"analog, 1 match"), "{listed:?}");
     assert!(
         !listed.iter().any(|row| row.starts_with("work")),
         "a library the find turns nothing up in is not listed: {listed:?}"
@@ -382,7 +383,7 @@ fn the_view_type_narrows_every_library_to_cells_holding_one() {
     );
     let controls = replay.frames(Vec::new());
     let listed = rows(&controls);
-    for row in ["analog, 1", "work, 1", "amp, 2", "symbol, symbol"] {
+    for row in ["analog, 1 match", "work, 1 match", "amp", "symbol"] {
         assert!(listed.contains(&row), "{row:?} in {listed:?}");
     }
     assert!(
@@ -479,9 +480,9 @@ fn drag(replay: &mut Replay, from: egui::Pos2, to: egui::Pos2) {
 fn a_cell_dragged_onto_a_library_opens_copy_cell_aimed_at_it() {
     let mut replay = library_page_with_analog();
     let controls = replay.frames(Vec::new());
-    let bias = only(&controls, "bias, 1", Role::ListBoxOption).center;
-    let analog = only(&controls, "analog, 2", Role::ListBoxOption).center;
-    let reference = only(&controls, "ref, 0, Read-only", Role::ListBoxOption).center;
+    let bias = only(&controls, "bias", Role::ListBoxOption).center;
+    let analog = only(&controls, "analog", Role::ListBoxOption).center;
+    let reference = only(&controls, "ref, Read-only", Role::ListBoxOption).center;
 
     drag(&mut replay, bias, reference);
     assert!(

@@ -56,7 +56,7 @@ pub(super) fn project_library_navigator(
     let total = libraries.len() + 1;
     let visible = libraries
         .iter()
-        .filter(|(_, _, _, visible)| *visible)
+        .filter(|(_, _, visible)| *visible)
         .count()
         + usize::from(builtin_matches);
     // The ratio is a fact only while the filter is hiding something; with no
@@ -75,7 +75,8 @@ pub(super) fn project_library_navigator(
         .as_deref()
         .filter(|_| !nav.builtin_library_open);
     let mut intent = None;
-    for (name, label, read_only, visible) in libraries.iter() {
+    let host = rspice_design::library::folder::HostPlatform::current();
+    for (name, label, visible) in libraries.iter() {
         if !visible {
             continue;
         }
@@ -90,9 +91,12 @@ pub(super) fn project_library_navigator(
             Some(_) => Cow::Owned(format!("{MARK_ROOM}{shown}")),
             None => shown.clone(),
         });
+        // Where it is kept is its icon: the project's own, or a folder of
+        // its own, as the Library page's column and Dependencies mark it.
+        let kept = nav.model.library_manager.reference(name);
         let response = nav_row_response(
             ui,
-            if *read_only {
+            if kept.is_some() {
                 WorkbenchIcon::Folder
             } else {
                 WorkbenchIcon::Project
@@ -112,7 +116,13 @@ pub(super) fn project_library_navigator(
                     .then_some(exception.label.as_str())
             })
         });
-        let response = match hover {
+        let kept_at = kept.map(|reference| {
+            format!(
+                "Kept in a folder of its own: {}",
+                reference.path.shown(host)
+            )
+        });
+        let response = match hover.or(kept_at.as_deref()) {
             Some(hover) => response.on_hover_text(hover),
             None => response,
         };
@@ -136,14 +146,14 @@ pub(super) fn project_library_navigator(
     intent
 }
 
-/// Each library by name and the name it is shown by, whether it is
-/// read-only, and whether the filter matches it by either name or a cell's or
-/// a view's; but not a netlist-first project's starter library.
+/// Each library by name and the name it is shown by, and whether the filter
+/// matches it by either name or a cell's or a view's; but not a
+/// netlist-first project's starter library.
 fn library_rail_rows(
     model: &Model,
     query: &str,
     netlist_first: bool,
-) -> Arc<[(String, String, bool, bool)]> {
+) -> Arc<[(String, String, bool)]> {
     model
         .library_manager
         .libraries_sorted()
@@ -168,7 +178,6 @@ fn library_rail_rows(
             (
                 library.name.clone(),
                 library.display_name().to_owned(),
-                library.read_only,
                 matches_query,
             )
         })

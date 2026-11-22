@@ -643,7 +643,7 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
     let mut replay = Replay::of(app);
     replay.frames(Vec::new());
 
-    replay.click("symbol, symbol, modified", Role::ListBoxOption);
+    replay.click("symbol, modified", Role::ListBoxOption);
     let state = &replay.app.state;
     assert_eq!(
         state.workbench.workspace,
@@ -658,7 +658,7 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
 
     let at = super::super::replay::only(
         &replay.frames(Vec::new()),
-        "symbol, symbol, modified",
+        "symbol, modified",
         Role::ListBoxOption,
     )
     .center;
@@ -694,7 +694,7 @@ fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
     use egui::accesskit::Role;
 
     use super::super::replay::{Replay, only};
-    use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS};
+    use rspice_app_state::veriloga_library::BUILTIN_VERILOGA_LIBRARY;
 
     let mut app = RSpiceApp::test_instance();
     let mut cell = Cell::new("amp");
@@ -716,8 +716,8 @@ fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
     );
 
     let controls = replay.frames(Vec::new());
-    // The rail announces a row's access after its name; the column's list
-    // announces each of its cells: the name, the cell count and the access.
+    // The rail announces a row's access after its name; so does the
+    // column's list.
     only(
         &controls,
         &format!("{BUILTIN_VERILOGA_LIBRARY}, Read-only"),
@@ -725,13 +725,10 @@ fn a_library_clicked_in_the_rail_leaves_the_built_in_library() {
     );
     only(
         &controls,
-        &format!(
-            "{BUILTIN_VERILOGA_LIBRARY}, {}, Read-only",
-            BUILTIN_VERILOGA_MODELS.len()
-        ),
+        &format!("{BUILTIN_VERILOGA_LIBRARY}, Read-only"),
         Role::ListBoxOption,
     );
-    only(&controls, "authoring, 1", Role::ListBoxOption);
+    only(&controls, "authoring", Role::ListBoxOption);
     let rail_row = only(&controls, "authoring", Role::Button).center;
     let press = |pressed| egui::Event::PointerButton {
         pos: rail_row,

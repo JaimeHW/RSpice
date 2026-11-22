@@ -15,6 +15,7 @@ use rspice_app_state::veriloga_library::{
 };
 
 use super::*;
+use crate::ui::icons::Icon;
 use crate::ui::widgets::table::{
     Cell as Entry, Column, ContextRequest, DataTable, Group, LineHeights, RowDrag, RowKey,
     Selection, TableResponse, TableState,
@@ -174,8 +175,8 @@ pub(super) struct LibraryRow {
     pub(super) name: String,
     /// What the row reads: the library's display name, or its name.
     label: String,
-    /// Its cells, or those the find turns up in it.
-    cells: String,
+    /// The cells the find turns up in it, in words.
+    matches: String,
     /// The row is the built-in Verilog-A library's.
     builtin: bool,
 }
@@ -183,7 +184,6 @@ pub(super) struct LibraryRow {
 /// One cell of the selected library that the filter lets through.
 pub(super) struct CellRow {
     pub(super) name: String,
-    views: String,
     description: String,
 }
 
@@ -283,7 +283,7 @@ pub(super) fn library_rows(
                         LibraryRow {
                             name: library.name.clone(),
                             label: library.display_name().to_owned(),
-                            cells: found.to_string(),
+                            matches: matches(found),
                             builtin: false,
                         }
                     })
@@ -294,7 +294,7 @@ pub(super) fn library_rows(
                 rows.push(LibraryRow {
                     name: BUILTIN_VERILOGA_LIBRARY.to_owned(),
                     label: BUILTIN_VERILOGA_LIBRARY.to_owned(),
-                    cells: models.to_string(),
+                    matches: matches(models),
                     builtin: true,
                 });
             }
@@ -347,7 +347,6 @@ pub(super) fn cell_rows(ctx: &Context, manager: &LibraryManager, find: &Find) ->
                         .filter(|cell| find.cell(cell))
                         .map(|cell| CellRow {
                             name: cell.name.clone(),
-                            views: cell.view_count().to_string(),
                             description: cell.description.clone(),
                         })
                         .collect()
@@ -360,6 +359,21 @@ pub(super) fn cell_rows(ctx: &Context, manager: &LibraryManager, find: &Find) ->
                 .collect()
         },
     )
+}
+
+/// How many cells a find turns up in a library, in words: a list column
+/// has no head to say what a bare number counts.
+fn matches(found: usize) -> String {
+    format!("{found} match{}", if found == 1 { "" } else { "es" })
+}
+
+/// Whether a view's name already says its type, as "schematic" does: the
+/// type beside it would only repeat it.
+fn named_for_its_type(view: &ViewRow) -> bool {
+    view.name.eq_ignore_ascii_case(view.view_type.caption())
+        || view
+            .name
+            .eq_ignore_ascii_case(view.view_type.display_name())
 }
 
 /// The selected cell's views, by name, of the type `find` asks for.
@@ -554,11 +568,22 @@ pub(super) fn library_column(
             .iter()
             .filter_map(|library| exceptions.get(&library.name)),
     );
+    // A list column has no heads, so each column says what it holds: the
+    // find's matches while a find runs, a status in words. Where a library
+    // is kept is its icon: the project's own, or a folder of its own, whose
+    // stored path the name's hint gives.
+    let finding = !find.is_everything();
     let columns = [
         Column::name("Library", 60.0),
-        Column::number("Cells", 44.0),
+        Column::words("Matches", 88.0),
         Column::words("Status", status),
     ];
+    let columns = if finding {
+        columns.to_vec()
+    } else {
+        vec![columns[0].clone(), columns[2].clone()]
+    };
+    let host = rspice_design::library::folder::HostPlatform::current();
     let focus = browser.focusing == Some(BrowserColumn::Library);
     let response = list_column(
         ui,
@@ -580,15 +605,28 @@ pub(super) fn library_column(
                 .max_height(body)
                 .show(ui, |row| {
                     let library = &libraries.rows[row];
-                    vec![
-                        Entry::text(library.label.as_str()),
-                        Entry::number(library.cells.as_str()),
-                        if library.builtin {
-                            Entry::text("Read-only")
-                        } else {
-                            exception(exceptions.get(&library.name))
-                        },
-                    ]
+                    let kept = (!library.builtin)
+                        .then(|| manager.reference(&library.name))
+                        .flatten();
+                    let name = Entry::text(library.label.as_str());
+                    let name = match kept {
+                        Some(reference) => name.icon(Icon::Folder).hint(format!(
+                            "Kept in a folder of its own: {}",
+                            reference.path.shown(host)
+                        )),
+                        None if library.builtin => name.icon(Icon::Folder),
+                        None => name.icon(Icon::Library),
+                    };
+                    let mut entries = vec![name];
+                    if finding {
+                        entries.push(Entry::text(library.matches.as_str()));
+                    }
+                    entries.push(if library.builtin {
+                        Entry::text("Read-only")
+                    } else {
+                        exception(exceptions.get(&library.name))
+                    });
+                    entries
                 })
         },
     );
@@ -664,15 +702,16 @@ pub(super) fn cell_column(
             .map(|cell| cell_exception(cx.model, library, &cell.name))
             .collect()
     });
+    // The View column's head counts the selected cell's views; a bare
+    // number here, with no head over it, said nothing.
     let columns = [
         Column::name("Cell", 60.0),
-        Column::number("Views", 44.0),
         Column::words(
             "Status",
             status_width(ui, 72.0, width, exceptions.iter().flatten()),
         ),
     ];
-    let columns = &columns[..if shown_library.is_some() { 3 } else { 2 }];
+    let columns = &columns[..if shown_library.is_some() { 2 } else { 1 }];
     let focus = browser.focusing == Some(BrowserColumn::Cell);
     let response = list_column(ui, "Cell", count, width, height, |ui, body| {
         DataTable::new(CELLS_TABLE, columns, cells.rows.len())
@@ -686,14 +725,11 @@ pub(super) fn cell_column(
             .show(ui, |row| {
                 let cell = &cells.rows[row];
                 let name = Entry::text(cell.name.as_str());
-                let mut entries = vec![
-                    if cell.description.trim().is_empty() {
-                        name
-                    } else {
-                        name.hint(cell.description.as_str())
-                    },
-                    Entry::number(cell.views.as_str()),
-                ];
+                let mut entries = vec![if cell.description.trim().is_empty() {
+                    name
+                } else {
+                    name.hint(cell.description.as_str())
+                }];
                 if shown_library.is_some() {
                     entries.push(exception(exceptions[row].as_ref()));
                 }
@@ -805,7 +841,11 @@ pub(super) fn view_column(
                     Some(path) => name.hint(path.as_str()),
                     None => name,
                 },
-                Entry::text(view.view_type.caption()),
+                if named_for_its_type(view) {
+                    Entry::empty()
+                } else {
+                    Entry::text(view.view_type.caption())
+                },
                 if file_exception.is_some() {
                     exception(file_exception)
                 } else if found.is_some_and(|view| view.modified) {

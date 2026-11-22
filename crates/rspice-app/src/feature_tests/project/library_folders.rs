@@ -438,7 +438,7 @@ fn an_edited_cellview_holds_its_lock_and_one_locked_elsewhere_is_never_written()
     assert!(
         announced
             .iter()
-            .any(|label| label == "schematic, schematic, Being edited by jsmith on LAB-PC3"),
+            .any(|label| label == "schematic, Being edited by jsmith on LAB-PC3"),
         "the stage's view row names its holder: {announced:#?}"
     );
 
