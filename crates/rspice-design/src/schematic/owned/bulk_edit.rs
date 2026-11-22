@@ -135,7 +135,7 @@ pub fn takes_instance_temperature(kind: ComponentType) -> bool {
         .is_none_or(|sheet| sheet.get("temp").is_some())
 }
 
-/// Why "Restore inherited value" cannot apply to a part's value.
+/// Why clearing to the inherited default cannot apply to a part's value.
 const VALUE_HAS_NO_INHERITANCE: &str = "A part's value has nothing to inherit; type the new value.";
 
 pub fn apply_bulk_edit(

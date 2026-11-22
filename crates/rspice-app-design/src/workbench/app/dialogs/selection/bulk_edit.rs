@@ -73,17 +73,18 @@ const fn bulk_property_label(value: SelectionBulkProperty) -> &'static str {
     }
 }
 
+/// What Apply does with the new value, the one it starts on first.
 const BULK_UNSET_BEHAVIORS: [SelectionBulkUnsetBehavior; 3] = [
-    SelectionBulkUnsetBehavior::LeaveUnchanged,
     SelectionBulkUnsetBehavior::SetExplicitValue,
+    SelectionBulkUnsetBehavior::LeaveUnchanged,
     SelectionBulkUnsetBehavior::RestoreInheritedValue,
 ];
 
 const fn bulk_unset_label(value: SelectionBulkUnsetBehavior) -> &'static str {
     match value {
-        SelectionBulkUnsetBehavior::LeaveUnchanged => "Leave unchanged",
-        SelectionBulkUnsetBehavior::SetExplicitValue => "Set explicit value",
-        SelectionBulkUnsetBehavior::RestoreInheritedValue => "Restore inherited value",
+        SelectionBulkUnsetBehavior::SetExplicitValue => "Set on every ticked part",
+        SelectionBulkUnsetBehavior::LeaveUnchanged => "Set only where already set",
+        SelectionBulkUnsetBehavior::RestoreInheritedValue => "Clear to the inherited default",
     }
 }
 
@@ -1178,12 +1179,12 @@ fn bulk_edit_fields(
         }
     });
     ui.add_space(9.0);
-    ui.label("Unset behavior");
+    ui.label("Change");
     let width = ui.available_width();
     pick(
         ui,
         "selection-bulk-unset",
-        "Unset behavior",
+        "Change",
         &mut dialog.unset_behavior,
         &BULK_UNSET_BEHAVIORS.map(|behavior| (behavior, bulk_unset_label(behavior))),
         width,
@@ -1193,11 +1194,7 @@ fn bulk_edit_fields(
     // Only a non-zero count is news. A row reading "0" on every clean filter
     // is a row the reader learns to skip.
     if impact.locked_or_excluded > 0 {
-        impact_row(
-            ui,
-            "Locked or excluded",
-            &impact.locked_or_excluded.to_string(),
-        );
+        impact_row(ui, "Skipped", &impact.locked_or_excluded.to_string());
     }
     // A bill-of-materials field or how a part is lettered changes no
     // analysis, so the count is shown only for what the netlist carries.
@@ -1566,9 +1563,13 @@ fn build_rows(
 ) -> Vec<SelectionBulkRow> {
     let active_key = model.workspace.content.active_schematic_reference().key();
     let mut buffers = Vec::new();
+    // A part's path is its occurrence's and its name: `/R1` at the top, not
+    // `//R1` under a root that already ends in the separator.
     buffers.push((
         active_key.clone(),
-        active_hierarchy_path(model),
+        active_hierarchy_path(model)
+            .trim_end_matches('/')
+            .to_owned(),
         model.schematic.document(),
         true,
     ));
@@ -1686,12 +1687,12 @@ fn append_buffer_rows(
                             component.name.clone()
                         }
                     ),
-                    value: "terminal contract".to_owned(),
+                    value: String::new(),
                     search_text: format!(
                         "{terminal} {} {} terminal pin port",
                         component.name, component.params
                     ),
-                    lock: Some("Master-owned".to_owned()),
+                    lock: Some("Set by the symbol".to_owned()),
                 });
             }
         }

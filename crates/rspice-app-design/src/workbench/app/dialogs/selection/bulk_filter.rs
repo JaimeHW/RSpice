@@ -17,7 +17,7 @@ impl SelectionBulkObjectKind {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::InstancesAndParameters => "Instances + parameters",
+            Self::InstancesAndParameters => "Parts",
             Self::PortsAndPins => "Ports and pins",
         }
     }
