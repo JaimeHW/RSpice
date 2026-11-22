@@ -429,6 +429,11 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             ProjectFeature::commit_configuration(cx, ConfigurationTransaction::UseForRuns(target))
         }
         Some(ProjectInspectorAction::Shell(request)) => cx.wb.outbox.push(request),
+        Some(ProjectInspectorAction::Properties(edit)) => {
+            if let Err(refusal) = properties::apply_project_properties(cx.model, edit) {
+                cx.wb.prompt(refusal);
+            }
+        }
         Some(ProjectInspectorAction::OpenDependency(library)) => {
             crate::workbench::surfaces::project::dependencies::open_dependency(
                 ui.ctx(),

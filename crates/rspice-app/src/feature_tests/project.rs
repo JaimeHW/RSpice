@@ -42,6 +42,7 @@ mod overview;
 mod overview_rows;
 mod plan_configuration;
 mod project_autosave;
+mod project_inspector;
 mod project_workflow;
 mod properties;
 mod publication;

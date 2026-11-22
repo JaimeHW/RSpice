@@ -2298,6 +2298,42 @@ fn property_row_combo_in(
     *selected != before
 }
 
+/// A property row choosing among values read only while its menu is open:
+/// for a list too costly to build on every frame just to state the one value
+/// chosen. The closed field states `shown`; `choices` lists each value with
+/// its name, and the one named `shown` is marked. Returns the value picked
+/// this frame.
+pub fn property_row_choice<T>(
+    ui: &mut Ui,
+    label: &str,
+    id_source: impl Hash + std::fmt::Debug,
+    shown: &str,
+    enabled: bool,
+    choices: impl FnOnce() -> Vec<(T, String)>,
+) -> Option<T> {
+    let mut picked = None;
+    property_row_dropdown_in(
+        ui,
+        id_source,
+        DropdownRow {
+            label,
+            closed: shown,
+            named: shown,
+            enabled,
+            label_width: None,
+            close_behavior: egui::PopupCloseBehavior::CloseOnClick,
+        },
+        |ui| {
+            for (value, name) in choices() {
+                if ui.selectable_label(name == shown, &name).clicked() {
+                    picked = Some(value);
+                }
+            }
+        },
+    );
+    picked
+}
+
 /// [`property_row_combo`] whose closed field states `shown`, the choice's
 /// short name, while its menu names every choice in full. Hovering the field
 /// names the chosen one in full. For choices whose full names outrun a

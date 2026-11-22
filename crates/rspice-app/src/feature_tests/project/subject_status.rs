@@ -332,7 +332,7 @@ fn the_inspector_lists_every_finding_the_checks_made() {
     for _ in 0..3 {
         app_frame(&ctx, &mut app, Vec::new());
     }
-    let inspector = painted_beside(&app_frame(&ctx, &mut app, Vec::new()), "Project file");
+    let inspector = painted_beside(&app_frame(&ctx, &mut app, Vec::new()), "Location");
     for message in &messages {
         assert!(
             inspector.iter().any(|text| text == message),

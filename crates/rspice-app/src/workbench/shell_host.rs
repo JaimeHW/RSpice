@@ -597,6 +597,18 @@ impl Host for RSpiceApp {
         };
         let messages = app.state.workbench.messages();
         match workspace {
+            // Nothing selected on the page, the inspector shows the project.
+            Workspace::Project
+                if rspice_app_project::workbench::docks::inspector::project::inspects_project(
+                    app.state.project.project_page,
+                    &app.state.model,
+                    app.state.project.builtin_models.open,
+                    &app.state.project.project_dependency_selection,
+                    &app.state.project.project_checkpoint_selection,
+                ) =>
+            {
+                "Project".to_owned()
+            }
             Workspace::Project => match app.state.project.project_page {
                 ProjectPage::Overview => "Project".to_owned(),
                 ProjectPage::Library => "Cell view".to_owned(),

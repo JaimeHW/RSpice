@@ -1,10 +1,12 @@
-//! The Project workspace's inspector: the overview, library, configuration,
-//! dependency and recovery pages.
+//! The Project workspace's inspector: the project itself while nothing on
+//! the page is selected, and otherwise the selected library, cell view,
+//! dependency or checkpoint; the configuration on the Configuration page.
 
 pub mod configuration;
 mod dependency;
 mod library;
 mod overview;
+mod properties;
 mod recovery;
 
 use egui::Ui;
@@ -20,11 +22,13 @@ use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationSelection,
 };
+use crate::workbench::project::properties::ProjectPropertiesEdit;
 use crate::workbench::project::workspace_state::ProjectPage;
 
 use dependency::project_dependency;
 pub use library::project_library;
-use overview::project_overview;
+use overview::overview_findings;
+use properties::project_properties;
 use recovery::project_recovery;
 
 /// What the Project workspace's inspector reads and writes: the project
@@ -79,6 +83,8 @@ pub enum ProjectInspectorAction {
     UseForRuns(ConfigurationSelection),
     /// Hand the shell what only it carries out.
     Shell(ProjectRequest),
+    /// Apply this edit of the project's properties.
+    Properties(ProjectPropertiesEdit),
     /// Open this dependency where it is edited, as its row's Open does.
     OpenDependency(DependencyLibrary),
     /// A command over a library kept in a folder of its own: its mode, or
@@ -90,18 +96,59 @@ pub(in crate::workbench) fn project(
     ui: &mut Ui,
     inspector: &mut ProjectInspector<'_>,
 ) -> Option<ProjectInspectorAction> {
+    let nothing_selected = inspects_project(
+        inspector.page,
+        inspector.model,
+        inspector.builtin_library_open,
+        inspector.dependency_selection,
+        inspector.checkpoint_selection,
+    );
     match inspector.page {
-        ProjectPage::Overview => project_overview(ui, inspector),
-        ProjectPage::Library => project_library(ui, inspector),
+        ProjectPage::Overview => {
+            let action = project_properties(ui, inspector);
+            overview_findings(ui, inspector);
+            action
+        }
         ProjectPage::Configuration => {
             configuration::project_configuration(ui, inspector.configuration, inspector.model)
                 .map(ProjectInspectorAction::UseForRuns)
         }
+        // The recovery store's state stands under the project while it is
+        // not in order.
+        ProjectPage::Recovery if nothing_selected => {
+            let action = project_properties(ui, inspector);
+            project_recovery(ui, inspector);
+            action
+        }
+        _ if nothing_selected => project_properties(ui, inspector),
+        ProjectPage::Library => project_library(ui, inspector),
         ProjectPage::Dependencies => project_dependency(ui, inspector),
         ProjectPage::Recovery => {
             project_recovery(ui, inspector);
             None
         }
+    }
+}
+
+/// Whether the inspector beside `page` shows the project itself: always on
+/// the Overview; on the Library Manager, Dependencies and Recovery while
+/// nothing on the page is selected. The Configuration page shows its
+/// configuration instead.
+pub fn inspects_project(
+    page: ProjectPage,
+    model: &Model,
+    builtin_library_open: bool,
+    dependency_selection: &Option<DependencyLibrary>,
+    checkpoint_selection: &Option<String>,
+) -> bool {
+    match page {
+        ProjectPage::Overview => true,
+        ProjectPage::Library => {
+            !builtin_library_open && model.library_manager.current_library().is_none()
+        }
+        ProjectPage::Configuration => false,
+        ProjectPage::Dependencies => dependency_selection.is_none(),
+        ProjectPage::Recovery => checkpoint_selection.is_none(),
     }
 }
 

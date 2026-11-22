@@ -1,5 +1,5 @@
 //! Project properties through whole application frames: opened from the
-//! project's name, the palette or the inspector, it changes the name,
+//! project's name or the palette, it changes the name,
 //! description, top cell and include search paths. What it applies survives
 //! save and reopen, each Apply is one step of Undo, and runs without a
 //! configuration start at the top it sets, as they do after Set as project
@@ -23,9 +23,7 @@ use rspice_app_state::state::CellViewRef;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
-/// The inspector's action and the File menu's row; the palette lists the
-/// command without its ellipsis.
-const PROPERTIES: &str = "Project properties\u{2026}";
+/// The command as the palette lists it, without its ellipsis.
 const PALETTE: &str = "Project properties";
 
 /// The reference project saved at `folder`/reference.rspiceproj and shown
@@ -37,6 +35,9 @@ fn saved_reference(folder: &Path, page: ProjectPage) -> (Replay, PathBuf) {
     assert!(app.state.save_project_to_path(&path));
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = page;
+    // The project inspector edits the same fields in place: closed, the
+    // dialog's are the only ones on screen.
+    app.state.workbench.inspector_visible = false;
     (Replay::of(app), path)
 }
 
@@ -141,6 +142,7 @@ fn what_project_properties_applies_survives_save_and_reopen() {
     assert!(reopened.state.load_project_from_path(&path));
     reopened.state.workbench.activate(Workspace::Project);
     reopened.state.project.project_page = ProjectPage::Overview;
+    reopened.state.workbench.inspector_visible = false;
     let mut reopened = Replay::of(reopened);
     assert_eq!(
         header_name(&reopened.frames(Vec::new())),
@@ -191,8 +193,7 @@ fn each_apply_is_one_step_of_undo_and_runs_start_at_the_top_it_sets() {
     replay.type_text("Renamed");
     replay.click("Apply", Role::Button);
 
-    // The inspector's Project actions open it too.
-    replay.click(PROPERTIES, Role::Button);
+    replay.choose_command(PALETTE);
     replay.click("Description", Role::MultilineTextInput);
     replay.type_text("Described");
     replay.click("Apply", Role::Button);

@@ -1,8 +1,8 @@
 //! The project's configuration transactions: which configuration runs use,
 //! and the edits the Configuration page applies to one.
 //!
-//! The Configuration page, its navigator and its inspector all commit through
-//! here, so each change to the catalog is validated the one way: a
+//! The Configuration page, its inspector and the project inspector commit
+//! through here, so each change to the catalog is validated the one way: a
 //! configuration that runs are about to use must project, keep its
 //! connectivity valid, generate a netlist and seal its sources before the
 //! catalog changes. The projection is taken on the frame; the rest runs off

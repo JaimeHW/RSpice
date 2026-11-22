@@ -525,11 +525,12 @@ fn announces(output: &egui::FullOutput, label: &str, value: &str) -> bool {
         .any(|node| node.label == label && node.value == value)
 }
 
-/// The Overview's inspector names the configuration the next run uses: once
-/// the plan names one of its own, that one, as the Analyses page's select
-/// says, while the project's mark stays where it was.
+/// The Overview names the configuration the next run uses: once the plan
+/// names one of its own, its Configuration row says that one, as the
+/// Analyses page's select says, while the project's mark stays where it was
+/// and the inspector's Configuration for runs names the mark.
 #[test]
-fn the_overview_inspector_names_the_configuration_the_plan_runs() {
+fn the_overview_names_the_configuration_the_plan_runs() {
     let ctx = offscreen();
     let (mut app, reference, _) = analyses_app();
     let output = settle(&ctx, &mut app, Vec::new());
@@ -538,18 +539,17 @@ fn the_overview_inspector_names_the_configuration_the_plan_runs() {
 
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Overview;
-    let output = settle(&ctx, &mut app, Vec::new());
+    let shown = painted(&settle(&ctx, &mut app, Vec::new()));
+    let lines: Vec<&str> = shown.lines().collect();
+    // The row states the configuration first, then what it binds.
     assert!(
-        announces(&output, "Configuration", VENDOR),
-        "the inspector names the plan's configuration: {:#?}",
-        nodes(&output)
+        lines
             .iter()
-            .filter(|node| node.label == "Configuration")
-            .map(|node| node.value.clone())
-            .collect::<Vec<_>>()
+            .any(|line| line.starts_with(&format!("{VENDOR} \u{b7} "))),
+        "the row names the plan's configuration:\n{shown}"
     );
     assert!(
-        !announces(&output, "Configuration", REFERENCE),
-        "and not the one marked for runs"
+        lines.contains(&REFERENCE),
+        "the inspector names the one marked for runs:\n{shown}"
     );
 }
