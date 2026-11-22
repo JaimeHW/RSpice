@@ -28,8 +28,10 @@ impl StretchOrthogonalPolicy {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::PreserveOrthogonal => "Preserve orthogonal",
-            Self::AllowDiagonal => "Allow diagonal",
+            // Both read as the Stretch strip's one control, Keep wires
+            // orthogonal, ticked or not.
+            Self::PreserveOrthogonal => "Wires kept orthogonal",
+            Self::AllowDiagonal => "Diagonal wires allowed",
         }
     }
 }
@@ -90,11 +92,10 @@ impl std::fmt::Display for StretchSelectionError {
             ),
             Self::NonOrthogonalSource { object_id } => write!(
                 formatter,
-                "Object {object_id} has non-orthogonal affected geometry; choose Allow diagonal to stretch it."
+                "Object {object_id} has angled segments; clear Keep wires orthogonal to stretch it."
             ),
-            Self::PerpendicularDeltaRequired => formatter.write_str(
-                "Preserve orthogonal requires motion perpendicular to the selected segment.",
-            ),
+            Self::PerpendicularDeltaRequired => formatter
+                .write_str("With Keep wires orthogonal, a segment moves only across its length."),
             Self::FixedAnchor { point } => write!(
                 formatter,
                 "The selected segment contains a fixed conductor or junction anchor at ({}, {}).",
@@ -168,7 +169,7 @@ impl StretchSelectionError {
                 name(*object_id)
             ),
             Self::NonOrthogonalSource { object_id } => format!(
-                "{} has angled segments; choose Allow diagonal to stretch it.",
+                "{} has angled segments; clear Keep wires orthogonal to stretch it.",
                 super::document::capitalized(&name(*object_id))
             ),
             Self::NetLabelAnchor { label_id, .. } => format!(

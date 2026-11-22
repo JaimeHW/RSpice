@@ -145,12 +145,7 @@ pub(super) fn commit_armed_stretch_selection(
             let recorded = state.model.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
             state.prompt(if recorded {
-                format!(
-                    "Stretched the selection by ({}, {}) with {}.",
-                    delta.x,
-                    delta.y,
-                    policy.label(),
-                )
+                format!("Stretched the selection by ({}, {}).", delta.x, delta.y)
             } else {
                 "Nothing stretched.".to_owned()
             });
