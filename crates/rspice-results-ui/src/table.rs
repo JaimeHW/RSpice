@@ -1045,13 +1045,16 @@ fn search_and_go_to(ui: &mut Ui, reserve: f32) {
 }
 
 fn search_fields(ui: &mut Ui) {
+    // The fields stand at the bar's control height, their words on its centre.
+    let height = crate::chrome::ResultBarMetrics::of(ui).instrument_control;
     let mut search = ui
         .data(|data| data.get_temp::<String>(search_id()))
         .unwrap_or_default();
-    let field = ui.add(
+    let field = ui.add_sized(
+        [SEARCH_WIDTH, height],
         egui::TextEdit::singleline(&mut search)
-            .desired_width(SEARCH_WIDTH)
             .font(theme::field_mono())
+            .vertical_align(egui::Align::Center)
             .hint_text("Search…"),
     );
     if field.changed() {
@@ -1062,10 +1065,11 @@ fn search_fields(ui: &mut Ui) {
     let mut text = ui
         .data(|data| data.get_temp::<String>(draft))
         .unwrap_or_default();
-    let field = ui.add(
+    let field = ui.add_sized(
+        [GO_TO_WIDTH, height],
         egui::TextEdit::singleline(&mut text)
-            .desired_width(GO_TO_WIDTH)
             .font(theme::field_mono())
+            .vertical_align(egui::Align::Center)
             .hint_text("Go to X…"),
     );
     let committed = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
