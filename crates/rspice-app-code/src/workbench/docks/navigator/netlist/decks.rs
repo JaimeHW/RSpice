@@ -71,6 +71,7 @@ pub(super) fn list(
                 enabled: true,
                 height,
                 hover: None,
+                path: false,
             },
         )
         .on_hover_text(tooltip);

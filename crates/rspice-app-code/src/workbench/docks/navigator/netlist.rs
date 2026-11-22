@@ -224,6 +224,7 @@ pub(in crate::workbench) fn netlist(
                         enabled: root.target_line.is_some(),
                         height,
                         hover: None,
+                        path: false,
                     },
                 )
                 .clicked()
@@ -260,6 +261,7 @@ pub(in crate::workbench) fn netlist(
                             enabled: true,
                             height,
                             hover: None,
+                            path: false,
                         },
                     )
                     .clicked()
@@ -309,6 +311,7 @@ pub(in crate::workbench) fn netlist(
                                 enabled: true,
                                 height,
                                 hover: Some(&hover),
+                                path: false,
                             },
                         );
                         if response.clicked() {
@@ -338,6 +341,7 @@ pub(in crate::workbench) fn netlist(
                             enabled: row.target_line.is_some(),
                             height,
                             hover: row.tooltip.as_deref(),
+                            path: true,
                         },
                         selector.map_or(0.0, |width| width + NETLIST_OUTLINE_ICON_GAP),
                     );
@@ -421,6 +425,7 @@ pub(in crate::workbench) fn netlist(
                                 enabled: true,
                                 height,
                                 hover: None,
+                                path: false,
                             },
                         )
                         .clicked()
@@ -487,6 +492,7 @@ pub(in crate::workbench) fn netlist(
                                 enabled: true,
                                 height,
                                 hover: None,
+                                path: false,
                             },
                         )
                         .clicked()
@@ -535,6 +541,7 @@ pub(in crate::workbench) fn netlist(
                                 enabled: true,
                                 height,
                                 hover: None,
+                                path: false,
                             },
                         )
                         .clicked()
@@ -679,6 +686,7 @@ fn missing_deck_outline(
                     enabled: false,
                     height,
                     hover: Some(&path),
+                    path: false,
                 },
             );
         });
@@ -716,6 +724,7 @@ fn outline_group_row(
             enabled: true,
             height,
             hover: None,
+            path: false,
         },
     );
     let expanded = group.expanded;
@@ -1341,6 +1350,7 @@ pub(super) fn netlist_diff(ui: &mut Ui, parts: &mut NetlistNavigator<'_>) {
                         enabled: true,
                         height,
                         hover: None,
+                        path: false,
                     },
                 )
                 .clicked()
@@ -1760,7 +1770,10 @@ impl NetlistNavigatorProjection {
                             MessageId::NetlistNavigatorLine,
                             &[("line", &entry.line().to_string())],
                         )),
-                        tooltip: Some(messages.text(MessageId::NetlistIncludeChainUntraced)),
+                        tooltip: Some(format!(
+                            "{label}\n{}",
+                            messages.text(MessageId::NetlistIncludeChainUntraced)
+                        )),
                         shadowed: false,
                         sections: None,
                         label,
@@ -1815,12 +1828,12 @@ impl NetlistNavigatorProjection {
                     .state
                     .map(|state| format!("{}\n", messages.text(state)))
                     .unwrap_or_default();
-                tooltip.push_str(
-                    &facts
-                        .chain
-                        .clone()
-                        .unwrap_or_else(|| messages.text(MessageId::NetlistIncludeChainUntraced)),
-                );
+                tooltip.push_str(&facts.chain.clone().unwrap_or_else(|| {
+                    format!(
+                        "{label}\n{}",
+                        messages.text(MessageId::NetlistIncludeChainUntraced)
+                    )
+                }));
                 if let Some(shadowed_by) = &facts.shadowed_by {
                     tooltip.push('\n');
                     tooltip.push_str(shadowed_by);
@@ -2157,6 +2170,9 @@ pub(super) enum NetlistOutlineRowShape {
 
 pub(super) struct OutlineRowVisual<'a> {
     pub(super) label: &'a str,
+    /// The label is a file's path. It gives way from its front, so the
+    /// file's name stays in view, and the meta beside it keeps its place.
+    pub(super) path: bool,
     pub(super) meta: Option<&'a str>,
     /// Severity tone for the meta column. `None` is the ordinary faint tone;
     /// a row states a colour only when the meta itself is a verdict.
@@ -2314,22 +2330,42 @@ fn netlist_outline_row_beside(ui: &mut Ui, row: OutlineRowVisual<'_>, trailing: 
     // The control over the row's end keeps its `trailing` points.
     let right = rect.right() - trailing;
     let room = (right - NETLIST_OUTLINE_PADDING_X - label_left).max(0.0);
-    // The name is what the row is: it keeps its whole width, and the value
-    // beside it is what gives way, ending in an ellipsis.
-    let label = crate::ui::panels::elide_text(ui, row.label, &label_font, room);
-    let label_width = ui
-        .painter()
-        .layout_no_wrap(label.clone(), label_font.clone(), foreground)
-        .size()
-        .x;
-    let meta = row.meta.map(|meta| {
-        crate::ui::panels::elide_text(
-            ui,
-            meta,
-            &meta_font,
-            room - label_width - NETLIST_OUTLINE_ICON_GAP,
-        )
-    });
+    let text_width = |text: &str, font: &egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), foreground)
+            .size()
+            .x
+    };
+    let (label, meta) = if row.path {
+        // A path is read by its file's name, and the meta says where the
+        // card is written: the meta keeps its place, and the path gives way
+        // from its front.
+        let meta = row
+            .meta
+            .map(|meta| crate::ui::panels::elide_text(ui, meta, &meta_font, room));
+        let beside = meta
+            .as_deref()
+            .filter(|meta| !meta.is_empty())
+            .map_or(0.0, |meta| {
+                text_width(meta, &meta_font) + NETLIST_OUTLINE_ICON_GAP
+            });
+        let label = crate::ui::panels::elide_path_front(ui, row.label, &label_font, room - beside);
+        (label, meta)
+    } else {
+        // The name is what the row is: it keeps its whole width, and the
+        // value beside it is what gives way, ending in an ellipsis.
+        let label = crate::ui::panels::elide_text(ui, row.label, &label_font, room);
+        let label_width = text_width(&label, &label_font);
+        let meta = row.meta.map(|meta| {
+            crate::ui::panels::elide_text(
+                ui,
+                meta,
+                &meta_font,
+                room - label_width - NETLIST_OUTLINE_ICON_GAP,
+            )
+        });
+        (label, meta)
+    };
     let cut = label != row.label || meta.as_deref() != row.meta;
     ui.painter().with_clip_rect(rect).text(
         egui::pos2(label_left, rect.center().y),
