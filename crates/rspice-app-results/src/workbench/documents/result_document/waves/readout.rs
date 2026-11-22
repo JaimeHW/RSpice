@@ -114,11 +114,20 @@ pub(super) fn add_offset_marker(
     Some(selector)
 }
 
-/// Whether the dock offers its Cursors page: while Results shows a sheet
-/// that reads cursors and markers.
+/// Whether the dock offers its Cursors page: while a sheet that reads
+/// cursors and markers is shown, in Results or in the plot pane beside a
+/// drawing, a netlist or a plan.
 pub fn offers_cursors(state: ResultsReads<'_>) -> bool {
-    state.workbench.workspace == Workspace::Results
-        && super::super::sheet_has_cursors(state.results.session.viewer)
+    let workbench = state.workbench;
+    let shown = workbench.workspace == Workspace::Results
+        || (workbench.split_with_results
+            && workbench.supports_results_split()
+            && state
+                .model
+                .simulation
+                .retained
+                .has_retained_result_dataset());
+    shown && super::super::sheet_has_cursors(state.results.session.viewer)
 }
 
 /// Whether the dock shows its Cursors page now.
