@@ -1019,8 +1019,9 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
 
 /// The canvas menu had Copy, Duplicate and Delete but no Cut, no Paste and
 /// no vertical mirror, so a reader working from the menu had to reach for
-/// keys to finish the job (audit E-9). Each row is offered on every target
-/// and runs its command: Cut takes the part onto the clipboard, Paste puts
+/// keys to finish the job (audit E-9). A part's menu offers Cut and Mirror
+/// vertically, the sheet's offers Paste once something is copied, and each
+/// row runs its command: Cut takes the part onto the clipboard, Paste puts
 /// it back where the menu was opened, and Mirror vertically flips the
 /// selection top to bottom.
 #[test]
@@ -1054,21 +1055,21 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
         .select_only_component(41);
     let symbol_context = schematic_symbol_context(&state);
 
-    for target in [ContextTarget::Component(41), ContextTarget::Canvas] {
-        let actions: Vec<ContextAction> = menu_entries(&state, target)
+    let actions = |state: &AppState, target| -> Vec<ContextAction> {
+        menu_entries(state, target)
             .iter()
             .filter_map(|entry| match entry {
                 ContextEntry::Command(command) => Some(command.action),
                 ContextEntry::Separator => None,
             })
-            .collect();
-        for action in [
-            ContextAction::Cut,
-            ContextAction::Paste,
-            ContextAction::MirrorVertical,
-        ] {
-            assert!(actions.contains(&action), "{target:?} lacks {action:?}");
-        }
+            .collect()
+    };
+    let part_menu = actions(&state, ContextTarget::Component(41));
+    for action in [ContextAction::Cut, ContextAction::MirrorVertical] {
+        assert!(
+            part_menu.contains(&action),
+            "the part's menu lacks {action:?}"
+        );
     }
     assert!(action_availability(ContextAction::Cut, &state).0);
     assert!(
@@ -1084,6 +1085,7 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     );
     assert!(state.model.schematic.document().components.is_empty());
     assert_eq!(state.design.schematic_clipboard.components.len(), 1);
+    assert!(actions(&state, ContextTarget::Canvas).contains(&ContextAction::Paste));
     assert!(action_availability(ContextAction::Paste, &state).0);
 
     let click = Point::new(200, 100);

@@ -323,36 +323,78 @@ fn clicked_source<'a>(state: &CanvasFacts<'a>) -> Option<&'a crate::state::Compo
         })
 }
 
-/// What one menu is about, which decides what fills its instance-master slot.
+/// What one menu is about, which decides its rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuSubject {
+    /// The canvas itself: nothing was under the pointer, and nothing is
+    /// selected.
+    Canvas,
     /// One placed independent source: the stimulus group, and no master rows.
     Source,
     /// An instance whose master is a Verilog-A view.
     VerilogAInstance,
-    /// The canvas itself: no object was under the pointer.
-    Canvas,
-    /// Any other instance, or a wire.
-    Object,
+    /// Any other instance.
+    Instance,
+    /// A wire, or a piece of one.
+    Wire,
+    Junction,
+    NetLabel,
+    /// A bus or one of its taps.
+    Bus,
+    Probe,
+    /// A design note or a documentation shape.
+    Annotation,
+    /// Two or more objects, which the menu acts on together.
+    Selection,
 }
 
 fn menu_subject(state: &CanvasFacts<'_>, target: ContextTarget) -> MenuSubject {
+    let selection = &state.model.schematic.session.editor.selection;
+    if selection.count() > 1 {
+        return MenuSubject::Selection;
+    }
     if clicked_source(state).is_some() {
         return MenuSubject::Source;
     }
-    match target {
-        ContextTarget::Canvas => MenuSubject::Canvas,
-        ContextTarget::Component(id) if state.veriloga_master_of_component(id).is_some() => {
+    let instance = |id| {
+        if state.veriloga_master_of_component(id).is_some() {
             MenuSubject::VerilogAInstance
+        } else {
+            MenuSubject::Instance
         }
-        ContextTarget::Component(_) | ContextTarget::Wire(_) => MenuSubject::Object,
+    };
+    match target {
+        ContextTarget::Component(id) => instance(id),
+        ContextTarget::Wire(_) => MenuSubject::Wire,
+        // A right-click selects what it lands on, and names a part or a
+        // wire as the target; anything else is named by what it selected.
+        ContextTarget::Canvas => {
+            if let Some(id) = selection.single_component() {
+                instance(id)
+            } else if selection.single_net_label().is_some() {
+                MenuSubject::NetLabel
+            } else if selection.single_bus().is_some() || selection.single_bus_tap().is_some() {
+                MenuSubject::Bus
+            } else if selection.single_junction().is_some() {
+                MenuSubject::Junction
+            } else if selection.single_probe().is_some() {
+                MenuSubject::Probe
+            } else if selection.single_design_note().is_some()
+                || selection.single_documentation_shape().is_some()
+            {
+                MenuSubject::Annotation
+            } else if selection.has_any_wire_selection() {
+                MenuSubject::Wire
+            } else {
+                MenuSubject::Canvas
+            }
+        }
     }
 }
 
 /// A click on empty sheet with nothing selected.
 fn is_bare_canvas(state: &CanvasFacts<'_>, target: ContextTarget) -> bool {
     menu_subject(state, target) == MenuSubject::Canvas
-        && state.model.schematic.session.editor.selection.is_empty()
 }
 
 /// The Arrange page: the Design menu's Arrange submenu, group by group.
@@ -467,47 +509,57 @@ fn turn(
     }
 }
 
-/// The rows a menu opened on the bare canvas, with nothing selected, leaves
-/// out: they act on a selection there is none of, so they could only ever be
-/// disabled there.
-fn selection_only(action: ContextAction, state: &CanvasFacts<'_>) -> bool {
+/// Whether the row `action` belongs to a menu about `subject`: the verbs that
+/// apply to that kind of object, and only those. The empty canvas offers what
+/// can be started on a sheet and the sheet's own verbs; an object offers its
+/// own, the edits common to every object, then what it has for a master or a
+/// signal. A row that applies to the kind but cannot run right now stays, off,
+/// and says why.
+fn row_belongs(action: ContextAction, subject: MenuSubject) -> bool {
+    use MenuSubject as S;
+    let instance = matches!(subject, S::Instance | S::VerilogAInstance);
+    let part = instance || subject == S::Source;
+    let turns = part || matches!(subject, S::NetLabel | S::Annotation | S::Selection);
     match action {
-        ContextAction::Properties
-        | ContextAction::Rotate
-        | ContextAction::Mirror
-        | ContextAction::MirrorVertical
-        | ContextAction::Arrange
-        | ContextAction::Cut
-        | ContextAction::Copy
-        | ContextAction::Duplicate
-        | ContextAction::Delete
-        | ContextAction::CreateHierarchy
-        | ContextAction::ShowInNetlist => true,
-        ContextAction::Paste => state.design.schematic_clipboard.is_empty(),
-        _ => false,
-    }
-}
-
-/// Whether the catalog's instance-master slot holds `action` for `subject`.
-fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
-    match action {
-        ContextAction::DescendHierarchy => subject == MenuSubject::Object,
-        ContextAction::OpenVerilogAView => subject == MenuSubject::VerilogAInstance,
-        // A symbol from the sheet's own ports is the sheet's verb, so it is
-        // on the sheet's menu; an instance's menu offers its symbol instead.
-        ContextAction::NewVerilogADevice
-        | ContextAction::ZoomBox
-        | ContextAction::CreateSymbolFromPorts
-        | ContextAction::PlaceInstance
+        ContextAction::PlaceInstance
         | ContextAction::PlaceWire
         | ContextAction::PlaceLabel
-        | ContextAction::PlaceText => subject == MenuSubject::Canvas,
-        ContextAction::UpdateInstanceInterface
-        | ContextAction::ReplaceInstance
-        | ContextAction::EditSymbolInPlace => {
-            matches!(subject, MenuSubject::Object | MenuSubject::VerilogAInstance)
+        | ContextAction::PlaceText
+        | ContextAction::Paste
+        | ContextAction::NewVerilogADevice
+        | ContextAction::CreateSymbolFromPorts
+        | ContextAction::SheetProperties
+        | ContextAction::FitContent
+        | ContextAction::ZoomBox => subject == S::Canvas,
+        ContextAction::Properties => turns || subject == S::Bus,
+        ContextAction::Rotate
+        | ContextAction::Mirror
+        | ContextAction::MirrorVertical
+        | ContextAction::Arrange => turns,
+        ContextAction::SnapToStandardValue | ContextAction::ResetLabelPosition => {
+            part || subject == S::Selection
         }
-        _ => true,
+        ContextAction::AdoptStimulus
+        | ContextAction::ReadoptStimulus
+        | ContextAction::SaveStimulus
+        | ContextAction::OpenStimulusDefinition => subject == S::Source,
+        ContextAction::Cut | ContextAction::Copy | ContextAction::Delete => subject != S::Canvas,
+        // A junction alone has nowhere to be copied to at a fixed offset.
+        ContextAction::Duplicate => !matches!(subject, S::Canvas | S::Junction),
+        ContextAction::DescendHierarchy => subject == S::Instance,
+        ContextAction::OpenVerilogAView => subject == S::VerilogAInstance,
+        ContextAction::EditSymbolInPlace
+        | ContextAction::UpdateInstanceInterface
+        | ContextAction::ReplaceInstance => instance,
+        // A repair of the whole drawing, offered on the sheet and on an
+        // instance beside the repair of that one.
+        ContextAction::UpdateAllInstanceInterfaces => instance || subject == S::Canvas,
+        ContextAction::CreateHierarchy => part || subject == S::Selection,
+        ContextAction::ShowInNetlist => part,
+        // A probe goes on a part or a wire; the canvas's own probe is the tool.
+        ContextAction::Probe => part || subject == S::Wire,
+        ContextAction::OperatingPoint => part || subject == S::Canvas,
+        ContextAction::ArrangeCommand(_) | ContextAction::Choose(_) => false,
     }
 }
 
@@ -538,51 +590,34 @@ fn selection_holds_a_standard_value(state: &CanvasFacts<'_>) -> bool {
 
 /// The entries the menu is made of, for what it was opened on.
 ///
-/// The catalog is one list, and almost all of it is every target's: a verb that
-/// cannot be taken right now stays where it is, disabled, and says why. What is
-/// left out is a verb that could never apply to the *kind* of object the menu
-/// is about. Only the instance-master slot varies. An instance offers its
-/// master's four rows; a Verilog-A instance's Descend row opens its module's
-/// view; the empty canvas, which has no master, offers a new Verilog-A device
-/// in their place, and a symbol from its own ports. A placed source gets the
-/// stimulus-library group instead of the master rows, which is also what lets
-/// the group in without turning the menu into a scroller. A rule with nothing
-/// left under it goes too.
+/// The catalog is one list, in one order, and each menu takes the rows that
+/// belong to its subject (`row_belongs`). Some rows are offered only where
+/// they have something to act on: Snap to standard value on a resistor,
+/// capacitor or inductor; Reset label position on a part whose text moved;
+/// the stimulus group on a source, by its standing with the library; Update
+/// all instances where one is stale; Paste here with something to paste. A
+/// rule with nothing left under it goes too.
 pub fn menu_entries(state: &CanvasFacts<'_>, target: ContextTarget) -> Vec<ContextEntry> {
     let subject = menu_subject(state, target);
-    let bare_canvas = is_bare_canvas(state, target);
     let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
     for entry in CONTEXT_ENTRIES {
-        if let ContextEntry::Command(command) = entry
-            && bare_canvas
-            && selection_only(command.action, state)
-        {
-            continue;
-        }
         let shown = match entry {
             ContextEntry::Separator => {
                 matches!(entries.last(), Some(ContextEntry::Command(_)))
             }
-            ContextEntry::Command(command) if stimulus::owns(command.action) => {
-                stimulus::shown(command.action, state)
-            }
-            ContextEntry::Command(command)
-                if command.action == ContextAction::SnapToStandardValue =>
-            {
-                selection_holds_a_standard_value(state)
-            }
-            ContextEntry::Command(command)
-                if command.action == ContextAction::ResetLabelPosition =>
-            {
-                super::label_reset::selection_holds_placed_text(state.model)
-            }
-            // A repair, so offered only where there is something to repair.
-            ContextEntry::Command(command)
-                if command.action == ContextAction::UpdateAllInstanceInterfaces =>
-            {
-                !stale_instances(state).is_empty()
-            }
-            ContextEntry::Command(command) => master_slot_shows(command.action, subject),
+            ContextEntry::Command(command) if !row_belongs(command.action, subject) => false,
+            ContextEntry::Command(command) => match command.action {
+                action if stimulus::owns(action) => stimulus::shown(action, state),
+                ContextAction::SnapToStandardValue => selection_holds_a_standard_value(state),
+                ContextAction::ResetLabelPosition => {
+                    super::label_reset::selection_holds_placed_text(state.model)
+                }
+                // A repair, so offered only where there is something to repair.
+                ContextAction::UpdateAllInstanceInterfaces => !stale_instances(state).is_empty(),
+                // Pasting needs something to paste.
+                ContextAction::Paste => !state.design.schematic_clipboard.is_empty(),
+                _ => true,
+            },
         };
         if shown {
             entries.push(*entry);
@@ -768,13 +803,16 @@ fn select_pointer_target(
 }
 
 /// Select what the menu opens on, unless it is already in the selection,
-/// and name it as the menu's target. A net highlight stays lit, so the menu
-/// can act on the lit net and Descend carries it into an instance.
+/// and name it as the menu's target. Opened on empty sheet, the menu is the
+/// sheet's, so nothing stays selected for its rows to act on elsewhere. A net
+/// highlight stays lit, so the menu can act on the lit net and Descend
+/// carries it into an instance.
 pub fn select_context_target(
     state: &mut CanvasParts<'_>,
     target: Option<PointerTarget>,
 ) -> ContextTarget {
     let Some(target) = target else {
+        state.model.schematic.session.editor.selection.clear();
         return ContextTarget::Canvas;
     };
     match target {

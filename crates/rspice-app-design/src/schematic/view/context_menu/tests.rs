@@ -13,6 +13,7 @@ use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType, Junction,
     LibraryCellInstance, NetLabel, Wire,
 };
+use rspice_design::schematic::selection::Selection;
 
 // The menu answers over the canvas's facts and acts over its parts. These
 // lend both from a test's state under the menu's own names, and answer what
@@ -231,16 +232,15 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<CommandKey>
         .collect()
 }
 
-/// Each target's menu, row for row and rule for rule. Only the
-/// instance-master slot differs: an instance's four master rows, a Verilog-A
-/// instance's "Open Verilog-A view" in place of Descend, and the empty
-/// canvas's one verb, "New Verilog-A device…", in place of all four, with
-/// the zoom box after Fit and the sheet's own symbol after Create hierarchy.
-/// The row and rule counts are the ones
-/// `rspice-schematic-editor`'s geometry test measures against the 635 px
-/// ceiling: 20 + 4 (625 px), 19 + 4 (598 px).
+/// Each target's menu, row for row and rule for rule. The empty canvas offers
+/// what can be started on a sheet and the sheet's own verbs; an instance its
+/// edits, the clipboard, its master's rows and its signal, with a Verilog-A
+/// instance's "Open Verilog-A view" in place of Descend; a wire none of the
+/// master rows, which could never apply to it. A part's menu, with every row
+/// it can take, fits the menu's 635 px without scrolling: 20 rows and 3 rules
+/// with its 47 px header are 614 px.
 #[test]
-fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
+fn each_target_gets_the_catalog_its_kind_calls_for() {
     let head = [
         (
             "Object properties…",
@@ -259,7 +259,6 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         ("Arrange", None),
         ("Cut selection", Some(ids::CUT)),
         ("Copy selection", Some(ids::COPY)),
-        ("Paste here", Some(ids::PASTE)),
         ("Duplicate", Some(ids::DUPLICATE)),
         ("Delete", Some(ids::DELETE)),
     ];
@@ -267,11 +266,6 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         (
             "Create hierarchy from selection…",
             Some(DesignCommand::CreateHierarchy.key()),
-        ),
-        ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
-        (
-            "Fit schematic content",
-            Some(DesignCommand::FitSchematicContent.key()),
         ),
         ("Show in netlist", Some(ids::SHOW_IN_NETLIST)),
         ("Probe", Some(DesignCommand::PlaceProbe.key())),
@@ -326,21 +320,12 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
                 Some(DesignCommand::FitSchematicContent.key())
             ),
             ("Zoom box", Some(ids::ZOOM_BOX)),
-            ("Probe", Some(DesignCommand::PlaceProbe.key())),
             ("Open operating point", Some(ids::RESULT_OPERATING_POINT)),
         ],
     );
-    // Something selected, then a click on the bare sheet: the selection's
-    // verbs are back, and only the bare canvas offers the creation verbs.
-    let mut selected = state_with_selected_source(0, false);
-    let selected_canvas = labels_of(&menu_entries(&selected, ContextTarget::Canvas));
-    assert!(selected_canvas.contains(&"Cut selection"));
-    assert!(!selected_canvas.contains(&"Draw wire"));
-    selected.model.schematic.session.editor.selection = Default::default();
-    assert!(labels_of(&menu_entries(&selected, ContextTarget::Canvas)).contains(&"Draw wire"));
-    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (11, 3));
+    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (10, 3));
 
-    // A schematic instance, and a wire: the master rows, Descend first.
+    // A schematic instance: its edits, its master's rows, Descend first.
     let mut resistor = DesignTestHost::default();
     resistor
         .model
@@ -352,18 +337,27 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 0));
-    for target in [ContextTarget::Component(id), ContextTarget::Wire(17)] {
-        let entries = menu_entries(&resistor, target);
-        assert_eq!(
-            catalog_of(&entries),
-            menu(&[descend, master_rows[0], master_rows[1], master_rows[2]]),
-            "{target:?}"
-        );
-        assert_eq!(
-            (catalog_of(&entries).len(), separators_in(&entries)),
-            (20, 4)
-        );
-    }
+    let entries = menu_entries(&resistor, ContextTarget::Component(id));
+    assert_eq!(
+        catalog_of(&entries),
+        menu(&[descend, master_rows[0], master_rows[1], master_rows[2]]),
+    );
+    assert_eq!(
+        (catalog_of(&entries).len(), separators_in(&entries)),
+        (17, 3)
+    );
+
+    // A wire: what a wire takes, and no master row.
+    assert_eq!(
+        catalog_of(&menu_entries(&resistor, ContextTarget::Wire(17))),
+        vec![
+            ("Cut selection", Some(ids::CUT)),
+            ("Copy selection", Some(ids::COPY)),
+            ("Duplicate", Some(ids::DUPLICATE)),
+            ("Delete", Some(ids::DELETE)),
+            ("Probe", Some(DesignCommand::PlaceProbe.key())),
+        ],
+    );
 
     // A Verilog-A instance: its Descend row opens the module's view.
     let (veriloga, id, _) = state_with_selected_veriloga_instance();
@@ -379,8 +373,127 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     );
     assert_eq!(
         (catalog_of(&entries).len(), separators_in(&entries)),
-        (20, 4)
+        (17, 3)
     );
+}
+
+/// A right-click on empty sheet lets go of the selection, so the menu it
+/// opens is the sheet's and no row acts on a part across the sheet.
+#[test]
+fn a_right_click_on_empty_sheet_lets_go_of_the_selection() {
+    let mut state = state_with_selected_source(0, false);
+    assert!(labels_of(&menu_entries(&state, ContextTarget::Canvas)).contains(&"Cut selection"));
+
+    let target = super::select_context_target(&mut canvas_parts(&mut state), None);
+
+    assert_eq!(target, ContextTarget::Canvas);
+    assert!(state.model.schematic.session.editor.selection.is_empty());
+    let labels = labels_of(&menu_entries(&state, target));
+    assert!(labels.contains(&"Draw wire"));
+    assert!(!labels.contains(&"Cut selection"));
+    assert!(!labels.contains(&"Rotate 90°"));
+}
+
+/// Each annotation's menu holds what applies to it: its form where it has
+/// one, the turns where it turns, and the clipboard. None offers the empty
+/// canvas's placement rows, and none a master's.
+#[test]
+fn an_annotation_menu_holds_only_what_applies_to_it() {
+    use crate::state::{DesignNote, DesignNoteKind, SchematicProbe};
+
+    let mut state = DesignTestHost::default();
+    let document = state.model.schematic.document_mut_for_test();
+    document.components.clear();
+    document
+        .net_labels
+        .push(NetLabel::new(73, Point::new(40, 40), "out"));
+    document.junctions.push(Junction::new(81, Point::new(0, 0)));
+    document.probes.push(
+        SchematicProbe::new(77, Point::new(10, 20), "V(OUT)", Some("V(OUT)".to_owned())).unwrap(),
+    );
+    document.design_notes.push(
+        DesignNote::new(
+            74,
+            Point::new(80, 80),
+            DesignNoteKind::ReviewNote,
+            "Review bias path",
+        )
+        .unwrap(),
+    );
+    let clipboard = ["Cut selection", "Copy selection", "Duplicate", "Delete"];
+    let turns = ["Rotate 90°", "Mirror", "Mirror vertically", "Arrange"];
+    let menu = |state: &mut DesignTestHost, select: &dyn Fn(&mut Selection)| {
+        let selection = &mut state.model.schematic.session.editor.selection;
+        selection.clear();
+        select(selection);
+        labels_of(&menu_entries(state, ContextTarget::Canvas))
+    };
+
+    let label = menu(&mut state, &|selection| selection.select_only_net_label(73));
+    let expected: Vec<&str> = ["Object properties…"]
+        .into_iter()
+        .chain(turns)
+        .chain(clipboard)
+        .collect();
+    assert_eq!(label, expected);
+
+    let note = menu(&mut state, &|selection| {
+        selection.select_only_design_note(74)
+    });
+    assert_eq!(note, expected);
+
+    let probe = menu(&mut state, &|selection| selection.select_only_probe(77));
+    assert_eq!(probe, clipboard.to_vec());
+
+    // A junction alone has nowhere to be duplicated to.
+    let junction = menu(&mut state, &|selection| {
+        selection.select_only_junction(Point::new(0, 0))
+    });
+    assert_eq!(junction, vec!["Cut selection", "Copy selection", "Delete"]);
+
+    for labels in [label, note, probe, junction] {
+        for absent in [
+            "Place instance…",
+            "Draw wire",
+            "Zoom box",
+            "Descend into selected instance",
+        ] {
+            assert!(!labels.contains(&absent), "{absent} in {labels:?}");
+        }
+    }
+}
+
+/// A part's menu with every row it can take: its standard value to snap and
+/// its moved name to put back. It fits the menu without scrolling.
+#[test]
+fn a_parts_fullest_menu_fits_without_scrolling() {
+    use rspice_design::schematic::label_layout::TextEdge;
+    use rspice_design::schematic::label_position::LabelPosition;
+
+    let mut state = DesignTestHost::default();
+    let mut moved =
+        Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
+    moved.name_label_pos = LabelPosition::Placed {
+        offset: Point::new(60, -40),
+        horizontal: TextEdge::Start,
+        vertical: TextEdge::End,
+        upward: false,
+        size_percent: 100,
+    };
+    state.model.schematic.document_mut_for_test().components = vec![moved];
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(1);
+    let entries = menu_entries(&state, ContextTarget::Component(1));
+    let labels = labels_of(&entries);
+    assert!(labels.contains(&"Snap to standard value"));
+    assert!(labels.contains(&"Reset label position"));
+    // The header, 19 rows of 27 px and 3 rules of 9 px: 587 px of 635.
+    assert_eq!((labels.len(), separators_in(&entries)), (19, 3));
 }
 
 /// A placed source's menu states the stimulus-library verbs its standing calls
@@ -428,7 +541,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
         for target in [ContextTarget::Component(7), ContextTarget::Canvas] {
             let entries = menu_entries(state, target);
             assert!(labels_of(&entries).len() <= 20, "{target:?}");
-            assert_eq!(separators_in(&entries), 5, "{target:?}");
+            assert_eq!(separators_in(&entries), 4, "{target:?}");
         }
         let entries = menu_entries(state, ContextTarget::Component(7));
         let labels = labels_of(&entries);
@@ -441,7 +554,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
         ] {
             assert!(!labels.contains(&master_row), "{labels:?}");
         }
-        assert_eq!(separators_in(&entries), 5);
+        assert_eq!(separators_in(&entries), 4);
         assert!(labels.len() <= 20);
         assert!(
             !matches!(entries.first(), Some(ContextEntry::Separator))
