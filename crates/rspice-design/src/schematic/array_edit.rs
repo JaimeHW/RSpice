@@ -245,8 +245,12 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
     /// Unlike [`Self::has_live_array_selection`], this rejects mixed
     /// selections containing any stale, partial, malformed, or unsupported
     /// object even when another selected object is otherwise valid. UI command
-    /// enablement should use this strict contract.
+    /// enablement should use this strict contract, so a selection the canvas
+    /// would refuse, a probe among them, is refused before anything is armed.
     pub fn validate_array_source_selection(&self) -> Result<(), SchematicArrayError> {
+        if !self.selection.objects.probes.is_empty() {
+            return Err(SchematicArrayError::ProbeSelectionUnsupported);
+        }
         validate_live_array_selection(self)?;
         validate_array_source_selection_direct(self)
     }
@@ -396,11 +400,7 @@ impl<J: Iterator<Item = Point> + Clone> ArraySource<'_, J> {
         terminal_points_for: &mut impl FnMut(&Component) -> Vec<(String, Point)>,
         component_bounds_for: &mut impl FnMut(&Component) -> (i32, i32, i32, i32),
     ) -> Result<BuiltArray, SchematicArrayError> {
-        if !self.selection.objects.probes.is_empty() {
-            return Err(SchematicArrayError::ProbeSelectionUnsupported);
-        }
-        validate_live_array_selection(self)?;
-        validate_array_source_selection_direct(self)?;
+        self.validate_array_source_selection()?;
         let normalized_plan =
             SchematicArrayPlan::new(plan.kind, plan.count, plan.naming.clone(), plan.placement)?;
         let plan = &normalized_plan;

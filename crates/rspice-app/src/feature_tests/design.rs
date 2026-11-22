@@ -13,6 +13,7 @@ mod canvas_keyboard;
 mod canvas_shortcuts;
 mod cell_deletion_transactions;
 mod context_menu;
+mod create_array;
 mod create_model_bound_symbol;
 mod create_model_bound_symbol_drawn;
 mod create_symbol_drawn;

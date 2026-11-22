@@ -219,6 +219,24 @@ impl DraftValidation {
     }
 }
 
+/// Why Create array is greyed for the selection, or `None` when the
+/// selection can be repeated. It is the same check the canvas makes before
+/// the first copy is placed, so nothing armed can fail for a reason known
+/// now.
+pub(crate) fn array_source_refusal(model: &Model) -> Option<&'static str> {
+    use crate::state::SchematicArrayError;
+    match model.schematic.validate_array_source_selection().err()? {
+        SchematicArrayError::ProbeSelectionUnsupported => {
+            Some("probes are not copied into an array; leave them out of the selection")
+        }
+        SchematicArrayError::PartialSelection => {
+            Some("select whole objects, not wire segments or corners")
+        }
+        SchematicArrayError::ReadOnly => Some("the active schematic is read-only"),
+        _ => Some("select an editable object"),
+    }
+}
+
 /// Open Create array over the three canvas tools' drafts, the model and the
 /// session: opening it stops an armed Move or Stretch.
 pub fn open_array_selection_dialog_in(
@@ -230,9 +248,7 @@ pub fn open_array_selection_dialog_in(
 ) {
     // Create array is greyed on a read-only schematic and on a selection it
     // cannot repeat, so those two return without a word.
-    if model.schematic_edit_read_only()
-        || model.schematic.validate_array_source_selection().is_err()
-    {
+    if model.schematic_edit_read_only() || array_source_refusal(model).is_some() {
         return;
     }
     let count = SchematicArrayCount::parse(DEFAULT_COUNT)

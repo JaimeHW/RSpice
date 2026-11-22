@@ -500,12 +500,9 @@ impl CommandSet for DesignCommand {
                 .default_stretch_target()
                 .is_none()
                 .then_some("select an editable object"),
-            Self::ArraySelection => reads
-                .model
-                .schematic
-                .validate_array_source_selection()
-                .is_err()
-                .then_some("select an editable object"),
+            Self::ArraySelection => {
+                crate::workbench::app::dialogs::selection::array::array_source_refusal(reads.model)
+            }
             Self::SwapToRSpiceSymbols => (!reads
                 .model
                 .schematic
