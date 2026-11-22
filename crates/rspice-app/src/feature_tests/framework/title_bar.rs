@@ -733,7 +733,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         .iter()
         .map(|command| command_registry().label(*command))
         .collect();
-    assert_eq!(arrange_labels.len(), 14);
+    assert_eq!(arrange_labels.len(), 15);
     let before = app.state.model.schematic.document().components[1].pos;
     let mut frame = |events| {
         menu_items_after_frame(&ctx, events, |ui| {
