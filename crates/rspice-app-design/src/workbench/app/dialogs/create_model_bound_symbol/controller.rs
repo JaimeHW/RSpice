@@ -66,34 +66,8 @@ pub fn open_create_model_bound_symbol_dialog(
                 .into_iter()
                 .next()
         });
-    let model_source = selected_model.map(|(source_library, model)| {
-        let pins = inferred_model_pins(model.model_type);
-        let section = source_library
-            .selected_corner
-            .as_deref()
-            .and_then(|name| source_library.corners.get(name))
-            .filter(|corner| corner.file_path.is_some())
-            .map(|corner| corner.name.clone());
-        let source_path = if section.is_some() {
-            source_library.root_path.clone()
-        } else {
-            model
-                .file_path
-                .clone()
-                .or_else(|| source_library.root_path.clone())
-        };
-        CreateSymbolModelSource {
-            library: source_library.name.clone(),
-            model: model.name.clone(),
-            model_type: model.model_type,
-            family: model_family_label(model.model_type).to_owned(),
-            source_path,
-            section,
-            instance_parameters: model_instance_parameters(model),
-            requires_pin_review: true,
-            pins,
-        }
-    });
+    let model_source =
+        selected_model.map(|(source_library, model)| model_card_source(source_library, model));
 
     let schematic_reference = model.workspace.content.active_schematic_reference();
     let schematic_ports = model.schematic.interface_ports();
@@ -139,6 +113,7 @@ pub fn open_create_model_bound_symbol_dialog(
         target: format!("{library} / {cell}"),
         source_mode,
         model_source,
+        model_choices: model_choices(model),
         schematic_source,
         pins,
         template,
@@ -146,6 +121,176 @@ pub fn open_create_model_bound_symbol_dialog(
         expected_library_revision: model.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
     };
+}
+
+/// Open Create symbol from the drawing in front, for one of the project's
+/// models or subcircuits, ending with the new part on the cursor there: the
+/// model the Models workspace selected when the project holds it, else the
+/// first by library and name.
+pub fn open_symbol_from_model_or_subcircuit(
+    dialog: &mut CreateModelBoundSymbolDialogState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+    selected_model: Option<&str>,
+) {
+    open_create_model_bound_symbol_dialog(dialog, model, wb, selected_model);
+    if !dialog.open {
+        return;
+    }
+    if dialog.model_choices.is_empty() {
+        dialog.close();
+        wb.prompt("This project holds no model or subcircuit to make a symbol for.");
+        return;
+    }
+    let chosen = selected_model
+        .and_then(|selected| {
+            dialog
+                .model_choices
+                .iter()
+                .position(|choice| choice.source.model.eq_ignore_ascii_case(selected))
+        })
+        .unwrap_or(0);
+    choose_model(dialog, chosen);
+    dialog.place_in = Some(model.workspace.content.active_view.clone());
+}
+
+/// Draw the symbol for choice `index` of the Model row: its pins, its body,
+/// and a cell named after it in the library the target names.
+pub(super) fn choose_model(draft: &mut CreateModelBoundSymbolDialogState, index: usize) {
+    let Some(choice) = draft.model_choices.get(index).cloned() else {
+        return;
+    };
+    let library = draft
+        .target
+        .split_once('/')
+        .map_or(draft.target.as_str(), |(library, _)| library)
+        .trim()
+        .to_owned();
+    draft.target = format!("{library} / {}", default_cell_name(&choice.source.model));
+    draft.source_mode = CreateSymbolSourceMode::Model;
+    draft.pins = choice.source.pins.clone();
+    draft.pin_contract_reviewed = !choice.source.requires_pin_review;
+    draft.template = choice.template;
+    draft.model_source = Some(choice.source);
+    draft.selected_pin = None;
+}
+
+/// Every model card and subcircuit the project's model libraries hold, by
+/// library and then by name, each with the body its symbol starts in. A
+/// subcircuit outside the library's active corner, or with no ports or no
+/// source to bind, is left out: no symbol could be made for it.
+fn model_choices(model: &Model) -> Vec<CreateSymbolModelChoice> {
+    let mut choices = Vec::new();
+    for library in model.model_library_manager.libraries_sorted() {
+        let active_sections = library.active_section_names();
+        let mut held = library
+            .models
+            .values()
+            .map(|card| CreateSymbolModelChoice {
+                template: default_template(card.model_type),
+                source: model_card_source(library, card),
+            })
+            .chain(library.subcircuits.values().filter_map(|interface| {
+                let active = interface.section.as_deref().is_none_or(|section| {
+                    active_sections
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(section))
+                });
+                let source_path = interface
+                    .file_path
+                    .clone()
+                    .or_else(|| library.root_path.clone())?;
+                (active && !interface.ports.is_empty()).then(|| {
+                    let (source, template) = subcircuit_source(
+                        library.name.clone(),
+                        interface.name.clone(),
+                        source_path,
+                        interface.ports.clone(),
+                        interface.description.as_deref(),
+                        interface.section.clone(),
+                        interface.parameter_defaults.clone(),
+                    );
+                    CreateSymbolModelChoice { source, template }
+                })
+            }))
+            .collect::<Vec<_>>();
+        held.sort_by_cached_key(|choice| choice.source.model.to_ascii_lowercase());
+        choices.extend(held);
+    }
+    choices
+}
+
+/// What a symbol for the model card `card` of `source_library` reads: the
+/// pins its device family has, and the file or corner that defines it.
+fn model_card_source(
+    source_library: &crate::state::model_library::ModelLibrary,
+    card: &crate::state::model_library::DeviceModel,
+) -> CreateSymbolModelSource {
+    let section = source_library
+        .selected_corner
+        .as_deref()
+        .and_then(|name| source_library.corners.get(name))
+        .filter(|corner| corner.file_path.is_some())
+        .map(|corner| corner.name.clone());
+    let source_path = if section.is_some() {
+        source_library.root_path.clone()
+    } else {
+        card.file_path
+            .clone()
+            .or_else(|| source_library.root_path.clone())
+    };
+    CreateSymbolModelSource {
+        library: source_library.name.clone(),
+        model: card.name.clone(),
+        model_type: card.model_type,
+        family: model_family_label(card.model_type).to_owned(),
+        source_path,
+        section,
+        instance_parameters: model_instance_parameters(card),
+        requires_pin_review: true,
+        pins: inferred_model_pins(card.model_type),
+    }
+}
+
+/// What a symbol for subcircuit `subcircuit` reads: a pin for each port in
+/// the definition's order, drawn by the role its name and the comment above
+/// it give, and the amplifier body when the pins are an amplifier's.
+fn subcircuit_source(
+    source_library: String,
+    subcircuit: String,
+    source_path: std::path::PathBuf,
+    ordered_ports: Vec<String>,
+    description: Option<&str>,
+    section: Option<String>,
+    parameter_defaults: std::collections::BTreeMap<String, String>,
+) -> (CreateSymbolModelSource, CreateSymbolTemplate) {
+    let roles = rspice_design::pin_roles::infer_pin_roles(&ordered_ports, description);
+    let template = if rspice_design::symbol_generation::is_amplifier_pin_set(&roles) {
+        CreateSymbolTemplate::OperationalAmplifier5Pin
+    } else {
+        CreateSymbolTemplate::RectangularIc
+    };
+    let pins = ordered_ports
+        .into_iter()
+        .zip(roles)
+        .enumerate()
+        .map(|(index, (port, role))| {
+            let (electrical_type, side) = role_pin(role, index);
+            CreateSymbolPinDraft::new(port, electrical_type, side)
+        })
+        .collect::<Vec<_>>();
+    let source = CreateSymbolModelSource {
+        library: source_library,
+        model: subcircuit,
+        model_type: ModelType::Other,
+        family: "subcircuit".to_owned(),
+        source_path: Some(source_path),
+        section,
+        instance_parameters: subcircuit_instance_parameters(parameter_defaults),
+        requires_pin_review: true,
+        pins,
+    };
+    (source, template)
 }
 
 pub fn open_create_subcircuit_bound_symbol_dialog(
@@ -184,38 +329,23 @@ pub fn open_create_subcircuit_bound_symbol_dialog(
             "Subcircuit '{subcircuit}' has no explicit ordered terminal contract"
         ));
     }
-    let roles = rspice_design::pin_roles::infer_pin_roles(&ordered_ports, description.as_deref());
-    let template = if rspice_design::symbol_generation::is_amplifier_pin_set(&roles) {
-        CreateSymbolTemplate::OperationalAmplifier5Pin
-    } else {
-        CreateSymbolTemplate::RectangularIc
-    };
-    let pins = ordered_ports
-        .into_iter()
-        .zip(roles)
-        .enumerate()
-        .map(|(index, (port, role))| {
-            let (electrical_type, side) = role_pin(role, index);
-            CreateSymbolPinDraft::new(port, electrical_type, side)
-        })
-        .collect::<Vec<_>>();
     let cell = default_cell_name(&subcircuit);
-    let model_source = CreateSymbolModelSource {
-        library: source_library,
-        model: subcircuit,
-        model_type: ModelType::Other,
-        family: "subcircuit".to_owned(),
-        source_path: Some(source_path),
+    let (model_source, template) = subcircuit_source(
+        source_library,
+        subcircuit,
+        source_path,
+        ordered_ports,
+        description.as_deref(),
         section,
-        instance_parameters: subcircuit_instance_parameters(parameter_defaults),
-        requires_pin_review: true,
-        pins: pins.clone(),
-    };
+        parameter_defaults,
+    );
+    let pins = model_source.pins.clone();
     *dialog = CreateModelBoundSymbolDialogState {
         open: true,
         target: format!("{target_library} / {cell}"),
         source_mode: CreateSymbolSourceMode::Model,
         model_source: Some(model_source),
+        model_choices: model_choices(model),
         pins,
         template,
         pin_contract_reviewed: false,
@@ -1213,7 +1343,29 @@ pub fn commit_create_model_bound_symbol(
         format!("Create symbol revision {revision} for {library_name}/{cell_name}"),
         fixture,
     )?;
+    let place_in = draft.place_in.take();
     draft.close();
+    model.record(
+        LogSeverity::Info,
+        LogSource::Studio,
+        format!("Created symbol {library_name}/{cell_name} at revision {revision}."),
+    );
+    // Started from a drawing, the new part ends on the cursor there, as a
+    // shelf row arms it; a part the drawing cannot place yet says why, and
+    // its symbol opens instead.
+    if let Some(drawing) = place_in {
+        match placement_on(model, &library_name, &cell_name, &drawing) {
+            Ok(binding) => {
+                rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+                    model, binding,
+                );
+                return Ok(());
+            }
+            Err(reason) => workbench.prompt(format!(
+                "Created {library_name}/{cell_name}, which cannot be placed yet: {reason}."
+            )),
+        }
+    }
     let view_name = if definition.generated_views.symbol {
         "symbol"
     } else if definition.generated_views.parameter_form {
@@ -1228,10 +1380,28 @@ pub fn commit_create_model_bound_symbol(
         &cell_name,
         view_name,
     )));
-    model.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        format!("Created symbol {library_name}/{cell_name} at revision {revision}."),
-    );
     Ok(())
+}
+
+/// Cell `cell` of `library` as a shelf row places it on `drawing`, which is
+/// still in front, or why it cannot be.
+fn placement_on(
+    model: &Model,
+    library: &str,
+    cell: &str,
+    drawing: &CellViewRef,
+) -> Result<crate::state::LibraryCellInstance, String> {
+    if model.workspace.content.active_view != *drawing {
+        return Err(format!("{} is no longer in front", drawing.display_path()));
+    }
+    let candidate =
+        crate::state::library_cell_placement_candidates(&model.library_manager, &model.workspace)
+            .into_iter()
+            .find(|candidate| candidate.library == library && candidate.cell == cell)
+            .ok_or_else(|| "it has no view a drawing can place".to_owned())?;
+    if candidate.ready {
+        Ok(candidate.binding)
+    } else {
+        Err(candidate.unavailable_reason)
+    }
 }

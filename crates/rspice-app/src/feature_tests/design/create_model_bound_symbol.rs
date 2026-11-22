@@ -465,3 +465,82 @@ fn a_vendor_amplifier_subcircuit_opens_with_the_amplifier_template() {
         ]
     );
 }
+
+/// Create symbol started from a drawing for one of the project's
+/// subcircuits ends where a shelf row does: the new part on the cursor of
+/// that drawing, with the subcircuit's ports in its own order, and the
+/// Design workspace still in front.
+#[test]
+fn a_symbol_made_from_a_subcircuit_ends_on_the_cursor_of_the_drawing_it_was_started_from() {
+    use crate::feature_tests::replay::Replay;
+    use crate::workbench::RSpiceApp;
+    use egui::accesskit::Role;
+    use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_symbol_from_model_or_subcircuit;
+    use rspice_app_state::state::Tool;
+    use rspice_app_state::state::model_library::{
+        ModelLibrary, ModelLibraryManager, ModelSubcircuitInterface,
+    };
+    use rspice_app_state::workbench::workspace::Workspace;
+
+    let mut replay = Replay::of(RSpiceApp::test_instance());
+    let state = &mut replay.app.state;
+    state.open_project_session();
+    state.workbench.activate(Workspace::Design);
+    let mut vendor = ModelLibrary::new("vendor_analog");
+    vendor.subcircuits.insert(
+        "OPA_CORE".to_owned(),
+        ModelSubcircuitInterface {
+            name: "OPA_CORE".to_owned(),
+            ports: ["inp", "inn", "out", "vcc", "vee"]
+                .map(str::to_owned)
+                .to_vec(),
+            parameter_defaults: Default::default(),
+            description: None,
+            file_path: Some(PathBuf::from("/models/opa_core.lib")),
+            source_line: Some(1),
+            section: None,
+        },
+    );
+    let mut models = ModelLibraryManager::new();
+    models.add_library(vendor);
+    state.model.model_library_manager = models;
+    let drawing = state.model.workspace.content.active_view.clone();
+
+    open_symbol_from_model_or_subcircuit(
+        &mut state.design.create_model_bound_symbol,
+        &state.model,
+        &mut state.workbench,
+        None,
+    );
+    let draft = &mut replay.app.state.design.create_model_bound_symbol;
+    assert!(draft.open, "Create symbol opens over the drawing");
+    let target = draft.target.clone();
+    assert!(target.ends_with(" / opa_core"), "{target}");
+    // The author confirms the pin order the subcircuit gave.
+    draft.pin_contract_reviewed = true;
+    replay.click("Create and place", Role::Button);
+
+    let state = &replay.app.state;
+    assert!(!state.design.create_model_bound_symbol.open);
+    assert_eq!(state.workbench.workspace, Workspace::Design);
+    assert_eq!(state.model.workspace.content.active_view, drawing);
+    assert_eq!(
+        state.model.schematic.session.editor.tool,
+        Tool::Place(ComponentType::CellInstance)
+    );
+    let binding = &state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_library_cell
+        .as_ref()
+        .expect("the new part is on the cursor")
+        .binding;
+    assert_eq!(
+        format!("{} / {}", binding.library, binding.cell),
+        target,
+        "the part on the cursor is the symbol just made"
+    );
+    assert_eq!(binding.terminal_order, ["inp", "inn", "out", "vcc", "vee"]);
+}

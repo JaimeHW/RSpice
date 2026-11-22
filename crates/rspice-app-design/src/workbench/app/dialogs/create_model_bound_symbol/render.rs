@@ -10,7 +10,8 @@ use crate::ui::widgets::{
 };
 
 use super::controller::{
-    commit_create_model_bound_symbol, target_syntax_error, validate_create_symbol_draft,
+    choose_model, commit_create_model_bound_symbol, target_syntax_error,
+    validate_create_symbol_draft,
 };
 use super::state::*;
 use crate::workbench::app::dialogs::review_primitives::{configure_field_validation, field_label};
@@ -37,10 +38,15 @@ pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
         pin_count,
         if pin_count == 1 { "" } else { "s" }
     );
-    let mut dialog = Dialog::new(TITLE, PRIMARY)
+    let placing = draft.place_in.is_some();
+    let mut dialog = Dialog::new(TITLE, if placing { PLACE_PRIMARY } else { PRIMARY })
         .description(DESCRIPTION)
         .size(DialogSize::Transaction)
-        .fixed_height(SURFACE_HEIGHT)
+        .fixed_height(if draft.model_choices.is_empty() {
+            SURFACE_HEIGHT
+        } else {
+            SURFACE_HEIGHT + MODEL_ROW_HEIGHT
+        })
         .ghost(if discard_confirm {
             "Discard changes"
         } else {
@@ -67,9 +73,14 @@ pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
     let mut response = dialog.show_transaction(ctx, |ui| Some(create_symbol_body(ui, &mut *draft)));
     match response.choice {
         DialogChoice::Primary => {
-            if let Err(error) = commit_create_model_bound_symbol(draft, model, workbench) {
+            match commit_create_model_bound_symbol(draft, model, workbench) {
+                // The canvas takes the keyboard, as a shelf row leaves it, so
+                // R, M and Esc work on the new part before the pointer
+                // reaches the sheet.
+                Ok(()) if placing => rspice_schematic_editor::view::canvas::request_focus(ctx),
+                Ok(()) => {}
                 // The dialog stays open and states the refusal in place.
-                draft.validation_error = Some(error);
+                Err(error) => draft.validation_error = Some(error),
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -146,10 +157,61 @@ fn identity_section(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) 
             }
             response
         });
+        model_choice_select(ui, draft);
         source_contract_combo(ui, draft);
         template_combo(ui, draft);
     });
     response.id
+}
+
+/// Which of the project's models and subcircuits the symbol is made for: a
+/// searchable list grouped by library, as a part chooser is, since a model
+/// library is too long to scroll.
+fn model_choice_select(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) {
+    if draft.model_choices.is_empty() {
+        return;
+    }
+    let mut libraries: Vec<(&str, Vec<usize>)> = Vec::new();
+    for (index, choice) in draft.model_choices.iter().enumerate() {
+        match libraries.last_mut() {
+            Some((library, members)) if *library == choice.source.library => members.push(index),
+            _ => libraries.push((choice.source.library.as_str(), vec![index])),
+        }
+    }
+    let groups = libraries
+        .iter()
+        .map(|(library, members)| crate::ui::widgets::SelectGroup {
+            heading: library,
+            options: members
+                .iter()
+                .map(|&index| {
+                    let source = &draft.model_choices[index].source;
+                    (source.model.clone(), source.family.as_str())
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let selected = draft
+        .model_source
+        .as_ref()
+        .map_or("", |source| source.model.as_str());
+    let picked = field_label(ui, "Model", |ui| {
+        let width = ui.available_width();
+        crate::ui::widgets::searchable_select(
+            ui,
+            "create-model-bound-symbol-model",
+            "Model",
+            selected,
+            &groups,
+            &mut draft.model_query,
+            width,
+        )
+    });
+    let picked = picked.and_then(|(group, option)| libraries.get(group)?.1.get(option).copied());
+    if let Some(index) = picked {
+        choose_model(draft, index);
+        draft.mark_edited();
+    }
 }
 
 fn source_contract_combo(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) {

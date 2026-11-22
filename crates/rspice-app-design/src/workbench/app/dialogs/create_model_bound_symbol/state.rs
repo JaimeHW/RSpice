@@ -10,10 +10,17 @@ use crate::state::{
 
 pub const TITLE: &str = "Create model-bound symbol";
 pub const PRIMARY: &str = "Create symbol revision";
+/// The primary when Create symbol was started from a drawing, which the new
+/// part is placed on.
+pub const PLACE_PRIMARY: &str = "Create and place";
 pub(super) const DESCRIPTION: &str = "Create one governed symbol definition from an explicit source contract, ordered electrical terminals, and versioned generated views.";
 /// Held in every state: only a refusal paints a strip, and a surface sized to
 /// its content would jump under the pointer as the draft became valid.
 pub(super) const SURFACE_HEIGHT: f32 = 526.0;
+/// What the Model row adds to the surface when the project has models to
+/// choose among: its caption, the control and the gaps around them, so the
+/// form still fits without a scroll bar.
+pub(super) const MODEL_ROW_HEIGHT: f32 = 67.0;
 pub(super) const SPLIT_BREAKPOINT: f32 = 640.0;
 pub(super) const SECTION_HEADER_HEIGHT: f32 = 31.0;
 pub(super) const PIN_HEADER_HEIGHT: f32 = 27.0;
@@ -227,6 +234,14 @@ impl CreateSymbolModelSource {
     }
 }
 
+/// One model or subcircuit a symbol can be made for, with the body it starts
+/// in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CreateSymbolModelChoice {
+    pub(crate) source: CreateSymbolModelSource,
+    pub(crate) template: CreateSymbolTemplate,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateSymbolSchematicSource {
     pub(crate) reference: CellViewRef,
@@ -248,7 +263,15 @@ pub struct CreateModelBoundSymbolDialogState {
     pub target: String,
     pub source_mode: CreateSymbolSourceMode,
     pub(crate) model_source: Option<CreateSymbolModelSource>,
+    /// Every model and subcircuit the project's model libraries hold, by
+    /// library, which the form's Model row chooses among.
+    pub(crate) model_choices: Vec<CreateSymbolModelChoice>,
+    /// What the Model row's list is narrowed to.
+    pub(crate) model_query: String,
     pub(crate) schematic_source: Option<CreateSymbolSchematicSource>,
+    /// The drawing Create symbol was started from, which the new part is
+    /// placed on, ready on the cursor, once the symbol is made.
+    pub place_in: Option<CellViewRef>,
     pub template: CreateSymbolTemplate,
     pub pins: Vec<CreateSymbolPinDraft>,
     pub symbol: bool,
@@ -269,7 +292,10 @@ impl Default for CreateModelBoundSymbolDialogState {
             target: String::new(),
             source_mode: CreateSymbolSourceMode::Model,
             model_source: None,
+            model_choices: Vec::new(),
+            model_query: String::new(),
             schematic_source: None,
+            place_in: None,
             template: CreateSymbolTemplate::OperationalAmplifier5Pin,
             pins: Vec::new(),
             symbol: true,
