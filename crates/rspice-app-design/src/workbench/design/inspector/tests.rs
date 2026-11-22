@@ -430,8 +430,9 @@ fn isolated_instance_terminals_are_open_not_bound_to_synthetic_nodes() {
 #[test]
 fn open_terminal_rows_are_disabled_while_bound_rows_remain_actionable() {
     let nodes = accesskit_nodes(|ui| {
-        terminal_row(ui, "1", None);
-        terminal_row(ui, "2", Some("VOUT"));
+        terminal_row(ui, "1", None, false);
+        terminal_row(ui, "2", Some("VOUT"), false);
+        terminal_row(ui, "3", None, true);
     });
 
     let open = nodes
@@ -447,6 +448,12 @@ fn open_terminal_rows_are_disabled_while_bound_rows_remain_actionable() {
 
     assert!(open.is_disabled());
     assert!(!bound.is_disabled());
+    let marked = nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("3, no connect"))
+        .map(|(_, node)| node)
+        .expect("a pin marked no-connect reads so");
+    assert!(marked.is_disabled());
 }
 
 /// A net below the design root is read under its instance path, as the run

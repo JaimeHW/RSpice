@@ -1729,10 +1729,17 @@ pub(super) const TERMINAL_ROW_ICON_GAP: f32 = 6.0;
 /// Per-pin terminal table: every declared terminal with the net it binds,
 /// clickable to select that conductor. Unbound pins read `open` and are
 /// not clickable, because there is no net to select.
-pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRowResult {
+/// One pin of the part and the net it is on: "open" where nothing meets
+/// it, or "no connect" where the pin is marked to stay open.
+pub(super) fn terminal_row(
+    ui: &mut Ui,
+    pin: &str,
+    net: Option<&str>,
+    no_connect: bool,
+) -> TreeRowResult {
     ui.add_enabled_ui(net.is_some(), |ui| {
         let t = Tokens::get(ui.ctx());
-        let meta = net.unwrap_or("open");
+        let meta = net.unwrap_or(if no_connect { "no connect" } else { "open" });
         let accessible_label = format!("{pin}, {meta}");
         let inset = panel_inset(ui);
         let (rect, response) = ui.allocate_exact_size(
@@ -1834,13 +1841,18 @@ pub fn terminals_section(
     if bindings.is_empty() {
         return;
     }
-    let open_pins = bindings.iter().filter(|(_, net)| net.is_none()).count();
+    // A pin marked no-connect is open on purpose, and not one to count.
+    let open_pins = bindings
+        .iter()
+        .filter(|(pin, net)| net.is_none() && !component.is_no_connect(pin))
+        .count();
     // The rows count themselves; the header speaks only for the open ones.
     let open = (open_pins > 0).then(|| format!("{open_pins} open"));
     section_header(ui, "Terminals", open.as_deref());
     let mut select: Option<&str> = None;
     for (pin, net) in bindings {
-        let row = terminal_row(ui, pin, net.as_deref());
+        let no_connect = component.is_no_connect(pin);
+        let row = terminal_row(ui, pin, net.as_deref(), no_connect);
         match net {
             Some(name) => {
                 if row.response.clicked() {
@@ -1848,6 +1860,10 @@ pub fn terminals_section(
                 }
                 row.response
                     .on_hover_text(format!("Select net {name} on the sheet"));
+            }
+            None if no_connect => {
+                row.response
+                    .on_disabled_hover_text("Marked no-connect · meant to stay open");
             }
             None => {
                 row.response
