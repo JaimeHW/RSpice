@@ -14,16 +14,16 @@
 //! The horizontal cursors follow in a table of their own: a group per pane
 //! naming its levels, and where each of its traces crosses them.
 
-use super::cursor_values::{marker_position, slope_text, x_delta, x_reciprocal};
+use super::cursor_values::{marker_x, slope_text, x_delta, x_reciprocal};
 use super::dock::{MarkerActions, MarkerMove, ReadoutInput, marker_color, visible_markers};
 use super::readout::{
     READOUT_ABSENT, ReadingLayout, TableRow, readout_branch_note, readout_traces, trace_table_rows,
 };
 use super::{StripModel, StripTrace, anchor_key};
-use crate::session::{HorizontalCursors, ReadingColumnId, ResultViewerState};
+use crate::session::{HorizontalCursors, MarkerSelector, ReadingColumnId, ResultViewerState};
 use egui::Ui;
 use rspice_results::result_presentation::{
-    AnalysisPresentationKey, WavePanePresentationKey, WaveformPresentationKey,
+    AnalysisPresentationKey, MarkerKind, WavePanePresentationKey, WaveformPresentationKey,
 };
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::{CursorId, CursorPair, XScale};
@@ -198,7 +198,7 @@ pub fn reading_columns(
             continue;
         };
         let kind = marker.kind();
-        let x = marker_position(&models[model], marker.anchor(), marker.x(), kind)
+        let x = marker_x(&models[model], state, marker)
             .map_err(|_| format!("no {} here", kind.label()));
         let note = marker.note().trim();
         let mut hover = format!("{} · {}", marker.display_id(), kind.label());
@@ -1064,6 +1064,32 @@ fn move_column(
     }
 }
 
+/// Where an offset from marker `selector` is put: where that marker stands,
+/// on its trace. `None` for an offset, which another cannot be read from.
+fn offset_spot(
+    state: &ResultViewerState,
+    source: ReadoutInput<'_>,
+    reading: &ReadingColumn,
+    selector: MarkerSelector,
+) -> Option<MarkerSpot> {
+    let marker = state.document_marker(selector.marker_id)?;
+    if matches!(marker.kind, MarkerKind::Offset(_)) {
+        return None;
+    }
+    let model = &source.models[reading.model];
+    let trace = model
+        .traces
+        .iter()
+        .find(|trace| !trace.overlay && anchor_key(model, trace) == marker.anchor)?;
+    Some(MarkerSpot {
+        analysis: model.analysis_key,
+        anchor: marker.anchor.clone(),
+        trace_name: marker.trace_name.clone(),
+        x: *reading.x.as_ref().ok()?,
+        samples: trace.x.clone(),
+    })
+}
+
 fn column_menu(
     ui: &mut Ui,
     state: &mut ResultViewerState,
@@ -1100,11 +1126,25 @@ fn column_menu(
     }
     if let ReadingColumnId::Marker(selector) = reading.id
         && ui
-            .button("Rename\u{2026}")
+            .button("Edit marker\u{2026}")
             .on_hover_text("Edit the marker's label and kind")
             .clicked()
     {
         requests.edit = Some(selector);
+        ui.close();
+    }
+    if let ReadingColumnId::Marker(selector) = reading.id
+        && reading.point
+        && let Some(spot) = offset_spot(state, source, reading, selector)
+        && ui
+            .button("Add offset marker\u{2026}")
+            .on_hover_text(
+                "A marker a typed amount from this one's level on its trace, as 3 dB below a \
+                 peak finds a corner; it follows this one",
+            )
+            .clicked()
+    {
+        requests.offset = Some((spot, selector));
         ui.close();
     }
     ui.separator();

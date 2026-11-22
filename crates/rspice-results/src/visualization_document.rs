@@ -1901,10 +1901,16 @@ pub enum PlotMarkerKind {
     },
     /// A line at the marker's X, reading every trace it crosses.
     VerticalLine,
+    /// The crossing of marker `from`'s level plus `by`, on its trace,
+    /// nearest the marker's X, found again whenever either moves.
+    Offset {
+        from: u64,
+        by: crate::result_presentation::CrossingLevel,
+    },
 }
 
 impl PlotMarkerKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::PointNote,
         Self::Peak,
         Self::SpecificationLine,
@@ -1914,6 +1920,10 @@ impl PlotMarkerKind {
             level: crate::result_presentation::CrossingLevel(0.0),
         },
         Self::VerticalLine,
+        Self::Offset {
+            from: 0,
+            by: crate::result_presentation::CrossingLevel(0.0),
+        },
     ];
 
     #[must_use]
@@ -1926,6 +1936,7 @@ impl PlotMarkerKind {
             Self::Valley => "Valley flag",
             Self::Crossing { .. } => "Crossing flag",
             Self::VerticalLine => "Vertical line",
+            Self::Offset { .. } => "Offset flag",
         }
     }
 }

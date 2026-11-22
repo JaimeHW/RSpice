@@ -81,6 +81,37 @@ fn apply_marker_actions(state: &mut ResultsParts<'_>, actions: MarkerActions) {
     if let Some(selector) = actions.edit {
         super::marker_dialog::open(state, selector);
     }
+    if let Some((spot, from)) = actions.offset {
+        add_offset_marker(state, spot, from);
+    }
+}
+
+/// Add a marker 3 below `from`'s level on its trace, where `from` stands,
+/// and open it for its amount to be typed.
+pub(super) fn add_offset_marker(
+    state: &mut ResultsParts<'_>,
+    spot: rspice_results_ui::waves::cursor_table::MarkerSpot,
+    from: super::super::MarkerSelector,
+) -> Option<super::super::MarkerSelector> {
+    let placement = super::super::MarkerPlacement {
+        analysis: spot.analysis,
+        anchor: spot.anchor,
+        trace_name: spot.trace_name,
+        x: spot.x,
+        samples: &spot.samples,
+    };
+    let selector = super::super::place_marker(state, placement)?;
+    let kind =
+        super::super::MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset {
+            from: from.marker_id.get(),
+            by: rspice_results::result_presentation::CrossingLevel(-3.0),
+        });
+    if let Err(error) = super::super::commit_marker_edit(state, selector, "", kind) {
+        state.prompt(format!("Could not make the offset marker: {error}"));
+        return None;
+    }
+    super::marker_dialog::open(state, selector);
+    Some(selector)
 }
 
 /// Whether the dock offers its Cursors page: while Results shows a sheet

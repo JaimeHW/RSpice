@@ -369,6 +369,156 @@ fn a_delta_marker_between_two_traces_reads_dx_dy_and_slope() {
     );
 }
 
+/// An offset marker 3 dB below the resonant peak of a second-order
+/// low-pass, added from the peak marker's menu, stands where the response
+/// has fallen 3 dB from the peak, as the closed form puts it, on the drawn
+/// line of the log-frequency strip; it opens for its amount, and a typed
+/// 6 dB moves it to where the response is 6 dB down.
+#[test]
+fn an_offset_marker_three_db_below_a_low_pass_peak_reads_where_it_falls() {
+    const F0: f64 = 1.0e4;
+    // |H| in dB of w0^2 / (s^2 + s w0 + w0^2), a low-pass with Q = 1.
+    let gain = |f: f64| {
+        let u = f / F0;
+        -10.0 * ((1.0 - u * u).powi(2) + u * u).log10()
+    };
+    // Where the response falls through `level` above its peak, by bisection
+    // on the closed form, which falls monotonically there.
+    let falls_to = |level: f64| {
+        let (mut low, mut high) = (F0 / 2f64.sqrt(), 1.0e6);
+        for _ in 0..200 {
+            let mid = (low * high).sqrt();
+            if gain(mid) > level {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        low
+    };
+    // 50 points a decade, 100 Hz to 1 MHz.
+    let x: Vec<f64> = (0..=200)
+        .map(|index| 10f64.powf(2.0 + f64::from(index) / 50.0))
+        .collect();
+    // The response as an AC run keeps it, magnitude and phase, on the Bode
+    // sheet, which draws the magnitude in dB.
+    let magnitude: Vec<f64> = x.iter().map(|f| 10f64.powf(gain(*f) / 20.0)).collect();
+    let phase: Vec<f64> = x
+        .iter()
+        .map(|f| {
+            let u = f / F0;
+            -u.atan2(1.0 - u * u).to_degrees()
+        })
+        .collect();
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = rspice_results::run::SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
+            RetainedTrace::new("|V(out)|", x.clone(), magnitude, "#00aaff"),
+            RetainedTrace::new("phase(V(out))", x, phase, "#ffaa00"),
+        ]),
+    );
+    let mut state = host_on(run);
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Bode;
+    state.quick_frame();
+    // Put by eye below the top, it climbs to it.
+    let peak = state
+        .place_marker("|V(out)|", 4.0e3)
+        .expect("a marker on |V(out)|");
+    state.mark(peak, "", MarkerKind::Peak);
+
+    let models = strip(&mut state);
+    let model = &models[0];
+    assert_eq!(model.x_scale, rspice_ui_kit::plot::XScale::Log10);
+    let trace = model
+        .traces
+        .iter()
+        .find(|trace| trace.source_waveform_name == "|V(out)|")
+        .expect("the magnitude is drawn");
+    assert_eq!(model.trace_unit(trace), "dB");
+    let (spot, top) = {
+        let marker = state
+            .results
+            .results
+            .session
+            .document_marker(peak.marker_id)
+            .expect("the peak marker");
+        let top = marker_position(model, &marker.anchor, marker.x, marker.kind)
+            .expect("the peak is found");
+        let spot = rspice_results_ui::waves::cursor_table::MarkerSpot {
+            analysis: model.analysis_key,
+            anchor: marker.anchor.clone(),
+            trace_name: marker.trace_name.clone(),
+            x: top,
+            samples: trace.x.clone(),
+        };
+        (spot, top)
+    };
+    // The top is the sample nearest the analytic peak at f0/sqrt(2).
+    assert!(
+        (top / (F0 / 2f64.sqrt()) - 1.0).abs() < 0.03,
+        "the peak stands at {top} Hz"
+    );
+    let offset = super::super::readout::add_offset_marker(&mut state.results_parts(), spot, peak)
+        .expect("an offset marker");
+    assert!(
+        state.results.results.session.marker_edit.is_some(),
+        "the offset marker opens for its amount"
+    );
+    state.results.results.session.marker_edit = None;
+    state.quick_frame();
+
+    let stands = |state: &mut ResultsTestHost| {
+        let models = strip(state);
+        let session = &state.results.results.session;
+        let marker = session
+            .document_marker(offset.marker_id)
+            .expect("the offset marker");
+        let x = rspice_results_ui::waves::cursor_values::marker_x(
+            &models[0],
+            session,
+            rspice_results_ui::session::MarkerView(marker),
+        )
+        .expect("the offset marker finds its level");
+        let magnitude = models[0]
+            .traces
+            .iter()
+            .find(|trace| trace.source_waveform_name == "|V(out)|")
+            .expect("the magnitude is drawn");
+        let y = models[0].trace_value(
+            magnitude,
+            x,
+            rspice_ui_kit::plot::SampleInterpolation::Linear,
+        );
+        (x, y)
+    };
+    for by in [-3.0, -6.0] {
+        if by != -3.0 {
+            state.mark(
+                offset,
+                "",
+                MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset {
+                    from: peak.marker_id.get(),
+                    by: rspice_results::result_presentation::CrossingLevel(by),
+                }),
+            );
+        }
+        let level = gain(top) + by;
+        let (x, y) = stands(&mut state);
+        let expected = falls_to(level);
+        assert!(
+            (x / expected - 1.0).abs() < 2e-3,
+            "{by} dB from the peak stands at {x} Hz where the response falls through it at \
+             {expected} Hz"
+        );
+        // It stands on the drawn line, which reads its level there.
+        assert!(
+            (y - level).abs() < 1e-9,
+            "it reads {y} dB where its level is {level} dB"
+        );
+    }
+}
+
 /// A cursor's X is typed in place: a click on it in the Cursors table opens
 /// it, and the typed value is where the cursor then stands.
 #[test]

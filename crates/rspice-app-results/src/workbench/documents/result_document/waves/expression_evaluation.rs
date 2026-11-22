@@ -67,13 +67,9 @@ impl Places {
             session
                 .strip_markers(analysis)
                 .filter_map(|marker| {
-                    let x = rspice_results_ui::waves::cursor_values::marker_position(
-                        model,
-                        marker.anchor(),
-                        marker.x(),
-                        marker.kind(),
-                    )
-                    .ok()?;
+                    let x =
+                        rspice_results_ui::waves::cursor_values::marker_x(model, session, marker)
+                            .ok()?;
                     let trace = model.traces.iter().find(|trace| {
                         !trace.overlay
                             && rspice_results_ui::waves::anchor_key(model, trace)

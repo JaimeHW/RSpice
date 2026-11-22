@@ -593,6 +593,18 @@ pub enum MarkerKind {
     Spec,
     /// A vertical marker: a line at its X, reading every trace it crosses.
     Vertical,
+    /// The crossing, on the trace another marker rides, of that marker's Y
+    /// plus a typed amount: 3 dB below a peak finds a corner. It follows its
+    /// marker as the curve changes.
+    Offset(MarkerOffset),
+}
+
+/// Which marker an offset marker is measured from, by its number, and by how
+/// much in its trace's unit; the amount compared bit for bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkerOffset {
+    pub from: u64,
+    pub by: CrossingLevel,
 }
 
 /// The level a crossing marker finds, compared bit for bit so a marker kind
@@ -631,6 +643,7 @@ impl MarkerKind {
             MarkerKind::Crossing(_) => "crossing",
             MarkerKind::Spec => "spec",
             MarkerKind::Vertical => "vertical",
+            MarkerKind::Offset(_) => "offset",
         }
     }
 
@@ -649,6 +662,9 @@ impl MarkerKind {
             }
             MarkerKind::Spec => "Spec — a limit line the design is measured against",
             MarkerKind::Vertical => "Vertical — a line at this X, reading every trace it crosses",
+            MarkerKind::Offset(_) => {
+                "Offset — a typed amount from another marker's level, found again as it moves"
+            }
         }
     }
 
@@ -662,18 +678,22 @@ impl MarkerKind {
                 | (MarkerKind::Crossing(_), MarkerKind::Crossing(_))
                 | (MarkerKind::Spec, MarkerKind::Spec)
                 | (MarkerKind::Vertical, MarkerKind::Vertical)
+                | (MarkerKind::Offset(_), MarkerKind::Offset(_))
         )
     }
 
     /// The feature a search marker finds, or `None` for a marker that stays
-    /// where it was put.
+    /// where it was put. An offset marker's level is its marker's, found
+    /// where that one stands, so it has none of its own.
     pub const fn search(self) -> Option<crate::feature_search::Anchor> {
         use crate::feature_search::Anchor;
         match self {
             MarkerKind::Peak => Some(Anchor::Peak),
             MarkerKind::Valley => Some(Anchor::Valley),
             MarkerKind::Crossing(level) => Some(Anchor::Crossing { level: level.0 }),
-            MarkerKind::Note | MarkerKind::Spec | MarkerKind::Vertical => None,
+            MarkerKind::Note | MarkerKind::Spec | MarkerKind::Vertical | MarkerKind::Offset(_) => {
+                None
+            }
         }
     }
 

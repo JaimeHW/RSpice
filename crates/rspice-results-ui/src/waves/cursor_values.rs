@@ -4,8 +4,10 @@
 //! trace as the trace is now.
 
 use super::{StripModel, anchor_key};
+use crate::session::{MarkerView, ResultViewerState};
 use rspice_results::feature_search;
-use rspice_results::result_presentation::{MarkerKind, WaveformPresentationKey};
+use rspice_results::result_presentation::{CrossingLevel, MarkerKind, WaveformPresentationKey};
+use rspice_ui_kit::plot::SampleInterpolation;
 use rspice_ui_kit::plot::{XScale, fmt_si_significant};
 use rspice_vocabulary::quantity::{FrequencyDisplay, QuantityPresentationPolicy};
 
@@ -44,17 +46,97 @@ pub fn marker_position(
         .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
         .and_then(|trace| {
             // A stored trace is searched a block at a time, never held whole.
-            feature_search::nearest(
-                &feature_search::WindowedCurve::new(&trace.x),
-                &feature_search::WindowedCurve::new(&trace.y),
-                x,
-                search,
-            )
+            let xs = feature_search::WindowedCurve::new(&trace.x);
+            let ys = feature_search::WindowedCurve::new(&trace.y);
+            match search {
+                // On a log X axis the line runs straight in log X between
+                // samples, so a crossing is found on that line, where the
+                // readout reads its level, and not on a line straight in X.
+                feature_search::Anchor::Crossing { .. } if model.x_scale == XScale::Log10 => {
+                    feature_search::nearest(&LogX(xs), &ys, x.log10(), search)
+                        .map(|found| 10f64.powf(found.x))
+                }
+                _ => feature_search::nearest(&xs, &ys, x, search).map(|found| found.x),
+            }
         })
-        .map(|found| found.x)
         .ok_or(x);
     positions.push((anchor.clone(), x.to_bits(), kind, found));
     found
+}
+
+/// A log X axis' samples as their logarithms, which a log axis spaces evenly.
+struct LogX<'a>(feature_search::WindowedCurve<'a>);
+
+impl feature_search::Curve for LogX<'_> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn at(&self, index: usize) -> f64 {
+        self.0.at(index).log10()
+    }
+
+    fn ascending(&self) -> bool {
+        self.0.ascending()
+    }
+}
+
+/// Where `marker` stands on its strip as the strip is now: [`marker_position`]
+/// for a marker of its own, and for an offset marker the crossing of its
+/// marker's Y plus its amount, on the trace it rides, nearest where it was
+/// put. Its marker is found first wherever that one now stands, so 3 dB
+/// below a peak follows the peak. `Err` carries where it was put when its
+/// marker is gone, is itself an offset, stands on no trace, or its level is
+/// never crossed.
+pub fn marker_x(
+    model: &StripModel,
+    session: &ResultViewerState,
+    marker: MarkerView<'_>,
+) -> Result<f64, f64> {
+    let MarkerKind::Offset(offset) = marker.kind() else {
+        return marker_position(model, marker.anchor(), marker.x(), marker.kind());
+    };
+    let Some(from) = session.strip_markers(marker.analysis()).find(|other| {
+        other.0.retained_id.get() == offset.from && other.0.document_id == marker.0.document_id
+    }) else {
+        return Err(marker.x());
+    };
+    offset_position(
+        model,
+        (from.anchor(), from.x(), from.kind()),
+        (marker.anchor(), marker.x()),
+        offset.by.0,
+    )
+}
+
+/// Where an offset marker put at `x` on `anchor` stands: the crossing of
+/// its marker's Y plus `by`, nearest `x`, its marker (the trace it rides,
+/// where it was put and its kind) found first wherever it now stands. `Err`
+/// carries `x` when that marker is itself an offset, stands on no trace, or
+/// the level is never crossed.
+pub fn offset_position(
+    model: &StripModel,
+    (from_anchor, from_x, from_kind): (&WaveformPresentationKey, f64, MarkerKind),
+    (anchor, x): (&WaveformPresentationKey, f64),
+    by: f64,
+) -> Result<f64, f64> {
+    if matches!(from_kind, MarkerKind::Offset(_)) {
+        return Err(x);
+    }
+    let Some(trace) = model
+        .traces
+        .iter()
+        .find(|trace| !trace.overlay && anchor_key(model, trace) == *from_anchor)
+    else {
+        return Err(x);
+    };
+    let stands = marker_position(model, from_anchor, from_x, from_kind).map_err(|_| x)?;
+    // The level is read off the drawn line, as the marker's own Y is.
+    let level = model.trace_value(trace, stands, SampleInterpolation::Linear) + by;
+    if !level.is_finite() {
+        return Err(x);
+    }
+    marker_position(model, anchor, x, MarkerKind::Crossing(CrossingLevel(level)))
 }
 
 /// The separation between the cursors, named the way the X axis reads: a

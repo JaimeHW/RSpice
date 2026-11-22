@@ -924,6 +924,7 @@ pub const fn marker_kind_of_retained(
         PlotMarkerKind::Crossing { level } => MarkerKind::Crossing(level),
         PlotMarkerKind::SpecificationLine => MarkerKind::Spec,
         PlotMarkerKind::VerticalLine => MarkerKind::Vertical,
+        PlotMarkerKind::Offset { from, by } => MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset { from, by }),
     }
 }
 
@@ -939,6 +940,7 @@ pub(crate) const fn retained_kind_of_marker(
         MarkerKind::Crossing(level) => PlotMarkerKind::Crossing { level },
         MarkerKind::Spec => PlotMarkerKind::SpecificationLine,
         MarkerKind::Vertical => PlotMarkerKind::VerticalLine,
+        MarkerKind::Offset(rspice_results::result_presentation::MarkerOffset { from, by }) => PlotMarkerKind::Offset { from, by },
     }
 }
 

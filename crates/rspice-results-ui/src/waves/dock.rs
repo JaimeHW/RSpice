@@ -40,6 +40,9 @@ pub struct MarkerActions {
     pub edit: Option<MarkerSelector>,
     /// A marker moved to a typed or snapped X.
     pub moved: Option<MarkerMove>,
+    /// A new offset marker asked for, at where this marker stands on the
+    /// trace it rides.
+    pub offset: Option<(super::cursor_table::MarkerSpot, MarkerSelector)>,
 }
 
 /// A marker moved to `x`; a saved view, which keeps a marker on a retained
@@ -113,7 +116,9 @@ pub(crate) fn strip_lane_rows(
 pub fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
     match kind {
         MarkerKind::Note | MarkerKind::Vertical => t.color.text,
-        MarkerKind::Peak | MarkerKind::Valley | MarkerKind::Crossing(_) => t.color.accent,
+        MarkerKind::Peak | MarkerKind::Valley | MarkerKind::Crossing(_) | MarkerKind::Offset(_) => {
+            t.color.accent
+        }
         MarkerKind::Spec => t.color.warn,
     }
 }

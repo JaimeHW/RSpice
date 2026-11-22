@@ -2,7 +2,7 @@
 use super::{
     CursorDomain, ReadoutPolicy, SHARED_X_SLOT, StripModel, StripTrace, UnitPane, anchor_key,
     cursor_interpolation,
-    cursor_values::marker_position,
+    cursor_values::marker_x,
     dock::{marker_color, marker_label},
     extent::{self, FamilyEnvelopePlan},
     header::{self as pane_header, WAVE_PANE_HEADER_HEIGHT, elide},
@@ -2091,7 +2091,7 @@ fn show_unit_pane(
             .strip_markers(model.analysis_key)
             .map(|marker| pane_view::MarkerPresentation {
                 anchor: marker.anchor(),
-                x: marker_position(model, marker.anchor(), marker.x(), marker.kind())
+                x: marker_x(model, host.session(), marker)
                     .unwrap_or_else(|seed| seed),
                 kind: marker.kind(),
                 color: marker_color(marker.kind(), &t),

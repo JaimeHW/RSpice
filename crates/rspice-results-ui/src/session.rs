@@ -97,6 +97,18 @@ pub struct MarkerEditDraft {
     pub selector: MarkerSelector,
     pub note: String,
     pub kind: MarkerKind,
+    /// A crossing's level as typed; `None` until the dialog first shows it.
+    pub level: Option<TypedEntry>,
+    /// An offset's amount as typed; `None` until the dialog first shows it.
+    pub by: Option<TypedEntry>,
+}
+
+/// A number typed in a dialog beside the text it was seeded with, so one
+/// left as it was keeps the value it was seeded from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedEntry {
+    pub seed: String,
+    pub text: String,
 }
 
 /// Per-frame projection of the markers the view being drawn keeps.
