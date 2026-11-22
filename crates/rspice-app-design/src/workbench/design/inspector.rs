@@ -719,8 +719,21 @@ fn multi_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     object_title(ui, &format!("{total} selected"), instances.as_deref(), None);
 
     // The set's instances, one row each: a click picks that one out of the
-    // set. The toolbar, the context menu and the keys act on the set itself.
-    section_block_gap(ui);
+    // set. The toolbar, the context menu and the keys act on the set itself,
+    // and so does the header's Properties, the form Q opens for what they
+    // share.
+    let properties = section_header_action(
+        ui,
+        "Instances",
+        "Properties\u{2026}",
+        crate::workbench::design::own_command_available(
+            cx,
+            crate::workbench::design::commands::DesignCommand::ObjectProperties,
+        ),
+    );
+    if properties.clicked() {
+        cx.execute(crate::workbench::design::commands::DesignCommand::ObjectProperties.key());
+    }
     if selected.is_empty() {
         muted_inspector_copy(ui, "No instances selected.");
         return;
