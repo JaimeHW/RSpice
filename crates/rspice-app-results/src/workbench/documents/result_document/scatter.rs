@@ -6,12 +6,23 @@ use rspice_results_ui::scatter as view;
 
 pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     let plan = population::plan(context);
-    view::domain_bar(
+    let pair = |sheet: &view::ScatterSheetState| (sheet.x.clone(), sheet.y.clone());
+    let before = pair(&context.results.session.scatter);
+    let drawn = view::domain_bar(
         ui,
         plan.as_deref().map(|plan| &**plan),
         &mut context.results.session.scatter,
         &mut context.results.session.show_spec_limits,
-    )
+    );
+    // A window belongs to the pair of columns it was set on: another column
+    // or the axes swapped is another cloud, in other units.
+    if pair(&context.results.session.scatter) != before {
+        context
+            .results
+            .session
+            .reset_plot_view(super::ResultViewer::Scatter, 0);
+    }
+    drawn
 }
 
 /// Draw the correlation; the measurement whose specification the reader
@@ -19,6 +30,9 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
 pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) -> Option<String> {
     let plan = population::plan(context);
     let session = &mut context.results.session;
+    // The one viewport the sheet keeps: the inspector's X and Y range fields
+    // write it, and the plot's own zoom and fit fold into it below.
+    let pinned = session.plot_view(super::ResultViewer::Scatter, 0);
     let mut scratch = Vec::new();
     let members = plan
         .as_deref()
@@ -27,12 +41,20 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) -> Option<String> {
         ui,
         plan.as_deref().map(|plan| &**plan),
         &mut session.scatter,
+        pinned,
         members,
         session.show_spec_limits,
         &mut session.cache,
         context.significant_digits,
     )?;
     super::record_drawn_axes(context.results, super::ResultViewer::Scatter, &drawn.plot);
+    if drawn.plot.view.any() {
+        context
+            .results
+            .session
+            .plot_view_mut(super::ResultViewer::Scatter, 0)
+            .apply(&drawn.plot.view);
+    }
     drawn.open_specification
 }
 
@@ -186,6 +208,42 @@ mod tests {
             collect(shape.shape, &mut text);
         }
         text
+    }
+
+    /// The inspector's X and Y ranges are the window the scatter draws, and
+    /// clearing one, as its fit button does, fits that axis to the cloud.
+    #[test]
+    fn a_pinned_window_is_the_one_the_scatter_draws() {
+        let (simulation, workspace, mut results) = fixture(101, None);
+        let viewer = super::super::ResultViewer::Scatter;
+        let draw = |results: &mut ResultsState| {
+            let egui = egui::Context::default();
+            crate::ui::Theme::default().apply(&egui);
+            let _ = egui.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 700.0),
+                    )),
+                    ..Default::default()
+                },
+                |root| {
+                    egui::CentralPanel::default().show(root, |ui| {
+                        show(ui, &mut context(&simulation, &workspace, results));
+                    });
+                },
+            );
+            results.session.drawn_axes[&viewer]
+        };
+        let view = results.session.plot_view_mut(viewer, 0);
+        view.x = Some((-2.0, 2.0));
+        view.y = Some((30.0, 50.0));
+        assert_eq!(draw(&mut results), ((-2.0, 2.0), (30.0, 50.0)));
+
+        results.session.plot_view_mut(viewer, 0).x = None;
+        let (x, y) = draw(&mut results);
+        assert_ne!(x, (-2.0, 2.0), "a cleared axis fits the cloud");
+        assert_eq!(y, (30.0, 50.0));
     }
 
     #[test]

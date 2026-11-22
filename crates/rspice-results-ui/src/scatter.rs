@@ -17,7 +17,7 @@ use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey, Tone};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
 
 use crate::fft::view::columns::{Fitting, fitted};
-use crate::presentation::well_hint;
+use crate::presentation::{PlotView, well_hint};
 use crate::requirement_lines::{self, PlotWithRequirements, RequirementLine};
 use crate::strip::{self, LegendChip};
 use rspice_results::population::{
@@ -38,9 +38,6 @@ pub struct ScatterSheetState {
     pub fit: bool,
     /// The brush rectangle in data space: x0, y0, x1, y1.
     pub brush: Option<[f64; 4]>,
-    /// The window a pinch zoomed to, X and Y; none fits the cloud. It
-    /// belongs to the pair of columns it was zoomed on.
-    pub zoom: Option<((f64, f64), (f64, f64))>,
 }
 
 impl Default for ScatterSheetState {
@@ -51,7 +48,6 @@ impl Default for ScatterSheetState {
             color_by_status: true,
             fit: true,
             brush: None,
-            zoom: None,
         }
     }
 }
@@ -179,7 +175,6 @@ pub fn domain_bar(
     ) {
         state.x = x_options.get(picked).cloned();
         state.brush = None;
-        state.zoom = None;
     }
     if let Some(picked) = select(
         ui,
@@ -191,7 +186,6 @@ pub fn domain_bar(
     ) {
         state.y = y_options.get(picked).cloned();
         state.brush = None;
-        state.zoom = None;
     }
 
     let mut colour = usize::from(!state.color_by_status);
@@ -236,7 +230,6 @@ pub fn domain_bar(
             scatter.y = Some(names[pair.x].clone());
         }
         state.brush = None;
-        state.zoom = None;
     }
 
     let t = Tokens::get(ui.ctx());
@@ -273,10 +266,16 @@ fn clear_selection(state: &mut ScatterSheetState, members: &mut Vec<usize>) {
 // ---------------------------------------------------------------------------
 
 /// Render the scatter sheet.
+///
+/// `view` is the window the sheet's viewport holds, one axis or both: what
+/// the inspector's range fields set and the plot's own zoom writes back
+/// through the returned response. An axis it leaves free fits the cloud.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     population: Option<&PopulationData>,
     state: &mut ScatterSheetState,
+    view: PlotView,
     members: &mut Vec<usize>,
     show_limits: bool,
     cache: &mut plot::DecimationCache,
@@ -363,9 +362,8 @@ pub fn show(
 
     let xs = points.iter().map(|(_, x, _)| *x).collect::<Vec<_>>();
     let ys = points.iter().map(|(_, _, y)| *y).collect::<Vec<_>>();
-    let ((x0, x1), (y0, y1)) = state
-        .zoom
-        .unwrap_or_else(|| (axis_range(&xs, x_column), axis_range(&ys, y_column)));
+    let (x0, x1) = view.x.unwrap_or_else(|| axis_range(&xs, x_column));
+    let (y0, y1) = view.y.unwrap_or_else(|| axis_range(&ys, y_column));
 
     let accessible = format!(
         "{} against {}; {} trials, {failing} failing. \
@@ -414,14 +412,6 @@ pub fn show(
     // pan under it.
     plot::set_interaction_mode(ui.ctx(), InteractionMode::Select);
     let response = plot::show(ui, &spec, cache, None, None);
-    if response.view.reset {
-        state.zoom = None;
-    } else if response.view.any() {
-        state.zoom = Some((
-            response.view.x.unwrap_or((x0, x1)),
-            response.view.y.unwrap_or((y0, y1)),
-        ));
-    }
 
     apply_input(ui, state, members, &points, &response, ((x0, x1), (y0, y1)));
     paint_hover_card(
