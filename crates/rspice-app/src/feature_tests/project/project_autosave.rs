@@ -22,7 +22,7 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     SaveScope, active_document_is_dirty, has_unsaved_changes, has_unsaved_changes_fresh,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
-use rspice_app_state::state::{ComponentType, Point};
+use rspice_app_state::state::{CellViewRef, ComponentType, Point};
 use rspice_app_state::workbench::workspace::Workspace;
 
 /// The folder the crashed session saves its project in, handed to the child
@@ -347,6 +347,112 @@ fn autosaves_beside(file: &Path) -> usize {
         .into_iter()
         .filter(|checkpoint| checkpoint.reason() == ProjectCheckpointReason::Autosave)
         .count()
+}
+
+/// Give the open project a second cell with a schematic, named `name`, and
+/// return its schematic view.
+fn add_cell(app: &mut RSpiceApp, name: &str) -> CellViewRef {
+    let library = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .root_library
+        .clone();
+    let project = &mut app.state.project;
+    project.new_cell_library = library.clone();
+    project.new_cell_name = name.to_owned();
+    project.new_cell_create_schematic = true;
+    project.new_cell_library_revision = app.state.model.library_manager.revision();
+    assert!(with_cx(app, create_new_cell), "the cell is created");
+    app.after_contribution();
+    CellViewRef::new(&library, name, "schematic")
+}
+
+/// Every edited cell view is in the autosave, not only the one in front:
+/// with two cells edited and the interval passed, an open of the project in
+/// another session offers both, and Keep brings both edits back.
+#[test]
+fn the_autosave_holds_every_edited_cell_and_keep_brings_them_back() {
+    let folder = unique_temp_dir("autosave-every-cell");
+    let file = folder.join(PROJECT);
+    let mut app = RSpiceApp::test_instance();
+    let top = app.state.model.workspace.content.active_view.clone();
+    let second = add_cell(&mut app, "second");
+    assert!(app.state.save_project_to_path(&file));
+    app.state.open_workspace_view(second.clone());
+    let saved_second = parts(&app);
+    edit(&mut app, 1);
+    app.state.open_workspace_view(top.clone());
+    let saved_top = parts(&app);
+    edit(&mut app, 2);
+    assert!(has_unsaved_changes_fresh(&app.state));
+    app.state.platform.project_autosave.arm_due();
+    frames_until(&offscreen(), &mut app, |app| {
+        !app.state.platform.project_autosave.written().is_empty()
+    });
+    // The session ends as a crash ends it: nothing cleaned up, and the
+    // project's open lock let go with it.
+    drop(app);
+
+    let mut reopened = RSpiceApp::test_instance();
+    assert!(reopened.state.load_project_from_path(&file));
+    let ctx = offscreen();
+    let asked = paint_until(&ctx, &mut reopened, |text| {
+        text.contains("Recover unsaved changes?")
+    });
+    assert!(
+        painted(&asked).contains("differs from the saved project in 2 documents"),
+        "{}",
+        painted(&asked)
+    );
+    app_frame(
+        &ctx,
+        &mut reopened,
+        click_on(&asked, "Keep the recovered changes"),
+    );
+    app_frame(&ctx, &mut reopened, Vec::new());
+    reopened.state.open_workspace_view(top);
+    assert_eq!(parts(&reopened), saved_top + 1, "the cell in front is back");
+    reopened.state.open_workspace_view(second);
+    assert_eq!(parts(&reopened), saved_second + 1, "and the cell behind it");
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// An interval in which nothing changed writes nothing, since the autosave
+/// on disk already holds the work; the next edit is written at the next one.
+#[test]
+fn an_interval_with_nothing_changed_writes_no_autosave() {
+    let folder = unique_temp_dir("autosave-idle");
+    let mut app = RSpiceApp::test_instance();
+    assert!(app.state.save_project_to_path(&folder.join(PROJECT)));
+    edit(&mut app, 1);
+    let ctx = offscreen();
+    app.state.platform.project_autosave.arm_due();
+    frames_until(&ctx, &mut app, |app| {
+        !app.state.platform.project_autosave.written().is_empty()
+    });
+    let newest = |app: &RSpiceApp| app.state.platform.project_autosave.written()[0].checkpoint_id();
+    let first = newest(&app);
+
+    app.state.platform.project_autosave.arm_due();
+    for _ in 0..4 {
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    frames_until(&ctx, &mut app, |app| {
+        !app.state.platform.project_autosave.busy()
+    });
+    assert_eq!(
+        newest(&app),
+        first,
+        "nothing changed, so nothing was written"
+    );
+
+    edit(&mut app, 2);
+    app.state.platform.project_autosave.arm_due();
+    frames_until(&ctx, &mut app, |app| newest(app) != first);
+    let _ = std::fs::remove_dir_all(folder);
 }
 
 /// Closing the window with two parts unsaved: the work is written as an

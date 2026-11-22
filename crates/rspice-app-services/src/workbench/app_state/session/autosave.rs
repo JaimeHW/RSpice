@@ -1,9 +1,12 @@
 //! Autosave: interrupted-session recovery that never touches the reader's file.
 //!
 //! A project with a file and unsaved work is written at the autosave interval
-//! as an Autosave checkpoint beside it, off the frame. Opening it, or starting
-//! with it, looks for an autosave another session left that is newer than the
-//! file and differs from it, and asks once what to do with it.
+//! as an Autosave checkpoint beside it, off the frame: every cell view it
+//! holds, not only the one in front. An interval in which the work did not
+//! change writes nothing, since the newest autosave already holds it, and
+//! deciding so reads only stamps. Opening it, or starting with it, looks for
+//! an autosave another session left that is newer than the file and differs
+//! from it, and asks once what to do with it.
 //!
 //! The browser does the same with a project saved to a file or to the
 //! browser's own storage: its autosave is kept in the browser's durable
@@ -171,6 +174,13 @@ pub struct ProjectAutosave {
     /// The saved project they were written over. A save after them removed
     /// them, or left them older than the file, where no start offers them.
     written_over: Option<u64>,
+    /// The working project the newest autosave holds, by its stamps. An
+    /// interval in which nothing changed writes nothing: that autosave
+    /// already holds the work.
+    written_stamp: Option<project_lifecycle::WorkingStamp>,
+    /// The working project the autosave being written holds, which becomes
+    /// [`Self::written_stamp`] once it is on disk.
+    writing_stamp: Option<project_lifecycle::WorkingStamp>,
     /// The last autosave could not be written: said when it starts, not at
     /// every interval it persists.
     failing: bool,
@@ -255,6 +265,7 @@ pub fn project_autosave_tick(state: &mut dyn LifecycleSourceMut, ctx: &Context) 
     if autosave.written_over.is_some_and(|over| over != saved) {
         autosave.written.clear();
         autosave.written_over = None;
+        autosave.written_stamp = None;
     }
     let minutes = parts.platform.autosave_minutes;
     let unsaved = autosaved_work(parts);
@@ -284,11 +295,26 @@ pub fn project_autosave_tick(state: &mut dyn LifecycleSourceMut, ctx: &Context) 
         return written;
     }
     autosave.due = Some(now + interval);
-    match start_writing(parts, Some(ctx)) {
-        Ok(writing) => parts.platform.project_autosave.writing = Some(writing),
+    write_if_changed(parts, Some(ctx));
+    written
+}
+
+/// Start writing an autosave of the open project, unless the newest one
+/// already holds the work as it stands: the stamps say so without reading
+/// the project, so an idle interval costs no capture, encoding or write.
+fn write_if_changed(parts: &mut LifecycleParts<'_>, ctx: Option<&Context>) {
+    let stamp = project_lifecycle::working_stamp(&*parts);
+    if parts.platform.project_autosave.written_stamp.as_ref() == Some(&stamp) {
+        return;
+    }
+    match start_writing(parts, ctx) {
+        Ok(writing) => {
+            let autosave = &mut parts.platform.project_autosave;
+            autosave.writing = Some(writing);
+            autosave.writing_stamp = Some(stamp);
+        }
         Err(error) => note_autosave_result(parts, Err(error)),
     }
-    written
 }
 
 /// Start writing an Autosave checkpoint of the open project: read off the
@@ -372,10 +398,7 @@ pub fn write_now(state: &mut dyn LifecycleSourceMut, ctx: Option<&Context>) {
     {
         return;
     }
-    match start_writing(parts, ctx) {
-        Ok(writing) => parts.platform.project_autosave.writing = Some(writing),
-        Err(error) => note_autosave_result(parts, Err(error)),
-    }
+    write_if_changed(parts, ctx);
 }
 
 /// Take an autosave the background thread finished writing.
@@ -397,12 +420,14 @@ fn note_autosave_result(parts: &mut LifecycleParts<'_>, result: Result<AutosaveW
     let autosave = &mut parts.platform.project_autosave;
     let was_failing = autosave.failing;
     autosave.failing = result.is_err();
+    let stamp = autosave.writing_stamp.take();
     match result.map(|written| written.summary) {
         Ok(summary) => {
             // Retention keeps only the newest autosave.
             autosave.written.clear();
             autosave.written.push(summary);
             autosave.written_over = Some(saved);
+            autosave.written_stamp = stamp;
             if was_failing {
                 parts.model.record(
                     LogSeverity::Info,
@@ -466,6 +491,15 @@ pub fn at_exit(state: &mut dyn LifecycleSourceMut) {
     let parts = &mut state.lifecycle_parts();
     if parts.platform.project_autosave.exit_reviewed || !autosaved_work(parts) {
         remove_own_autosaves(parts.platform);
+        return;
+    }
+    let autosave = &parts.platform.project_autosave;
+    if !autosave.written.is_empty()
+        && autosave.written_stamp.as_ref() == Some(&project_lifecycle::working_stamp(&*parts))
+    {
+        // The newest autosave already holds the work: it is kept for the
+        // next start as it is.
+        parts.platform.project_autosave.written.clear();
         return;
     }
     match project_checkpoint::capture(parts, ProjectCheckpointReason::Autosave)
