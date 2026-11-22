@@ -476,3 +476,54 @@ fn a_read_only_view_probes_without_a_marker_or_a_plan_output() {
         payloads_before
     );
 }
+
+/// The net inspector's Plot, pressed before a run, keeps no marker, so the
+/// output it saves is the plan's and the next run saves it, where a
+/// probe-owned output with no marker behind it would be dropped. An output a
+/// probe once owned becomes the plan's the same way.
+#[test]
+fn the_net_inspector_plot_before_a_run_is_saved_by_the_next_run() {
+    use crate::state::SavedOutputOrigin;
+    let next_run_saves_out = |state: &DesignTestHost| {
+        let plan_id = state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .id();
+        let (effective, _, _) =
+            rspice_simulation::output_contract::selection::effective_plan_capture(
+                state.model.sim_setup.save_policy.output_selection_mode,
+                saved_outputs(state),
+                &[],
+                &state.model.schematic.document().probes,
+                &[],
+                plan_id,
+            )
+            .expect("the plan resolves its outputs");
+        effective
+            .iter()
+            .any(|output| normalized_probe_expression(&output.source_expression) == "v(out)")
+    };
+
+    let mut state = DesignTestHost::default();
+    toggle_probe_with_feedback(&mut canvas_parts(&mut state), "OUT", "V(OUT)");
+    assert_eq!(saved_outputs(&state).len(), 1);
+    assert_eq!(saved_outputs(&state)[0].origin, SavedOutputOrigin::Plan);
+    assert!(next_run_saves_out(&state));
+
+    let mut state = DesignTestHost::default();
+    request_probe_signal(
+        &mut canvas_parts(&mut state),
+        &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+    );
+    assert_eq!(
+        saved_outputs(&state)[0].origin,
+        SavedOutputOrigin::SchematicProbe
+    );
+    assert!(!next_run_saves_out(&state), "no marker owns it");
+    toggle_probe_with_feedback(&mut canvas_parts(&mut state), "OUT", "V(OUT)");
+    assert_eq!(saved_outputs(&state).len(), 1);
+    assert_eq!(saved_outputs(&state)[0].origin, SavedOutputOrigin::Plan);
+    assert!(next_run_saves_out(&state));
+}

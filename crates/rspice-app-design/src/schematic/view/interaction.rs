@@ -9,8 +9,8 @@ use egui::{Response, Ui};
 
 use crate::state::{
     ComponentType, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    SchematicNetHighlighting, SchematicProbe, Tool, ViewType,
+    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SchematicNetHighlighting, SchematicProbe, Tool, ViewType,
 };
 use crate::workbench::app_state::Model;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
@@ -1134,32 +1134,61 @@ struct ProbeOutputBinding {
     created: bool,
 }
 
+/// Make sure the active plan saves `spelling`'s signal for the next run.
+///
+/// `origin` says who owns a new output. A probe marker owns its own, which
+/// lives as long as the marker does. An action that keeps no marker, the net
+/// inspector's Plot, gives it to the plan, since a probe-owned output with
+/// no marker behind it is dropped when the run is prepared; for the same
+/// reason it takes over a probe-owned output of the signal it finds.
 fn ensure_plan_probe_output(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
+    origin: SavedOutputOrigin,
 ) -> Result<ProbeOutputBinding, String> {
-    let mut setup = state.model.sim_setup.clone();
+    let setup = state.model.sim_setup.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     let plan_name = setup.active_plan_name().to_string();
     let expression = spelling.engine().trim();
     let expression_key = normalized_probe_expression(expression);
-    if state
+    let existing = state
         .model
         .workspace
         .content
         .plan_data(plan_id)
         .and_then(|payload| {
-            payload.saved_outputs.iter().find_map(|output| {
-                (output.kind == SavedOutputKind::RawVoltageOrCurrent
-                    && normalized_probe_expression(&output.source_expression) == expression_key)
-                    .then_some(output.id)
-            })
-        })
-        .is_some()
-    {
+            payload
+                .saved_outputs
+                .iter()
+                .find(|output| {
+                    output.kind == SavedOutputKind::RawVoltageOrCurrent
+                        && normalized_probe_expression(&output.source_expression) == expression_key
+                })
+                .cloned()
+        });
+    if let Some(existing) = existing {
+        if origin != SavedOutputOrigin::Plan || existing.origin != SavedOutputOrigin::SchematicProbe
+        {
+            return Ok(ProbeOutputBinding {
+                plan_name,
+                created: false,
+            });
+        }
+        let mut workspace = state.model.workspace.clone();
+        let id = existing.id;
+        workspace
+            .content
+            .replace_saved_output(plan_id, id, existing.with_origin(SavedOutputOrigin::Plan))
+            .map_err(|error| error.to_string())?;
+        publish_plan_outputs(
+            state,
+            setup,
+            workspace,
+            format!("Kept {expression} as a plan output."),
+        )?;
         return Ok(ProbeOutputBinding {
             plan_name,
-            created: false,
+            created: true,
         });
     }
 
@@ -1185,7 +1214,7 @@ fn ensure_plan_probe_output(
         SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )?
-    .with_origin(crate::state::SavedOutputOrigin::SchematicProbe);
+    .with_origin(origin);
     let preflight =
         crate::simulation::SimulationController::new().saved_output_preflight(state.model, &output);
     if let rspice_simulation::output_contract::SavedOutputSemanticStatus::Invalid { reason } =
@@ -1201,24 +1230,38 @@ fn ensure_plan_probe_output(
         .content
         .add_saved_output(plan_id, output)
         .map_err(|error| error.to_string())?;
+    publish_plan_outputs(
+        state,
+        setup,
+        workspace,
+        format!("Added schematic probe output {expression}."),
+    )?;
+    Ok(ProbeOutputBinding {
+        plan_name,
+        created: true,
+    })
+}
+
+/// Validate a changed output list and commit it with the plan setup in one
+/// step, so a failure leaves the live configuration as it was.
+fn publish_plan_outputs(
+    state: &mut CanvasParts<'_>,
+    mut setup: rspice_app_state::workbench::app_state::sim_setup::SimSetupState,
+    workspace: rspice_app_state::state::ProjectWorkspace,
+    description: String,
+) -> Result<(), String> {
     workspace
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
     let receipt = setup
-        .commit_active_plan_configuration_change(format!(
-            "Added schematic probe output {expression}."
-        ))
+        .commit_active_plan_configuration_change(description)
         .map_err(|error| error.to_string())?;
-
     state.model.sim_setup = setup;
     state.model.workspace = workspace;
     state.runs.preflight.invalidate();
     state.model.record_plan_receipt(receipt.status_line());
-    Ok(ProbeOutputBinding {
-        plan_name,
-        created: true,
-    })
+    Ok(())
 }
 
 /// Resolve a probe into either an immediate plot transaction or a durable
@@ -1238,26 +1281,34 @@ fn request_probe_signal(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
-    request_probe_plot(state, spelling, ProbePlot::Show)
+    request_probe_plot(
+        state,
+        spelling,
+        ProbePlot::Show,
+        SavedOutputOrigin::SchematicProbe,
+    )
 }
 
-/// The inspector's Plot button: on the plot, or off it when it is there.
-fn request_probe_signal_toggle(
+/// The net inspector's Plot button: on the plot, or off it when it is
+/// there. It keeps no marker, so what it saves for the next run is the
+/// plan's.
+fn request_net_plot(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
 ) -> ProbeSignalOutcome {
-    request_probe_plot(state, spelling, ProbePlot::Toggle)
+    request_probe_plot(state, spelling, ProbePlot::Toggle, SavedOutputOrigin::Plan)
 }
 
 fn request_probe_plot(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
     plot: ProbePlot,
+    origin: SavedOutputOrigin,
 ) -> ProbeSignalOutcome {
     if is_ground_voltage_expression(spelling.engine()) {
         return ProbeSignalOutcome::GroundReference;
     }
-    let binding = match ensure_plan_probe_output(state, spelling) {
+    let binding = match ensure_plan_probe_output(state, spelling, origin) {
         Ok(binding) => binding,
         Err(reason) => return ProbeSignalOutcome::Rejected { reason },
     };
@@ -1373,8 +1424,7 @@ pub(crate) fn toggle_probe_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let (spelling, outcome) =
-        commit_probe_request(state, name, display, request_probe_signal_toggle);
+    let (spelling, outcome) = commit_probe_request(state, name, display, request_net_plot);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(state, spelling.display(), outcome);
     configuration_changed
