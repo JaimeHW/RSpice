@@ -14,6 +14,7 @@ use super::{
     component::Component,
     component_type::ComponentType,
     ground_glyph::OPEN_PIN_HALF_WORLD,
+    label_position::InstanceText,
     net_label::{NetLabel, NetLabelDrawing, NetLabelKind, NetLabelSide, SupplyGlyph},
 };
 use crate::symbol::SymbolDocument;
@@ -357,6 +358,28 @@ fn automatic_instance_label_layout(
         InstanceLabelLayout {
             name: above,
             value: PlacedText::new(LayoutPoint::new(x, y + half_h + margin), Center, Start),
+        }
+    }
+}
+
+/// Where an instance letters its name or its value, in world units: where a
+/// drawing or a drag placed it, else at `symbol`'s own anchor when the
+/// instance is drawn with that authored symbol, else clear of its turned
+/// body. The canvas, the printed page and a drag of the text all ask here.
+pub fn instance_text_placement(
+    component: &Component,
+    symbol: Option<&SymbolDocument>,
+    text: InstanceText,
+) -> PlacedText {
+    match (symbol, text) {
+        (Some(document), InstanceText::Name) => symbol_name_placement(component, document),
+        (Some(document), InstanceText::Value) => symbol_value_placement(component, document),
+        (None, text) => {
+            let layout = instance_label_layout(instance_origin(component), 1.0, component);
+            match text {
+                InstanceText::Name => layout.name,
+                InstanceText::Value => layout.value,
+            }
         }
     }
 }

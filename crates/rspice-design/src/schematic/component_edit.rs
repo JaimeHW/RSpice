@@ -156,6 +156,14 @@ impl SelectionTransform {
                 component.toggle_mirror_v();
             }
         }
+        // A name or value placed by hand turns with its part, about the
+        // part's position, and stays beside the side of the body it was on.
+        let turn = |offset: Point| self.apply(offset, Point::origin());
+        component.name_label_pos = component.name_label_pos.turned(turn);
+        component.value_label_pos = component.value_label_pos.turned(turn);
+        for piece in &mut component.value_pieces {
+            piece.position = piece.position.turned(turn);
+        }
     }
 }
 
@@ -577,5 +585,64 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A value moved off to the right of a resistor stays on the side of the
+    /// body it was moved to as the part turns and flips: below it after a
+    /// quarter turn, on the left after a flip, and back where it was after
+    /// four quarter turns. The text stays upright throughout.
+    #[test]
+    fn a_placed_value_turns_and_flips_with_its_part() {
+        use super::super::label_layout::{
+            INSTANCE_VALUE_WORLD, LayoutRect, TextEdge, instance_text_placement, text_box,
+        };
+        use super::super::label_position::{InstanceText, LabelPosition};
+
+        let at = Point::new(100, 40);
+        let value_box = |part: &Component| -> LayoutRect {
+            text_box(
+                instance_text_placement(part, None, InstanceText::Value),
+                &part.value,
+                INSTANCE_VALUE_WORLD,
+            )
+        };
+        let mut part = Component::new(1, ComponentType::Resistor, at).with_name_value("R1", "10k");
+        part.value_label_pos = LabelPosition::Placed {
+            offset: Point::new(40, 0),
+            horizontal: TextEdge::Start,
+            vertical: TextEdge::Center,
+            upward: false,
+            size_percent: 100,
+        };
+        let placed = part.value_label_pos;
+        let right = value_box(&part);
+        assert!(right.min.x >= 140.0, "starts right of the body: {right:?}");
+
+        let turn = |part: &mut Component, transform: SelectionTransform| {
+            transform.orient(part);
+            part.pos = transform.apply(part.pos, at);
+        };
+        turn(&mut part, SelectionTransform::RotateClockwise);
+        let below = value_box(&part);
+        assert!(below.min.y >= 80.0, "below the turned body: {below:?}");
+        assert!(
+            (below.center().x - 100.0).abs() < 0.5,
+            "centred under the part: {below:?}"
+        );
+        assert!(below.width() > below.height(), "still upright: {below:?}");
+
+        for _ in 0..3 {
+            turn(&mut part, SelectionTransform::RotateClockwise);
+        }
+        assert_eq!(
+            part.value_label_pos, placed,
+            "four quarter turns put it back"
+        );
+
+        turn(&mut part, SelectionTransform::MirrorHorizontal);
+        let left = value_box(&part);
+        assert!(left.max.x <= 60.0, "on the left after a flip: {left:?}");
+        turn(&mut part, SelectionTransform::MirrorHorizontal);
+        assert_eq!(part.value_label_pos, placed, "a second flip puts it back");
     }
 }
