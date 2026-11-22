@@ -26,7 +26,9 @@ use crate::schematic::view::selection_layout::{
 use crate::schematic::view::selection_transform::{
     SelectionTransform, something_floats, turn_what_floats_or_selection,
 };
-use crate::schematic::view::sheet_visibility::objects_of_kind_on_active_sheet;
+use crate::schematic::view::sheet_visibility::{
+    object_is_on_active_sheet, objects_of_kind_on_active_sheet,
+};
 use crate::schematic::view::standard_value_snap::{run_snap_to_standard_value, snap_block_reason};
 use crate::schematic::view::{highlight_selected_net, selected_net, transient_annotation_status};
 use crate::state::{
@@ -480,8 +482,11 @@ impl CommandSet for DesignCommand {
                 .validate_array_source_selection()
                 .is_err()
                 .then_some("select an editable object"),
-            Self::SwapToRSpiceSymbols => (!reads.model.schematic.can_swap_to_rspice_symbols())
-                .then_some("no part here draws an imported symbol"),
+            Self::SwapToRSpiceSymbols => (!reads
+                .model
+                .schematic
+                .can_swap_to_rspice_symbols(|id| object_is_on_active_sheet(reads.model, id)))
+            .then_some("no part here draws an imported symbol"),
             // The repair is offered exactly where the deck refuses: the
             // schematic itself answers whether the selected instance still
             // presents its master's interface, so a live row and a netlist
@@ -1057,7 +1062,28 @@ impl CommandSet for DesignCommand {
                 cx.wb,
             ),
             Self::SwapToRSpiceSymbols => {
-                cx.model.schematic.swap_to_rspice_symbols();
+                let selected = !cx.model.schematic.session.editor.selection.is_empty();
+                let on_sheet = cx
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .iter()
+                    .map(|component| component.id)
+                    .filter(|id| object_is_on_active_sheet(cx.model, *id))
+                    .collect::<std::collections::HashSet<_>>();
+                let swapped = cx
+                    .model
+                    .schematic
+                    .swap_to_rspice_symbols(|id| on_sheet.contains(&id));
+                let parts = if swapped == 1 { "part" } else { "parts" };
+                cx.wb.prompt(match (swapped, selected) {
+                    (0, _) => "No part here draws an imported symbol.".to_owned(),
+                    (_, true) => format!("Swapped {swapped} selected {parts} to RSpice symbols."),
+                    (_, false) => {
+                        format!("Swapped {swapped} {parts} on this sheet to RSpice symbols.")
+                    }
+                });
             }
             // The operation reports its own outcome, including the name of any
             // terminal the master dropped, so no route composes a second

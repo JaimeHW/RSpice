@@ -73,29 +73,42 @@ impl SchematicState {
     }
 
     /// The parts a swap to RSpice's symbols reaches: the selected ones, or
-    /// with nothing selected every part on the sheet.
-    fn in_symbol_swap_scope(&self, component: u64) -> bool {
+    /// with nothing selected every part `on_sheet` places on the sheet in
+    /// front, never the cell view's other sheets, which the reader cannot see.
+    fn in_symbol_swap_scope(&self, component: u64, on_sheet: impl Fn(u64) -> bool) -> bool {
         let selection = &self.session.editor.selection;
-        selection.is_empty() || selection.has_component(component)
+        if selection.is_empty() {
+            on_sheet(component)
+        } else {
+            selection.has_component(component)
+        }
     }
 
     /// Whether any part in scope still draws artwork its drawing brought.
-    pub fn can_swap_to_rspice_symbols(&self) -> bool {
+    pub fn can_swap_to_rspice_symbols(&self, on_sheet: impl Fn(u64) -> bool) -> bool {
         !self.session.read_only
             && self.design.document().components.iter().any(|component| {
-                self.in_symbol_swap_scope(component.id) && component.can_swap_to_rspice_symbol()
+                self.in_symbol_swap_scope(component.id, &on_sheet)
+                    && component.can_swap_to_rspice_symbol()
             })
     }
 
     /// Draws the parts in scope with RSpice's own symbols at the pins they
     /// stand on, as one undo step, and counts them.
-    pub fn swap_to_rspice_symbols(&mut self) -> usize {
+    pub fn swap_to_rspice_symbols(&mut self, on_sheet: impl Fn(u64) -> bool) -> usize {
         if self.session.read_only {
             return 0;
         }
-        let selection = self.session.editor.selection.clone();
+        let in_scope = self
+            .design
+            .document()
+            .components
+            .iter()
+            .map(|component| component.id)
+            .filter(|component| self.in_symbol_swap_scope(*component, &on_sheet))
+            .collect::<std::collections::HashSet<_>>();
         let edit = self.design.swap_part_symbols(
-            |component| selection.is_empty() || selection.has_component(component),
+            |component| in_scope.contains(&component),
             rspice_design::foreign_schematic::with_rspice_symbol,
         );
         if edit.value > 0 {
@@ -185,15 +198,27 @@ mod tests {
         let (mut state, first, second) = sheet_with_carried_artwork();
         let (before_first, before_second) = (artwork(&state, first), artwork(&state, second));
         state.session.editor.selection.select_only_component(first);
-        assert!(state.can_swap_to_rspice_symbols());
-        assert_eq!(state.swap_to_rspice_symbols(), 1, "the selection alone");
+        assert!(state.can_swap_to_rspice_symbols(|_| true));
+        assert_eq!(
+            state.swap_to_rspice_symbols(|_| true),
+            1,
+            "the selection alone"
+        );
         assert_ne!(artwork(&state, first), before_first);
         assert_eq!(artwork(&state, second), before_second);
         assert!(state.undo());
         assert_eq!(artwork(&state, first), before_first, "one undo step");
 
         state.session.editor.selection.clear();
-        assert_eq!(state.swap_to_rspice_symbols(), 2, "the whole sheet");
+        assert_eq!(
+            state.swap_to_rspice_symbols(|id| id == second),
+            1,
+            "only the sheet in front"
+        );
+        assert_ne!(artwork(&state, second), before_second);
+        assert_eq!(artwork(&state, first), before_first, "another sheet's part");
+        assert!(state.undo());
+        assert_eq!(state.swap_to_rspice_symbols(|_| true), 2, "the whole sheet");
         assert_ne!(artwork(&state, first), before_first);
         assert_ne!(artwork(&state, second), before_second);
         assert!(state.undo());
