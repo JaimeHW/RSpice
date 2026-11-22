@@ -872,3 +872,78 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
     assert_eq!(state.model.schematic.document().wires, vec![here, there]);
     assert!(state.model.schematic.document().junctions.is_empty());
 }
+
+/// Reset label position is a row only in the menu of a selection that holds
+/// a part whose name or value was moved. It puts that part's texts back
+/// where the layout places them, leaves the rest of the part and an unmoved
+/// part alone, and one undo moves them back.
+#[test]
+fn reset_label_position_puts_a_moved_name_and_value_back_as_one_undo_step() {
+    use rspice_design::schematic::label_layout::TextEdge;
+    use rspice_design::schematic::label_position::LabelPosition;
+
+    let placed = LabelPosition::Placed {
+        offset: Point::new(60, -40),
+        horizontal: TextEdge::Start,
+        vertical: TextEdge::End,
+        upward: false,
+        size_percent: 100,
+    };
+    let mut state = DesignTestHost::default();
+    let mut moved =
+        Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
+    moved.name_label_pos = placed;
+    moved.value_label_pos = placed;
+    let unmoved =
+        Component::new(2, ComponentType::Resistor, Point::new(200, 0)).with_name_value("R2", "2k");
+    state.model.schematic.document_mut_for_test().components = vec![moved.clone(), unmoved];
+    state.model.schematic.init_undo_history();
+    let reset = "Reset label position";
+
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(2);
+    assert!(
+        !labels_of(&menu_entries(&state, ContextTarget::Component(2))).contains(&reset),
+        "a part whose texts stand where the layout puts them has no use for the row"
+    );
+
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(1);
+    assert!(labels_of(&menu_entries(&state, ContextTarget::Component(1))).contains(&reset));
+    assert!(action_availability(ContextAction::ResetLabelPosition, &state).0);
+
+    let symbol_context = schematic_symbol_context(&state);
+    execute_context_action(
+        ContextAction::ResetLabelPosition,
+        &mut canvas_parts(&mut state),
+        Point::new(0, 0),
+        &symbol_context,
+    );
+
+    let parts = &state.model.schematic.document().components;
+    assert_eq!(parts[0].name_label_pos, LabelPosition::Auto);
+    assert_eq!(parts[0].value_label_pos, LabelPosition::Auto);
+    assert_eq!(
+        (parts[0].pos, parts[0].value.as_str()),
+        (moved.pos, "1k"),
+        "the part itself stays put"
+    );
+    assert!(
+        !labels_of(&menu_entries(&state, ContextTarget::Component(1))).contains(&reset),
+        "nothing is left to put back"
+    );
+
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().components[0], moved);
+    assert!(!state.model.schematic.can_undo(), "the reset was one step");
+}

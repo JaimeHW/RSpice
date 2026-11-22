@@ -98,6 +98,9 @@ pub enum ContextAction {
     /// Round the selected resistors, capacitors and inductors to the
     /// project's preferred-number series.
     SnapToStandardValue,
+    /// Return the selected parts' moved names and values to where the
+    /// layout places them.
+    ResetLabelPosition,
     /// Arm the zoom box: the next drag frames the view. A finger has no
     /// Z key.
     ZoomBox,

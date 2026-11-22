@@ -20,6 +20,7 @@ use rspice_schematic_editor::symbol_editor::interaction::arm_stretch;
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 use crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid;
+use crate::schematic::view::label_reset::{reset_block_reason, run_reset_label_position};
 use crate::schematic::view::selection_layout::{
     SelectionLayoutCommand, apply_selection_layout, selection_layout_availability,
 };
@@ -403,6 +404,7 @@ impl CommandSet for DesignCommand {
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid
             | Self::SnapToStandardValue
+            | Self::ResetLabelPosition
             | Self::JoinCollinearWires
                 if !schematic =>
             {
@@ -436,6 +438,7 @@ impl CommandSet for DesignCommand {
                 .then_some("select an editable object"),
             Self::JoinCollinearWires | Self::SetStandardValueSeries(_) => None,
             Self::SnapToStandardValue => snap_block_reason(reads.model),
+            Self::ResetLabelPosition => reset_block_reason(reads.model),
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter
             | Self::AlignSelectionRight
@@ -985,6 +988,7 @@ impl CommandSet for DesignCommand {
                 run_snap_selection_to_grid(cx.model, cx.wb, &symbols);
             }
             Self::SnapToStandardValue => run_snap_to_standard_value(cx.model, cx.wb),
+            Self::ResetLabelPosition => run_reset_label_position(cx.model, cx.wb),
             Self::SetStandardValueSeries(series) => {
                 let workspace = &mut cx.model.workspace.content;
                 if workspace.standard_value_series != series {

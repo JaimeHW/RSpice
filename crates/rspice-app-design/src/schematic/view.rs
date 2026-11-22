@@ -27,6 +27,7 @@ pub mod gesture_commits;
 pub(crate) mod grid_snap_selection;
 pub mod interaction;
 pub mod keyboard_navigation;
+pub(crate) mod label_reset;
 pub mod mobile_controls;
 pub mod move_interaction;
 mod parts;

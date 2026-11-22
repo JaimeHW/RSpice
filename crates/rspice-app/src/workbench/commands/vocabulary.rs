@@ -558,6 +558,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::DistributeSelectionHorizontal.key(),
     DesignCommand::DistributeSelectionVertical.key(),
     DesignCommand::SnapSelectionToGrid.key(),
+    DesignCommand::ResetLabelPosition.key(),
     DesignCommand::SnapToStandardValue.key(),
     DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6).key(),
     DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12).key(),

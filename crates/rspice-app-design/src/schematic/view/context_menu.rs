@@ -124,6 +124,14 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         label: "Snap to standard value",
         shortcut_command: None,
     }),
+    // Only in the menu of a selection that holds a part whose name or value
+    // has been moved; see `menu_entries`.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::ResetLabelPosition,
+        icon: ContextIcon::Text,
+        label: "Reset label position",
+        shortcut_command: Some(DesignCommand::ResetLabelPosition.key()),
+    }),
     // The stimulus-library group, which exists only in a placed source's menu
     // and states the verbs that source's standing with the library calls for;
     // see `stimulus`.
@@ -544,6 +552,11 @@ pub fn menu_entries(state: &CanvasFacts<'_>, target: ContextTarget) -> Vec<Conte
                 if command.action == ContextAction::SnapToStandardValue =>
             {
                 selection_holds_a_standard_value(state)
+            }
+            ContextEntry::Command(command)
+                if command.action == ContextAction::ResetLabelPosition =>
+            {
+                super::label_reset::selection_holds_placed_text(state.model)
             }
             ContextEntry::Command(command) => master_slot_shows(command.action, subject),
         };
@@ -1532,6 +1545,10 @@ pub fn action_availability(action: ContextAction, state: &CanvasFacts<'_>) -> (b
             let blocked = super::standard_value_snap::snap_block_reason(state.model);
             (blocked.is_none(), blocked.unwrap_or_default())
         }
+        ContextAction::ResetLabelPosition => {
+            let blocked = super::label_reset::reset_block_reason(state.model);
+            (blocked.is_none(), blocked.unwrap_or_default())
+        }
         ContextAction::OperatingPoint => (
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
@@ -1711,6 +1728,9 @@ pub fn execute_context_action(
         ContextAction::OperatingPoint => open_operating_point(state),
         ContextAction::SnapToStandardValue => {
             super::standard_value_snap::run_snap_to_standard_value(state.model, state.workbench);
+        }
+        ContextAction::ResetLabelPosition => {
+            super::label_reset::run_reset_label_position(state.model, state.workbench);
         }
         ContextAction::Choose(_) => {}
     }

@@ -169,6 +169,9 @@ pub enum DesignCommand {
     DistributeSelectionVertical,
     /// Move every selected object's anchor to the nearest grid point.
     SnapSelectionToGrid,
+    /// Return each selected part's name and value to where the layout
+    /// places them.
+    ResetLabelPosition,
     /// Snap each selected resistor, capacitor and inductor to the nearest
     /// value of the project's preferred-number series.
     SnapToStandardValue,
@@ -428,7 +431,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub const ALL: [Self; 103] = [
+    pub const ALL: [Self; 104] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -497,6 +500,7 @@ impl DesignCommand {
         Self::DistributeSelectionHorizontal,
         Self::DistributeSelectionVertical,
         Self::SnapSelectionToGrid,
+        Self::ResetLabelPosition,
         Self::SnapToStandardValue,
         Self::SetStandardValueSeries(ESeries::E6),
         Self::SetStandardValueSeries(ESeries::E12),
@@ -607,6 +611,7 @@ impl DesignCommand {
             }
             Self::DistributeSelectionVertical => CommandKey::new("distribute-selection-vertical"),
             Self::SnapSelectionToGrid => CommandKey::new("snap-selection-to-grid"),
+            Self::ResetLabelPosition => CommandKey::new("reset-label-position"),
             Self::SnapToStandardValue => CommandKey::new("snap-to-standard-value"),
             Self::SetStandardValueSeries(ESeries::E6) => CommandKey::new("standard-values-e6"),
             Self::SetStandardValueSeries(ESeries::E12) => CommandKey::new("standard-values-e12"),
@@ -972,6 +977,7 @@ impl DesignCommand {
             Self::SnapSelectionToGrid => {
                 ("Snap selection to grid", "Design", arrange, canvas, NONE)
             }
+            Self::ResetLabelPosition => ("Reset label position", "Design", arrange, canvas, NONE),
             Self::SnapToStandardValue => {
                 ("Snap to standard value", "Design", arrange, canvas, NONE)
             }

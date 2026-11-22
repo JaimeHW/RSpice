@@ -555,6 +555,7 @@ const ARRANGE_MENU: &[MenuEntry] = &[
     Separator,
     design(DesignCommand::SnapSelectionToGrid).access('S'),
     design(DesignCommand::JoinCollinearWires).access('J'),
+    design(DesignCommand::ResetLabelPosition).access('P'),
 ];
 
 /// Snap the selected values to the project's preferred-number series, and
