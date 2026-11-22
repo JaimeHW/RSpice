@@ -24,15 +24,18 @@ fn rc() -> RSpiceApp {
         "RC Lowpass Filter",
         &mut app.state.model.schematic,
     );
-    app.state
+    let drive = app
+        .state
         .model
         .schematic
         .document_mut_for_test()
         .components
         .iter_mut()
         .find(|component| component.name == "VIN")
-        .expect("the drive")
-        .kind = ComponentType::VoltageSource;
+        .expect("the drive");
+    drive.kind = ComponentType::VoltageSource;
+    drive.value = "1".to_owned();
+    drive.params.clear();
     app.state.sync_active_schematic_to_workspace();
     edit_the_transient(&mut app.state, |draft| {
         draft.stop = "500u".to_owned();

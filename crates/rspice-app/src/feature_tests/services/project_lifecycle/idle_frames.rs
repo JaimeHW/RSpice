@@ -160,8 +160,6 @@ mod every_surface {
             .expect("one source for the view");
         let testbench = CellViewRef::new("behavioral", "bench", "testbench");
 
-        state.model.sim_setup.tran.step = "1n".to_owned();
-        state.model.sim_setup.tran.stop = "10u".to_owned();
         state.open_workspace_view(top.clone());
         state.workbench.activate(Workspace::Design);
         run_to_its_end(&mut replay);

@@ -1750,7 +1750,8 @@ pub(crate) fn go_on_leaving(
     None
 }
 
-/// Replace the session with a new project holding `example`, named after it.
+/// Replace the session with a new project holding `example`, named after it,
+/// its plan running the example's own analysis.
 ///
 /// The project is not saved: it opens in place, ready to run, and its first
 /// Save asks where to keep it.
@@ -1761,6 +1762,8 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
     };
     state.create_new_project_with(&params)?;
     load_example(example.name, &mut state.model.schematic);
+    let shown = example.analysis.plan_into(&mut state.model.sim_setup)?;
+    state.simulate.active_analysis_instance = Some(shown);
     state.sync_active_schematic_to_workspace();
     Ok(())
 }

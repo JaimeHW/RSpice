@@ -5,7 +5,6 @@
 use egui::{Context, vec2};
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
-use std::time::{Duration, Instant};
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -13,17 +12,14 @@ use crate::workbench::session::project_transactions::create_example_project;
 use crate::workbench::session::project_transactions::request_example;
 use rspice_app_project::workbench::tools::examples_browser::{open_refusal, show};
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
-use rspice_app_state::state::AnalysisType;
 
-/// Every example opens as a project whose default plan the engine
-/// prepares and authorizes, through the path the toolbar's Run takes:
-/// netlisted, its models bound, its decks built and checked, and the run
-/// queued. Running each to its end is left to the test below: in an
-/// unoptimized build that takes from seconds to minutes per example.
+/// Every example opens as a project whose own plan the engine prepares and
+/// authorizes, through the path the toolbar's Run takes: netlisted, its
+/// models bound, its decks built and checked, and the run queued.
 #[test]
-fn every_example_opens_as_a_project_whose_default_analysis_is_authorized() {
+fn every_example_opens_as_a_project_whose_analysis_is_authorized() {
     for example in EXAMPLES {
-        let app = open_and_press_run(example, "10n");
+        let app = open_and_press_run(example);
         let report = app
             .state
             .runs
@@ -44,50 +40,9 @@ fn every_example_opens_as_a_project_whose_default_analysis_is_authorized() {
     }
 }
 
-/// An example opened as a project runs to its transient result.
-#[test]
-fn an_example_project_runs_to_its_result() {
-    let example = EXAMPLES[0];
-    let mut app = open_and_press_run(example, "10u");
-    // What the frame loop does each frame while the run is dispatched
-    // and collected.
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        app.simulation_controller
-            .update(&mut app.state, &*app.export_workflow_io);
-        let execution = &app.state.model.simulation.execution;
-        if !execution.has_active_execution() && !execution.trigger_simulation {
-            break;
-        }
-        assert!(Instant::now() < deadline, "{} timed out", example.name);
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let run = app
-        .state
-        .model
-        .simulation
-        .retained
-        .runs
-        .last()
-        .expect("the run is retained");
-    assert!(
-        run.analyses.iter().any(|analysis| {
-            analysis.analysis_type == AnalysisType::Transient
-                && analysis.success
-                && !analysis.waveforms.is_empty()
-        }),
-        "{}: {:?}",
-        example.name,
-        run.analyses
-            .iter()
-            .map(|analysis| &analysis.error_message)
-            .collect::<Vec<_>>()
-    );
-}
-
-/// Open `example` as a project and press Run, as the toolbar does, with
-/// its transient cut to `stop`; preflight has settled on return.
-fn open_and_press_run(example: Example, stop: &str) -> RSpiceApp {
+/// Open `example` as a project and press Run, as the toolbar does;
+/// preflight has settled on return.
+fn open_and_press_run(example: Example) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     create_example_project(&mut app.state, example).expect("the example opens as a project");
     assert_eq!(
@@ -99,10 +54,6 @@ fn open_and_press_run(example: Example, stop: &str) -> RSpiceApp {
         "{} draws its circuit",
         example.name
     );
-    // The default plan runs a millisecond at 10 ns steps; the engine
-    // checks the same plan over a shorter window.
-    app.state.model.sim_setup.tran.step = "1n".to_owned();
-    app.state.model.sim_setup.tran.stop = stop.to_owned();
     // The frame after the project opens, on which the controller lets go
     // of the design it replaced; a check started before it would be
     // dropped with that design.

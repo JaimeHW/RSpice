@@ -1,12 +1,11 @@
 //! Examples: the demonstration circuits, each opened as a project of its own.
 //!
 //! The circuits are the ones `workbench::examples` draws through the
-//! schematic's own API, which until this dialog only the tests reached.
-//! Opening one replaces the session with a new project named after it, draws
-//! the circuit as its top cell, and saves it where the reader says: a file
-//! they choose on the desktop, this browser's storage on the web. While the
-//! open project has unsaved changes, Open asks to save them first, as New
-//! project does.
+//! schematic's own API. Opening one replaces the session with a new project
+//! named after it, draws the circuit as its top cell, and plans the analysis
+//! whose plot shows the circuit at work. The project opens unsaved, ready to
+//! run; its first Save asks where to keep it. While the open project has
+//! unsaved changes, Open asks to save them first, as New project does.
 
 use egui::{Context, Sense, vec2};
 

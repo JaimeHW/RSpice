@@ -12,12 +12,11 @@ use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
-/// An example project with a short transient, the session settled on it.
+/// The RC low-pass example's project, on its own short transient, the
+/// session settled on it.
 fn example_project() -> User {
     let mut app = RSpiceApp::test_instance();
     create_example_project(&mut app.state, EXAMPLES[0]).expect("the example opens as a project");
-    app.state.model.sim_setup.tran.step = "1n".to_owned();
-    app.state.model.sim_setup.tran.stop = "10u".to_owned();
     User::new(app)
 }
 
@@ -346,6 +345,65 @@ fn an_operating_point_run_opens_on_its_operating_point() {
         user.app.state.results.results.session.viewer,
         ResultViewer::Op
     );
+}
+
+/// Every example's Run opens Results on a plot of the circuit at work: a
+/// plotted trace that moves across the time or the sweep, not a flat line at
+/// its bias. A swing of a millivolt and a hundredth of its level is one the
+/// plot's own scale shows.
+#[test]
+fn every_example_opens_on_a_plot_whose_trace_moves() {
+    for example in EXAMPLES {
+        let mut app = RSpiceApp::test_instance();
+        create_example_project(&mut app.state, example).expect("the example opens as a project");
+        let mut user = User::new(app);
+        run_to_its_end(&mut user);
+
+        let viewer = user.app.state.results.results.session.viewer;
+        assert!(
+            rspice_results::result_presentation::viewer_uses_wave_stack(viewer),
+            "{} opens on {viewer:?}",
+            example.name
+        );
+        let run = user
+            .app
+            .state
+            .model
+            .simulation
+            .active_run()
+            .expect("a run is open");
+        let mut plotted = Vec::new();
+        for analysis in &run.analyses {
+            for waveform in &analysis.waveforms {
+                let key = SourceWaveformPresentationKey::new(
+                    AnalysisPresentationKey::new(run.dataset_id, analysis),
+                    &waveform.name,
+                );
+                if waveform_plotted(
+                    &user.app.state.model,
+                    &user.app.state.results.results,
+                    &key,
+                    &waveform.name,
+                    waveform.visible,
+                ) {
+                    let samples = waveform.y.read_whole().expect("the samples read");
+                    let (low, high) = samples
+                        .iter()
+                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), &y| {
+                            (low.min(y), high.max(y))
+                        });
+                    plotted.push((waveform.name.clone(), samples.len(), low, high));
+                }
+            }
+        }
+        assert!(
+            plotted.iter().any(|&(_, points, low, high)| {
+                points > 2 && high - low > 1e-3 && high - low > 0.01 * low.abs().max(high.abs())
+            }),
+            "{}: a plotted trace moves: {plotted:?}",
+            example.name
+        );
+    }
 }
 
 /// The Results page on Waves after a run, as a completed run opens it.

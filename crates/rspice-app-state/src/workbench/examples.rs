@@ -13,7 +13,8 @@
 //! - **Opamp Inverting Amplifier**: VCVS-based inverting stage
 //!
 //! [`EXAMPLES`] lists them with the line Help's Examples dialog shows for
-//! each; [`load_example`] draws one by its name.
+//! each, and the analysis whose plot shows the circuit at work;
+//! [`load_example`] draws one by its name.
 //!
 //! # Geometry rules
 //!
@@ -37,18 +38,89 @@
 
 use rspice_design::schematic::document::SchematicDocument;
 
+use crate::product::AnalysisInstanceId;
+use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
+use crate::workbench::app_state::sim_setup::{DcSetup, SimSetupState, TranSetup};
 
 // =============================================================================
 // Example Circuit Definitions
 // =============================================================================
 
-/// One demonstration circuit: the name [`load_example`] draws it by, and
-/// what it is, in a line.
+/// One demonstration circuit: the name [`load_example`] draws it by, what
+/// it is, in a line, and the analysis a run of it solves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Example {
     pub name: &'static str,
     pub summary: &'static str,
+    pub analysis: ExampleAnalysis,
+}
+
+/// What a run of an example solves, chosen so the plot it opens on shows the
+/// circuit doing its job. The values are the plan's own text, as a reader
+/// would type them on the Simulation page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExampleAnalysis {
+    /// The operating point, and a linear DC sweep of the source `source`
+    /// from 0 to `stop` in steps of `step`.
+    DcSweep {
+        source: &'static str,
+        stop: &'static str,
+        step: &'static str,
+    },
+    /// A transient from 0 to `stop`, printed every `step`.
+    Transient {
+        stop: &'static str,
+        step: &'static str,
+    },
+}
+
+impl ExampleAnalysis {
+    /// The drafts the plan holds, in order; the last is the one the plot
+    /// shows.
+    fn drafts(self) -> Vec<AnalysisDraft> {
+        match self {
+            Self::DcSweep { source, stop, step } => vec![
+                AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+                AnalysisDraft::DcSweep(DcSetup {
+                    source: source.to_owned(),
+                    start: "0".to_owned(),
+                    stop: stop.to_owned(),
+                    step: step.to_owned(),
+                    ..DcSetup::default()
+                }),
+            ],
+            Self::Transient { stop, step } => vec![AnalysisDraft::Transient(TranSetup {
+                stop: stop.to_owned(),
+                step: step.to_owned(),
+                ..TranSetup::default()
+            })],
+        }
+    }
+
+    /// Make the active plan of `setup` run this analysis in place of the
+    /// analyses it had, and return the analysis the plot shows.
+    pub fn plan_into(self, setup: &mut SimSetupState) -> Result<AnalysisInstanceId, String> {
+        let plan = setup.stable_analysis_plan_mut()?;
+        let replaced = plan
+            .instances()
+            .iter()
+            .map(|instance| instance.id())
+            .collect::<Vec<_>>();
+        let mut shown = None;
+        for (position, draft) in self.drafts().into_iter().enumerate() {
+            let (id, _) = plan
+                .insert_draft_with_id(AnalysisInstanceId::new(), draft, true, position)
+                .map_err(|error| error.to_string())?;
+            shown = Some(id);
+        }
+        for id in replaced {
+            plan.remove(id, Vec::new())
+                .map_err(|error| error.to_string())?;
+        }
+        setup.refresh_legacy_analysis_projections();
+        shown.ok_or_else(|| "an example plans at least one analysis".to_owned())
+    }
 }
 
 /// Every demonstration circuit, in the order the Examples dialog lists them.
@@ -56,26 +128,51 @@ pub const EXAMPLES: [Example; 6] = [
     Example {
         name: "RC Lowpass Filter",
         summary: "R1 1k into C1 159n: a first-order low-pass with its corner at 1 kHz.",
+        analysis: ExampleAnalysis::Transient {
+            stop: "3m",
+            step: "2u",
+        },
     },
     Example {
         name: "Voltage Divider",
         summary: "Two 10k resistors halving a 5 V supply.",
+        analysis: ExampleAnalysis::DcSweep {
+            source: "VCC",
+            stop: "5",
+            step: "0.1",
+        },
     },
     Example {
         name: "Common Emitter Amplifier",
         summary: "An NPN stage on 12 V: RB 100k bias, RC 1k load, RE 100 degeneration.",
+        analysis: ExampleAnalysis::Transient {
+            stop: "3m",
+            step: "2u",
+        },
     },
     Example {
         name: "CMOS Inverter",
         summary: "A PMOS and NMOS pair on 3.3 V, switched by a pulse input.",
+        analysis: ExampleAnalysis::Transient {
+            stop: "40n",
+            step: "50p",
+        },
     },
     Example {
         name: "Differential Pair",
         summary: "Two NPN transistors sharing a 1 mA tail: an op-amp input stage.",
+        analysis: ExampleAnalysis::Transient {
+            stop: "3m",
+            step: "2u",
+        },
     },
     Example {
         name: "Opamp Inverting Amplifier",
         summary: "A gain of -10 from RF 10k over RIN 1k around a high-gain op-amp.",
+        analysis: ExampleAnalysis::Transient {
+            stop: "3m",
+            step: "2u",
+        },
     },
 ];
 
@@ -130,9 +227,11 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
 fn build_rc_lowpass(doc: &mut SchematicDocument) {
     let mut id = 1u64;
 
-    // Input source — vertical at R0: + (100,180), − (100,220).
-    let v1 = Component::new(id, ComponentType::VoltageSourceAc, Point::new(100, 200))
-        .with_name_value("VIN", "1");
+    // Input source — vertical at R0: + (100,180), − (100,220). A 1 kHz
+    // square wave, so the output shows the RC charging and discharging.
+    let mut v1 = Component::new(id, ComponentType::VoltageSourcePulse, Point::new(100, 200))
+        .with_name_value("VIN", "0");
+    v1.params = "v2=1 td=0 tr=1u tf=1u pw=500u per=1m".to_owned();
     id += 1;
     doc.components.push(v1);
 
@@ -295,8 +394,10 @@ fn build_common_emitter(doc: &mut SchematicDocument) {
     doc.components.push(cin);
 
     // AC input — vertical at R0: + (60,220), − (60,260).
-    let vin = Component::new(id, ComponentType::VoltageSourceAc, Point::new(60, 240))
-        .with_name_value("VIN", "10m");
+    // A 10 mV, 1 kHz sine, well inside the stage's band.
+    let mut vin = Component::new(id, ComponentType::VoltageSourceSin, Point::new(60, 240))
+        .with_name_value("VIN", "0");
+    vin.params = "va=10m freq=1k".to_owned();
     id += 1;
     doc.components.push(vin);
 
@@ -505,14 +606,18 @@ fn build_differential_pair(doc: &mut SchematicDocument) {
     id += 1;
     doc.components.push(vcc);
 
-    // Differential drive — vertical at R0.
-    let vin1 = Component::new(id, ComponentType::VoltageSourceAc, Point::new(60, 260))
-        .with_name_value("VIN1", "1m");
+    // Differential drive — vertical at R0. The two 5 mV, 1 kHz sines swing
+    // in antiphase, so the collectors swing against each other; driven in
+    // phase, they would cancel.
+    let mut vin1 = Component::new(id, ComponentType::VoltageSourceSin, Point::new(60, 260))
+        .with_name_value("VIN1", "0");
+    vin1.params = "va=5m freq=1k".to_owned();
     id += 1;
     doc.components.push(vin1);
 
-    let vin2 = Component::new(id, ComponentType::VoltageSourceAc, Point::new(420, 260))
-        .with_name_value("VIN2", "1m");
+    let mut vin2 = Component::new(id, ComponentType::VoltageSourceSin, Point::new(420, 260))
+        .with_name_value("VIN2", "0");
+    vin2.params = "va=5m freq=1k phase=180".to_owned();
     id += 1;
     doc.components.push(vin2);
 
@@ -609,9 +714,11 @@ fn build_opamp_inverter(doc: &mut SchematicDocument) {
     id += 1;
     doc.components.push(rf);
 
-    // Input source — vertical at R0: + (80,190), − (80,230).
-    let vin = Component::new(id, ComponentType::VoltageSourceAc, Point::new(80, 210))
-        .with_name_value("VIN", "100m");
+    // Input source — vertical at R0: + (80,190), − (80,230). A 100 mV,
+    // 1 kHz sine, which comes out ten times larger and inverted.
+    let mut vin = Component::new(id, ComponentType::VoltageSourceSin, Point::new(80, 210))
+        .with_name_value("VIN", "0");
+    vin.params = "va=100m freq=1k".to_owned();
     id += 1;
     doc.components.push(vin);
 
@@ -677,6 +784,7 @@ fn build_opamp_inverter(doc: &mut SchematicDocument) {
     // ground-referenced internally).
     add_wire(doc, vec![Point::new(80, 230), Point::new(80, 300)]);
     add_wire(doc, vec![Point::new(80, 300), Point::new(200, 300)]);
+    add_label(doc, Point::new(110, 170), "in");
     add_label(doc, Point::new(380, 160), "vout");
 }
 
