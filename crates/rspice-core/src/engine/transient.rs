@@ -4876,15 +4876,22 @@ impl Engine {
         SimulationError,
     > {
         Self::ensure_bjt_transient_phase_support(&prepared.circuit, abort)?;
-        let admitted = AdmittedTransientCircuit {
-            prepared,
-            identity: CheckpointIdentity {
+        // Only a checkpoint states the run's identity, and stating it reads the whole netlist
+        // (on a million devices, seconds before the operating point that Stop could not
+        // interrupt): a run that keeps no checkpoint never computes it.
+        let identity = if plan.final_checkpoint_retention.is_retained()
+            || !plan.scheduled_checkpoint_times.is_empty()
+        {
+            CheckpointIdentity {
                 fingerprint: netlist_fingerprint(checkpoint_netlist),
                 netlist_identity: netlist_checkpoint_identity(checkpoint_netlist),
                 restart_identity: restart_checkpoint_identity(checkpoint_netlist),
                 simulation_identity: simulation_checkpoint_identity(&self.config),
-            },
+            }
+        } else {
+            CheckpointIdentity::unstated()
         };
+        let admitted = AdmittedTransientCircuit { prepared, identity };
         self.run_tran_admitted(netlist, checkpoint_netlist, window, abort, plan, admitted)
     }
 

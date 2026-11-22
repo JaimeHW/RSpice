@@ -216,6 +216,18 @@ pub(super) struct CheckpointIdentity {
     pub simulation_identity: String,
 }
 
+impl CheckpointIdentity {
+    /// The identity of a run that captures no checkpoint, which therefore never reads it.
+    pub(super) fn unstated() -> Self {
+        Self {
+            fingerprint: 0,
+            netlist_identity: String::new(),
+            restart_identity: None,
+            simulation_identity: String::new(),
+        }
+    }
+}
+
 /// The accepted point a checkpoint captures.
 #[derive(Clone, Copy)]
 pub(crate) struct CheckpointState<'a> {
