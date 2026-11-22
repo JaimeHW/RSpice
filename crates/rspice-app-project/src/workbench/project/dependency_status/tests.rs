@@ -165,3 +165,60 @@ fn a_location_is_read_from_the_project_folder_when_it_is_near() {
         );
     }
 }
+
+/// A deck kept as a file is a row, and each file its include lines name is
+/// a row of its own: found beside the deck or along the include search
+/// paths, or not found, with the line that names it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_deck_file_lists_the_files_it_includes_found_or_not() {
+    use crate::state::{DeckSource, ProjectDeck};
+
+    let folder = std::env::temp_dir().join(format!("rspice-deck-rows-{}", std::process::id()));
+    std::fs::create_dir_all(folder.join("models")).expect("the folder is made");
+    std::fs::write(folder.join("models").join("tt.lib"), "* corners\n").expect("it writes");
+    std::fs::write(
+        folder.join("amp.cir"),
+        "* amp\n.include models/tt.lib\n.include gone.lib\n.end\n",
+    )
+    .expect("it writes");
+    let mut model = model();
+    model.workspace.content.decks.push(ProjectDeck {
+        id: rspice_design::deck::DeckId::new(),
+        source: DeckSource::File {
+            path: folder.join("amp.cir"),
+        },
+    });
+    let rows = build_rows(&model);
+    let files: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.library.kind,
+                DependencyKind::Deck | DependencyKind::Include
+            )
+        })
+        .map(|row| (row.library.kind, row.library.shown_name(), row.status.label))
+        .collect();
+    assert_eq!(
+        files,
+        [
+            (DependencyKind::Deck, "amp.cir", "Found"),
+            (DependencyKind::Include, "gone.lib", "Not found"),
+            (DependencyKind::Include, "tt.lib", "Found"),
+        ]
+    );
+    let gone = rows
+        .iter()
+        .find(|row| row.library.name == "gone.lib")
+        .expect("the missing include is a row");
+    assert!(
+        gone.status
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.starts_with("amp.cir line 3")),
+        "{:?}",
+        gone.status.detail
+    );
+    let _ = std::fs::remove_dir_all(folder);
+}

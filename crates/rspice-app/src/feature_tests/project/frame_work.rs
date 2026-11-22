@@ -14,6 +14,7 @@ use egui::Context;
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::configuration_state::CONFIGURATION_SCANS;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_project::workbench::project::{DependencyKind, DependencyLibrary};
 use rspice_app_project::workbench::surfaces::library_cellview_manager::CELLVIEW_PROJECTION_BUILDS;
 use rspice_app_project::workbench::surfaces::project::library::LIBRARY_ROW_BUILDS;
 use rspice_app_project::workbench::surfaces::project::overview::OverviewSnapshot;
@@ -464,6 +465,21 @@ fn dependencies_states_a_stale_technology_once_its_model_file_is_refreshed() {
     attach_technology_from(&mut app, &model_file);
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Dependencies;
+    // The inspector states what the technology's status needs done.
+    let package = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .expect("the technology is attached")
+        .package_name()
+        .to_owned();
+    app.state.project.project_dependency_selection = Some(DependencyLibrary {
+        kind: DependencyKind::Technology,
+        name: package,
+    });
     let ctx = offscreen();
     let stale = "Attached technology contract is stale";
 
@@ -483,8 +499,8 @@ fn dependencies_states_a_stale_technology_once_its_model_file_is_refreshed() {
     let _ = std::fs::remove_dir_all(folder);
 }
 
-/// The dependency ledger keeps its rows until a catalogue changes: a
-/// library added since the last frame is a row on the next.
+/// The dependency table keeps its rows until a catalogue changes: a library
+/// added since the last frame is a row on the next.
 #[test]
 fn a_library_added_since_the_last_frame_is_a_dependency() {
     let mut app = RSpiceApp::test_instance();
@@ -499,7 +515,7 @@ fn a_library_added_since_the_last_frame_is_a_dependency() {
         .library_manager
         .add_library(Library::new("aa-late"));
     let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    assert!(next.contains("aa-late"), "the ledger lists it: {next}");
+    assert!(next.contains("aa-late"), "the table lists it: {next}");
 }
 
 /// One whole application frame on a screen of `size`.

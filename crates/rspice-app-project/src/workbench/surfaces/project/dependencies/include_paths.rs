@@ -1,11 +1,15 @@
 //! The project's include search paths, edited from their rows: added,
 //! changed to another folder, removed and moved in the search order. Each
-//! edit is one step of the one Undo over the project's properties, refused
-//! while the project is open read-only.
+//! edit applies through the one path every edit of the project's properties
+//! takes: one step of Undo, refused while the project is open read-only.
 
 use std::path::{Path, PathBuf};
 
 use crate::workbench::app_state::Model;
+use crate::workbench::project::properties::{
+    ProjectPropertiesEdit, apply_project_properties, include_search_path_refusal,
+    project_properties_refusal,
+};
 
 /// One edit of the include search chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,51 +46,56 @@ pub(crate) fn edit_include_paths(
     model: &mut Model,
     edit: IncludePathEdit,
 ) -> Result<String, String> {
-    let mut candidate = model.workspace.content.project.properties();
-    let paths = &mut candidate.include_search_paths;
-    let position = |paths: &[PathBuf], written: &str| {
-        paths
+    if let Some(refusal) = project_properties_refusal(model) {
+        return Err(refusal.to_owned());
+    }
+    let mut paths = model
+        .workspace
+        .content
+        .project
+        .properties()
+        .include_search_paths;
+    let listed: Vec<String> = paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    let position = |written: &str| {
+        listed
             .iter()
-            .position(|path| path.display().to_string() == written)
+            .position(|listed| listed == written)
             .ok_or_else(|| format!("{written} is no longer an include search path."))
     };
-    let (step, done) = match edit {
+    let done = match edit {
         IncludePathEdit::Add(folder) => {
-            if paths.contains(&folder) {
-                return Err(format!("{} is already listed.", folder.display()));
-            }
             let shown = folder.display().to_string();
+            if let Some(refusal) =
+                include_search_path_refusal(listed.iter().map(String::as_str), &shown)
+            {
+                return Err(refusal);
+            }
             paths.push(folder);
-            (
-                format!("add include search path {shown}"),
-                format!("Added include search path {shown}."),
-            )
+            format!("Added include search path {shown}.")
         }
         IncludePathEdit::Change(written, folder) => {
-            let at = position(paths, &written)?;
+            let at = position(&written)?;
             let shown = folder.display().to_string();
             if shown == written {
                 return Err(format!("{written} already names that folder."));
             }
-            if paths.contains(&folder) {
-                return Err(format!("{shown} is already listed."));
+            if let Some(refusal) =
+                include_search_path_refusal(listed.iter().map(String::as_str), &shown)
+            {
+                return Err(refusal);
             }
             paths[at] = folder;
-            (
-                format!("change include search path {written} to {shown}"),
-                format!("Include search path {written} is now {shown}."),
-            )
+            format!("Include search path {written} is now {shown}.")
         }
         IncludePathEdit::Remove(written) => {
-            let at = position(paths, &written)?;
-            paths.remove(at);
-            (
-                format!("remove include search path {written}"),
-                format!("Removed include search path {written}."),
-            )
+            paths.remove(position(&written)?);
+            format!("Removed include search path {written}.")
         }
         IncludePathEdit::Move(written, up) => {
-            let at = position(paths, &written)?;
+            let at = position(&written)?;
             let to = if up {
                 at.checked_sub(1)
             } else {
@@ -99,17 +108,19 @@ pub(crate) fn edit_include_paths(
                 )
             })?;
             paths.swap(at, to);
-            let way = if up { "up" } else { "down" };
-            (
-                format!("move include search path {written} {way}"),
-                format!(
-                    "Include search path {written} is now searched {}.",
-                    ordinal(to + 1)
-                ),
+            format!(
+                "Include search path {written} is now searched {}.",
+                ordinal(to + 1)
             )
         }
     };
-    model.publish_project_properties(candidate, step)?;
+    apply_project_properties(
+        model,
+        ProjectPropertiesEdit {
+            include_search_paths: Some(paths),
+            ..ProjectPropertiesEdit::default()
+        },
+    )?;
     Ok(done)
 }
 

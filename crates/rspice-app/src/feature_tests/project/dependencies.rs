@@ -1,7 +1,8 @@
 //! The Dependencies page through whole application frames: each library has
-//! one status, and the table and the inspector beside it say the same thing
-//! about it, in every state a library can be in; and each row of the table
-//! can be opened, shown, read again or removed from the page.
+//! one status, and the table and the inspector beside the page say the same
+//! thing about it, in every state a library can be in; and each row of the
+//! table can be opened, shown, read again, changed or removed from its menu,
+//! the bar or a key.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -10,6 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::app::dialogs::project::{RELINK_PICK, SHOWN_FOLDERS};
 use rspice_app_project::workbench::project::DependencyLibrary;
+use rspice_app_project::workbench::project::library_dialogs::library_files::answer_next_folder_pick;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::Library;
@@ -71,7 +73,7 @@ fn table_row<'a>(
 
 /// How a table row for `name` of `kind` starts when it is announced.
 fn row_label(name: &str, kind: &str) -> String {
-    format!("Library: {name}, Type: {kind}, ")
+    format!("Name: {name}, Kind: {kind}, ")
 }
 
 /// The status a table row announces, after its head.
@@ -82,17 +84,13 @@ fn row_status(label: &str) -> &str {
 /// What the table and the inspector say about `library`, in the frame
 /// after it was selected.
 pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 2] {
-    let kind = match library.kind {
-        rspice_app_project::workbench::project::DependencyKind::Design => "Design",
-        rspice_app_project::workbench::project::DependencyKind::Model => "Model",
-    };
     app.state.project.project_dependency_selection = Some(library.clone());
     let ctx = offscreen();
     app_frame(&ctx, app, Vec::new());
     let output = app_frame(&ctx, app, Vec::new());
     let nodes = announced(&output);
 
-    let table = table_row(&nodes, &library.name, kind);
+    let table = table_row(&nodes, library.shown_name(), library.kind.label());
     assert_eq!(
         table.len(),
         1,
@@ -299,8 +297,8 @@ fn a_model_library_kept_in_the_project_is_in_the_project_in_every_place() {
 }
 
 /// A project with no technology attached is ordinary, as on the Overview:
-/// the page and the inspector say "Not attached" with no mark, and no
-/// sentence about a missing binding.
+/// the table has no Technology row, nothing speaks of a missing binding,
+/// and Add offers to attach one.
 #[test]
 fn a_project_with_no_technology_attached_carries_no_mark() {
     let mut libraries = libraries();
@@ -317,36 +315,17 @@ fn a_project_with_no_technology_attached_carries_no_mark() {
     );
     let ctx = offscreen();
     app_frame(&ctx, &mut libraries.app, Vec::new());
-    let output = app_frame(&ctx, &mut libraries.app, Vec::new());
-    // The rows that state the technology, not the headings titled with it.
-    let technology: Vec<_> = output
-        .platform_output
-        .accesskit_update
-        .as_ref()
-        .expect("the frame publishes its tree")
-        .nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.role() != egui::accesskit::Role::Heading && node.label() == Some("Technology")
-        })
-        .map(|(_, node)| {
-            (
-                node.value().map(str::to_owned),
-                node.description().map(str::to_owned),
-            )
-        })
-        .collect();
-    assert_eq!(
-        technology.len(),
-        1,
-        "the page states it; the inspector speaks of the selected library: {technology:?}"
+    let page = app_frame(&ctx, &mut libraries.app, Vec::new());
+    let rows = ledger_rows(&page);
+    assert!(
+        !rows.iter().any(|row| row.contains("Kind: Technology, ")),
+        "{rows:#?}"
     );
-    for (value, description) in technology {
-        assert_eq!(value.as_deref(), Some("Not attached"));
-        assert_eq!(description, None, "no mark on an ordinary project");
-    }
-    let text = painted(&output);
+    let text = painted(&page);
     assert!(!text.contains("binding"), "{text}");
+    app_frame(&ctx, &mut libraries.app, click_on(&page, "Add"));
+    let menu = app_frame(&ctx, &mut libraries.app, Vec::new());
+    assert_eq!(offered(&menu, &["Technology\u{2026}"]), [Some(true)]);
     let _ = std::fs::remove_dir_all(libraries.folder);
 }
 
@@ -372,8 +351,9 @@ fn a_design_and_a_model_library_of_one_name_are_selected_apart() {
     let output = app_frame(&ctx, &mut app, Vec::new());
     let nodes = announced(&output);
 
-    let design = table_row(&nodes, "shared", "Design");
-    let model = table_row(&nodes, "shared", "Model");
+    let design = table_row(&nodes, "shared", "Design library");
+    let model = table_row(&nodes, "shared", "Model library");
+    assert_eq!((design.len(), model.len()), (1, 1), "{nodes:#?}");
     assert!(!design[0].3 && model[0].3, "{design:?} {model:?}");
     let text = painted(&output);
     assert!(text.contains("Model library"), "{text}");
@@ -384,32 +364,33 @@ fn a_design_and_a_model_library_of_one_name_are_selected_apart() {
     assert_eq!(status[0].1.as_deref(), Some("Built in"));
 }
 
-/// The table lists the libraries the filter leaves, and a project that
-/// replaces this one starts with neither the filter nor the selection.
+/// The bar's filter keeps the rows that say what it holds, and a project
+/// that replaces this one starts with neither the filter nor the selection.
 #[test]
-fn the_tables_filter_and_selection_are_lost_with_the_project() {
+fn the_bar_filter_keeps_matching_rows_and_is_lost_with_the_project() {
     let mut libraries = libraries();
     let app = &mut libraries.app;
-    app.state.workbench.set_navigator_filter("CHANGED");
+    app.state.project.dependencies.filter = "CHANGED".to_owned();
     let name = libraries.changed.clone();
     app.state.project.project_dependency_selection = Some(DependencyLibrary::model(&name));
     let ctx = offscreen();
     app_frame(&ctx, app, Vec::new());
     let nodes = announced(&app_frame(&ctx, app, Vec::new()));
     assert!(
-        table_row(&nodes, &libraries.found, "Model").is_empty(),
+        table_row(&nodes, &libraries.found, "Model library").is_empty(),
         "the filter hides it"
     );
-    assert_eq!(table_row(&nodes, &name, "Model").len(), 1);
+    assert_eq!(table_row(&nodes, &name, "Model library").len(), 1);
+    assert!(
+        nodes
+            .iter()
+            .any(|(label, value, ..)| label == "Filter dependencies"
+                && value.as_deref() == Some("CHANGED")),
+        "the bar's filter holds it"
+    );
 
     crate::workbench::app_state::services_access::reset_for_new_project(&mut app.state);
-    assert_eq!(
-        app.state
-            .workbench
-            .navigator_trees
-            .filter(Workspace::Project),
-        ""
-    );
+    assert_eq!(app.state.project.dependencies.filter, "");
     assert_eq!(app.state.project.project_dependency_selection, None);
     let _ = std::fs::remove_dir_all(libraries.folder);
 }
@@ -425,7 +406,7 @@ fn ledger_rows(output: &egui::FullOutput) -> Vec<String> {
         .iter()
         .filter_map(|(_, node)| {
             let label = node.label()?;
-            label.starts_with("Library: ").then(|| {
+            label.starts_with("Name: ").then(|| {
                 (
                     node.bounds().map_or(0.0, |bounds| bounds.y0),
                     label.to_owned(),
@@ -440,6 +421,16 @@ fn ledger_rows(output: &egui::FullOutput) -> Vec<String> {
 /// A secondary press and release on the table row for `name` of `kind`, as
 /// a right-click asks for its menu.
 fn menu_on(output: &egui::FullOutput, name: &str, kind: &str) -> Vec<egui::Event> {
+    press_on(output, name, kind, egui::PointerButton::Secondary)
+}
+
+/// A press and release of `button` on the table row for `name` of `kind`.
+fn press_on(
+    output: &egui::FullOutput,
+    name: &str,
+    kind: &str,
+    button: egui::PointerButton,
+) -> Vec<egui::Event> {
     let row = row_label(name, kind);
     let bounds = output
         .platform_output
@@ -458,11 +449,22 @@ fn menu_on(output: &egui::FullOutput, name: &str, kind: &str) -> Vec<egui::Event
         .into_iter()
         .map(|pressed| egui::Event::PointerButton {
             pos: at,
-            button: egui::PointerButton::Secondary,
+            button,
             pressed,
             modifiers: egui::Modifiers::default(),
         })
         .collect()
+}
+
+/// A press of `key` with `modifiers` held.
+fn key(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
+    vec![egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }]
 }
 
 /// Whether each of `labels` is announced, and can be pressed.
@@ -527,7 +529,7 @@ fn the_status_head_sorts_the_worst_library_first() {
     let page = app_frame(&ctx, &mut libraries.app, Vec::new());
     let unsorted = ledger_rows(&page);
     assert!(
-        unsorted[0].starts_with("Library: cells, "),
+        unsorted[0].starts_with("Name: cells, "),
         "design libraries come first until a head sorts: {unsorted:#?}"
     );
     app_frame(&ctx, &mut libraries.app, click_on(&page, "Sort by Status"));
@@ -548,16 +550,16 @@ fn a_model_library_opens_in_models_from_its_row() {
     let mut libraries = libraries();
     let name = libraries.found.clone();
     let ctx = offscreen();
-    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model library");
     assert_eq!(
         offered(
             &menu,
             &[
                 "Open in Models",
                 "Show in folder",
-                "Relink\u{2026}",
+                "Change\u{2026}",
                 "Reload",
-                "Remove"
+                "Remove\u{2026}"
             ]
         ),
         [Some(true); 5]
@@ -580,9 +582,9 @@ fn a_model_library_opens_in_models_from_its_row() {
 
 /// The inspector states what a model library's row has no column for: on
 /// whose authority it is read, its digest, how many models it holds and each
-/// file it was read from, whole.
+/// file it was read from, whole; and its access, which is read-only.
 #[test]
-fn a_model_library_states_its_access_digest_models_and_files_in_the_inspector() {
+fn a_model_library_states_its_authority_digest_models_and_files_in_the_inspector() {
     let mut libraries = libraries();
     let name = libraries.found.clone();
     libraries.app.state.project.project_dependency_selection =
@@ -608,13 +610,14 @@ fn a_model_library_states_its_access_digest_models_and_files_in_the_inspector() 
         .get_library(&name)
         .expect("the library is attached")
         .clone();
-    let access = match library.source_authority {
+    let authority = match library.source_authority {
         ModelSourceAuthority::BuiltIn => "Ships with RSpice",
         ModelSourceAuthority::External => "Linked to its file",
         ModelSourceAuthority::RetainedImport { .. } => "Kept as imported",
         ModelSourceAuthority::ProjectOwned { .. } => "Project-owned",
     };
-    assert_eq!(value("Access"), access);
+    assert_eq!(value("Authority"), authority);
+    assert_eq!(value("Access"), "Read-only");
     let pin = library
         .source_closure
         .first()
@@ -630,65 +633,78 @@ fn a_model_library_states_its_access_digest_models_and_files_in_the_inspector() 
         .and_then(|file| file.to_str())
         .expect("a file name");
     // Plain words reach a screen reader as a value with no label, so every
-    // node is read, labelled or not.
-    let words: Vec<String> = output
+    // node is read, labelled or not, with where it stands: the table's
+    // Location says the same path, so the file is looked for under the
+    // heading, in the heading's column.
+    let words: Vec<(String, egui::accesskit::Rect)> = output
         .platform_output
         .accesskit_update
         .as_ref()
         .expect("the frame publishes its tree")
         .nodes
         .iter()
-        .flat_map(|(_, node)| [node.label(), node.value()])
-        .flatten()
-        .map(str::to_owned)
+        .filter_map(|(_, node)| Some((node, node.bounds()?)))
+        .flat_map(|(node, bounds)| {
+            [node.label(), node.value()]
+                .into_iter()
+                .flatten()
+                .map(move |text| (text.to_owned(), bounds))
+        })
         .collect();
-    let files = words
+    let (_, heading) = words
         .iter()
-        .position(|text| text.starts_with("Files"))
+        .find(|(text, _)| text.starts_with("Files"))
         .unwrap_or_else(|| panic!("the files have a heading of their own: {words:#?}"));
     assert!(
-        words[files..].iter().any(|text| text.ends_with(file)),
+        words.iter().any(|(text, at)| text.ends_with(file)
+            && at.y0 >= heading.y1
+            && at.x0 >= heading.x0 - 1.0
+            && at.x0 < heading.x1),
         "the file it was read from is stated under Files: {words:#?}"
     );
     let _ = std::fs::remove_dir_all(libraries.folder);
 }
 
-/// The built-in library ships with RSpice: it opens in Models, and there is
-/// no file to show, read or relink and nothing to remove.
+/// The built-in library ships with RSpice: it opens in Models, there is no
+/// file to show or read, and Change… and Remove… say why they are not taken.
 #[test]
 fn the_built_in_library_offers_only_to_open() {
     let mut libraries = libraries();
     let name = libraries.built_in.clone();
     let ctx = offscreen();
-    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model library");
     assert_eq!(
         offered(
             &menu,
             &[
                 "Open in Models",
                 "Show in folder",
-                "Relink\u{2026}",
+                "Change\u{2026}",
                 "Reload",
-                "Remove"
+                "Remove\u{2026}"
             ]
         ),
-        [Some(true), None, None, None, None]
+        [Some(true), None, Some(false), None, Some(false)]
     );
     let _ = std::fs::remove_dir_all(libraries.folder);
 }
 
-/// A design library opens on the Library page, selected, and its menu's
-/// Delete library... opens the review that deletes one.
+/// A design library opens in the Library Manager, selected, and its menu's
+/// Remove… opens the review that deletes one the project file holds.
 #[test]
 fn a_design_library_opens_on_the_library_page_and_reviews_its_deletion() {
     let mut libraries = libraries();
     let ctx = offscreen();
-    let menu = open_menu(&ctx, &mut libraries.app, "cells", "Design");
+    let menu = open_menu(&ctx, &mut libraries.app, "cells", "Design library");
     assert_eq!(
-        offered(&menu, &["Open in Library", "Delete library\u{2026}"]),
+        offered(&menu, &["Open in Library Manager", "Remove\u{2026}"]),
         [Some(true), Some(true)]
     );
-    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Open in Library"));
+    app_frame(
+        &ctx,
+        &mut libraries.app,
+        click_on(&menu, "Open in Library Manager"),
+    );
     assert_eq!(
         libraries.app.state.project.project_page,
         ProjectPage::Library
@@ -705,12 +721,8 @@ fn a_design_library_opens_on_the_library_page_and_reviews_its_deletion() {
     );
 
     libraries.app.state.project.project_page = ProjectPage::Dependencies;
-    let menu = open_menu(&ctx, &mut libraries.app, "cells", "Design");
-    app_frame(
-        &ctx,
-        &mut libraries.app,
-        click_on(&menu, "Delete library\u{2026}"),
-    );
+    let menu = open_menu(&ctx, &mut libraries.app, "cells", "Design library");
+    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Remove\u{2026}"));
     assert!(libraries.app.state.project.delete_library_dialog);
     assert!(
         libraries
@@ -732,7 +744,7 @@ fn a_model_library_is_shown_in_its_folder() {
     let name = libraries.found.clone();
     SHOWN_FOLDERS.with(|shown| shown.borrow_mut().clear());
     let ctx = offscreen();
-    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model library");
     app_frame(&ctx, &mut libraries.app, click_on(&menu, "Show in folder"));
     let shown = SHOWN_FOLDERS.with(|shown| shown.borrow().clone());
     assert_eq!(shown.len(), 1, "{shown:?}");
@@ -751,7 +763,7 @@ fn a_changed_model_library_is_reloaded_from_its_row() {
     let mut libraries = libraries();
     let name = libraries.changed.clone();
     let ctx = offscreen();
-    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model library");
     app_frame(&ctx, &mut libraries.app, click_on(&menu, "Reload"));
     paint_until_recorded(
         &ctx,
@@ -779,8 +791,8 @@ fn a_missing_model_library_is_relinked_from_its_row() {
     std::fs::write(&file, ".model nmissing nmos level=1 vto=0.5\n").expect("the file writes");
     RELINK_PICK.with(|pick| *pick.borrow_mut() = Some(file.clone()));
     let ctx = offscreen();
-    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model");
-    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Relink\u{2026}"));
+    let menu = open_menu(&ctx, &mut libraries.app, &name, "Model library");
+    app_frame(&ctx, &mut libraries.app, click_on(&menu, "Change\u{2026}"));
     paint_until_recorded(
         &ctx,
         &mut libraries.app,
@@ -816,8 +828,8 @@ fn a_model_library_removed_from_its_row_comes_back_with_undo() {
     app.state.project.project_page = ProjectPage::Dependencies;
     let (name, _) = import_file(&mut app, &root, "spare.lib", "nspare");
     let ctx = offscreen();
-    let menu = open_menu(&ctx, &mut app, &name, "Model");
-    app_frame(&ctx, &mut app, click_on(&menu, "Remove"));
+    let menu = open_menu(&ctx, &mut app, &name, "Model library");
+    app_frame(&ctx, &mut app, click_on(&menu, "Remove\u{2026}"));
     assert!(
         app.state
             .model
@@ -841,5 +853,131 @@ fn a_model_library_removed_from_its_row_comes_back_with_undo() {
             .is_some(),
         "Undo puts it back"
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Enter on a design library's row opens it in the Library Manager, as the
+/// first command of its menu does.
+#[test]
+fn enter_on_a_design_library_opens_it_in_the_library_manager() {
+    let mut libraries = libraries();
+    let ctx = offscreen();
+    app_frame(&ctx, &mut libraries.app, Vec::new());
+    let page = app_frame(&ctx, &mut libraries.app, Vec::new());
+    let row = press_on(
+        &page,
+        "cells",
+        "Design library",
+        egui::PointerButton::Primary,
+    );
+    app_frame(&ctx, &mut libraries.app, row);
+    app_frame(&ctx, &mut libraries.app, Vec::new());
+    app_frame(
+        &ctx,
+        &mut libraries.app,
+        key(egui::Key::Enter, egui::Modifiers::NONE),
+    );
+    assert_eq!(
+        libraries.app.state.project.project_page,
+        ProjectPage::Library
+    );
+    assert_eq!(
+        libraries
+            .app
+            .state
+            .model
+            .library_manager
+            .selected_library
+            .as_deref(),
+        Some("cells")
+    );
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// The folders the netlister searches for an include, by their names.
+fn searched(app: &RSpiceApp) -> Vec<String> {
+    app.state
+        .model
+        .include_search_chain()
+        .directories()
+        .iter()
+        .filter_map(|folder| Some(folder.file_name()?.to_str()?.to_owned()))
+        .collect()
+}
+
+/// An include search path is added from the bar's Add, moved up with
+/// Alt+Up and removed with Delete; each is one step of Undo, and each
+/// changes the folders the netlister searches.
+#[test]
+fn an_include_path_is_added_moved_and_removed_one_undo_step_each() {
+    let (mut app, root) = saved_project("dependency-include-paths");
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Dependencies;
+    for folder in ["first", "second"] {
+        std::fs::create_dir_all(root.join(folder)).expect("the folder is made");
+    }
+    let ctx = offscreen();
+    for folder in ["first", "second"] {
+        app_frame(&ctx, &mut app, Vec::new());
+        let page = app_frame(&ctx, &mut app, Vec::new());
+        answer_next_folder_pick(&root.join(folder));
+        app_frame(&ctx, &mut app, click_on(&page, "Add"));
+        let menu = app_frame(&ctx, &mut app, Vec::new());
+        app_frame(&ctx, &mut app, click_on(&menu, "Include path\u{2026}"));
+    }
+    assert_eq!(searched(&app), ["first", "second"]);
+    assert_eq!(
+        app.state
+            .model
+            .workspace
+            .content
+            .project
+            .include_search_paths(),
+        [PathBuf::from("first"), PathBuf::from("second")],
+        "a folder in the project is kept from the project folder"
+    );
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(searched(&app), ["first"], "one step takes one path out");
+    app.execute_command_key(ids::REDO);
+    assert_eq!(searched(&app), ["first", "second"]);
+
+    app_frame(&ctx, &mut app, Vec::new());
+    let page = app_frame(&ctx, &mut app, Vec::new());
+    let row = press_on(
+        &page,
+        "second",
+        "Include path",
+        egui::PointerButton::Primary,
+    );
+    app_frame(&ctx, &mut app, row);
+    app_frame(&ctx, &mut app, Vec::new());
+    app_frame(
+        &ctx,
+        &mut app,
+        key(egui::Key::ArrowUp, egui::Modifiers::ALT),
+    );
+    assert_eq!(searched(&app), ["second", "first"], "searched first now");
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(
+        searched(&app),
+        ["first", "second"],
+        "one step moves it back"
+    );
+    app.execute_command_key(ids::REDO);
+    assert_eq!(searched(&app), ["second", "first"]);
+
+    app_frame(&ctx, &mut app, Vec::new());
+    app_frame(
+        &ctx,
+        &mut app,
+        key(egui::Key::Delete, egui::Modifiers::NONE),
+    );
+    assert_eq!(
+        searched(&app),
+        ["first"],
+        "Delete removes the selected path"
+    );
+    app.execute_command_key(ids::UNDO);
+    assert_eq!(searched(&app), ["second", "first"], "one step puts it back");
     let _ = std::fs::remove_dir_all(root);
 }

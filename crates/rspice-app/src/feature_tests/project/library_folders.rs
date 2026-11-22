@@ -824,8 +824,8 @@ fn a_held_edit_goes_back_over_a_library_the_paths_page_finds() {
     );
 }
 
-/// What the Dependencies page's table and inspector say about `work`,
-/// and the Overview's Dependencies row, agree with `label` and `mark`.
+/// What the Dependencies page's table and inspector say about `work`, and
+/// the Overview's Dependencies row, agree with `label` and `mark`.
 fn assert_every_place_says(app: &mut RSpiceApp, label: &str, mark: Option<&str>) {
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Dependencies;

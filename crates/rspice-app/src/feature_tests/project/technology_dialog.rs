@@ -50,12 +50,33 @@ fn project_with_pdk(label: &str) -> (RSpiceApp, PathBuf) {
     (app, root)
 }
 
-/// The attach dialog opened from the page, as its first settled frame.
+/// The attach dialog opened from the page bar's Add, as its first settled
+/// frame.
 fn open_attach_dialog(ctx: &egui::Context, app: &mut RSpiceApp) -> egui::FullOutput {
     let page = app_frame(ctx, app, Vec::new());
-    app_frame(ctx, app, click_on(&page, "Attach technology\u{2026}"));
+    app_frame(ctx, app, click_on(&page, "Add"));
+    let menu = app_frame(ctx, app, Vec::new());
+    app_frame(ctx, app, click_on(&menu, "Technology\u{2026}"));
     app_frame(ctx, app, Vec::new());
     app_frame(ctx, app, Vec::new())
+}
+
+/// A press on the table's Technology row, which selects it.
+fn select_technology_row(output: &egui::FullOutput) -> Vec<egui::Event> {
+    let row = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .find_map(|(_, node)| {
+            let label = node.label()?;
+            (label.starts_with("Name: ") && label.contains(", Kind: Technology, "))
+                .then(|| label.to_owned())
+        })
+        .expect("the table lists the attached technology");
+    click_on(output, &row)
 }
 
 /// Frames until the project's technology is attached; the last one.
@@ -236,10 +257,11 @@ fn a_retained_model_library_attaches_without_its_original_files() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Detach sits beside Attach and takes the same checkpointed change: who
-/// detaches it starts on the person at this application, the checkpoint is
-/// written first, and the project is left with no technology and a receipt
-/// that says it was detached.
+/// Remove… on the Technology row detaches it through the same checkpointed
+/// change as Attach: who detaches it starts on the person at this
+/// application, the checkpoint is written first, and the project is left
+/// with no technology, no Technology row and a receipt that says it was
+/// detached.
 #[test]
 fn the_technology_detaches_from_the_page_through_a_checkpoint() {
     let (mut app, root) = attachable_project("technology-detach");
@@ -249,9 +271,11 @@ fn the_technology_detaches_from_the_page_through_a_checkpoint() {
     app_frame(&ctx, &mut app, click_on(&dialog, "Attach"));
     paint_until_attached(&ctx, &mut app);
     let page = app_frame(&ctx, &mut app, Vec::new());
-    assert_eq!(enabled(&page, "Detach\u{2026}"), Some(true));
+    app_frame(&ctx, &mut app, select_technology_row(&page));
+    let page = app_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(enabled(&page, "Remove\u{2026}"), Some(true));
 
-    app_frame(&ctx, &mut app, click_on(&page, "Detach\u{2026}"));
+    app_frame(&ctx, &mut app, click_on(&page, "Remove\u{2026}"));
     app_frame(&ctx, &mut app, Vec::new());
     let detach = app_frame(&ctx, &mut app, Vec::new());
     let text = painted(&detach);
@@ -294,6 +318,10 @@ fn the_technology_detaches_from_the_page_through_a_checkpoint() {
         "the Console records the change"
     );
     let page = app_frame(&ctx, &mut app, Vec::new());
-    assert_eq!(enabled(&page, "Detach\u{2026}"), Some(false));
+    assert_eq!(
+        enabled(&page, "Remove\u{2026}"),
+        Some(false),
+        "the row it was selected on is gone"
+    );
     let _ = std::fs::remove_dir_all(root);
 }

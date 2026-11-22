@@ -27,10 +27,8 @@ use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager}
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, PROBLEM_MARK_SIDE, Problem, paint_problem_mark,
-    problem_line,
-};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark};
+use crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page_in;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
@@ -573,13 +571,4 @@ fn workspace_empty_table_row(ui: &mut Ui, width: f32, text: &str) {
 
 fn short_identity(identity: &str) -> String {
     identity.chars().take(8).collect()
-}
-
-fn muted(ui: &mut Ui, text: &str) {
-    let tokens = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(text)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-            .color(tokens.color.text_faint),
-    );
 }

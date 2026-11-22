@@ -29,15 +29,18 @@ use crate::state::model_library::ModelSourceAuthority;
 use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey};
 use crate::workbench::app_state::model::LibraryMode;
 use crate::workbench::project::dependency_status::{
-    DependencyKind, DependencyLibrary, DependencyRow, UNSET, dependency_status_key,
-    refresh_source_drift, reread_files, settle_selection, shown_path, visible_dependency_rows,
+    DependencyKind, DependencyLibrary, DependencyRow, UNSET, dependency_rows,
+    dependency_status_key, refresh_source_drift, reread_files, settle_selection, shown_path,
+    visible_dependency_rows,
 };
 use crate::workbench::project::library_dialogs::library_files::{
     LibraryFileIntent, library_file_blocker, library_file_label, pick_folder,
     run_library_file_intent, take_browser_folder,
 };
+use crate::workbench::project::properties::project_properties_refusal;
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
+use rspice_ui_kit::widgets::{PageBar, PageBarFilter, page_bar_kind};
 
 #[derive(Debug, Clone, Serialize)]
 struct DependencyManifest {
@@ -133,6 +136,14 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     take_browser_folder(cx);
     refresh_source_drift(ui.ctx(), cx.model);
     let filter = cx.state.dependencies.filter.trim().to_owned();
+    // A kind the project no longer has a row of lists everything again,
+    // as the kind select then says.
+    let rows = dependency_rows(ui.ctx(), cx.model);
+    if let Some(kind) = cx.state.dependencies.kind
+        && !rows.iter().any(|row| row.library.kind == kind)
+    {
+        cx.state.dependencies.kind = None;
+    }
     let kind = cx.state.dependencies.kind;
     let (rows, visible) = visible_dependency_rows(ui.ctx(), cx.model, &filter, kind);
     settle_selection(&rows, &mut cx.state.project_dependency_selection);
@@ -180,101 +191,74 @@ fn dependency_bar(
     cx: &mut Cx<'_, ProjectFeature>,
     view: &LedgerView,
 ) -> Option<Asked> {
-    let t = Tokens::get(ui.ctx());
-    let pad = t.metrics.bar_pad.round() as i8;
     let selected = cx
         .state
         .project_dependency_selection
         .as_ref()
         .and_then(|selected| view.row(selected))
         .cloned();
-    let mut asked = None;
-    let shown = egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, pad))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_min_height(t.metrics.ctl_h);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let filter = ui.add_sized(
-                    [FILTER_WIDTH, t.metrics.ctl_h],
-                    egui::TextEdit::singleline(&mut cx.state.dependencies.filter)
-                        .hint_text("Filter\u{2026}")
-                        .vertical_align(Align::Center),
-                );
-                ui.ctx().accesskit_node_builder(filter.id, |node| {
-                    node.set_label("Filter dependencies");
-                });
-                let kinds = present_kinds(&view.rows);
-                let choices: Vec<String> = std::iter::once(ANY_KIND.to_owned())
-                    .chain(kinds.iter().map(|kind| kind.label().to_owned()))
-                    .collect();
-                let current = cx
-                    .state
-                    .dependencies
-                    .kind
-                    .map_or(ANY_KIND, DependencyKind::label);
-                if let Some(index) = crate::ui::widgets::select(
-                    ui,
-                    "workbench.project.dependencies.kind",
-                    "Kind",
-                    current,
-                    &choices,
-                    KIND_WIDTH,
-                ) {
-                    cx.state.dependencies.kind = index
-                        .checked_sub(1)
-                        .and_then(|index| kinds.get(index).copied());
+    let (report, problem) = bar_report(cx, view);
+    PageBar::new().report(report, problem).show(ui, |ui| {
+        let mut asked = None;
+        PageBarFilter::new("workbench.project.dependencies", "Filter dependencies")
+            .show(ui, &mut cx.state.dependencies.filter);
+        let kinds = present_kinds(&view.rows);
+        let choices: Vec<String> = std::iter::once(ANY_KIND.to_owned())
+            .chain(kinds.iter().map(|kind| kind.label().to_owned()))
+            .collect();
+        let current = cx
+            .state
+            .dependencies
+            .kind
+            .and_then(|kind| kinds.iter().position(|listed| *listed == kind))
+            .map_or(0, |index| index + 1);
+        if let Some(index) = page_bar_kind(
+            ui,
+            "workbench.project.dependencies.kind",
+            "Kind",
+            &choices,
+            current,
+        ) {
+            cx.state.dependencies.kind = index
+                .checked_sub(1)
+                .and_then(|index| kinds.get(index).copied());
+        }
+        rspice_ui_kit::widgets::menu_button(ui, "Add", |ui| {
+            ui.set_min_width(160.0);
+            for addition in Addition::ALL {
+                let refusal = addition_refusal(cx, addition);
+                if menu_item(ui, addition.label(), None, refusal.as_deref()) {
+                    asked = Some(Asked::Add(addition));
                 }
-                ui.add_space(6.0);
-                rspice_ui_kit::widgets::menu_button(ui, "Add", |ui| {
-                    ui.set_min_width(160.0);
-                    for addition in Addition::ALL {
-                        let refusal = addition_refusal(cx, addition);
-                        if menu_item(ui, addition.label(), None, refusal.as_deref()) {
-                            asked = Some(Asked::Add(addition));
-                        }
-                    }
-                });
-                let (change, remove) = match &selected {
-                    Some(row) => (change_refusal(cx, row), remove_refusal(cx, row)),
-                    None => (
-                        Some(NOTHING_SELECTED.to_owned()),
-                        Some(NOTHING_SELECTED.to_owned()),
-                    ),
-                };
-                if bar_button(ui, CHANGE, change.as_deref())
-                    && let Some(row) = &selected
-                {
-                    asked = Some(Asked::Change(row.library.clone()));
-                }
-                if bar_button(ui, REMOVE, remove.as_deref())
-                    && let Some(row) = &selected
-                {
-                    asked = Some(Asked::Remove(row.library.clone()));
-                }
-                if bar_button(ui, "Refresh", None) {
-                    asked = Some(Asked::Refresh);
-                }
-                if bar_button(ui, "Export manifest\u{2026}", None) {
-                    asked = Some(Asked::Export);
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    bar_output(ui, cx, view);
-                });
-            });
+            }
         });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom() - 0.5,
-        Stroke::new(1.0, t.color.border),
-    );
-    asked
+        let (change, remove) = match &selected {
+            Some(row) => (change_refusal(cx, row), remove_refusal(cx, row)),
+            None => (
+                Some(NOTHING_SELECTED.to_owned()),
+                Some(NOTHING_SELECTED.to_owned()),
+            ),
+        };
+        if bar_button(ui, CHANGE, change.as_deref())
+            && let Some(row) = &selected
+        {
+            asked = Some(Asked::Change(row.library.clone()));
+        }
+        if bar_button(ui, REMOVE, remove.as_deref())
+            && let Some(row) = &selected
+        {
+            asked = Some(Asked::Remove(row.library.clone()));
+        }
+        if bar_button(ui, "Refresh", None) {
+            asked = Some(Asked::Refresh);
+        }
+        if bar_button(ui, "Export manifest\u{2026}", None) {
+            asked = Some(Asked::Export);
+        }
+        asked
+    })
 }
 
-const FILTER_WIDTH: f32 = 200.0;
-const KIND_WIDTH: f32 = 128.0;
 const ANY_KIND: &str = "Any kind";
 const CHANGE: &str = "Change\u{2026}";
 const REMOVE: &str = "Remove\u{2026}";
@@ -325,17 +309,18 @@ fn menu_item(ui: &mut Ui, label: &str, key: Option<&str>, refusal: Option<&str>)
 
 /// What the bar says on its right: how many dependencies there are, how
 /// many the filter shows, and whether all are found or how many are not,
-/// with the worst one's mark.
-fn bar_output(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>, view: &LedgerView) {
+/// behind the worst one's mark.
+fn bar_report(cx: &Cx<'_, ProjectFeature>, view: &LedgerView) -> (String, Option<Problem>) {
     let total = view.rows.len();
-    let count = if view.visible.len() == total {
-        format!("{total} dependenc{}", if total == 1 { "y" } else { "ies" })
+    let noun = if total == 1 {
+        "dependency"
     } else {
-        format!(
-            "{} of {total} dependenc{}",
-            view.visible.len(),
-            if total == 1 { "y" } else { "ies" }
-        )
+        "dependencies"
+    };
+    let count = if view.visible.len() == total {
+        format!("{total} {noun}")
+    } else {
+        format!("{} of {total} {noun}", view.visible.len())
     };
     let problems = view
         .rows
@@ -348,19 +333,16 @@ fn bar_output(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>, view: &LedgerView) {
         .map(|row| row.status.mark)
         .max_by_key(|mark| severity(*mark))
         .and_then(Tone::problem);
-    let reading = cx.state.dependencies.reading();
-    let state = match (reading, problems) {
-        (Some(reading), _) => reading,
-        (None, 0) => "all found".to_owned(),
-        (None, 1) => "1 problem".to_owned(),
-        (None, problems) => format!("{problems} problems"),
-    };
-    let text = format!("{count} \u{00b7} {state}");
-    match worst {
-        Some(problem) if cx.state.dependencies.reading().is_none() => {
-            problem_line(ui, problem, &text);
+    match cx.state.dependencies.reading() {
+        Some(reading) => (format!("{count} \u{00b7} {reading}"), None),
+        None => {
+            let state = match problems {
+                0 => "all found".to_owned(),
+                1 => "1 problem".to_owned(),
+                problems => format!("{problems} problems"),
+            };
+            (format!("{count} \u{00b7} {state}"), worst)
         }
-        _ => muted(ui, &text),
     }
 }
 
@@ -774,10 +756,7 @@ fn menu_items(cx: &Cx<'_, ProjectFeature>, row: &DependencyRow) -> Vec<MenuItem>
 
 /// Why nothing can change the project's properties now.
 fn read_only_refusal(cx: &Cx<'_, ProjectFeature>) -> Option<String> {
-    cx.model
-        .safe_mode
-        .project_read_only()
-        .then(|| "The project is open read-only.".to_owned())
+    project_properties_refusal(cx.model).map(str::to_owned)
 }
 
 /// Why a model library cannot be read now: another is being read.
