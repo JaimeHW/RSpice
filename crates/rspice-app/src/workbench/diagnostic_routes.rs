@@ -351,7 +351,7 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                         MessageId::ProblemRouteNoLongerDrawn,
                         &[
                             ("view", &cell_view.display_path()),
-                            ("object", &object.name()),
+                            ("object", object.name()),
                         ],
                     );
                     app.state.prompt(refusal);

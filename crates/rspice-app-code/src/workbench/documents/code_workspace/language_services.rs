@@ -693,7 +693,7 @@ impl LanguageServiceIndex {
         {
             return Err(messages.format(
                 MessageId::SourceRenameUnreadable,
-                &[("line", &line.to_string()), ("reason", &reason.to_string())],
+                &[("line", &line.to_string()), ("reason", reason)],
             ));
         }
         self.rename_preview(messages, name, replacement)
