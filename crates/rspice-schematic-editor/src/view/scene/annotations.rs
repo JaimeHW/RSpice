@@ -476,13 +476,19 @@ pub(super) fn draw_operating_point_annotations(
             } else {
                 FontWeight::Regular
             };
-            let text = annotation
+            let mut shown = annotation
                 .lines
                 .iter()
                 .take(MAX_LINES)
                 .map(|line| line.replace('\u{03bc}', "\u{00b5}"))
-                .collect::<Vec<_>>()
-                .join("\n");
+                .collect::<Vec<_>>();
+            // A badge cut short says so rather than passing for the whole.
+            if annotation.lines.len() > MAX_LINES
+                && let Some(last) = shown.last_mut()
+            {
+                last.push_str(" \u{2026}");
+            }
+            let text = shown.join("\n");
             painter.fonts_mut(|fonts| {
                 rspice_ui_kit::text::layout_no_wrap(
                     fonts,

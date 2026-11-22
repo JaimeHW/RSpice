@@ -615,10 +615,14 @@ fn device_op_param_unit(name: &str) -> &'static str {
     }
 }
 
-fn device_op_annotation_label(entry: &rspice_core::circuit::DeviceOpEntry) -> String {
+/// A device's badge lines from its operating point: who it is, with its
+/// kind and region, then its first three parameters, one to a line.
+fn device_op_annotation_lines(
+    entry: &rspice_core::circuit::DeviceOpEntry,
+) -> (String, Vec<String>) {
     let identity = entry.region.map_or_else(
         || format!("{} [{}]", entry.name, entry.device_kind),
-        |region| format!("{} [{} · {region}]", entry.name, entry.device_kind),
+        |region| format!("{} [{} \u{b7} {region}]", entry.name, entry.device_kind),
     );
     let values = entry
         .params
@@ -632,13 +636,8 @@ fn device_op_annotation_label(entry: &rspice_core::circuit::DeviceOpEntry) -> St
                 unit
             )
         })
-        .collect::<Vec<_>>()
-        .join(" · ");
-    if values.is_empty() {
-        identity
-    } else {
-        format!("{identity} · {values}")
-    }
+        .collect();
+    (identity, values)
 }
 
 /// The run's own statement of which occurrences it emitted, joined onto the
@@ -1128,20 +1127,22 @@ pub fn operating_point_annotations(state: &CanvasFacts<'_>) -> Vec<OperatingPoin
                 badge_quantity(current.value, &current.unit)
             ));
         }
-        if retained_device_op
-            && let Some(entry) = device_op.and_then(|report| {
-                report
-                    .entries
-                    .iter()
-                    .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
+        let device = retained_device_op
+            .then(|| {
+                device_op.and_then(|report| {
+                    report
+                        .entries
+                        .iter()
+                        .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
+                })
             })
-        {
-            lines.extend(
-                device_op_annotation_label(entry)
-                    .split(" \u{00b7} ")
-                    .map(str::to_owned),
-            );
-        }
+            .flatten()
+            .map(device_op_annotation_lines);
+        let (identity, values) = device.unzip();
+        lines.extend(identity);
+        // Power the display options asked for comes before the device's own
+        // parameters, so the line the reader chose is the one the badge's
+        // line limit never cuts.
         if back_annotation == SchematicBackAnnotationContent::VoltagesCurrentsAndPower
             && let Some(power) = device_power(&dc_op, &component.name)
         {
@@ -1151,6 +1152,7 @@ pub fn operating_point_annotations(state: &CanvasFacts<'_>) -> Vec<OperatingPoin
                 badge_quantity(power.value, &power.unit)
             ));
         }
+        lines.extend(values.into_iter().flatten());
         if lines.is_empty() {
             continue;
         }
@@ -1535,8 +1537,10 @@ pub mod tests {
         );
     }
 
-    #[test]
-    fn retained_device_op_mode_annotates_only_selected_authoritative_devices() {
+    /// The operating-point fixture with `VBIAS` selected and its device
+    /// operating point retained as `entry`.
+    #[cfg(test)]
+    fn state_with_selected_device_op(entry: rspice_core::circuit::DeviceOpEntry) -> DesignTestHost {
         use crate::state::*;
 
         let mut state = state_with_operating_point();
@@ -1567,19 +1571,64 @@ pub mod tests {
             run_point_nominal_supply_voltage: None,
         });
         analysis.device_op = Some(rspice_core::circuit::DeviceOpReport {
-            entries: vec![rspice_core::circuit::DeviceOpEntry {
-                name: "VBIAS".to_owned(),
-                device_kind: "SOURCE",
-                region: None,
-                params: vec![("id", 2.0e-3)],
-                module: None,
-            }],
+            entries: vec![entry],
+        });
+        state
+    }
+
+    #[test]
+    fn retained_device_op_mode_annotates_only_selected_authoritative_devices() {
+        let state = state_with_selected_device_op(rspice_core::circuit::DeviceOpEntry {
+            name: "VBIAS".to_owned(),
+            device_kind: "SOURCE",
+            region: None,
+            params: vec![("id", 2.0e-3)],
+            module: None,
         });
 
         let annotations = operating_point_annotations(&canvas_facts(&state));
         assert_eq!(annotations.len(), 2, "voltage plus selected device OP");
         assert!(text(&annotations[1]).contains("VBIAS [SOURCE]"));
         assert!(text(&annotations[1]).contains("id=2mA"));
+    }
+
+    /// A device with a region and three parameters shows the power the
+    /// display options ask for within the badge's four lines, right after
+    /// who it is, and its identity stays on one line.
+    #[test]
+    fn a_device_badge_shows_its_power_before_its_parameters() {
+        let mut state = state_with_selected_device_op(rspice_core::circuit::DeviceOpEntry {
+            name: "VBIAS".to_owned(),
+            device_kind: "SOURCE",
+            region: Some("saturation"),
+            params: vec![("id", 2.0e-3), ("gm", 1.0e-3), ("vdsat", 0.2)],
+            module: None,
+        });
+        state.model.simulation.retained.runs[0].analyses[0]
+            .dc_op
+            .as_mut()
+            .expect("fixture dc op")
+            .power_dissipation
+            .push(OperatingPointValue {
+                name: "P(vbias)".to_owned(),
+                value: 2.5e-3,
+                unit: "W".to_owned(),
+            });
+        state.design.schematic_visibility.back_annotation =
+            SchematicBackAnnotationContent::VoltagesCurrentsAndPower;
+
+        let annotations = operating_point_annotations(&canvas_facts(&state));
+        let lines = &annotations[1].lines;
+        let identity = lines
+            .iter()
+            .position(|line| line == "VBIAS [SOURCE \u{b7} saturation]")
+            .expect("the identity is one line");
+        let power = lines
+            .iter()
+            .position(|line| line.starts_with("P(vbias) = "))
+            .expect("the power line is drawn");
+        assert_eq!(power, identity + 1, "power follows the identity: {lines:?}");
+        assert!(power < 4, "within the badge's four lines: {lines:?}");
     }
 
     /// One prepared run that emitted `amp` at `/X1` and `/X2`.
