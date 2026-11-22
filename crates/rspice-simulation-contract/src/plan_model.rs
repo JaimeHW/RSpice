@@ -239,25 +239,17 @@ impl SimulationPlanConfigurationReceipt {
         (!self.digest.is_empty()).then_some(self.digest.as_str())
     }
 
-    /// The receipt as a single status line.
+    /// The receipt as the one line the session's log shows: the change, in the words of the
+    /// surface that made it ("Added saved output V(out).").
     ///
     /// Every surface that commits a configuration change reports it the same
     /// way, so the wording lives with the receipt rather than being restated
-    /// at each call site.
+    /// at each call site. Its number, the revisions it moved the plan between
+    /// and the plan's digest are the receipt's record, kept with the plan, not
+    /// words for the reader.
     #[must_use]
     pub fn status_line(&self) -> String {
-        let mut line = format!(
-            "Configuration receipt #{} · revision {} to {} · {}",
-            self.sequence(),
-            self.source_revision().get(),
-            self.committed_revision().get(),
-            self.detail()
-        );
-        if let Some(digest) = self.digest() {
-            line.push_str(" · ");
-            line.push_str(digest);
-        }
-        line
+        self.detail().to_owned()
     }
 }
 

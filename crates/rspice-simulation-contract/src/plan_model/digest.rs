@@ -207,4 +207,16 @@ mod tests {
             "a receipt without a digest does not claim one"
         );
     }
+
+    /// The session's log says what changed; the receipt's number, the revisions and the plan's
+    /// digest stay on the receipt the plan keeps.
+    #[test]
+    fn a_receipt_tells_the_log_its_change_and_keeps_its_bookkeeping() {
+        let mut plan = transient_plan();
+        plan.commit_configuration_change("Added design variable vdd.")
+            .expect("commits");
+        let receipt = &plan.configuration_receipts()[0];
+        assert!(receipt.digest().is_some_and(|digest| digest.starts_with("fnv1a64")));
+        assert_eq!(receipt.status_line(), "Added design variable vdd.");
+    }
 }

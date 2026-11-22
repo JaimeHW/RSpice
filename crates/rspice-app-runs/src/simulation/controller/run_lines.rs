@@ -110,6 +110,10 @@ pub(super) fn announce_run_start(
     // Watched from here, so a run that ends before a frame has seen it
     // running is still announced when it ends.
     let run_id = run.run_id;
+    let netlisted = run
+        .prepared_receipt()
+        .and_then(|receipt| receipt.configuration())
+        .map(|configuration| netlisted_under(state.model(), configuration));
     let mut header = vec![format!("Run {}", run.id), product_version()];
     header.extend(
         design
@@ -127,13 +131,38 @@ pub(super) fn announce_run_start(
         LogSeverity::Info,
         header.join(" \u{b7} "),
     );
+    let mut started = format!("Run {run_sequence} started: {}", analyses.join(", "));
+    if let Some(netlisted) = netlisted {
+        started.push_str(" · ");
+        started.push_str(&netlisted);
+    }
     state.model_mut().record_anchored(
         LogSeverity::Info,
         LogSource::Run,
-        format!("Run {run_sequence} started: {}", analyses.join(", ")),
+        started,
         LogAnchor::ResultRun { run_sequence },
     );
     state.runs_mut().run_watch.run_started(run_id);
+}
+
+/// The configuration a design's run netlisted under and the views it tried, as a design tool's
+/// log names them: "configuration Mixed-signal · view list schematic, veriloga".
+fn netlisted_under(
+    model: &Model,
+    configuration: &rspice_results::run_receipt::RunConfiguration,
+) -> String {
+    let views = configuration
+        .id
+        .and_then(|id| model.workspace.content.configuration_sets.find(id))
+        .map(|set| set.executable_view_policy().join(", "))
+        .filter(|views| !views.is_empty());
+    match views {
+        Some(views) => format!("configuration {} · view list {views}", configuration.name),
+        None if configuration.id.is_none() => {
+            format!("configuration {} · built-in view list", configuration.name)
+        }
+        None => format!("configuration {}", configuration.name),
+    }
 }
 
 /// Close a run's log with its summary and write the same line in the
