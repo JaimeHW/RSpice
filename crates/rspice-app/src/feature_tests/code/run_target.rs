@@ -143,6 +143,44 @@ fn a_deck_with_an_error_does_not_run_and_the_notice_names_the_line() {
     );
 }
 
+/// An empty deck file is said to be empty, by Run and by Check and netlist
+/// alike, and nothing starts.
+#[test]
+fn an_empty_deck_is_said_to_be_empty() {
+    let mut app = netlist_session_with_deck("", "subckt_a.cir");
+
+    app.execute_command_key(ids::CHECK_AND_NETLIST);
+    assert_eq!(app.state.prompt_text(), Some("subckt_a.cir is empty."));
+    press_run(&mut app);
+    assert_eq!(app.state.prompt_text(), Some("subckt_a.cir is empty."));
+    assert!(!deck_run_started(&app), "nothing starts");
+}
+
+/// A deck that names no analysis, or only cards that run none, cannot run,
+/// and one sentence in the deck's words says so.
+#[test]
+fn a_deck_with_no_analysis_says_so_in_one_sentence() {
+    for source in [
+        "test $var expansion\nv1 1 0 dc = 0\n.end\n",
+        "temperatures only\nR1 a 0 1k\n.temp 25 125\n.end\n",
+    ] {
+        let mut app = netlist_session_with_deck(source, "dollar-1.cir");
+
+        app.execute_command_key(ids::CHECK_AND_NETLIST);
+        assert_eq!(
+            app.state.prompt_text(),
+            Some("dollar-1.cir cannot run: the deck has no analysis, such as .op, .ac or .tran"),
+            "{source}"
+        );
+        press_run(&mut app);
+        assert_eq!(
+            app.state.prompt_text(),
+            Some("dollar-1.cir did not run: the deck has no analysis, such as .op, .ac or .tran"),
+            "{source}"
+        );
+    }
+}
+
 /// Nothing anywhere asks for a separate validation before Run: no command is
 /// called Validate.
 #[test]

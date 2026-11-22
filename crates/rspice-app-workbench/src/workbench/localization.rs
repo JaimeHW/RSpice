@@ -887,6 +887,7 @@ define_messages! {
     NetlistDeckDidNotRun => "{name} did not run: {error}",
     NetlistDeckCannotRunAt => "{name} cannot run: line {line}: {error}",
     NetlistDeckCannotRun => "{name} cannot run: {error}",
+    NetlistDeckEmpty => "{name} is empty.",
     NetlistDeckChecked => "{name} checked · 0 blocking errors · {warnings} · {tasks}",
     NetlistDeckCheckedWarning => "1 warning",
     NetlistDeckCheckedWarnings => "{count} warnings",

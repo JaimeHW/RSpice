@@ -1051,10 +1051,7 @@ fn manual_deck_temp_only_reports_no_runnable_analysis() {
     )
     .expect_err("temperature directive alone should not run");
 
-    assert!(
-        err.iter()
-            .any(|message| message.contains("No runnable analysis command"))
-    );
+    assert_eq!(err, ["the deck has no analysis, such as .op, .ac or .tran"]);
 }
 
 #[test]
@@ -1072,10 +1069,7 @@ fn manual_deck_reports_no_analysis() {
     let reference_pvt = ReferencePoint::default();
     let err = build_manual_deck_queue(reference_pvt.temperature_celsius, "deck\nR1 a 0 1k\n.end\n")
         .expect_err("no analysis should fail");
-    assert!(
-        err.iter()
-            .any(|e| e.contains("No analysis command in netlist"))
-    );
+    assert_eq!(err, ["the deck has no analysis, such as .op, .ac or .tran"]);
 }
 
 /// A hand-written `.SENS` card reaches the run with its own filter and

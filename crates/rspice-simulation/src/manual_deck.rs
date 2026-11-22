@@ -93,6 +93,10 @@ pub fn build_manual_deck_queue_with_runtimes(
     .map_err(ManualDeckError::Cards)
 }
 
+/// Why a deck with nothing to run does not run: it names no analysis, or
+/// only cards that run none, as `.temp` alone does.
+const NO_ANALYSIS: &str = "the deck has no analysis, such as .op, .ac or .tran";
+
 /// Queue the deck's own analyses around its lowered periodic tasks.
 ///
 /// `deck` is the source `parsed` was read from, with its includes expanded
@@ -105,8 +109,7 @@ fn queue_manual_deck_analyses(
 ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
     if parsed.analyses.is_empty() && periodic_tasks.is_empty() {
         return Err(vec![
-            "No analysis command in netlist. Add .op, .ac, .tran, or another supported analysis."
-                .to_string(),
+            NO_ANALYSIS.to_owned(),
         ]);
     }
 
@@ -307,8 +310,7 @@ fn queue_manual_deck_analyses(
 
     if errors.is_empty() && queue.is_empty() {
         Err(vec![
-            "No runnable analysis command in netlist. Add .op, .ac, .tran, .step, .mc, or another supported analysis."
-                .to_string(),
+            NO_ANALYSIS.to_owned(),
         ])
     } else if errors.is_empty() {
         match finalize_manual_fourier_contracts(&mut queue) {

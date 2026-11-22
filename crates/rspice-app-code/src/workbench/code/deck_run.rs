@@ -80,6 +80,20 @@ fn check_deck_run(cx: &mut Cx<'_, CodeFeature>, for_run: bool) -> DeckCheck {
     else {
         return DeckCheck::Held;
     };
+    // An empty deck has nothing for a check to read: it comes to the front
+    // and the notice says it is empty, and nothing more.
+    if text.trim().is_empty() {
+        deck_files::show_deck(cx.model, &mut cx.state.netlist);
+        let notice = cx
+            .wb
+            .messages()
+            .format(MessageId::NetlistDeckEmpty, &[("name", &name)]);
+        cx.model
+            .record(LogSeverity::Error, LogSource::Netlist, notice.clone());
+        cx.wb.prompt(notice);
+        bring_findings_current(cx);
+        return DeckCheck::Held;
+    }
     let result = {
         let code = RunCodeFacts {
             veriloga_compilation: veriloga_compilation_in(&cx.state.code_workspace),

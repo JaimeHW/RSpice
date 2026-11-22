@@ -820,7 +820,7 @@ fn expand_manual_deck<R, A>(
     if source.trim().is_empty() {
         return Err(PreparationError::new(
             PreparationStage::SourceChecks,
-            "Enter a netlist before running",
+            "the deck is empty",
         ));
     }
 
