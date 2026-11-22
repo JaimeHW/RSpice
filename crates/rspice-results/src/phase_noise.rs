@@ -277,7 +277,10 @@ fn weighted_integral(
 ) -> Option<f64> {
     const PANELS: usize = 64;
     let (low, high) = band;
-    if !(low < high) || low < frequency[0] || high > frequency[frequency.len() - 1] {
+    if low.is_nan() || high.is_nan() || low >= high {
+        return None;
+    }
+    if low < frequency[0] || high > frequency[frequency.len() - 1] {
         return None;
     }
     let mut total = 0.0;

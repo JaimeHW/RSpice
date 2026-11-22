@@ -1095,7 +1095,7 @@ pub fn equal_scale_ranges(
         return (x, y);
     }
     let per_point = (x_span / width).max(y_span / height);
-    if !(per_point > 0.0) {
+    if per_point <= 0.0 {
         return (x, y);
     }
     let about = |(low, high): (f64, f64), points: f64| {

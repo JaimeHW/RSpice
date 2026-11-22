@@ -143,7 +143,7 @@ pub(crate) fn contributor_table(
         let Some(line) = order.get(row).map(|&index| &lines[index]) else {
             return;
         };
-        if let Some(pins) = pinned.as_deref_mut() {
+        if let Some(pins) = pinned.as_mut() {
             let at = pins.iter().position(|pin| line.is(pin));
             let label = if at.is_some() { "Unpin" } else { "Pin to top" };
             if ui.button(label).clicked() {
