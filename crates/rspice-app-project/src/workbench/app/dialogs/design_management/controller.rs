@@ -21,6 +21,7 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
             &parts.model.schematic,
         );
     }
+    super::variant_readout::refresh_variant_readout(parts.dialog, parts.model);
     let manager_dirty = parts.dialog.dirty();
     let discard = parts.dialog.discard_confirmation;
     // A new edit invalidates a previously displayed discard confirmation.
@@ -31,13 +32,14 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
     });
     let validation = validate_design_management_page(parts.dialog, parts.model, page);
     let write_allowed = !parts.model.safe_mode.project_read_only();
-    let primary_enabled = write_allowed
-        && validation.is_ok()
-        && if page == DesignManagementPage::Manager {
-            manager_dirty
-        } else {
-            true
-        };
+    let primary_enabled = page.read_out()
+        || write_allowed
+            && validation.is_ok()
+            && if page == DesignManagementPage::Manager {
+                manager_dirty
+            } else {
+                true
+            };
     let description = page.description();
     let initial_height = if page == DesignManagementPage::Manager {
         MANAGER_INITIAL_HEIGHT
@@ -69,11 +71,14 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
         .initial_height(initial_height)
         .flush_body()
         .overlay_scrollbar()
-        .ghost(ghost)
         .primary_enabled(primary_enabled)
         .primary_on_enter(false)
         .initial_focus(DialogInitialFocus::BodyControl)
         .body_scroll_offset(&mut body_scroll_offset);
+    // A read-out's Close is its only action: there is nothing to cancel.
+    if !page.read_out() {
+        dialog = dialog.ghost(ghost);
+    }
     let drawing_sheet_personal = parts.model.preferences.drawing_sheet_personal_preferences();
     if discard {
         dialog = dialog.transaction_state(
@@ -148,7 +153,7 @@ pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ct
             let dirty = if page == DesignManagementPage::Manager {
                 parts.dialog.dirty()
             } else {
-                parts.dialog.subflow_dirty()
+                !page.read_out() && parts.dialog.subflow_dirty()
             };
             if dirty && !parts.dialog.discard_confirmation {
                 parts.dialog.discard_confirmation = true;
@@ -367,11 +372,7 @@ pub(super) fn validate_design_management_page(
                 return Err("Reference and comparison variants must be different.".to_owned());
             }
         }
-        DesignManagementPage::VariantMatrix => {
-            if draft.variants().variants().is_empty() {
-                return Err("Create at least one governed assembly variant first.".to_owned());
-            }
-        }
+        DesignManagementPage::VariantMatrix => {}
         DesignManagementPage::RenumberPreview => {
             let table = dialog
                 .renumber_table

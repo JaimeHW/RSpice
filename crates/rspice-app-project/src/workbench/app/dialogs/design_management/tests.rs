@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::state::{
-    CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDirection, CrossSheetPortEndpoint,
-    CrossSheetSignalType, Point,
+    CellViewRef, CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDirection,
+    CrossSheetPortEndpoint, CrossSheetSignalType, Point,
 };
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::project::ProjectFeature;
@@ -592,4 +592,126 @@ fn the_reserved_ranges_table_shows_real_collisions() {
         ),
         "the project range's row does not show its overlap"
     );
+}
+
+/// `R1`, `R2` and `R3` on the open schematic, and two variants with
+/// Design management open over them: Industrial leaves `R1` off, and
+/// Automotive, derived from it, puts a qualified resistor of 2k in place of
+/// `R2` and gives `R3` the value 4k7.
+fn two_variants_over_three_parts() -> (
+    FeatureHarness<ProjectFeature>,
+    AssemblyVariantId,
+    AssemblyVariantId,
+) {
+    use crate::state::{ComponentSubstitution, VariantObjectOverride, VariantQualificationState};
+    let mut harness = harness();
+    harness.open_project_session();
+    let document = harness.model.schematic.document_mut_for_test();
+    for id in 1..=3_u64 {
+        document.components.push(
+            crate::state::Component::new(
+                id,
+                crate::state::ComponentType::Resistor,
+                Point::new(i32::try_from(id).unwrap() * 100, 0),
+            )
+            .with_name_value(format!("R{id}"), "1k"),
+        );
+    }
+    open_design_management_dialog(
+        &mut harness.state.design_management,
+        &mut harness.model,
+        &harness.platform,
+        &mut harness.wb,
+    );
+    let dialog = &mut harness.state.design_management;
+    let owner = dialog.owner_key.clone();
+    let key = |id| SchematicObjectKey::new(&owner, id).unwrap();
+    let variants = dialog.draft.as_mut().unwrap().variants_mut();
+    let industrial = variants
+        .create(AssemblyVariantDraft {
+            name: "Industrial".to_owned(),
+            parent_id: None,
+            inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+            overrides: BTreeMap::from([(
+                key(1),
+                VariantObjectOverride::DoNotPopulate {
+                    approval_reference: String::new(),
+                },
+            )]),
+        })
+        .unwrap();
+    let automotive = variants
+        .create(AssemblyVariantDraft {
+            name: "Automotive".to_owned(),
+            parent_id: Some(industrial),
+            inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+            overrides: BTreeMap::from([
+                (
+                    key(2),
+                    VariantObjectOverride::Substitute {
+                        replacement: ComponentSubstitution {
+                            library: "qualified".to_owned(),
+                            cell: "res_aec".to_owned(),
+                            view: "symbol".to_owned(),
+                            value_override: Some("2k".to_owned()),
+                            model_section: None,
+                            port_equivalence_digest: None,
+                            qualification: VariantQualificationState::Current,
+                        },
+                    },
+                ),
+                (
+                    key(3),
+                    VariantObjectOverride::Fitted {
+                        value_override: Some("4k7".to_owned()),
+                    },
+                ),
+            ]),
+        })
+        .unwrap();
+    (harness, industrial, automotive)
+}
+
+/// The Substitution matrix shows what each variant does to each part it
+/// changes, inherited changes marked, and only shows it: its one action is
+/// Close, which goes back to the Variants tab with nothing changed.
+#[test]
+fn the_substitution_matrix_reads_each_variants_changes_and_only_closes() {
+    let ctx = themed_context();
+    let (mut harness, _, _) = two_variants_over_three_parts();
+    let dialog = &mut harness.state.design_management;
+    dialog.active_tab = DesignManagementTab::Variants;
+    dialog.reset_inputs_for_page(DesignManagementPage::VariantMatrix, None, None);
+    let before = dialog.draft.clone();
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = frame(&ctx, &mut harness, Vec::new());
+    }
+    let cell = CellViewRef::from_key(&harness.state.design_management.owner_key)
+        .unwrap()
+        .cell;
+    for row in [
+        format!("R1, {cell}, DNP, DNP (inherited)"),
+        format!("R2, {cell}, , qualified/res_aec \u{00b7} 2k"),
+        format!("R3, {cell}, , Value 4k7"),
+    ] {
+        assert!(says(&nodes, &row), "the matrix has no row {row:?}");
+    }
+    assert!(says(&nodes, "3 parts \u{00b7} 2 variants"));
+    assert!(!says(&nodes, "Apply reviewed substitutions"));
+    assert!(!says(&nodes, "Missing replacement"));
+    assert!(
+        !nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Button && node.label() == Some("Cancel")
+        }),
+        "a read-out offers Cancel"
+    );
+    let (close, _) = node(&nodes, egui::accesskit::Role::Button, "Close");
+    let _ = frame(&ctx, &mut harness, vec![click(*close)]);
+    let dialog = &harness.state.design_management;
+    assert_eq!(dialog.page, DesignManagementPage::Manager);
+    assert_eq!(dialog.active_tab, DesignManagementTab::Variants);
+    assert_eq!(dialog.draft, before, "closing the matrix changed the draft");
 }

@@ -250,71 +250,9 @@ pub(super) fn commit_design_management_subflow(
                 )),
             )
         }
-        DesignManagementPage::VariantMatrix => {
-            let draft = parts
-                .dialog
-                .draft
-                .as_mut()
-                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-            let mut variants = draft.variants().clone();
-            let mut settings = variants.settings().clone();
-            settings.missing_replacement = inputs.missing_replacement;
-            settings.model_equivalence = inputs.model_equivalence;
-            let settings_changed = settings != *variants.settings();
-            if settings_changed {
-                variants
-                    .set_settings(settings)
-                    .map_err(|error| error.to_string())?;
-            }
-            let edits = variants
-                .variants()
-                .iter()
-                .flat_map(|variant| {
-                    variant
-                        .definition()
-                        .overrides
-                        .iter()
-                        .filter_map(|(object, value)| {
-                            let in_scope = inputs.matrix_scope
-                                == VariantMatrixScope::AllControlledInstances
-                                || object.cell_view_key() == owner_key;
-                            let replacement = match value {
-                                crate::state::VariantObjectOverride::Substitute { replacement } => {
-                                    Some(replacement.clone())
-                                }
-                                crate::state::VariantObjectOverride::DoNotPopulate { .. } => None,
-                                crate::state::VariantObjectOverride::Fitted { .. } => {
-                                    return None;
-                                }
-                            };
-                            in_scope.then(|| VariantMatrixEdit {
-                                variant_id: variant.id(),
-                                expected_revision: variant.revision(),
-                                object: object.clone(),
-                                replacement,
-                            })
-                        })
-                })
-                .collect::<Vec<_>>();
-            if !edits.is_empty() {
-                match variants.apply_substitution_matrix(
-                    edits,
-                    inputs.missing_replacement,
-                    inputs.model_equivalence,
-                ) {
-                    Ok(_) | Err(crate::state::DesignManagementError::NoChanges(_)) => {}
-                    Err(error) => return Err(error.to_string()),
-                }
-            }
-            if !settings_changed {
-                return Err(
-                    "The governed substitution policies and existing overrides are unchanged."
-                        .to_owned(),
-                );
-            }
-            *draft.variants_mut() = variants;
-            (DesignManagementTab::Variants, None)
-        }
+        // A read-out's Close changes nothing and goes back to the tab it
+        // was opened from.
+        DesignManagementPage::VariantMatrix => (DesignManagementTab::Variants, None),
         DesignManagementPage::RenumberPreview => {
             let design_management = parts
                 .dialog

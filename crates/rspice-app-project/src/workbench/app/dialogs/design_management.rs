@@ -13,10 +13,10 @@ use crate::state::{
     AnnotationReservedRange, AssemblyVariantDraft, AssemblyVariantId, CrossSheetPortDefinition,
     DesignManagementCatalog, DrawingSheetInheritance, DrawingSheetNewSheetPolicy,
     DrawingSheetStandard, HierarchyAuditConfiguration, HierarchyAuditRequest,
-    HierarchyAuditSubject, MissingReplacementPolicy, ModelEquivalencePolicy, MoveSelectionRequest,
-    ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope, SchematicObjectKey,
-    SchematicSheetFormat, SheetDefinition, SheetDeleteBehavior, SheetId, SheetPageNumbering,
-    SheetPortPolicy, VariantInheritance, VariantMatrixEdit, VariantQualificationPlan,
+    HierarchyAuditSubject, ModelEquivalencePolicy, MoveSelectionRequest, ProtectedReferencePolicy,
+    RenumberOrder, RenumberRequest, RenumberScope, SchematicObjectKey, SchematicSheetFormat,
+    SheetDefinition, SheetDeleteBehavior, SheetId, SheetPageNumbering, SheetPortPolicy,
+    VariantInheritance, VariantQualificationPlan,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -108,11 +108,18 @@ impl DesignManagementPage {
             Self::MoveSelection => "Move",
             Self::NewVariant => "Create variant",
             Self::CompareVariants => "Open comparison",
-            Self::VariantMatrix => "Apply reviewed substitutions",
+            Self::VariantMatrix => "Close",
             Self::RenumberPreview => "Renumber",
             Self::AnnotationPolicy => "Save policy",
             Self::HierarchyAudit => "Run audit",
         }
+    }
+
+    /// Whether the page only shows something: its one action, Close, goes
+    /// back to the manager and changes nothing, so it needs no Cancel and
+    /// is offered on a project that cannot be written.
+    const fn read_out(self) -> bool {
+        matches!(self, Self::VariantMatrix)
     }
 
     /// What the page is for, in a sentence under its title.
@@ -123,7 +130,9 @@ impl DesignManagementPage {
             Self::MoveSelection => "Move the selected objects to another sheet of this cell view.",
             Self::NewVariant => "Add an assembly variant of this design.",
             Self::CompareVariants => "Compare two assembly variants.",
-            Self::VariantMatrix => "Set the rules variant substitutions follow.",
+            Self::VariantMatrix => {
+                "What each variant does to each part it changes. An empty cell is the part as the base design fits it."
+            }
             Self::RenumberPreview => {
                 "Every part's new name is listed before anything changes. Tick Keep to leave a part's name as it is."
             }
@@ -201,8 +210,6 @@ pub struct SubflowInputs {
     compare_target: Option<AssemblyVariantId>,
     difference_classes: VariantDifferenceClasses,
     matrix_scope: VariantMatrixScope,
-    missing_replacement: MissingReplacementPolicy,
-    model_equivalence: ModelEquivalencePolicy,
     renumber_scope: RenumberScopeChoice,
     renumber_order: RenumberOrder,
     /// The parts whose Keep tick is set: Renumber leaves their names alone.
@@ -232,8 +239,6 @@ impl Default for SubflowInputs {
             compare_target: None,
             difference_classes: VariantDifferenceClasses::DevicesValuesDnpModels,
             matrix_scope: VariantMatrixScope::AllControlledInstances,
-            missing_replacement: MissingReplacementPolicy::Block,
-            model_equivalence: ModelEquivalencePolicy::RequireQualifiedReplacement,
             renumber_scope: RenumberScopeChoice::WholeProject,
             renumber_order: RenumberOrder::AcrossThenDown,
             renumber_keep: BTreeSet::new(),
@@ -307,6 +312,8 @@ pub struct DesignManagementDialogState {
     input_baseline: Option<SubflowInputs>,
     /// The Renumber page's list as last worked out.
     renumber_table: Option<RenumberTable>,
+    /// The Substitution matrix or the Compare list as last worked out.
+    variant_readout: Option<variant_readout::VariantReadout>,
     /// What each reserved range holds, as last worked out, and from what.
     range_use: Option<(DraftBasis, Vec<crate::state::ReservedRangeUse>)>,
     selection_object_ids: Vec<u64>,
@@ -333,6 +340,7 @@ impl Default for DesignManagementDialogState {
             inputs: SubflowInputs::default(),
             input_baseline: None,
             renumber_table: None,
+            variant_readout: None,
             range_use: None,
             selection_object_ids: Vec::new(),
             all_object_ids: Vec::new(),
@@ -484,6 +492,7 @@ impl DesignManagementDialogState {
         self.inputs = inputs.clone();
         self.input_baseline = (page != DesignManagementPage::Manager).then_some(inputs);
         self.renumber_table = None;
+        self.variant_readout = None;
         self.error = None;
         self.discard_confirmation = false;
         self.body_scroll_offset = 0.0;
@@ -731,6 +740,7 @@ mod controller;
 mod manager;
 pub mod operations;
 mod subflows;
+mod variant_readout;
 pub use controller::render_design_management_dialog;
 #[cfg(test)]
 mod tests;

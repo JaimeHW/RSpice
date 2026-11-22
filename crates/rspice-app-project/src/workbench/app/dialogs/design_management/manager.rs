@@ -319,7 +319,7 @@ pub(super) fn variants_manager_body(
                 action = DesignManagementBodyAction::Open(DesignManagementPage::CompareVariants);
             }
             if Button::new("Substitution matrix\u{2026}")
-                .enabled(write_allowed && !variants.is_empty())
+                .enabled(!variants.is_empty())
                 .show(ui)
                 .clicked()
             {
@@ -345,7 +345,7 @@ pub(super) fn variants_manager_body(
         }
         let settings = draft.variants().settings().clone();
         let mut inheritance = settings.inheritance;
-        let mut missing = settings.missing_replacement;
+        let mut equivalence = settings.model_equivalence;
         let mut compatibility = settings.result_compatibility;
         let mut changed = false;
         changed |= setting_combo(
@@ -364,17 +364,21 @@ pub(super) fn variants_manager_body(
             &mut inheritance,
             write_allowed,
         );
+        // Which replacements the inspector offers a part as its substitute.
         changed |= setting_combo(
             right,
-            "Missing replacement",
+            "Model equivalence",
             &[
-                (MissingReplacementPolicy::Block, "Block netlist and release"),
                 (
-                    MissingReplacementPolicy::ExplicitDoNotPopulate,
-                    "DNP with explicit approval",
+                    ModelEquivalencePolicy::RequireQualifiedReplacement,
+                    "Require qualified replacement",
+                ),
+                (
+                    ModelEquivalencePolicy::AllowReviewCandidate,
+                    "Allow review candidate",
                 ),
             ],
-            &mut missing,
+            &mut equivalence,
             write_allowed,
         );
         changed |= setting_combo(
@@ -400,8 +404,7 @@ pub(super) fn variants_manager_body(
                     .variants_mut()
                     .set_settings(crate::state::AssemblyVariantSettings {
                         inheritance,
-                        missing_replacement: missing,
-                        model_equivalence: settings.model_equivalence,
+                        model_equivalence: equivalence,
                         result_compatibility: compatibility,
                     }),
                 "Assembly variant contract updated.",

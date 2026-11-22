@@ -30,14 +30,6 @@ pub enum VariantQualificationState {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum MissingReplacementPolicy {
-    #[default]
-    Block,
-    ExplicitDoNotPopulate,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum ModelEquivalencePolicy {
     #[default]
     RequireQualifiedReplacement,
@@ -56,7 +48,6 @@ pub enum VariantResultCompatibility {
 #[serde(deny_unknown_fields)]
 pub struct AssemblyVariantSettings {
     pub inheritance: VariantInheritance,
-    pub missing_replacement: MissingReplacementPolicy,
     pub model_equivalence: ModelEquivalencePolicy,
     pub result_compatibility: VariantResultCompatibility,
 }
@@ -249,14 +240,6 @@ pub struct VariantComparison {
     pub comparison_digest: Option<ContentDigest>,
     pub differences: Vec<VariantDifference>,
     pub semantic_digest: ContentDigest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VariantMatrixEdit {
-    pub variant_id: AssemblyVariantId,
-    pub expected_revision: u64,
-    pub object: SchematicObjectKey,
-    pub replacement: Option<ComponentSubstitution>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -854,108 +837,6 @@ impl AssemblyVariantCatalog {
             differences,
             semantic_digest,
         })
-    }
-
-    pub fn apply_substitution_matrix(
-        &mut self,
-        edits: Vec<VariantMatrixEdit>,
-        missing_policy: MissingReplacementPolicy,
-        equivalence_policy: ModelEquivalencePolicy,
-    ) -> Result<Vec<(AssemblyVariantId, u64)>, DesignManagementError> {
-        self.validate()?;
-        if edits.is_empty() {
-            return Err(DesignManagementError::EmptySelection);
-        }
-        let mut unique = HashSet::with_capacity(edits.len());
-        for edit in &edits {
-            edit.object.validate()?;
-            if !unique.insert((edit.variant_id, edit.object.clone())) {
-                return Err(DesignManagementError::DuplicateVariantMatrixCell {
-                    variant: edit.variant_id,
-                    object: edit.object.clone(),
-                });
-            }
-            let current = self.find(edit.variant_id).ok_or_else(|| {
-                DesignManagementError::MissingReference {
-                    domain: "assembly variant",
-                    identity: edit.variant_id.to_string(),
-                }
-            })?;
-            require_revision(
-                edit.expected_revision,
-                current.revision,
-                "assembly variant",
-                edit.variant_id.to_string(),
-            )?;
-            if self.variants.iter().any(|variant| {
-                variant
-                    .definition
-                    .parent
-                    .as_ref()
-                    .is_some_and(|parent| parent.id == edit.variant_id)
-            }) {
-                return Err(DesignManagementError::VariantHasDependents(edit.variant_id));
-            }
-            if let Some(replacement) = &edit.replacement {
-                validate_substitution(replacement)?;
-                if equivalence_policy == ModelEquivalencePolicy::RequireQualifiedReplacement
-                    && replacement.qualification != VariantQualificationState::Current
-                {
-                    return Err(DesignManagementError::UnqualifiedReplacement(
-                        edit.object.clone(),
-                    ));
-                }
-            } else if missing_policy == MissingReplacementPolicy::Block {
-                return Err(DesignManagementError::MissingReplacement(
-                    edit.object.clone(),
-                ));
-            }
-        }
-
-        let mut candidate = self.clone();
-        let mut touched = BTreeSet::new();
-        for edit in edits {
-            let target = candidate
-                .variants
-                .iter_mut()
-                .find(|variant| variant.id == edit.variant_id)
-                .expect("variant was validated");
-            let new_override = match edit.replacement {
-                Some(replacement) => VariantObjectOverride::Substitute { replacement },
-                None => VariantObjectOverride::DoNotPopulate {
-                    approval_reference: "reviewed substitution matrix".to_owned(),
-                },
-            };
-            if target.definition.overrides.get(&edit.object) == Some(&new_override) {
-                continue;
-            }
-            target
-                .definition
-                .overrides
-                .insert(edit.object, new_override);
-            touched.insert(edit.variant_id);
-        }
-        if touched.is_empty() {
-            return Err(DesignManagementError::NoChanges(
-                "variant substitution matrix",
-            ));
-        }
-        let mut revisions = Vec::with_capacity(touched.len());
-        for id in touched {
-            let target = candidate
-                .variants
-                .iter_mut()
-                .find(|variant| variant.id == id)
-                .expect("variant was validated");
-            target.revision =
-                next_revision(target.revision, "assembly variant", target.id.to_string())?;
-            target.semantic_digest =
-                digest("rspice-assembly-variant-semantic/v1", &target.definition)?;
-            revisions.push((id, target.revision));
-        }
-        candidate.validate()?;
-        *self = candidate;
-        Ok(revisions)
     }
 
     fn materialize_draft(

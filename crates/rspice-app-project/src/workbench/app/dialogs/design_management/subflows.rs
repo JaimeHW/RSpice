@@ -40,6 +40,27 @@ pub(super) fn design_management_subflow_body(
         {
             dialog.inputs.renumber_keep.insert(object);
         }
+    } else if dialog.page.read_out() {
+        // The scope beside the table it shows, as Renumber's fields stand
+        // beside its names.
+        split_surface(ui, RENUMBER_FIELDS_FRACTION, |left, right| {
+            Frame::NONE
+                .inner_margin(Margin::symmetric(PANE_INSET as i8, 0))
+                .show(left, |pane| {
+                    first_response = Some(subflow_fields(
+                        pane,
+                        dialog,
+                        workspace,
+                        libraries,
+                        schematic,
+                        drawing_sheet_personal,
+                        write_allowed,
+                    ));
+                });
+            if let Some(readout) = dialog.variant_readout.as_ref() {
+                super::variant_readout::variant_readout_list(right, readout);
+            }
+        });
     } else {
         single_pane(ui, |pane| {
             first_response = Some(subflow_fields(
@@ -334,51 +355,21 @@ pub(super) fn subflow_fields(
             );
             response
         }
-        DesignManagementPage::VariantMatrix => {
-            let response = field_combo(
-                ui,
-                "Scope",
-                &[
-                    (
-                        VariantMatrixScope::AllControlledInstances,
-                        "All variant-controlled instances",
-                    ),
-                    (VariantMatrixScope::CurrentHierarchy, "Current hierarchy"),
-                ],
-                &mut dialog.inputs.matrix_scope,
-                write_allowed,
-            );
-            field_combo(
-                ui,
-                "Missing replacement",
-                &[
-                    (MissingReplacementPolicy::Block, "Block"),
-                    (
-                        MissingReplacementPolicy::ExplicitDoNotPopulate,
-                        "Explicit DNP",
-                    ),
-                ],
-                &mut dialog.inputs.missing_replacement,
-                write_allowed,
-            );
-            field_combo(
-                ui,
-                "Model equivalence",
-                &[
-                    (
-                        ModelEquivalencePolicy::RequireQualifiedReplacement,
-                        "Require qualified replacement",
-                    ),
-                    (
-                        ModelEquivalencePolicy::AllowReviewCandidate,
-                        "Allow review candidate",
-                    ),
-                ],
-                &mut dialog.inputs.model_equivalence,
-                write_allowed,
-            );
-            response
-        }
+        // What is shown can be narrowed on a project that cannot be
+        // written: the scope changes nothing.
+        DesignManagementPage::VariantMatrix => field_combo(
+            ui,
+            "Scope",
+            &[
+                (
+                    VariantMatrixScope::AllControlledInstances,
+                    "All variant-controlled instances",
+                ),
+                (VariantMatrixScope::CurrentHierarchy, "Current hierarchy"),
+            ],
+            &mut dialog.inputs.matrix_scope,
+            true,
+        ),
         DesignManagementPage::RenumberPreview => {
             let response = field_combo(
                 ui,

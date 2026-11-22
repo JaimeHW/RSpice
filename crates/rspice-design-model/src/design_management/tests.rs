@@ -1951,34 +1951,6 @@ fn a_value_override_changes_the_value_alone() {
 }
 
 #[test]
-fn substitution_matrix_enforces_qualification_before_any_commit() {
-    let mut catalog = AssemblyVariantCatalog::default();
-    let id = catalog
-        .create(variant_draft("Industrial", None, BTreeMap::new()))
-        .unwrap();
-    let revision = catalog.find(id).unwrap().revision();
-    let before = catalog.clone();
-    let result = catalog.apply_substitution_matrix(
-        vec![VariantMatrixEdit {
-            variant_id: id,
-            expected_revision: revision,
-            object: object_key(44),
-            replacement: Some(substitution(
-                "candidate",
-                VariantQualificationState::ReviewRequired,
-            )),
-        }],
-        MissingReplacementPolicy::Block,
-        ModelEquivalencePolicy::RequireQualifiedReplacement,
-    );
-    assert!(matches!(
-        result,
-        Err(DesignManagementError::UnqualifiedReplacement(object)) if object == object_key(44)
-    ));
-    assert_eq!(catalog, before);
-}
-
-#[test]
 fn renumber_preview_is_deterministic_and_commit_retains_immutable_mapping() {
     let mut state = AnnotationState::default();
     let request = RenumberRequest {

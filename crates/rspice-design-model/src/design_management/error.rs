@@ -127,15 +127,6 @@ pub enum DesignManagementError {
     },
     #[error("a variant cannot be compared with itself")]
     SameVariantComparison,
-    #[error("variant matrix cell ({variant}, object {object}) is duplicated")]
-    DuplicateVariantMatrixCell {
-        variant: AssemblyVariantId,
-        object: SchematicObjectKey,
-    },
-    #[error("object {0} has no replacement and the matrix policy blocks missing replacements")]
-    MissingReplacement(SchematicObjectKey),
-    #[error("object {0} replacement is not qualified")]
-    UnqualifiedReplacement(SchematicObjectKey),
     #[error("object {object} replacement parameters cannot be applied: {reason}")]
     InvalidReplacementParameters {
         object: SchematicObjectKey,
