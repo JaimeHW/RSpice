@@ -360,23 +360,27 @@ const fn overflow_advisories_visible(_tier: DrawingSheetLodTier) -> bool {
     true
 }
 
+/// The colours a drawing sheet is painted in: the desk around the paper,
+/// the paper and its edge, and the frame, zones and title block printed on
+/// it. The canvas and the sheet previews of the drawing-sheet dialogs share
+/// them, so a preview shows the sheet the canvas shows.
 #[derive(Clone, Copy)]
-struct DrawingSheetPalette {
-    desk: Color32,
-    paper: Color32,
-    edge: Color32,
-    shadow: Color32,
-    border: Color32,
-    zone: Color32,
-    zone_ink: Color32,
-    block: Color32,
-    block_ink: Color32,
-    block_label: Color32,
-    overflow: Color32,
+pub struct DrawingSheetPalette {
+    pub desk: Color32,
+    pub paper: Color32,
+    pub edge: Color32,
+    pub shadow: Color32,
+    pub border: Color32,
+    pub zone: Color32,
+    pub zone_ink: Color32,
+    pub block: Color32,
+    pub block_ink: Color32,
+    pub block_label: Color32,
+    pub overflow: Color32,
 }
 
 impl DrawingSheetPalette {
-    fn resolve(tokens: &Tokens) -> Self {
+    pub fn resolve(tokens: &Tokens) -> Self {
         if tokens.mode == Mode::Light {
             Self {
                 desk: Color32::from_rgb(0xd5, 0xda, 0xdd),
@@ -392,11 +396,14 @@ impl DrawingSheetPalette {
                 overflow: tokens.color.warn,
             }
         } else {
+            // The paper stands clear of the desk by its own fill, not by its
+            // edge line alone: a sheet is a body on the desk, as a page is in
+            // KiCad's and Altium's dark themes.
             Self {
-                desk: Color32::from_rgb(0x04, 0x08, 0x0b),
-                paper: Color32::from_rgb(0x0b, 0x12, 0x17),
-                edge: Color32::from_rgb(0x4d, 0x59, 0x60),
-                shadow: Color32::from_black_alpha(96),
+                desk: Color32::from_rgb(0x04, 0x07, 0x0a),
+                paper: Color32::from_rgb(0x14, 0x1c, 0x22),
+                edge: Color32::from_rgb(0x5c, 0x69, 0x71),
+                shadow: Color32::from_black_alpha(160),
                 border: Color32::from_rgb(0x6f, 0x7f, 0x89),
                 zone: Color32::from_rgb(0x41, 0x4e, 0x56),
                 zone_ink: Color32::from_rgb(0x8e, 0x99, 0x9f),

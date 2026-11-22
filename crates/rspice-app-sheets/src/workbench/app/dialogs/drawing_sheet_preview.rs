@@ -3,8 +3,8 @@
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 
 use rspice_schematic_editor::view::drawing_sheet::{
-    DRAWING_SHEET_ORIGIN, DRAWING_SHEET_UNITS_PER_MM, DrawingSheetPrintablePreview,
-    DrawingSheetPrintablePreviewKind,
+    DRAWING_SHEET_ORIGIN, DRAWING_SHEET_UNITS_PER_MM, DrawingSheetPalette,
+    DrawingSheetPrintablePreview, DrawingSheetPrintablePreviewKind,
 };
 
 use crate::state::{
@@ -72,7 +72,7 @@ pub fn drawing_sheet_preview(ui: &mut Ui, format: &SchematicSheetFormat, height:
 /// The desk (backdrop) color the preview paints behind the paper, exposed so
 /// a fused surface can extend the same desk across its whole preview region.
 pub(super) fn sheet_desk_color(ctx: &egui::Context) -> Color32 {
-    SheetPreviewPalette::for_text_color(Tokens::get(ctx).color.text).desk
+    DrawingSheetPalette::resolve(&Tokens::get(ctx)).desk
 }
 
 /// One sheet drawn at the scale its whole set shares.
@@ -106,7 +106,7 @@ fn drawing_sheet_preview_impl(
     common_extent_um: Option<(u64, u64)>,
 ) {
     let t = Tokens::get(ui.ctx());
-    let palette = SheetPreviewPalette::for_text_color(t.color.text);
+    let palette = DrawingSheetPalette::resolve(&t);
     let width = ui.available_width().max(1.0);
     let total_height = height.max(72.0);
     let (stage, response) = ui.allocate_exact_size(vec2(width, total_height), Sense::hover());
@@ -269,7 +269,7 @@ fn paint_content_silhouette(
     content: &DrawingSheetPreviewContent,
     drawing_rect: Rect,
     map: &impl Fn(f32, f32) -> Pos2,
-    palette: SheetPreviewPalette,
+    palette: DrawingSheetPalette,
 ) {
     let map_world = |x: f64, y: f64| {
         let (origin_x, origin_y) = DRAWING_SHEET_ORIGIN;
@@ -285,7 +285,7 @@ fn paint_content_silhouette(
         );
         let outside = !drawing_rect.contains(bounds.min) || !drawing_rect.contains(bounds.max);
         let color = if outside {
-            palette.warning
+            palette.overflow
         } else {
             palette.zone_ink
         };
@@ -341,49 +341,6 @@ fn paint_content_silhouette(
     }
 }
 
-#[derive(Clone, Copy)]
-struct SheetPreviewPalette {
-    desk: Color32,
-    paper: Color32,
-    edge: Color32,
-    border: Color32,
-    zone: Color32,
-    zone_ink: Color32,
-    block: Color32,
-    block_ink: Color32,
-    warning: Color32,
-}
-
-impl SheetPreviewPalette {
-    fn for_text_color(text: Color32) -> Self {
-        if text.r() > 160 {
-            Self {
-                desk: Color32::from_rgb(4, 8, 11),
-                paper: Color32::from_rgb(11, 18, 23),
-                edge: Color32::from_rgb(77, 89, 96),
-                border: Color32::from_rgb(111, 127, 137),
-                zone: Color32::from_rgb(65, 78, 86),
-                zone_ink: Color32::from_rgb(142, 153, 159),
-                block: Color32::from_rgb(16, 24, 29),
-                block_ink: Color32::from_rgb(197, 205, 210),
-                warning: Color32::from_rgb(224, 145, 48),
-            }
-        } else {
-            Self {
-                desk: Color32::from_rgb(213, 218, 221),
-                paper: Color32::WHITE,
-                edge: Color32::from_rgb(153, 162, 167),
-                border: Color32::from_rgb(77, 84, 89),
-                zone: Color32::from_rgb(141, 149, 154),
-                zone_ink: Color32::from_rgb(69, 75, 79),
-                block: Color32::from_rgb(243, 245, 246),
-                block_ink: Color32::from_rgb(31, 37, 40),
-                warning: Color32::from_rgb(138, 79, 0),
-            }
-        }
-    }
-}
-
 /// Paint the sheet's frame from the artwork the canvas and the plot draw,
 /// scaled to the preview. Lines keep their physical proportions down to a
 /// hairline, and references are lettered only where the band can carry
@@ -394,7 +351,7 @@ fn paint_frame(
     geometry: &crate::state::DrawingSheetGeometry,
     map: &impl Fn(f32, f32) -> Pos2,
     scale: f32,
-    palette: SheetPreviewPalette,
+    palette: DrawingSheetPalette,
 ) {
     let at = |(x_um, y_um): (i64, i64)| map(x_um as f32, y_um as f32);
     let width = |width_um: u64| (width_um as f32 * scale).max(0.55);
@@ -461,7 +418,7 @@ fn paint_title_block(
     title: Rect,
     format: &SchematicSheetFormat,
     geometry: &crate::state::DrawingSheetGeometry,
-    palette: SheetPreviewPalette,
+    palette: DrawingSheetPalette,
 ) {
     // The cells the canvas and the plot draw, scaled to the preview.
     let Some(layout) = crate::state::drawing_sheet_title_layout(format, geometry) else {
