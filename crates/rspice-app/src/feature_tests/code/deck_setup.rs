@@ -173,7 +173,7 @@ fn a_deck_that_states_no_analysis_says_so_and_opens_in_netlist() {
 }
 
 #[test]
-fn the_setup_lists_analyses_options_temperature_and_top_level_parameters() {
+fn the_setup_lists_analyses_options_temperature_and_top_level_parameters_in_deck_order() {
     const DECK: &str = "setup cards\n\
         .param gain=10\n\
         .subckt amp a y g=1\n\
@@ -199,13 +199,7 @@ fn the_setup_lists_analyses_options_temperature_and_top_level_parameters() {
     assert_eq!(
         listed,
         vec![
-            (
-                SetupSection::Analyses,
-                12,
-                ".step",
-                "param gain list 1 10".to_owned()
-            ),
-            (SetupSection::Analyses, 13, ".tran", "1n 1u".to_owned()),
+            (SetupSection::Parameters, 2, ".param", "gain=10".to_owned()),
             (
                 SetupSection::Options,
                 9,
@@ -213,7 +207,13 @@ fn the_setup_lists_analyses_options_temperature_and_top_level_parameters() {
                 "reltol=1e-4 abstol=1e-12".to_owned()
             ),
             (SetupSection::Temperature, 11, ".temp", "27 85".to_owned()),
-            (SetupSection::Parameters, 2, ".param", "gain=10".to_owned()),
+            (
+                SetupSection::Analyses,
+                12,
+                ".step",
+                "param gain list 1 10".to_owned()
+            ),
+            (SetupSection::Analyses, 13, ".tran", "1n 1u".to_owned()),
         ]
     );
 }

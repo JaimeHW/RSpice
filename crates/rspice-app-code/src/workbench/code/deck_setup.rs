@@ -2,12 +2,12 @@
 //!
 //! A deck runs as written, so Simulate has no plan to edit for it. In the
 //! plan editor's place the page is one dense table of the deck's own setup,
-//! as a simulation environment lists a setup: its analyses, then its
-//! option, temperature and parameter statements, each at its line,
-//! read-only and as the deck writes them. A row opens the Netlist workspace
-//! at its line, where the deck is changed. The toolbar carries Open in
-//! Netlist and Run deck; the inspector, with nothing selected, the deck's
-//! facts.
+//! as a simulation environment lists a setup: its analysis, option,
+//! temperature and parameter statements in the order the deck states them,
+//! each at its line, read-only and as the deck writes them. A row opens the
+//! Netlist workspace at its line, where the deck is changed. The toolbar
+//! carries Open in Netlist and Run deck; the inspector, with nothing
+//! selected, the deck's facts.
 
 use egui::Ui;
 
@@ -27,9 +27,8 @@ const LINE_WIDTH: f32 = 64.0;
 const STATEMENT_WIDTH: f32 = 112.0;
 const ARGUMENTS_LEAST_WIDTH: f32 = 240.0;
 
-/// The kinds of statement a deck sets its simulation up with, in the order
-/// the table lists them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// The kinds of statement a deck sets its simulation up with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupSection {
     Analyses,
     Options,
@@ -81,7 +80,8 @@ impl SetupCard {
 /// The deck's own setup statements, from the index of its first file: every
 /// analysis, the option and `.temp` statements, and the parameter
 /// statements written at the deck's top level (a subcircuit's parameters
-/// are its own). A statement that sets several parameters is one row.
+/// are its own), in the order the deck states them. A statement that sets
+/// several parameters is one row.
 pub fn setup_cards(index: &NetlistSourceIndex) -> Vec<SetupCard> {
     let mut cards: Vec<SetupCard> = Vec::new();
     for entry in index.outline().entries() {
@@ -106,7 +106,7 @@ pub fn setup_cards(index: &NetlistSourceIndex) -> Vec<SetupCard> {
             lines,
         });
     }
-    cards.sort_by_key(|card| (card.section, card.line));
+    cards.sort_by_key(|card| card.line);
     cards
 }
 
