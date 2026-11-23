@@ -256,14 +256,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         },
     },
     DialogSpec {
-        key: DialogKey("project.project_revision_history"),
+        key: DialogKey("project.history"),
         modality: Modality::Dialog,
-        is_open: Some(|state| {
-            features::dialog_open(state, DialogKey("project.project_revision_history"))
-        }),
-        render: |app, ctx| {
-            features::render_dialog(app, ctx, DialogKey("project.project_revision_history"))
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("project.history"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("project.history")),
     },
     DialogSpec {
         key: DialogKey("code.source_document"),

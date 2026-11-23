@@ -8,7 +8,9 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted};
+use super::recovery_frames::{
+    app_frame, click_on, offered, offscreen, paint_until, painted, select_row,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
@@ -363,10 +365,10 @@ fn after_a_crash_a_technology_not_installed_here_is_said_in_the_question() {
 }
 
 /// "Open the saved project" leaves the saved project open, clean, and the
-/// autosave on the Recovery page until the next save, which its row says:
-/// the recovery keeps it, the reader never pinned it.
+/// autosave on the History page until the next save, which its record says:
+/// the recovery keeps it, and it cannot be pinned.
 #[test]
-fn after_a_crash_open_the_saved_project_keeps_the_autosave_on_the_recovery_page() {
+fn after_a_crash_open_the_saved_project_keeps_the_autosave_on_the_history_page() {
     let (folder, saved_parts) = crashed_session("autosave-crash-saved");
     let (mut app, ctx, asked) = open_after_crash(&folder);
     app_frame(&ctx, &mut app, click_on(&asked, "Open the saved project"));
@@ -387,25 +389,40 @@ fn after_a_crash_open_the_saved_project_keeps_the_autosave_on_the_recovery_page(
     );
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::History;
+    let autosave = ProjectCheckpointReason::Autosave.label();
     let shown = paint_until(&ctx, &mut app, |text| {
-        text.contains("Kept for recovery until you save \u{b7} ")
+        text.lines().any(|line| line == autosave)
     });
-    assert!(!painted(&shown).contains("Pinned"), "{}", painted(&shown));
+    let selected = select_row(&ctx, &mut app, &shown, autosave);
+    let text = painted(&selected);
+    assert!(text.contains("For recovery, until you save"), "{text}");
+    assert!(!offered(&selected, "Pin"), "an autosave is not pinned");
     let _ = std::fs::remove_dir_all(folder);
 }
 
-/// Compare shows the Recovery page with the autosave selected and what it
-/// changes listed under it.
+/// Compare shows the History page with the autosave selected, and what it
+/// changes listed over it.
 #[test]
 fn after_a_crash_compare_lists_what_the_autosave_changes() {
     let (folder, saved_parts) = crashed_session("autosave-crash-compare");
     let (mut app, ctx, asked) = open_after_crash(&folder);
     app_frame(&ctx, &mut app, click_on(&asked, "Compare"));
     let shown = paint_until(&ctx, &mut app, |text| {
-        text.contains("The current project differs in 1 document:")
+        text.contains("differs from the checkpoint \u{201c}Autosave\u{201d} in 1 document.")
     });
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(app.state.project.project_page, ProjectPage::History);
+    let autosave = list(&app.state.model)
+        .expect("listed")
+        .checkpoints
+        .into_iter()
+        .find(|checkpoint| checkpoint.reason() == ProjectCheckpointReason::Autosave)
+        .expect("the autosave is listed");
+    assert_eq!(
+        app.state.project.project_history_selection,
+        Some(autosave.checkpoint_id().to_string()),
+        "the autosave is selected"
+    );
     assert!(
         painted(&shown)
             .lines()

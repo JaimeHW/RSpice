@@ -1436,7 +1436,6 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "library_cellview_manager"),
             ("lib.rs", "project"),
             ("lib.rs", "project_launcher"),
-            ("lib.rs", "project_revision_history"),
             ("lib.rs", "project_workflow"),
             ("lib.rs", "slots"),
             ("lib.rs", "surfaces"),

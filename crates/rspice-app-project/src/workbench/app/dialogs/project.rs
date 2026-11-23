@@ -162,12 +162,12 @@ pub(crate) const CHECKPOINT_NOT_RESTORED: &str = "Checkpoint not restored";
 pub(crate) type ChangeOutcome = Result<Option<String>, (&'static str, String)>;
 
 /// A change to the browser's checkpoints that finished after the frame that
-/// started it, for the Recovery page to take.
+/// started it, for the History page to take.
 #[cfg(target_arch = "wasm32")]
 pub(crate) struct BrowserCheckpointChange {
     pub(crate) project_id: String,
     pub(crate) outcome: ChangeOutcome,
-    /// Started from the Recovery page, which waits for it.
+    /// Started from the History page, which waits for it.
     pub(crate) from_page: bool,
 }
 
@@ -178,7 +178,7 @@ thread_local! {
 }
 
 /// The completion of a checkpoint a transaction took and did not wait for:
-/// the Recovery page lists again once it is written, and one that could not
+/// the History page lists again once it is written, and one that could not
 /// be written raises a notice.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn checkpoint_written_later(
@@ -199,7 +199,7 @@ pub(crate) fn checkpoint_written_later(
     }
 }
 
-/// What the reader asked to delete from the Recovery page.
+/// What the reader asked to delete from the History page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CheckpointDeletion {
     /// A checkpoint, by its identity.

@@ -67,7 +67,6 @@ pub mod workbench {
             pub mod design_management;
             pub mod library;
             pub mod project;
-            pub mod project_revision_history;
         }
 
         pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
@@ -75,7 +74,6 @@ pub mod workbench {
             DesignManagementDialogState, open_design_management_dialog,
         };
         pub(crate) use dialogs::project::TechnologyAttachmentDialogState;
-        pub(crate) use dialogs::project_revision_history::ProjectRevisionHistoryDialogState;
     }
     mod app_state {
         pub(crate) use rspice_app_state::workbench::app_state::{

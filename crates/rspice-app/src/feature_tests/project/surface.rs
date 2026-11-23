@@ -1,5 +1,5 @@
 //! The Project workspace drawn through the whole application: the overview
-//! and the recovery page from live state, and a press on the page carried
+//! and the History page from live state, and a press on the page carried
 //! out in the frame it was clicked in.
 
 use egui::{Modifiers, Ui, pos2};
@@ -246,16 +246,15 @@ fn announced_starting(output: &egui::FullOutput, prefix: &str) -> String {
 }
 
 /// History… on the Overview runs its command as the page returns, inside
-/// the stage's step of the frame: the revision history is open before the
-/// frame draws its dialogs, so it shows in the frame it was asked for in.
+/// the stage's step of the frame: the History page is in front in the
+/// frame it was asked for in.
 #[test]
-fn overview_history_opens_before_the_frame_draws_its_dialogs() {
+fn overview_history_opens_the_history_page_in_the_frame_it_was_clicked_in() {
     let (ctx, mut app, settled) = settled_on(ProjectPage::Overview);
-    assert!(!app.state.project.project_revision_history.open);
 
     click_announced(&ctx, &mut app, settled, "History\u{2026}");
 
-    assert!(app.state.project.project_revision_history.open);
+    assert_eq!(app.state.project.project_page, ProjectPage::History);
 }
 
 /// The latest run on the Overview is selected and its workspace opened as
@@ -300,20 +299,6 @@ fn overview_root_actions_open_the_root_in_the_frame_they_were_clicked_in() {
             "{label}"
         );
     }
-}
-
-/// Revision history… on the Recovery page is answered as the page
-/// returns, inside the stage's step of the frame: the dialog is open
-/// before the frame draws its dialogs, so it shows in the frame it was
-/// asked for in.
-#[test]
-fn revision_history_opens_before_the_frame_draws_its_dialogs() {
-    let (ctx, mut app, settled) = settled_on(ProjectPage::History);
-    assert!(!app.state.project.project_revision_history.open);
-
-    click_announced(&ctx, &mut app, settled, "Revision history\u{2026}");
-
-    assert!(app.state.project.project_revision_history.open);
 }
 
 pub(super) fn populated_project_app() -> RSpiceApp {
@@ -536,7 +521,7 @@ fn the_netlist_first_overview_names_the_deck() {
     );
 }
 
-/// The Recovery page over a catalog this test controls, rather than
+/// The History page over a catalog this test controls, rather than
 /// whatever the machine's recovery directory happens to hold.
 #[cfg(not(target_arch = "wasm32"))]
 fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSpiceApp {
@@ -565,7 +550,7 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
         fixture_summary(&name, revision, reason, now - age, bytes)
     })
     .collect::<Vec<_>>();
-    app.state.project.project_checkpoint_selection = catalog
+    app.state.project.project_history_selection = catalog
         .first()
         .map(|checkpoint| checkpoint.checkpoint_id().to_string());
     let recovery = &mut app.state.project.project_checkpoint_recovery;
@@ -597,93 +582,55 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
     app
 }
 
-/// Recovery states its checkpoints, where they are kept, and its two
-/// actions in plain words at every supported width, and none of the
-/// retired policy ledger survives.
+/// History lists the checkpoints newest first, each by when it was taken
+/// and why, and its bar counts them against the space they are kept in.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
-    for size in [
-        egui::vec2(1440.0, 900.0),
-        egui::vec2(820.0, 1180.0),
-        egui::vec2(390.0, 844.0),
+fn the_history_page_lists_checkpoints_newest_first() {
+    let mut app = recovery_project_app(3, false, false);
+    let made = app
+        .state
+        .project
+        .project_checkpoint_recovery
+        .checkpoints
+        .iter()
+        .map(|checkpoint| rspice_app_state::time_compat::local_stamp(checkpoint.created_unix_ms()))
+        .collect::<Vec<_>>();
+    let text = painted_project_page(egui::vec2(1440.0, 900.0), |ui| show(ui, &mut app));
+    for expected in [
+        "3 checkpoints \u{b7} ",
+        "Create checkpoint",
+        "Compare\u{2026}",
+        "Restore\u{2026}",
+        "Manual checkpoint",
+        "Before technology change",
     ] {
-        let mut app = recovery_project_app(3, false, false);
-        // Two checkpoints made minutes apart are told apart by the time in
-        // the row; a tablet has no hover to read it from.
-        let made = rspice_app_state::time_compat::local_stamp(
-            app.state.project.project_checkpoint_recovery.checkpoints[0].created_unix_ms(),
-        );
-        let text = painted_project_page(size, |ui| show(ui, &mut app));
-        assert!(
-            text.contains(&format!("{made} \u{b7} 6 min ago \u{b7} revision 3")),
-            "{made:?} missing at {}x{}:\n{text}",
-            size.x,
-            size.y
-        );
-        for expected in [
-            "History",
-            "3 checkpoints",
-            "Create checkpoint",
-            "Revision history\u{2026}",
-            "Checkpoints",
-            "Manual checkpoint",
-            "Before technology change",
-            "6 min ago \u{b7} revision 3",
-            "Compare",
-            "Restore\u{2026}",
-            "Storage",
-            "Manual and pinned checkpoints are kept until you delete them.",
-        ] {
-            assert!(
-                text.contains(expected),
-                "{expected:?} missing at {}x{}:\n{text}",
-                size.x,
-                size.y
-            );
-        }
-        for retired in [
-            "Policy & storage",
-            "SHOWN",
-            "Checkpoint now",
-            "Quarantined payloads",
-            "governed mutations",
-            "never overwritten",
-            "Working state",
-            // A catalog that reads back whole says nothing: neither the
-            // page's state beside its title nor the Storage card reports
-            // that nothing has gone wrong.
-            "3 verified",
-            "Integrity",
-        ] {
-            assert!(
-                !text.contains(retired),
-                "{retired:?} is still painted at {}x{}:\n{text}",
-                size.x,
-                size.y
-            );
-        }
+        assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
+    // Two checkpoints made minutes apart are told apart by the time in the
+    // row; the newest is first.
+    let at = made
+        .iter()
+        .map(|made| {
+            text.find(made.as_str())
+                .unwrap_or_else(|| panic!("{made:?} missing:\n{text}"))
+        })
+        .collect::<Vec<_>>();
+    assert!(at.is_sorted(), "{made:?} are not newest first:\n{text}");
 }
 
-/// An empty catalog says so once, a damaged artifact gets its own card,
-/// and an unreadable directory offers a retry instead of an empty list.
+/// An empty history says so once; a damaged checkpoint is a row of its own
+/// that says in a few words what is wrong; and a store that cannot be read
+/// says what to do and offers Try again instead of an empty list.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
+fn the_history_page_states_empty_damaged_and_unreadable_catalogs() {
     let size = egui::vec2(1440.0, 900.0);
     let mut empty = recovery_project_app(0, false, false);
     let text = painted_project_page(size, |ui| show(ui, &mut empty));
-    for expected in ["no checkpoints", "No checkpoints yet"] {
+    for expected in ["0 checkpoints \u{b7} ", "No checkpoints or revisions yet."] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
-    assert!(
-        !text.contains("KEPT"),
-        "an empty catalog counts nothing:\n{text}"
-    );
-    // An empty store has nothing to verify, which it says by having no
-    // Integrity row rather than by printing "Nothing to check".
-    assert!(!text.contains("Integrity"), "{text}");
 
     let mut damaged = recovery_project_app(2, true, false);
     let text = painted_project_page(size, |ui| show(ui, &mut damaged));
@@ -700,15 +647,13 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
             .expect("its record says when it was taken"),
     );
     for expected in [
-        "2 damaged",
-        "Damaged",
+        "2 checkpoints \u{b7} 2 damaged \u{b7} ",
+        "Status",
+        "Copy changed",
+        "Record damaged",
         "Manual checkpoint",
-        &format!("{taken} \u{b7} yesterday"),
-        "The copy of the project it keeps has changed since it was taken, so it cannot be \
-         trusted. Delete it.",
+        taken.as_str(),
         "2b9d3e61-0c7a-4f58-8e1d-5a6c9f0b4e27.checkpoint.json",
-        "Its record is damaged, so what it holds is unknown. Delete it.",
-        "These checkpoints are damaged, so they cannot be restored.",
     ] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
@@ -716,7 +661,6 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
         !text.contains("7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10"),
         "a checkpoint with a name is not named by its identity:\n{text}"
     );
-    assert!(!text.contains("set aside"), "{text}");
     assert!(!text.contains("integrity manifest"), "{text}");
 
     // An unreadable store says what is wrong and what to do in plain
@@ -724,8 +668,7 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
     let mut unreadable = recovery_project_app(0, false, true);
     let text = painted_project_page(size, |ui| show(ui, &mut unreadable));
     for expected in [
-        "unreadable",
-        "Checkpoints could not be read",
+        "Checkpoints unreadable",
         "RSpice could not open the folder that keeps this project's checkpoints. Check that \
          you are allowed to open it, then try again.",
         "Try again",
@@ -738,15 +681,14 @@ fn the_recovery_page_states_empty_damaged_and_unreadable_catalogs() {
             "{system:?} is the Console's:\n{text}"
         );
     }
-    assert!(!text.contains("No checkpoints yet"), "{text}");
+    assert!(!text.contains("No checkpoints or revisions yet"), "{text}");
 }
 
-/// A store that cannot be read is "Unreadable" with the one failure mark in
-/// the Storage card, and offers no Create checkpoint: the action is disabled
-/// rather than failing once pressed.
+/// A store that cannot be read offers no Create checkpoint: the action is
+/// disabled rather than failing once pressed.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn an_unreadable_store_is_one_word_and_cannot_take_a_checkpoint() {
+fn an_unreadable_store_cannot_take_a_checkpoint() {
     let mut app = recovery_project_app(0, false, true);
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
@@ -763,9 +705,6 @@ fn an_unreadable_store_is_one_word_and_cannot_take_a_checkpoint() {
             egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
         },
     );
-    let text = painted_text(&output);
-    assert!(text.contains("Unreadable"), "{text}");
-    assert!(!text.contains("Not checked"), "{text}");
     let create = output
         .platform_output
         .accesskit_update

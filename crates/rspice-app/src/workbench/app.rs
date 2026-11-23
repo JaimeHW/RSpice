@@ -582,7 +582,7 @@ impl RSpiceApp {
         self.state.poll_segment_checks(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.state.poll_project_pack(ctx);
-        // A checkpoint the Recovery page read back goes into the project
+        // A checkpoint the History page read back goes into the project
         // before anything draws it.
         crate::workbench::app_state::services_access::apply_restored_checkpoint(&mut self.state);
         self.project_autosave(ctx);

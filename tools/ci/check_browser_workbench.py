@@ -105,18 +105,29 @@ def verify_age(browser, name, now_ms):
 
 
 def verify_checkpoint_time(browser, manifest, now_ms):
-    """A checkpoint row states when the checkpoint was made, as a date and time
-    no clock fault moves or hides, and then its age, which a fault makes
-    unknown or moves the way the clock moved."""
+    """A checkpoint row of the History page states when the checkpoint was
+    made, as a date and time no clock fault moves or hides, beside the
+    revision it holds."""
     stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(manifest["created_unix_ms"] // 1000))
-    for value, age, suffix in ((now_ms - 86_400_000, "time unavailable", "rollback"),
-                               (now_ms + 86_400_000, "yesterday", "forward"),
-                               ("nonfinite", "time unavailable", "unavailable")):
-        row = f"Manual checkpoint, {stamp} · {age} · revision {manifest['project_revision']},"
+    row = f"When: {stamp}, Change: Manual checkpoint,"
+    revision = f"Revision: {manifest['project_revision']}"
+    for value, suffix in ((now_ms - 86_400_000, "rollback"),
+                          (now_ms + 86_400_000, "forward"),
+                          ("nonfinite", "unavailable")):
         with wall_clock(browser, value):
-            snapshot = browser.capture(f"checkpoint-age-{suffix}")
-            if not any(control["label"].startswith(row) for control in controls(snapshot)):
+            snapshot = browser.capture(f"checkpoint-time-{suffix}")
+            if not any(control["label"].startswith(row) and revision in control["label"]
+                       for control in controls(snapshot)):
                 raise AssertionError(f"The checkpoint row did not read {row!r} after a clock adjustment")
+
+
+def checkpoint_row(browser):
+    """The History page's one row of the manual checkpoint."""
+    rows = [control for control in controls(browser.snapshot())
+            if control["label"].startswith("When: ") and "Change: Manual checkpoint," in control["label"]]
+    if len(rows) != 1:
+        raise AssertionError(f"Expected one row of the manual checkpoint; got {rows}")
+    return rows[0]
 
 
 def verify_revision_time(browser, record, note):
@@ -129,7 +140,7 @@ def verify_revision_time(browser, record, note):
                           ("nonfinite", "unavailable")):
         with wall_clock(browser, value):
             snapshot = browser.capture(f"revision-time-{suffix}")
-            if not any(f"Time: {stamp}" in control["label"] and f"Change: {note}" in control["label"]
+            if not any(f"When: {stamp}" in control["label"] and f"Change: {note}" in control["label"]
                        for control in controls(snapshot)):
                 raise AssertionError(f"The revision did not state {stamp!r} after a clock adjustment")
 
@@ -157,7 +168,6 @@ def canonical_projects(browser):
 
 
 def validated_save_clock(browser, review_intervals):
-    browser.click("Close", "button")
     browser.click("Schematic", "button")
     # A fresh schematic opens framed on its sheet; Zoom 100% puts one canvas
     # point on one schematic unit, so the offsets below keep their spacing.
@@ -240,7 +250,8 @@ def validated_save_clock(browser, review_intervals):
     (browser.output / "validated-project.rspiceproj").write_bytes(raw.encode("utf-8"))
     choose_command(browser, "Revision history")
     verify_revision_time(browser, saved[0], note)
-    browser.click("Close", "button")
+    # The page reloads on the schematic, whose canvas takes the keyboard.
+    browser.click("Schematic", "button")
     browser.call("POST", "/refresh", {})
     wait_until_ready(browser)
     browser.click("Schematic canvas", "canvas")
@@ -257,7 +268,6 @@ def validated_save_clock(browser, review_intervals):
 
 
 def model_validation_clock(browser):
-    browser.click("Close", "button")
     choose_command(browser, "Corners & sections")
     browser.click("Expand console", "button")
     clear_console(browser)
@@ -631,19 +641,25 @@ def verify_recovery_copy(project, recovered, filename):
 
 
 def restore_checkpoint(browser, records, project, review_intervals):
-    """Restore asks in the checkpoint's row before it changes anything, and a
-    declined restore leaves every checkpoint as it was. A restore that goes
+    """Restore… on the selected checkpoint asks before it changes anything, and
+    a declined restore leaves every checkpoint as it was. A restore that goes
     ahead keeps the project as it is now as a "Before restore" checkpoint
     first, changes no other checkpoint, and says what it restored."""
-    question = "Restore “Manual checkpoint” from"
-    browser.click("Restore Manual checkpoint into the project", "button")
-    if not reports(controls(browser.capture("checkpoint-restore-asked")), question):
+    def asked():
+        return any(control["label"] == "Restore" and control["role"] == "button"
+                   for control in controls(browser.snapshot()))
+
+    browser.click("Restore…", "button")
+    wait_for(asked, "the restore's question")
+    browser.capture("checkpoint-restore-asked")
+    if checkpoint_records(browser) != records:
         raise AssertionError("Restore went ahead without asking")
     browser.click("Cancel", "button")
-    if reports(controls(browser.snapshot()), question) or checkpoint_records(browser) != records:
+    if asked() or checkpoint_records(browser) != records:
         raise AssertionError("A declined restore was not dismissed or changed the checkpoints")
-    browser.click("Restore Manual checkpoint into the project", "button")
-    browser.click("Restore Manual checkpoint", "button")
+    browser.click("Restore…", "button")
+    wait_for(asked, "the restore's question")
+    browser.click("Restore", "button")
     wait_for_checkpoint_publication(browser, records, "the before-restore checkpoint")
     wait_for(lambda: reports(controls(browser.snapshot()), "Restored “Manual checkpoint” from"),
              "the restore's report")
@@ -961,9 +977,9 @@ def exported_dataset(browser):
     return wait_for(download, "the exported result dataset", 60).read_text(encoding="utf-8")
 
 
-def click_control(browser, control):
+def click_control(browser, control, button=0):
     """Click one rendered control where it is drawn, for a button that shares its name with one
-    outside the form it belongs to."""
+    outside the form it belongs to, or a row no label names whole; button 2 asks for its menu."""
     canvas = browser.script("""
         const r = document.getElementById('rspice_canvas').getBoundingClientRect();
         return {x: r.x, y: r.y, ratio: devicePixelRatio};
@@ -973,8 +989,8 @@ def click_control(browser, control):
     browser.record_input("click", label=control["label"], role=control["role"], node=control["id"],
                          x=x, y=y, keyboard=[])
     pointer = [{"type": "pointerMove", "duration": 0, "origin": "viewport", "x": x, "y": y},
-               {"type": "pointerDown", "button": 0}, {"type": "pause", "duration": 60},
-               {"type": "pointerUp", "button": 0}]
+               {"type": "pointerDown", "button": button}, {"type": "pause", "duration": 60},
+               {"type": "pointerUp", "button": button}]
     browser.call("POST", "/actions", {"actions": [
         {"type": "pointer", "id": "mouse", "parameters": {"pointerType": "mouse"}, "actions": pointer}]})
     browser.snapshot()
@@ -1438,9 +1454,10 @@ def run(browser):
     browser.capture("checkpoint-created")
     reject_checkpoint_clock(browser, "retained-checkpoint-store")
     verify_checkpoint_time(browser, manifest, time.time_ns() // 1_000_000)
-    # Save as new project... is the row's second action; in a browser it
-    # downloads the copy.
-    browser.click("More actions for Manual checkpoint", "button")
+    # The row is selected for Restore… below; Save as new project… is in its
+    # menu, and in a browser it downloads the copy.
+    click_control(browser, checkpoint_row(browser))
+    click_control(browser, checkpoint_row(browser), button=2)
     browser.click("Save as new project…", "button")
 
     def download():
@@ -1456,8 +1473,8 @@ def run(browser):
     browser.capture("checkpoint-exported")
     restore_checkpoint(browser, records, project, review_intervals)
     choose_command(browser, "Revision history")
-    wait_for(lambda: any("Project revision and audit history" in (control["label"], control["value"])
-                        for control in controls(browser.snapshot())), "revision history")
+    wait_for(lambda: any(control["label"] == "Create checkpoint"
+                        for control in controls(browser.snapshot())), "the History page")
     browser.capture("revision-history")
     validated_save = validated_save_clock(browser, review_intervals)
     model_validation = model_validation_clock(browser)

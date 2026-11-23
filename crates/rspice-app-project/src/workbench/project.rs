@@ -13,7 +13,7 @@ pub mod library_dialogs;
 mod new_project;
 pub mod properties;
 mod read_only_notice;
-mod revision_history;
+pub mod revision_history;
 pub mod workspace_state;
 
 pub use dependency_status::{DependencyKind, DependencyLibrary};
@@ -51,9 +51,7 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::{ProjectCommand, ProjectRequest};
 use library_dialogs::new_view::existing_symbol_view;
 use library_dialogs::new_view_target;
-pub(crate) use revision_history::{
-    open_project_revision_history, open_project_revision_history_on, schematic_row_key,
-};
+pub(crate) use revision_history::schematic_row_key;
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage, ProjectPage};
 
 /// The project feature.
@@ -95,7 +93,7 @@ impl Feature for ProjectFeature {
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
 /// order lists them by, in that order: New project, Check and save, Design
-/// management, Revision history, the configuration dialogs, New Cell, New
+/// management, the History page's questions, the configuration dialogs, New Cell, New
 /// View, Copy Cell, Rename Cell, the deletion review and the staged
 /// deletion. Then the library and view membership dialogs the Library
 /// surface draws, which hold a modal gate while open. Each is open while its
@@ -120,9 +118,9 @@ const DIALOGS: &[FeatureDialog<ProjectFeature>] = &[
         render: ProjectFeature::render_design_management_dialog,
     },
     FeatureDialog {
-        key: DialogKey("project.project_revision_history"),
-        is_open: |project| project.project_revision_history.open,
-        render: ProjectFeature::render_project_revision_history_dialog,
+        key: DialogKey("project.history"),
+        is_open: crate::workbench::surfaces::project::history::asking,
+        render: crate::workbench::surfaces::project::history::dialogs,
     },
     FeatureDialog {
         key: DialogKey("project.configuration"),
@@ -406,7 +404,8 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             configuration: &mut project.configuration,
             dependency_selection: &project.project_dependency_selection,
             checkpoint_recovery: &project.project_checkpoint_recovery,
-            checkpoint_selection: &project.project_checkpoint_selection,
+            history: &project.history,
+            history_selection: &project.project_history_selection,
             builtin_library_open: project.builtin_models.open,
             builtin_model: project
                 .builtin_models
@@ -442,6 +441,22 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             crate::workbench::project::library_dialogs::library_files::run_library_file_intent(
                 cx, intent,
             );
+        }
+        Some(ProjectInspectorAction::CheckpointNote(checkpoint, note)) => {
+            crate::workbench::surfaces::project::history::keep_note(
+                ui.ctx(),
+                cx,
+                checkpoint,
+                &note,
+            );
+        }
+        Some(ProjectInspectorAction::CheckpointBudget(mib)) => {
+            if let Err(refusal) = cx.model.preferences.set_scalar(
+                rspice_app_state::workbench::preferences::ScalarPreference::CheckpointBudgetMib,
+                mib,
+            ) {
+                cx.wb.prompt(refusal);
+            }
         }
         None => {}
     }
@@ -753,11 +768,15 @@ impl CommandSet for ProjectCommand {
                 DesignManagementTab::Annotation,
             ),
             Self::CreateSymbol => open_create_symbol_dialog(cx.state, cx.model, cx.wb),
-            Self::RevisionHistory => open_project_revision_history(
-                &mut cx.state.project_revision_history,
-                cx.model,
-                cx.platform,
-            ),
+            // The History page, on the newest revision of the schematic in
+            // front when it has one.
+            Self::RevisionHistory => {
+                cx.wb.activate(Workspace::Project);
+                cx.state.project_page = ProjectPage::History;
+                if let Some(key) = revision_history::newest_front_revision(cx.model) {
+                    cx.state.project_history_selection = Some(key);
+                }
+            }
             // The project's properties are edited in the project inspector,
             // beside the Overview, which selects nothing: the inspector is
             // shown and its Name takes the keys.

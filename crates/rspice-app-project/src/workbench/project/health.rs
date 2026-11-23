@@ -431,7 +431,7 @@ const CHECKPOINTS_UNREADABLE: &str = "Checkpoints could not be read. Check that 
 const CHECKPOINTS_UNREADABLE: &str = "Checkpoints could not be read. Check that this site may \
      store data; the Console has what the browser said.";
 
-/// The work a save would write, and what the Recovery page can bring back.
+/// The work a save would write, and what the History page can bring back.
 /// The checkpoints are counted once the page's catalogue has listed them;
 /// a store that could not be listed, or holds damaged checkpoints, is the
 /// caution.

@@ -1,6 +1,6 @@
 //! The Project workspace's inspector: the project itself while nothing on
 //! the page is selected, and otherwise the selected library, cell view,
-//! dependency or checkpoint; the configuration on the Configuration page.
+//! dependency or History row; the configuration on the Configuration page.
 
 pub mod configuration;
 mod dependency;
@@ -23,17 +23,19 @@ use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationSelection,
 };
 use crate::workbench::project::properties::ProjectPropertiesEdit;
+use crate::workbench::project::revision_history::HistoryPageState;
 use crate::workbench::project::workspace_state::ProjectPage;
 
 use dependency::project_dependency;
 pub use library::project_library;
 use overview::overview_findings;
 use properties::project_properties;
-use recovery::project_recovery;
+use recovery::{history_checkpoints, history_record};
 
 /// What the Project workspace's inspector reads and writes: the project
 /// feature's page and the selections its rails keep, the configuration
-/// page, the recovery catalog and the model, with what the design checks
+/// page, the checkpoint catalog and the History page's journal rows, and
+/// the model, with what the design checks
 /// read of the other features' state and the project as its lifecycle reads
 /// it.
 pub struct ProjectInspector<'a> {
@@ -41,7 +43,10 @@ pub struct ProjectInspector<'a> {
     pub configuration: &'a mut ConfigurationPageState,
     pub dependency_selection: &'a Option<DependencyLibrary>,
     pub checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
-    pub checkpoint_selection: &'a Option<String>,
+    pub history: &'a HistoryPageState,
+    /// The History row selected: a checkpoint's identity, a damaged one's
+    /// key or a journal record's.
+    pub history_selection: &'a Option<String>,
     /// Whether the Library page shows the built-in Verilog-A library rather
     /// than one of the project's.
     pub builtin_library_open: bool,
@@ -93,6 +98,11 @@ pub enum ProjectInspectorAction {
     /// A command over a library kept in a folder of its own: its mode, or
     /// Break lock… on one of its files.
     LibraryFile(crate::workbench::project::library_dialogs::library_files::LibraryFileIntent),
+    /// Keep this note on the checkpoint, as the History page's Note… does.
+    CheckpointNote(uuid::Uuid, String),
+    /// Keep automatic checkpoints inside this many MiB, as the Preferences
+    /// set it.
+    CheckpointBudget(u32),
 }
 
 pub(in crate::workbench) fn project(
@@ -104,7 +114,7 @@ pub(in crate::workbench) fn project(
         inspector.model,
         inspector.builtin_library_open,
         inspector.dependency_selection,
-        inspector.checkpoint_selection,
+        inspector.history_selection,
     );
     match inspector.page {
         ProjectPage::Overview => {
@@ -116,25 +126,22 @@ pub(in crate::workbench) fn project(
             configuration::project_configuration(ui, inspector.configuration, inspector.model)
                 .map(ProjectInspectorAction::UseForRuns)
         }
-        // The recovery store's state stands under the project while it is
-        // not in order.
+        // Where the checkpoints are kept, and the space they are kept in,
+        // stand under the project.
         ProjectPage::History if nothing_selected => {
             let action = project_properties(ui, inspector);
-            project_recovery(ui, inspector);
-            action
+            let checkpoints = history_checkpoints(ui, inspector);
+            action.or(checkpoints)
         }
         _ if nothing_selected => project_properties(ui, inspector),
         ProjectPage::Library => project_library(ui, inspector),
         ProjectPage::Dependencies => project_dependency(ui, inspector),
-        ProjectPage::History => {
-            project_recovery(ui, inspector);
-            None
-        }
+        ProjectPage::History => history_record(ui, inspector),
     }
 }
 
 /// Whether the inspector beside `page` shows the project itself: always on
-/// the Overview; on the Library Manager, Dependencies and Recovery while
+/// the Overview; on the Library Manager, Dependencies and History while
 /// nothing on the page is selected. The Configuration page shows its
 /// configuration instead.
 pub fn inspects_project(
@@ -142,7 +149,7 @@ pub fn inspects_project(
     model: &Model,
     builtin_library_open: bool,
     dependency_selection: &Option<DependencyLibrary>,
-    checkpoint_selection: &Option<String>,
+    history_selection: &Option<String>,
 ) -> bool {
     match page {
         ProjectPage::Overview => true,
@@ -151,7 +158,7 @@ pub fn inspects_project(
         }
         ProjectPage::Configuration => false,
         ProjectPage::Dependencies => dependency_selection.is_none(),
-        ProjectPage::History => checkpoint_selection.is_none(),
+        ProjectPage::History => history_selection.is_none(),
     }
 }
 

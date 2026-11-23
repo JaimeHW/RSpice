@@ -337,7 +337,7 @@ pub(crate) struct WorkbenchWire {
     #[serde(default)]
     project_library_filter: String,
     #[serde(default)]
-    project_checkpoint_selection: Option<String>,
+    project_history_selection: Option<String>,
     #[serde(default)]
     library_cellview_page: LibraryCellviewPage,
     #[serde(default)]
@@ -440,7 +440,7 @@ pub(crate) struct WorkbenchWireRef<'a> {
     #[serde(default)]
     project_library_filter: &'a String,
     #[serde(default)]
-    project_checkpoint_selection: &'a Option<String>,
+    project_history_selection: &'a Option<String>,
     #[serde(default)]
     library_cellview_page: &'a LibraryCellviewPage,
     #[serde(default)]
@@ -608,7 +608,7 @@ impl<'a> WorkbenchWireRef<'a> {
             netlist: Cow::Owned(code.netlist_session(generated_netlist)),
             project_page: &project.project_page,
             project_library_filter: &project.project_library_filter,
-            project_checkpoint_selection: &project.project_checkpoint_selection,
+            project_history_selection: &project.project_history_selection,
             library_cellview_page: &project.library_cellview_page,
             verification_page: &simulate.verification_page,
             simulation_page: &simulate.simulation_page,
@@ -658,7 +658,7 @@ impl<'a> WorkbenchWireRef<'a> {
             netlist: self.netlist.clone().into_owned(),
             project_page: *self.project_page,
             project_library_filter: self.project_library_filter.clone(),
-            project_checkpoint_selection: self.project_checkpoint_selection.clone(),
+            project_history_selection: self.project_history_selection.clone(),
             library_cellview_page: *self.library_cellview_page,
             verification_page: *self.verification_page,
             simulation_page: *self.simulation_page,
@@ -709,7 +709,7 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
             netlist: Cow::Borrowed(&wire.netlist),
             project_page: &wire.project_page,
             project_library_filter: &wire.project_library_filter,
-            project_checkpoint_selection: &wire.project_checkpoint_selection,
+            project_history_selection: &wire.project_history_selection,
             library_cellview_page: &wire.library_cellview_page,
             verification_page: &wire.verification_page,
             simulation_page: &wire.simulation_page,
@@ -839,7 +839,7 @@ impl WorkbenchWire {
         state.code.restore_netlist_session(self.netlist);
         state.project.project_page = self.project_page;
         state.project.project_library_filter = self.project_library_filter;
-        state.project.project_checkpoint_selection = self.project_checkpoint_selection;
+        state.project.project_history_selection = self.project_history_selection;
         state.project.library_cellview_page = self.library_cellview_page;
         state.simulate.verification_page = self.verification_page;
         state.simulate.simulation_page = self.simulation_page;

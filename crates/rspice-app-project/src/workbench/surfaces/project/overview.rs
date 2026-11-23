@@ -22,10 +22,10 @@ use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::framework::feature::Cx;
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use crate::workbench::project::health::{lifecycle_label, lifecycle_tone};
 use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::project::{ProjectFeature, open_project_revision_history_on};
 use crate::workbench::state::Workspace;
 
 use super::library::{LibraryIntent, apply_library_intent};
@@ -187,15 +187,9 @@ impl OverviewIntent {
                     cx.model.diagnostics.set_current_finding(finding);
                 }
             }
-            Self::OpenRevision(key) => open_project_revision_history_on(
-                &mut cx.state.project_revision_history,
-                cx.model,
-                cx.platform,
-                key,
-            ),
-            Self::OpenCheckpoint(checkpoint) => {
+            Self::OpenRevision(key) | Self::OpenCheckpoint(key) => {
                 cx.execute(ProjectCommand::Page(ProjectPage::History).key());
-                cx.state.project_checkpoint_selection = Some(checkpoint);
+                cx.state.project_history_selection = Some(key);
             }
         }
     }

@@ -1,6 +1,6 @@
 //! Geometry shared by the project workspace's carded pages.
 //!
-//! Overview and Recovery share the landing surfaces' layout: a header band and a
+//! The Overview shares the landing surfaces' layout: a header band and a
 //! centred content column on the application ground, with bordered cards. A
 //! card of facts sizes to its content; a card that is a list takes the height
 //! the window has, since a list has more rows to show in it.
@@ -26,14 +26,9 @@ pub(super) const COLUMN_GAP: f32 = 14.0;
 pub(super) const CARD_GAP: f32 = 10.0;
 
 /// Lay a page out on the application ground: its own vertical scroll, and a
-/// content column `body` receives as `(inset, width)` from the left edge.
-pub(super) fn show(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui, f32, f32)) {
-    show_measured(ui, id_salt, |ui, inset, width, _| body(ui, inset, width));
-}
-
-/// [`show`], telling `body` the viewport's height as well, `(inset, width,
-/// height)`: a page whose lists take the height the window has sizes them
-/// to it, and scrolls only once they reach their least.
+/// content column `body` receives as `(inset, width, height)` from the left
+/// edge, with the viewport's height: a page whose lists take the height the
+/// window has sizes them to it, and scrolls only once they reach their least.
 pub(super) fn show_measured(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut Ui, f32, f32, f32)) {
     let tokens = Tokens::get(ui.ctx());
     let workspace_width = visible_workspace_width(ui);
@@ -60,26 +55,6 @@ pub(super) fn show_measured(ui: &mut Ui, id_salt: &str, body: impl FnOnce(&mut U
                 ui.add_space(BODY_BOTTOM);
             });
     });
-}
-
-/// Run `body` in a top-down column `width` wide, `inset` from the left edge.
-pub(super) fn inset_column<R>(
-    ui: &mut Ui,
-    inset: f32,
-    width: f32,
-    body: impl FnOnce(&mut Ui) -> R,
-) -> R {
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.add_space(inset);
-        ui.allocate_ui_with_layout(vec2(width, 1.0), Layout::top_down(Align::Min), |ui| {
-            ui.set_width(width);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            body(ui)
-        })
-        .inner
-    })
-    .inner
 }
 
 /// Run `body` in a top-down column `width` wide, `inset` from the left edge,

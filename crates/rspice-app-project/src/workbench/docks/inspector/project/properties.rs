@@ -1,5 +1,5 @@
 //! The project inspector: what the Overview, Library Manager, Dependencies
-//! and Recovery pages show while nothing on them is selected.
+//! and History pages show while nothing on them is selected.
 //!
 //! The project's name, description and top cell are edited in place and
 //! applied as the project's properties are applied anywhere, each change one
@@ -138,7 +138,7 @@ fn runs_use(
 /// puts the value back. While `refuse` objects, the field is marked and says
 /// why on hover. A read-only project shows `value` as a fact, `read_only` on
 /// hover. A field asked to take the keys (`focus`) takes them as it draws.
-fn edited_text(
+pub(super) fn edited_text(
     ui: &mut Ui,
     label: &str,
     value: &str,

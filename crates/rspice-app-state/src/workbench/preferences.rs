@@ -920,6 +920,11 @@ impl ScalarPreference {
     }
 }
 
+/// The spaces offered for a project's automatic checkpoints, in MiB,
+/// smallest first: Preferences and the History page's inspector offer the
+/// same ones. The shipped one is 512 MiB.
+pub const CHECKPOINT_BUDGETS_MIB: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
+
 /// A stored list of host folders, kept in the order they are searched.
 ///
 /// A family of its own beside the choices, toggles and scalars for the reason

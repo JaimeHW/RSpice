@@ -206,10 +206,13 @@ fn assert_the_step_raises_nothing(app: &mut RSpiceApp, key: &'static str) {
 }
 
 #[test]
-fn revision_history_raises_nothing_for_the_answer_after_it() {
+fn the_history_pages_question_raises_nothing_for_the_answer_after_it() {
     let mut app = with_a_writable_cell();
-    with_cx(&mut app, |cx| ProjectCommand::RevisionHistory.execute(cx));
-    assert_the_step_raises_nothing(&mut app, "project.project_revision_history");
+    app.state.project.project_checkpoint_recovery.saved_copy = Some((
+        uuid::Uuid::nil(),
+        std::path::PathBuf::from("copy.rspiceproj"),
+    ));
+    assert_the_step_raises_nothing(&mut app, "project.history");
 }
 
 #[test]

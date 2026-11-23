@@ -1,4 +1,4 @@
-//! Recovery, the launcher and revision history through whole application
+//! Recovery, the launcher and the History page through whole application
 //! frames: an idle frame reads no project file, lists no checkpoint
 //! directory, stats no file and rebuilds no list, and checkpoint work runs
 //! while the page goes on painting.
@@ -11,10 +11,11 @@ use egui::{Context, Modifiers, Pos2, Rect, Vec2, pos2, vec2};
 
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::app::dialogs::project::CheckpointJobHold;
-use rspice_app_project::workbench::app::dialogs::project_revision_history::AUDIT_ROW_BUILDS;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::open_project_launcher;
+use rspice_app_project::workbench::project::revision_history::AUDIT_ROW_BUILDS;
 use rspice_app_project::workbench::project::workspace_state::{ProjectLauncherPage, ProjectPage};
+use rspice_app_project::workbench::surfaces::project::history::HISTORY_ROW_BUILDS;
 use rspice_app_project::workbench::tools::project_launcher::PROJECT_LIST_BUILDS;
 use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
@@ -97,6 +98,20 @@ pub(super) fn painted(output: &egui::FullOutput) -> String {
 /// `label`: the topmost, when several are, as a reader takes the first row
 /// of a list.
 pub(super) fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Event> {
+    click_where(
+        output,
+        |announced| announced == label,
+        egui::PointerButton::Primary,
+    )
+}
+
+/// A press and release of `button` in the middle of the topmost control
+/// `output` announces with a label `named` picks.
+pub(super) fn click_where(
+    output: &egui::FullOutput,
+    named: impl Fn(&str) -> bool,
+    button: egui::PointerButton,
+) -> Vec<egui::Event> {
     let bounds = output
         .platform_output
         .accesskit_update
@@ -104,9 +119,9 @@ pub(super) fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Even
         .expect("the frame publishes its tree")
         .nodes
         .iter()
-        .filter_map(|(_, node)| (node.label()? == label).then_some(node.bounds()?))
+        .filter_map(|(_, node)| named(node.label()?).then_some(node.bounds()?))
         .min_by(|a, b| a.y0.total_cmp(&b.y0))
-        .unwrap_or_else(|| panic!("the frame announces `{label}`"));
+        .expect("the frame announces the control");
     let at = pos2(
         ((bounds.x0 + bounds.x1) / 2.0) as f32,
         ((bounds.y0 + bounds.y1) / 2.0) as f32,
@@ -115,17 +130,90 @@ pub(super) fn click_on(output: &egui::FullOutput, label: &str) -> Vec<egui::Even
         egui::Event::PointerMoved(at),
         egui::Event::PointerButton {
             pos: at,
-            button: egui::PointerButton::Primary,
+            button,
             pressed: true,
             modifiers: Modifiers::default(),
         },
         egui::Event::PointerButton {
             pos: at,
-            button: egui::PointerButton::Primary,
+            button,
             pressed: false,
             modifiers: Modifiers::default(),
         },
     ]
+}
+
+/// A click on the lowest control announced as `label`: a dialog's button
+/// rather than one of the same name on the window's frame above it.
+pub(super) fn click_lowest(output: &egui::FullOutput, label: &str) -> Vec<egui::Event> {
+    let bounds = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| (node.label()? == label).then_some(node.bounds()?))
+        .max_by(|a, b| a.y0.total_cmp(&b.y0))
+        .unwrap_or_else(|| panic!("the frame announces `{label}`"));
+    let at = pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    std::iter::once(egui::Event::PointerMoved(at))
+        .chain([true, false].map(|pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::default(),
+        }))
+        .collect()
+}
+
+/// Whether the control `output` announces as `label` can be pressed.
+pub(super) fn offered(output: &egui::FullOutput, label: &str) -> bool {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the frame publishes its tree")
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label().as_deref() == Some(label))
+        .map(|(_, node)| !node.is_disabled())
+        .unwrap_or_else(|| panic!("the frame announces `{label}`"))
+}
+
+/// A press and release of `key`, with no modifier held.
+pub(super) fn key_press(key: egui::Key) -> Vec<egui::Event> {
+    [true, false]
+        .into_iter()
+        .map(|pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::default(),
+        })
+        .collect()
+}
+
+/// Select the topmost History row whose Change is `change`, as `shown`
+/// lists it, and paint the frame after.
+pub(super) fn select_row(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    shown: &egui::FullOutput,
+    change: &str,
+) -> egui::FullOutput {
+    let named = format!("Change: {change},");
+    let click = click_where(
+        shown,
+        |label| label.contains(&named),
+        egui::PointerButton::Primary,
+    );
+    app_frame(ctx, app, click);
+    app_frame(ctx, app, Vec::new())
 }
 
 /// Paint until `done` holds for what was painted, as the reader's screen
@@ -303,10 +391,11 @@ fn the_launcher_builds_its_project_list_once_per_change() {
 }
 
 /// "Create checkpoint" writes the checkpoint on a background thread. While
-/// it runs the page goes on painting and says so; when it is done the new
-/// checkpoint is in the list.
+/// it runs the page goes on painting and says so, and the selected
+/// checkpoint cannot be restored; when it is done the new checkpoint is in
+/// the list.
 #[test]
-fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() {
+fn a_checkpoint_created_on_the_history_page_is_written_while_the_page_paints() {
     let (mut app, root) = saved_project("recovery-page-create");
     for _ in 0..2 {
         create(&mut app.state, ProjectCheckpointReason::Manual).expect("checkpoint written");
@@ -314,27 +403,28 @@ fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() 
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
-    let listed = paint_until(&ctx, &mut app, |text| text.contains("2 checkpoints"));
+    let listed = paint_until(&ctx, &mut app, |text| text.contains("2 checkpoints \u{b7}"));
+    let selected = select_row(&ctx, &mut app, &listed, "Manual checkpoint");
 
     let hold = CheckpointJobHold::default();
     app.state.project.project_checkpoint_recovery.job_hold = Some(hold.clone());
-    assert_eq!(restores_offered(&listed), [true, true]);
-    app_frame(&ctx, &mut app, click_on(&listed, "Create checkpoint"));
+    assert!(offered(&selected, "Restore\u{2026}"));
+    app_frame(&ctx, &mut app, click_on(&selected, "Create checkpoint"));
     for _ in 0..IDLE_FRAMES {
         let waiting = app_frame(&ctx, &mut app, Vec::new());
         let text = painted(&waiting);
         assert!(text.contains("Creating checkpoint\u{2026}"), "{text}");
-        assert!(text.contains("2 checkpoints"), "{text}");
+        assert!(text.contains("2 checkpoints \u{b7}"), "{text}");
         // Restoring saves a copy from the list the job is about to change.
-        assert_eq!(restores_offered(&waiting), [false, false]);
+        assert!(!offered(&waiting, "Restore\u{2026}"));
     }
 
     hold.release();
-    let created = paint_until(&ctx, &mut app, |text| text.contains("3 checkpoints"));
+    let created = paint_until(&ctx, &mut app, |text| text.contains("3 checkpoints \u{b7}"));
     let text = painted(&created);
     assert!(text.contains("Create checkpoint"), "{text}");
     assert!(!text.contains("Creating checkpoint\u{2026}"), "{text}");
-    assert_eq!(restores_offered(&created), [true, true, true]);
+    assert!(offered(&created, "Restore\u{2026}"));
     assert!(
         app.state
             .model
@@ -347,8 +437,9 @@ fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() 
 }
 
 /// A checkpoint whose copy of the project changed on disk is listed as
-/// damaged with what is wrong and what to do; the store's own account of it
-/// goes to the Console once, not again when the page lists it again.
+/// damaged, and its record says what is wrong and what to do; the store's
+/// own account of it goes to the Console once, not again when the page lists
+/// it again.
 #[test]
 fn a_damaged_checkpoint_says_what_is_wrong_and_the_console_keeps_the_store_text() {
     let (mut app, root) = saved_project("recovery-page-damaged");
@@ -370,12 +461,14 @@ fn a_damaged_checkpoint_says_what_is_wrong_and_the_console_keeps_the_store_text(
     app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let listed = paint_until(&ctx, &mut app, |text| text.contains("1 damaged"));
-    let text = painted(&listed);
     assert!(
-        text.contains(
-            "The copy of the project it keeps has changed since it was taken, so it cannot be \
-             trusted. Delete it."
-        ),
+        painted(&listed).contains("Copy changed"),
+        "{}",
+        painted(&listed)
+    );
+    let text = painted(&select_row(&ctx, &mut app, &listed, "Manual checkpoint"));
+    assert!(
+        text.contains("The copy of the project it keeps has changed since it was taken"),
         "{text}"
     );
     assert!(!text.contains("integrity manifest"), "{text}");
@@ -423,6 +516,7 @@ fn a_damaged_checkpoint_is_named_by_its_name_and_time() {
     let ctx = offscreen();
     let listed = paint_until(&ctx, &mut app, |text| text.contains("1 damaged"));
     let text = painted(&listed);
+    let record = painted(&select_row(&ctx, &mut app, &listed, "Manual checkpoint"));
     let damaged = &app.state.project.project_checkpoint_recovery.quarantined[0];
     assert_eq!(damaged.title(), Some("Manual checkpoint"));
     let taken = rspice_app_state::time_compat::local_stamp(
@@ -432,36 +526,14 @@ fn a_damaged_checkpoint_is_named_by_its_name_and_time() {
     );
     assert!(text.contains("Manual checkpoint"), "{text}");
     assert!(text.contains(&taken), "{taken} missing:\n{text}");
+    assert!(text.contains("Copy missing"), "{text}");
     assert!(
-        text.contains("The copy of the project it keeps is missing. Delete it."),
-        "{text}"
+        record.contains("The copy of the project it keeps is missing."),
+        "{record}"
     );
     assert!(!text.contains(damaged.label()), "{text}");
+    assert!(!record.contains(damaged.label()), "{record}");
     let _ = std::fs::remove_dir_all(root);
-}
-
-/// Whether each checkpoint row's Restore… can be pressed, top to bottom.
-fn restores_offered(output: &egui::FullOutput) -> Vec<bool> {
-    let Some(update) = output.platform_output.accesskit_update.as_ref() else {
-        return Vec::new();
-    };
-    let mut restores = update
-        .nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.label().is_some_and(|label| {
-                label.starts_with("Restore ") && label.ends_with(" into the project")
-            })
-        })
-        .map(|(_, node)| {
-            (
-                node.bounds().map_or(0.0, |bounds| bounds.y0),
-                !node.is_disabled(),
-            )
-        })
-        .collect::<Vec<_>>();
-    restores.sort_by(|a, b| a.0.total_cmp(&b.0));
-    restores.into_iter().map(|(_, offered)| offered).collect()
 }
 
 /// A checkpoint that cannot be written raises a notice: the list does not
@@ -474,7 +546,8 @@ fn a_checkpoint_that_cannot_be_written_raises_a_notice() {
     app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let listed = paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == "1 checkpoint")
+        text.lines()
+            .any(|line| line.starts_with("1 checkpoint \u{b7}"))
     });
     let raised = |app: &RSpiceApp| {
         app.state
@@ -504,29 +577,29 @@ fn a_checkpoint_that_cannot_be_written_raises_a_notice() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Revision history builds its table when it opens; a frame that only
-/// paints the open dialog builds nothing.
+/// The History page builds its rows when it shows, from the journal and
+/// from the checkpoints; a frame that only paints the page builds nothing.
 #[test]
-fn revision_history_builds_its_rows_when_it_opens_not_every_frame() {
-    let mut app = RSpiceApp::test_instance();
+fn the_history_page_builds_its_rows_when_it_shows_not_every_frame() {
+    let (mut app, root) = saved_project("history-page-builds");
     app.state.workbench.activate(Workspace::Project);
     app.execute_command_key(ProjectCommand::RevisionHistory.key());
-    assert!(app.state.project.project_revision_history.open);
+    assert_eq!(app.state.project.project_page, ProjectPage::History);
     let ctx = offscreen();
-    let builds = || AUDIT_ROW_BUILDS.with(|builds| builds.replace(0));
+    let journal = || AUDIT_ROW_BUILDS.with(|builds| builds.replace(0));
+    let listed = || HISTORY_ROW_BUILDS.with(|builds| builds.replace(0));
 
-    builds();
-    let first = first_seen(&ctx, &mut app);
-    assert!(
-        painted(&first).contains("Project revision and audit history"),
-        "{}",
-        painted(&first)
-    );
-    assert_eq!(builds(), 1);
+    journal();
+    listed();
+    paint_until(&ctx, &mut app, |text| text.contains("0 checkpoints \u{b7}"));
+    assert_eq!(journal(), 1, "the journal is read once");
+    assert!(listed() > 0, "the rows are listed");
     for _ in 0..IDLE_FRAMES {
         app_frame(&ctx, &mut app, Vec::new());
     }
-    assert_eq!(builds(), 0);
+    assert_eq!(journal(), 0);
+    assert_eq!(listed(), 0);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// "Restore autosave?" states the autosave's time and age from when it was
@@ -571,7 +644,7 @@ fn the_restore_autosave_dialog_states_the_age_it_was_offered_with() {
 /// file, on frames painted one after another in one context, as a reader
 /// moving between the pages sees them.
 #[test]
-fn after_a_save_as_the_overview_and_the_recovery_page_state_one_revision() {
+fn after_a_save_as_the_overview_and_the_history_page_state_one_revision() {
     let (mut app, root) = saved_project("save-as-revision");
     for name in ["Amplifier a", "Amplifier b", "Amplifier c", "Amplifier d"] {
         app.state

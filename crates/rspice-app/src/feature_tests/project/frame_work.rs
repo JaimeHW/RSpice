@@ -3,7 +3,8 @@
 //! that work, so each kind is counted where it is done: fingerprint passes,
 //! whole-project captures, hashes of model sources, project files read,
 //! checkpoint directories listed and files stat'ed, whole-catalog sorts, net
-//! extractions, library columns listed and drawings or bindings walked.
+//! extractions, library columns listed, history rows listed and drawings or
+//! bindings walked.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -13,9 +14,11 @@ use egui::Context;
 
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::configuration_state::CONFIGURATION_SCANS;
+use rspice_app_project::workbench::project::revision_history::AUDIT_ROW_BUILDS;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::project::{DependencyKind, DependencyLibrary};
 use rspice_app_project::workbench::surfaces::library_cellview_manager::CELLVIEW_PROJECTION_BUILDS;
+use rspice_app_project::workbench::surfaces::project::history::HISTORY_ROW_BUILDS;
 use rspice_app_project::workbench::surfaces::project::library::LIBRARY_ROW_BUILDS;
 use rspice_app_project::workbench::surfaces::project::overview::OverviewSnapshot;
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
@@ -66,6 +69,8 @@ struct FrameWork {
     /// Library browser columns listed and sorted, and the cell-view
     /// manager's catalog projected.
     library_rows: usize,
+    /// The revision journal read for the History page, and its rows listed.
+    history_rows: usize,
     /// Drawings walked for a cell's placements, and a configuration's
     /// bindings, instance paths or views walked.
     design_scans: usize,
@@ -90,6 +95,8 @@ fn take_work() -> FrameWork {
         net_extractions: design.connectivity_passes,
         library_rows: LIBRARY_ROW_BUILDS.with(|n| n.replace(0))
             + CELLVIEW_PROJECTION_BUILDS.with(|n| n.replace(0)),
+        history_rows: AUDIT_ROW_BUILDS.with(|n| n.replace(0))
+            + HISTORY_ROW_BUILDS.with(|n| n.replace(0)),
         design_scans: CELL_USAGE_SCANS.with(|n| n.replace(0))
             + CONFIGURATION_SCANS.with(|n| n.replace(0)),
     }
@@ -245,10 +252,11 @@ fn the_dependencies_page_does_no_project_work_on_an_idle_frame() {
 }
 
 /// The checkpoints are listed on a background thread: the first frame says
-/// so, and neither it nor any frame after reads a checkpoint.
+/// so, and neither it nor any frame after reads a checkpoint; an idle frame
+/// lists no row.
 #[test]
-fn the_recovery_page_lists_its_checkpoints_off_the_frame_and_idles() {
-    let (mut app, folder) = large_project("frame-work-recovery", COMPONENTS);
+fn the_history_page_lists_its_checkpoints_off_the_frame_and_idles() {
+    let (mut app, folder) = large_project("frame-work-history", COMPONENTS);
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();

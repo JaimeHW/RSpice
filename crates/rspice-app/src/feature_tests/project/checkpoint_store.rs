@@ -1,12 +1,15 @@
 //! A project's checkpoints through whole saves: where they are kept before
 //! and after the project has a file, what a save adds and removes, and what
-//! the reader changes on the Recovery page.
+//! the reader changes on the History page.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::Path;
 
-use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted, saved_project};
+use super::recovery_frames::{
+    app_frame, click_lowest, click_on, click_where, key_press, offscreen, paint_until, painted,
+    saved_project, select_row,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
@@ -346,28 +349,11 @@ fn a_save_leaves_only_the_project_and_its_checkpoints_beside_it() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Open the row's More menu and choose `item` in it.
-fn choose(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    shown: &egui::FullOutput,
-    title: &str,
-    item: &str,
-) -> egui::FullOutput {
-    app_frame(
-        ctx,
-        app,
-        click_on(shown, &format!("More actions for {title}")),
-    );
-    let menu = app_frame(ctx, app, Vec::new());
-    app_frame(ctx, app, click_on(&menu, item))
-}
-
-/// On the Recovery page a checkpoint is pinned, named by a note and deleted
-/// after a question that names it, each through its row's More menu, and
-/// each change is in the store the page lists from.
+/// On the History page a checkpoint is pinned from the bar, noted from its
+/// row's menu and deleted with the Delete key after a question that names
+/// it, and each change is in the store the page lists from.
 #[test]
-fn a_checkpoint_is_pinned_noted_and_deleted_on_the_recovery_page() {
+fn a_checkpoint_is_pinned_noted_and_deleted_on_the_history_page() {
     let (mut app, root) = saved_project("checkpoint-store-page-changes");
     create(&mut app.state, ProjectCheckpointReason::TechnologyChange)
         .expect("the checkpoint is written");
@@ -375,20 +361,25 @@ fn a_checkpoint_is_pinned_noted_and_deleted_on_the_recovery_page() {
     app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let shown = paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == "1 checkpoint")
+        text.lines()
+            .any(|line| line.starts_with("1 checkpoint \u{b7} "))
     });
 
-    choose(&ctx, &mut app, &shown, "Before technology change", "Pin");
-    let shown = paint_until(&ctx, &mut app, |text| text.contains("Pinned \u{b7} "));
+    let selected = select_row(&ctx, &mut app, &shown, "Before technology change");
+    app_frame(&ctx, &mut app, click_on(&selected, "Pin"));
+    let shown = paint_until(&ctx, &mut app, |text| {
+        text.lines().any(|line| line == "Unpin")
+    });
     assert!(listed(&app)[0].pinned(), "the pin is stored");
 
-    choose(
-        &ctx,
-        &mut app,
+    let menu = click_where(
         &shown,
-        "Before technology change",
-        "Add note\u{2026}",
+        |label| label.contains("Change: Before technology change,"),
+        egui::PointerButton::Secondary,
     );
+    app_frame(&ctx, &mut app, menu);
+    let menu = app_frame(&ctx, &mut app, Vec::new());
+    app_frame(&ctx, &mut app, click_lowest(&menu, "Note\u{2026}"));
     // The field opens on the next frame and takes the keyboard on the one
     // after, once the menu it was chosen from has gone.
     for _ in 0..2 {
@@ -402,34 +393,25 @@ fn a_checkpoint_is_pinned_noted_and_deleted_on_the_recovery_page() {
     let writing = app_frame(&ctx, &mut app, Vec::new());
     app_frame(&ctx, &mut app, click_on(&writing, "Keep note"));
     let shown = paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == "Before the gain change")
+        !text.contains("Keep note") && text.lines().any(|line| line == "Before the gain change")
     });
     assert_eq!(listed(&app)[0].note(), Some("Before the gain change"));
 
-    let asked = choose(
-        &ctx,
-        &mut app,
-        &shown,
-        "Before the gain change",
-        "Delete\u{2026}",
-    );
-    let asked = if painted(&asked).contains("It cannot be brought back") {
-        asked
-    } else {
-        app_frame(&ctx, &mut app, Vec::new())
-    };
+    // The click selects the row and gives the table the keyboard.
+    select_row(&ctx, &mut app, &shown, "Before technology change");
+    app_frame(&ctx, &mut app, key_press(egui::Key::Delete));
+    let asked = paint_until(&ctx, &mut app, |text| {
+        text.contains("It cannot be brought back.")
+    });
+    let text = painted(&asked);
     assert!(
-        painted(&asked).contains("Delete \u{201c}Before the gain change\u{201d} from "),
-        "the question names the checkpoint:\n{}",
-        painted(&asked)
+        text.contains("Delete checkpoint") && text.contains("Before the gain change"),
+        "the question names the checkpoint:\n{text}"
     );
-    app_frame(
-        &ctx,
-        &mut app,
-        click_on(&asked, "Delete Before the gain change"),
-    );
+    app_frame(&ctx, &mut app, click_on(&asked, "Delete"));
     paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == "no checkpoints")
+        text.lines()
+            .any(|line| line.starts_with("0 checkpoints \u{b7} "))
     });
     assert!(listed(&app).is_empty(), "the checkpoint is gone from disk");
     assert_eq!(

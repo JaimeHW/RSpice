@@ -857,7 +857,7 @@ pub fn recovered_work_dialog(
         .size(DialogSize::Transaction)
         .secondary("Open the saved project")
         .ghost("Compare")
-        .hint("Esc opens the saved project; the changes stay on the Recovery page until you save.")
+        .hint("Esc opens the saved project; the changes stay on the History page until you save.")
         .show(ctx, |ui| {
             let c = Tokens::get(ui.ctx()).color;
             ui.label(

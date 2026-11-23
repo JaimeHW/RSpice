@@ -105,7 +105,7 @@ fn overview_history_action_preserves_project_context() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(app.state.model.workspace.content.active_view, active);
-    assert!(app.state.project.project_revision_history.open);
+    assert_eq!(app.state.project.project_page, ProjectPage::History);
 }
 
 #[test]

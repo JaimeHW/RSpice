@@ -213,7 +213,7 @@ class BrowserWorkbenchTests(unittest.TestCase):
                         side_effect=[before, before, snapshot_only, published]) as read):
                 result = run_with_saved_provider(browser, decision)
             # Run no longer moves the reader, so the outcome is read on the
-            # Simulation workspace the check opens before the Recovery page.
+            # Simulation workspace the check opens before the History page.
             self.assertEqual([call.args[1] for call in choose.call_args_list],
                              ["Open simulation workspace", "History"])
             self.assertEqual(read.call_count, 4)

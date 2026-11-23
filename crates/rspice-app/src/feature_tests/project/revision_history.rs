@@ -1,13 +1,18 @@
-//! Project revision history under a finger, through the whole application:
-//! on a tablet and on a phone, every comparison and restore the history
-//! offers is reached by taps alone, and each revision states the date and
-//! time it was made.
+//! Schematic revisions on the History page, through the whole application:
+//! each revision states the date and time it was made, Compare… names what
+//! changed in its view's drawing since, and Restore… on a revision of a
+//! schematic that is not open opens it and puts its drawing back.
 
-use egui::{Modifiers, Pos2, Rect, Vec2, pos2, vec2};
+#![cfg(not(target_arch = "wasm32"))]
 
-use super::recovery_frames::{offscreen, painted};
+use std::time::{Duration, Instant};
+
+use super::recovery_frames::{
+    app_frame, click_lowest, click_on, offscreen, paint_until, painted, select_row,
+};
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, Point, SchematicState, ValidatedSchematicRevisionId,
     View, ViewType,
@@ -18,105 +23,10 @@ use rspice_design::schematic::validated_revision::{
     ValidatedRevisionRequest, ValidationFindingCounts,
 };
 
-const TABLET: Vec2 = vec2(820.0, 1180.0);
-const PHONE: Vec2 = vec2(390.0, 844.0);
-
-/// One whole application frame `size` points wide and tall.
-fn frame(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    size: Vec2,
-    events: Vec<egui::Event>,
-) -> egui::FullOutput {
-    ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
-            events,
-            ..Default::default()
-        },
-        |ui| {
-            let ctx = ui.ctx().clone();
-            app.prepare_frame(&ctx);
-            app.render_frame_chrome(ui);
-            app.render_frame_dialogs(&ctx);
-        },
-    )
-}
-
-/// A few frames with nothing done, as the screen settles.
-fn settle(ctx: &egui::Context, app: &mut RSpiceApp, size: Vec2) -> egui::FullOutput {
-    let mut output = frame(ctx, app, size, Vec::new());
-    for _ in 0..3 {
-        output = frame(ctx, app, size, Vec::new());
-    }
-    output
-}
-
-/// Every label the frame announces.
-fn labels(output: &egui::FullOutput) -> Vec<String> {
-    output
-        .platform_output
-        .accesskit_update
-        .as_ref()
-        .expect("the frame publishes its tree")
-        .nodes
-        .iter()
-        .filter_map(|(_, node)| node.label().map(str::to_owned))
-        .collect()
-}
-
-/// What the frame says: every string it painted and every label it
-/// announces, whose words a narrow header may elide on the screen.
-fn said(output: &egui::FullOutput) -> String {
-    [painted(output), labels(output).join("\n")].join("\n")
-}
-
-/// A finger's tap on the part of the control `output` announces with a
-/// label `named` picks that lies on the screen, then the frames it settles
-/// over.
-fn tap(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    size: Vec2,
-    output: &egui::FullOutput,
-    named: impl Fn(&str) -> bool,
-) -> egui::FullOutput {
-    let bounds = output
-        .platform_output
-        .accesskit_update
-        .as_ref()
-        .expect("the frame publishes its tree")
-        .nodes
-        .iter()
-        .find_map(|(_, node)| named(node.label()?).then_some(node.bounds()?))
-        .unwrap_or_else(|| panic!("no control is announced so: {:#?}", labels(output)));
-    let left = (bounds.x0 as f32).max(0.0);
-    let right = (bounds.x1 as f32).min(size.x);
-    let at = pos2((left + right) / 2.0, ((bounds.y0 + bounds.y1) / 2.0) as f32);
-    assert!(
-        left < right && (0.0..size.y).contains(&at.y),
-        "the control lies off the screen at {bounds:?}"
-    );
-    let press = |pressed| egui::Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: Modifiers::default(),
-    };
-    frame(
-        ctx,
-        app,
-        size,
-        vec![egui::Event::PointerMoved(at), press(true), press(false)],
-    );
-    settle(ctx, app, size)
-}
-
-/// A drawn revision as the history names it: its digest's first ten
-/// characters, and when it was made.
+/// A drawn revision: which it is, and when it was made as the history
+/// states it.
 struct Made {
     id: ValidatedSchematicRevisionId,
-    digest: String,
     stamp: String,
 }
 
@@ -150,12 +60,6 @@ fn validate(schematic: &mut SchematicState, project: &str, view: &str, note: &st
         .expect("the journal holds it");
     Made {
         id,
-        digest: record
-            .revision_digest()
-            .to_string()
-            .chars()
-            .take(10)
-            .collect(),
         stamp: local_stamp(record.created_unix_ms()),
     }
 }
@@ -165,12 +69,11 @@ fn amplifier() -> CellViewRef {
     CellViewRef::new("bench", "amp", "schematic")
 }
 
-/// A project under a finger whose open schematic has two revisions, a
-/// baseline and the resistor added after it, and whose amplifier, not open,
-/// has one it has moved on from; with the history open on it.
+/// A project whose open schematic has two revisions, a baseline and the
+/// resistor added after it, and whose amplifier, not open, has one it has
+/// moved on from; with File > Revision history… taken, which shows History.
 fn history_app() -> (RSpiceApp, [Made; 3]) {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.coarse_pointer = true;
     let mut library = Library::new("bench");
     let mut cell = Cell::new("amp");
     cell.add_view(View::new("schematic", ViewType::Schematic));
@@ -197,143 +100,74 @@ fn history_app() -> (RSpiceApp, [Made; 3]) {
 
     app.state.workbench.activate(Workspace::Project);
     app.execute_command_key(ProjectCommand::RevisionHistory.key());
-    assert!(app.state.project.project_revision_history.open);
+    assert_eq!(app.state.project.project_page, ProjectPage::History);
     (app, [baseline, resistor, amplifier_review])
 }
 
 fn selected(app: &RSpiceApp) -> Option<String> {
-    app.state.project.project_revision_history.selected()
+    app.state.project.project_history_selection.clone()
 }
 
 fn key(made: &Made) -> String {
     format!("schematic:{}", made.id.as_uuid())
 }
 
-/// A revision as a comparison and the choice of what to compare it with
-/// name it: its digest and when it was made.
-fn named(made: &Made) -> String {
-    format!("{} ({})", made.digest, made.stamp)
-}
-
-/// On a tablet and on a phone, a finger selects a revision and reads what
-/// changed since it, chooses another revision of its view to compare it
-/// with, and restores a revision of a schematic that is not open, which
-/// opens it: no key is held and nothing is hovered. Every revision states
-/// the date and time it was made. On the phone each record opens on a page
-/// of its own, and Back returns to the list.
+/// Revision history opens on the newest revision of the schematic in front.
+/// Every revision states when it was made; Compare… on the baseline names
+/// the resistor added since; and Restore… on the amplifier's revision asks
+/// first, then opens the amplifier with its revision's drawing.
 #[test]
-fn every_comparison_and_restore_is_reached_by_taps_alone() {
-    for size in [TABLET, PHONE] {
-        let phone = size == PHONE;
-        let ctx = offscreen();
-        let (mut app, [baseline, resistor, amp]) = history_app();
-        let output = settle(&ctx, &mut app, size);
-        let text = painted(&output);
-        for made in [&baseline, &resistor, &amp] {
-            assert!(
-                text.contains(&made.stamp),
-                "{size:?}: {} is not stated:\n{text}",
-                made.stamp
-            );
-        }
-
-        // The baseline: what changed since it, by name.
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label.contains("Change: Baseline review")
-        });
-        assert_eq!(selected(&app), Some(key(&baseline)), "{size:?}");
-        let text = said(&output);
-        let since = format!("From revision {} to the current design", named(&baseline));
-        for stated in [
-            "Changes to the current design",
-            &since,
-            "Components",
-            "Added",
-        ] {
-            assert!(text.contains(stated), "{size:?}: {stated:?}\n{text}");
-        }
-
-        // Compared with the resistor's revision instead, chosen by taps.
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == "Compare with"
-        });
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == named(&resistor)
-        });
-        assert_eq!(
-            app.state
-                .project
-                .project_revision_history
-                .compared_with()
-                .map(str::to_owned),
-            Some(key(&resistor)),
-            "{size:?}"
-        );
-        let text = said(&output);
-        let between = format!(
-            "From revision {} to revision {}",
-            named(&baseline),
-            named(&resistor)
-        );
-        for stated in ["Changes between two revisions", &between] {
-            assert!(text.contains(stated), "{size:?}: {stated:?}\n{text}");
-        }
-
-        // The amplifier's revision, then Restore and its confirmation.
-        let output = if phone {
-            tap(&ctx, &mut app, size, &output, |label| label == "Back")
-        } else {
-            output
-        };
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label.contains("Change: Amplifier review")
-        });
-        assert_eq!(selected(&app), Some(key(&amp)), "{size:?}");
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == "Restore\u{2026}"
-        });
-        let text = said(&output);
+fn a_schematic_revision_is_compared_and_restored_from_the_history_page() {
+    let ctx = offscreen();
+    let (mut app, [baseline, resistor, amp]) = history_app();
+    assert_eq!(selected(&app), Some(key(&resistor)));
+    let shown = paint_until(&ctx, &mut app, |text| text.contains("Amplifier review"));
+    let text = painted(&shown);
+    for made in [&baseline, &resistor, &amp] {
         assert!(
-            text.contains("Restore opens bench/amp/schematic and replaces its drawing"),
-            "{size:?}:\n{text}"
-        );
-        let output = tap(&ctx, &mut app, size, &output, |label| {
-            label == "Confirm restore"
-        });
-        let model = &app.state.model;
-        assert_eq!(model.workspace.content.active_view, amplifier(), "{size:?}");
-        assert_eq!(
-            model.schematic.document().components.len(),
-            1,
-            "{size:?}: the amplifier is its revision's drawing again"
-        );
-        assert!(app.state.project.project_revision_history.open, "{size:?}");
-        let text = said(&output);
-        assert!(
-            !text.contains("Revision history cannot continue"),
-            "{size:?}:\n{text}"
+            text.contains(&made.stamp),
+            "{} is not stated:\n{text}",
+            made.stamp
         );
     }
-}
 
-/// A project saved but never checked lists no design revision, and the
-/// history says so: what it does list, how a revision is recorded, and
-/// where the versions its saves replaced are kept.
-#[test]
-fn a_history_with_no_revision_says_what_it_lists_and_where_saves_are() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Project);
-    app.execute_command_key(ProjectCommand::RevisionHistory.key());
-    assert!(app.state.project.project_revision_history.open);
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let shown = settle(&ctx, &mut app, egui::vec2(1600.0, 900.0));
-    let text = said(&shown);
+    // The baseline: what changed since it, by name.
+    let picked = select_row(&ctx, &mut app, &shown, "Baseline review");
+    assert_eq!(selected(&app), Some(key(&baseline)));
+    app_frame(&ctx, &mut app, click_on(&picked, "Compare\u{2026}"));
+    let compared = paint_until(&ctx, &mut app, |text| {
+        text.contains("Compare schematic revision") && text.contains("Added")
+    });
+    let text = painted(&compared);
+    for stated in [baseline.stamp.as_str(), "Components"] {
+        assert!(text.contains(stated), "{stated:?}\n{text}");
+    }
+    app_frame(&ctx, &mut app, click_lowest(&compared, "Close"));
+    let shown = paint_until(&ctx, &mut app, |text| {
+        !text.contains("Compare schematic revision")
+    });
+
+    // The amplifier's revision, then Restore and its question.
+    let picked = select_row(&ctx, &mut app, &shown, "Amplifier review");
+    assert_eq!(selected(&app), Some(key(&amp)));
+    app_frame(&ctx, &mut app, click_on(&picked, "Restore\u{2026}"));
+    let asked = paint_until(&ctx, &mut app, |text| {
+        text.contains("Only the drawing of bench/amp/schematic goes back to this revision")
+    });
+    app_frame(&ctx, &mut app, click_on(&asked, "Restore"));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while app.state.model.workspace.content.active_view != amplifier()
+        || app.state.model.schematic.document().components.len() != 1
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the amplifier never opened on its revision's drawing"
+        );
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    let after = app_frame(&ctx, &mut app, Vec::new());
     assert!(
-        text.contains("No design revision is recorded yet"),
-        "{text}"
+        !painted(&after).contains("Restore schematic revision"),
+        "the question is answered"
     );
-    assert!(text.contains("checkpoint on the Recovery page"), "{text}");
-    assert!(!text.contains("Select a revision"), "{text}");
 }

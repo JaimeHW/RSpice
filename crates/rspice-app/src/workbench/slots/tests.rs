@@ -424,8 +424,9 @@ const DIALOG_GATE: &[DialogRow] = &[
     ("design_review_comments", |dialogs| {
         dialogs.design.design_review_comments.open = true;
     }),
-    ("project_revision_history", |dialogs| {
-        dialogs.project.project_revision_history.open = true;
+    ("history", |dialogs| {
+        dialogs.project.project_checkpoint_recovery.saved_copy =
+            Some((uuid::Uuid::nil(), std::path::PathBuf::from("copy.rspice")));
     }),
     ("create_model_bound_symbol", |dialogs| {
         dialogs.design.create_model_bound_symbol.open = true;

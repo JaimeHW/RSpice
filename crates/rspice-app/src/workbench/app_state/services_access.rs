@@ -311,7 +311,7 @@ pub(crate) fn open_comparison(
     Err(recovery::comparison_unavailable())
 }
 
-/// Put the checkpoint the Recovery page read back into the open project, and
+/// Put the checkpoint the History page read back into the open project, and
 /// say so on the status bar. The page lists its checkpoints again, the
 /// "Before restore" one among them.
 pub(crate) fn apply_restored_checkpoint(state: &mut AppState) {
@@ -665,7 +665,7 @@ impl AppState {
 /// just what the autosave holds, the project is put back as saved and the
 /// autosave offered, as the desktop offers it at a start. When the reader has
 /// worked on since, or the session kept work the autosave does not hold, that
-/// work stays and nothing is asked: the autosave stays on the Recovery page.
+/// work stays and nothing is asked: the autosave stays on the History page.
 pub(crate) fn settle_restart_offer(state: &mut AppState) {
     let autosave = &mut state.platform.project_autosave;
     if autosave.offer.is_none() {
@@ -723,7 +723,7 @@ pub(crate) fn settle_restart_offer(state: &mut AppState) {
 
 /// The recovered-work question an open or a start raised: Keep puts the
 /// autosave back in the open project as unsaved changes, Open the saved
-/// project leaves it on the Recovery page, Compare shows it there with what
+/// project leaves it on the History page, Compare shows it there with what
 /// it changes listed.
 pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Context) {
     use autosave::RecoveredWorkAnswer;
@@ -753,7 +753,7 @@ pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Co
             recovery.project_id = Some(found.project_id);
             recovery.invalidate();
             recovery.set_comparison(id, found.differences);
-            state.project.project_checkpoint_selection = Some(id.to_string());
+            state.project.project_history_selection = Some(id.to_string());
             state.project.project_page =
                 rspice_app_project::workbench::project::workspace_state::ProjectPage::History;
             state

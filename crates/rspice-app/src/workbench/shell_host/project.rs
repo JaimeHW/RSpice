@@ -7,8 +7,9 @@ use egui::Ui;
 
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_project::workbench::surfaces::project::recovery::recovery;
-use rspice_app_project::workbench::surfaces::project::{configuration, dependencies, overview};
+use rspice_app_project::workbench::surfaces::project::{
+    configuration, dependencies, history, overview,
+};
 
 pub(crate) mod dropped;
 pub(crate) mod landing;
@@ -38,7 +39,8 @@ pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
         // The Library page carries out what the reader asked of it between
         // its own calls, which the shell still does over the application.
         ProjectPage::Library => library::library(ui, app),
-        ProjectPage::History => recovery(ui, &mut features::cx(app)),
+        // The table under the page's bar scrolls itself, to the page's floor.
+        ProjectPage::History => history::history(ui, &mut features::cx(app)),
         ProjectPage::Configuration => configuration::configuration(ui, &mut features::cx(app)),
         // The table under the page's bar scrolls itself, to the page's floor.
         ProjectPage::Dependencies => dependencies::dependencies(ui, &mut features::cx(app)),

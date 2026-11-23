@@ -3,7 +3,7 @@
 //! recovery workflows; the Project Launcher, the Examples dialog, and the
 //! Project workspace's pages and filters.
 
-use crate::workbench::app::{DesignManagementDialogState, ProjectRevisionHistoryDialogState};
+use crate::workbench::app::DesignManagementDialogState;
 
 /// What the Library page's built-in Verilog-A library has selected.
 #[derive(Debug, Clone, Default)]
@@ -179,9 +179,6 @@ pub struct ProjectState {
     /// Project-owned sheet, variant, annotation, and hierarchy manager.
     pub design_management: Box<DesignManagementDialogState>,
 
-    /// Hash-linked validated schematic revisions and semantic audit workflow.
-    pub project_revision_history: Box<ProjectRevisionHistoryDialogState>,
-
     /// Project-owned technology attachment transaction.
     pub technology_attachment:
         crate::workbench::app::dialogs::project::TechnologyAttachmentDialogState,
@@ -216,7 +213,13 @@ pub struct ProjectState {
     pub project_dependency_selection: Option<crate::workbench::project::DependencyLibrary>,
     /// The Dependencies page's ledger, and the model library it is reading.
     pub dependencies: crate::workbench::app::dialogs::project::DependencyPageState,
-    pub project_checkpoint_selection: Option<String>,
+    /// The row the History page and its inspector have selected: a
+    /// checkpoint's identity, a journal record's key or a damaged
+    /// checkpoint's.
+    pub project_history_selection: Option<String>,
+    /// The History page: its filter, kind and table, the journal's rows and
+    /// what it asks about a schematic revision.
+    pub history: Box<crate::workbench::project::revision_history::HistoryPageState>,
     /// The Overview's tables: their order, sized columns, selection and
     /// scroll. Presentation only; they belong to the open project.
     pub overview_tables: crate::workbench::surfaces::project::overview::OverviewTables,
@@ -255,6 +258,7 @@ impl ProjectState {
         self.configuration_dialog = Default::default();
         self.project_dependency_selection = None;
         self.dependencies = Default::default();
+        *self.history = Default::default();
         self.overview_tables = Default::default();
     }
 }

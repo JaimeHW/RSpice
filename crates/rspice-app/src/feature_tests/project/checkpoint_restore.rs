@@ -1,4 +1,4 @@
-//! Going back to a checkpoint on the Recovery page: Restore puts it back in
+//! Going back to a checkpoint on the History page: Restore puts it back in
 //! the open project as unsaved changes after keeping the project as it was,
 //! Compare names each document that differs, and a checkpoint saved as a new
 //! project is offered to open. A project file that will not open is reached
@@ -7,7 +7,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted, saved_project};
+use super::recovery_frames::{
+    app_frame, click_lowest, click_on, offscreen, paint_until, painted, saved_project, select_row,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::services_access::restore_checkpoint_in_place;
@@ -47,11 +49,20 @@ fn listed(app: &RSpiceApp) -> Vec<ProjectCheckpointSummary> {
         .checkpoints
 }
 
-/// The Recovery page in front, once it lists `count` checkpoints.
-fn recovery_page(ctx: &egui::Context, app: &mut RSpiceApp, count: &str) -> egui::FullOutput {
+/// The History page in front, once its bar reports `count`.
+fn history_page(ctx: &egui::Context, app: &mut RSpiceApp, count: &str) -> egui::FullOutput {
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::History;
-    paint_until(ctx, app, |text| text.lines().any(|line| line == count))
+    let reported = format!("{count} \u{b7} ");
+    paint_until(ctx, app, |text| {
+        text.lines().any(|line| line.starts_with(&reported))
+    })
+}
+
+/// The bar reports `count` checkpoints.
+fn reports(count: &str) -> impl Fn(&str) -> bool {
+    let reported = format!("{count} \u{b7} ");
+    move |text: &str| text.lines().any(|line| line.starts_with(&reported))
 }
 
 /// The frame after `shown` that paints `text`, clicking nothing more.
@@ -68,10 +79,10 @@ fn next_with(
     }
 }
 
-/// Restore asks in place, keeps the project as it was in a "Before restore"
-/// checkpoint, then puts the checkpoint back in the same project: its parts
-/// are the checkpoint's, the work is unsaved, the file is untouched, and the
-/// status bar and the page say what happened.
+/// Restore… on the selected checkpoint asks first, keeps the project as it
+/// was in a "Before restore" checkpoint, then puts the checkpoint back in the
+/// same project: its parts are the checkpoint's, the work is unsaved, the
+/// file is untouched, and the status bar and the page say what happened.
 #[test]
 fn restore_puts_the_checkpoint_back_in_the_open_project_as_unsaved_changes() {
     let (mut app, root) = saved_project("restore-in-place");
@@ -86,32 +97,24 @@ fn restore_puts_the_checkpoint_back_in_the_open_project_as_unsaved_changes() {
     let project_id = app.state.model.workspace.content.project.id().to_string();
 
     let ctx = offscreen();
-    let shown = recovery_page(&ctx, &mut app, "1 checkpoint");
-    let asked = app_frame(
-        &ctx,
-        &mut app,
-        click_on(&shown, "Restore Manual checkpoint into the project"),
-    );
+    let shown = history_page(&ctx, &mut app, "1 checkpoint");
+    let selected = select_row(&ctx, &mut app, &shown, "Manual checkpoint");
+    let asked = app_frame(&ctx, &mut app, click_on(&selected, "Restore\u{2026}"));
     let asked = next_with(
         &ctx,
         &mut app,
         asked,
-        "Restore \u{201c}Manual checkpoint\u{201d} from ",
+        "The whole project goes back to this checkpoint",
     );
     assert!(
-        painted(&asked)
-            .contains("the project as it is now is kept as \u{201c}Before restore\u{201d}"),
+        painted(&asked).contains(
+            "The project as it is now is kept first, as the checkpoint \u{201c}Before restore\u{201d}"
+        ),
         "the question says what is kept:\n{}",
         painted(&asked)
     );
-    app_frame(
-        &ctx,
-        &mut app,
-        click_on(&asked, "Restore Manual checkpoint"),
-    );
-    paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == "2 checkpoints")
-    });
+    app_frame(&ctx, &mut app, click_on(&asked, "Restore"));
+    paint_until(&ctx, &mut app, reports("2 checkpoints"));
 
     assert_eq!(
         parts(&app),
@@ -177,17 +180,14 @@ fn restoring_before_technology_change_takes_the_project_back_to_its_technology()
         .expect("the technology is attached");
 
     let ctx = offscreen();
-    let shown = recovery_page(&ctx, &mut app, "1 checkpoint");
-    let asked = app_frame(
-        &ctx,
-        &mut app,
-        click_on(&shown, "Restore Before technology change into the project"),
-    );
+    let shown = history_page(&ctx, &mut app, "1 checkpoint");
+    let selected = select_row(&ctx, &mut app, &shown, "Before technology change");
+    let asked = app_frame(&ctx, &mut app, click_on(&selected, "Restore\u{2026}"));
     let asked = next_with(
         &ctx,
         &mut app,
         asked,
-        "Restore \u{201c}Before technology change\u{201d} from ",
+        "The whole project goes back to this checkpoint",
     );
     assert!(
         painted(&asked).contains(&format!(
@@ -196,14 +196,8 @@ fn restoring_before_technology_change_takes_the_project_back_to_its_technology()
         "the question says what happens to the technology:\n{}",
         painted(&asked)
     );
-    app_frame(
-        &ctx,
-        &mut app,
-        click_on(&asked, "Restore Before technology change"),
-    );
-    paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == "2 checkpoints")
-    });
+    app_frame(&ctx, &mut app, click_on(&asked, "Restore"));
+    paint_until(&ctx, &mut app, reports("2 checkpoints"));
 
     let project = &app.state.model.workspace.content.project;
     assert!(
@@ -259,12 +253,9 @@ fn a_checkpoint_whose_technology_is_not_installed_is_refused_before_it_is_confir
     let mut app = RSpiceApp::test_instance();
     assert!(app.state.load_project_from_path(&file));
     let ctx = offscreen();
-    let shown = recovery_page(&ctx, &mut app, "1 checkpoint");
-    let asked = app_frame(
-        &ctx,
-        &mut app,
-        click_on(&shown, "Restore Manual checkpoint into the project"),
-    );
+    let shown = history_page(&ctx, &mut app, "1 checkpoint");
+    let selected = select_row(&ctx, &mut app, &shown, "Manual checkpoint");
+    let asked = app_frame(&ctx, &mut app, click_on(&selected, "Restore\u{2026}"));
     let asked = next_with(
         &ctx,
         &mut app,
@@ -284,7 +275,7 @@ fn a_checkpoint_whose_technology_is_not_installed_is_refused_before_it_is_confir
         "{text}"
     );
     assert!(
-        !text.contains("Its project becomes unsaved changes"),
+        !text.contains("goes back to this checkpoint"),
         "nothing is offered to confirm:\n{text}"
     );
     for _ in 0..5 {
@@ -307,8 +298,9 @@ fn a_checkpoint_whose_technology_is_not_installed_is_refused_before_it_is_confir
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Compare lists each document the open project differs in, with how; a
-/// checkpoint of the project as it is answers on one line.
+/// Compare… lists each document the open project differs in, with how, in
+/// a dialog Close puts away; a checkpoint of the project as it is answers on
+/// one line.
 #[test]
 fn compare_names_each_document_that_differs() {
     let (mut app, root) = saved_project("compare-by-document");
@@ -317,14 +309,13 @@ fn compare_names_each_document_that_differs() {
     let drawing = app.state.model.workspace.content.active_view.clone();
 
     let ctx = offscreen();
-    let shown = recovery_page(&ctx, &mut app, "1 checkpoint");
-    app_frame(
-        &ctx,
-        &mut app,
-        click_on(&shown, "Compare Manual checkpoint with the current project"),
-    );
+    let shown = history_page(&ctx, &mut app, "1 checkpoint");
+    let selected = select_row(&ctx, &mut app, &shown, "Manual checkpoint");
+    app_frame(&ctx, &mut app, click_on(&selected, "Compare\u{2026}"));
     let found = paint_until(&ctx, &mut app, |text| {
-        text.contains("The current project differs in 1 document:")
+        text.contains(
+            "differs from the checkpoint \u{201c}Manual checkpoint\u{201d} in 1 document.",
+        )
     });
     let text = painted(&found);
     let line = format!("{} \u{b7} {}", drawing.cell, drawing.view);
@@ -340,25 +331,20 @@ fn compare_names_each_document_that_differs() {
         "{:?}",
         app.state.prompt_text()
     );
-    app_frame(&ctx, &mut app, click_on(&found, "Close the comparison"));
+    app_frame(&ctx, &mut app, click_lowest(&found, "Close"));
     let closed = app_frame(&ctx, &mut app, Vec::new());
     assert!(
-        !painted(&closed).contains("differs in 1 document"),
+        !painted(&closed).contains("Compare with checkpoint"),
         "the list is put away"
     );
 
     // A checkpoint of the project as it is now: identical, on one line.
     create(&mut app.state, ProjectCheckpointReason::Manual).expect("a second one is written");
     app.state.project.project_checkpoint_recovery.invalidate();
-    let shown = paint_until(&ctx, &mut app, |text| {
-        text.lines().any(|line| line == "2 checkpoints")
-    });
+    let shown = paint_until(&ctx, &mut app, reports("2 checkpoints"));
     // Both rows carry the same title; the newest is listed first.
-    app_frame(
-        &ctx,
-        &mut app,
-        click_on(&shown, "Compare Manual checkpoint with the current project"),
-    );
+    let selected = select_row(&ctx, &mut app, &shown, "Manual checkpoint");
+    app_frame(&ctx, &mut app, click_on(&selected, "Compare\u{2026}"));
     frames_until(&ctx, &mut app, |app| {
         app.state.prompt_text() == Some("The current project is identical to this checkpoint.")
     });
@@ -412,7 +398,7 @@ C1 out 0 10n
 }
 
 /// "Save as new project…" writes the checkpoint as a project of its own and
-/// the row offers to open it; opening it leaves the project that was open.
+/// offers to open it; opening it leaves the project that was open.
 #[test]
 fn a_checkpoint_saved_as_a_new_project_is_offered_to_open() {
     let (mut app, root) = saved_project("saved-copy-offer");
@@ -424,7 +410,7 @@ fn a_checkpoint_saved_as_a_new_project_is_offered_to_open() {
             .save_project_to_path(&root.join("idle.rspiceproj"))
     );
     let ctx = offscreen();
-    recovery_page(&ctx, &mut app, "2 checkpoints");
+    history_page(&ctx, &mut app, "2 checkpoints");
     let checkpoint = listed(&app)
         .into_iter()
         .find(|checkpoint| checkpoint.reason() == ProjectCheckpointReason::Manual)
@@ -437,7 +423,7 @@ fn a_checkpoint_saved_as_a_new_project_is_offered_to_open() {
     let shown = paint_until(&ctx, &mut app, |text| {
         text.contains("idle-recovered.rspiceproj")
     });
-    app_frame(&ctx, &mut app, click_on(&shown, "Open the saved project"));
+    app_frame(&ctx, &mut app, click_on(&shown, "Open it"));
     for _ in 0..3 {
         app_frame(&ctx, &mut app, Vec::new());
     }

@@ -178,8 +178,8 @@ fn an_unsaved_cell_says_so_without_a_warning() {
 }
 
 /// Each kind of Activity row opens what it names: a run opens its results,
-/// a validated revision opens Revision history on it, a checkpoint opens
-/// Recovery on it and a library publication opens the Library page.
+/// a validated revision or a checkpoint opens the History page on it and a
+/// library publication opens the Library page.
 #[test]
 fn each_activity_row_opens_what_it_names() {
     // A run.
@@ -239,10 +239,12 @@ fn each_activity_row_opens_what_it_names() {
     let (ctx, mut app, settled) = settle(app, ProjectPage::Overview);
     let row = row_with(&settled, &["First review"]);
     click_announced(&ctx, &mut app, settled, &row);
-    let history = &app.state.project.project_revision_history;
-    assert!(history.open);
-    let selected = history
-        .selected()
+    assert_eq!(app.state.project.project_page, ProjectPage::History);
+    let selected = app
+        .state
+        .project
+        .project_history_selection
+        .clone()
         .expect("the history stands on the revision");
     assert!(
         selected.ends_with(&revisions[0].as_uuid().to_string()),
@@ -279,7 +281,7 @@ fn each_activity_row_opens_what_it_names() {
         let row = row_with(&settled, &["Detail: Revision 2"]);
         click_announced(&ctx, &mut app, settled, &row);
         assert_eq!(app.state.project.project_page, ProjectPage::History);
-        assert_eq!(app.state.project.project_checkpoint_selection, Some(older));
+        assert_eq!(app.state.project.project_history_selection, Some(older));
     }
 }
 

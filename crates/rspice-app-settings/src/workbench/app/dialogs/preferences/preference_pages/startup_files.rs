@@ -3,6 +3,7 @@
 //! much space automatic checkpoints are kept in.
 
 use egui::Ui;
+use rspice_app_state::workbench::preferences::CHECKPOINT_BUDGETS_MIB;
 
 use crate::ui::widgets::select;
 use crate::workbench::ScalarPreference;
@@ -18,10 +19,6 @@ use super::{keyword_choice_row, toggle_row};
 
 /// The recent-list lengths offered, shortest first. The shipped one is 8.
 const RECENT_FILES_LISTED: [u32; 4] = [5, 8, 12, 20];
-
-/// The spaces offered for automatic checkpoints, in MiB, smallest first. The
-/// shipped one is 512 MiB.
-const CHECKPOINT_BUDGETS_MIB: [u32; 7] = [128, 256, 512, 1024, 2048, 4096, 8192];
 
 pub(super) fn section(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
     section_heading(ui, "Startup and files");
