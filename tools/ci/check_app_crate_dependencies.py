@@ -138,7 +138,7 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-formats", "rspice-results", "rspice-results-ui", "rspice-schematic-editor",
         "rspice-ui-kit", "rspice-vocabulary",
     },
-    # The code feature: the persisted model, the platform services, the run
+    # The source feature: the persisted model, the platform services, the run
     # tier whose controller generates the netlists it shows, the workbench
     # framework it registers with, and the design, project, model library,
     # simulation, format, result and painting crates its source editors and
