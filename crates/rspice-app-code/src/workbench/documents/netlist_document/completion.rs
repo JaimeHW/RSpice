@@ -36,6 +36,8 @@ pub struct SymbolEntry {
 pub struct CompletionAnchor {
     pub focused: bool,
     pub caret_char_index: usize,
+    /// The caret's byte in the text, read from the editor's rope.
+    pub caret_byte: usize,
     /// `None` when the caret is scrolled or folded out of view. The popover
     /// closes rather than float somewhere the caret is not.
     pub screen_position: Option<egui::Pos2>,
@@ -235,7 +237,7 @@ pub fn show(
         return None;
     }
 
-    let caret = anchor.caret_char_index;
+    let caret = anchor.caret_byte.min(buffer.len());
     // After a blank on an element line the next pin is what is offered.
     let (token_start, token, line_start) =
         token_at(buffer, caret).unwrap_or((caret, String::new(), usize::MAX));
@@ -290,11 +292,10 @@ pub fn show(
 
     if let Some(index) = take {
         let chosen = &candidates[index];
-        let byte_start = char_to_byte(buffer, token_start);
-        let byte_end = char_to_byte(buffer, caret);
-        let placed_caret = token_start + chosen.insert.chars().count();
+        // A token is ASCII, a byte to a character.
+        let placed_caret = anchor.caret_char_index - token.len() + chosen.insert.chars().count();
         state.completion_open = false;
-        return Some((byte_start, byte_end, chosen.insert.clone(), placed_caret));
+        return Some((token_start, caret, chosen.insert.clone(), placed_caret));
     }
 
     state.completion_open = true;
@@ -314,19 +315,19 @@ pub fn place_caret(ui: &Ui, editor_id: egui::Id, char_index: usize) {
     ctx.memory_mut(|memory| memory.request_focus(editor_id));
 }
 
-/// The identifier token ending at the caret: `(token_start_chars, text,
-/// line_first_nonws_chars)`. `None` when the caret doesn't trail a token.
+/// The identifier token ending at the caret's byte `caret`: `(token's
+/// first byte, text, byte of its line's first non-blank)`. `None` when the
+/// caret doesn't trail a token. Only the caret's line is read, and on a
+/// dash-joined name the card it continues.
 fn token_at(buffer: &str, caret: usize) -> Option<(usize, String, usize)> {
-    let chars: Vec<char> = buffer.chars().collect();
-    if caret > chars.len() {
-        return None;
-    }
-    let is_token_char =
-        |ch: char| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '!';
-    let mut start = caret;
-    while start > 0 && is_token_char(chars[start - 1]) {
-        start -= 1;
-    }
+    let before = buffer.get(..caret)?;
+    let bytes = before.as_bytes();
+    let is_token_byte =
+        |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'.' || byte == b'!';
+    let mut start = bytes
+        .iter()
+        .rposition(|&byte| !is_token_byte(byte))
+        .map_or(0, |at| at + 1);
     if start == caret {
         return None; // caret not at the end of a token
     }
@@ -334,44 +335,32 @@ fn token_at(buffer: &str, caret: usize) -> Option<(usize, String, usize)> {
     // `NONLIN-TRAN`: the token starts at its first word.
     let joined = |at: usize| {
         let mut word = at - 1;
-        while word > 0 && (chars[word - 1].is_ascii_alphanumeric() || chars[word - 1] == '_') {
+        while word > 0 && (bytes[word - 1].is_ascii_alphanumeric() || bytes[word - 1] == b'_') {
             word -= 1;
         }
         (word < at - 1).then_some(word)
     };
     let on_options_card = || {
-        let card = card_before(buffer, char_to_byte(buffer, start));
+        let card = card_before(buffer, start);
         card.split_whitespace()
             .next()
             .is_some_and(rspice_core::netlist::is_options_card)
     };
-    if start > 0 && chars[start - 1] == '-' && on_options_card() {
+    if start > 0 && bytes[start - 1] == b'-' && on_options_card() {
         while start > 0
-            && chars[start - 1] == '-'
+            && bytes[start - 1] == b'-'
             && let Some(word) = joined(start)
         {
             start = word;
         }
     }
     // The line's first non-whitespace position (dot-command context check).
-    let mut line_begin = start;
-    while line_begin > 0 && chars[line_begin - 1] != '\n' {
-        line_begin -= 1;
-    }
-    let mut first_nonws = line_begin;
-    while first_nonws < start && chars[first_nonws].is_whitespace() {
-        first_nonws += 1;
-    }
-    let token: String = chars[start..caret].iter().collect();
-    Some((start, token, first_nonws))
-}
-
-fn char_to_byte(buffer: &str, char_index: usize) -> usize {
-    buffer
+    let line_begin = before[..start].rfind('\n').map_or(0, |at| at + 1);
+    let first_nonws = before[line_begin..start]
         .char_indices()
-        .nth(char_index)
-        .map(|(byte, _)| byte)
-        .unwrap_or(buffer.len())
+        .find(|(_, ch)| !ch.is_whitespace())
+        .map_or(start, |(at, _)| line_begin + at);
+    Some((start, before[start..].to_owned(), first_nonws))
 }
 
 /// What a position among an element's pins is: the pins in order, the one
@@ -416,17 +405,16 @@ fn device_terminals(letter: char) -> &'static [MessageId] {
     }
 }
 
-/// Which pin of the element on its line the token starting at char
-/// `token_start` of `buffer` is written for, when it is one: a subcircuit's
+/// Which pin of the element on its line the token starting at byte
+/// `start` of `buffer` is written for, when it is one: a subcircuit's
 /// port, by the subcircuit the line names or, before it names one, each
 /// subcircuit in scope with a port there; or a device's terminal.
 fn pin_help(
     state: &NetlistDocumentState,
     buffer: &str,
-    token_start: usize,
+    start: usize,
     messages: MessageCatalog,
 ) -> Option<PinHelp> {
-    let start = char_to_byte(buffer, token_start);
     let line_start = buffer[..start].rfind('\n').map_or(0, |at| at + 1);
     if line_start == 0 {
         return None;
@@ -588,15 +576,14 @@ fn stated_level(card: &str) -> Option<u32> {
     })
 }
 
-/// Which parameters a name started at char `token_start` of `buffer` would
-/// be, when it starts a field: the token follows a blank, `(` or `,`, never
-/// `=` or `{`, so a value or an expression is never offered a parameter.
+/// Which parameters a name started at byte `start` of `buffer` would be,
+/// when it starts a field: the token follows a blank, `(` or `,`, never `=`
+/// or `{`, so a value or an expression is never offered a parameter.
 fn parameter_site(
     state: &NetlistDocumentState,
     buffer: &str,
-    token_start: usize,
+    start: usize,
 ) -> Option<ParameterSite> {
-    let start = char_to_byte(buffer, token_start);
     let before = buffer[..start].chars().next_back()?;
     if !(before.is_whitespace() || before == '(' || before == ',') {
         return None;
@@ -1310,7 +1297,7 @@ mod tests {
         let state = &mut harness.state.netlist;
         assert!(super::super::language::project_index_now(&harness.model, state).is_some());
         state.cursor_line = deck.matches('\n').count();
-        let caret = deck.chars().count() - token.chars().count();
+        let caret = deck.len() - token.len();
         let rows = rows_offered(state, deck, caret, token);
         let note = rows.first().map(|row| row.doc.clone()).unwrap_or_default();
         (
@@ -1346,7 +1333,7 @@ mod tests {
         let state = &mut harness.state.netlist;
         assert!(super::super::language::project_index_now(&harness.model, state).is_some());
         state.cursor_line = deck.matches('\n').count();
-        let caret = deck.chars().count() - token.chars().count();
+        let caret = deck.len() - token.len();
         rows_offered(state, deck, caret, token)
             .into_iter()
             .map(|row| row.insert)
@@ -1510,7 +1497,7 @@ mod tests {
     /// The rows the popover offers with the caret at the end of `buffer`, the
     /// token and its site found as `show` finds them.
     fn rows_at_end(state: &NetlistDocumentState, buffer: &str) -> Vec<Candidate> {
-        let caret = buffer.chars().count();
+        let caret = buffer.len();
         let (token_start, token, line_start) =
             token_at(buffer, caret).unwrap_or((caret, String::new(), usize::MAX));
         let pins = pin_help(state, buffer, token_start, english());

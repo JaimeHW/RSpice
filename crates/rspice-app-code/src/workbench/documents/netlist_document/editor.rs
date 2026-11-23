@@ -214,7 +214,7 @@ pub fn show(
         .iter()
         .map(|problem| problem.mark.clone())
         .collect::<Vec<_>>();
-    let edited_lines = runs.manual_run.edited_lines.clone();
+    let edited_lines = &runs.manual_run.edited_lines;
     let net_marks = super::cross_probe::net_marks(model, netlist).to_vec();
     let cross_probe_line = (netlist.front.shows_generated())
         .then_some(netlist.cross_probe_line)
@@ -243,7 +243,7 @@ pub fn show(
     let cursor_line;
     let cursor_column;
     let cursor_char_index;
-    let selected_char_range;
+    let selected_byte_range;
     let hover_char_index;
     let editor_response;
     let anchor;
@@ -288,7 +288,7 @@ pub fn show(
             accent: c.accent,
             error: c.err,
             warning: c.warn,
-            edited_lines: &edited_lines,
+            edited_lines,
             cross_probe_line,
             marks: &marks,
             marks_outdated: false,
@@ -346,6 +346,15 @@ pub fn show(
         if changed {
             buffer = String::from(&text);
         }
+        // Where the caret and the selection stand in bytes, read from the
+        // editor's rope rather than counted from the deck's first character.
+        let rope = text.rope();
+        let byte_of = |char_index: usize| rope.char_to_byte(char_index.min(rope.len_chars()));
+        let caret_byte = byte_of(output.cursor_char_index);
+        selected_byte_range = output.selected_char_range.and_then(|(start, end)| {
+            let (start, end) = (start.min(end), start.max(end));
+            (start < end).then(|| byte_of(start)..byte_of(end))
+        });
         crate::workbench::documents::virtual_text_editor::keep_string_owner_text(
             ui.ctx(),
             editor_id,
@@ -355,7 +364,6 @@ pub fn show(
         cursor_line = output.cursor_line;
         cursor_column = output.cursor_column;
         cursor_char_index = output.cursor_char_index;
-        selected_char_range = output.selected_char_range;
         hover_char_index = output.hover_char_index;
         unanswered_history = output.unanswered_history;
         view = output.view;
@@ -364,6 +372,7 @@ pub fn show(
         anchor = completion::CompletionAnchor {
             focused: output.response.has_focus(),
             caret_char_index: output.cursor_char_index,
+            caret_byte,
             screen_position: output.caret_anchor,
         };
     }
@@ -374,18 +383,7 @@ pub fn show(
     let now = ui.input(|input| input.time);
     netlist.cursor_line = cursor_line;
     netlist.cursor_char_index = cursor_char_index;
-    netlist.selected_byte_range = selected_char_range.and_then(|(start, end)| {
-        let (start, end) = (start.min(end), start.max(end));
-        (start < end).then(|| {
-            let byte_at = |char_index: usize| {
-                buffer
-                    .char_indices()
-                    .nth(char_index)
-                    .map_or(buffer.len(), |(byte, _)| byte)
-            };
-            byte_at(start)..byte_at(end)
-        })
-    });
+    netlist.selected_byte_range = selected_byte_range;
 
     // The right-click menu, open over the editor or opening in this frame,
     // closes the completion list and the signature hint, so no two popups
@@ -422,7 +420,7 @@ pub fn show(
     // cannot implicitly create `workspace.netlist_source`.
     if changed || completion_changed {
         workbench.outbox.push(NetlistEditorRequest::Commit {
-            buffer: buffer.clone(),
+            front: netlist.front.clone(),
             cursor_line,
             now,
         });
@@ -593,28 +591,34 @@ fn show_signature_help(
         });
 }
 
-/// Commit the text the editor showed at the end of its frame, typed on
-/// `cursor_line` at input time `now`, and mark the lines it changed against
-/// the run's baseline when the deck itself is in front.
+/// Commit the text the editor left as the model's netlist source at the
+/// end of its frame over `front`, typed on `cursor_line` at input time
+/// `now`, and mark the lines it changed against the run's baseline when the
+/// deck itself is in front. An edit to a document no longer in front is
+/// not the one in front's to take.
 pub fn commit_edit(
     model: &mut super::Model,
     netlist: &mut super::NetlistDocumentState,
     runs: &mut RunsState,
-    buffer: &str,
+    front: &super::NetlistTab,
     cursor_line: usize,
     now: f64,
 ) {
+    if netlist.front != *front {
+        return;
+    }
     // Only the Added lines, the open deck and its open includes take an
     // edit: the generated netlist, a comparison and a run's input are
     // read-only.
     if netlist.front == super::NetlistTab::AddedLines {
-        if super::edit_added_lines(model, netlist, buffer.to_owned()) {
+        let lines = model.simulation.source.netlist_content.clone();
+        if super::edit_added_lines(model, netlist, lines) {
             netlist.last_edit_time = now;
             netlist.typed_revision = Some(netlist.revision);
         }
         return;
     }
-    if !super::edit_deck_file(model, netlist, buffer.to_owned()) {
+    if !super::keep_editor_text(model, netlist) {
         return;
     }
     netlist.last_edit_time = now;

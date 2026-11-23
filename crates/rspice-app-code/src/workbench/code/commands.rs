@@ -245,10 +245,11 @@ pub enum CodeHandOff {
 /// them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum NetlistEditorRequest {
-    /// Commit the text the editor showed at the end of its frame, typed on
+    /// Commit the text the editor left as the model's netlist source at
+    /// the end of its frame over the document `front`, typed on
     /// `cursor_line` at input time `now`, through the ownership guard.
     Commit {
-        buffer: String,
+        front: crate::workbench::documents::netlist_document::NetlistTab,
         cursor_line: usize,
         now: f64,
     },

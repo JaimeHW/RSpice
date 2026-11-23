@@ -350,8 +350,20 @@ pub fn redo_netlist_edit(
 }
 
 /// Replace the text of the file in front, the open deck or an include open
-/// beside it, with what the editor shows. Whether that changed it.
+/// beside it, with `text`. Whether that changed it.
 pub fn edit_deck_file(model: &mut Model, netlist: &mut NetlistDocumentState, text: String) -> bool {
+    let shown = std::mem::replace(&mut model.simulation.source.netlist_content, text);
+    if keep_editor_text(model, netlist) {
+        return true;
+    }
+    model.simulation.source.netlist_content = shown;
+    false
+}
+
+/// Keep the text the editor left as the model's netlist source as the text
+/// of the file in front, the open deck or an include open beside it: the
+/// one copy an edit makes. Whether that changed it.
+fn keep_editor_text(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     if !netlist.front.shows_deck() {
         return false;
     }
@@ -361,12 +373,11 @@ pub fn edit_deck_file(model: &mut Model, netlist: &mut NetlistDocumentState, tex
     };
     if !deck
         .file_mut(include.as_deref())
-        .is_some_and(|file| file.edit(text.clone()))
+        .is_some_and(|file| file.edit_to(&model.simulation.source.netlist_content))
     {
         return false;
     }
     super::deck_files::keep_stored_edit(model, deck, include.as_deref());
-    model.simulation.source.netlist_content = text;
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
     clear_netlist_edit_journal(netlist);

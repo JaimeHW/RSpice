@@ -235,14 +235,14 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
 pub fn answer_netlist_editor(cx: &mut Cx<'_, CodeFeature>, request: NetlistEditorRequest) {
     match request {
         NetlistEditorRequest::Commit {
-            buffer,
+            front,
             cursor_line,
             now,
         } => netlist_document::commit_editor_edit(
             cx.model,
             &mut cx.state.netlist,
             cx.runs,
-            &buffer,
+            &front,
             cursor_line,
             now,
         ),

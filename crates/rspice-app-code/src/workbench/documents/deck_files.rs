@@ -200,6 +200,17 @@ impl OpenFile {
         self.dirty = true;
         true
     }
+
+    /// Replace the text with a copy of `text`, written over the file's own
+    /// text where it has room; whether that changed it.
+    pub fn edit_to(&mut self, text: &str) -> bool {
+        if self.text == text {
+            return false;
+        }
+        text.clone_into(&mut self.text);
+        self.dirty = true;
+        true
+    }
 }
 
 /// The deck open in the Netlist workspace, with the include files opened

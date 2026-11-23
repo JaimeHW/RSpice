@@ -1214,20 +1214,23 @@ fn output_expression_diagnostic_is_localized_to_the_authored_request() {
 #[test]
 fn editor_commit_rejects_generated_artifact_mutation() {
     let mut harness = harness();
-    harness.model.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
+    harness.model.netlist_artifacts.generated_source = "generated\n.op\n.end\n".to_owned();
     harness.state.netlist.revision = 4;
 
+    // The editor leaves what it shows as the model's source.
+    harness.model.simulation.source.netlist_content = "silently edited\n.end\n".to_owned();
+    let front = harness.state.netlist.front.clone();
     commit_edit(
         &mut harness.model,
         &mut harness.state.netlist,
         &mut harness.runs,
-        "silently edited\n.end\n",
+        &front,
         1,
         2.5,
     );
     assert!(harness.state.netlist.open_deck.is_none());
     assert_eq!(
-        harness.model.simulation.source.netlist_content,
+        harness.model.netlist_artifacts.generated_source,
         "generated\n.op\n.end\n"
     );
     assert_eq!(harness.state.netlist.revision, 4);
@@ -1240,11 +1243,13 @@ fn editor_commit_edits_the_open_deck_and_keeps_its_file() {
     open_deck(&mut harness, "C:/p/amp.cir", "deck\n.op\n.end\n");
     harness.state.netlist.revision = 9;
 
+    harness.model.simulation.source.netlist_content = "deck\n.tran 1n 1u\n.end\n".to_owned();
+    let front = harness.state.netlist.front.clone();
     commit_edit(
         &mut harness.model,
         &mut harness.state.netlist,
         &mut harness.runs,
-        "deck\n.tran 1n 1u\n.end\n",
+        &front,
         1,
         7.25,
     );
@@ -1264,6 +1269,36 @@ fn editor_commit_edits_the_open_deck_and_keeps_its_file() {
     assert_eq!(harness.state.netlist.revision, 10);
     assert_eq!(harness.state.netlist.last_edit_time, 7.25);
     assert!(harness.runs.manual_run.edited_lines.contains(&1));
+}
+
+/// An edit made over one document is not the next one's: when the deck's
+/// include took the front in the frame the editor edited the deck, the
+/// include keeps its own text.
+#[test]
+fn editor_commit_over_a_document_no_longer_in_front_is_dropped() {
+    let mut harness = harness();
+    open_deck(&mut harness, "C:/p/amp.cir", "deck\n.op\n.end\n");
+    harness.state.netlist.revision = 9;
+
+    harness.model.simulation.source.netlist_content = "deck\n.tran 1n 1u\n.end\n".to_owned();
+    commit_edit(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        &mut harness.runs,
+        &crate::workbench::documents::netlist_document::NetlistTab::AddedLines,
+        1,
+        7.25,
+    );
+    let deck = harness
+        .state
+        .netlist
+        .open_deck
+        .as_ref()
+        .expect("the deck stays open");
+    assert_eq!(deck.root.text, "deck\n.op\n.end\n");
+    assert!(!deck.root.dirty);
+    assert_eq!(harness.state.netlist.revision, 9);
+    assert!(harness.runs.manual_run.edited_lines.is_empty());
 }
 
 /// A deck is drawn at the size the source editors are set to.
