@@ -19,8 +19,6 @@ use crate::widgets::{
     paint_problem_mark, select, select_width,
 };
 
-/// The room a bar keeps above and below its controls, shared between them.
-const PAGE_BAR_PAD: f32 = 4.0;
 /// The gap between two controls, and between the last control and the report.
 pub const PAGE_BAR_GAP: f32 = 8.0;
 /// A filter's width when the bar has room for it.
@@ -28,11 +26,13 @@ const FILTER_WIDTH: f32 = 200.0;
 /// The least a filter is made, whatever the bar leaves it.
 const FILTER_MIN_WIDTH: f32 = 120.0;
 
-/// A page bar's height: a control and the room around it, from the metrics,
-/// so it holds its controls under a finger too.
+/// A page bar's height: a control with a bar's padding above and below it,
+/// as every bar in the app keeps, so its controls stand clear of the tabs
+/// over it and the rule under it, under a finger too.
 #[must_use]
 pub fn page_bar_height(ui: &Ui) -> f32 {
-    Tokens::get(ui.ctx()).metrics.ctl_h + PAGE_BAR_PAD
+    let t = Tokens::get(ui.ctx());
+    t.metrics.ctl_h + 2.0 * t.metrics.bar_pad
 }
 
 /// A page's bar: its controls, and what it reports at the right end.
