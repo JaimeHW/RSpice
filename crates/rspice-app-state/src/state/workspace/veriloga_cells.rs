@@ -629,7 +629,7 @@ pub(crate) fn retire_code_workspace_veriloga(
     content: &mut rspice_project::ProjectWorkspace,
     libraries: &mut LibraryManager,
 ) -> Option<String> {
-    let owner = ProjectSourceOwner::CodeWorkspace;
+    let owner = ProjectSourceOwner::ProjectWide;
     let bundle = content.project_sources.bundle_for_owner(&owner)?.clone();
     if is_retired_demo(&bundle) {
         content.project_sources.remove();

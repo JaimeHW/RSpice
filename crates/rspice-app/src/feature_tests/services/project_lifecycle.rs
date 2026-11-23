@@ -118,7 +118,7 @@ fn edit_code_workspace_source(state: &mut AppState, content: &str) {
         project
             .insert_project_source_bundle(
                 rspice_app_state::state::ProjectSourceBundle::try_new(
-                    rspice_app_state::state::ProjectSourceOwner::CodeWorkspace,
+                    rspice_app_state::state::ProjectSourceOwner::ProjectWide,
                     "shared.va",
                     content,
                     [],

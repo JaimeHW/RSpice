@@ -1265,7 +1265,7 @@ fn standalone_connection_worker_transport_retains_selected_physics() {
 fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
     let project_id = rspice_vocabulary::product::ProjectId::new();
     let bundle = rspice_design::project_sources::ProjectSourceBundle::try_new(
-            rspice_design::project_sources::ProjectSourceOwner::CodeWorkspace,
+            rspice_design::project_sources::ProjectSourceOwner::ProjectWide,
             "different_file_name.va",
             "module worker_owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
             [],

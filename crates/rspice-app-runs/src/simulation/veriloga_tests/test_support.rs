@@ -61,7 +61,7 @@ endmodule
 
 pub fn project_bundle(profile: &build_profile::VerilogABuildProfile) -> ProjectSourceBundle {
     ProjectSourceBundle::try_new_with_build_profile(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "model.va",
         PROJECT_SOURCE,
         [

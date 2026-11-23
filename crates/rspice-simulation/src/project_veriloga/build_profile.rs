@@ -473,7 +473,7 @@ mod tests {
     fn persisted_profile_is_selected_by_role_not_filename() {
         let profile = VerilogABuildProfile::starter("device").to_toml().unwrap();
         let bundle = ProjectSourceBundle::try_new_with_build_profile(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "models/device.va",
             "module device; endmodule\n",
             [ProjectSourceFile::try_new("config/release.data", profile).unwrap()],
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn legacy_profile_never_invents_an_entry_module_from_the_file_name() {
         let bundle = ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "presentation_name.va",
             "module actual_model; endmodule\n",
             [],

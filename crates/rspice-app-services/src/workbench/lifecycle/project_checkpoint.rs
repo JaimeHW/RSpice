@@ -2798,7 +2798,7 @@ mod tests {
         let build_profile = "[compiler]\nwarnings = \"error\"\n";
 
         let veriloga = ProjectSourceBundle::try_new_with_build_profile(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "devices/sensor_core.va",
             veriloga_root,
             [

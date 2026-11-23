@@ -250,14 +250,8 @@ mod tests {
         "module worker(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n";
 
     fn bundle(source: &str) -> ProjectSourceBundle {
-        ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
-            "worker.va",
-            source,
-            [],
-            [],
-        )
-        .unwrap()
+        ProjectSourceBundle::try_new(ProjectSourceOwner::ProjectWide, "worker.va", source, [], [])
+            .unwrap()
     }
 
     #[test]

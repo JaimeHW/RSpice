@@ -125,7 +125,7 @@ pub(crate) fn veriloga_dependency_view(
         .owner()
     {
         crate::state::ProjectSourceOwner::CellView { reference } => Some(reference.clone()),
-        crate::state::ProjectSourceOwner::CodeWorkspace => None,
+        crate::state::ProjectSourceOwner::ProjectWide => None,
     }
 }
 

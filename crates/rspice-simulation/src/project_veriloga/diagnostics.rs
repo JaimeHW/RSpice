@@ -411,7 +411,7 @@ mod tests {
 
     fn bundle(path: &str, source: &str) -> ProjectSourceBundle {
         use rspice_design::project_sources::ProjectSourceOwner;
-        ProjectSourceBundle::try_new(ProjectSourceOwner::CodeWorkspace, path, source, [], [])
+        ProjectSourceBundle::try_new(ProjectSourceOwner::ProjectWide, path, source, [], [])
             .expect("a valid bundle")
     }
 

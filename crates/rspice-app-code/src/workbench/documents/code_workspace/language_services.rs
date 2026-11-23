@@ -1394,7 +1394,7 @@ mod tests {
             .map(|file| ProjectSourceDependency::try_new(root_path, file.logical_path()).unwrap())
             .collect::<Vec<_>>();
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             root_path,
             root,
             files,

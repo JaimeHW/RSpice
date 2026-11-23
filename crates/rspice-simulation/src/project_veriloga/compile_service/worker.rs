@@ -422,7 +422,7 @@ mod tests {
 
     fn selected_source() -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "worker.va",
             "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
             [],
@@ -437,7 +437,7 @@ mod tests {
             crate::project_veriloga::build_profile::VerilogABuildProfile::starter("worker");
         profile.entry_modules.clear();
         ProjectSourceBundle::try_new_with_build_profile(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "worker.va",
             "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
             [
@@ -540,7 +540,7 @@ mod tests {
     /// `missing`, which nothing defines.
     fn design_over(cell: &str) -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "top.va",
             format!("module top(p, n); inout p, n; electrical p, n; {cell} xu(p, n); endmodule\n"),
             [],
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn the_worker_compiles_under_the_transferred_min_typ_max_selection() {
         let held = ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "held.va",
             "module held(p, n); inout p, n; electrical p, n;\n\
              parameter real g = 1.0e-3:2.0e-3:3.0e-3;\n\

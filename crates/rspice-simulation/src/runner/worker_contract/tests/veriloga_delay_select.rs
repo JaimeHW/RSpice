@@ -15,7 +15,7 @@ const HELD: &str = "module held(p, n); inout p, n; electrical p, n;\n\
 fn request(options: &str) -> WorkerRequest {
     let project_id = rspice_vocabulary::product::ProjectId::new();
     let bundle = rspice_design::project_sources::ProjectSourceBundle::try_new(
-        rspice_design::project_sources::ProjectSourceOwner::CodeWorkspace,
+        rspice_design::project_sources::ProjectSourceOwner::ProjectWide,
         "held.va",
         HELD,
         [],

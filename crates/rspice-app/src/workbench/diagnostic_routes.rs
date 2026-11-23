@@ -140,7 +140,7 @@ fn open_code_document(
             app.state.open_workspace_view(reference.clone());
             app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
         }
-        ProjectSourceOwner::CodeWorkspace => {
+        ProjectSourceOwner::ProjectWide => {
             app.state.prompt(said(MessageId::ProblemRouteNoEditor));
             return;
         }

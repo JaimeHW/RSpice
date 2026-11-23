@@ -195,7 +195,7 @@ const ACCEPTED_ROOT_EXTENSION_TEXT: &str = "'.va', '.vams' or '.v'";
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ProjectSourceOwner {
-    CodeWorkspace,
+    ProjectWide,
     CellView { reference: CellViewRef },
 }
 
@@ -247,14 +247,14 @@ fn canonical_owner_segment(value: &str) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum CanonicalProjectSourceOwnerKey {
-    CodeWorkspace,
+    ProjectWide,
     CellView(CanonicalCellViewOwnerKey),
 }
 
 impl fmt::Display for CanonicalProjectSourceOwnerKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CodeWorkspace => formatter.write_str("code-workspace"),
+            Self::ProjectWide => formatter.write_str("code-workspace"),
             Self::CellView(reference) => write!(formatter, "cell-view:{reference}"),
         }
     }
@@ -268,7 +268,7 @@ impl ProjectSourceOwner {
 
     fn canonical_key(&self) -> CanonicalProjectSourceOwnerKey {
         match self {
-            Self::CodeWorkspace => CanonicalProjectSourceOwnerKey::CodeWorkspace,
+            Self::ProjectWide => CanonicalProjectSourceOwnerKey::ProjectWide,
             Self::CellView { reference } => CanonicalProjectSourceOwnerKey::CellView(
                 canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view),
             ),
@@ -277,7 +277,7 @@ impl ProjectSourceOwner {
 
     fn validate(&self) -> Result<(), ProjectSourceError> {
         match self {
-            Self::CodeWorkspace => Ok(()),
+            Self::ProjectWide => Ok(()),
             Self::CellView { reference } => reference.validate_name_segments().map_err(|error| {
                 ProjectSourceError::InvalidCellViewOwner {
                     reference: reference.display_path(),
@@ -840,7 +840,7 @@ impl ProjectSourceRegistry {
             .served_keys()
             .find(|key| self.bundles.iter().any(|current| current.serves(key)))
         {
-            if bundle.owner == ProjectSourceOwner::CodeWorkspace {
+            if bundle.owner == ProjectSourceOwner::ProjectWide {
                 return Err(ProjectSourceError::DuplicateLanguage);
             }
             return Err(ProjectSourceError::DuplicateOwner {
@@ -895,7 +895,7 @@ impl ProjectSourceRegistry {
         let index = self
             .bundles
             .iter()
-            .position(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)?;
+            .position(|bundle| bundle.owner == ProjectSourceOwner::ProjectWide)?;
         Some(self.bundles.remove(index).root)
     }
 
@@ -1156,7 +1156,7 @@ impl ProjectSourceRegistry {
             }
             let matched = match &bundle.owner {
                 ProjectSourceOwner::CellView { reference } => matches(reference),
-                ProjectSourceOwner::CodeWorkspace => false,
+                ProjectSourceOwner::ProjectWide => false,
             };
             if !matched {
                 continue;
@@ -1193,7 +1193,7 @@ impl ProjectSourceRegistry {
         let Some(index) = self
             .bundles
             .iter()
-            .position(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)
+            .position(|bundle| bundle.owner == ProjectSourceOwner::ProjectWide)
         else {
             return Ok(None);
         };
@@ -1300,11 +1300,11 @@ impl ProjectSourceRegistry {
         let mut candidate = self.clone();
         candidate
             .bundles
-            .retain(|bundle| !matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace));
+            .retain(|bundle| !matches!(bundle.owner(), ProjectSourceOwner::ProjectWide));
         for bundle in source
             .bundles
             .iter()
-            .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace))
+            .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::ProjectWide))
         {
             candidate.insert_bundle(bundle.clone())?;
         }
@@ -1490,7 +1490,7 @@ impl ProjectSourceRegistry {
             }
             for owner in bundle.served_keys() {
                 if !owners.insert(owner.clone()) {
-                    if bundle.owner == ProjectSourceOwner::CodeWorkspace {
+                    if bundle.owner == ProjectSourceOwner::ProjectWide {
                         return Err(ProjectSourceError::DuplicateLanguage);
                     }
                     return Err(ProjectSourceError::DuplicateOwner {
@@ -1505,13 +1505,13 @@ impl ProjectSourceRegistry {
     fn code_workspace_bundle(&self) -> Option<&ProjectSourceBundle> {
         self.bundles
             .iter()
-            .find(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)
+            .find(|bundle| bundle.owner == ProjectSourceOwner::ProjectWide)
     }
 
     fn code_workspace_bundle_mut(&mut self) -> Option<&mut ProjectSourceBundle> {
         self.bundles
             .iter_mut()
-            .find(|bundle| bundle.owner == ProjectSourceOwner::CodeWorkspace)
+            .find(|bundle| bundle.owner == ProjectSourceOwner::ProjectWide)
     }
 
     fn canonicalize(&mut self) {

@@ -49,14 +49,8 @@ fn project_of(source: &str) -> (ProjectId, ProjectSourceRegistry) {
     let mut sources = ProjectSourceRegistry::default();
     sources
         .insert_bundle(
-            ProjectSourceBundle::try_new(
-                ProjectSourceOwner::CodeWorkspace,
-                "top.va",
-                source,
-                [],
-                [],
-            )
-            .expect("a valid bundle"),
+            ProjectSourceBundle::try_new(ProjectSourceOwner::ProjectWide, "top.va", source, [], [])
+                .expect("a valid bundle"),
         )
         .expect("install the design");
     sources
@@ -262,7 +256,7 @@ fn a_design_without_leaves_keeps_its_identity_under_any_table() {
     sources
         .insert_bundle(
             ProjectSourceBundle::try_new(
-                ProjectSourceOwner::CodeWorkspace,
+                ProjectSourceOwner::ProjectWide,
                 "load.va",
                 "`include \"disciplines.vams\"\n\
                  module load(p, n); inout p, n; electrical p, n;\n\

@@ -126,14 +126,8 @@ mod tests {
 
     fn bundle(source: &str) -> ProjectSourceBundle {
         use rspice_design::project_sources::ProjectSourceOwner;
-        ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
-            "probe.va",
-            source,
-            [],
-            [],
-        )
-        .expect("a valid bundle")
+        ProjectSourceBundle::try_new(ProjectSourceOwner::ProjectWide, "probe.va", source, [], [])
+            .expect("a valid bundle")
     }
 
     /// A check held in a constant function that never returns stops once

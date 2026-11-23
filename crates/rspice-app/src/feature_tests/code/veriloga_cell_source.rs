@@ -27,7 +27,7 @@ const RETIRED_DEMO: &str = "`include \"constants.vams\"\nmodule sensor_bridge(ou
 const EDITED_MODULE: &str = "`include \"constants.vams\"\n`include \"disciplines.vams\"\nmodule sensor_bridge(out, inp, inn);\n  inout out, inp, inn;\n  electrical out, inp, inn;\n  parameter real gain = 50.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
 
 fn code_workspace_owner() -> ProjectSourceOwner {
-    ProjectSourceOwner::CodeWorkspace
+    ProjectSourceOwner::ProjectWide
 }
 
 /// The text of a project whose project-wide Verilog-A bundle holds `source`

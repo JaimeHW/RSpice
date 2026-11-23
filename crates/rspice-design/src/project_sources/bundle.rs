@@ -102,7 +102,7 @@ impl ProjectSourceBundle {
         let was_validated = document.validation_is_current();
         let mut bundle = Self {
             id,
-            owner: ProjectSourceOwner::CodeWorkspace,
+            owner: ProjectSourceOwner::ProjectWide,
             shared_with: Vec::new(),
             build_profile: None,
             root: document,
@@ -145,7 +145,7 @@ impl ProjectSourceBundle {
     pub fn cell_views(&self) -> impl Iterator<Item = &CellViewRef> {
         let owner = match &self.owner {
             ProjectSourceOwner::CellView { reference } => Some(reference),
-            ProjectSourceOwner::CodeWorkspace => None,
+            ProjectSourceOwner::ProjectWide => None,
         };
         owner.into_iter().chain(&self.shared_with)
     }
@@ -442,7 +442,7 @@ impl ProjectSourceBundle {
         let mut hasher = Sha256::new();
         hash_frame(&mut hasher, CLOSURE_DIGEST_DOMAIN);
         match owner {
-            ProjectSourceOwner::CodeWorkspace => hash_frame(&mut hasher, b"code-workspace"),
+            ProjectSourceOwner::ProjectWide => hash_frame(&mut hasher, b"code-workspace"),
             ProjectSourceOwner::CellView { reference } => {
                 hash_frame(&mut hasher, b"cell-view");
                 hash_frame(&mut hasher, reference.library.as_bytes());

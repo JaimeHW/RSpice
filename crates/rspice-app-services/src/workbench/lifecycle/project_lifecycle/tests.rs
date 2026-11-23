@@ -49,7 +49,7 @@ fn edit_code_workspace_source(state: &mut ServicesHost, content: &str) {
         project
             .insert_project_source_bundle(
                 crate::state::ProjectSourceBundle::try_new(
-                    crate::state::ProjectSourceOwner::CodeWorkspace,
+                    crate::state::ProjectSourceOwner::ProjectWide,
                     "shared.va",
                     content,
                     [],

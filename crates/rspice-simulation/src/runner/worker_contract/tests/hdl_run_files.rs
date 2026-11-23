@@ -17,7 +17,7 @@ const LOGGER: &str = "module logger(p); inout p; electrical p; integer fd;\n\
 fn request(directory: &std::path::Path, files: rspice_core::config::HdlRunFiles) -> WorkerRequest {
     let project_id = rspice_vocabulary::product::ProjectId::new();
     let bundle = rspice_design::project_sources::ProjectSourceBundle::try_new(
-        rspice_design::project_sources::ProjectSourceOwner::CodeWorkspace,
+        rspice_design::project_sources::ProjectSourceOwner::ProjectWide,
         "logger.va",
         LOGGER,
         [],

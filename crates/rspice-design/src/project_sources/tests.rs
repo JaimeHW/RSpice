@@ -81,10 +81,10 @@ fn closure_digest_is_order_independent_after_canonical_construction_and_length_f
     assert_eq!(first.closure_digest(), second.closure_digest());
 
     let split_a =
-        ProjectSourceBundle::try_new(ProjectSourceOwner::CodeWorkspace, "a.va", "bc", [], [])
+        ProjectSourceBundle::try_new(ProjectSourceOwner::ProjectWide, "a.va", "bc", [], [])
             .unwrap();
     let split_b =
-        ProjectSourceBundle::try_new(ProjectSourceOwner::CodeWorkspace, "ab.va", "c", [], [])
+        ProjectSourceBundle::try_new(ProjectSourceOwner::ProjectWide, "ab.va", "c", [], [])
             .unwrap();
     assert_ne!(split_a.closure_digest(), split_b.closure_digest());
 }
@@ -118,7 +118,7 @@ fn edits_advance_bundle_revision_and_invalidate_root_and_closure_evidence() {
 #[test]
 fn revision_history_round_trips_and_restores_as_a_new_monotonic_revision() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "models/root.va",
         "module root; endmodule\n",
         [],
@@ -173,7 +173,7 @@ fn revision_history_round_trips_and_restores_as_a_new_monotonic_revision() {
 #[test]
 fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "models/root.va",
         "module root; endmodule\n",
         [],
@@ -239,7 +239,7 @@ fn authoring_add_rename_and_delete_keep_source_and_dependency_graph_atomic() {
 #[test]
 fn authoring_rejects_invalid_or_cascading_edits_without_partial_mutation() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "root.va",
         "`include \"a.vams\"\nmodule root; endmodule\n",
         [
@@ -271,7 +271,7 @@ fn authoring_rejects_invalid_or_cascading_edits_without_partial_mutation() {
 #[test]
 fn multi_file_replacement_is_atomic_and_rejects_duplicate_paths() {
     let bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "root.va",
         "`include \"defs.vams\"\nmodule root; endmodule\n",
         [dependency_file("defs.vams", "// old definitions\n")],
@@ -364,7 +364,7 @@ fn multi_file_replacement_is_atomic_and_rejects_duplicate_paths() {
 #[test]
 fn root_rename_preserves_explicit_root_ownership_and_outgoing_edges() {
     let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "models/root.va",
         "`include \"shared/defs.vams\"\nmodule root; endmodule\n",
         [dependency_file("shared/defs.vams", "// definitions\n")],
@@ -402,7 +402,7 @@ fn paths_reject_absolute_traversal_backslashes_nul_and_case_duplicates() {
         Err(ProjectSourceError::NulInContent { .. })
     ));
     let result = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "models/root.va",
         "root",
         [dependency_file("MODELS/ROOT.VA", "duplicate")],
@@ -417,7 +417,7 @@ fn paths_reject_absolute_traversal_backslashes_nul_and_case_duplicates() {
 #[test]
 fn dependency_graph_rejects_missing_cycles_and_unreachable_files() {
     let missing = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "root.va",
         "root",
         [],
@@ -429,7 +429,7 @@ fn dependency_graph_rejects_missing_cycles_and_unreachable_files() {
     ));
 
     let cyclic = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "root.va",
         "root",
         [dependency_file("a.vams", "a")],
@@ -444,7 +444,7 @@ fn dependency_graph_rejects_missing_cycles_and_unreachable_files() {
     ));
 
     let unreachable = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "root.va",
         "root",
         [dependency_file("orphan.vams", "orphan")],
@@ -463,7 +463,7 @@ fn closure_bounds_are_enforced() {
         .collect::<Vec<_>>();
     assert!(matches!(
         ProjectSourceBundle::try_new(
-            ProjectSourceOwner::CodeWorkspace,
+            ProjectSourceOwner::ProjectWide,
             "root.va",
             "root",
             files,
@@ -488,7 +488,7 @@ fn closure_accepts_the_exact_ten_thousand_file_contract_limit() {
         .map(|index| dependency("root.va", &format!("deps/{index:04}.vams")))
         .collect::<Vec<_>>();
     let bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         "root.va",
         "root",
         files,
@@ -740,7 +740,7 @@ fn veriloga_registry() -> ProjectSourceRegistry {
 #[test]
 fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validation() {
     let mut registry = veriloga_registry();
-    let owner = ProjectSourceOwner::CodeWorkspace;
+    let owner = ProjectSourceOwner::ProjectWide;
     let before = registry.bundle_for_owner(&owner).unwrap().id();
     registry.mark_bundle_validated(before).unwrap();
     let original = registry.get_bundle(before).unwrap().clone();
@@ -783,7 +783,7 @@ fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validat
 fn a_key_written_before_a_move_reads_back_as_the_current_key_until_the_bytes_change() {
     let project = ProjectId::new();
     let mut registry = veriloga_registry();
-    let owner = ProjectSourceOwner::CodeWorkspace;
+    let owner = ProjectSourceOwner::ProjectWide;
     let id = registry.bundle_for_owner(&owner).unwrap().id();
     let legacy_key =
         project_veriloga_bundle_source_key(project, registry.get_bundle(id).unwrap(), "sensor")

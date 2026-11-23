@@ -518,7 +518,7 @@ fn import_bundle(root: &str) -> ProjectSourceBundle {
         .filter(|(_, imported)| imported != file)
         .map(|(importer, imported)| ProjectSourceDependency::try_new(importer, imported).unwrap());
     ProjectSourceBundle::try_new(
-        ProjectSourceOwner::CodeWorkspace,
+        ProjectSourceOwner::ProjectWide,
         file,
         root_text,
         files

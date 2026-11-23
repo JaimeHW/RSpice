@@ -231,7 +231,7 @@ pub(super) fn netlist_source_digest(workspace: &ProjectWorkspace) -> Result<Cont
     let code_workspace_sources = workspace
         .project_sources
         .iter_bundles()
-        .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace))
+        .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::ProjectWide))
         .map(ProjectSourceBundle::authored_content)
         .collect::<Vec<_>>();
     digest(&(
