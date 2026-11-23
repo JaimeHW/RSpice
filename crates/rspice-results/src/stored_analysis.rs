@@ -17,8 +17,13 @@ use crate::analysis_result::AnalysisResult;
 use crate::store_reader::{Segment, SegmentColumn};
 use crate::waveform::{RetainedWaveform, StoredWindow, WaveformValues, WindowLead};
 
-/// Rows pushed into a segment at once.
+/// The most rows pushed into a segment at once.
 pub const ROWS_PER_PUSH: usize = 4096;
+
+/// The most values one push carries across a segment's columns, 8 MiB of them. A block of rows
+/// stays that size however many columns the segment has, so a run of a million signals is pushed
+/// a row at a time, not [`ROWS_PER_PUSH`] rows of every signal at once (32 GB).
+const VALUES_PER_PUSH: usize = 1 << 20;
 
 /// Pushes rows (their x, then their value columns row-major) into a segment's writer.
 pub type PushRows<'a> = dyn FnMut(&[f64], &[f64]) -> Result<(), StoreError> + 'a;
@@ -73,7 +78,8 @@ impl SegmentGroup {
         self.axis
     }
 
-    /// Push every row of this group, [`ROWS_PER_PUSH`] at a time, reading each series once.
+    /// Push every row of this group, at most [`ROWS_PER_PUSH`] at a time and no more than
+    /// [`VALUES_PER_PUSH`] values, reading each series once.
     pub fn fill<W: AsRef<RetainedWaveform>>(
         &self,
         waveforms: &[W],
@@ -106,11 +112,12 @@ impl SegmentGroup {
             }
             columns.push(samples(values).map_err(failed)?);
         }
-        let mut row_values = Vec::with_capacity(columns.len() * ROWS_PER_PUSH);
-        let mut row_x = Vec::with_capacity(ROWS_PER_PUSH);
+        let block = (VALUES_PER_PUSH / columns.len().max(1)).clamp(1, ROWS_PER_PUSH);
+        let mut row_values = Vec::with_capacity(columns.len() * block.min(rows));
+        let mut row_x = Vec::with_capacity(block.min(rows));
         let mut first = 0;
         while first < rows {
-            let last = (first + ROWS_PER_PUSH).min(rows);
+            let last = (first + block).min(rows);
             row_x.clear();
             row_values.clear();
             for row in first..last {
@@ -359,4 +366,53 @@ fn samples(values: &WaveformValues) -> Result<Cow<'_, [f64]>, String> {
     values
         .read_range(0..values.len())
         .map_err(|failure| failure.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis_type::AnalysisType;
+
+    /// A segment of many columns is pushed in blocks no larger than a push holds, every row
+    /// once and in order.
+    #[test]
+    fn a_wide_segment_is_pushed_in_blocks_no_larger_than_a_push_holds() {
+        const COLUMNS: usize = 1_000;
+        const ROWS: usize = 1_100;
+        let value = |column: usize, row: usize| (column * ROWS + row) as f64;
+        let x: Vec<f64> = (0..ROWS).map(|row| row as f64).collect();
+        let waveforms: Vec<RetainedWaveform> = (0..COLUMNS)
+            .map(|column| {
+                let y: Vec<f64> = (0..ROWS).map(|row| value(column, row)).collect();
+                RetainedWaveform::new(format!("V(n{column})"), x.clone(), y)
+            })
+            .collect();
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(waveforms);
+        let plan = StoredAnalysis::plan(&analysis).expect("the analysis is grouped");
+        let [group] = plan.groups() else {
+            panic!("one x axis is one segment");
+        };
+        let mut pushes = 0;
+        let mut next_row = 0;
+        group
+            .fill(&analysis.waveforms, &mut |row_x: &[f64], values: &[f64]| {
+                assert!(values.len() <= VALUES_PER_PUSH, "{} values", values.len());
+                assert_eq!(values.len(), row_x.len() * COLUMNS);
+                for (&at, row) in row_x.iter().zip(values.chunks(COLUMNS)) {
+                    assert_eq!(at, next_row as f64);
+                    assert!(
+                        row.iter()
+                            .enumerate()
+                            .all(|(column, &held)| held == value(column, next_row))
+                    );
+                    next_row += 1;
+                }
+                pushes += 1;
+                Ok::<(), StoreError>(())
+            })
+            .expect("every row is pushed");
+        assert_eq!(next_row, ROWS, "every row, once");
+        assert_eq!(pushes, 2, "a thousand and forty-eight rows, then the rest");
+    }
 }
