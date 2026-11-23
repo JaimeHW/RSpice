@@ -290,6 +290,9 @@ pub struct SeriesKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunNotHeld;
 
+/// A series as a figure draws it: its X samples and its values, one of each per point.
+pub type FigurePoints = (Vec<f64>, Vec<f64>);
+
 /// The pixel columns a report figure's series is drawn at: as many as the widest figure has.
 pub const FIGURE_COLUMNS: usize = crate::visualization_raster::MAX_RASTER_DIMENSION as usize;
 
@@ -306,7 +309,7 @@ pub trait SourceSamples {
         series: &SeriesKey,
         range: Option<(f64, f64)>,
         columns: usize,
-    ) -> Result<Option<(Vec<f64>, Vec<f64>)>, RunNotHeld>;
+    ) -> Result<Option<FigurePoints>, RunNotHeld>;
 }
 
 /// The points a figure draws of a tile over x in `x0 ..= x1`: a sample tile's rows with the
@@ -705,7 +708,7 @@ pub(super) fn run_series_points(
     series: &SeriesKey,
     range: Option<(f64, f64)>,
     samples: Option<&dyn SourceSamples>,
-) -> Result<Option<(Vec<f64>, Vec<f64>)>, RunNotHeld> {
+) -> Result<Option<FigurePoints>, RunNotHeld> {
     if let Some(embedded) = run.figure_samples(series) {
         return Ok(Some((embedded.x.clone(), embedded.y.clone())));
     }
@@ -858,7 +861,7 @@ where
         series: &SeriesKey,
         range: Option<(f64, f64)>,
         columns: usize,
-    ) -> Result<Option<(Vec<f64>, Vec<f64>)>, RunNotHeld> {
+    ) -> Result<Option<FigurePoints>, RunNotHeld> {
         let run = self.run(binding).ok_or(RunNotHeld)?;
         let Some(analysis) = run.analyses.iter().map(AsRef::as_ref).find(|analysis| {
             crate::result_presentation::AnalysisPresentationKey::new(run.dataset_id, analysis)

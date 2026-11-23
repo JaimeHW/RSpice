@@ -178,10 +178,6 @@ fn a_run_of_a_million_signals_has_a_view_that_names_only_what_it_plots() {
         "the reopened view plots what it plotted"
     );
     assert_eq!(ticked_and_plotted(&app.state), (3, 3));
-    println!(
-        "the view of a run of {SIGNALS} signals: {} bytes",
-        saved.len()
-    );
     assert!(
         saved.len() < SIGNALS,
         "the view holds nothing for a signal it does not plot: {} bytes",

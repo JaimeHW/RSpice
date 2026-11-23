@@ -260,7 +260,7 @@ impl SourceSamples for Samples {
         series: &SeriesKey,
         _range: Option<(f64, f64)>,
         _columns: usize,
-    ) -> Result<Option<(Vec<f64>, Vec<f64>)>, RunNotHeld> {
+    ) -> Result<Option<FigurePoints>, RunNotHeld> {
         if binding != self.binding {
             return Err(RunNotHeld);
         }
