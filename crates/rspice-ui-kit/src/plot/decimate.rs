@@ -61,8 +61,61 @@ struct Held {
     /// twentieth of its trace's values and lives only while frames keep
     /// drawing from it.
     blocks: HashMap<u64, (Arc<blocks::BlockIndex>, u64)>,
+    /// The envelopes of each picture drawn off the frame, taken in whole,
+    /// with the frame that last drew from them.
+    kept: Vec<(Arc<Kept>, u64)>,
     #[cfg(any(test, feature = "test-support"))]
     work: DecimationWork,
+}
+
+/// The envelopes one picture drawn off the frame reads, gathered off the
+/// frame so the frame takes them in as one: a frame that shows a picture of
+/// a hundred thousand curves touches none of their envelopes.
+#[derive(Debug, Default)]
+pub(super) struct Kept {
+    map: HashMap<CacheKey, Arc<[[f64; 2]]>>,
+    /// What they hold the cache to.
+    bytes: usize,
+}
+
+impl Kept {
+    /// Keep `envelope` under `key`.
+    pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: Arc<[[f64; 2]]>) {
+        let bytes = kept_bytes(envelope.len());
+        if let Some(replaced) = self.map.insert(key.0, envelope) {
+            self.bytes = self.bytes.saturating_sub(kept_bytes(replaced.len()));
+        }
+        self.bytes = self.bytes.saturating_add(bytes);
+    }
+
+    /// Keep everything `other` keeps too.
+    pub(super) fn extend(&mut self, mut other: Self) {
+        if other.map.len() > self.map.len() {
+            std::mem::swap(self, &mut other);
+        }
+        for (key, envelope) in other.map {
+            self.keep(EnvelopeKey(key), envelope);
+        }
+    }
+}
+
+/// What one envelope of `points` kept with a picture holds the cache to.
+const fn kept_bytes(points: usize) -> usize {
+    points * size_of::<[f64; 2]>() + size_of::<(CacheKey, Arc<[[f64; 2]]>)>()
+}
+
+/// Let `kept` go. Freeing a picture's envelopes is as much work as it has
+/// curves, so it is done off the frame.
+fn release(kept: Arc<Kept>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Without a thread it is freed here.
+        let _ = std::thread::Builder::new()
+            .name("plot envelopes".to_owned())
+            .spawn(move || drop(kept));
+    }
+    #[cfg(target_arch = "wasm32")]
+    drop(kept);
 }
 
 /// What the cache has done since it was made, for the frame-cost gates.
@@ -243,6 +296,9 @@ impl DecimationCache {
         self.held.map.clear();
         self.held.order.clear();
         self.held.blocks.clear();
+        for (kept, _) in self.held.kept.drain(..) {
+            release(kept);
+        }
         self.resident_bytes = 0;
     }
 
@@ -266,6 +322,11 @@ impl DecimationCache {
     /// is room: none when every envelope held was drawn this frame and the
     /// budget is spent.
     fn evict_to_fit(&mut self, incoming_bytes: usize) -> bool {
+        // Past the budget, the pictures' envelopes this frame has not drawn
+        // from give way first, each picture's whole.
+        if self.resident_bytes.saturating_add(incoming_bytes) > self.byte_capacity {
+            self.release_kept_not_drawn();
+        }
         let held = &mut *self.held;
         while let Some((&read, &oldest)) = held.order.first_key_value() {
             let over_budget =
@@ -348,10 +409,38 @@ impl DecimationCache {
         self.lookup(&key.0)
     }
 
-    /// Keep `envelope`, reduced off the frame, under `key`, as the frame
-    /// keeps the envelopes it reduces itself.
-    pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: &Arc<[[f64; 2]]>) {
-        self.retain(key.0, envelope);
+    /// Take in the envelopes a picture drawn off the frame reads, whole:
+    /// nothing here touches each. Those of the pictures this frame has not
+    /// drawn from go, as the envelopes of a view the reader left do; the
+    /// picture's own keeps every envelope it reads.
+    pub(super) fn keep_all(&mut self, kept: Kept) {
+        self.release_kept_not_drawn();
+        if kept.map.is_empty() {
+            return;
+        }
+        let bytes = kept.bytes;
+        let kept = Arc::new(kept);
+        if bytes <= self.byte_capacity && self.evict_to_fit(bytes) {
+            self.resident_bytes = self.resident_bytes.saturating_add(bytes);
+            self.held.kept.push((kept, self.tick));
+        } else {
+            release(kept);
+        }
+    }
+
+    /// Let go of the pictures' envelopes this frame has not drawn from.
+    fn release_kept_not_drawn(&mut self) {
+        let tick = self.tick;
+        let mut index = 0;
+        while index < self.held.kept.len() {
+            if self.held.kept[index].1 == tick {
+                index += 1;
+                continue;
+            }
+            let (kept, _) = self.held.kept.remove(index);
+            self.resident_bytes = self.resident_bytes.saturating_sub(kept.bytes);
+            release(kept);
+        }
     }
 
     /// Count `curves` stroked into a picture.
@@ -487,17 +576,28 @@ impl DecimationCache {
 
     fn lookup(&mut self, key: &CacheKey) -> Option<Arc<[[f64; 2]]>> {
         let held = &mut *self.held;
-        let hit = held.map.get_mut(key)?;
-        hit.last_used = self.tick;
-        held.reads += 1;
-        held.order.remove(&hit.read);
-        hit.read = held.reads;
-        held.order.insert(hit.read, *key);
+        let envelope = if let Some(hit) = held.map.get_mut(key) {
+            hit.last_used = self.tick;
+            held.reads += 1;
+            held.order.remove(&hit.read);
+            hit.read = held.reads;
+            held.order.insert(hit.read, *key);
+            Arc::clone(&hit.envelope)
+        } else {
+            let (envelope, last_used) =
+                held.kept.iter_mut().rev().find_map(|(kept, last_used)| {
+                    kept.map
+                        .get(key)
+                        .map(|envelope| (Arc::clone(envelope), last_used))
+                })?;
+            *last_used = self.tick;
+            envelope
+        };
         #[cfg(any(test, feature = "test-support"))]
         {
             held.work.hits += 1;
         }
-        Some(Arc::clone(&hit.envelope))
+        Some(envelope)
     }
 
     fn retain(&mut self, key: CacheKey, envelope: &Arc<[[f64; 2]]>) {

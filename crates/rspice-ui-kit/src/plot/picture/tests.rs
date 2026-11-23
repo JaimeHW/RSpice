@@ -31,6 +31,18 @@ fn frame(
     x1: f64,
     size: egui::Vec2,
 ) -> (DecimationWork, Vec<egui::epaint::ClippedShape>) {
+    frame_over(ctx, cache, curve, curves, (x1, 1.5), size)
+}
+
+/// [`frame`], its Y axis over `-y1..=y1`.
+fn frame_over(
+    ctx: &egui::Context,
+    cache: &mut DecimationCache,
+    curve: (&WaveformValues, &WaveformValues),
+    curves: usize,
+    (x1, y1): (f64, f64),
+    size: egui::Vec2,
+) -> (DecimationWork, Vec<egui::epaint::ClippedShape>) {
     cache.ensure_version(1);
     let before = cache.work();
     let (x, y) = (
@@ -46,7 +58,7 @@ fn frame(
             let mut spec = PlotSpec::new(
                 Axis::linear(0.0, x1, "s"),
                 XScale::Linear,
-                Axis::linear(-1.5, 1.5, "V"),
+                Axis::linear(-y1, y1, "V"),
             );
             for index in 0..curves {
                 spec.traces.push(
@@ -197,11 +209,67 @@ fn a_picture_costing_more_than_a_frame_is_drawn_off_it() {
     assert_eq!((again.rebuilds, again.strokes), (0, 0));
 }
 
+/// Frames until the picture asked for arrives, and what the cache did on
+/// the frame it arrived.
+fn arrival(
+    ctx: &egui::Context,
+    cache: &mut DecimationCache,
+    curve: (&WaveformValues, &WaveformValues),
+    curves: usize,
+    over: (f64, f64),
+    size: egui::Vec2,
+) -> DecimationWork {
+    let started = std::time::Instant::now();
+    loop {
+        let (work, shown) = frame_over(ctx, cache, curve, curves, over, size);
+        if !says_updating(&shown) {
+            return work;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "the picture never arrived"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// The frame a picture drawn off the frame arrives on takes its envelopes
+/// in whole, touching none of them, and a later picture of the same curves
+/// reads every one of them from the cache.
+#[test]
+fn an_arriving_picture_keeps_its_envelopes_without_the_frame_touching_each() {
+    let ctx = context();
+    let mut cache = DecimationCache::default();
+    let (x, y) = sine(40_000);
+    let curve = (&WaveformValues::from(x), &WaveformValues::from(y));
+    let size = egui::vec2(900.0, 400.0);
+    let (asked, _) = frame(&ctx, &mut cache, curve, 300, 10.0, size);
+    assert_eq!((asked.hits, asked.rebuilds), (0, 0));
+    let arrived = arrival(&ctx, &mut cache, curve, 300, (10.0, 1.5), size);
+    assert_eq!(
+        (arrived.hits, arrived.rebuilds, arrived.strokes),
+        (0, 0, 300),
+        "the arriving picture's frame took in an envelope by itself"
+    );
+    // A taller Y axis is a new picture of the same envelopes.
+    let (asked, _) = frame_over(&ctx, &mut cache, curve, 300, (10.0, 3.0), size);
+    assert_eq!(
+        (asked.hits, asked.rebuilds),
+        (300, 0),
+        "the new picture reads the envelopes the last one kept"
+    );
+    let arrived = arrival(&ctx, &mut cache, curve, 300, (10.0, 3.0), size);
+    assert_eq!((arrived.rebuilds, arrived.strokes), (0, 300));
+    // And the picture after it still finds every one of them.
+    let (asked, _) = frame_over(&ctx, &mut cache, curve, 300, (10.0, 1.5), size);
+    assert_eq!((asked.hits, asked.rebuilds), (300, 0));
+}
+
 fn nothing_drawn() -> Built {
     Built {
         drawing: Drawing::Shapes(Vec::new()),
         complete: true,
-        kept: Vec::new(),
+        kept: Kept::default(),
         curves: 0,
     }
 }

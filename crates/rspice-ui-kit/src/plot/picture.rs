@@ -29,7 +29,7 @@ use egui::epaint::TessellationOptions;
 use egui::{Color32, Pos2, Rect, Shape, Stroke, pos2};
 use rspice_results::waveform::WaveformValues;
 
-use super::decimate::{self, DecimationCache, EnvelopeKey, TraceView};
+use super::decimate::{self, DecimationCache, EnvelopeKey, Kept, TraceView};
 use super::render::{
     MarkerSlots, TraceMarkerShape, column_dashes, finite_runs, held_steps, run_is_a_point,
     runs_forward, trace_marker_positions, trace_marker_shapes,
@@ -253,8 +253,12 @@ impl Look {
 
 /// Where a curve drawn off the frame takes its envelope from.
 pub(super) enum Source {
-    /// An envelope the frame holds.
-    Held(Arc<[[f64; 2]]>),
+    /// An envelope the frame holds, and the key the cache holds it under
+    /// when it does.
+    Held {
+        envelope: Arc<[[f64; 2]]>,
+        key: Option<EnvelopeKey>,
+    },
     /// Samples in memory, reduced off the frame.
     Memory {
         key: u64,
@@ -270,6 +274,9 @@ pub(super) enum Source {
         y: WaveformValues,
     },
 }
+
+/// An envelope the cache holds, with the key it holds it under.
+type HeldEnvelope = (EnvelopeKey, Arc<[[f64; 2]]>);
 
 /// One curve of a picture drawn off the frame.
 pub(super) struct Curve {
@@ -294,14 +301,28 @@ pub(super) struct Built {
     /// Every envelope is the view's own, not a coarser one drawn while it is
     /// read.
     complete: bool,
-    /// Envelopes reduced off the frame, for the frame's cache to keep.
-    kept: Vec<(EnvelopeKey, Arc<[[f64; 2]]>)>,
+    /// The envelopes it reads, for the frame's cache to keep.
+    kept: Kept,
     curves: usize,
 }
 
 enum Drawing {
     Shapes(Vec<Shape>),
-    Pixels(Box<raster::Canvas>),
+    /// The device pixels of `rect`, ready for the renderer.
+    Image {
+        rect: Rect,
+        image: egui::ColorImage,
+    },
+}
+
+impl Drawing {
+    /// `canvas` as the renderer takes it.
+    fn of(canvas: &raster::Canvas) -> Self {
+        Self::Image {
+            rect: canvas.rect(),
+            image: canvas.image(),
+        }
+    }
 }
 
 /// A picture the plot shows.
@@ -467,7 +488,7 @@ pub(super) fn draw(
     // rest costs.
     let mut work = 0usize;
     let mut points = 0usize;
-    let held: Vec<Option<Arc<[[f64; 2]]>>> = spec
+    let held: Vec<Option<HeldEnvelope>> = spec
         .traces
         .iter()
         .zip(&looks)
@@ -492,7 +513,7 @@ pub(super) fn draw(
             };
             work = work.saturating_add(cost);
             points = points.saturating_add(drawn);
-            held
+            held.map(|envelope| (envelope_key, envelope))
         })
         .collect();
     let off_frame = cfg!(not(target_arch = "wasm32")) && work > FRAME_WORK;
@@ -577,13 +598,16 @@ fn picture_key(
 /// borrowed samples nobody shares, the envelope the frame reduces now.
 fn source_of(
     trace: &Trace<'_>,
-    held: Option<Arc<[[f64; 2]]>>,
+    held: Option<HeldEnvelope>,
     cache: &mut DecimationCache,
     geometry: &Geometry,
     look: &Look,
 ) -> Source {
-    if let Some(envelope) = held {
-        return Source::Held(envelope);
+    if let Some((key, envelope)) = held {
+        return Source::Held {
+            envelope,
+            key: Some(key),
+        };
     }
     let key = trace.cache_key.unwrap_or_default();
     if let Some(stored) = trace.stored {
@@ -607,14 +631,17 @@ fn source_of(
             shape: trace.shape.cloned(),
         };
     }
-    Source::Held(cache.series(
-        key,
-        trace.x,
-        trace.y,
-        geometry.view(look.y),
-        trace.parametric,
-        trace.shape,
-    ))
+    Source::Held {
+        envelope: cache.series(
+            key,
+            trace.x,
+            trace.y,
+            geometry.view(look.y),
+            trace.parametric,
+            trace.shape,
+        ),
+        key: None,
+    }
 }
 
 /// Draw the picture now, reducing through the frame's cache what it does
@@ -622,7 +649,7 @@ fn source_of(
 fn build_on_frame(
     spec: &PlotSpec<'_>,
     looks: &[Option<Look>],
-    held: &[Option<Arc<[[f64; 2]]>>],
+    held: &[Option<HeldEnvelope>],
     cache: &mut DecimationCache,
     geometry: &Geometry,
     options: Option<TessellationOptions>,
@@ -636,7 +663,8 @@ fn build_on_frame(
             continue;
         };
         let view = geometry.view(look.y);
-        let envelope = match (held.get(index).cloned().flatten(), trace.stored) {
+        let held = held.get(index).cloned().flatten();
+        let envelope = match (held.map(|(_, envelope)| envelope), trace.stored) {
             (Some(envelope), _) => Some(envelope),
             (None, Some(stored)) => {
                 let (envelope, done) = cache.stored_series_read(trace.cache_key, stored, view);
@@ -667,20 +695,21 @@ fn build_on_frame(
             for shape in &shapes {
                 canvas.paint(shape);
             }
-            Drawing::Pixels(Box::new(canvas))
+            Drawing::of(&canvas)
         }
         _ => Drawing::Shapes(shapes),
     };
     Built {
         drawing,
         complete,
-        kept: Vec::new(),
+        kept: Kept::default(),
         curves: 0,
     }
 }
 
-/// Turn a drawn picture into one the plot shows: its pixels made a texture,
-/// its envelopes kept and its curves counted.
+/// Turn a drawn picture into one the plot shows: its pixels handed to the
+/// renderer, its envelopes kept whole and its curves counted. Nothing here
+/// is done once per curve.
 fn take(
     ctx: &egui::Context,
     key: u64,
@@ -688,15 +717,13 @@ fn take(
     built: Built,
     cache: &mut DecimationCache,
 ) -> Picture {
-    for (envelope_key, envelope) in &built.kept {
-        cache.keep(*envelope_key, envelope);
-    }
+    cache.keep_all(built.kept);
     cache.stroked(built.curves);
     let content = match built.drawing {
         Drawing::Shapes(shapes) => Content::Shapes(shapes),
-        Drawing::Pixels(canvas) => Content::Pixels {
-            rect: canvas.rect(),
-            texture: ctx.load_texture("plot curves", canvas.image(), egui::TextureOptions::NEAREST),
+        Drawing::Image { rect, image } => Content::Pixels {
+            rect,
+            texture: ctx.load_texture("plot curves", image, egui::TextureOptions::NEAREST),
         },
     };
     Picture {
@@ -781,7 +808,7 @@ fn build_off_frame(job: &Job, cancel: &AtomicBool) -> Option<Built> {
         .min(job.curves.len().max(1));
     let run = job.curves.len().div_ceil(threads).max(1);
     let kept_bytes = AtomicUsize::new(0);
-    let parts: Vec<Option<Built>> = std::thread::scope(|scope| {
+    let parts: Vec<Option<Run>> = std::thread::scope(|scope| {
         let handles: Vec<_> = job
             .curves
             .chunks(run)
@@ -800,12 +827,33 @@ fn build_off_frame(job: &Job, cancel: &AtomicBool) -> Option<Built> {
         built.kept.extend(part.kept);
         built.curves += part.curves;
         match (&mut built.drawing, part.drawing) {
-            (Drawing::Shapes(shapes), Drawing::Shapes(more)) => shapes.extend(more),
-            (Drawing::Pixels(canvas), Drawing::Pixels(top)) => canvas.cover_with(&top),
+            (Drawn::Shapes(shapes), Drawn::Shapes(more)) => shapes.extend(more),
+            (Drawn::Pixels(canvas), Drawn::Pixels(top)) => canvas.cover_with(&top),
             _ => return None,
         }
     }
-    Some(built)
+    Some(Built {
+        drawing: match built.drawing {
+            Drawn::Shapes(shapes) => Drawing::Shapes(shapes),
+            Drawn::Pixels(canvas) => Drawing::of(&canvas),
+        },
+        complete: built.complete,
+        kept: built.kept,
+        curves: built.curves,
+    })
+}
+
+/// One run of a job's curves, drawn.
+struct Run {
+    drawing: Drawn,
+    complete: bool,
+    kept: Kept,
+    curves: usize,
+}
+
+enum Drawn {
+    Shapes(Vec<Shape>),
+    Pixels(Box<raster::Canvas>),
 }
 
 /// Draw one run of a job's curves.
@@ -814,13 +862,13 @@ fn draw_run(
     job: &Job,
     cancel: &AtomicBool,
     kept_bytes: &AtomicUsize,
-) -> Option<Built> {
+) -> Option<Run> {
     let geometry = &job.geometry;
     let mut canvas = job
         .pixels
         .then(|| raster::Canvas::new(geometry.area(), geometry.pixels_per_point, job.options));
     let mut shapes = Vec::new();
-    let mut kept = Vec::new();
+    let mut kept = Kept::default();
     let mut complete = true;
     for curve in curves {
         if cancel.load(Ordering::Relaxed) {
@@ -828,7 +876,7 @@ fn draw_run(
         }
         let view = geometry.view(curve.look.y);
         let (envelope, done, envelope_key) = match &curve.source {
-            Source::Held(envelope) => (Arc::clone(envelope), true, None),
+            Source::Held { envelope, key } => (Arc::clone(envelope), true, *key),
             Source::Memory {
                 key,
                 x,
@@ -859,7 +907,7 @@ fn draw_run(
             // envelopes drawn; the rest are not held on to.
             let bytes = envelope.len() * size_of::<[f64; 2]>();
             if kept_bytes.fetch_add(bytes, Ordering::Relaxed) + bytes <= job.keep_budget {
-                kept.push((envelope_key, Arc::clone(&envelope)));
+                kept.keep(envelope_key, Arc::clone(&envelope));
             }
         }
         let start = shapes.len();
@@ -875,10 +923,10 @@ fn draw_run(
             }
         }
     }
-    Some(Built {
+    Some(Run {
         drawing: match canvas {
-            Some(canvas) => Drawing::Pixels(Box::new(canvas)),
-            None => Drawing::Shapes(shapes),
+            Some(canvas) => Drawn::Pixels(Box::new(canvas)),
+            None => Drawn::Shapes(shapes),
         },
         complete,
         kept,
