@@ -165,6 +165,67 @@ fn chip_list(ui: &mut Ui, list: ChipList<'_>) -> Option<OrderedChipsEdit> {
     edit
 }
 
+/// How wide [`ordered_chips`] draws `values` on one line, with its add
+/// dropdown while `enabled` and something is `addable`: the room a layout
+/// gives the list for it not to wrap. `keep_one` is as for
+/// [`required_ordered_chips`].
+pub fn ordered_chips_width(
+    ui: &Ui,
+    values: &[String],
+    addable: bool,
+    enabled: bool,
+    keep_one: bool,
+) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let controls = enabled.then_some(!(keep_one && values.len() == 1));
+    let widths = values
+        .iter()
+        .map(|value| {
+            let words = ui
+                .painter()
+                .layout_no_wrap(value.clone(), font.clone(), t.color.text)
+                .size()
+                .x;
+            chip_width(&t, words, controls)
+        })
+        .chain((enabled && addable).then_some(ADD_WIDTH))
+        .collect::<Vec<_>>();
+    widths.iter().sum::<f32>() + tokens::SP_3 * widths.len().saturating_sub(1) as f32
+}
+
+/// How many controls a chip carries: none while read-only, else earlier and
+/// later, and remove where the chip may go.
+fn control_count(controls: Option<bool>) -> f32 {
+    match controls {
+        None => 0.0,
+        Some(true) => 3.0,
+        Some(false) => 2.0,
+    }
+}
+
+/// The width of one chip control and the chip's height. A finger gets a
+/// target it can hit for each control, so a press meant for "later" never
+/// lands on the "remove" beside it.
+fn control_size(t: &Tokens) -> (f32, f32) {
+    if t.metrics.is_touch() {
+        (t.metrics.touch_target(), t.metrics.touch_target())
+    } else {
+        (CONTROL_W, 22.0)
+    }
+}
+
+/// The width of a chip whose words are `words` wide.
+fn chip_width(t: &Tokens, words: f32, controls: Option<bool>) -> f32 {
+    let count = control_count(controls);
+    let controls_width = if count > 0.0 {
+        count * control_size(t).0 + 2.0
+    } else {
+        0.0
+    };
+    words + 2.0 * CHIP_PAD_X + controls_width
+}
+
 /// One chip. `controls` is `None` for a read-only chip, otherwise whether it
 /// offers Remove.
 fn chip(
@@ -182,24 +243,9 @@ fn chip(
         theme::mono(tokens::FS_0, FontWeight::Regular),
         c.text,
     );
-    let control_count = match controls {
-        None => 0.0,
-        Some(true) => 3.0,
-        Some(false) => 2.0,
-    };
-    // A finger gets a target it can hit for each control, so a press meant
-    // for "later" never lands on the "remove" beside it.
-    let (control_w, height) = if t.metrics.is_touch() {
-        (t.metrics.touch_target(), t.metrics.touch_target())
-    } else {
-        (CONTROL_W, 22.0)
-    };
-    let controls_width = if control_count > 0.0 {
-        control_count * control_w + 2.0
-    } else {
-        0.0
-    };
-    let size = vec2(galley.size().x + 2.0 * CHIP_PAD_X + controls_width, height);
+    let control_count = control_count(controls);
+    let (control_w, height) = control_size(&t);
+    let size = vec2(chip_width(&t, galley.size().x, controls), height);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| {
         WidgetInfo::labeled(

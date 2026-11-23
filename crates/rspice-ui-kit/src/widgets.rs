@@ -69,7 +69,9 @@ pub use form::{
 };
 pub use measurement_table::measurement_table;
 pub use menu_button::menu_button;
-pub use ordered_chips::{OrderedChipsEdit, ordered_chips, required_ordered_chips};
+pub use ordered_chips::{
+    OrderedChipsEdit, ordered_chips, ordered_chips_width, required_ordered_chips,
+};
 pub use page_bar::{PAGE_BAR_GAP, PageBar, PageBarFilter, page_bar_height, page_bar_kind};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_INSET, PANE_RAIL_W, PaneSide, pane_footer,
