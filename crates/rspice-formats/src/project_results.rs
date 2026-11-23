@@ -57,6 +57,8 @@ mod codec;
 pub use codec::*;
 
 mod executed_deck;
+mod identity;
+pub use identity::ProjectResultsIdentity;
 mod snapshot;
 mod stored_values;
 pub use snapshot::{ProjectSimulationResults, RestoredProjectSimulationResults};
@@ -339,7 +341,7 @@ pub struct ProjectSimulationRun {
     /// The run's own log. Absent is empty, which is every run written before
     /// runs kept one. Like retention it is outside the dataset digest, and the
     /// result history's fingerprint reads past it
-    /// ([`ProjectSimulationResults::as_fingerprinted`]): it is the run's
+    /// ([`ProjectSimulationResultsData::identity`]): it is the run's
     /// account of itself, not result content, so it needs no schema era.
     #[serde(default, skip_serializing_if = "RunLog::is_empty")]
     pub log: RunLog,
@@ -742,6 +744,43 @@ impl ProjectSimulationRun {
     where
         A: AsRef<AnalysisResult<W>>,
     {
+        Self::record(
+            run,
+            run.analyses
+                .iter()
+                .map(|analysis| {
+                    ProjectAnalysisResult::from_analysis(analysis.as_ref(), &mut waveform)
+                })
+                .collect(),
+            PersistedField::Value(
+                run.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT),
+            ),
+        )
+    }
+
+    /// The run's record with each analysis by its header alone: no samples,
+    /// no evidence, no digest. What tells a retained run apart once it is
+    /// written ([`ProjectSimulationResultsData::identity`]), taken without
+    /// reading a signal. Not a record a file may hold: it does not validate.
+    pub fn header_of<A, W: AsRef<RetainedWaveform>>(run: &SimulationRun<A>) -> Self
+    where
+        A: AsRef<AnalysisResult<W>>,
+    {
+        Self::record(
+            run,
+            run.analyses
+                .iter()
+                .map(|analysis| ProjectAnalysisResult::header_of(analysis.as_ref()))
+                .collect(),
+            PersistedField::Missing,
+        )
+    }
+
+    fn record<A>(
+        run: &SimulationRun<A>,
+        analyses: Vec<ProjectAnalysisResult>,
+        dataset_content_digest: PersistedField<ContentDigest>,
+    ) -> Self {
         let (provenance_mode, prepared_receipt) = match run.provenance() {
             None => (PersistedField::Missing, PersistedField::Missing),
             Some(SimulationRunProvenance::LegacyUnattributed) => (
@@ -776,16 +815,8 @@ impl ProjectSimulationRun {
             id: run.id,
             label: run.label.clone(),
             timestamp: run.timestamp,
-            analyses: run
-                .analyses
-                .iter()
-                .map(|analysis| {
-                    ProjectAnalysisResult::from_analysis(analysis.as_ref(), &mut waveform)
-                })
-                .collect(),
-            dataset_content_digest: PersistedField::Value(
-                run.dataset_content_digest_with_encoding(ResultDigestEncoding::CURRENT),
-            ),
+            analyses,
+            dataset_content_digest,
             provenance_mode,
             prepared_receipt,
             campaign_membership: run.campaign_membership().cloned(),
@@ -1273,6 +1304,40 @@ impl ProjectAnalysisResult {
 }
 
 impl ProjectAnalysisResult {
+    /// `analysis` by its header: what it is, when, how it ended, and the
+    /// task that produced it, which a file's plan references are checked by.
+    fn header_of<W>(analysis: &AnalysisResult<W>) -> Self {
+        Self {
+            id: analysis.id,
+            analysis_type: analysis_type_key(analysis.analysis_type).to_string(),
+            label: analysis.label.clone(),
+            timestamp: analysis.timestamp,
+            result_data_digest: PersistedField::Missing,
+            waveforms: Vec::new(),
+            dc_op: None,
+            device_op: None,
+            noise_summary: None,
+            family_metadata: None,
+            native_scalar_units: PersistedField::Missing,
+            result_payload: PersistedField::Missing,
+            transient_checkpoint: PersistedField::Missing,
+            monte_carlo_checkpoint: PersistedField::Missing,
+            measurements: Vec::new(),
+            checks: PersistedField::Missing,
+            saved_output_receipts: Vec::new(),
+            success: analysis.success,
+            error_message: analysis.error_message.clone(),
+            failure_attribution: None,
+            failure_capability: analysis.failure_capability.clone(),
+            convergence: PersistedField::Missing,
+            import_source: PersistedField::Missing,
+            provenance: analysis
+                .provenance
+                .as_ref()
+                .map(ProjectAnalysisResultProvenance::from),
+        }
+    }
+
     pub fn from_analysis<W: AsRef<RetainedWaveform>>(
         analysis: &AnalysisResult<W>,
         waveform: impl FnMut(&W) -> ProjectWaveformData,

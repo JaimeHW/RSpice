@@ -52,6 +52,45 @@ impl ProjectWorkingSet<'_> {
         execution_context: impl FnOnce() -> Result<ProjectExecutionContext, ProjectLifecycleError>,
         signal_sets: impl FnOnce() -> Vec<SignalSet>,
     ) -> Result<ProjectFile, ProjectLifecycleError> {
+        self.capture_with(
+            content,
+            sessions,
+            (results, RunRecords::Whole),
+            execution_context,
+            signal_sets,
+        )
+    }
+
+    /// [`Self::capture`] with `results` holding each run by its header: the
+    /// project a check reads, whether a save could write it and what its
+    /// documents digest to, without copying or validating any run's signals.
+    /// Every reference the file makes to a run is checked, against the run's
+    /// header; a run's own record is checked when a save writes it.
+    pub fn capture_with_run_headers(
+        self,
+        content: SnapshotContent,
+        sessions: &mut impl SnapshotSessions,
+        results: impl FnOnce() -> ProjectSimulationResults,
+        execution_context: impl FnOnce() -> Result<ProjectExecutionContext, ProjectLifecycleError>,
+        signal_sets: impl FnOnce() -> Vec<SignalSet>,
+    ) -> Result<ProjectFile, ProjectLifecycleError> {
+        self.capture_with(
+            content,
+            sessions,
+            (results, RunRecords::Headers),
+            execution_context,
+            signal_sets,
+        )
+    }
+
+    fn capture_with(
+        self,
+        content: SnapshotContent,
+        sessions: &mut impl SnapshotSessions,
+        (results, records): (impl FnOnce() -> ProjectSimulationResults, RunRecords),
+        execution_context: impl FnOnce() -> Result<ProjectExecutionContext, ProjectLifecycleError>,
+        signal_sets: impl FnOnce() -> Vec<SignalSet>,
+    ) -> Result<ProjectFile, ProjectLifecycleError> {
         #[cfg(any(test, feature = "document-fingerprint-observation"))]
         crate::registry::observe(&crate::registry::PROJECT_CAPTURES);
         let mut workspace = self.workspace.clone();
@@ -91,12 +130,23 @@ impl ProjectWorkingSet<'_> {
         project
             .validate()
             .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-        project
-            .simulation_results
-            .validate()
-            .map_err(ProjectLifecycleError::InvalidState)?;
+        if records == RunRecords::Whole {
+            project
+                .simulation_results
+                .validate()
+                .map_err(ProjectLifecycleError::InvalidState)?;
+        }
         Ok(project)
     }
+}
+
+/// How much of each run a working-set capture records.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunRecords {
+    /// Every signal, as a file holds it.
+    Whole,
+    /// The run's header alone.
+    Headers,
 }
 
 impl ProjectFile {

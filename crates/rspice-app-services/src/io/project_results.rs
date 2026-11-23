@@ -2,14 +2,44 @@
 use crate::state::{AnalysisResult, RetainedTrace, SimulationRun, SimulationState};
 use rspice_formats::project_results::*;
 
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Captures of the retained results whole, each a record of every
+    /// signal of every run.
+    pub static WHOLE_RESULT_CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationResults {
     if state.retained.runs.is_empty() {
         // Clearing datasets preserves both their allocation history and
         // the project's retention decision across save and session restore.
         return capture_simulation_results_without_runs(state);
     }
+    #[cfg(any(test, feature = "test-support"))]
+    WHOLE_RESULT_CAPTURES.with(|captures| captures.set(captures.get() + 1));
+    with_runs(state, state.retained.runs.iter().map(capture_run).collect())
+}
 
-    let runs: Vec<_> = state.retained.runs.iter().map(capture_run).collect();
+/// [`capture_simulation_results`] with each run by its header alone
+/// ([`ProjectSimulationRun::header_of`]): what tells the retained results apart
+/// for a dirty check, which reads no signal. Never a file's results: it does
+/// not validate.
+pub fn capture_simulation_result_headers(state: &SimulationState) -> ProjectSimulationResults {
+    if state.retained.runs.is_empty() {
+        return capture_simulation_results_without_runs(state);
+    }
+    with_runs(
+        state,
+        state
+            .retained
+            .runs
+            .iter()
+            .map(|run| ProjectSimulationRun::header_of(&run.data))
+            .collect(),
+    )
+}
+
+fn with_runs(state: &SimulationState, runs: Vec<ProjectSimulationRun>) -> ProjectSimulationResults {
     ProjectSimulationResultsData {
         runs,
         imported_monte_carlo_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),

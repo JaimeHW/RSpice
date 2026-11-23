@@ -212,13 +212,134 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
         "returning to accepted content must be clean"
     );
 
+    // A save checks every signal it writes, whatever the dirty check read.
     state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
         .x
         .make_mut()[1] = f64::NAN;
     assert!(snapshot(&state).is_err());
-    assert!(has_unsaved_changes(&state));
-    state.model.simulation.retained.runs[0].analyses[0].waveforms[0]
-        .x
-        .make_mut()[1] = 1.0;
+}
+
+/// A finished run of many signals with one sample each, as a run's results
+/// are retained.
+fn wide_run(sequence: u64, signals: usize) -> rspice_app_state::state::SimulationRun {
+    let mut run = rspice_app_state::state::SimulationRun::new(sequence);
+    run.add_analysis(
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "Tran",
+        )
+        .with_waveforms(
+            (0..signals)
+                .map(|signal| {
+                    rspice_app_state::state::RetainedTrace::new(
+                        format!("V(n{signal})"),
+                        vec![0.0, 1.0],
+                        vec![1.0, 2.0],
+                        "",
+                    )
+                })
+                .collect(),
+        ),
+    );
+    run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
+        .unwrap();
+    run.mark_running().unwrap();
+    run.finish_lifecycle(rspice_app_state::state::SimulationRunLifecycle::Completed)
+        .unwrap();
+    run
+}
+
+/// A run that ends is told apart by its identity: the project reads unsaved
+/// at once, and the dirty check neither copies, validates nor digests one
+/// signal of it. Pinning it, noting it or letting it go reads as the edit it
+/// is; going back reads clean.
+#[test]
+fn a_run_that_ends_reads_unsaved_without_copying_its_signals() {
+    let (mut state, _) = super::durable_content::retained_results();
+    let baseline = snapshot(&state).unwrap();
+    state
+        .platform
+        .project_lifecycle
+        .accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
+    let captures = || rspice_app_services::io::WHOLE_RESULT_CAPTURES.with(std::cell::Cell::get);
+    let validations =
+        || rspice_formats::project_results::RESULT_VALIDATIONS.with(std::cell::Cell::get);
+    let (captured, validated) = (captures(), validations());
+    let work = WorkCounts::reset();
+
+    state
+        .model
+        .simulation
+        .retained
+        .runs
+        .insert(0, wide_run(2, 20_000));
+    state.model.simulation.retained.next_run_id = 2;
+    assert!(has_unsaved_changes(&state));
+    assert!(dirty_documents(&state).contains(&ProjectDocumentId::ResultHistory));
+    let run_id = state.model.simulation.retained.runs[0].run_id;
+    assert!(state.model.simulation.set_run_retention(
+        run_id,
+        rspice_app_state::state::RunRetention::GoldenBaseline,
+    ));
+    assert!(has_unsaved_changes(&state));
+    state.model.simulation.retained.runs[0].note = "the wide one".to_owned();
+    assert!(has_unsaved_changes(&state));
+
+    assert_eq!(
+        captures(),
+        captured,
+        "the dirty check copied the runs whole"
+    );
+    assert_eq!(validations(), validated, "the dirty check validated a run");
+    assert_eq!(work.since().get(DatasetWalk::DatasetDigest), 0);
+
+    state.model.simulation.retained.runs.remove(0);
+    state.model.simulation.retained.next_run_id = 1;
+    assert!(
+        !has_unsaved_changes(&state),
+        "the history as it was saved reads clean"
+    );
+}
+
+/// The record of a run's headers and the record a save writes are the same
+/// run to the dirty check, for every input a save keeps.
+#[test]
+fn a_run_by_its_headers_compares_as_the_run_a_save_writes() {
+    let (mut state, _) = super::durable_content::retained_results();
+    state
+        .model
+        .simulation
+        .retained
+        .runs
+        .insert(0, wide_run(2, 3));
+    state.model.simulation.retained.next_run_id = 2;
+    state.model.simulation.retained.runs[0].note = "noted".to_owned();
+    state
+        .model
+        .simulation
+        .retained
+        .executed_decks
+        .retain(deck("a deck"));
+    let identity = |results: &rspice_app_services::io::ProjectSimulationResults| {
+        serde_json::to_string(&results.identity()).unwrap()
+    };
+    let whole = rspice_app_services::io::capture_simulation_results(&state.model.simulation);
+    let headers =
+        rspice_app_services::io::capture_simulation_result_headers(&state.model.simulation);
+    assert_eq!(identity(&headers), identity(&whole));
+    assert!(headers.runs.iter().all(|run| {
+        run.analyses
+            .iter()
+            .all(|analysis| analysis.waveforms.is_empty())
+    }));
+    let restored = rspice_app_services::io::simulation_state_from_results(whole.clone()).unwrap();
+    assert_eq!(
+        identity(&rspice_app_services::io::capture_simulation_result_headers(
+            &restored
+        )),
+        identity(&whole),
+        "a reopened run is the run that was saved"
+    );
 }

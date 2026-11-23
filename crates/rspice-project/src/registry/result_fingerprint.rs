@@ -1,4 +1,8 @@
-//! The existing Results digest, reused only for identical immutable inputs.
+//! The Results digest: the retained runs by identity, never by their
+//! samples, with what the reader made of them. A run is immutable once
+//! written, so a history holding a million-signal run digests in what its
+//! runs' headers weigh, and a record holding only those headers digests as
+//! the whole record does.
 
 use std::cell::RefCell;
 
@@ -52,9 +56,10 @@ impl ResultFingerprintCache {
     }
 }
 
-/// The result history's fingerprint: the retained runs without their logs,
-/// the reports, the views (what the reader made of the runs among them) and
-/// the saved signal sets.
+/// The result history's fingerprint: the retained runs by identity
+/// ([`crate::results::ProjectSimulationResultsData::identity`]), the reports,
+/// the views (what the reader made of the runs among them) and the saved
+/// signal sets.
 pub fn digest(
     results: &ProjectSimulationResults,
     reports: &[ReportDocument],
@@ -63,10 +68,9 @@ pub fn digest(
 ) -> Result<ContentDigest, String> {
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
     super::fingerprints::observe(&RESULT_FINGERPRINT_PASSES);
-    let results = results.as_fingerprinted();
     super::digest(&(
-        "result-history-v2",
-        &*results,
+        "result-history-v3",
+        results.identity(),
         reports,
         visualizations,
         signal_sets,

@@ -3,6 +3,13 @@
 //! Retained run and deck owners provide mutation identities. Selection,
 //! overlays, retention, and the sequence counter are compared by exact value.
 //! An unchanged lookup only clones the immutable result snapshot handle.
+//!
+//! Two snapshots are held. A save, a session and every decision read the
+//! whole one, which records every run's signals. The dirty check reads the
+//! one of the runs' headers: a run is immutable once written, so its
+//! identity is what tells one retained history from another, and a run that
+//! ends, however many signals it wrote, is compared without copying or
+//! digesting any of them.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,16 +19,36 @@ use crate::product::DatasetId;
 use crate::state::{ExecutedDeckArchive, RunHistoryRevision, SimulationState};
 
 #[derive(Debug, Clone, Default)]
-pub struct ResultCache(RefCell<Option<CachedResults>>);
+pub struct ResultCache {
+    /// The results as a save writes them.
+    whole: RefCell<Option<CachedResults>>,
+    /// The results as the dirty check reads them: each run by its header.
+    headers: RefCell<Option<CachedHeaders>>,
+}
 
 /// Issues the stamp of each captured snapshot, unique for the process.
 static NEXT_SNAPSHOT_STAMP: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
 struct CachedResults {
-    /// Names this snapshot: two caches holding the same stamp hold the same
-    /// snapshot, a clone of one capture.
+    key: ResultKey,
+    snapshot: ProjectSimulationResults,
+}
+
+#[derive(Debug, Clone)]
+struct CachedHeaders {
+    key: ResultKey,
+    /// Names the results' identity: two caches holding the same stamp hold
+    /// results that compare equal. Kept while the runs' headers do not
+    /// change, so a run streaming its samples moves no stamp.
     stamp: u64,
+    identity: Option<rspice_vocabulary::product::ContentDigest>,
+    snapshot: ProjectSimulationResults,
+}
+
+/// Every input to the persisted projection, by identity or by value.
+#[derive(Debug, Clone)]
+struct ResultKey {
     history: RunHistoryRevision,
     decks: ExecutedDeckArchive,
     imported_checkpoints: crate::state::MonteCarloCheckpointLibrary,
@@ -32,10 +59,23 @@ struct CachedResults {
     active_run_idx: Option<usize>,
     active_analysis_idx: Option<usize>,
     overlay_dataset_ids: Vec<DatasetId>,
-    snapshot: ProjectSimulationResults,
 }
 
-impl CachedResults {
+impl ResultKey {
+    fn of(state: &SimulationState) -> Self {
+        Self {
+            history: state.retained.runs.revision(),
+            decks: state.retained.executed_decks.clone(),
+            imported_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
+            imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
+            next_run_id: state.retained.next_run_id,
+            retained_dataset_limit: state.retained.retained_dataset_limit,
+            active_run_idx: state.view.active_run_idx,
+            active_analysis_idx: state.view.active_analysis_idx,
+            overlay_dataset_ids: state.view.overlay_dataset_ids.clone(),
+        }
+    }
+
     fn matches(&self, state: &SimulationState) -> bool {
         // Adding state requires an explicit persisted-versus-runtime choice.
         let SimulationState {
@@ -114,37 +154,55 @@ impl CachedResults {
 
 impl ResultCache {
     pub fn capture(&self, state: &SimulationState) -> ProjectSimulationResults {
-        self.with_current(state, |held| held.snapshot.clone())
+        let mut cached = self.whole.borrow_mut();
+        if let Some(held) = cached.as_ref().filter(|held| held.key.matches(state)) {
+            return held.snapshot.clone();
+        }
+        cached
+            .insert(CachedResults {
+                key: ResultKey::of(state),
+                snapshot: crate::io::capture_simulation_results(state),
+            })
+            .snapshot
+            .clone()
     }
 
-    /// The stamp of the snapshot `state` persists as: equal stamps, equal
-    /// persisted results. Captures the snapshot when the one held no longer
-    /// matches, as [`Self::capture`] would.
+    /// The results with each run by its header, as the dirty check compares
+    /// them ([`crate::io::capture_simulation_result_headers`]).
+    pub fn headers(&self, state: &SimulationState) -> ProjectSimulationResults {
+        self.with_headers(state, |held| held.snapshot.clone())
+    }
+
+    /// The stamp of the results' identity as `state` holds them: equal
+    /// stamps, results that compare equal. Moves only when the runs' headers,
+    /// the selection or another persisted input changed, never because a
+    /// run's samples did.
     pub fn stamp(&self, state: &SimulationState) -> u64 {
-        self.with_current(state, |held| held.stamp)
+        self.with_headers(state, |held| held.stamp)
     }
 
-    fn with_current<R>(
+    fn with_headers<R>(
         &self,
         state: &SimulationState,
-        read: impl FnOnce(&CachedResults) -> R,
+        read: impl FnOnce(&CachedHeaders) -> R,
     ) -> R {
-        let mut cached = self.0.borrow_mut();
-        if let Some(held) = cached.as_ref().filter(|held| held.matches(state)) {
+        let mut cached = self.headers.borrow_mut();
+        if let Some(held) = cached.as_ref().filter(|held| held.key.matches(state)) {
             return read(held);
         }
-        let snapshot = crate::io::capture_simulation_results(state);
-        read(cached.insert(CachedResults {
-            stamp: NEXT_SNAPSHOT_STAMP.fetch_add(1, Ordering::Relaxed),
-            history: state.retained.runs.revision(),
-            decks: state.retained.executed_decks.clone(),
-            imported_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
-            imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
-            next_run_id: state.retained.next_run_id,
-            retained_dataset_limit: state.retained.retained_dataset_limit,
-            active_run_idx: state.view.active_run_idx,
-            active_analysis_idx: state.view.active_analysis_idx,
-            overlay_dataset_ids: state.view.overlay_dataset_ids.clone(),
+        let snapshot = crate::io::capture_simulation_result_headers(state);
+        let identity = rspice_project::registry::digest(&snapshot.identity()).ok();
+        let stamp = cached
+            .as_ref()
+            .filter(|held| identity.is_some() && held.identity == identity)
+            .map_or_else(
+                || NEXT_SNAPSHOT_STAMP.fetch_add(1, Ordering::Relaxed),
+                |held| held.stamp,
+            );
+        read(cached.insert(CachedHeaders {
+            key: ResultKey::of(state),
+            stamp,
+            identity,
             snapshot,
         }))
     }

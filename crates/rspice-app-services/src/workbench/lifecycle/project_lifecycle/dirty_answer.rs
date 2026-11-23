@@ -20,6 +20,10 @@
 //! The generated netlist's input digest, which the Netlist page reads every
 //! frame, is held for the working stamp the same way.
 //!
+//! Retained runs are compared by identity: a run is immutable once written,
+//! so the check reads each run's header and never copies or digests its
+//! signals, and a run that ends costs the check what its header does.
+//!
 //! In debug builds and tests every held answer is checked: the project is
 //! captured again and a document whose identity moved under an unchanged
 //! stamp panics, naming it. A subject the stamp misses fails the suite; it
@@ -59,7 +63,7 @@ pub struct WorkingStamp {
     simulation_plan: u64,
     /// The model catalog, its resolution records and its validation receipt.
     model_catalog: [u64; 3],
-    /// The retained results as the project persists them.
+    /// The retained results by identity: each run by its header.
     results: u64,
     /// The Results presentation a save keeps, which its feature owns and
     /// does not stamp: by its canonical encoding, as the fingerprint reads
@@ -341,7 +345,7 @@ fn agrees(
 }
 
 fn fingerprint(state: &LifecycleView<'_>) -> Result<DocumentFingerprints, String> {
-    super::capture_snapshot(state, SnapshotContent::Current)
+    headers_snapshot(state)
         .and_then(|snapshot| {
             state
                 .platform
@@ -396,7 +400,7 @@ fn compare(
                     || {
                         let workspace = &state.model.workspace.content;
                         lifecycle.authority.result_fingerprints().digest(
-                            &lifecycle.result_cache.capture(&state.model.simulation),
+                            &lifecycle.result_cache.headers(&state.model.simulation),
                             &workspace.report_documents,
                             &workspace.visualization_documents,
                             &state.presentation.saved_signal_sets(),
@@ -492,7 +496,7 @@ fn validity(state: &LifecycleView<'_>, stamp: &WorkingStamp) -> Result<(), Strin
                 )
             });
     }
-    let valid = super::capture_snapshot(state, SnapshotContent::Current)
+    let valid = headers_snapshot(state)
         .map(drop)
         .map_err(|error| error.to_string());
     *held.borrow_mut() = Some((stamp.clone(), valid.clone()));
@@ -563,9 +567,16 @@ pub(super) fn netlist_input(
 }
 
 fn digest_netlist_input(state: &LifecycleView<'_>) -> Result<ContentDigest, ProjectLifecycleError> {
-    super::capture_snapshot(state, SnapshotContent::Current)?
+    headers_snapshot(state)?
         .file
         .generated_netlist_input_digest()
+}
+
+/// The working project as a check reads it, each retained run by its header.
+fn headers_snapshot(
+    state: &LifecycleView<'_>,
+) -> Result<super::ProjectSnapshot, ProjectLifecycleError> {
+    super::capture_snapshot_holding(state, SnapshotContent::Current, super::RunRecords::Headers)
 }
 
 /// Run `mark`, which writes only the runtime unsaved marks — a tab's dot, a

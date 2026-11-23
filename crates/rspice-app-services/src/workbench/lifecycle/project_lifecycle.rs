@@ -227,35 +227,57 @@ pub fn capture_snapshot(
     state: &dyn LifecycleSource,
     content: SnapshotContent,
 ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
-    let state = &state.lifecycle_view();
+    capture_snapshot_holding(&state.lifecycle_view(), content, RunRecords::Whole)
+}
+
+/// How much of each retained run a capture records.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunRecords {
+    /// Every signal, as a save writes it.
+    Whole,
+    /// The run's header: what a check of the working project reads.
+    Headers,
+}
+
+fn capture_snapshot_holding(
+    state: &LifecycleView<'_>,
+    content: SnapshotContent,
+    records: RunRecords,
+) -> Result<ProjectSnapshot, ProjectLifecycleError> {
     let mut sessions = SnapshotSessionCapture {
         workspace: state.model.workspace.session.clone(),
         active: &state.model.schematic.session,
     };
-    let file = ProjectWorkingSet {
+    let working = ProjectWorkingSet {
         workspace: &state.model.workspace.content,
         active_schematic: state.model.schematic.editor_ref().design,
         libraries: &state.model.library_manager,
-    }
-    .capture(
-        content,
-        &mut sessions,
-        || {
-            state
-                .platform
-                .project_lifecycle
-                .result_cache
-                .capture(&state.model.simulation)
-        },
-        || {
-            crate::io::capture_execution_context(
-                &state.model.sim_setup,
-                &state.model.model_library_manager,
-            )
-            .map_err(ProjectLifecycleError::InvalidState)
-        },
-        || state.presentation.saved_signal_sets(),
-    )?;
+    };
+    let execution_context = || {
+        crate::io::capture_execution_context(
+            &state.model.sim_setup,
+            &state.model.model_library_manager,
+        )
+        .map_err(ProjectLifecycleError::InvalidState)
+    };
+    let signal_sets = || state.presentation.saved_signal_sets();
+    let results = &state.platform.project_lifecycle.result_cache;
+    let file = match records {
+        RunRecords::Whole => working.capture(
+            content,
+            &mut sessions,
+            || results.capture(&state.model.simulation),
+            execution_context,
+            signal_sets,
+        ),
+        RunRecords::Headers => working.capture_with_run_headers(
+            content,
+            &mut sessions,
+            || results.headers(&state.model.simulation),
+            execution_context,
+            signal_sets,
+        ),
+    }?;
     let mut file = file;
     // A symbol edited in place leaves the sheet it is edited on in front of
     // the layout a save writes.

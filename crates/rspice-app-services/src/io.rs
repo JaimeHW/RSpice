@@ -31,10 +31,10 @@ pub use generated_bundle::build_generated_bundle;
 pub use project_execution::{capture_execution_context, restore_execution_context};
 pub use project_io::{ProjectSimulationResults, ProjectSnapshot, load_project_file};
 #[cfg(any(test, feature = "test-support"))]
-pub use project_results::simulation_state_from_results;
+pub use project_results::{WHOLE_RESULT_CAPTURES, simulation_state_from_results};
 pub use project_results::{
-    capture_run, capture_simulation_results, capture_simulation_results_without_runs,
-    restore_project_run, restore_simulation_results,
+    capture_run, capture_simulation_result_headers, capture_simulation_results,
+    capture_simulation_results_without_runs, restore_project_run, restore_simulation_results,
 };
 pub use rspice_project::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext};
 // The run's own corner-expansion entry point, so the Corners page's tests can

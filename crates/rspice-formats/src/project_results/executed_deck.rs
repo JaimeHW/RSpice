@@ -68,14 +68,6 @@ impl ExecutedDeckSource {
     pub const fn digest(&self) -> ContentDigest {
         self.digest
     }
-
-    /// This source as the result fingerprint reads it: named by its digest.
-    pub(super) fn named_by_digest(&self) -> Self {
-        Self {
-            text: std::sync::Arc::from(format!("sha256:{}", self.digest)),
-            digest: self.digest,
-        }
-    }
 }
 
 /// Equal digests are equal text; comparing them reads neither.
