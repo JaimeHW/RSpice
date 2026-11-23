@@ -244,7 +244,7 @@ fn the_band_counts_only_the_populated_variant() {
     for width in [1000.0, 1440.0] {
         let shown = frame(&mut app, width);
         assert!(
-            shown.reports(&format!("{total} of {total} instances bound")),
+            shown.reports(&format!("{total} instances bound")),
             "the {width}px band must count {total} instances"
         );
     }
@@ -430,7 +430,7 @@ fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
     // A count is read as a magnitude, its thousands grouped.
     let shown = frame(&mut app, 1440.0);
     assert!(
-        shown.reports("1,082,401 of 1,082,401 instances bound"),
+        shown.reports("1,082,401 instances bound"),
         "the bar must state the count grouped: {:#?}",
         shown.every_word().collect::<Vec<_>>()
     );

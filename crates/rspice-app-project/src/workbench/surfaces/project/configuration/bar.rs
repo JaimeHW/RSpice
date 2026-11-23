@@ -323,13 +323,16 @@ fn report(state: &BarState, resolution: &ConfigurationResolution) -> (String, Op
     } else {
         let total = tables.total_instances;
         let unbound = tables.unbound_instances;
-        // A count is read as a magnitude: 1,082,401, grouped.
-        let of_total = counted(total, "instance", "instances");
+        // A count is read as a magnitude: 1,082,401, grouped. The unbound
+        // are the problem, so they are what is counted while there are any.
         if unbound == 0 {
-            (format!("{} of {of_total} bound", grouped(total)), None)
+            (
+                format!("{} bound", counted(total, "instance", "instances")),
+                None,
+            )
         } else {
             (
-                format!("{} of {of_total} unbound", grouped(unbound)),
+                format!("{} unbound", counted(unbound, "instance", "instances")),
                 Some(Problem::Failure),
             )
         }
