@@ -14,9 +14,11 @@ fn model() -> Model {
     Model::session_start(PdkConfig::default(), None, restore_model_library_manager)
 }
 
+/// A row is found by anything it shows: its contents, and its status only
+/// when that is a problem, since a sound row says none.
 #[test]
 fn a_row_is_found_by_anything_it_shows() {
-    let row = DependencyRow {
+    let mut row = DependencyRow {
         library: DependencyLibrary::model("models_tt"),
         version: "2.1".to_owned(),
         source: "/models/tt.lib".to_owned(),
@@ -24,6 +26,7 @@ fn a_row_is_found_by_anything_it_shows() {
         resolved: Some("/models/tt.lib".to_owned()),
         access: "Read-only",
         digest: "12ab".to_owned(),
+        contents: Some(Contents::of(21, "model", "models").and(3, "subckt", "subckts")),
         status: LibraryStatus::neutral("Found", None),
     };
     for shown in [
@@ -33,11 +36,19 @@ fn a_row_is_found_by_anything_it_shows() {
         "tt.lib",
         "../models",
         "12ab",
-        "found",
+        "21 models",
+        "3 subckts",
     ] {
         assert!(row.matches(shown), "{shown}");
     }
     assert!(!row.matches("missing"));
+    assert!(!row.matches("found"), "a sound row says no status");
+    row.status = LibraryStatus {
+        mark: Tone::Error,
+        label: "Not found",
+        detail: None,
+    };
+    assert!(row.matches("not found"));
 }
 
 /// Design libraries come first, then model libraries, each by name without

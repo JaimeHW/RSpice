@@ -2,9 +2,11 @@
 //! and model libraries, the folders its include lines are searched in, and
 //! its decks with the files they include.
 //!
-//! Every row's status is the one the inspector beside the page gives the
-//! same dependency: both read the rows built once per change of what a
-//! status reads. The exported manifest serializes the same rows.
+//! Each row says what the dependency is, what it provides and where it is.
+//! A sound one says nothing more; a problem marks its name and is named at
+//! the right end of its location, in the inspector's words for the same
+//! dependency: both read the rows built once per change of what a status
+//! reads. The exported manifest serializes the same rows.
 //!
 //! One bar over the table holds what the page does: the filter and the kind
 //! it lists, Add, and Change… and Remove… on the selected row; the row's
@@ -26,10 +28,10 @@ pub(crate) use include_paths::{IncludePathEdit, edit_include_paths};
 
 use super::*;
 use crate::state::model_library::ModelSourceAuthority;
-use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey};
+use crate::ui::widgets::table::{Cell, Column, DataTable, RowKey, SortKey, fitted_width};
 use crate::workbench::app_state::model::LibraryMode;
 use crate::workbench::project::dependency_status::{
-    DependencyKind, DependencyLibrary, DependencyRow, UNSET, dependency_rows,
+    DependencyKind, DependencyLibrary, DependencyRow, DependencyStatusKey, UNSET, dependency_rows,
     dependency_status_key, refresh_source_drift, reread_files, settle_selection, shown_path,
     visible_dependency_rows,
 };
@@ -81,6 +83,9 @@ struct LedgerView {
     /// Each visible row's key, in the same order: the table keeps its
     /// selection by it through a sort or a change of the rows.
     keys: Arc<[RowKey]>,
+    /// What the rows were built from: the columns sized to what they hold
+    /// are measured again only when it moves.
+    status: DependencyStatusKey,
 }
 
 impl LedgerView {
@@ -147,14 +152,11 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let kind = cx.state.dependencies.kind;
     let (rows, visible) = visible_dependency_rows(ui.ctx(), cx.model, &filter, kind);
     settle_selection(&rows, &mut cx.state.project_dependency_selection);
+    let status = dependency_status_key(ui.ctx(), cx.model);
     let keys = derived(
         ui.ctx(),
         "dependencies.keys",
-        (
-            dependency_status_key(ui.ctx(), cx.model),
-            filter.to_lowercase(),
-            kind,
-        ),
+        (status.clone(), filter.to_lowercase(), kind),
         || {
             visible
                 .iter()
@@ -166,6 +168,7 @@ pub fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         rows,
         visible,
         keys,
+        status,
     };
     let width = visible_workspace_width(ui);
     let height = visible_workspace_height(ui);
@@ -349,8 +352,7 @@ fn bar_report(cx: &Cx<'_, ProjectFeature>, view: &LedgerView) -> (String, Option
     }
 }
 
-/// How bad a status is: the bar names the worst, and the status column
-/// sorts by it.
+/// How bad a status is: the bar names the worst.
 const fn severity(mark: Tone) -> u8 {
     match mark {
         Tone::Neutral => 0,
@@ -359,25 +361,75 @@ const fn severity(mark: Tone) -> u8 {
     }
 }
 
-/// The table's columns. Name and Location share what the fixed columns
-/// leave; a column no row has a value for is left out.
-fn ledger_columns(rows: &[DependencyRow]) -> Vec<(LedgerColumn, Column)> {
+/// The table's columns across `width`. Name takes what the others leave;
+/// Contents and Location are as wide as what they hold, Location never so
+/// wide that Name is left less than its least. A column no row has a value
+/// for is left out.
+fn ledger_columns(ui: &Ui, view: &LedgerView, width: f32) -> Vec<(LedgerColumn, Column)> {
+    let rows = &view.rows;
     let has = |value: fn(&DependencyRow) -> bool| rows.iter().any(value);
-    [
-        (LedgerColumn::Name, Column::name("Name", 120.0)),
-        (LedgerColumn::Kind, Column::words("Kind", 104.0)),
-        (LedgerColumn::Version, Column::words("Version", 72.0)),
-        (LedgerColumn::Location, Column::name("Location", 120.0)),
-        (LedgerColumn::Access, Column::words("Access", 80.0)),
-        (LedgerColumn::Status, Column::words("Status", 116.0)),
+    let [contents, location] = fitted_widths(ui, view);
+    let shown: Vec<(LedgerColumn, f32)> = [
+        (LedgerColumn::Name, NAME_LEAST),
+        (LedgerColumn::Kind, 104.0),
+        (LedgerColumn::Version, 72.0),
+        (LedgerColumn::Contents, contents),
+        (LedgerColumn::Location, location),
+        (LedgerColumn::Access, 80.0),
     ]
     .into_iter()
     .filter(|(column, _)| match column {
         LedgerColumn::Version => has(|row| row.version != UNSET),
+        LedgerColumn::Contents => has(|row| row.contents.is_some()),
         LedgerColumn::Access => has(|row| row.access != UNSET),
         _ => true,
     })
-    .collect()
+    .collect();
+    let others: f32 = shown
+        .iter()
+        .filter(|(column, _)| *column != LedgerColumn::Location)
+        .map(|(_, least)| least)
+        .sum();
+    // A path cut short shows whole under the pointer.
+    let location = location.min((width - others).max(LOCATION_LEAST));
+    shown
+        .into_iter()
+        .map(|(column, least)| {
+            let head = column.head();
+            let shown = match column {
+                LedgerColumn::Name => Column::name(head, least),
+                LedgerColumn::Location => Column::words(head, location),
+                _ => Column::words(head, least),
+            };
+            (column, shown)
+        })
+        .collect()
+}
+
+/// The least the Name column takes, which it is given before the rest.
+const NAME_LEAST: f32 = 120.0;
+
+/// The least Location is cut to beside a long name: a short path whole.
+const LOCATION_LEAST: f32 = 120.0;
+
+/// The widths Contents and Location take to show every row whole, measured
+/// when the rows change, not on every frame.
+fn fitted_widths(ui: &Ui, view: &LedgerView) -> [f32; 2] {
+    derived(
+        ui.ctx(),
+        "dependencies.widths",
+        (view.status.clone(), ui.ctx().pixels_per_point().to_bits()),
+        || {
+            [LedgerColumn::Contents, LedgerColumn::Location].map(|column| {
+                let cells: Vec<Cell> = view
+                    .rows
+                    .iter()
+                    .map(|row| ledger_cell(row, column))
+                    .collect();
+                fitted_width(ui, column.head(), &cells)
+            })
+        },
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -385,48 +437,94 @@ enum LedgerColumn {
     Name,
     Kind,
     Version,
+    Contents,
     Location,
     Access,
-    Status,
 }
 
-/// One row's cell under `column`.
+impl LedgerColumn {
+    const fn head(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Kind => "Kind",
+            Self::Version => "Version",
+            Self::Contents => "Contents",
+            Self::Location => "Location",
+            Self::Access => "Access",
+        }
+    }
+}
+
+/// Two hints in one, the first above the second.
+fn joined(first: Option<&str>, second: Option<&str>) -> Option<String> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(format!("{first}\n{second}")),
+        (first, second) => first.or(second).map(str::to_owned),
+    }
+}
+
+/// One row's cell under `column`. A sound row's cells state what it is; a
+/// problem marks its name, which reads its detail out with the row, and
+/// names itself at the right end of its location, where the pointer finds
+/// the detail too.
 fn ledger_cell(row: &DependencyRow, column: LedgerColumn) -> Cell {
     let absent = || Cell::absent().sort_by(SortKey::Missing);
+    let problem = row.status.mark.problem();
+    let detail = problem.and(row.status.detail.as_deref());
     match column {
-        LedgerColumn::Name if row.library.name.is_empty() => absent(),
         LedgerColumn::Name => {
-            let name = Cell::text(row.library.shown_name());
-            if row.library.shown_name() == row.library.name {
-                name
+            let name = if row.library.name.is_empty() {
+                absent()
             } else {
-                name.hint(row.library.name.as_str())
+                Cell::text(row.library.shown_name())
+            };
+            let whole = (!row.library.name.is_empty()
+                && row.library.shown_name() != row.library.name)
+                .then_some(row.library.name.as_str());
+            let name = match problem {
+                Some(problem) => name.marked(problem),
+                None => name,
+            };
+            match joined(whole, detail) {
+                Some(hint) => name.hint(hint),
+                None => name,
             }
         }
         LedgerColumn::Kind => Cell::text(row.library.kind.label()),
         LedgerColumn::Version if row.version == UNSET => absent(),
         LedgerColumn::Version => Cell::number(row.version.as_str()),
-        LedgerColumn::Location if row.location == UNSET => absent(),
+        LedgerColumn::Contents => match &row.contents {
+            Some(contents) => {
+                let cell = Cell::text(contents.words.as_str())
+                    .sort_by(SortKey::Number(contents.count as f64));
+                match contents.more.as_deref() {
+                    Some(more) => cell.suffix(more),
+                    None => cell,
+                }
+            }
+            None => absent(),
+        },
         LedgerColumn::Location => {
-            let location = Cell::text(row.location.as_str());
-            match row.resolved.as_deref() {
-                Some(whole) if whole != row.location => location.hint(whole),
-                _ => location,
+            let location = if row.location == UNSET {
+                absent()
+            } else {
+                Cell::text(row.location.as_str())
+            };
+            let location = match problem {
+                Some(_) => location.state(row.status.label, None),
+                None => location,
+            };
+            let whole = row
+                .resolved
+                .as_deref()
+                .filter(|whole| *whole != row.location);
+            match joined(whole, detail) {
+                Some(hint) => location.hint(hint),
+                None => location,
             }
         }
         LedgerColumn::Access if row.access == UNSET => absent(),
         LedgerColumn::Access => Cell::text(row.access),
-        LedgerColumn::Status => {
-            let status = match row.status.mark.problem() {
-                Some(problem) => Cell::problem(row.status.label, problem),
-                None => Cell::text(row.status.label),
-            }
-            .sort_by(SortKey::Status(severity(row.status.mark)));
-            match row.status.detail.as_deref() {
-                Some(detail) => status.hint(detail),
-                None => status,
-            }
-        }
     }
 }
 
@@ -494,11 +592,13 @@ fn ledger(
         }
         _ => {}
     }
-    let columns = ledger_columns(&view.rows);
+    let columns = ledger_columns(ui, view, width);
     let heads: Vec<Column> = columns.iter().map(|(_, column)| column.clone()).collect();
-    let status_column = columns
+    // Narrower than the columns' least, the table scrolls sideways and
+    // keeps the location, where a problem is named, beside the name.
+    let location_column = columns
         .iter()
-        .position(|(column, _)| *column == LedgerColumn::Status)
+        .position(|(column, _)| *column == LedgerColumn::Location)
         .unwrap_or(heads.len() - 1);
     let response = DataTable::new(
         "workbench.project.dependencies.ledger",
@@ -508,7 +608,7 @@ fn ledger(
     .state(table)
     .keys(keys)
     .freeze(1)
-    .pin_when_narrow(status_column)
+    .pin_when_narrow(location_column)
     .max_height(ui.available_height().max(1.0))
     .show(ui, |row| {
         let row = &view.rows[view.visible[row]];

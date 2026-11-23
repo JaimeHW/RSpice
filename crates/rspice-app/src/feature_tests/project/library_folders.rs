@@ -36,7 +36,7 @@ use rspice_design::library::folder::{
     ReferenceStatus,
 };
 
-use super::dependencies::said_about;
+use super::dependencies::{expected_said, said_about};
 use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted};
 use super::with_cx;
 
@@ -829,10 +829,9 @@ fn a_held_edit_goes_back_over_a_library_the_paths_page_finds() {
 fn assert_every_place_says(app: &mut RSpiceApp, label: &str, mark: Option<&str>) {
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Dependencies;
-    let expected = (label.to_owned(), mark.map(str::to_owned));
     assert_eq!(
         said_about(app, &DependencyLibrary::design(LIBRARY)),
-        [expected.clone(), expected],
+        expected_said(label, mark),
         "the table and the inspector"
     );
     let snapshot = OverviewSnapshot::capture(

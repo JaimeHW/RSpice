@@ -552,6 +552,74 @@ fn model_files(count: usize) -> String {
     format!("{count} model file{}", if count == 1 { "" } else { "s" })
 }
 
+/// What a dependency provides, counted from the catalogue that holds it
+/// when the rows are built: a design library's cells, a model library's
+/// models and subcircuits, a technology's models and process corners.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Contents {
+    /// The first count, which a sort by the column orders by.
+    pub count: usize,
+    /// The first count in words: "12 cells", "21 models".
+    pub words: String,
+    /// A second count, said after the first: "5 corners", "3 subckts".
+    pub more: Option<String>,
+}
+
+impl Contents {
+    fn of(count: usize, one: &str, many: &str) -> Self {
+        Self {
+            count,
+            words: counted(count, one, many),
+            more: None,
+        }
+    }
+
+    /// The same contents with a second count, when there is any of it.
+    fn and(mut self, count: usize, one: &str, many: &str) -> Self {
+        if count > 0 {
+            self.more = Some(counted(count, one, many));
+        }
+        self
+    }
+
+    /// A model library's: its models, and the subcircuits it defines by
+    /// name, a subcircuit each `.lib` section redefines counted once. A
+    /// library of subcircuits alone is counted by them.
+    fn of_models(library: &ModelLibrary) -> Self {
+        let subcircuits = library
+            .subcircuits
+            .values()
+            .map(|subcircuit| subcircuit.name.as_str())
+            .collect::<BTreeSet<_>>()
+            .len();
+        let models = library.models.len();
+        if models == 0 && subcircuits > 0 {
+            Self::of(subcircuits, "subckt", "subckts")
+        } else {
+            Self::of(models, "model", "models").and(subcircuits, "subckt", "subckts")
+        }
+    }
+}
+
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
+
+/// A design library's cells while its catalogue holds what its folder
+/// gave: a library whose folder was not read has no count to give.
+fn design_contents(model: &Model, library: &rspice_design::library::Library) -> Option<Contents> {
+    use rspice_design::library::folder::ReferenceStatus;
+    match model.reference_status(&library.name) {
+        Some(
+            ReferenceStatus::NotLoaded
+            | ReferenceStatus::NotFound(_)
+            | ReferenceStatus::Unreadable(_)
+            | ReferenceStatus::DifferentLibrary { .. },
+        ) => None,
+        _ => Some(Contents::of(library.cell_count(), "cell", "cells")),
+    }
+}
+
 /// What every status reads: the two catalogues, the drift report, the
 /// technology's status and the files the project reads. Each is read by its
 /// stamp or by what it found, never by walking a catalogue or the disk, so
@@ -625,24 +693,36 @@ pub struct DependencyRow {
     /// own to set.
     pub access: &'static str,
     pub digest: String,
+    /// What it provides, or `None` for what cannot be counted honestly: a
+    /// file or a folder, or a library that is not there to count.
+    pub contents: Option<Contents>,
     pub status: LibraryStatus,
 }
 
 impl DependencyRow {
     /// Whether the reader's filter, trimmed and lowercased, finds this row
-    /// in anything it shows.
+    /// in anything it shows. A status is shown only when it is a problem,
+    /// so only a problem's words find a row.
     pub fn matches(&self, filter: &str) -> bool {
+        let problem = self.status.mark.problem().map(|_| self.status.label);
         filter.is_empty()
             || [
-                self.library.name.as_str(),
-                self.library.kind.label(),
-                self.version.as_str(),
-                self.source.as_str(),
-                self.location.as_str(),
-                self.digest.as_str(),
-                self.status.label,
+                Some(self.library.name.as_str()),
+                Some(self.library.kind.label()),
+                Some(self.version.as_str()),
+                Some(self.source.as_str()),
+                Some(self.location.as_str()),
+                Some(self.digest.as_str()),
+                self.contents
+                    .as_ref()
+                    .map(|contents| contents.words.as_str()),
+                self.contents
+                    .as_ref()
+                    .and_then(|contents| contents.more.as_deref()),
+                problem,
             ]
-            .iter()
+            .into_iter()
+            .flatten()
             .any(|value| value.to_lowercase().contains(filter))
     }
 }
@@ -706,6 +786,7 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
             );
             DependencyRow {
                 status: library_status(model, &key),
+                contents: design_contents(model, library),
                 library: key,
                 // A design library has no version; the technology it is
                 // drawn for is the inspector's to state.
@@ -728,8 +809,11 @@ fn build_rows(model: &Model) -> Vec<DependencyRow> {
         .map(|library| {
             let key = DependencyLibrary::model(&library.name);
             let built_in = !library.source_authority.has_execution_source();
+            let status = library_status(model, &key);
             DependencyRow {
-                status: library_status(model, &key),
+                // A library whose files fail gives a run nothing to count on.
+                contents: (status.mark != Tone::Error).then(|| Contents::of_models(library)),
+                status,
                 library: key,
                 version: nonempty_or_unset(&library.version),
                 source: library.root_path.as_deref().map_or_else(
@@ -803,6 +887,7 @@ fn technology_row(model: &Model, project_folder: Option<&Path>) -> Option<Depend
             resolved: None,
             access: UNSET,
             digest: UNSET.to_owned(),
+            contents: None,
             status,
         });
     };
@@ -832,6 +917,14 @@ fn technology_row(model: &Model, project_folder: Option<&Path>) -> Option<Depend
                 || UNSET.to_owned(),
                 |pin| pin.digest.to_string().chars().take(8).collect(),
             ),
+        // The models it pinned when it was attached, and its corners.
+        contents: (status.mark != Tone::Error).then(|| {
+            Contents::of(binding.model_count(), "model", "models").and(
+                binding.process_sections().len(),
+                "corner",
+                "corners",
+            )
+        }),
         status,
     })
 }

@@ -164,6 +164,7 @@ fn include_path_rows(authored: &[PathBuf], folder: Option<&Path>) -> Vec<Depende
                 resolved: placed.then(|| shown_path(entry.resolved())),
                 access: UNSET,
                 digest: UNSET.to_owned(),
+                contents: None,
                 status,
             }
         })
@@ -188,6 +189,7 @@ fn deck_rows(
         resolved,
         access: UNSET,
         digest: UNSET.to_owned(),
+        contents: None,
         status,
     };
     match &deck.source {
@@ -261,6 +263,7 @@ fn include_row(
         resolved,
         access: UNSET,
         digest: UNSET.to_owned(),
+        contents: None,
         status,
     }
 }

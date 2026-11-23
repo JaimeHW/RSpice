@@ -1,8 +1,9 @@
 //! The Dependencies page through whole application frames: each library has
-//! one status, and the table and the inspector beside the page say the same
-//! thing about it, in every state a library can be in; and each row of the
-//! table can be opened, shown, read again, changed or removed from its menu,
-//! the bar or a key.
+//! one status, which the inspector beside the page states and the table
+//! states only when it is a problem, in the same words, in every state a
+//! library can be in; each row counts what its library provides; and each
+//! row of the table can be opened, shown, read again, changed or removed
+//! from its menu, the bar or a key.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -58,32 +59,55 @@ fn announced(output: &egui::FullOutput) -> Vec<(String, Option<String>, Option<S
 }
 
 /// The table's row for `name` of `kind`, which a screen reader is told cell
-/// by cell under its head, the status last.
+/// by cell under its head.
 fn table_row<'a>(
     nodes: &'a [(String, Option<String>, Option<String>, bool)],
     name: &str,
     kind: &str,
 ) -> Vec<&'a (String, Option<String>, Option<String>, bool)> {
-    let row = row_label(name, kind);
     nodes
         .iter()
-        .filter(|(label, ..)| label.starts_with(&row))
+        .filter(|(label, ..)| names_row(label, name, kind))
         .collect()
 }
 
-/// How a table row for `name` of `kind` starts when it is announced.
-fn row_label(name: &str, kind: &str) -> String {
-    format!("Name: {name}, Kind: {kind}, ")
+/// Whether an announced table row is the one for `name` of `kind`: its name
+/// first, behind the severity of a problem's mark when it has one, its kind
+/// next.
+fn names_row(label: &str, name: &str, kind: &str) -> bool {
+    label.strip_prefix("Name: ").is_some_and(|rest| {
+        severity(rest).1.starts_with(&format!("{name}, "))
+            && rest.contains(&format!("Kind: {kind}, "))
+    })
 }
 
-/// The status a table row announces, after its head.
-fn row_status(label: &str) -> &str {
-    label.rsplit("Status: ").next().unwrap_or(label)
+/// What a table row says of its dependency's status: for a problem, the
+/// severity its name is marked with and the words at the right end of its
+/// location; nothing for a sound one.
+fn row_said(label: &str) -> Option<Said> {
+    let severity = label
+        .strip_prefix("Name: ")
+        .and_then(|rest| severity(rest).0);
+    let location = label.split_once("Location: ").map_or("", |(_, rest)| rest);
+    let location = location
+        .split_once(", Access: ")
+        .map_or(location, |(location, _)| location);
+    match location.rsplit_once(", ") {
+        Some((_, state)) => Some((state.to_owned(), severity)),
+        None => severity.map(|severity| (String::new(), Some(severity))),
+    }
+}
+
+/// What the table and the inspector say about a library whose status is
+/// `label`, marked `mark`: the inspector always, the table only a problem.
+pub(super) fn expected_said(label: &str, mark: Option<&str>) -> (Option<Said>, Said) {
+    let said: Said = (label.to_owned(), mark.map(str::to_owned));
+    (mark.map(|_| said.clone()), said)
 }
 
 /// What the table and the inspector say about `library`, in the frame
 /// after it was selected.
-pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [Said; 2] {
+pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> (Option<Said>, Said) {
     app.state.project.project_dependency_selection = Some(library.clone());
     let ctx = offscreen();
     app_frame(&ctx, app, Vec::new());
@@ -96,8 +120,7 @@ pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [S
         1,
         "one table row names {library:?}: {nodes:#?}"
     );
-    let (table_severity, words) = severity(row_status(&table[0].0));
-    let table = (words.to_owned(), table_severity);
+    let table = row_said(&table[0].0);
 
     let statuses: Vec<_> = nodes
         .iter()
@@ -108,7 +131,7 @@ pub(super) fn said_about(app: &mut RSpiceApp, library: &DependencyLibrary) -> [S
         statuses[0].1.clone().expect("the status row has a value"),
         statuses[0].2.clone(),
     );
-    [table, inspector]
+    (table, inspector)
 }
 
 /// One model file written to `folder`, imported as the Models workspace
@@ -187,11 +210,10 @@ fn libraries() -> Libraries {
 }
 
 fn assert_said(app: &mut RSpiceApp, library: DependencyLibrary, status: &str, mark: Option<&str>) {
-    let expected: Said = (status.to_owned(), mark.map(str::to_owned));
     let said = said_about(app, &library);
     assert_eq!(
         said,
-        [expected.clone(), expected],
+        expected_said(status, mark),
         "the table and the inspector on {library:?}"
     );
 }
@@ -431,7 +453,6 @@ fn press_on(
     kind: &str,
     button: egui::PointerButton,
 ) -> Vec<egui::Event> {
-    let row = row_label(name, kind);
     let bounds = output
         .platform_output
         .accesskit_update
@@ -439,8 +460,8 @@ fn press_on(
         .expect("the frame publishes its tree")
         .nodes
         .iter()
-        .find_map(|(_, node)| node.label()?.starts_with(&row).then(|| node.bounds())?)
-        .unwrap_or_else(|| panic!("the table shows `{row}`"));
+        .find_map(|(_, node)| names_row(node.label()?, name, kind).then(|| node.bounds())?)
+        .unwrap_or_else(|| panic!("the table shows {name} of {kind}"));
     let at = egui::pos2(
         ((bounds.x0 + bounds.x1) / 2.0) as f32,
         ((bounds.y0 + bounds.y1) / 2.0) as f32,
@@ -519,27 +540,62 @@ fn paint_until_recorded(ctx: &egui::Context, app: &mut RSpiceApp, start: &str) {
     panic!("the Console never said `{start}`: {lines:#?}");
 }
 
-/// The Status head sorts the ledger with the worst first, so a library the
-/// reader has to act on is on top however long the list.
+/// However long the list, a library the reader has to act on is found by
+/// its problem's words in the bar's filter; a sound library's status is not
+/// shown, so its words find nothing.
 #[test]
-fn the_status_head_sorts_the_worst_library_first() {
+fn a_problem_is_found_by_its_words_and_a_sound_status_is_not() {
     let mut libraries = libraries();
     let ctx = offscreen();
+    libraries.app.state.project.dependencies.filter = "not found".to_owned();
+    app_frame(&ctx, &mut libraries.app, Vec::new());
+    let rows = ledger_rows(&app_frame(&ctx, &mut libraries.app, Vec::new()));
+    assert_eq!(rows.len(), 1, "{rows:#?}");
+    assert!(
+        names_row(&rows[0], &libraries.missing, "Model library"),
+        "{rows:#?}"
+    );
+    assert_eq!(
+        row_said(&rows[0]),
+        Some(("Not found".to_owned(), Some("Error".to_owned())))
+    );
+
+    libraries.app.state.project.dependencies.filter = "in project".to_owned();
     app_frame(&ctx, &mut libraries.app, Vec::new());
     let page = app_frame(&ctx, &mut libraries.app, Vec::new());
-    let unsorted = ledger_rows(&page);
-    assert!(
-        unsorted[0].starts_with("Name: cells, "),
-        "design libraries come first until a head sorts: {unsorted:#?}"
-    );
-    app_frame(&ctx, &mut libraries.app, click_on(&page, "Sort by Status"));
-    let sorted = ledger_rows(&app_frame(&ctx, &mut libraries.app, Vec::new()));
-    assert_eq!(sorted.len(), unsorted.len());
-    assert!(row_status(&sorted[0]).starts_with("Error: "), "{sorted:#?}");
-    assert!(
-        !row_status(sorted.last().expect("a row")).contains(": "),
-        "{sorted:#?}"
-    );
+    assert!(ledger_rows(&page).is_empty(), "{:#?}", ledger_rows(&page));
+    let _ = std::fs::remove_dir_all(libraries.folder);
+}
+
+/// Each library's row counts what it provides, from the catalogue that
+/// holds it: a design library its cells, a model library its models. A
+/// library whose file is gone has nothing to count, and says so with a
+/// dash.
+#[test]
+fn each_library_counts_what_it_provides() {
+    let mut libraries = libraries();
+    let mut parts = Library::new("parts");
+    for name in ["amp", "bias", "filter"] {
+        parts.add_cell(rspice_app_state::state::Cell::new(name));
+    }
+    libraries.app.state.model.library_manager.add_library(parts);
+    let ctx = offscreen();
+    app_frame(&ctx, &mut libraries.app, Vec::new());
+    let nodes = announced(&app_frame(&ctx, &mut libraries.app, Vec::new()));
+    let contents = |name: &str, kind: &str| {
+        let row = table_row(&nodes, name, kind);
+        assert_eq!(row.len(), 1, "one row names {name}: {nodes:#?}");
+        let label = &row[0].0;
+        label
+            .split_once("Contents: ")
+            .and_then(|(_, rest)| rest.split(", Location: ").next())
+            .unwrap_or_else(|| panic!("{label}"))
+            .to_owned()
+    };
+    assert_eq!(contents("parts", "Design library"), "3 cells");
+    assert_eq!(contents("cells", "Design library"), "0 cells");
+    assert_eq!(contents(&libraries.found, "Model library"), "1 model");
+    assert_eq!(contents(&libraries.missing, "Model library"), "\u{2014}");
     let _ = std::fs::remove_dir_all(libraries.folder);
 }
 
