@@ -10,15 +10,7 @@ fn view() -> (VisualizationDocument, PaneId, AnalysisInstanceId) {
     let source = SourceDataset::run_reference(
         DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([1; 32])),
         "Run",
-        vec![RunSourceAnalysis::new(
-            tran,
-            AnalysisType::Transient,
-            ["V(rail)", "V(ripple)", "I(load)"]
-                .iter()
-                .enumerate()
-                .map(|(index, name)| RunSignal::new(u32::try_from(index).unwrap(), *name, false))
-                .collect(),
-        )],
+        vec![RunSourceAnalysis::new(tran, AnalysisType::Transient)],
     )
     .expect("a run reference");
     let document = VisualizationDocument::new_working_view(
@@ -119,14 +111,7 @@ fn a_panes_strips_survive_a_rerun_a_save_and_a_copy() {
                 next: SourceDataset::run_reference(
                     DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([2; 32])),
                     "Run",
-                    vec![RunSourceAnalysis::new(
-                        tran,
-                        AnalysisType::Transient,
-                        vec![
-                            RunSignal::new(0, "V(rail)", false),
-                            RunSignal::new(1, "V(ripple)", false),
-                        ],
-                    )],
+                    vec![RunSourceAnalysis::new(tran, AnalysisType::Transient)],
                 )
                 .expect("the re-run"),
             }],

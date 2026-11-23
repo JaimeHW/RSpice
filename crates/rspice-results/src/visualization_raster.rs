@@ -648,12 +648,18 @@ pub fn resolve_cartesian_line_scene(
         let mut points = Vec::new();
         if let Some(run) = dataset.run_source() {
             // A run reference draws only from the samples a report copy of
-            // the document carries; the run store is not consulted here.
+            // the document carries; the run store is not consulted here. A
+            // copy carries none for a signal its run does not have, which
+            // draws nothing.
             let samples = run
                 .select_one(&trace.row_predicates)
                 .ok()
-                .and_then(|series| run.figure_samples(series))
-                .ok_or(VisualizationRasterError::EmptyTrace(trace.id.get()))?;
+                .and_then(|series| run.figure_samples(&series));
+            let samples = match samples {
+                Some(samples) => samples,
+                None if run.carries_figure_samples() => continue,
+                None => return Err(VisualizationRasterError::EmptyTrace(trace.id.get())),
+            };
             points
                 .try_reserve_exact(samples.x().len())
                 .map_err(|_| VisualizationRasterError::Allocation("resolved raster points"))?;
@@ -707,6 +713,9 @@ pub fn resolve_cartesian_line_scene(
         });
     }
 
+    if traces.is_empty() {
+        return Err(VisualizationRasterError::NoVisibleTraces);
+    }
     canonicalize_actual_bindings(&mut actual_bindings);
     let expected_bindings = canonicalize_expected_bindings(&reference.dataset_bindings)?;
     if expected_bindings != actual_bindings {

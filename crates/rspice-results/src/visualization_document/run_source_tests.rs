@@ -1,7 +1,7 @@
-//! A document that references its runs: it holds each run's signals and no
-//! samples, provisions panes from them, re-points at a run with the same
-//! signals, embeds a run only when archived, and carries a figure's samples
-//! only in a report's copy.
+//! A document that references its runs: it names each run and the signals
+//! its traces draw, and holds neither the run's samples nor its list of
+//! signals; it re-points at another run by signal name, embeds a run only
+//! when archived, and carries a figure's samples only in a report's copy.
 
 use super::*;
 use crate::analysis_type::AnalysisType;
@@ -10,32 +10,20 @@ fn binding(seed: u8) -> DatasetBinding {
     DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([seed; 32]))
 }
 
-fn signals(names: &[&str]) -> Vec<RunSignal> {
-    names
-        .iter()
-        .enumerate()
-        .map(|(index, name)| RunSignal::new(u32::try_from(index).unwrap(), *name, false))
-        .collect()
-}
-
-fn reference(
-    binding: DatasetBinding,
-    analysis: AnalysisInstanceId,
-    names: &[&str],
-) -> SourceDataset {
+fn reference(binding: DatasetBinding, analysis: AnalysisInstanceId) -> SourceDataset {
     SourceDataset::run_reference(
         binding,
         "Run 1 (9:00:00 AM)",
-        vec![RunSourceAnalysis::new(
-            analysis,
-            AnalysisType::Transient,
-            signals(names),
-        )],
+        vec![RunSourceAnalysis::new(analysis, AnalysisType::Transient)],
     )
     .expect("a valid run reference")
 }
 
-fn waveform_pane(binding: DatasetBinding, analysis: AnalysisInstanceId) -> NewPagePane {
+fn waveform_pane(
+    binding: DatasetBinding,
+    analysis: AnalysisInstanceId,
+    plotted: Vec<String>,
+) -> NewPagePane {
     NewPagePane {
         title: "Transient".to_owned(),
         kind: PaneKind::Cartesian,
@@ -44,6 +32,7 @@ fn waveform_pane(binding: DatasetBinding, analysis: AnalysisInstanceId) -> NewPa
             analysis_id: analysis,
             dataset: binding,
         }),
+        plotted,
     }
 }
 
@@ -54,21 +43,19 @@ fn twenty_names() -> Vec<String> {
 fn referencing_document() -> (VisualizationDocument, DatasetBinding, AnalysisInstanceId) {
     let source = binding(1);
     let analysis = AnalysisInstanceId::new();
-    let names = twenty_names();
-    let names = names.iter().map(String::as_str).collect::<Vec<_>>();
     let document = VisualizationDocument::new_with_initial_pane(
         "Twenty signals",
-        vec![reference(source, analysis, &names)],
-        waveform_pane(source, analysis),
+        vec![reference(source, analysis)],
+        waveform_pane(source, analysis, twenty_names()),
     )
     .expect("a document over a run reference");
     (document, source, analysis)
 }
 
 #[test]
-fn a_run_reference_provisions_every_signal_and_saves_without_samples() {
+fn a_run_reference_plots_the_signals_it_is_given_and_saves_without_its_run() {
     let (document, source, analysis) = referencing_document();
-    assert_eq!(document.traces().len(), 20, "one trace per signal");
+    assert_eq!(document.traces().len(), 20, "one trace per signal named");
     let first = &document.traces()[0];
     assert_eq!(first.binding, source);
     assert_eq!(first.source_signal(), Some("V(n0)"));
@@ -87,6 +74,10 @@ fn a_run_reference_provisions_every_signal_and_saves_without_samples() {
         serde_json::json!(VisualizationDocument::SCHEMA_VERSION)
     );
     assert!(value["datasets"][0].get("rows").is_none());
+    assert!(
+        !json.contains("\"signals\"") && !json.contains("trace-index"),
+        "the document lists none of the run's signals: {json}"
+    );
     let reopened: VisualizationDocument = serde_json::from_str(&json).unwrap();
     assert_eq!(reopened, document);
 }
@@ -122,25 +113,27 @@ fn a_run_reference_selects_whole_signals_never_samples() {
             .to_string()
             .contains("needs the samples")
     );
-    let absent = document.transact(
+    let unplaced = document.transact(
         document.revision(),
         vec![trace(vec![QueryCoordinate {
             column: TRACE_NAME_COLUMN.to_owned(),
-            value: TypedValue::Text("V(absent)".to_owned()),
+            value: TypedValue::Text("V(n0)".to_owned()),
         }])],
     );
-    assert!(absent.unwrap_err().to_string().contains("select no signal"));
+    assert!(
+        unplaced
+            .unwrap_err()
+            .to_string()
+            .contains("names an analysis"),
+        "a trace on a run names the analysis its signal is of"
+    );
 }
 
 #[test]
 fn a_document_compares_any_number_of_run_references() {
     let (mut document, _, _) = referencing_document();
     for seed in 2..=40 {
-        let edit = DocumentEdit::AttachDataset(reference(
-            binding(seed),
-            AnalysisInstanceId::new(),
-            &["V(n0)"],
-        ));
+        let edit = DocumentEdit::AttachDataset(reference(binding(seed), AnalysisInstanceId::new()));
         document.transact(document.revision(), vec![edit]).unwrap();
     }
     assert_eq!(document.datasets().len(), 40);
@@ -150,17 +143,27 @@ fn a_document_compares_any_number_of_run_references() {
 fn analyses_of_one_run_merge_into_its_reference_and_cannot_be_rewritten() {
     let (mut document, source, analysis) = referencing_document();
     let second = AnalysisInstanceId::new();
-    let merge = |analysis, names: &[&str]| {
-        DocumentEdit::MergeDatasetProjection(reference(source, analysis, names))
+    let merge = |analysis, kind| {
+        DocumentEdit::MergeDatasetProjection(
+            SourceDataset::run_reference(
+                source,
+                "Run 1 (9:00:00 AM)",
+                vec![RunSourceAnalysis::new(analysis, kind)],
+            )
+            .unwrap(),
+        )
     };
     document
-        .transact(document.revision(), vec![merge(second, &["I(R1)"])])
+        .transact(
+            document.revision(),
+            vec![merge(second, AnalysisType::Transient)],
+        )
         .unwrap();
     let run = document.datasets()[0].run_source().unwrap();
     assert_eq!(run.analyses().len(), 2);
     assert!(
         document
-            .transact(document.revision(), vec![merge(analysis, &["V(other)"])])
+            .transact(document.revision(), vec![merge(analysis, AnalysisType::Ac)])
             .unwrap_err()
             .to_string()
             .contains("cannot be rewritten")
@@ -172,28 +175,20 @@ fn repointing_moves_every_pane_and_trace_onto_the_same_signals_of_another_run() 
     let (mut document, previous, analysis) = referencing_document();
     let next = binding(9);
     let next_analysis = AnalysisInstanceId::new();
-    // The other run lists its signals in another order.
-    let mut names = twenty_names();
-    names.reverse();
-    let names = names.iter().map(String::as_str).collect::<Vec<_>>();
-    let repoint = |names: &[&str]| DocumentEdit::RepointDataset {
-        previous,
-        next: reference(next, next_analysis, names),
-        analyses: vec![AnalysisRepoint {
-            previous: analysis,
-            next: next_analysis,
-        }],
-    };
-
-    let missing = document.transact(document.revision(), vec![repoint(&names[1..])]);
-    assert!(
-        missing.unwrap_err().to_string().contains("V(n19)"),
-        "a run without one of the signals is refused by name"
-    );
-    assert_eq!(document.datasets()[0].binding(), previous, "nothing moved");
-
+    // Whether the other run holds the same signals is the host's to check:
+    // the document names its signals and reads neither run's list of them.
     document
-        .transact(document.revision(), vec![repoint(&names)])
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::RepointDataset {
+                previous,
+                next: reference(next, next_analysis),
+                analyses: vec![AnalysisRepoint {
+                    previous: analysis,
+                    next: next_analysis,
+                }],
+            }],
+        )
         .unwrap();
     assert_eq!(document.datasets().len(), 1, "the missing run is let go");
     assert_eq!(document.datasets()[0].binding(), next);
@@ -203,10 +198,13 @@ fn repointing_moves_every_pane_and_trace_onto_the_same_signals_of_another_run() 
     assert_eq!(first.binding, next);
     assert_eq!(first.source_signal(), Some("V(n0)"));
     assert_eq!(first.source_analysis(), Some(next_analysis));
-    assert!(first.row_predicates.contains(&QueryCoordinate {
-        column: "trace-index".to_owned(),
-        value: TypedValue::Integer(19),
-    }));
+    assert!(
+        first
+            .row_predicates
+            .iter()
+            .all(|predicate| predicate.column != "trace-index"),
+        "a trace names its signal, not the place one run lists it at"
+    );
 }
 
 #[test]
@@ -259,12 +257,18 @@ impl SourceSamples for Samples {
     fn series_figure(
         &self,
         binding: DatasetBinding,
-        series: SeriesKey,
+        series: &SeriesKey,
         _range: Option<(f64, f64)>,
         _columns: usize,
-    ) -> Option<(Vec<f64>, Vec<f64>)> {
-        (binding == self.binding && series.component == SignalComponent::Display)
-            .then(|| (self.x.clone(), self.y.clone()))
+    ) -> Result<Option<(Vec<f64>, Vec<f64>)>, RunNotHeld> {
+        if binding != self.binding {
+            return Err(RunNotHeld);
+        }
+        // This run has every signal of the twenty but the last.
+        Ok(
+            (series.component == SignalComponent::Display && series.name != "V(n19)")
+                .then(|| (self.x.clone(), self.y.clone())),
+        )
     }
 }
 
@@ -286,7 +290,7 @@ fn a_report_copy_carries_exactly_the_samples_its_traces_draw() {
     );
     let run = copy.datasets()[0].run_source().unwrap();
     let series = run.select_one(&copy.traces()[3].row_predicates).unwrap();
-    let carried = run.figure_samples(series).unwrap();
+    let carried = run.figure_samples(&series).unwrap();
     assert_eq!(carried.x(), samples.x.as_slice());
     assert!(carried.y()[1].is_nan(), "an unavailable sample stays one");
     let reopened: VisualizationDocument =
@@ -295,7 +299,7 @@ fn a_report_copy_carries_exactly_the_samples_its_traces_draw() {
         reopened.datasets()[0]
             .run_source()
             .unwrap()
-            .figure_samples(series)
+            .figure_samples(&series)
             .unwrap()
             .x(),
         samples.x.as_slice()
@@ -304,8 +308,13 @@ fn a_report_copy_carries_exactly_the_samples_its_traces_draw() {
         document.datasets()[0]
             .run_source()
             .unwrap()
-            .figure_samples(series)
+            .figure_samples(&series)
             .is_none()
+    );
+    let absent = run.select_one(&copy.traces()[19].row_predicates).unwrap();
+    assert!(
+        run.figure_samples(&absent).is_none(),
+        "a signal the run does not have is carried by no figure"
     );
 
     let elsewhere = Samples {

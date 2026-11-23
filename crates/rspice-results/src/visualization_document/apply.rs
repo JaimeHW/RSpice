@@ -214,16 +214,24 @@ impl VisualizationDocument {
     /// pane. A bound pane without these entities can be shown by the live
     /// Results renderer, but cannot participate in deterministic export,
     /// marker/measurement authoring, trace visibility, or link groups.
+    ///
+    /// A pane bound to a table plots every signal the table holds. A run
+    /// reference holds no list of its run's signals, so a pane bound to one
+    /// plots the signals `plotted` names, which the host read from the run.
     pub(super) fn provision_bound_pane(
         &mut self,
         pane_id: PaneId,
         viewer_id: &str,
         binding: PaneDataBinding,
+        plotted: &[String],
         created: &mut Vec<EntityRef>,
     ) -> Result<(), VisualizationError> {
         let (x_axis_id, y_axis_id) = self.provision_axes(pane_id, viewer_id, created)?;
         if self.traces.iter().any(|trace| trace.pane_id == pane_id) {
             return Ok(());
+        }
+        if self.dataset_for_binding(binding.dataset)?.run.is_some() {
+            return self.set_signals_plotted(pane_id, plotted, true, created);
         }
         self.provision_display_traces(pane_id, binding, (x_axis_id, y_axis_id), created)
     }
@@ -622,6 +630,7 @@ impl VisualizationDocument {
                     viewer_id: default_viewer_id_for_kind(kind).to_owned(),
                     binding: None,
                     placement,
+                    plotted: Vec::new(),
                 })?;
                 created.push(EntityRef::Pane(id));
                 Ok(())
@@ -653,14 +662,15 @@ impl VisualizationDocument {
                 }
                 Ok(())
             }
-            DocumentEdit::AddBoundPane(pane) => {
+            DocumentEdit::AddBoundPane(mut pane) => {
                 let viewer_id = pane.viewer_id.clone();
                 let binding = pane.binding;
                 let placement = pane.placement;
+                let plotted = std::mem::take(&mut pane.plotted);
                 let id = self.create_pane(pane)?;
                 created.push(EntityRef::Pane(id));
                 if let Some(binding) = binding {
-                    self.provision_bound_pane(id, &viewer_id, binding, created)?;
+                    self.provision_bound_pane(id, &viewer_id, binding, &plotted, created)?;
                 }
                 self.inherit_axis_link_groups(id, placement)?;
                 Ok(())
@@ -677,10 +687,17 @@ impl VisualizationDocument {
                     viewer_id: pane.viewer_id,
                     binding: pane.binding,
                     placement: PanePlacement::Primary,
+                    plotted: Vec::new(),
                 })?;
                 created.push(EntityRef::Pane(pane_id));
                 if let Some(binding) = binding {
-                    self.provision_bound_pane(pane_id, &viewer_id, binding, created)?;
+                    self.provision_bound_pane(
+                        pane_id,
+                        &viewer_id,
+                        binding,
+                        &pane.plotted,
+                        created,
+                    )?;
                 }
                 Ok(())
             }
@@ -718,7 +735,7 @@ impl VisualizationDocument {
                 pane.viewer_id = viewer_id.clone();
                 pane.binding = binding;
                 if let Some(binding) = binding {
-                    self.provision_bound_pane(pane_id, &viewer_id, binding, created)?;
+                    self.provision_bound_pane(pane_id, &viewer_id, binding, &[], created)?;
                 }
                 Ok(())
             }
@@ -1582,8 +1599,7 @@ impl VisualizationDocument {
         let mut traces = Vec::new();
         {
             let dataset = self.dataset_for_binding(next)?;
-            let mut signals_by_analysis =
-                HashMap::<AnalysisInstanceId, (HashMap<String, Vec<QueryCoordinate>>, bool)>::new();
+            let mut signals_by_analysis = HashMap::<AnalysisInstanceId, SignalNames>::new();
             for (index, trace) in self.traces.iter().enumerate() {
                 if trace.binding != previous {
                     continue;
@@ -1606,17 +1622,20 @@ impl VisualizationDocument {
                 if let std::collections::hash_map::Entry::Vacant(entry) =
                     signals_by_analysis.entry(to)
                 {
-                    entry.insert(display_predicates_by_name(dataset, to, describe_next)?);
+                    entry.insert(SignalNames::of(dataset, to, describe_next)?);
                 }
-                let (by_name, long_form) = &signals_by_analysis[&to];
-                let predicates = if *long_form {
+                let names = &signals_by_analysis[&to];
+                let predicates = if names.is_wide() {
+                    None
+                } else {
                     // The vector the trace was provisioned from, not what it
                     // is called: a reader who renames a trace has not
-                    // repointed it at another signal. A signal the run
+                    // repointed it at another signal. A signal a table
                     // lacks keeps its trace, marked missing, naming the
-                    // analysis it now stands in.
+                    // analysis it now stands in; a run says whether it has
+                    // the signal when the trace is drawn.
                     let signal = trace.source_signal().unwrap_or(&trace.label);
-                    Some(match by_name.get(signal) {
+                    Some(match names.predicates(signal, trace_component(trace)) {
                         Some(predicates) => (predicates.clone(), false),
                         None if keep_missing || trace.missing => {
                             (missing_signal_predicates(&trace.row_predicates, to), true)
@@ -1630,8 +1649,6 @@ impl VisualizationDocument {
                             });
                         }
                     })
-                } else {
-                    None
                 };
                 traces.push((index, predicates));
             }
@@ -2556,15 +2573,15 @@ impl VisualizationDocument {
     }
 }
 
-/// The display signals of one analysis a long-form table or a run reference
-/// holds, as (trace index, name) in source order, and whether the dataset
-/// tells its analyses apart. `None` when the dataset is not long-form.
+/// The display signals of one analysis a long-form table holds, as (trace
+/// index, name) in source order, and whether the table tells its analyses
+/// apart. `None` when the dataset is not a long-form table.
 pub(super) fn long_form_display_signals(
     dataset: &SourceDataset,
     analysis_id: AnalysisInstanceId,
 ) -> Option<(Vec<(i64, String)>, bool)> {
-    if let Some(run) = &dataset.run {
-        return Some((run.display_signals(analysis_id), true));
+    if dataset.run.is_some() {
+        return None;
     }
     let column_index = |key: &str| dataset.columns.iter().position(|column| column.key == key);
     let analysis_identity = analysis_id.to_string();
@@ -2686,6 +2703,71 @@ pub(super) fn display_predicates_by_name(
         }
     }
     Ok((by_name, true))
+}
+
+/// How the traces of one analysis of a dataset name the signals they draw.
+pub(super) enum SignalNames {
+    /// A run reference: a trace names its signal, and the run says whether
+    /// it has it when the trace is drawn.
+    Run(AnalysisInstanceId),
+    /// A long-form table: each display signal's exact predicates by name.
+    LongForm(HashMap<String, Vec<QueryCoordinate>>),
+    /// A wide table: one signal column per signal.
+    Wide,
+}
+
+impl SignalNames {
+    pub(super) fn of(
+        dataset: &SourceDataset,
+        analysis_id: AnalysisInstanceId,
+        describe: &str,
+    ) -> Result<Self, VisualizationError> {
+        if dataset.run.is_some() {
+            return Ok(Self::Run(analysis_id));
+        }
+        let (by_name, long_form) = display_predicates_by_name(dataset, analysis_id, describe)?;
+        Ok(if long_form {
+            Self::LongForm(by_name)
+        } else {
+            Self::Wide
+        })
+    }
+
+    pub(super) const fn is_wide(&self) -> bool {
+        matches!(self, Self::Wide)
+    }
+
+    /// The exact predicates that name the signal `name`, drawn as
+    /// `component` where the source tells components apart; `None` when a
+    /// table has no display signal by that name.
+    pub(super) fn predicates(
+        &self,
+        name: &str,
+        component: SignalComponent,
+    ) -> Option<Vec<QueryCoordinate>> {
+        match self {
+            Self::Run(analysis) => Some(run_signal_predicates(*analysis, name, component)),
+            Self::LongForm(by_name) => by_name.get(name).cloned(),
+            Self::Wide => None,
+        }
+    }
+}
+
+/// The part of its signal a trace draws: the display values unless its
+/// predicates name another.
+pub(super) fn trace_component(trace: &Trace) -> SignalComponent {
+    trace
+        .row_predicates
+        .iter()
+        .find_map(|coordinate| match &coordinate.value {
+            TypedValue::Text(key) if coordinate.column == COMPONENT_COLUMN => {
+                [SignalComponent::Real, SignalComponent::Imag]
+                    .into_iter()
+                    .find(|component| component.key() == key)
+            }
+            _ => None,
+        })
+        .unwrap_or(SignalComponent::Display)
 }
 
 /// Spectrum settings stand when their record, samples and measurement do.

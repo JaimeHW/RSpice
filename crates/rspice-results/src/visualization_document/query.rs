@@ -315,7 +315,7 @@ pub(super) fn trace_contains_exact_coordinate(
         // that places it snaps it onto the run's samples, and the viewer reads
         // it against the run.
         let series = run.select_one(&trace.row_predicates)?;
-        return Ok(match (coordinate, run.figure_samples(series)) {
+        return Ok(match (coordinate, run.figure_samples(&series)) {
             (TypedValue::Real(x), Some(samples)) => samples
                 .x()
                 .iter()
@@ -400,7 +400,7 @@ pub(super) fn validate_trace_row_predicates(
         resolved.push((index, &predicate.value));
     }
     if let Some(run) = &dataset.run {
-        run.select(predicates)?;
+        run.select_one(predicates)?;
         return Ok(());
     }
     if !dataset.rows.iter().any(|row| {

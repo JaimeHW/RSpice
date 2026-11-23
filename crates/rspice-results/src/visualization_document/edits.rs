@@ -61,6 +61,11 @@ pub struct NewPane {
     pub viewer_id: String,
     pub binding: Option<PaneDataBinding>,
     pub placement: PanePlacement,
+    /// The signals the pane plots to begin with, by name, when it is bound
+    /// to a run: a run reference holds no list of its run's signals, so the
+    /// host names them. A pane bound to a table plots every signal it holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plotted: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +76,11 @@ pub struct NewPagePane {
     #[serde(deserialize_with = "deserialize_key_string")]
     pub viewer_id: String,
     pub binding: Option<PaneDataBinding>,
+    /// The signals the pane plots to begin with, by name, when it is bound
+    /// to a run: a run reference holds no list of its run's signals, so the
+    /// host names them. A pane bound to a table plots every signal it holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plotted: Vec<String>,
 }
 
 /// One analysis a re-pointed document reads, and the analysis of the new run

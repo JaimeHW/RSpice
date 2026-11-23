@@ -172,7 +172,7 @@ fn commit_is_project_owned_dirty_and_stably_selected() {
         trace.label == "V(out)"
             && trace.coordinate_key == "x"
             && trace.signal_key == "y"
-            && trace.row_predicates.len() == 4
+            && trace.row_predicates.len() == 3
     }));
     assert_eq!(document.tracking(), ResultDocumentTracking::pinned());
     assert_eq!(

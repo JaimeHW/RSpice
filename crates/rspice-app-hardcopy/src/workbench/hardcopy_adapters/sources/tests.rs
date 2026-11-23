@@ -727,7 +727,7 @@ fn linear_axes_are_captioned_on_both_dimensions_and_keep_offset_anchors() {
 #[test]
 fn a_figure_of_a_run_reference_prints_from_the_samples_its_copy_carries() {
     use crate::results::visualization_document::{
-        NewPagePane, PaneDataBinding, PaneKind, RunSignal, RunSourceAnalysis,
+        NewPagePane, PaneDataBinding, PaneKind, RunSourceAnalysis,
     };
     use crate::state::result_presentation::AnalysisPresentationKey;
     use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
@@ -749,11 +749,7 @@ fn a_figure_of_a_run_reference_prints_from_the_samples_its_copy_carries() {
     let source = SourceDataset::run_reference(
         binding,
         "Run 1",
-        vec![RunSourceAnalysis::new(
-            analysis_id,
-            AnalysisType::Transient,
-            vec![RunSignal::new(0, "V(out)", false)],
-        )],
+        vec![RunSourceAnalysis::new(analysis_id, AnalysisType::Transient)],
     )
     .unwrap();
     let document = VisualizationDocument::new_with_initial_pane(
@@ -767,6 +763,7 @@ fn a_figure_of_a_run_reference_prints_from_the_samples_its_copy_carries() {
                 analysis_id,
                 dataset: binding,
             }),
+            plotted: vec!["V(out)".to_owned()],
         },
     )
     .unwrap();

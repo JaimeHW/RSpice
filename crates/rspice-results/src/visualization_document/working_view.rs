@@ -77,6 +77,7 @@ impl VisualizationDocument {
                         dataset: binding,
                     }),
                     placement,
+                    plotted: Vec::new(),
                 },
                 &mut created,
             )?;
@@ -197,17 +198,16 @@ impl VisualizationDocument {
         let mut traces = Vec::with_capacity(new.len());
         {
             let dataset = self.dataset_for_binding(binding.dataset)?;
-            let (by_name, long_form) =
-                apply::display_predicates_by_name(dataset, binding.analysis_id, "pane's")?;
+            let signals = apply::SignalNames::of(dataset, binding.analysis_id, "pane's")?;
             let coordinate = dataset
                 .columns
                 .iter()
                 .find(|column| column.role == ColumnRole::Coordinate);
             for name in new {
-                let trace = if long_form {
-                    by_name
-                        .get(name.as_str())
-                        .map(|predicates| ("y".to_owned(), "x".to_owned(), predicates.clone()))
+                let trace = if !signals.is_wide() {
+                    signals
+                        .predicates(name, SignalComponent::Display)
+                        .map(|predicates| ("y".to_owned(), "x".to_owned(), predicates))
                 } else {
                     dataset
                         .columns

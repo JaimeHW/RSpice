@@ -293,12 +293,11 @@ pub fn repoint(
     let catalogs = analyses
         .iter()
         .map(|mapping| {
-            let analysis = run
-                .analyses
+            run.analyses
                 .iter()
                 .find(|analysis| source_analysis_identity(run, analysis) == mapping.next)
-                .ok_or_else(|| "The chosen run no longer holds the analysis.".to_owned())?;
-            run_source_analysis(run, analysis).map_err(|error| error.to_string())
+                .map(|analysis| run_source_analysis(run, analysis))
+                .ok_or_else(|| "The chosen run no longer holds the analysis.".to_owned())
         })
         .collect::<Result<Vec<_>, String>>()?;
     let next = SourceDataset::run_reference(

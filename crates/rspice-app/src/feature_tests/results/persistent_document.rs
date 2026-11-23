@@ -170,9 +170,27 @@ fn latest_tracking_fixture() -> LatestFixture {
     }
 }
 
-/// A signal name no run reference can catalogue: the newest run carrying it
-/// cannot build the retained source a document follows.
-const UNCATALOGUED_SIGNAL: &str = "V(out)\u{7}";
+/// A newest run no run reference can name: its label is longer than any
+/// label may be, so the retained source a document follows cannot be built
+/// from it.
+fn unreferenceable_run(
+    run_sequence: u64,
+    plan_id: SimulationPlanId,
+    project_revision: ObjectRevision,
+    source_digest: ContentDigest,
+    authored_analysis_id: AnalysisInstanceId,
+) -> SimulationRun {
+    let mut run = authored_run(
+        run_sequence,
+        plan_id,
+        project_revision,
+        source_digest,
+        authored_analysis_id,
+        "V(out)",
+    );
+    run.label = "R".repeat(2_000);
+    run
+}
 
 /// A Latest document whose newest run cannot build its retained source
 /// keeps drawing the dataset it last resolved, under a banner naming the
@@ -189,16 +207,20 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
     } = latest_tracking_fixture();
     let good_dataset = app.state.model.simulation.retained.runs[0].dataset_id;
     let project_revision = app.state.model.workspace.content.project.revision();
-    // The newest run of the same authored analysis names its signal in a
-    // way no run reference can catalogue.
-    app.state.model.simulation.retained.runs.push(authored_run(
-        2,
-        plan_id,
-        project_revision,
-        source_digest,
-        authored_analysis_id,
-        UNCATALOGUED_SIGNAL,
-    ));
+    // The newest run of the same authored analysis is one no run reference
+    // can name.
+    app.state
+        .model
+        .simulation
+        .retained
+        .runs
+        .push(unreferenceable_run(
+            2,
+            plan_id,
+            project_revision,
+            source_digest,
+            authored_analysis_id,
+        ));
     let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
     assert_ne!(good_dataset, stale_dataset);
 
@@ -245,8 +267,8 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
 }
 
 /// A Latest document whose newest run renamed the net it plots moves onto
-/// that run all the same: the trace keeps its place, marked missing, and
-/// nothing is refused.
+/// that run all the same: the trace keeps its place, naming the signal the
+/// run lacks, and nothing is refused.
 #[test]
 fn a_latest_document_moves_onto_a_run_that_lacks_its_signal() {
     let LatestFixture {
@@ -287,9 +309,20 @@ fn a_latest_document_moves_onto_a_run_that_lacks_its_signal() {
         "the view moved onto the newest run"
     );
     assert!(!document.traces().is_empty());
+    let renamed = &app.state.model.simulation.retained.runs[1];
     assert!(
-        document.traces().iter().all(|trace| trace.missing),
-        "the trace the run lacks stays, marked missing"
+        document.traces().iter().all(|trace| {
+            trace.binding.dataset_id == newest
+                && trace.source_signal().is_some_and(|signal| {
+                    !renamed.analyses.iter().any(|analysis| {
+                        analysis
+                            .waveforms
+                            .iter()
+                            .any(|waveform| waveform.name == signal)
+                    })
+                })
+        }),
+        "the trace the run lacks stays on it, naming its signal"
     );
     assert!(
         app.state
@@ -389,14 +422,18 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
         source_digest,
     } = latest_tracking_fixture();
     let project_revision = app.state.model.workspace.content.project.revision();
-    app.state.model.simulation.retained.runs.push(authored_run(
-        2,
-        plan_id,
-        project_revision,
-        source_digest,
-        authored_analysis_id,
-        UNCATALOGUED_SIGNAL,
-    ));
+    app.state
+        .model
+        .simulation
+        .retained
+        .runs
+        .push(unreferenceable_run(
+            2,
+            plan_id,
+            project_revision,
+            source_digest,
+            authored_analysis_id,
+        ));
     let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
 
     assert!(matches!(

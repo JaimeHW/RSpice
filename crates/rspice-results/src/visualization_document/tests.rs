@@ -212,6 +212,7 @@ fn same_run_analysis_projections_merge_without_cross_binding_trace_rows() {
                     placement: PanePlacement::Below {
                         anchor_pane_id: first_pane,
                     },
+                    plotted: Vec::new(),
                 }),
             ],
         )
@@ -1755,6 +1756,7 @@ fn composed_page_and_bound_pane_commit_exact_source_identity() {
                     dataset: source,
                 }),
                 placement: PanePlacement::Primary,
+                plotted: Vec::new(),
             })],
         )
         .unwrap();
@@ -1816,6 +1818,7 @@ fn report_page_assignment_reorder_and_link_inheritance_are_atomic() {
                 placement: PanePlacement::Below {
                     anchor_pane_id: primary,
                 },
+                plotted: Vec::new(),
             })],
         )
         .unwrap();
@@ -1868,6 +1871,7 @@ fn report_page_assignment_reorder_and_link_inheritance_are_atomic() {
                 placement: PanePlacement::Below {
                     anchor_pane_id: second,
                 },
+                plotted: Vec::new(),
             })],
         )
         .unwrap();
@@ -1961,6 +1965,7 @@ fn invalid_pane_binding_and_single_pane_layout_roll_back_atomically() {
                 placement: PanePlacement::Below {
                     anchor_pane_id: primary,
                 },
+                plotted: Vec::new(),
             })],
         ),
         Err(VisualizationError::InvalidValue {
@@ -1984,6 +1989,7 @@ fn invalid_pane_binding_and_single_pane_layout_roll_back_atomically() {
                 placement: PanePlacement::Below {
                     anchor_pane_id: primary,
                 },
+                plotted: Vec::new(),
             })],
         ),
         Err(VisualizationError::SourceDigestMismatch { .. })
@@ -2036,6 +2042,7 @@ fn pane_placement_orders_are_stable_across_insert_move_and_remove() {
                 placement: PanePlacement::Below {
                     anchor_pane_id: primary,
                 },
+                plotted: Vec::new(),
             })],
         )
         .unwrap();
@@ -2055,6 +2062,7 @@ fn pane_placement_orders_are_stable_across_insert_move_and_remove() {
                 placement: PanePlacement::RightOf {
                     anchor_pane_id: primary,
                 },
+                plotted: Vec::new(),
             })],
         )
         .unwrap();

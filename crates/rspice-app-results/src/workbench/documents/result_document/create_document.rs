@@ -20,7 +20,7 @@ use crate::results::viewer_catalog::{
 use crate::results::visualization_document::{
     AxisOrientation, AxisScale, DocumentEdit, EntityRef, LinkKind, NewPagePane, NewPane,
     PageUpdatePolicy, PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking,
-    ResultDocumentTrackingMode, RunSignal, RunSourceAnalysis, SourceDataset, VisualizationDocument,
+    ResultDocumentTrackingMode, RunSourceAnalysis, SourceDataset, VisualizationDocument,
     VisualizationError,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
@@ -524,8 +524,9 @@ pub(super) fn reference_run_label(run: &SimulationRun) -> String {
 }
 
 /// The dataset a document reads one analysis of a retained run through: the
-/// run by identity and content digest, and the signals of the analysis. The
-/// samples stay in the run, so a document is no larger for a larger run.
+/// run by identity and content digest, and the analysis. The samples and the
+/// list of signals stay in the run, so a document is no larger for a larger
+/// run.
 pub(super) fn source_reference(
     run: &SimulationRun,
     analysis: &AnalysisResult,
@@ -533,37 +534,30 @@ pub(super) fn source_reference(
     SourceDataset::run_reference(
         DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
         reference_run_label(run),
-        vec![run_source_analysis(run, analysis)?],
+        vec![run_source_analysis(run, analysis)],
     )
 }
 
-/// One analysis of a run as a run reference catalogs it: its identity, its
-/// kind and its signals.
+/// One analysis of a run as a run reference names it: its identity and its
+/// kind.
 pub(super) fn run_source_analysis(
     run: &SimulationRun,
     analysis: &AnalysisResult,
-) -> Result<RunSourceAnalysis, VisualizationError> {
-    let signals = analysis
-        .waveforms
-        .iter()
-        .enumerate()
-        .map(|(index, waveform)| {
-            let index = u32::try_from(index).map_err(|_| VisualizationError::InvalidValue {
-                field: "run-source.signals",
-                message: "the analysis holds more signals than a run reference indexes".to_owned(),
-            })?;
-            Ok(RunSignal::new(
-                index,
-                waveform.name.clone(),
-                waveform.complex.is_some(),
-            ))
-        })
-        .collect::<Result<Vec<_>, VisualizationError>>()?;
-    Ok(RunSourceAnalysis::new(
+) -> RunSourceAnalysis {
+    RunSourceAnalysis::new(
         source_analysis_identity(run, analysis),
         analysis.analysis_type,
-        signals,
-    ))
+    )
+}
+
+/// Every signal of `analysis`, by name: what a new document's pane over it
+/// plots.
+pub(super) fn every_signal(analysis: &AnalysisResult) -> Vec<String> {
+    analysis
+        .waveforms
+        .iter()
+        .map(|waveform| waveform.name.clone())
+        .collect()
 }
 
 pub(super) fn pane_kind(art: ViewerArt) -> PaneKind {
@@ -609,6 +603,7 @@ fn build_document(
             kind: pane_kind(resolved.viewer.art),
             viewer_id: resolved.viewer.id.to_owned(),
             binding: Some(binding),
+            plotted: every_signal(resolved.analysis),
         },
     )?;
     let page_id = document.pages()[0].id;
@@ -661,6 +656,7 @@ fn build_document(
                 viewer_id: resolved.viewer.id.to_owned(),
                 binding: Some(binding),
                 placement,
+                plotted: every_signal(resolved.analysis),
             })],
         )?;
         let pane_id = receipt

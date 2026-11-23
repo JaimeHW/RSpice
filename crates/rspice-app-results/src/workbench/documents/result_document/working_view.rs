@@ -424,15 +424,14 @@ fn first_plotted(
         .collect()
 }
 
-/// `run` as a view reads it: by identity and digest, with the signals of
-/// every analysis it solved.
+/// `run` as a view reads it: by identity and digest, and every analysis it
+/// solved. The view lists none of its signals, so a run of any size has one.
 fn run_reference(state: ResultsReads<'_>, run: &SimulationRun) -> Option<SourceDataset> {
     let analyses = run
         .analyses
         .iter()
         .map(|analysis| super::create_document::run_source_analysis(run, analysis))
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
+        .collect();
     SourceDataset::run_reference(
         DatasetBinding::new(run.dataset_id, super::retained_dataset_digest(state, run)),
         super::create_document::reference_run_label(run),
@@ -550,30 +549,25 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
         .filter_map(|pane| pane.binding)
         .any(|binding| binding.dataset.dataset_id == run.dataset_id);
     // The run the view reads grew since the view last read it: it was shown
-    // while still running, and has signals now that it had not then, or it
-    // finished with samples it had not then.
+    // while still running, and has analyses now that it had not then, or it
+    // finished with samples it had not then. A signal it gained needs no
+    // reading: the view names the signals it plots, not the run's list.
     let grown = reads_run
         && document
             .datasets()
             .iter()
             .find(|dataset| dataset.binding().dataset_id == run.dataset_id)
             .is_some_and(|held| {
-                let signals_changed = held.run_source().is_none_or(|source| {
+                let analyses_changed = held.run_source().is_none_or(|source| {
                     run.analyses.iter().any(|analysis| {
                         source
                             .analysis(super::create_document::source_analysis_identity(
                                 run, analysis,
                             ))
-                            .is_some_and(|read| {
-                                !read
-                                    .signals()
-                                    .iter()
-                                    .map(|signal| signal.name())
-                                    .eq(analysis.waveforms.iter().map(|w| w.name.as_str()))
-                            })
+                            .is_none()
                     })
                 });
-                signals_changed
+                analyses_changed
                     || (finished
                         && held.binding().content_digest
                             != super::retained_dataset_digest(state.results_reads(), run))
@@ -625,6 +619,7 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
                         anchor_pane_id,
                     },
                 ),
+                plotted: Vec::new(),
             },
         ));
         // A pane added in this transaction has no identity to anchor the

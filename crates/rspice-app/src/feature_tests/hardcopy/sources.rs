@@ -582,6 +582,7 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
                         rspice_app_state::results::visualization_document::PanePlacement::Below {
                             anchor_pane_id: first_pane,
                         },
+                    plotted: Vec::new(),
                 },
             )],
         )

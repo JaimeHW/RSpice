@@ -2960,7 +2960,13 @@ impl VisualizationDocument {
             initial.binding = pane.binding;
         }
         if let Some(binding) = pane.binding {
-            document.provision_bound_pane(pane_id, &pane.viewer_id, binding, &mut Vec::new())?;
+            document.provision_bound_pane(
+                pane_id,
+                &pane.viewer_id,
+                binding,
+                &pane.plotted,
+                &mut Vec::new(),
+            )?;
         }
         document.validate()?;
         Ok(document)

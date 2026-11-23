@@ -285,6 +285,7 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
                 kind: PaneKind::Cartesian,
                 viewer_id: "viewer-waveform".to_owned(),
                 binding: Some(binding),
+                plotted: Vec::new(),
             },
         }],
     )

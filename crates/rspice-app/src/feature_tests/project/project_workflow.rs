@@ -1624,6 +1624,11 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
                         dataset: source.binding(),
                     }),
                 },
+                DocumentEdit::SetSignalsPlotted {
+                    pane_id,
+                    signals: vec!["V(out)".to_owned()],
+                    plotted: true,
+                },
                 DocumentEdit::SetPresentation(VisualizationPresentationPolicy {
                     significant_digits: 13,
                     phase_continuous: true,
@@ -1638,7 +1643,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
             rspice_app_state::results::visualization_document::EntityRef::Trace(id) => Some(*id),
             _ => None,
         })
-        .expect("bound pane provisions a trace");
+        .expect("the pane plots the signal it is given");
     let cursor_axis_id = document
         .traces()
         .iter()

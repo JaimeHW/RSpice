@@ -13,24 +13,14 @@ fn run(
     binding: DatasetBinding,
     analyses: &[(AnalysisInstanceId, AnalysisType, &[&str])],
 ) -> SourceDataset {
+    // A run reference names the run's analyses, never its signals: the names
+    // here say what the run holds, for the reader of the test.
     SourceDataset::run_reference(
         binding,
         "Run",
         analyses
             .iter()
-            .map(|(id, kind, names)| {
-                RunSourceAnalysis::new(
-                    *id,
-                    *kind,
-                    names
-                        .iter()
-                        .enumerate()
-                        .map(|(index, name)| {
-                            RunSignal::new(u32::try_from(index).unwrap(), *name, false)
-                        })
-                        .collect(),
-                )
-            })
+            .map(|(id, kind, _)| RunSourceAnalysis::new(*id, *kind))
             .collect(),
     )
     .expect("a valid run reference")
@@ -188,18 +178,6 @@ fn plotting_a_signal_adds_its_trace_once_and_closing_a_strip_keeps_it() {
         ],
         "plotting a hidden signal shows its trace instead of adding another"
     );
-    assert!(
-        document
-            .transact(
-                document.revision(),
-                vec![DocumentEdit::SetSignalsPlotted {
-                    pane_id,
-                    signals: vec!["V(nowhere)".to_owned()],
-                    plotted: true,
-                }],
-            )
-            .is_err()
-    );
 
     document
         .transact(
@@ -263,9 +241,9 @@ fn following_a_run_moves_each_pane_onto_its_own_analysis() {
         plotted(&document, ac_pane.id),
         [
             ("V(out)".to_owned(), true, false),
-            ("V(mid)".to_owned(), true, true)
+            ("V(mid)".to_owned(), true, false)
         ],
-        "a signal the re-run lacks keeps its trace, marked missing"
+        "a signal the re-run lacks keeps its trace: the run says it has none when the trace is drawn"
     );
     assert_eq!(document.datasets().len(), 1, "the earlier run is let go");
 }
