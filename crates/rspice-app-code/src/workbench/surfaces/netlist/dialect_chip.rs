@@ -539,7 +539,8 @@ mod tests {
                 .filter(|(_, rect)| {
                     rect.bottom()
                         <= super::super::super::toolbar::code_toolbar_height(
-                            &crate::ui::tokens::Tokens::default().metrics,
+                            egui::vec2(1440.0, 900.0),
+                            false,
                         )
                 })
                 .map(|(text, _)| text.clone())

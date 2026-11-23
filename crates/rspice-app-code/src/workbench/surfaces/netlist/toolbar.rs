@@ -30,8 +30,11 @@ pub(super) const CODE_TOOLBAR_ACTION_GUTTER: f32 = 12.0;
 /// The strip's height under `metrics`: a compact control, which a finger's
 /// target raises, with the bar's padding above and below it.
 #[must_use]
-pub fn code_toolbar_height(metrics: &tokens::Metrics) -> f32 {
-    crate::ui::widgets::compact_height(metrics) + 2.0 * metrics.bar_pad
+/// The toolbar stands where the document bar stands in the other
+/// workspaces, so it is the document bar's height and ends on the line the
+/// dock headers beside it end on.
+pub fn code_toolbar_height(viewport: egui::Vec2, coarse_pointer: bool) -> f32 {
+    crate::workbench::layout::document_bar_height(viewport.x, viewport.y, coarse_pointer)
 }
 /// Side of a status line's problem mark and the air after it: the kit's own,
 /// so a marked status matches every other marked line in the product.
@@ -89,7 +92,10 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
     // The shell's layout class, the one every workspace lays out by.
     let phone = WidthClass::for_width(ui.ctx().content_rect().width()) == WidthClass::Phone;
     let (rect, _) = ui.allocate_exact_size(
-        vec2(width, code_toolbar_height(&t.metrics)),
+        vec2(
+            width,
+            code_toolbar_height(ui.ctx().content_rect().size(), cx.wb.coarse_pointer),
+        ),
         egui::Sense::hover(),
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);

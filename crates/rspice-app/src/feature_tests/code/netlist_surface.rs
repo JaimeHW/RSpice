@@ -156,8 +156,7 @@ fn run_strip_band(
     // The run's band is at least an advisory row high: these are the first
     // points under the toolbar.
     const BAND_PROBE: f32 = 24.0;
-    let toolbar_height =
-        toolbar::code_toolbar_height(&rspice_app_workbench::ui::tokens::Tokens::default().metrics);
+    let toolbar_height = toolbar::code_toolbar_height(vec2(width, 520.0), false);
     let band = egui::Rect::from_min_max(
         egui::pos2(0.0, toolbar_height + 1.0),
         egui::pos2(width, toolbar_height + BAND_PROBE - 1.0),

@@ -199,9 +199,11 @@ pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, height: f32) {
         egui::vec2(ui.available_width(), height),
         egui::Sense::hover(),
     );
+    // The rule is the band's last row of pixels, as the document bar draws
+    // its own, so the two rules are one line.
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         egui::Stroke::new(1.0, t.color.border),
     );
     let title = app.inspector_title(app.inspector_scope(app.workbench().workspace));

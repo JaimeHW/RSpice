@@ -310,6 +310,15 @@ pub(crate) fn toolbar_tool_limit(viewport_width: f32, viewport_height: f32) -> O
     }
 }
 
+/// The document bar's height at a viewport: the band across the top of a
+/// workspace's documents. A page whose own bar stands in the document bar's
+/// place takes this height, and the dock headers beside it take it, so the
+/// three end on one line.
+pub fn document_bar_height(viewport_width: f32, viewport_height: f32, coarse_pointer: bool) -> f32 {
+    let short_landscape = viewport_width <= 900.0 && viewport_height <= 500.0;
+    ChromeMetrics::resolve(viewport_width, short_landscape, coarse_pointer).document
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ChromeMetrics {
     title: f32,

@@ -99,7 +99,8 @@ mod tests {
                     egui::Shape::Text(text)
                         if text.visual_bounding_rect().bottom()
                             <= super::super::toolbar::code_toolbar_height(
-                                &crate::ui::tokens::Tokens::default().metrics,
+                                egui::vec2(1440.0, 900.0),
+                                false,
                             ) =>
                     {
                         Some(text.galley.text().to_owned())
