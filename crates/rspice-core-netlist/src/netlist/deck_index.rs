@@ -244,9 +244,40 @@ pub struct DeckIndex {
     /// names a reader binds by scope, which a deck of many devices has few
     /// of.
     definitions: Vec<usize>,
+    /// Every read, in the order of where it is written: by file, then by
+    /// its first byte.
     references: Vec<DeckReference>,
+    /// Every place a node is written, in the same order.
     nodes: Vec<DeckNode>,
     includes: Vec<DeckInclude>,
+    /// Where in `symbols` each definition is, in the order of where it is
+    /// written, so the name at a place is found by a search rather than by
+    /// reading every name the deck writes.
+    symbols_by_place: Vec<usize>,
+    /// Where in `references` each read that binds a definition is, by the
+    /// definition it binds and then in source order.
+    references_by_target: Vec<usize>,
+    /// The longest span of a definition, a read and a node, in bytes: how
+    /// far before a byte a name written over it can start.
+    widest: Widest,
+}
+
+/// The longest span, in bytes, of each kind of name an index records.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Widest {
+    symbol: usize,
+    reference: usize,
+}
+
+/// Where `location` is written, as the index orders names by place.
+fn place(location: &DeckLocation) -> (usize, usize) {
+    (location.file, location.span.start)
+}
+
+/// The line `location` starts on, as the index orders names by line, which
+/// is the order of their places.
+fn line_of(location: &DeckLocation) -> (usize, usize) {
+    (location.file, location.line)
 }
 
 impl DeckIndex {
@@ -315,9 +346,67 @@ impl DeckIndex {
 
     /// The reads `symbol` binds, in source order.
     pub fn references_to(&self, symbol: usize) -> impl Iterator<Item = &DeckReference> {
-        self.references
+        let target = |at: &usize| self.references[*at].target;
+        let first = self
+            .references_by_target
+            .partition_point(|at| target(at) < Some(symbol));
+        let end = self
+            .references_by_target
+            .partition_point(|at| target(at) <= Some(symbol));
+        self.references_by_target[first..end]
             .iter()
-            .filter(move |reference| reference.target == Some(symbol))
+            .map(|at| &self.references[*at])
+    }
+
+    /// The definitions written on one-based physical `line` of `file`, by
+    /// their position in [`Self::symbols`], in the order they are written.
+    pub fn symbols_on_line(
+        &self,
+        file: usize,
+        line: usize,
+    ) -> impl Iterator<Item = (usize, &DeckSymbol)> + '_ {
+        let line_at = |at: &usize| line_of(&self.symbols[*at].location);
+        let first = self
+            .symbols_by_place
+            .partition_point(|at| line_at(at) < (file, line));
+        let end = self
+            .symbols_by_place
+            .partition_point(|at| line_at(at) <= (file, line));
+        self.symbols_by_place[first..end]
+            .iter()
+            .map(|at| (*at, &self.symbols[*at]))
+    }
+
+    /// The reads written on one-based physical `line` of `file`, by their
+    /// position in [`Self::references`], in source order.
+    pub fn references_on_line(
+        &self,
+        file: usize,
+        line: usize,
+    ) -> impl Iterator<Item = (usize, &DeckReference)> + '_ {
+        let first = self
+            .references
+            .partition_point(|reference| line_of(&reference.location) < (file, line));
+        let end = self
+            .references
+            .partition_point(|reference| line_of(&reference.location) <= (file, line));
+        (first..end).map(|at| (at, &self.references[at]))
+    }
+
+    /// The places a node is written on one-based physical `line` of `file`,
+    /// by their position in [`Self::nodes`], in source order.
+    pub fn nodes_on_line(
+        &self,
+        file: usize,
+        line: usize,
+    ) -> impl Iterator<Item = (usize, &DeckNode)> + '_ {
+        let first = self
+            .nodes
+            .partition_point(|node| line_of(&node.location) < (file, line));
+        let end = self
+            .nodes
+            .partition_point(|node| line_of(&node.location) <= (file, line));
+        (first..end).map(|at| (at, &self.nodes[at]))
     }
 
     /// The card written on one-based physical `line` of `file`, continuation
@@ -332,22 +421,37 @@ impl DeckIndex {
         (card.location.file == file && card.lines.contains(&line)).then_some(index)
     }
 
-    /// The name written at `byte` of `file`.
+    /// The name written at `byte` of `file`: the first read written over it,
+    /// else the first definition. It is found by a search among the names
+    /// written at most the longest name's length before it, not by reading
+    /// every name.
     #[must_use]
     pub fn name_at(&self, file: usize, byte: usize) -> Option<DeckNameAt> {
         let covers = |location: &DeckLocation| {
             location.file == file && location.span.start <= byte && byte <= location.span.end
         };
-        if let Some(index) = self
+        let from = |widest: usize| (file, byte.saturating_sub(widest));
+        let first = self
             .references
-            .iter()
-            .position(|reference| covers(&reference.location))
-        {
+            .partition_point(|reference| place(&reference.location) < from(self.widest.reference));
+        let end = self
+            .references
+            .partition_point(|reference| place(&reference.location) <= (file, byte));
+        if let Some(index) = (first..end).find(|at| covers(&self.references[*at].location)) {
             return Some(DeckNameAt::Reference(index));
         }
-        self.symbols
+        let place_of = |at: &usize| place(&self.symbols[*at].location);
+        let first = self
+            .symbols_by_place
+            .partition_point(|at| place_of(at) < from(self.widest.symbol));
+        let end = self
+            .symbols_by_place
+            .partition_point(|at| place_of(at) <= (file, byte));
+        self.symbols_by_place[first..end]
             .iter()
-            .position(|symbol| covers(&symbol.location))
+            .copied()
+            .filter(|at| covers(&self.symbols[*at].location))
+            .min()
             .map(DeckNameAt::Definition)
     }
 
@@ -1585,10 +1689,26 @@ impl Builder {
                 node.scope = 0;
             }
         }
-        let order = |location: &DeckLocation| (location.file, location.span.start);
-        references.sort_by_key(|reference| order(&reference.location));
-        self.index.nodes.sort_by_key(|node| order(&node.location));
+        references.sort_by_key(|reference| place(&reference.location));
+        self.index.nodes.sort_by_key(|node| place(&node.location));
         self.index.references = references;
+        let symbols = &self.index.symbols;
+        let mut symbols_by_place = (0..symbols.len()).collect::<Vec<_>>();
+        symbols_by_place.sort_by_key(|at| place(&symbols[*at].location));
+        self.index.symbols_by_place = symbols_by_place;
+        let references = &self.index.references;
+        let mut references_by_target = (0..references.len())
+            .filter(|at| references[*at].target.is_some())
+            .collect::<Vec<_>>();
+        references_by_target.sort_by_key(|at| references[*at].target);
+        self.index.references_by_target = references_by_target;
+        let widest = |spans: &mut dyn Iterator<Item = &DeckLocation>| {
+            spans.map(|location| location.span.len()).max().unwrap_or(0)
+        };
+        self.index.widest = Widest {
+            symbol: widest(&mut symbols.iter().map(|symbol| &symbol.location)),
+            reference: widest(&mut references.iter().map(|reference| &reference.location)),
+        };
         self.index.definitions = self
             .index
             .symbols

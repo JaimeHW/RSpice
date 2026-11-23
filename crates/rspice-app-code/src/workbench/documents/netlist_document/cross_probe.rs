@@ -140,7 +140,8 @@ fn line_and_column(source: &str, char_index: usize) -> (usize, usize) {
 
 /// The name the index has at one-based `line` of the shown text, touching
 /// the caret at zero-based character `column`: a node first, then an
-/// element's own name, then an element read on another card.
+/// element's own name, then an element read on another card. Only the names
+/// written on the line are read, however long the deck.
 fn name_on(deck: &DeckIndex, line: usize, column: usize) -> Option<CaretName> {
     let caret = column + 1;
     // The shown text is the index's first file; a name touches the caret
@@ -151,27 +152,31 @@ fn name_on(deck: &DeckIndex, line: usize, column: usize) -> Option<CaretName> {
             && location.column <= caret
             && caret <= location.column + name.chars().count()
     };
-    if let Some(node) = deck
-        .nodes()
-        .iter()
-        .find(|node| touches(&node.location, &node.name))
+    if let Some((_, node)) = deck
+        .nodes_on_line(0, line)
+        .find(|(_, node)| touches(&node.location, &node.name))
     {
         return Some(CaretName::Node {
             name: node.name.clone(),
             top_level: node.scope == 0,
         });
     }
-    if let Some(symbol) = deck.symbols().iter().find(|symbol| {
-        symbol.kind == DeckSymbolKind::Instance && touches(&symbol.location, &symbol.name)
-    }) {
+    // The first the deck lists, as a read of every name would find.
+    if let Some((_, symbol)) = deck
+        .symbols_on_line(0, line)
+        .filter(|(_, symbol)| {
+            symbol.kind == DeckSymbolKind::Instance && touches(&symbol.location, &symbol.name)
+        })
+        .min_by_key(|(at, _)| *at)
+    {
         return Some(CaretName::Element {
             name: symbol.name.clone(),
             top_level: symbol.scope == 0,
             head: true,
         });
     }
-    deck.references()
-        .iter()
+    deck.references_on_line(0, line)
+        .map(|(_, reference)| reference)
         .find(|reference| {
             reference.kind == DeckSymbolKind::Instance
                 && touches(&reference.location, &reference.name)

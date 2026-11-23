@@ -81,3 +81,64 @@ fn a_device_has_a_current_to_plot_and_a_subcircuit_instance_none() {
         Some(("in", true))
     );
 }
+
+/// The name under the caret, found among the names on its line, is the one
+/// reading every name of the deck found, at every line and column, the ends
+/// of each name and the columns past a line's end included.
+#[test]
+fn the_name_on_a_line_is_the_one_every_name_read_finds() {
+    use rspice_core::netlist::{DeckLocation, DeckSymbolKind};
+
+    let deck = format!("{DECK}* after\nR2 a b {{w}}\nK2 L1 L2 1\n");
+    let index = NetlistSourceIndex::parse(&deck);
+    let deck_index = index.deck();
+    let scanned = |line: usize, column: usize| {
+        let caret = column + 1;
+        let touches = |location: &DeckLocation, name: &str| {
+            location.file == 0
+                && location.line == line
+                && location.column <= caret
+                && caret <= location.column + name.chars().count()
+        };
+        if let Some(node) = deck_index
+            .nodes()
+            .iter()
+            .find(|node| touches(&node.location, &node.name))
+        {
+            return Some(CaretName::Node {
+                name: node.name.clone(),
+                top_level: node.scope == 0,
+            });
+        }
+        if let Some(symbol) = deck_index.symbols().iter().find(|symbol| {
+            symbol.kind == DeckSymbolKind::Instance && touches(&symbol.location, &symbol.name)
+        }) {
+            return Some(CaretName::Element {
+                name: symbol.name.clone(),
+                top_level: symbol.scope == 0,
+                head: true,
+            });
+        }
+        deck_index
+            .references()
+            .iter()
+            .find(|reference| {
+                reference.kind == DeckSymbolKind::Instance
+                    && touches(&reference.location, &reference.name)
+            })
+            .map(|reference| CaretName::Element {
+                name: reference.name.clone(),
+                top_level: reference.scope == 0,
+                head: false,
+            })
+    };
+    let mut named = 0;
+    for (line, text) in deck.lines().enumerate().map(|(at, text)| (at + 1, text)) {
+        for column in 0..=text.chars().count() + 2 {
+            let found = name_on(deck_index, line, column);
+            assert_eq!(found, scanned(line, column), "line {line}, column {column}");
+            named += usize::from(found.is_some());
+        }
+    }
+    assert!(named > 40, "the deck's names are found: {named}");
+}

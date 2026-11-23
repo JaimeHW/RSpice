@@ -588,3 +588,145 @@ fn definitions_leave_out_the_devices() {
     assert!(index.resolve(DeckSymbolKind::Model, "DM", 0).is_some());
     assert!(index.resolve(DeckSymbolKind::Instance, "x1", 0).is_some());
 }
+
+/// Finding a name by where it is written gives what reading every name did,
+/// at every byte and on every line of a deck and an include that write names
+/// edge to edge, nested in expressions and probes, in subcircuits and over
+/// continuation lines.
+#[test]
+fn a_name_found_by_place_is_the_one_every_name_read_finds() {
+    let deck = "\
+places
+.param w=1 l={w*2}
+.func f(a) {a+w}
+.subckt amp in out gain=2
+R1 in out {gain*w}
+X2 in mid sub
++ k=3
+.ends
+.subckt sub p q k=1
+Rk p q {k}
+.ends
+.model dm d is=1e-14
+X1 a b amp gain={f(l)}
+D1 a 0 dm
+K1 L1 L2 0.5
+L1 a 0 1u
+L2 b 0 1u
+.save v(a,b) i(R1)
+.end
+";
+    let include = "R9 x y {w}\nX9 x y amp\n";
+    let index = DeckIndex::build(&[
+        DeckIndexSource {
+            identity: "deck.cir",
+            text: deck,
+            kind: SourceKind::DeckRoot,
+        },
+        DeckIndexSource {
+            identity: "inc.lib",
+            text: include,
+            kind: SourceKind::Included,
+        },
+    ]);
+    assert!(!index.references().is_empty() && !index.nodes().is_empty());
+    let scanned_name_at = |file: usize, byte: usize| {
+        let covers = |location: &DeckLocation| {
+            location.file == file && location.span.start <= byte && byte <= location.span.end
+        };
+        if let Some(at) = index
+            .references()
+            .iter()
+            .position(|reference| covers(&reference.location))
+        {
+            return Some(DeckNameAt::Reference(at));
+        }
+        index
+            .symbols()
+            .iter()
+            .position(|symbol| covers(&symbol.location))
+            .map(DeckNameAt::Definition)
+    };
+    for (file, text) in [(0, deck), (1, include), (2, "")] {
+        for byte in 0..=text.len() + 2 {
+            assert_eq!(
+                index.name_at(file, byte),
+                scanned_name_at(file, byte),
+                "file {file}, byte {byte}"
+            );
+        }
+        for line in 0..=text.lines().count() + 1 {
+            let on = |location: &DeckLocation| location.file == file && location.line == line;
+            let scanned = |locations: Vec<(usize, &DeckLocation)>| {
+                locations
+                    .into_iter()
+                    .filter(|(_, location)| on(location))
+                    .map(|(at, _)| at)
+                    .collect::<Vec<_>>()
+            };
+            let mut symbols = index
+                .symbols_on_line(file, line)
+                .map(|(at, _)| at)
+                .collect::<Vec<_>>();
+            symbols.sort_unstable();
+            assert_eq!(
+                symbols,
+                scanned(
+                    index
+                        .symbols()
+                        .iter()
+                        .map(|s| &s.location)
+                        .enumerate()
+                        .collect()
+                ),
+                "symbols on line {line} of file {file}"
+            );
+            assert_eq!(
+                index
+                    .references_on_line(file, line)
+                    .map(|(at, _)| at)
+                    .collect::<Vec<_>>(),
+                scanned(
+                    index
+                        .references()
+                        .iter()
+                        .map(|r| &r.location)
+                        .enumerate()
+                        .collect()
+                ),
+                "reads on line {line} of file {file}"
+            );
+            assert_eq!(
+                index
+                    .nodes_on_line(file, line)
+                    .map(|(at, _)| at)
+                    .collect::<Vec<_>>(),
+                scanned(
+                    index
+                        .nodes()
+                        .iter()
+                        .map(|n| &n.location)
+                        .enumerate()
+                        .collect()
+                ),
+                "nodes on line {line} of file {file}"
+            );
+        }
+    }
+    for symbol in 0..index.symbols().len() + 1 {
+        let found = index.references_to(symbol).collect::<Vec<_>>();
+        let scanned = index
+            .references()
+            .iter()
+            .filter(|reference| reference.target == Some(symbol))
+            .collect::<Vec<_>>();
+        assert_eq!(found, scanned, "the reads of symbol {symbol}");
+    }
+    let bound = (0..index.symbols().len())
+        .filter(|symbol| index.references_to(*symbol).next().is_some())
+        .count();
+    assert!(
+        bound >= 4,
+        "the deck reads w, f, l, gain, k, amp, sub and dm"
+    );
+}
