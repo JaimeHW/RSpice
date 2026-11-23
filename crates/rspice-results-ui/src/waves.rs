@@ -62,7 +62,7 @@ pub fn as_returned(name: &str) -> std::borrow::Cow<'_, str> {
 ///
 /// The discriminants are saved: a marker's trace key stores `kind as u8`, so
 /// each kind keeps its number and a retired one's number is never reused.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TraceKind {
     /// Plain values (V, A, sweep output).
     Value = 0,

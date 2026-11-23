@@ -422,7 +422,11 @@ fn rank_palette_slots(
         return 0;
     }
     let ranked = |trace: &super::StripTrace| trace.palette_slot.is_some() && !trace.overlay;
+    // Each source once, in the order its first curve comes, found by its key:
+    // a strip can draw a million curves, so none is found by searching the
+    // others.
     let mut sources: Vec<((usize, TraceKind), bool, bool)> = Vec::new();
+    let mut source_at = HashMap::<(usize, TraceKind), usize>::new();
     for (trace, shown) in model.traces.iter().zip(source_visible) {
         if !ranked(trace) {
             continue;
@@ -432,9 +436,12 @@ fn rank_palette_slots(
             .waveforms
             .get(trace.waveform_index)
             .is_some_and(|waveform| waveform.visible);
-        match sources.iter_mut().find(|(source, ..)| *source == key) {
-            Some((_, _, any_shown)) => *any_shown |= *shown,
-            None => sources.push((key, dataset, *shown)),
+        match source_at.entry(key) {
+            std::collections::hash_map::Entry::Occupied(at) => sources[*at.get()].2 |= *shown,
+            std::collections::hash_map::Entry::Vacant(at) => {
+                at.insert(sources.len());
+                sources.push((key, dataset, *shown));
+            }
         }
     }
     let plotted = sources.iter().filter(|(_, dataset, _)| *dataset).count();
@@ -443,7 +450,7 @@ fn rank_palette_slots(
         .filter(|(_, dataset, shown)| !dataset && *shown)
         .count();
     let (mut plotted_rank, mut added_rank, mut spare_rank) = (0, plotted, plotted + added);
-    let slots: Vec<((usize, TraceKind), usize)> = sources
+    let slots: HashMap<(usize, TraceKind), usize> = sources
         .iter()
         .map(|(key, dataset, shown)| {
             let counter = if *dataset {
@@ -461,7 +468,7 @@ fn rank_palette_slots(
     let analysis_key = model.analysis_key;
     for trace in model.traces.iter_mut().filter(|trace| ranked(trace)) {
         let key = (trace.waveform_index, trace.kind);
-        let Some(&(_, slot)) = slots.iter().find(|(source, _)| *source == key) else {
+        let Some(&slot) = slots.get(&key) else {
             continue;
         };
         let hue = palette[slot % palette.len()];
