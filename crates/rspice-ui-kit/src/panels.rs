@@ -1044,20 +1044,24 @@ pub fn property_row_path(ui: &mut Ui, label: &str, path: &str) -> Response {
 }
 
 /// One fact in a [`fact_rows`] list: its label, its value, whether the
-/// value is a file's path, the problem it states, and what its hover says
-/// when the value is a short form of something longer.
+/// value is a file's path, the problem it states, what its hover says when
+/// the value is a short form of something longer, and where its value
+/// leads, in the words of what following it does.
 #[derive(Debug, Clone, Copy)]
 pub struct Fact<'a> {
     pub label: &'a str,
     pub value: &'a str,
     pub path: bool,
-    /// A problem the value states: its mark goes in front of the value, which
-    /// stays in the list's one face and ink.
+    /// A problem the value states: its mark hangs in front of the value,
+    /// which stays in the list's one face and ink.
     pub problem: Option<Problem>,
     /// The whole of what the value shortens, such as the absolute path of a
     /// file named relative to its project. The hover says it instead of the
     /// value.
     pub whole: Option<&'a str>,
+    /// What following the value does: the value is a link, and its hover
+    /// says this.
+    pub link: Option<&'a str>,
 }
 
 impl<'a> Fact<'a> {
@@ -1068,6 +1072,7 @@ impl<'a> Fact<'a> {
             path: false,
             problem: None,
             whole: None,
+            link: None,
         }
     }
 
@@ -1078,6 +1083,7 @@ impl<'a> Fact<'a> {
             path: true,
             problem: None,
             whole: None,
+            link: None,
         }
     }
 
@@ -1087,9 +1093,23 @@ impl<'a> Fact<'a> {
         self
     }
 
+    /// The same fact behind `problem`'s mark, which is the only colour on
+    /// its row; `None` leaves it plain.
+    pub const fn marked(mut self, problem: Option<Problem>) -> Self {
+        self.problem = problem;
+        self
+    }
+
     /// The hover says `whole`, of which the value is a short form.
     pub const fn whole(mut self, whole: &'a str) -> Self {
         self.whole = Some(whole);
+        self
+    }
+
+    /// The same fact, its value a link that does `action`; `None` leaves
+    /// it a plain value.
+    pub const fn linked(mut self, action: Option<&'a str>) -> Self {
+        self.link = action;
         self
     }
 }
@@ -1102,19 +1122,46 @@ impl<'a> Fact<'a> {
 /// from the front, so its file's name stays in view; every row's whole text
 /// is in its hover.
 pub fn fact_rows(ui: &mut Ui, facts: &[Fact<'_>]) {
-    let t = Tokens::get(ui.ctx());
+    let marked = facts.iter().any(|fact| fact.problem.is_some());
+    let label_width = fact_label_width(ui, facts.iter().map(|fact| fact.label))
+        + if marked { FACT_MARK_ROOM } else { 0.0 };
+    let _ = fact_rows_on(ui, facts, label_width);
+}
+
+/// How much wider than its widest label a label column of facts is kept
+/// where a value can be marked: the mark hangs there, in front of the value.
+pub const FACT_MARK_ROOM: f32 = PROBLEM_MARK_ADVANCE;
+
+/// How wide a label column of facts has to be for the widest of `labels`:
+/// what lists of facts that read as one, side by side or one under the
+/// next, set their labels on. Facts that can be marked add
+/// [`FACT_MARK_ROOM`].
+pub fn fact_label_width<'a>(ui: &Ui, labels: impl IntoIterator<Item = &'a str>) -> f32 {
     let font = fact_font();
-    let label_width = facts
-        .iter()
-        .map(|fact| {
+    labels
+        .into_iter()
+        .map(|label| {
             ui.painter()
-                .layout_no_wrap(fact.label.to_owned(), font.clone(), Color32::WHITE)
+                .layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE)
                 .size()
                 .x
                 .ceil()
         })
-        .fold(0.0, f32::max);
-    for fact in facts {
+        .fold(0.0, f32::max)
+}
+
+/// [`fact_rows`] on a label column `label_width` wide, which other lists of
+/// facts on the page share. The fact whose linked value was followed, by a
+/// click or by Enter on it.
+///
+/// A linked value is underlined faintly, and in its own colour under the
+/// pointer; its hover says what following it does. A marked value's mark
+/// hangs in front of it, in the label column's last [`FACT_MARK_ROOM`].
+pub fn fact_rows_on(ui: &mut Ui, facts: &[Fact<'_>], label_width: f32) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let font = fact_font();
+    let mut followed = None;
+    for (index, fact) in facts.iter().enumerate() {
         let (slot, response) = row_slot(ui, Some(label_width), Sense::hover());
         let painter = ui.painter();
         let label = elide_text(ui, fact.label, &font, slot.label.width());
@@ -1130,30 +1177,58 @@ pub fn fact_rows(ui: &mut Ui, facts: &[Fact<'_>]) {
         } else {
             elide_text
         };
-        let mark = if fact.problem.is_some() {
-            crate::widgets::PROBLEM_MARK_ADVANCE
-        } else {
-            0.0
-        };
         if let Some(problem) = fact.problem {
-            let side = crate::widgets::PROBLEM_MARK_SIDE;
+            // The mark hangs in front of the value, in the room the label
+            // column keeps for it, so a marked value starts where a plain
+            // one does.
+            let side = PROBLEM_MARK_SIDE;
             paint_problem_mark(
-                &painter.with_clip_rect(slot.value),
+                &painter.with_clip_rect(slot.rect),
                 Rect::from_center_size(
-                    Pos2::new(slot.value.left() + side * 0.5, slot.rect.center().y),
+                    Pos2::new(
+                        slot.value.left() - PROBLEM_MARK_GAP - side * 0.5,
+                        slot.value.center().y,
+                    ),
                     Vec2::splat(side),
                 ),
                 problem,
             );
         }
-        let value = elide(ui, fact.value, &font, (slot.value.width() - mark).max(1.0));
-        painter.with_clip_rect(slot.value).text(
-            Pos2::new(slot.value.left() + mark, slot.value.center().y),
+        let value = elide(ui, fact.value, &font, slot.value.width());
+        let words = painter.with_clip_rect(slot.value).text(
+            Pos2::new(slot.value.left(), slot.value.center().y),
             Align2::LEFT_CENTER,
             value,
             font.clone(),
             t.color.text,
         );
+        if let Some(action) = fact.link {
+            let link = ui
+                .interact(
+                    words.intersect(slot.value),
+                    response.id.with("link"),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(action);
+            link.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Link, ui.is_enabled(), fact.value)
+            });
+            let underline = if link.hovered() || link.has_focus() {
+                t.color.text
+            } else {
+                t.color.border_strong
+            };
+            painter.with_clip_rect(slot.value).hline(
+                words.x_range(),
+                words.bottom() - 0.5,
+                Stroke::new(1.0, underline),
+            );
+            theme::paint_focus_ring(ui, &link, link.rect);
+            if link.clicked() {
+                followed = Some(index);
+            }
+        }
         let whole = fact.whole.unwrap_or(fact.value);
         announce_row(ui, &response, fact.label, whole);
         if let Some(problem) = fact.problem {
@@ -1165,6 +1240,7 @@ pub fn fact_rows(ui: &mut Ui, facts: &[Fact<'_>]) {
         }
         response.on_hover_text(format!("{}: {}", fact.label, whole));
     }
+    followed
 }
 
 /// The one face a [`fact_rows`] list sets its labels and values in.
@@ -2549,7 +2625,7 @@ fn property_row_with_tone(
     let value_rect = slot.value;
     let rect = slot.rect;
     let status_prefix = if mark.is_some() {
-        crate::widgets::PROBLEM_MARK_ADVANCE
+        PROBLEM_MARK_ADVANCE
     } else {
         0.0
     };
@@ -2560,7 +2636,7 @@ fn property_row_with_tone(
     });
     row_label(ui, slot.label, label);
     if let Some((mark, mark_tone)) = mark {
-        let side = crate::widgets::PROBLEM_MARK_SIDE;
+        let side = PROBLEM_MARK_SIDE;
         paint_status_mark(
             &ui.painter().with_clip_rect(value_rect),
             Rect::from_center_size(
@@ -2606,7 +2682,7 @@ pub fn card_well(ui: &mut Ui, card: Result<&str, &str>, trailing_inset: f32) -> 
         Err(text) => (text, Some(Problem::Failure)),
     };
     let mark_room = if problem.is_some() {
-        crate::widgets::PROBLEM_MARK_ADVANCE
+        PROBLEM_MARK_ADVANCE
     } else {
         0.0
     };
@@ -2621,7 +2697,7 @@ pub fn card_well(ui: &mut Ui, card: Result<&str, &str>, trailing_inset: f32) -> 
     );
     ui.painter().rect_filled(rect, 2.0, palette.bg_inset);
     if let Some(problem) = problem {
-        let side = crate::widgets::PROBLEM_MARK_SIDE;
+        let side = PROBLEM_MARK_SIDE;
         paint_problem_mark(
             ui.painter(),
             Rect::from_center_size(
