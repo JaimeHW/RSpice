@@ -44,6 +44,7 @@ fn with_readout<R>(
             tokens,
         )
     });
+    let models_generation = state.results.models.generation();
     let strips = on_screen_strips(state.results_reads());
     // Design notation changes labels only; the rows' keys stay the result's.
     // It is read the first time a row is named, so a frame that names none
@@ -54,6 +55,7 @@ fn with_readout<R>(
         &mut state.results.session,
         ReadoutInput {
             models: models.as_deref().map_or(&[], Vec::as_slice),
+            models_generation,
             on_screen_strips: &strips,
             presentation: presentation.readout(),
             quantity_policy,

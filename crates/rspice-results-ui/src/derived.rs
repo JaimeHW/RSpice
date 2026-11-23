@@ -62,6 +62,10 @@ pub struct DerivedSeries {
     /// window asked of it, per series key: a steady view reads no tile for its
     /// fit.
     stored_extents: std::collections::HashMap<u64, StoredExtentMemo>,
+    /// The Measurements table's measurements, the last finished and the one
+    /// under way, each with what it measures; kept across data versions, as
+    /// what it measures names the build of the models it was taken of.
+    measurements: crate::waves::readout::MeasurementsMemo,
 }
 
 /// A stored series' extent over its whole record, and over the last window
@@ -93,6 +97,11 @@ impl DerivedSeries {
     #[cfg(feature = "test-support")]
     pub fn window_stats_count(&self) -> usize {
         self.stats.len()
+    }
+
+    /// The Measurements table's measurements between frames.
+    pub(crate) fn measurements_mut(&mut self) -> &mut crate::waves::readout::MeasurementsMemo {
+        &mut self.measurements
     }
 
     /// Discard derived values when the host supplies a different data version.

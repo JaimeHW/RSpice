@@ -8,6 +8,7 @@ use super::{
 };
 use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
+use rspice_results::waveform::{SharedWaveformValues, WaveformValues};
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_branches_into,
@@ -17,7 +18,10 @@ use rspice_ui_kit::plot::{
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 pub const READOUT_ROW_H: f32 = 20.0;
 pub const READOUT_PAD_X: f32 = 10.0;
@@ -269,15 +273,27 @@ fn readout_accessibility_text(
     text
 }
 
+/// How the Measurements table words what it measured.
+#[derive(Clone, Copy)]
+pub struct MeasurementWording<'a> {
+    pub significant_digits: usize,
+    pub quantity_policy: QuantityPresentationPolicy,
+    pub display_name: DisplayName<'a>,
+}
+
 /// Paint retained-sample measurements for the selected strip and cursor span.
+///
+/// The strip's plotted traces are measured once for each build of the strip
+/// models (`generation`) and window, off the frame, and the table lays out
+/// only the rows it shows, each named and worded as it is shown: a strip of a
+/// hundred thousand ticked signals costs a frame what a strip of ten does.
 pub fn measurement_panel(
     ui: &mut Ui,
     derived: &mut DerivedSeries,
     model: &StripModel,
+    generation: u64,
     window: Option<(f64, f64)>,
-    significant_digits: usize,
-    quantity_policy: QuantityPresentationPolicy,
-    display_name: DisplayName<'_>,
+    wording: MeasurementWording<'_>,
 ) {
     let title = if window.is_some() {
         "Measurements · A–B"
@@ -288,15 +304,338 @@ pub fn measurement_panel(
     // in the product is taken; stating it on the header of every strip is a
     // constant, not a qualification.
     section_header(ui, title, None);
-    measurement_rows(
-        ui,
-        derived,
-        model,
-        window,
-        significant_digits,
-        quantity_policy,
-        display_name,
-    );
+    let of = MeasuredOf {
+        generation,
+        strip: super::stable_hash(&model.analysis_key),
+        window: window.map(|(a, b)| (a.min(b).to_bits(), a.max(b).to_bits())),
+    };
+    let shown = derived
+        .measurements_mut()
+        .shown(of, ui.ctx(), || MeasurementPlan::of(model, window));
+    let columns = [
+        Column::name("Measurement", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
+        Column::name("Value", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
+    ];
+    match shown {
+        Shown::Measured(measured) => {
+            let _ = DataTable::new("results.measurements", &columns, measured.rows)
+                .list()
+                .show(ui, |row| {
+                    let (name, value) = measured.row(model, row, wording);
+                    vec![Cell::faint(name), Cell::number(value)]
+                });
+        }
+        Shown::Measuring(signals) => {
+            let _ = DataTable::new("results.measurements", &columns[..1], 1)
+                .list()
+                .show(ui, |_| {
+                    vec![Cell::faint(format!(
+                        "Measuring {signals} signal{}…",
+                        if signals == 1 { "" } else { "s" }
+                    ))]
+                });
+        }
+        Shown::Nothing => {}
+    }
+}
+
+/// The least width of each of the Measurements table's two columns, which
+/// share the inspector's width between them.
+const MEASUREMENT_COLUMN_LEAST_W: f32 = 64.0;
+
+/// What a strip's measurements were taken of: a build of its models, the
+/// strip, and the window's bounds' bits, or none for the whole record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MeasuredOf {
+    generation: u64,
+    strip: u64,
+    window: Option<(u64, u64)>,
+}
+
+impl MeasuredOf {
+    /// Whether measurements taken of `self` name the same traces as `other`
+    /// does: the same build of the same strip, whatever the window.
+    fn same_traces(self, other: Self) -> bool {
+        self.generation == other.generation && self.strip == other.strip
+    }
+}
+
+/// One plotted trace, or one branch of it, as measured, and the first of its
+/// rows in the table.
+#[derive(Debug, Clone, Copy)]
+struct MeasuredTrace {
+    /// Its index in the strip's traces.
+    trace: usize,
+    branch: Option<usize>,
+    stats: WindowStats,
+    first_row: usize,
+}
+
+/// A strip's plotted traces measured over one window, in row order.
+#[derive(Debug, Default)]
+struct Measurements {
+    traces: Vec<MeasuredTrace>,
+    rows: usize,
+}
+
+impl Measurements {
+    /// Row `row` of the table, named and worded as `model` names and words
+    /// its traces.
+    fn row(
+        &self,
+        model: &StripModel,
+        row: usize,
+        wording: MeasurementWording<'_>,
+    ) -> (String, String) {
+        let at = self
+            .traces
+            .partition_point(|measured| measured.first_row <= row)
+            .saturating_sub(1);
+        let Some(measured) = self.traces.get(at) else {
+            return (String::new(), READOUT_ABSENT.to_owned());
+        };
+        let Some(trace) = model.traces.get(measured.trace) else {
+            return (String::new(), READOUT_ABSENT.to_owned());
+        };
+        let mut name = (wording.display_name)(&trace.name).into_owned();
+        if let Some(branch) = measured.branch {
+            name.push(' ');
+            name.push_str(&branch_tag(&trace.shape, branch));
+        }
+        if let Some(tag) = run_tag(model, trace) {
+            name.push_str(" · ");
+            name.push_str(&tag);
+        }
+        let stats = match measured.stats {
+            Ok(stats) => stats,
+            Err(error) => return (name, format!("Unavailable: {error}")),
+        };
+        let (statistic, value) = match row - measured.first_row {
+            0 => ("min", stats.min),
+            1 => ("max", stats.max),
+            _ => ("rms", stats.rms),
+        };
+        (
+            format!("{name} {statistic}"),
+            model.format_trace_value(
+                trace,
+                value,
+                wording.significant_digits,
+                wording.quantity_policy,
+            ),
+        )
+    }
+}
+
+/// How many rows a measured trace takes: one saying why it was not measured,
+/// or its min and max, and its RMS where its kind has one (`rms`).
+fn rows_of(stats: &WindowStats, rms: bool) -> usize {
+    match stats {
+        Err(_) => 1,
+        Ok(_) if rms => 3,
+        Ok(_) => 2,
+    }
+}
+
+fn has_rms(kind: TraceKind) -> bool {
+    matches!(
+        kind,
+        TraceKind::Value | TraceKind::Real | TraceKind::Imaginary
+    )
+}
+
+/// The branches of `trace` the table names, each measured on its own, or the
+/// whole trace.
+fn measured_branches(trace: &StripTrace) -> Vec<Option<usize>> {
+    if trace.shape.class() == SweepClass::MultiBranch
+        && trace.shape.branch_count() <= MAX_READOUT_BRANCHES
+    {
+        (0..trace.shape.branch_count()).map(Some).collect()
+    } else {
+        vec![None]
+    }
+}
+
+/// A strip's plotted traces, owned whole so they can be measured off the
+/// frame.
+struct MeasurementPlan {
+    window: Option<(f64, f64)>,
+    traces: Vec<PlannedTrace>,
+}
+
+struct PlannedTrace {
+    trace: usize,
+    branch: Option<usize>,
+    x: SharedWaveformValues,
+    y: SharedWaveformValues,
+    shape: Arc<SweepShape>,
+    rms: bool,
+}
+
+impl MeasurementPlan {
+    fn of(model: &StripModel, window: Option<(f64, f64)>) -> Self {
+        let mut traces = Vec::new();
+        for (index, trace) in model.traces.iter().enumerate() {
+            if !trace.visible {
+                continue;
+            }
+            for branch in measured_branches(trace) {
+                traces.push(PlannedTrace {
+                    trace: index,
+                    branch,
+                    x: trace.x.clone(),
+                    y: trace.y.clone(),
+                    shape: Arc::clone(&trace.shape),
+                    rms: has_rms(trace.kind),
+                });
+            }
+        }
+        Self { window, traces }
+    }
+
+    /// Measure every planned trace, or stop when `stop` is raised.
+    fn measure(self, stop: &AtomicBool) -> Option<Measurements> {
+        let mut rows = 0;
+        let mut traces = Vec::with_capacity(self.traces.len());
+        for planned in self.traces {
+            if stop.load(Ordering::Relaxed) {
+                return None;
+            }
+            let stats = interval_statistics(
+                &planned.x,
+                &planned.y,
+                &planned.shape,
+                self.window,
+                planned.branch,
+            );
+            traces.push(MeasuredTrace {
+                trace: planned.trace,
+                branch: planned.branch,
+                stats,
+                first_row: rows,
+            });
+            rows += rows_of(&stats, planned.rms);
+        }
+        Some(Measurements { traces, rows })
+    }
+}
+
+/// A measuring under way off the frame: what it measures, its answer once it
+/// has one (`None` if it was stopped), and the flag that stops it.
+#[derive(Debug, Clone)]
+struct Measuring {
+    of: MeasuredOf,
+    signals: usize,
+    answer: Arc<OnceLock<Option<Arc<Measurements>>>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Measuring {
+    fn start(of: MeasuredOf, plan: MeasurementPlan, ctx: &egui::Context) -> Self {
+        let signals = plan.traces.len();
+        let answer = Arc::new(OnceLock::new());
+        let stop = Arc::new(AtomicBool::new(false));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (held, halt, ctx) = (Arc::clone(&answer), Arc::clone(&stop), ctx.clone());
+            let spawned = std::thread::Builder::new()
+                .name("results-measurements".to_owned())
+                .spawn(move || {
+                    let _ = held.set(plan.measure(&halt).map(Arc::new));
+                    ctx.request_repaint();
+                });
+            // With no thread to be had, the table says nothing rather than
+            // measure on the frame.
+            if spawned.is_err() {
+                let _ = answer.set(None);
+            }
+        }
+        // The page has one thread: it measures as it starts.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = ctx;
+            let _ = answer.set(plan.measure(&stop).map(Arc::new));
+        }
+        Self {
+            of,
+            signals,
+            answer,
+            stop,
+        }
+    }
+}
+
+/// The Measurements table's measurements between frames: the last finished,
+/// and the one under way. At most one measures at a time; one asked for
+/// while another runs starts once it has stopped.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MeasurementsMemo {
+    done: Option<(MeasuredOf, Arc<Measurements>)>,
+    running: Option<Measuring>,
+}
+
+/// What the table shows this frame.
+enum Shown {
+    Measured(Arc<Measurements>),
+    /// Measuring this many signals, with nothing of these traces to show yet.
+    Measuring(usize),
+    Nothing,
+}
+
+impl MeasurementsMemo {
+    /// Keep the answer of a measuring that has ended.
+    fn collect(&mut self) {
+        if let Some(running) = &self.running
+            && let Some(answer) = running.answer.get()
+        {
+            if let Some(measured) = answer {
+                self.done = Some((running.of, Arc::clone(measured)));
+            }
+            self.running = None;
+        }
+    }
+
+    /// What to show of the measurements of `of`, measuring `plan` when none
+    /// is under way: those of `of`, or while they are measured the last of
+    /// the same traces over another window.
+    fn shown(
+        &mut self,
+        of: MeasuredOf,
+        ctx: &egui::Context,
+        plan: impl FnOnce() -> MeasurementPlan,
+    ) -> Shown {
+        self.collect();
+        let current = self.done.as_ref().is_some_and(|(done, _)| *done == of);
+        let start = match &self.running {
+            Some(running) => {
+                if running.of != of {
+                    running.stop.store(true, Ordering::Relaxed);
+                }
+                false
+            }
+            None => !current,
+        };
+        if start {
+            let plan = plan();
+            if plan.traces.is_empty() {
+                self.done = Some((of, Arc::new(Measurements::default())));
+            } else {
+                self.running = Some(Measuring::start(of, plan, ctx));
+                self.collect();
+            }
+        }
+        match (&self.done, &self.running) {
+            (Some((done, measured)), _) if done.same_traces(of) => {
+                if measured.rows == 0 {
+                    Shown::Nothing
+                } else {
+                    Shown::Measured(Arc::clone(measured))
+                }
+            }
+            (_, Some(running)) => Shown::Measuring(running.signals),
+            _ => Shown::Nothing,
+        }
+    }
 }
 /// The traces the readout lists, in row order.
 ///
@@ -524,10 +863,8 @@ pub fn trace_interval_statistics(
     window: Option<(f64, f64)>,
     branch: Option<usize>,
 ) -> WindowStats {
-    use rspice_results::measurements::{MeasurementError, measure_interval};
-
     if window.is_some_and(|(a, b)| !a.is_finite() || !b.is_finite()) {
-        return Err(MeasurementError::NonFiniteWindow);
+        return Err(rspice_results::measurements::MeasurementError::NonFiniteWindow);
     }
     let (a_bits, b_bits) = window.map_or((u64::MAX, u64::MAX), |(a, b)| {
         (a.min(b).to_bits(), a.max(b).to_bits())
@@ -539,46 +876,62 @@ pub fn trace_interval_statistics(
         branch.unwrap_or(usize::MAX),
     );
     derived.stats_or(key, || {
-        if trace.x.len() != trace.y.len() {
-            return Err(MeasurementError::LengthMismatch);
-        }
-        let (range, ascending) = match branch {
-            Some(index) => {
-                let run = trace
-                    .shape
-                    .runs()
-                    .get(index)
-                    .ok_or(MeasurementError::NonMonotoneAxis)?;
-                (
-                    run.start..run.end,
-                    run.orientation == rspice_results::sampling::XOrientation::Ascending,
-                )
-            }
-            None => (0..trace.x.len(), trace.shape.is_single_ascending()),
-        };
-        // A window over an ascending trace measures only the samples in it
-        // and one either side, found by bisection; a stored trace reads just
-        // those rows and keeps none of them.
-        let range = match window {
-            Some((a, b)) if ascending => window_rows(&trace.x, range, a.min(b), a.max(b)),
-            _ => range,
-        };
-        // A stored window that cannot be read has no samples to measure.
-        let unread = |_| MeasurementError::IncompleteCoverage { fraction: 0.0 };
-        let x = trace.x.read_range(range.clone()).map_err(unread)?;
-        if x.iter().any(|v| !v.is_finite()) {
-            return Err(MeasurementError::NonFiniteAxis);
-        }
-        let y = trace.y.read_range(range).map_err(unread)?;
-        measure_interval(&x, &y, window)
+        interval_statistics(&trace.x, &trace.y, &trace.shape, window, branch)
     })
+}
+
+/// Min, max and RMS of the samples `x` and `y` hold over `window`, or over
+/// the whole of them, of one branch of `shape` or of all of it.
+fn interval_statistics(
+    x: &WaveformValues,
+    y: &WaveformValues,
+    shape: &SweepShape,
+    window: Option<(f64, f64)>,
+    branch: Option<usize>,
+) -> WindowStats {
+    use rspice_results::measurements::{MeasurementError, measure_interval};
+
+    if window.is_some_and(|(a, b)| !a.is_finite() || !b.is_finite()) {
+        return Err(MeasurementError::NonFiniteWindow);
+    }
+    if x.len() != y.len() {
+        return Err(MeasurementError::LengthMismatch);
+    }
+    let (range, ascending) = match branch {
+        Some(index) => {
+            let run = shape
+                .runs()
+                .get(index)
+                .ok_or(MeasurementError::NonMonotoneAxis)?;
+            (
+                run.start..run.end,
+                run.orientation == rspice_results::sampling::XOrientation::Ascending,
+            )
+        }
+        None => (0..x.len(), shape.is_single_ascending()),
+    };
+    // A window over an ascending trace measures only the samples in it and
+    // one either side, found by bisection; a stored trace reads just those
+    // rows and keeps none of them.
+    let range = match window {
+        Some((a, b)) if ascending => window_rows(x, range, a.min(b), a.max(b)),
+        _ => range,
+    };
+    // A stored window that cannot be read has no samples to measure.
+    let unread = |_| MeasurementError::IncompleteCoverage { fraction: 0.0 };
+    let xs = x.read_range(range.clone()).map_err(unread)?;
+    if xs.iter().any(|v| !v.is_finite()) {
+        return Err(MeasurementError::NonFiniteAxis);
+    }
+    let ys = y.read_range(range).map_err(unread)?;
+    measure_interval(&xs, &ys, window)
 }
 
 /// The samples of `range` of the ascending axis `x` that a measurement over
 /// `low ..= high` reads: those inside it and the nearest one either side,
 /// found by bisection over single samples.
 fn window_rows(
-    x: &rspice_results::waveform::WaveformValues,
+    x: &WaveformValues,
     range: std::ops::Range<usize>,
     low: f64,
     high: f64,
@@ -617,70 +970,34 @@ pub fn measurement_values(
     quantity_policy: QuantityPresentationPolicy,
     display_name: DisplayName<'_>,
 ) -> Vec<(String, String)> {
-    let mut rows = Vec::new();
-    for trace in readout_traces(model) {
-        let branches: Vec<Option<usize>> = if trace.shape.class() == SweepClass::MultiBranch
-            && trace.shape.branch_count() <= MAX_READOUT_BRANCHES
-        {
-            (0..trace.shape.branch_count()).map(Some).collect()
-        } else {
-            vec![None]
-        };
-        for branch in branches {
-            let mut name = display_name(&trace.name).into_owned();
-            if let Some(branch) = branch {
-                name.push(' ');
-                name.push_str(&branch_tag(&trace.shape, branch));
-            }
-            if let Some(tag) = run_tag(model, trace) {
-                name.push_str(" · ");
-                name.push_str(&tag);
-            }
+    let mut rows = 0;
+    let mut traces = Vec::new();
+    for (index, trace) in model.traces.iter().enumerate() {
+        if !trace.visible {
+            continue;
+        }
+        for branch in measured_branches(trace) {
             let stats = trace_interval_statistics(derived, model, trace, window, branch);
-            let stats = match stats {
-                Ok(stats) => stats,
-                Err(error) => {
-                    rows.push((name, format!("Unavailable: {error}")));
-                    continue;
-                }
-            };
-            let fmt = |v| model.format_trace_value(trace, v, significant_digits, quantity_policy);
-            rows.push((format!("{name} min"), fmt(stats.min)));
-            rows.push((format!("{name} max"), fmt(stats.max)));
-            if matches!(
-                trace.kind,
-                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary
-            ) {
-                rows.push((format!("{name} rms"), fmt(stats.rms)));
-            }
+            traces.push(MeasuredTrace {
+                trace: index,
+                branch,
+                stats,
+                first_row: rows,
+            });
+            rows += rows_of(&stats, has_rms(trace.kind));
         }
     }
-    // An arbitrary cap the reader had to work around by hiding traces is not
-    // a measurement, so the row that announced it goes.
-    rows
-}
-
-/// Min/max/RMS use retained linear segments, including interpolated A/B
-/// endpoints. Rendering interpolation and display decimation do not alter them.
-fn measurement_rows(
-    ui: &mut Ui,
-    derived: &mut DerivedSeries,
-    model: &StripModel,
-    window: Option<(f64, f64)>,
-    significant_digits: usize,
-    quantity_policy: QuantityPresentationPolicy,
-    display_name: DisplayName<'_>,
-) {
-    let rows = measurement_values(
-        derived,
-        model,
-        window,
+    let measured = Measurements { traces, rows };
+    let wording = MeasurementWording {
         significant_digits,
         quantity_policy,
         display_name,
-    );
-    let refs: Vec<(&str, &str)> = rows.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    rspice_ui_kit::widgets::measurement_table(ui, &refs);
+    };
+    // An arbitrary cap the reader had to work around by hiding traces is not
+    // a measurement, so the row that announced it goes.
+    (0..measured.rows)
+        .map(|row| measured.row(model, row, wording))
+        .collect()
 }
 
 /// Append the exact cursor values using the explicit copied-value policy.

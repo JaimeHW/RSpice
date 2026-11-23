@@ -23,6 +23,9 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 #[derive(Clone, Copy)]
 pub struct ReadoutInput<'a> {
     pub models: &'a [StripModel],
+    /// Which build of the strip models `models` is: what is measured of them
+    /// is kept until it changes.
+    pub models_generation: u64,
     pub on_screen_strips: &'a [AnalysisPresentationKey],
     pub presentation: ReadoutPolicy,
     pub quantity_policy: QuantityPresentationPolicy,
@@ -895,10 +898,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultViewerState, source: ReadoutIn
             ui,
             &mut state.derived,
             model,
+            source.models_generation,
             window,
-            significant_digits,
-            quantity_policy,
-            source.display_name,
+            super::readout::MeasurementWording {
+                significant_digits,
+                quantity_policy,
+                display_name: source.display_name,
+            },
         );
     }
 }
