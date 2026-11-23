@@ -19,11 +19,11 @@ const HOT: &str = "sweep deck\n* RSpice sealed model source: pack rspice-cmos 3.
                    .OPTIONS TEMP=125\nV1 out 0 1\n.op\n.end\n";
 
 fn point(label: &str, deck: &std::sync::Arc<str>) -> ExecutedDeckPoint {
-    ExecutedDeckPoint {
-        label: label.to_owned(),
-        model_sources: sealed_model_sources(deck),
-        deck: std::sync::Arc::clone(deck),
-    }
+    ExecutedDeckPoint::new(
+        label,
+        std::sync::Arc::clone(deck),
+        sealed_model_sources(deck),
+    )
 }
 
 /// One sealed plan run, with an id the executed-deck archive can key on.
@@ -216,7 +216,9 @@ fn a_deck_source_no_retained_point_references_is_refused() {
     written
         .executed_decks
         .sources
-        .push("smuggled deck\n.end\n".to_owned());
+        .push(rspice_formats::project_results::ExecutedDeckSource::new(
+            "smuggled deck\n.end\n",
+        ));
 
     let error = written
         .validate()
@@ -247,7 +249,11 @@ fn more_retained_decks_than_a_session_could_hold_fails_closed_on_load() {
     // the oldest before a fifth could be retained. This is the shape of the
     // file a tamperer produces, not one a session can.
     written.executed_decks.sources = (1..=5)
-        .map(|sequence| format!("deck {sequence}\n.end\n"))
+        .map(|sequence| {
+            rspice_formats::project_results::ExecutedDeckSource::new(format!(
+                "deck {sequence}\n.end\n"
+            ))
+        })
         .collect();
     written.executed_decks.runs = (1..=5)
         .map(|sequence| ProjectExecutedDeck {

@@ -857,10 +857,12 @@ mod tests {
                     // Two points over one shared source: what the run costs is the
                     // source once, never once per point.
                     points: (0..2)
-                        .map(|index| crate::state::ExecutedDeckPoint {
-                            label: format!("point {index}"),
-                            model_sources: Vec::new(),
-                            deck: std::sync::Arc::clone(&deck),
+                        .map(|index| {
+                            crate::state::ExecutedDeckPoint::new(
+                                format!("point {index}"),
+                                std::sync::Arc::clone(&deck),
+                                Vec::new(),
+                            )
                         })
                         .collect(),
                 });

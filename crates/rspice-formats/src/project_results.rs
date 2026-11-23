@@ -70,7 +70,7 @@ mod pack;
 #[cfg(any(unix, windows))]
 pub use pack::{PACK_EXTENSION, folder_to_unpack, pack_project, unpack_project};
 mod provenance;
-pub use executed_deck::ProjectExecutedDecks;
+pub use executed_deck::{ExecutedDeckSource, ProjectExecutedDecks};
 // The rows inside are named only where a file is written by hand: production
 // code builds them from the session archive and reads them back through it.
 pub use executed_deck::{ProjectExecutedDeck, ProjectExecutedDeckPoint};
@@ -339,7 +339,7 @@ pub struct ProjectSimulationRun {
     /// The run's own log. Absent is empty, which is every run written before
     /// runs kept one. Like retention it is outside the dataset digest, and the
     /// result history's fingerprint reads past it
-    /// ([`ProjectSimulationResults::without_run_logs`]): it is the run's
+    /// ([`ProjectSimulationResults::as_fingerprinted`]): it is the run's
     /// account of itself, not result content, so it needs no schema era.
     #[serde(default, skip_serializing_if = "RunLog::is_empty")]
     pub log: RunLog,

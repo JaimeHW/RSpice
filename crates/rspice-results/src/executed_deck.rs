@@ -7,6 +7,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use rspice_vocabulary::product::ContentDigest;
+use sha2::{Digest as _, Sha256};
+
 /// How many runs' decks one session keeps.
 ///
 /// Four, because the question this answers is nearly always about the run just
@@ -50,6 +53,47 @@ pub struct ExecutedDeckPoint {
     /// what the engine was given, so a label here can never describe a source
     /// the deck does not actually contain.
     pub model_sources: Vec<String>,
+    /// `deck`'s content digest: what tells two decks apart, and what the
+    /// project's result fingerprint reads in place of the text.
+    digest: ContentDigest,
+}
+
+impl ExecutedDeckPoint {
+    /// A point over `deck`, digested here.
+    pub fn new(label: impl Into<String>, deck: Arc<str>, model_sources: Vec<String>) -> Self {
+        let digest = deck_digest(&deck);
+        Self::digested(label, deck, model_sources, digest)
+    }
+
+    /// A point over `deck` whose content digest, `digest`, was read where the
+    /// deck was made: a run's decks are digested as the run is prepared, so
+    /// the frame it starts in reads none of them.
+    pub fn digested(
+        label: impl Into<String>,
+        deck: Arc<str>,
+        model_sources: Vec<String>,
+        digest: ContentDigest,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            deck,
+            model_sources,
+            digest,
+        }
+    }
+
+    /// The content digest of [`Self::deck`].
+    #[must_use]
+    pub const fn digest(&self) -> ContentDigest {
+        self.digest
+    }
+}
+
+/// A deck's content digest: the SHA-256 of its exact UTF-8 text, as the
+/// netlist document reads one.
+#[must_use]
+pub fn deck_digest(deck: &str) -> ContentDigest {
+    ContentDigest::from_bytes(Sha256::digest(deck.as_bytes()).into())
 }
 
 /// Every deck one run executed, in the order its tasks were dispatched.
@@ -222,11 +266,7 @@ mod tests {
     use super::*;
 
     fn point(label: &str, deck: &Arc<str>) -> ExecutedDeckPoint {
-        ExecutedDeckPoint {
-            label: label.to_owned(),
-            deck: Arc::clone(deck),
-            model_sources: Vec::new(),
-        }
+        ExecutedDeckPoint::new(label, Arc::clone(deck), Vec::new())
     }
 
     fn deck_of(run_id: u64, text: &str, points: usize) -> ExecutedDeck {

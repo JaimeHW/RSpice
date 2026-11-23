@@ -388,11 +388,7 @@ fn a_run_input_opened_from_results_is_a_tab_that_keeps_its_text() {
         .executed_decks
         .retain(ExecutedDeck {
             run_id: run,
-            points: vec![ExecutedDeckPoint {
-                label: "nominal".to_owned(),
-                deck: INPUT.into(),
-                model_sources: Vec::new(),
-            }],
+            points: vec![ExecutedDeckPoint::new("nominal", INPUT.into(), Vec::new())],
         });
 
     app.execute_command_key(ResultsCommand::OpenTaskDeck.key());

@@ -65,11 +65,11 @@ fn swept_current_source() -> ResultsTestHost {
         .executed_decks
         .retain(ExecutedDeck {
             run_id,
-            points: vec![ExecutedDeckPoint {
-                label: "DC".to_owned(),
-                deck: "* bias sweep\nIbias 0 in DC 0\n.dc Ibias 0 1m 10u\n.end\n".into(),
-                model_sources: Vec::new(),
-            }],
+            points: vec![ExecutedDeckPoint::new(
+                "DC",
+                "* bias sweep\nIbias 0 in DC 0\n.dc Ibias 0 1m 10u\n.end\n".into(),
+                Vec::new(),
+            )],
         });
     state.results.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     state

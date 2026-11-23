@@ -80,11 +80,7 @@ fn a_sweep_points_executed_deck_stays_on_screen_on_the_next_frames() {
     let mut app = open_project_app();
     app.state.runs.manual_run.last_run_buffer = Some(MANUAL.into());
     app.state.runs.manual_run.last_run_id = Some(3);
-    let point = |label: &str, deck: &str| ExecutedDeckPoint {
-        label: label.to_owned(),
-        deck: deck.into(),
-        model_sources: Vec::new(),
-    };
+    let point = |label: &str, deck: &str| ExecutedDeckPoint::new(label, deck.into(), Vec::new());
     app.state
         .model
         .simulation

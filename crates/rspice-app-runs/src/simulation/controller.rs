@@ -703,11 +703,14 @@ impl SimulationController {
                 run_id,
                 points: dispatch
                     .tasks()
-                    .map(|task| crate::state::ExecutedDeckPoint {
+                    .map(|task| {
                         // Read out of this very deck where the run was prepared.
-                        model_sources: task.sealed_model_sources().to_vec(),
-                        label: task.label().to_owned(),
-                        deck: std::sync::Arc::clone(task.executable_netlist()),
+                        crate::state::ExecutedDeckPoint::digested(
+                            task.label(),
+                            std::sync::Arc::clone(task.executable_netlist()),
+                            task.sealed_model_sources().to_vec(),
+                            task.executable_netlist_digest(),
+                        )
                     })
                     .collect(),
             });

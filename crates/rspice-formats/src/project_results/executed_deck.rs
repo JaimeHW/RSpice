@@ -32,10 +32,71 @@ use super::*;
 pub struct ProjectExecutedDecks {
     /// Distinct executed-deck text, written once and referenced by index.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<String>,
+    pub sources: Vec<ExecutedDeckSource>,
     /// The exact deck each retained run's engine read, per point.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<ProjectExecutedDeck>,
+}
+
+/// One distinct executed deck's text, shared with the session archive that
+/// holds it, and its content digest: what tells two sources apart, and what
+/// the result fingerprint reads in place of the text.
+///
+/// Written as the text alone; the digest is read again from the text on load.
+#[derive(Debug, Clone)]
+pub struct ExecutedDeckSource {
+    text: std::sync::Arc<str>,
+    digest: ContentDigest,
+}
+
+impl ExecutedDeckSource {
+    /// A source over `text`, digested here.
+    pub fn new(text: impl Into<std::sync::Arc<str>>) -> Self {
+        let text = text.into();
+        let digest = rspice_results::executed_deck::deck_digest(&text);
+        Self { text, digest }
+    }
+
+    /// The deck text.
+    #[must_use]
+    pub const fn text(&self) -> &std::sync::Arc<str> {
+        &self.text
+    }
+
+    /// The content digest of [`Self::text`].
+    #[must_use]
+    pub const fn digest(&self) -> ContentDigest {
+        self.digest
+    }
+
+    /// This source as the result fingerprint reads it: named by its digest.
+    pub(super) fn named_by_digest(&self) -> Self {
+        Self {
+            text: std::sync::Arc::from(format!("sha256:{}", self.digest)),
+            digest: self.digest,
+        }
+    }
+}
+
+/// Equal digests are equal text; comparing them reads neither.
+impl PartialEq for ExecutedDeckSource {
+    fn eq(&self, other: &Self) -> bool {
+        self.digest == other.digest
+    }
+}
+
+impl Eq for ExecutedDeckSource {}
+
+impl Serialize for ExecutedDeckSource {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.text)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExecutedDeckSource {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::new)
+    }
 }
 
 /// One retained run's executed decks, as the project file writes them.
@@ -70,7 +131,7 @@ impl ProjectExecutedDecks {
         archive: &rspice_results::executed_deck::ExecutedDeckArchive,
         retained_runs: impl Iterator<Item = u64> + Clone,
     ) -> Self {
-        let mut sources: Vec<String> = Vec::new();
+        let mut sources: Vec<ExecutedDeckSource> = Vec::new();
         let mut runs: Vec<ProjectExecutedDeck> = Vec::new();
         for record in archive.iter() {
             if !retained_runs.clone().any(|id| id == record.run_id) {
@@ -80,15 +141,19 @@ impl ProjectExecutedDecks {
                 .points
                 .iter()
                 .map(|point| {
-                    // Equality rather than allocation identity: the archive
-                    // shares one allocation between the points that solved one
-                    // source, and two runs' identical decks are separate
-                    // allocations that would otherwise both be written.
+                    // Content rather than allocation identity, read by digest:
+                    // the archive shares one allocation between the points
+                    // that solved one source, and two runs' identical decks
+                    // are separate allocations that would otherwise both be
+                    // written. The text is shared, never copied.
                     let source = sources
                         .iter()
-                        .position(|held| held.as_str() == point.deck.as_ref())
+                        .position(|held| held.digest == point.digest())
                         .unwrap_or_else(|| {
-                            sources.push(point.deck.to_string());
+                            sources.push(ExecutedDeckSource {
+                                text: std::sync::Arc::clone(&point.deck),
+                                digest: point.digest(),
+                            });
                             sources.len() - 1
                         });
                     ProjectExecutedDeckPoint {
@@ -106,18 +171,13 @@ impl ProjectExecutedDecks {
     }
 
     /// Rebuild the session archive, sharing one allocation per distinct source
-    /// exactly as the archive that wrote it did.
+    /// exactly as the archive that wrote it did, and its digest.
     ///
     /// The caps are re-applied by [`ExecutedDeckArchive::restore`]: a file
     /// carrying more than a session could have held is refused, not trimmed.
     pub fn into_archive(
         self,
     ) -> Result<rspice_results::executed_deck::ExecutedDeckArchive, String> {
-        let shared: Vec<std::sync::Arc<str>> = self
-            .sources
-            .iter()
-            .map(|source| std::sync::Arc::from(source.as_str()))
-            .collect();
         let records = self
             .runs
             .iter()
@@ -126,19 +186,20 @@ impl ProjectExecutedDecks {
                     .points
                     .iter()
                     .map(|point| {
-                        let source = shared.get(point.source).ok_or_else(|| {
+                        let source = self.sources.get(point.source).ok_or_else(|| {
                             format!(
                                 "executed deck for run {} references source {} of {}",
                                 deck.run_id,
                                 point.source,
-                                shared.len()
+                                self.sources.len()
                             )
                         })?;
-                        Ok(rspice_results::executed_deck::ExecutedDeckPoint {
-                            label: point.label.clone(),
-                            model_sources: rspice_model_library::sealed_model_sources(source),
-                            deck: std::sync::Arc::clone(source),
-                        })
+                        Ok(rspice_results::executed_deck::ExecutedDeckPoint::digested(
+                            point.label.clone(),
+                            std::sync::Arc::clone(&source.text),
+                            rspice_model_library::sealed_model_sources(&source.text),
+                            source.digest,
+                        ))
                     })
                     .collect::<Result<Vec<_>, String>>()?;
                 Ok(rspice_results::executed_deck::ExecutedDeck {

@@ -299,11 +299,11 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
         .executed_decks
         .retain(ExecutedDeck {
             run_id: sequence,
-            points: vec![ExecutedDeckPoint {
-                label: "nominal".to_owned(),
-                deck: "task deck\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n".into(),
-                model_sources: Vec::new(),
-            }],
+            points: vec![ExecutedDeckPoint::new(
+                "nominal",
+                "task deck\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n".into(),
+                Vec::new(),
+            )],
         });
 
     assert_eq!(

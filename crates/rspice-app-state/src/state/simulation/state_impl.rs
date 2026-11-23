@@ -1251,11 +1251,7 @@ mod tests {
             .executed_decks
             .retain(crate::state::ExecutedDeck {
                 run_id: sequence,
-                points: vec![crate::state::ExecutedDeckPoint {
-                    label: "TT".to_owned(),
-                    model_sources: Vec::new(),
-                    deck,
-                }],
+                points: vec![crate::state::ExecutedDeckPoint::new("TT", deck, Vec::new())],
             });
         let snapshot = state.clone();
         for worker_active in [true, false] {
@@ -1307,11 +1303,11 @@ mod tests {
                 .executed_decks
                 .retain(crate::state::ExecutedDeck {
                     run_id: sequence,
-                    points: vec![crate::state::ExecutedDeckPoint {
-                        label: "TT 27C".to_owned(),
-                        model_sources: Vec::new(),
+                    points: vec![crate::state::ExecutedDeckPoint::new(
+                        "TT 27C",
                         deck,
-                    }],
+                        Vec::new(),
+                    )],
                 });
         }
         assert!(
@@ -1550,11 +1546,11 @@ mod tests {
                 .executed_decks
                 .retain(crate::state::ExecutedDeck {
                     run_id,
-                    points: vec![crate::state::ExecutedDeckPoint {
-                        label: "TT".to_owned(),
-                        model_sources: Vec::new(),
-                        deck: std::sync::Arc::from(format!("run {run_id}\n.end\n")),
-                    }],
+                    points: vec![crate::state::ExecutedDeckPoint::new(
+                        "TT",
+                        std::sync::Arc::from(format!("run {run_id}\n.end\n")),
+                        Vec::new(),
+                    )],
                 });
         }
         let decks = |state: &SimulationState| {

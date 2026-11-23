@@ -63,7 +63,7 @@ pub fn digest(
 ) -> Result<ContentDigest, String> {
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
     super::fingerprints::observe(&RESULT_FINGERPRINT_PASSES);
-    let results = results.without_run_logs();
+    let results = results.as_fingerprinted();
     super::digest(&(
         "result-history-v2",
         &*results,

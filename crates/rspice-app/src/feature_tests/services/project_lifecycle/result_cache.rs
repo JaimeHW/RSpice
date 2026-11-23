@@ -11,11 +11,7 @@ use rspice_app_state::state::{
 fn deck(text: &str) -> ExecutedDeck {
     ExecutedDeck {
         run_id: 1,
-        points: vec![ExecutedDeckPoint {
-            label: "Tran".to_owned(),
-            deck: text.into(),
-            model_sources: Vec::new(),
-        }],
+        points: vec![ExecutedDeckPoint::new("Tran", text.into(), Vec::new())],
     }
 }
 

@@ -429,11 +429,8 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
     let mut harness = deck_state();
     let point = |label: &str, text: &str| {
         let deck: std::sync::Arc<str> = std::sync::Arc::from(text);
-        ExecutedDeckPoint {
-            label: label.to_owned(),
-            model_sources: sealed_model_sources(&deck),
-            deck,
-        }
+        let model_sources = sealed_model_sources(&deck);
+        ExecutedDeckPoint::new(label, deck, model_sources)
     };
     harness
         .model
@@ -544,11 +541,8 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
     let digest = |value: u8| crate::product::ContentDigest::from_bytes([value; 32]);
     let point = |label: &str, text: &str| {
         let deck: std::sync::Arc<str> = std::sync::Arc::from(text);
-        ExecutedDeckPoint {
-            label: label.to_owned(),
-            model_sources: sealed_model_sources(&deck),
-            deck,
-        }
+        let model_sources = sealed_model_sources(&deck);
+        ExecutedDeckPoint::new(label, deck, model_sources)
     };
     let seal = |harness: &mut SourceHarness, source: &str| {
         let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {

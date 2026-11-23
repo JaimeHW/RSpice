@@ -1602,11 +1602,8 @@ mod tests {
 
         let point = |label: &str, text: &str| {
             let deck: std::sync::Arc<str> = std::sync::Arc::from(text);
-            ExecutedDeckPoint {
-                label: label.to_owned(),
-                model_sources: crate::state::sealed_model_sources(&deck),
-                deck,
-            }
+            let model_sources = crate::state::sealed_model_sources(&deck);
+            ExecutedDeckPoint::new(label, deck, model_sources)
         };
         harness
             .model
