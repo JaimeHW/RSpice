@@ -30,8 +30,9 @@ pub struct RunsState {
     pub preparing_deck: Option<PreparingDeck>,
 }
 
-/// A deck whose run is being prepared: what the press took, which names the
-/// deck in what the run's verdict says, and finds the line a refusal names.
+/// A deck being prepared: what the press took, which names the deck in what
+/// the verdict says, and finds the line a refusal names, and what the press
+/// asked of it.
 #[derive(Debug, Clone)]
 pub struct PreparingDeck {
     pub name: String,
@@ -41,6 +42,22 @@ pub struct PreparingDeck {
     /// Run anyway and Stop, and nothing of it dispatches until the reader
     /// runs it anyway. The status line and the band above the deck say it.
     pub memory: Option<rspice_simulation::execution::run_memory::MemoryWarning>,
+    pub action: crate::simulation::controller::DeckAction,
+}
+
+impl PreparingDeck {
+    /// What Stop says of it.
+    #[must_use]
+    pub fn stopped(&self) -> String {
+        match self.action {
+            crate::simulation::controller::DeckAction::Run => {
+                format!("Stopped {} before it ran.", self.name)
+            }
+            crate::simulation::controller::DeckAction::Check => {
+                format!("Stopped checking {}.", self.name)
+            }
+        }
+    }
 }
 
 impl RunsState {
@@ -59,13 +76,13 @@ impl RunsState {
     pub fn stop_preparing_deck(
         &mut self,
         controller: &mut crate::simulation::controller::SimulationController,
-    ) -> Option<String> {
+    ) -> Option<PreparingDeck> {
         let deck = self.preparing_deck.take()?;
         controller.cancel_deck_run_preparation();
         if deck.memory.is_some() {
             controller.clear_prepared_run();
         }
-        Some(deck.name)
+        Some(deck)
     }
 
     /// What the deck's run, prepared and waiting for Run anyway, needs

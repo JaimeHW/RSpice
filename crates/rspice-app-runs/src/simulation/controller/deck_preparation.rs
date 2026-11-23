@@ -7,22 +7,27 @@
 //! stands, its text shared rather than copied, freezes what preparing the run
 //! reads, and hands both to a worker. The frame loop polls it, the status bar
 //! says the run is preparing, and Stop drops it. The run runs what the press
-//! took: an edit made while it prepares is not the run's.
+//! took: an edit made while it prepares is not the run's. Check and netlist
+//! prepares the deck the same way and keeps nothing of it but what it found.
 //!
 //! It comes in three parts. The press,
-//! [`SimulationController::start_deck_run_preparation`], freezes the inputs
-//! and starts the worker. The worker, [`prepare_on_worker`], prepares the run
-//! and sends a [`WorkerOutcome`], one case for each way a preparation ends.
-//! The apply, [`SimulationController::poll_deck_run_preparation`], takes the
+//! [`SimulationController::start_deck_preparation`], freezes the inputs and
+//! starts the worker. The worker, [`prepare_on_worker`], prepares the run and
+//! reports a [`WorkerOutcome`], one case for each way a preparation ends. The
+//! apply, [`SimulationController::poll_deck_run_preparation`], takes the
 //! outcome in a later frame and turns it into the [`DeckRunVerdict`] the
 //! frame acts on, retaining a prepared run for dispatch.
+//!
+//! The worker reports first and frees afterwards: what it built for a run
+//! that stopped, or for a check, is dropped once the report is made, so
+//! nothing waits on the freeing of a parsed and flattened deck.
 //!
 //! In the browser, and in the application's tests unless they ask otherwise,
 //! the preparation runs inline, [`prepare_on_frame`], so there the press
 //! still prepares the run.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, mpsc};
 
 use super::prepared_run::FrozenDeckPreparation;
 use super::run_inputs::RetainedRunInputs;
@@ -33,8 +38,24 @@ use crate::simulation::execution::{
 };
 use rspice_simulation::execution::run_memory::MemoryWarning;
 
-/// What a deck's preparation came to, as the worker sends it: one case for
-/// each way it ends, each of which the apply turns into a
+/// What a press asks of a deck's preparation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckAction {
+    /// Run: the prepared run is retained for dispatch.
+    Run,
+    /// Check and netlist: the deck is prepared as Run prepares it, and only
+    /// what the preparation found is kept.
+    Check,
+}
+
+/// What the press hands the worker beside the deck: a step the worker takes
+/// before it prepares anything, such as saving the deck's files, which says
+/// whether the preparation goes on. A step that holds it has said why
+/// itself.
+pub type BeforePreparing = Box<dyn FnOnce() -> bool + Send>;
+
+/// What a deck's preparation came to, as the worker reports it: one case
+/// for each way it ends, each of which the apply turns into a
 /// [`DeckRunVerdict`].
 enum WorkerOutcome {
     /// The run, prepared from the deck as the press took it.
@@ -46,46 +67,138 @@ enum WorkerOutcome {
         snapshot: Box<PreparedRunSnapshot>,
         warning: MemoryWarning,
     },
+    /// The deck checked: what preparing its run found.
+    Checked(Box<PreparedRunMetadata>),
     /// Preparing the run refused the deck.
     Refused(PreparationError),
     /// Preparing it reached a Verilog-A source another thread is compiling,
     /// which a preparation on the frame does not wait for.
     Compiling,
+    /// The step before preparing held it.
+    Held,
+    /// Stop reached the worker.
+    Stopped,
 }
 
 impl WorkerOutcome {
-    fn of(prepared: Result<PreparedRunSnapshot, PreparationError>) -> Self {
-        match prepared {
-            Ok(snapshot) => match snapshot.memory_warning() {
-                Some(warning) => Self::NeedsMemory {
-                    snapshot: Box::new(snapshot),
-                    warning,
-                },
-                None => Self::Prepared(Box::new(snapshot)),
+    /// What `prepared` comes to for `action`, and what is left to free once
+    /// it is reported: a check keeps the prepared run's findings alone.
+    fn of(
+        prepared: Result<PreparedRunSnapshot, PreparationError>,
+        action: DeckAction,
+    ) -> (Self, Option<PreparedRunSnapshot>) {
+        match (prepared, action) {
+            (Ok(snapshot), DeckAction::Run) => match snapshot.memory_warning() {
+                Some(warning) => (
+                    Self::NeedsMemory {
+                        snapshot: Box::new(snapshot),
+                        warning,
+                    },
+                    None,
+                ),
+                None => (Self::Prepared(Box::new(snapshot)), None),
             },
-            Err(error) => Self::Refused(error),
+            (Ok(snapshot), DeckAction::Check) => {
+                (Self::Checked(Box::new(snapshot.metadata())), Some(snapshot))
+            }
+            (Err(error), _) => (Self::Refused(error), None),
         }
     }
 }
 
-/// The worker: prepare the run from what the press froze, stopped once
-/// `cancel` is raised. A constant function or a loop the preparation
-/// evaluates polls the same flag, so Stop ends it too. A worker waits for a
-/// Verilog-A source another thread compiles.
-fn prepare_on_worker(frozen: &FrozenDeckPreparation, cancel: &Arc<AtomicBool>) -> WorkerOutcome {
-    WorkerOutcome::of(rspice_core::engine::with_loop_abort(cancel, || {
-        frozen.prepare(cancel)
-    }))
+/// The worker's one report, made once, however the worker ends: sent, it
+/// asks for the frame that takes it, and releases a test's hold.
+struct Report {
+    sender: mpsc::Sender<WorkerOutcome>,
+    _wake: WakeOnEnd,
+    #[cfg(any(test, feature = "test-support"))]
+    _hold: Option<mpsc::Sender<()>>,
+}
+
+/// The stop signal a worker prepares under. The first poll that finds Stop
+/// raised reports the worker stopped, before the preparation unwinds and
+/// frees what it built, so Stop is answered within one step of the
+/// preparation whatever that step built.
+struct ReportingStop {
+    cancel: Arc<AtomicBool>,
+    report: Mutex<Option<Report>>,
+}
+
+impl ReportingStop {
+    /// Report `outcome`, unless a report was made.
+    fn report(&self, outcome: WorkerOutcome) {
+        let report = self
+            .report
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(report) = report {
+            let _ = report.sender.send(outcome);
+        }
+    }
+
+    fn stopped(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+}
+
+impl rspice_core::abort_signal::AbortSignal for ReportingStop {
+    fn is_aborted(&self) -> bool {
+        if !self.stopped() {
+            return false;
+        }
+        self.report(WorkerOutcome::Stopped);
+        true
+    }
+}
+
+/// The worker: take the step before preparing, then prepare the run from
+/// what the press froze, stopped once Stop is raised, and report how it
+/// ended before anything it built is freed. A constant function or a loop
+/// the preparation evaluates polls the same signal, so Stop ends it too. A
+/// worker waits for a Verilog-A source another thread compiles.
+fn prepare_on_worker(
+    frozen: &FrozenDeckPreparation,
+    action: DeckAction,
+    before: BeforePreparing,
+    signal: &ReportingStop,
+) {
+    if !before() {
+        signal.report(WorkerOutcome::Held);
+        return;
+    }
+    if signal.stopped() {
+        signal.report(WorkerOutcome::Stopped);
+        return;
+    }
+    let prepared = rspice_core::engine::with_loop_abort(signal, || frozen.prepare(signal));
+    let (outcome, left) = WorkerOutcome::of(prepared, action);
+    if signal.stopped() {
+        signal.report(WorkerOutcome::Stopped);
+    } else {
+        signal.report(outcome);
+    }
+    // Freed after the report.
+    drop(left);
 }
 
 /// The same on the frame, where there is no worker. A frame does not wait
 /// for a Verilog-A source another thread compiles: the preparation stops
 /// there, and the frame loop asks again once the compile ends.
-fn prepare_on_frame(frozen: &FrozenDeckPreparation) -> WorkerOutcome {
+fn prepare_on_frame(
+    frozen: &FrozenDeckPreparation,
+    action: DeckAction,
+    before: BeforePreparing,
+) -> WorkerOutcome {
+    if !before() {
+        return WorkerOutcome::Held;
+    }
     rspice_simulation::project_veriloga::external_runtimes::unless_compiling(|| {
         frozen.prepare(&rspice_core::NoAbort)
     })
-    .map_or(WorkerOutcome::Compiling, WorkerOutcome::of)
+    .map_or(WorkerOutcome::Compiling, |prepared| {
+        WorkerOutcome::of(prepared, action).0
+    })
 }
 
 /// A deck's preparation in flight.
@@ -110,10 +223,15 @@ pub enum DeckRunVerdict {
         metadata: Box<PreparedRunMetadata>,
         warning: MemoryWarning,
     },
+    /// The deck was checked: what preparing its run found. Nothing of it is
+    /// retained.
+    Checked(Box<PreparedRunMetadata>),
     /// Preparing the run refused the deck.
     Refused(PreparationError),
     /// Preparing it reached a Verilog-A source another thread is compiling.
     Compiling,
+    /// The step before preparing held it, and said why.
+    Held,
 }
 
 static DECK_RUN_WAKER: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
@@ -164,15 +282,36 @@ fn prepares_away() -> bool {
     DECK_RUN_WAKER.get().is_some()
 }
 
+/// Free `outcome` away from the frame: a prepared run holds the parsed and
+/// flattened deck, which takes a large deck's preparation a good part of a
+/// second to free.
+fn free_away_from_frame(outcome: WorkerOutcome) {
+    match outcome {
+        WorkerOutcome::Prepared(snapshot) | WorkerOutcome::NeedsMemory { snapshot, .. } => {
+            spawn_or_inline(move || drop(snapshot));
+        }
+        outcome => drop(outcome),
+    }
+}
+
 impl SimulationController {
-    /// The press: start preparing the run of `deck`, the deck as a Run press
-    /// took it, from what preparing it reads of `state`, frozen now. The retained run,
-    /// and any deck preparation in flight, are dropped. Off the frame where
-    /// the application prepares decks away from it; on it otherwise, where
-    /// the verdict is in when this returns.
-    pub fn start_deck_run_preparation(&mut self, state: &impl RunHost, deck: ManualDeckCopy) {
+    /// The press: start preparing `deck`, the deck as the press took it, for
+    /// `action`, from what preparing it reads of `state`, frozen now;
+    /// `before` runs first, where the preparation runs. Any deck preparation
+    /// in flight is dropped, and for Run the retained run too. Off the frame
+    /// where the application prepares decks away from it; on it otherwise,
+    /// where the verdict is in when this returns.
+    pub fn start_deck_preparation(
+        &mut self,
+        state: &impl RunHost,
+        deck: ManualDeckCopy,
+        action: DeckAction,
+        before: BeforePreparing,
+    ) {
         self.cancel_deck_run_preparation();
-        self.clear_prepared_run();
+        if action == DeckAction::Run {
+            self.clear_prepared_run();
+        }
         let frozen = FrozenDeckPreparation::freeze(state, deck.clone());
         let (sender, receiver) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -181,22 +320,31 @@ impl SimulationController {
         #[cfg(not(any(test, feature = "test-support")))]
         let hold: Option<()> = None;
         if prepares_away() || hold.is_some() {
-            let cancel = Arc::clone(&cancel);
-            spawn_or_inline(move || {
+            #[cfg(any(test, feature = "test-support"))]
+            let (release, hold) = match hold {
+                Some(WorkerHold { release, ended }) => (Some(release), Some(ended)),
+                None => (None, None),
+            };
+            let signal = ReportingStop {
+                cancel: Arc::clone(&cancel),
                 // However the worker ends, even in a panic, the frame that
-                // takes its verdict is asked for.
-                let _wake = WakeOnEnd;
+                // takes its report is asked for.
+                report: Mutex::new(Some(Report {
+                    sender,
+                    _wake: WakeOnEnd,
+                    #[cfg(any(test, feature = "test-support"))]
+                    _hold: hold,
+                })),
+            };
+            spawn_or_inline(move || {
                 #[cfg(any(test, feature = "test-support"))]
-                if let Some(hold) = &hold {
-                    let _ = hold.release.recv();
+                if let Some(release) = &release {
+                    let _ = release.recv();
                 }
-                let outcome = prepare_on_worker(&frozen, &cancel);
-                if !cancel.load(Ordering::Relaxed) {
-                    let _ = sender.send(outcome);
-                }
+                prepare_on_worker(&frozen, action, before, &signal);
             });
         } else {
-            let _ = sender.send(prepare_on_frame(&frozen));
+            let _ = sender.send(prepare_on_frame(&frozen, action, before));
         }
         self.deck_preparation = Some(PendingDeckPreparation {
             receiver,
@@ -205,20 +353,24 @@ impl SimulationController {
         });
     }
 
-    /// Whether a deck's run is being prepared.
+    /// Whether a deck is being prepared.
     #[must_use]
     pub fn deck_run_preparing(&self) -> bool {
         self.deck_preparation.is_some()
     }
 
     /// Stop the deck preparation in flight: its worker stops at its next
-    /// abort point, and what it prepares is dropped. Returns whether one was
-    /// in flight.
+    /// abort point, and what it prepares is dropped, away from the frame.
+    /// Returns whether one was in flight.
     pub fn cancel_deck_run_preparation(&mut self) -> bool {
         let Some(pending) = self.deck_preparation.take() else {
             return false;
         };
         pending.cancel.store(true, Ordering::Relaxed);
+        // A run the worker prepared before Stop reached it waits here.
+        if let Ok(outcome) = pending.receiver.try_recv() {
+            free_away_from_frame(outcome);
+        }
         true
     }
 
@@ -249,6 +401,8 @@ impl SimulationController {
         match outcome {
             WorkerOutcome::Compiling => DeckRunVerdict::Compiling,
             WorkerOutcome::Refused(error) => DeckRunVerdict::Refused(error),
+            WorkerOutcome::Held | WorkerOutcome::Stopped => DeckRunVerdict::Held,
+            WorkerOutcome::Checked(metadata) => DeckRunVerdict::Checked(metadata),
             WorkerOutcome::Prepared(snapshot) => {
                 let metadata = Box::new(snapshot.metadata());
                 match self.retain_prepared_run(*snapshot, RetainedRunInputs::Pressed(deck)) {
@@ -272,7 +426,8 @@ impl SimulationController {
 pub struct DeckPreparationHold {
     /// Sending on it, or dropping it, lets the worker prepare.
     pub release: mpsc::Sender<()>,
-    /// Disconnects once the worker has ended, however it ended.
+    /// Disconnects once the worker has reported how it ended, however it
+    /// ended.
     pub ended: mpsc::Receiver<()>,
 }
 
@@ -280,8 +435,8 @@ pub struct DeckPreparationHold {
 #[cfg(any(test, feature = "test-support"))]
 pub(super) struct WorkerHold {
     release: mpsc::Receiver<()>,
-    /// Dropped with the worker.
-    _ended: mpsc::Sender<()>,
+    /// Dropped with the worker's report.
+    ended: mpsc::Sender<()>,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -293,7 +448,7 @@ impl SimulationController {
         let (ended, worker_ended) = mpsc::channel();
         self.deck_preparation_hold = Some(WorkerHold {
             release: released,
-            _ended: ended,
+            ended,
         });
         DeckPreparationHold {
             release,

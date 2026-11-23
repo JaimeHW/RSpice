@@ -156,8 +156,8 @@ const ROUTED: &[RoutedCommand<SourceFeature>] = &[
         key: ids::CHECK_AND_NETLIST,
         takes: runs_a_deck,
         // A deck whose file is missing has nothing to check until it is
-        // found.
-        enabled: run_deck_readable,
+        // found. A deck being prepared is Stop's.
+        enabled: |reads| reads.runs.preparing_deck.is_none() && run_deck_readable(reads),
         execute: deck_run::check_deck,
     },
 ];

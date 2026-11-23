@@ -154,7 +154,7 @@ impl CommandSet for SimulateCommand {
                     cx.runs.preflight.request_check_cancel();
                 } else if let Some(deck) = cx.runs.stop_preparing_deck(cx.handles.run_controller) {
                     // Nothing of a run still being prepared has started.
-                    let message = format!("Stopped {deck} before it ran.");
+                    let message = deck.stopped();
                     cx.model
                         .record(LogSeverity::Info, LogSource::Run, message.clone());
                     cx.wb.prompt(message);

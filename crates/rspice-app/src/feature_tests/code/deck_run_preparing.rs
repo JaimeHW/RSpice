@@ -1,5 +1,5 @@
-//! Run on a deck whose run is prepared away from the frame, as the
-//! application prepares one: the press answers at once with the run
+//! Run, and Check and netlist, on a deck prepared away from the frame, as
+//! the application prepares one: the press answers at once with the deck
 //! preparing, Stop drops it before anything runs, and an edit made while it
 //! prepares is not the run's.
 
@@ -8,7 +8,7 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
 use rspice_app_code::workbench::documents::netlist_document::edit_deck_file;
-use rspice_app_runs::simulation::controller::DeckPreparationHold;
+use rspice_app_runs::simulation::controller::{DeckAction, DeckPreparationHold};
 use rspice_app_state::state::SimulationRunIntent;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -158,4 +158,69 @@ fn an_edit_while_preparing_does_not_reach_the_run() {
         Some(DECK),
         "it ran the text pressed"
     );
+}
+
+/// Check and netlist prepares the deck as Run does: the press returns with
+/// the deck preparing and the status bar saying so, Stop drops it, and
+/// nothing is dispatched, then or once the worker ends.
+#[test]
+fn check_while_preparing_behaves_as_run_does() {
+    let (mut app, hold) = held_session();
+    let ctx = themed_context();
+
+    app.execute_command_key(ids::CHECK_AND_NETLIST);
+
+    assert!(
+        app.state
+            .runs
+            .preparing_deck
+            .as_ref()
+            .is_some_and(|deck| deck.action == DeckAction::Check),
+        "the check is preparing"
+    );
+    let output = frame(&ctx, &mut app, DESKTOP);
+    assert!(says(&output, "Preparing"), "the status bar says so");
+    assert!(
+        app.command_key_enabled(ids::STOP_SIMULATION),
+        "Stop stops it"
+    );
+    assert!(!app.command_key_enabled(ids::CHECK_AND_NETLIST));
+    assert!(!app.command_key_enabled(ids::RUN_SIMULATION));
+
+    app.execute_command_key(ids::STOP_SIMULATION);
+    assert!(app.state.runs.preparing_deck.is_none());
+    assert_eq!(app.state.prompt_text(), Some("Stopped checking amp_tb.cir."));
+    release(hold);
+    for _ in 0..2 {
+        frame(&ctx, &mut app, DESKTOP);
+    }
+    assert!(!deck_run_started(&app), "a check dispatches nothing");
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("Stopped checking amp_tb.cir."),
+        "a stopped check says nothing more"
+    );
+    assert!(app.command_key_enabled(ids::CHECK_AND_NETLIST));
+}
+
+/// A check prepared on a worker says what it found once it ends, and runs
+/// nothing.
+#[test]
+fn a_check_on_a_worker_says_what_it_found() {
+    let (mut app, hold) = held_session();
+    let ctx = themed_context();
+
+    app.execute_command_key(ids::CHECK_AND_NETLIST);
+    release(hold);
+    frame(&ctx, &mut app, DESKTOP);
+
+    assert!(app.state.runs.preparing_deck.is_none());
+    assert!(
+        app.state
+            .prompt_text()
+            .is_some_and(|notice| notice.starts_with("amp_tb.cir checked")),
+        "{:?}",
+        app.state.prompt_text()
+    );
+    assert!(!deck_run_started(&app), "a check runs nothing");
 }

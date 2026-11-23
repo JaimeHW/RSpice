@@ -66,9 +66,11 @@ mod analysis_spec_build;
 mod completion;
 use analysis_spec_build::analysis_inputs;
 mod deck_preparation;
+pub use deck_preparation::{
+    BeforePreparing, DeckAction, DeckRunVerdict, prepare_deck_runs_away_from_frame,
+};
 #[cfg(any(test, feature = "test-support"))]
 pub use deck_preparation::{DeckPreparationHold, prepare_deck_runs_away_here};
-pub use deck_preparation::{DeckRunVerdict, prepare_deck_runs_away_from_frame};
 mod engine_check;
 pub use engine_check::{PreflightOutcome, PreflightStage, PreflightVerdict};
 #[cfg(test)]

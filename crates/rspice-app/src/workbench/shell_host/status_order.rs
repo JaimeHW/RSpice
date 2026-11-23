@@ -24,7 +24,7 @@ use rspice_app_results::workbench::documents::result_document::{
     SharedXStatus, active_shared_x_status,
 };
 use rspice_app_results::workbench::results::ResultsFeature;
-use rspice_app_runs::simulation::controller::PreflightStage;
+use rspice_app_runs::simulation::controller::{DeckAction, PreflightStage};
 use rspice_app_runs::simulation::status::{
     EngineAvailability, preflight_status, simulation_engine_status,
 };
@@ -414,10 +414,10 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
             warning.message()
         ))
     } else if let Some(deck) = &app.state.runs.preparing_deck {
-        Cow::Owned(format!(
-            "Preparing the run of {}. Stop drops it.",
-            deck.name
-        ))
+        Cow::Owned(match deck.action {
+            DeckAction::Run => format!("Preparing the run of {}. Stop drops it.", deck.name),
+            DeckAction::Check => format!("Checking {}. Stop drops it.", deck.name),
+        })
     } else if !app.state.runs.waiting.is_empty() {
         Cow::Borrowed("Waits for the Verilog-A compile running in the background. Stop drops it.")
     } else if let Some(outcome) = &outcome {
