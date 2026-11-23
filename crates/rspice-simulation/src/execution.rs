@@ -5,6 +5,8 @@
 //! snapshot's generation-bound permit immediately before dispatch.
 
 mod authorization;
+mod deck_outputs;
+pub use deck_outputs::DeckOutputs;
 mod headless;
 mod headless_tasks;
 mod permit;

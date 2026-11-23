@@ -992,6 +992,7 @@ pub fn build_prepared_manual_deck<R, A>(
         })
         .collect();
     let hierarchy = inputs.flattened(parsed, &rspice_core::NoAbort)?;
+    let deck_outputs = super::DeckOutputs::of(&hierarchy.parsed);
     reject_unresolved_models_in(
         &hierarchy.parsed,
         &hierarchy.flattened,
@@ -1168,9 +1169,12 @@ pub fn build_prepared_manual_deck<R, A>(
         &rspice_core::NoAbort,
         &|_| {},
     )
-    .map(|snapshot| match source_lines {
-        Some((lines, expansion)) => snapshot.with_source_lines(&expansion, Some(lines)),
-        None => snapshot,
+    .map(|snapshot| {
+        let snapshot = snapshot.with_deck_outputs(deck_outputs);
+        match source_lines {
+            Some((lines, expansion)) => snapshot.with_source_lines(&expansion, Some(lines)),
+            None => snapshot,
+        }
     })
 }
 

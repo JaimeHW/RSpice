@@ -633,6 +633,7 @@ pub struct AuthorizedRunDispatch {
     executable_netlist: Arc<str>,
     advisories: Vec<String>,
     manual_source: Option<String>,
+    deck_outputs: super::DeckOutputs,
     cross_probe: Option<CrossProbeSnapshot>,
     hierarchy_map: SealedHierarchyMap,
     configuration: Option<rspice_results::run_receipt::RunConfiguration>,
@@ -721,6 +722,12 @@ impl AuthorizedRunDispatch {
 
     pub fn manual_source(&self) -> Option<&str> {
         self.manual_source.as_deref()
+    }
+
+    /// The outputs a manual deck names, which its run plots; none for a run generated from
+    /// the design, whose plan says what it plots.
+    pub fn deck_outputs(&self) -> &super::DeckOutputs {
+        &self.deck_outputs
     }
 
     pub fn take_cross_probe(&mut self) -> Option<CrossProbeSnapshot> {
@@ -1006,6 +1013,8 @@ pub struct PreparedRunSnapshot {
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
     manual_source: Option<String>,
+    /// The outputs a manual deck names, which its run plots.
+    deck_outputs: super::DeckOutputs,
     cross_probe: Option<CrossProbeSnapshot>,
     /// The occurrence map its receipts seal, converted and checked once.
     hierarchy_map: SealedHierarchyMap,
@@ -1066,6 +1075,13 @@ impl PreparedRunSnapshot {
             &rspice_core::NoAbort,
             &|_| {},
         )
+    }
+
+    /// This snapshot of a manual deck, with the outputs the deck names.
+    #[must_use]
+    pub(crate) fn with_deck_outputs(mut self, outputs: super::DeckOutputs) -> Self {
+        self.deck_outputs = outputs;
+        self
     }
 
     /// This snapshot with the line map of the include expansion its deck was
@@ -1775,6 +1791,7 @@ impl PreparedRunSnapshot {
             receipt: parts.receipt,
             advisories: parts.advisories,
             manual_source: parts.manual_source,
+            deck_outputs: super::DeckOutputs::default(),
             cross_probe: parts.cross_probe,
             hierarchy_map,
             touchstone_export: parts.touchstone_export,
@@ -1954,6 +1971,7 @@ impl PreparedRunSnapshot {
             executable_netlist,
             advisories: self.advisories,
             manual_source: self.manual_source,
+            deck_outputs: self.deck_outputs,
             cross_probe: self.cross_probe,
             hierarchy_map,
             configuration: self.configuration,
