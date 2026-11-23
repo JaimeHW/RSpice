@@ -7,6 +7,8 @@ use rspice_core_netlist::netlist::{
     DeckCardKind, DeckIndex, DeckIndexSource, DeckSymbol, DeckSymbolKind, DeckTokenKind,
     SourceKind, comment_start,
 };
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 /// The source construct represented by an outline row.
@@ -147,10 +149,22 @@ impl OutlineEntry {
 }
 
 /// A navigator section containing source-order entry indices.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// What the navigator lists of a section, its declarations and the rows
+/// they fall in under the subcircuits they are written in, is worked out
+/// with the outline, where the outline is built, and shared: a frame that
+/// lists a deck of a million devices reads them, it does not walk them.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineSection {
     kind: OutlineSectionKind,
-    entry_indices: Vec<usize>,
+    entry_indices: Arc<[usize]>,
+    /// The entries the section declares, when they are fewer than its
+    /// entries: a subcircuit's end shares the subcircuits' section and
+    /// declares nothing.
+    declared: Option<Arc<[usize]>>,
+    /// The rows the declarations are listed in when one is written inside a
+    /// subcircuit; `None` when every one is at the top level.
+    rows: Option<Arc<[OutlineRow]>>,
 }
 
 impl OutlineSection {
@@ -163,6 +177,65 @@ impl OutlineSection {
     pub fn entry_indices(&self) -> &[usize] {
         &self.entry_indices
     }
+
+    /// The entries the section declares, in source order: every one but a
+    /// subcircuit's end.
+    #[must_use]
+    pub fn declarations(&self) -> &Arc<[usize]> {
+        self.declared.as_ref().unwrap_or(&self.entry_indices)
+    }
+
+    /// The rows the declarations are listed in when one of them is written
+    /// inside a subcircuit, as [`rows_by_scope`] lists them; `None` when
+    /// every one is at the top level and the rows are the declarations.
+    #[must_use]
+    pub const fn rows(&self) -> Option<&Arc<[OutlineRow]>> {
+        self.rows.as_ref()
+    }
+}
+
+/// One row of a section whose declarations are listed under the subcircuits
+/// they are written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutlineRow {
+    /// A declaration's entry, and whether it is listed under a subcircuit.
+    Declaration { entry: usize, nested: bool },
+    /// The entry of the `.subckt` card whose declarations follow.
+    Subcircuit(usize),
+}
+
+/// The rows `declarations`, entries of `entries`, are listed in when one of
+/// them is written inside a subcircuit: the top level's first, then each
+/// subcircuit's under a row naming it, subcircuits in the order the deck
+/// defines them. `None` when every declaration is at the top level.
+#[must_use]
+pub fn rows_by_scope(declarations: &[usize], entries: &[OutlineEntry]) -> Option<Vec<OutlineRow>> {
+    let scope_of = |position: &usize| entries.get(*position).and_then(OutlineEntry::scope);
+    if declarations
+        .iter()
+        .all(|position| scope_of(position).is_none())
+    {
+        return None;
+    }
+    let mut inside = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+    let mut rows = Vec::with_capacity(declarations.len());
+    for position in declarations {
+        match scope_of(position) {
+            Some(subcircuit) => inside.entry(subcircuit).or_default().push(*position),
+            None => rows.push(OutlineRow::Declaration {
+                entry: *position,
+                nested: false,
+            }),
+        }
+    }
+    for (subcircuit, declared) in inside {
+        rows.push(OutlineRow::Subcircuit(subcircuit));
+        rows.extend(declared.into_iter().map(|entry| OutlineRow::Declaration {
+            entry,
+            nested: true,
+        }));
+    }
+    Some(rows)
 }
 
 /// Parsed, deterministic navigation model for exact source text.
@@ -170,7 +243,7 @@ impl OutlineSection {
 /// Read off the engine's [`DeckIndex`] of the text, so a card is what the
 /// engine reads as one: `+` lines continue it, its comments are not part of
 /// it, and it knows the subcircuit it is written in.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NetlistOutline {
     entries: Vec<OutlineEntry>,
     sections: Vec<OutlineSection>,
@@ -415,9 +488,26 @@ impl NetlistOutline {
                     .enumerate()
                     .filter_map(|(index, entry)| (entry.kind.section() == kind).then_some(index))
                     .collect::<Vec<_>>();
-                (!entry_indices.is_empty()).then_some(OutlineSection {
+                if entry_indices.is_empty() {
+                    return None;
+                }
+                let declared = entry_indices
+                    .iter()
+                    .any(|index| entries[*index].kind == OutlineEntryKind::EndSubcircuit)
+                    .then(|| {
+                        entry_indices
+                            .iter()
+                            .copied()
+                            .filter(|index| entries[*index].kind != OutlineEntryKind::EndSubcircuit)
+                            .collect::<Arc<[usize]>>()
+                    });
+                let rows = rows_by_scope(declared.as_deref().unwrap_or(&entry_indices), &entries)
+                    .map(Arc::from);
+                Some(OutlineSection {
                     kind,
-                    entry_indices,
+                    entry_indices: entry_indices.into(),
+                    declared,
+                    rows,
                 })
             })
             .collect();

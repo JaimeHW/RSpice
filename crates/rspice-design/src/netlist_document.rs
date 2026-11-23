@@ -15,7 +15,8 @@ pub use document::{
     NetlistDocument, NetlistDocumentId, SourceLocator, ValidationDiagnostic, content_digest,
 };
 pub use outline::{
-    NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineSection, OutlineSectionKind,
+    NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineRow, OutlineSection,
+    OutlineSectionKind, rows_by_scope,
 };
 pub use outline::{
     card_tokens, card_tokens_with_columns, parse_include_directives, same_include_graph,

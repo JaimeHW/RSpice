@@ -12,7 +12,7 @@
 
 use egui::Ui;
 
-use crate::state::{NetlistSourceIndex, OutlineEntryKind};
+use crate::state::{NetlistSourceIndex, OutlineSectionKind};
 use crate::ui::widgets::Button;
 use crate::workbench::app_state::Model;
 use crate::workbench::code::SourceFeature;
@@ -153,30 +153,6 @@ pub fn deck_facts(
     facts_of(model, netlist, index, EntryCounts::of(index), messages)
 }
 
-/// [`deck_facts`], its outline's entries counted once for each index: an
-/// idle frame reads the counts rather than walking every entry again. The
-/// index is told by identity; a new text has a new one.
-pub(crate) fn kept_deck_facts(
-    ctx: &egui::Context,
-    model: &Model,
-    netlist: &NetlistDocumentState,
-    index: &std::sync::Arc<NetlistSourceIndex>,
-    messages: MessageCatalog,
-) -> DeckFacts {
-    type Kept = (std::sync::Arc<NetlistSourceIndex>, EntryCounts);
-    let id = egui::Id::new("workbench.deck.facts.counts");
-    let counts = match ctx.data(|data| data.get_temp::<std::sync::Arc<Kept>>(id)) {
-        Some(kept) if std::sync::Arc::ptr_eq(&kept.0, index) => kept.1,
-        _ => {
-            let counts = EntryCounts::of(index);
-            let kept = std::sync::Arc::new((std::sync::Arc::clone(index), counts));
-            ctx.data_mut(|data| data.insert_temp(id, kept));
-            counts
-        }
-    };
-    facts_of(model, netlist, index, counts, messages)
-}
-
 /// What a page says while the deck is read for the first time, where its
 /// facts or rows will be.
 pub(crate) fn reading_line(ui: &mut Ui, messages: MessageCatalog) {
@@ -200,19 +176,25 @@ struct EntryCounts {
 }
 
 impl EntryCounts {
+    /// The counts of `index`, read off its outline's sections, which list
+    /// their declarations as the outline is built: a frame reads five
+    /// lengths, however many devices the deck has.
     fn of(index: &NetlistSourceIndex) -> Self {
-        let mut counts = Self::default();
-        for entry in index.outline().entries() {
-            match entry.kind() {
-                OutlineEntryKind::Device => counts.devices += 1,
-                OutlineEntryKind::Analysis => counts.analyses += 1,
-                OutlineEntryKind::Model => counts.models += 1,
-                OutlineEntryKind::Subcircuit => counts.subcircuits += 1,
-                OutlineEntryKind::Include | OutlineEntryKind::Library => counts.dependencies += 1,
-                _ => {}
-            }
+        let count = |kind: OutlineSectionKind| {
+            index
+                .outline()
+                .sections()
+                .iter()
+                .find(|section| section.kind() == kind)
+                .map_or(0, |section| section.declarations().len())
+        };
+        Self {
+            devices: count(OutlineSectionKind::Devices),
+            analyses: count(OutlineSectionKind::Analyses),
+            models: count(OutlineSectionKind::Models),
+            subcircuits: count(OutlineSectionKind::Subcircuits),
+            dependencies: count(OutlineSectionKind::Dependencies),
         }
-        counts
     }
 }
 

@@ -13,13 +13,13 @@
 //! appeared in neither would be something the deck states and the navigator
 //! hides.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use super::*;
 use egui::{Response, ScrollArea, Ui};
 
-use crate::state::{OutlineEntry, OutlineEntryKind};
-use crate::state::{OutlineSection, OutlineSectionKind};
+use crate::state::OutlineEntry;
+use crate::state::{OutlineRow, OutlineSection, OutlineSectionKind};
 use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1627,23 +1627,15 @@ impl NetlistOutlineChild {
 pub(super) struct NetlistOutlineGroup {
     pub(super) row: NetlistNavigatorRow,
     pub(super) section: OutlineSectionKind,
-    /// Indices into the source index's entries, in source order.
-    entries: Vec<usize>,
+    /// Indices into the source index's entries, in source order: unfiltered,
+    /// the section's own, shared with the outline rather than listed again.
+    entries: std::sync::Arc<[usize]>,
     /// The rows the group draws when a declaration sits inside a subcircuit:
     /// the top level's declarations, then each subcircuit's row and its own.
     /// `None` when every declaration is at the top level and the rows are the
     /// declarations.
-    scoped: Option<Vec<OutlineSlot>>,
+    scoped: Option<std::sync::Arc<[OutlineRow]>>,
     pub(super) expanded: bool,
-}
-
-/// One row of a group that lists declarations under their subcircuits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutlineSlot {
-    /// A declaration's entry, and whether it is drawn under a subcircuit.
-    Declaration { entry: usize, nested: bool },
-    /// The entry of the `.subckt` card whose declarations follow.
-    Subcircuit(usize),
 }
 
 impl NetlistOutlineGroup {
@@ -1657,7 +1649,9 @@ impl NetlistOutlineGroup {
     /// How many rows the group draws when disclosed: its declarations, and a
     /// row for each subcircuit they are written inside.
     pub(super) fn row_count(&self) -> usize {
-        self.scoped.as_ref().map_or(self.entries.len(), Vec::len)
+        self.scoped
+            .as_ref()
+            .map_or(self.entries.len(), |rows| rows.len())
     }
 
     /// The row at `position`, named from the index.
@@ -1669,17 +1663,17 @@ impl NetlistOutlineGroup {
         let entries = index.outline().entries();
         let slot = match &self.scoped {
             Some(rows) => *rows.get(position)?,
-            None => OutlineSlot::Declaration {
+            None => OutlineRow::Declaration {
                 entry: *self.entries.get(position)?,
                 nested: false,
             },
         };
         match slot {
-            OutlineSlot::Declaration { entry, nested } => Some(NetlistOutlineChild {
+            OutlineRow::Declaration { entry, nested } => Some(NetlistOutlineChild {
                 nested,
                 ..outline_child(self.section, entries.get(entry)?)
             }),
-            OutlineSlot::Subcircuit(entry) => {
+            OutlineRow::Subcircuit(entry) => {
                 let subcircuit = entries.get(entry)?;
                 Some(NetlistOutlineChild {
                     label: subcircuit.name().to_owned(),
@@ -1807,12 +1801,14 @@ impl NetlistNavigatorProjection {
         let outline = index.outline();
         let query = NetlistNavigatorQuery::new(query);
         let entries = outline.entries();
-        let section_of = |kind: OutlineSectionKind| -> &[usize] {
+        let section = |kind: OutlineSectionKind| {
             outline
                 .sections()
                 .iter()
                 .find(|section| section.kind() == kind)
-                .map_or(&[][..], OutlineSection::entry_indices)
+        };
+        let section_of = |kind: OutlineSectionKind| -> &[usize] {
+            section(kind).map_or(&[][..], OutlineSection::entry_indices)
         };
         let resolved = |indices: &[usize]| -> Vec<&OutlineEntry> {
             indices
@@ -1841,7 +1837,7 @@ impl NetlistNavigatorProjection {
             .filter_map(|spec| {
                 outline_group(
                     spec,
-                    section_of(spec.section),
+                    section(spec.section)?,
                     entries,
                     &query,
                     collapsed,
@@ -1975,29 +1971,25 @@ impl NetlistNavigatorProjection {
 
 fn outline_group(
     spec: &GroupSpec,
-    section: &[usize],
+    section: &OutlineSection,
     entries: &[OutlineEntry],
     query: &NetlistNavigatorQuery,
     collapsed: &BTreeSet<OutlineSectionKind>,
     messages: MessageCatalog,
 ) -> Option<NetlistOutlineGroup> {
     let entry_of = |position: &usize| entries.get(*position);
+    // Both ends of a subcircuit share its section; the definition is the row.
+    // The section's declarations and the rows they fall in were listed with
+    // the outline, away from the frame: a group the filter does not narrow
+    // shares them, so the frame the outline lands in reads the deck's count
+    // of devices rather than walking them.
+    let declared = section.declarations();
     // A group the deck declares nothing in is a row spent on nothing.
-    if section.is_empty() {
-        return None;
-    }
+    let &first = declared.first()?;
+    let declarations = declared.len();
     // The filter is matched against the label the reader can see. Matching the
     // English behind it would leave a translated navigator unsearchable by the
     // names it displays.
-    // Both ends of a subcircuit share its section; the definition is the row.
-    // The group is drawn every frame, so its declarations are listed once,
-    // in one allocation, and kept as they are unless a filter narrows them.
-    let mut declared = Vec::with_capacity(section.len());
-    declared.extend(section.iter().copied().filter(|position| {
-        entry_of(position).is_some_and(|entry| entry.kind() != OutlineEntryKind::EndSubcircuit)
-    }));
-    let &first = declared.first()?;
-    let declarations = declared.len();
     let label = messages.text(spec.label);
     if !query.matches_group(&label, declared.iter().filter_map(entry_of)) {
         return None;
@@ -2006,13 +1998,16 @@ fn outline_group(
     // whatever the stored preference says.
     let filtering = !query.is_empty() && !query.matches_text(&label);
     let expanded = filtering || !collapsed.contains(&spec.section);
-    let selected = if filtering {
-        declared
-            .into_iter()
+    let (selected, scoped) = if filtering {
+        let kept = declared
+            .iter()
+            .copied()
             .filter(|position| entry_of(position).is_some_and(|entry| query.matches_entry(entry)))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        let scoped = crate::state::rows_by_scope(&kept, entries).map(std::sync::Arc::from);
+        (std::sync::Arc::from(kept), scoped)
     } else {
-        declared
+        (std::sync::Arc::clone(declared), section.rows().cloned())
     };
     let meta = if filtering {
         format!("{} of {declarations}", selected.len())
@@ -2035,44 +2030,10 @@ fn outline_group(
             source_ranges: Vec::new(),
         },
         section: spec.section,
-        scoped: scoped_rows(&selected, entries),
+        scoped,
         entries: selected,
         expanded,
     })
-}
-
-/// The rows of a group whose declarations include one written inside a
-/// subcircuit: the top level's first, then each subcircuit's under a row
-/// naming it, subcircuits in the order the deck defines them. `None` when
-/// every declaration is at the top level.
-fn scoped_rows(selected: &[usize], entries: &[OutlineEntry]) -> Option<Vec<OutlineSlot>> {
-    let scope_of = |position: &usize| entries.get(*position).and_then(OutlineEntry::scope);
-    if selected.iter().all(|position| scope_of(position).is_none()) {
-        return None;
-    }
-    let mut inside = BTreeMap::<usize, Vec<usize>>::new();
-    let mut rows = Vec::with_capacity(selected.len());
-    for position in selected {
-        match scope_of(position) {
-            Some(subcircuit) => inside.entry(subcircuit).or_default().push(*position),
-            None => rows.push(OutlineSlot::Declaration {
-                entry: *position,
-                nested: false,
-            }),
-        }
-    }
-    for (subcircuit, declarations) in inside {
-        rows.push(OutlineSlot::Subcircuit(subcircuit));
-        rows.extend(
-            declarations
-                .into_iter()
-                .map(|entry| OutlineSlot::Declaration {
-                    entry,
-                    nested: true,
-                }),
-        );
-    }
-    Some(rows)
 }
 
 /// Name one declaration and what it is bound to or written with, as the

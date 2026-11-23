@@ -202,8 +202,7 @@ fn deck_page(cx: &Cx<'_, SourceFeature>) -> bool {
 /// its first read is done.
 fn root_deck_facts(cx: &mut Cx<'_, SourceFeature>, ctx: &egui::Context) -> Option<DeckFacts> {
     let index = root_deck_source_index(ctx, cx.model, &mut cx.state.netlist)?;
-    Some(netlist_first::kept_deck_facts(
-        ctx,
+    Some(netlist_first::deck_facts(
         cx.model,
         &cx.state.netlist,
         &index,
