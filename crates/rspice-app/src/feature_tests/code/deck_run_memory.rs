@@ -1,19 +1,21 @@
 //! Run on a deck weighed against the memory of the machine it runs on, a
-//! machine the tests pretend: a run that needs more than is free waits for
-//! Run anyway or Stop, its numbers on the status line and in the band above
-//! the deck; one that needs more than is installed is refused before it
-//! runs; and the check of a deck is held to the limits its run is held to.
+//! machine the tests pretend: a run that needs more than is free waits where
+//! a run being prepared waits, for Run anyway or Stop, its numbers on the
+//! status line and in the band above the deck; one that needs more than is
+//! installed is refused before it runs; and the check of a deck is held to
+//! the limits its run is held to.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::fmt::Write as _;
 
 use egui::accesskit::Role;
+use rspice_app_runs::simulation::controller::DeckPreparationHold;
 use rspice_app_state::state::SimulationRunIntent;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_simulation::execution::run_memory::{
-    FieldPolicy, MachineMemory, POLICY, deck_limits, forget_machine_memory_here,
+    FieldPolicy, MachineMemory, MemoryWarning, POLICY, deck_limits, forget_machine_memory_here,
     pretend_machine_memory_here,
 };
 
@@ -87,10 +89,18 @@ fn said_with(output: &egui::FullOutput, part: &str) -> Vec<String> {
         .collect()
 }
 
+/// What the run of the deck being prepared needs beyond the memory free,
+/// when it waits for Run anyway, with the deck's name.
+fn held(app: &RSpiceApp) -> Option<(String, MemoryWarning)> {
+    let deck = app.state.runs.preparing_deck.as_ref()?;
+    Some((deck.name.clone(), deck.memory?))
+}
+
 /// A machine with memory installed for the deck and almost none free: Run
-/// prepares the run and holds it. Nothing dispatches; the status line says
-/// what the run needs and what is free, the band above the deck says it in
-/// full, and Run anyway there starts the run prepared.
+/// prepares the run, and it waits where a run being prepared waits. Nothing
+/// dispatches; the status line says what the run needs and what is free,
+/// the band above the deck says it, and Run anyway there starts the run
+/// prepared.
 #[test]
 fn a_run_needing_more_than_is_free_waits_for_run_anyway() {
     let busy = MachineMemory {
@@ -100,34 +110,63 @@ fn a_run_needing_more_than_is_free_waits_for_run_anyway() {
     let mut replay = session(&chain(600), "chain.cir", busy);
 
     replay.app.execute_command_key(ids::RUN_SIMULATION);
-    let hold = replay
-        .app
-        .state
-        .runs
-        .memory_hold
-        .clone()
-        .expect("the run waits for an answer");
-    assert_eq!(hold.name, "chain.cir");
-    assert_eq!(hold.warning.memory, busy);
-    assert!(hold.warning.needed_bytes > busy.free_bytes);
+    let (name, warning) = held(&replay.app).expect("the run waits for an answer");
+    assert_eq!(name, "chain.cir");
+    assert_eq!(warning.memory, busy);
+    assert!(warning.needed_bytes > busy.free_bytes);
     assert!(!run_started(&replay.app), "nothing dispatches");
     assert!(replay.app.command_key_enabled(ids::STOP_SIMULATION));
+    assert!(!replay.app.command_key_enabled(ids::RUN_SIMULATION));
     let output = replay.frame(Vec::new());
     // The status line marks it a warning, and says so to a screen reader.
-    let status = format!("Warning: {}", hold.warning.status());
+    let status = format!("Warning: {}", warning.status());
     assert!(
         says(&output, &status),
         "the status line says {status:?}; said {:?}",
         said_with(&output, "free")
     );
-    assert!(says(&output, &hold.warning.numbers()), "the band says it");
+    assert!(says(&output, &warning.numbers()), "the band says it");
     for _ in 0..3 {
         replay.frame(Vec::new());
     }
     assert!(!run_started(&replay.app), "still nothing dispatches");
 
     replay.click("Run anyway", Role::Button);
-    assert_eq!(replay.app.state.runs.memory_hold, None);
+    assert!(replay.app.state.runs.preparing_deck.is_none());
+    assert!(run_started(&replay.app), "Run anyway starts the run");
+    forget_machine_memory_here();
+}
+
+/// The same run prepared away from the frame, as the application prepares
+/// one: once its worker has prepared it, it waits in Preparing for Run
+/// anyway instead of starting.
+#[test]
+fn a_run_prepared_away_from_the_frame_waits_for_run_anyway() {
+    let busy = MachineMemory {
+        installed_bytes: 16 * GB,
+        free_bytes: MB,
+    };
+    let mut replay = session(&chain(600), "chain.cir", busy);
+    let DeckPreparationHold { release, ended } = replay
+        .app
+        .simulation_controller
+        .hold_next_deck_run_preparation();
+
+    replay.app.execute_command_key(ids::RUN_SIMULATION);
+    assert!(replay.app.state.runs.preparing_deck.is_some());
+    assert_eq!(held(&replay.app), None, "it is still preparing");
+    drop(release);
+    // Disconnects once the worker has ended.
+    let _ = ended.recv();
+    replay.frame(Vec::new());
+
+    let (_, warning) = held(&replay.app).expect("the prepared run waits for an answer");
+    assert_eq!(warning.memory, busy);
+    for _ in 0..3 {
+        replay.frame(Vec::new());
+    }
+    assert!(!run_started(&replay.app), "nothing dispatches");
+    replay.click("Run anyway", Role::Button);
     assert!(run_started(&replay.app), "Run anyway starts the run");
     forget_machine_memory_here();
 }
@@ -143,13 +182,13 @@ fn stop_drops_a_run_held_for_memory() {
     let mut replay = session(&chain(600), "chain.cir", busy);
 
     replay.app.execute_command_key(ids::RUN_SIMULATION);
-    assert!(replay.app.state.runs.memory_hold.is_some());
+    assert!(held(&replay.app).is_some());
     replay.click("Stop", Role::Button);
 
-    assert_eq!(replay.app.state.runs.memory_hold, None);
+    assert!(replay.app.state.runs.preparing_deck.is_none());
     assert_eq!(
         replay.app.state.prompt_text(),
-        Some("Stopped the run of chain.cir. Nothing ran.")
+        Some("Stopped chain.cir before it ran.")
     );
     for _ in 0..3 {
         replay.frame(Vec::new());
@@ -171,7 +210,7 @@ fn a_run_needing_more_than_is_installed_is_refused_before_it_runs() {
 
     replay.app.execute_command_key(ids::RUN_SIMULATION);
 
-    assert_eq!(replay.app.state.runs.memory_hold, None);
+    assert!(replay.app.state.runs.preparing_deck.is_none());
     assert!(!run_started(&replay.app), "nothing runs");
     let notice = replay
         .app
@@ -240,7 +279,7 @@ fn the_check_and_the_run_hold_a_deck_to_the_same_limits() {
         run_started(&replay.app),
         "the deck runs: {:?}; held {:?}",
         replay.app.state.prompt_text(),
-        replay.app.state.runs.memory_hold
+        held(&replay.app)
     );
     drop(replay);
 
