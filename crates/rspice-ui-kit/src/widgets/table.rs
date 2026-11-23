@@ -317,6 +317,11 @@ pub struct Cell {
     icon: Option<Icon>,
     /// A mark at the cell's right end, after the words.
     trailing: Option<Icon>,
+    /// Faint words after the cell's own: what the row is besides its name.
+    suffix: Option<String>,
+    /// Words at the cell's right end: a state the row is in, behind a
+    /// problem's mark when it is one.
+    state: Option<(String, Option<Problem>)>,
     /// The row reads the hint out after the words: the words are a problem
     /// and the hint says what it is.
     says_hint: bool,
@@ -353,6 +358,8 @@ impl Cell {
             sort: None,
             icon: None,
             trailing: None,
+            suffix: None,
+            state: None,
             says_hint: false,
             indent: 0,
             twist: Twist::None,
@@ -419,6 +426,23 @@ impl Cell {
     /// the row names, such as a read-only library's lock.
     pub fn trailing(mut self, icon: Icon) -> Self {
         self.trailing = Some(icon);
+        self
+    }
+
+    /// The same words followed by `suffix` in the faint register, after a
+    /// middle dot: what the row is besides its name, such as a view's type
+    /// where its name does not say it. The row reads it after the words.
+    pub fn suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.suffix = Some(suffix.into());
+        self
+    }
+
+    /// The same words with `state` at the cell's right end, dim, behind
+    /// `problem`'s mark when it is one: a state the row is in, such as a
+    /// view's unsaved edits or a file changed on disk. The cell's own words
+    /// give way to it, and the row reads it after them.
+    pub fn state(mut self, state: impl Into<String>, problem: Option<Problem>) -> Self {
+        self.state = Some((state.into(), problem));
         self
     }
 

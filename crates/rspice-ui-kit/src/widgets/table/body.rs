@@ -32,6 +32,8 @@ const LEAD_ICON_GAP: f32 = 6.0;
 const UNSAVED_RADIUS: f32 = 3.0;
 const UNSAVED_GAP: f32 = 5.0;
 const UNSAVED_ROOM: f32 = UNSAVED_GAP + 2.0 * UNSAVED_RADIUS;
+/// The least gap between a cell's words and the state at its right end.
+const STATE_GAP: f32 = 12.0;
 
 /// Where one row goes and how it is marked.
 pub(super) struct RowPlace<'g> {
@@ -149,8 +151,19 @@ impl DataTable<'_> {
                         Ink::Problem(problem) => problem.announce(&cell.text),
                         _ => cell.text.clone(),
                     };
+                    if let Some(suffix) = &cell.suffix {
+                        words.push_str(", ");
+                        words.push_str(suffix);
+                    }
                     if cell.unsaved {
                         words.push_str(", unsaved changes");
+                    }
+                    if let Some((state, problem)) = &cell.state {
+                        words.push_str(", ");
+                        match problem {
+                            Some(problem) => words.push_str(&problem.announce(state)),
+                            None => words.push_str(state),
+                        }
                     }
                     if let Some(icon) = cell.trailing {
                         words.push_str(", ");
@@ -314,6 +327,45 @@ impl DataTable<'_> {
                 );
                 span.max = (span.max - LEAD_ICON_SIDE - LEAD_ICON_GAP).max(span.min);
             }
+            let font = if cell.mono {
+                theme::mono(tokens::FS_0, FontWeight::Regular)
+            } else {
+                theme::sans(tokens::FS_0, FontWeight::Regular)
+            };
+            // A state stands at the right end, left of any trailing mark, as
+            // wide as its words up to half the cell; the cell's own words
+            // have what it leaves.
+            let mut state_cut = false;
+            if let Some((state, problem)) = &cell.state {
+                let mark = if problem.is_some() {
+                    crate::widgets::PROBLEM_MARK_ADVANCE
+                } else {
+                    0.0
+                };
+                let natural = ui
+                    .painter()
+                    .layout_no_wrap(state.clone(), font.clone(), t.color.text_dim)
+                    .size()
+                    .x
+                    + mark;
+                let width = natural.min(span.span() * 0.5);
+                let room = egui::Rangef::new(span.max - width, span.max);
+                state_cut = paint_words(
+                    ui,
+                    cell_rect,
+                    clip,
+                    room,
+                    Words {
+                        text: state,
+                        font: font.clone(),
+                        align: Align::Left,
+                        color: t.color.text_dim,
+                        problem: *problem,
+                    },
+                )
+                .is_some_and(|painted| painted.elided);
+                span.max = (span.max - width - STATE_GAP).max(span.min);
+            }
             if let Some(open) = self.lead_in(ui, index, cell, cell_rect, clip, &mut span) {
                 answered.twist = Some(open);
             }
@@ -371,11 +423,6 @@ impl DataTable<'_> {
             } else {
                 None
             };
-            let font = if cell.mono {
-                theme::mono(tokens::FS_0, FontWeight::Regular)
-            } else {
-                theme::sans(tokens::FS_0, FontWeight::Regular)
-            };
             let (color, problem) = match cell.ink {
                 Ink::Plain | Ink::Toned(Tone::Neutral) => (t.color.text, None),
                 Ink::Faint => (t.color.text_faint, None),
@@ -390,14 +437,44 @@ impl DataTable<'_> {
                 span,
                 Words {
                     text: &cell.text,
-                    font,
+                    font: font.clone(),
                     align: column.align,
                     color,
                     problem,
                 },
             );
+            // A suffix follows whole words in what they leave of the span;
+            // behind words cut short it is not shown, and the tip has it.
+            let mut last = painted;
+            let mut suffix_cut = false;
+            if let Some(suffix) = &cell.suffix {
+                let after = painted
+                    .filter(|words| !words.elided && column.align == Align::Left)
+                    .map(|words| words.landed.right());
+                let room = after
+                    .map(|left| egui::Rangef::new(left, span.max))
+                    .filter(|room| room.span() > 0.0);
+                let joined = format!(" \u{b7} {suffix}");
+                let shown = room.and_then(|room| {
+                    paint_words(
+                        ui,
+                        cell_rect,
+                        clip,
+                        room,
+                        Words {
+                            text: &joined,
+                            font: font.clone(),
+                            align: Align::Left,
+                            color: t.color.text_faint,
+                            problem: None,
+                        },
+                    )
+                });
+                suffix_cut = shown.is_none_or(|shown| shown.elided);
+                last = shown.or(last);
+            }
             if cell.unsaved
-                && let Some(words) = painted
+                && let Some(words) = last
             {
                 let centre = pos2(
                     words.landed.right() + UNSAVED_GAP + UNSAVED_RADIUS,
@@ -427,10 +504,22 @@ impl DataTable<'_> {
             }
             // Words cut short show in full where the reader points, and under
             // a finger held on them, beside any hint the cell gives.
-            let elided = painted.is_some_and(|painted| painted.elided);
+            let elided = painted.is_some_and(|painted| painted.elided) || suffix_cut || state_cut;
+            let whole = || {
+                let mut whole = cell.text.clone();
+                if let Some(suffix) = &cell.suffix {
+                    whole.push_str(" \u{b7} ");
+                    whole.push_str(suffix);
+                }
+                if let Some((state, _)) = cell.state.as_ref().filter(|_| state_cut) {
+                    whole.push('\n');
+                    whole.push_str(state);
+                }
+                whole
+            };
             let tip = match (elided, &cell.hint) {
-                (true, Some(hint)) => Some(format!("{}\n{hint}", cell.text)),
-                (true, None) => Some(cell.text.clone()),
+                (true, Some(hint)) => Some(format!("{}\n{hint}", whole())),
+                (true, None) => Some(whole()),
                 (false, hint) => hint.clone(),
             };
             if let Some(tip) = tip {
