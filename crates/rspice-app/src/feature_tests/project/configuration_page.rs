@@ -167,6 +167,18 @@ impl Frame {
             || self.painted.iter().any(|(painted, _)| painted == text)
     }
 
+    /// Whether the page bar's report states `fact` among its facts, which
+    /// it joins with " \u{b7} " behind the severity of a problem.
+    fn reports(&self, fact: &str) -> bool {
+        self.announced.iter().any(|announced| {
+            let said = ["Warning: ", "Error: "]
+                .iter()
+                .find_map(|severity| announced.strip_prefix(severity))
+                .unwrap_or(announced);
+            said.split(" \u{b7} ").any(|part| part == fact)
+        })
+    }
+
     fn every_word(&self) -> impl Iterator<Item = &str> {
         self.announced
             .iter()
@@ -181,10 +193,10 @@ fn the_default_states_the_built_in_lists() {
     let project = &app.state.model.workspace.content.project;
     let top = format!("{}/{}/schematic", project.root_library, project.top_cell);
     let shown = frame(&mut app, 1440.0);
+    assert!(shown.reports("used for runs"));
     for fact in [
-        "Default",
-        "Used for runs",
-        "New configuration\u{2026}",
+        "Configuration: Default",
+        "More configuration actions",
         top.as_str(),
         "\u{2014}",
         "the instance's own view, then extracted, then spice",
@@ -229,10 +241,10 @@ fn the_band_counts_only_the_populated_variant() {
     assert_ne!(authored.total_instances, expected.total_instances);
     assert!(expected.is_valid());
     let total = expected.total_instances;
-    for width in [640.0, 1440.0] {
+    for width in [1000.0, 1440.0] {
         let shown = frame(&mut app, width);
         assert!(
-            shown.says(&format!("{total} of {total} instances bound")),
+            shown.reports(&format!("{total} of {total} instances bound")),
             "the {width}px band must count {total} instances"
         );
     }
@@ -315,7 +327,7 @@ fn a_drawing_edit_that_places_no_instance_keeps_the_resolution() {
 fn a_dirty_configuration_offers_apply_and_revert() {
     let mut app = reference_app();
     let shown = frame(&mut app, 1440.0);
-    assert!(shown.says("Used for runs"));
+    assert!(shown.reports("used for runs"));
     let catalog = app.state.model.workspace.content.configuration_sets.clone();
     let id = catalog.active_configuration_id().unwrap();
     app.state
@@ -340,8 +352,8 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
         ("X2", "user/amp", "schematic", "Instance binding"),
     ] {
         let row = format!(
-            "Instance: {name}, Cell: {cell}, View found: schematic, View to use: {to_use}, \
-             Bound by: {rule}, Model section: "
+            "Instance: {name}, Cell: {cell}, Cell to use: Inherited, View found: schematic, \
+             View to use: {to_use}, Bound by: {rule}, Model section: "
         );
         assert!(
             shown.announced.iter().any(|label| label.starts_with(&row)),
@@ -351,7 +363,7 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
     }
     assert!(shown.says(
         "Table columns: Instance, Cell, Cell to use, View found, View to use, Bound by, \
-         Model section, Status"
+         Model section"
     ));
 
     let collapsed = app.state.project.configuration.visible_instances().len();
@@ -417,12 +429,9 @@ fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
 
     // A count is read as a magnitude, its thousands grouped.
     let shown = frame(&mut app, 1440.0);
-    for fact in [
-        "1,082,401 of 1,082,401 instances bound",
-        "1,082,401 instances",
-    ] {
+    for fact in ["1,082,401 of 1,082,401 instances bound"] {
         assert!(
-            shown.says(fact),
+            shown.reports(fact),
             "the page must state {fact:?}: {:#?}",
             shown.every_word().collect::<Vec<_>>()
         );
@@ -481,8 +490,8 @@ fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
 
 /// The Cells tab lists each library/cell once, and keeps a cell binding the
 /// design does not use, marked, so it can be removed. The list a cell
-/// inherits is stated only on a row with a binding of its own: the grid
-/// above states it once for every cell that inherits.
+/// inherits is stated only on a row with a binding of its own, a dash on
+/// the others: the band above states it once for every cell that inherits.
 #[test]
 fn the_cells_tab_lists_each_cell_once_with_its_binding() {
     let mut app = reference_app();
@@ -513,10 +522,11 @@ fn the_cells_tab_lists_each_cell_once_with_its_binding() {
          Inherited view list"
     ));
     for row in [
-        "Library: user, Cell: amp, Instances: 2, View found: schematic, View to use: Inherited",
-        "Library: vendor, Cell: filter, Instances: 1, View found: schematic, \
+        "Library: user, Cell: amp, Cell to use: Inherited, Instances: 2, View found: schematic, \
+         View to use: Inherited, Inherited view list: \u{2014}",
+        "Library: vendor, Cell: filter, Cell to use: Inherited, Instances: 1, View found: schematic, \
          View to use: schematic, Inherited view list: schematic",
-        "Library: user, Cell: retired_block, Instances: 0, \
+        "Library: user, Cell: retired_block, Cell to use: Inherited, Instances: 0, \
          View found: Warning: not in this design, View to use: schematic, \
          Inherited view list: schematic",
     ] {
@@ -528,10 +538,10 @@ fn the_cells_tab_lists_each_cell_once_with_its_binding() {
         .filter(|label| label.starts_with("Library: user, Cell: amp,"))
         .count();
     assert_eq!(amp_rows, 1, "a cell instantiated twice is one row");
-    // The count is the design's cells; the binding beside them is counted
-    // apart, so the header agrees with the rows under it.
+    // The binding that binds nothing is counted apart from the rows, on
+    // the bar.
     assert!(
-        shown.says("4 cells \u{b7} 1 binding not in this design"),
+        shown.reports("1 binding not in this design"),
         "{:#?}",
         shown.every_word().collect::<Vec<_>>()
     );

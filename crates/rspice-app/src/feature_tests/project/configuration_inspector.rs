@@ -66,6 +66,9 @@ fn context() -> egui::Context {
     ctx
 }
 
+/// With nothing selected the inspector states what the bar and the band do
+/// not: the name, whether runs use it, its bindings counted and the
+/// revision last applied. The top cell and the DUT are the band's.
 #[test]
 fn with_nothing_selected_it_states_the_configuration() {
     let mut app = reference_app();
@@ -73,12 +76,11 @@ fn with_nothing_selected_it_states_the_configuration() {
     let painted = frame(&context(), &mut app, Vec::new());
     for fact in [
         "Reference hierarchy",
-        "user/top/schematic",
-        "/X1",
         "Used for runs",
         "Yes",
         "Instance bindings",
         "Cell bindings",
+        "Last applied",
     ] {
         assert!(
             painted.iter().any(|text| text == fact),
@@ -90,23 +92,22 @@ fn with_nothing_selected_it_states_the_configuration() {
         "Validate configuration",
         "Active binding",
         "Overrides",
+        "Top cell",
+        "DUT instance",
+        "Use for runs",
     ] {
         assert!(!painted.iter().any(|text| text == retired), "{retired:?}");
     }
 }
 
+/// On Default the inspector names it, says runs use it, and that its
+/// bindings are built in; the band states them.
 #[test]
 fn on_default_it_states_the_built_in_facts() {
     let mut app = RSpiceApp::test_instance();
     resolve(&mut app);
     let painted = frame(&context(), &mut app, Vec::new());
-    for fact in [
-        "Default",
-        "the instance's own view, then extracted, then spice",
-        "spice, verilog, veriloga, verilogams, extracted",
-        "Stop the netlist",
-        "Yes",
-    ] {
+    for fact in ["Default", "Used for runs", "Yes", "Built in"] {
         assert!(
             painted.iter().any(|text| text == fact),
             "{fact:?} not in {painted:#?}"

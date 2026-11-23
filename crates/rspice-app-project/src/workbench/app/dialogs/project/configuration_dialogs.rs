@@ -1,8 +1,8 @@
-//! The configuration dialogs: New configuration, Clone, Rename and Delete,
+//! The configuration dialogs: New configuration, Copy, Rename and Delete,
 //! the question asked before edits that are not applied would be lost, and
 //! the picker that binds rows of the page's tables to another cell.
 //!
-//! Everything else about a configuration is edited on its page. New, Clone,
+//! Everything else about a configuration is edited on its page. New, Copy,
 //! Rename and Delete are the transactions that add one to the project, name
 //! one, or take one away; each commits through the configuration
 //! transactions. The picker edits the page's edits, as the page does.
@@ -299,36 +299,6 @@ pub fn show_configuration_page_in(
     }
     wb.activate(crate::workbench::state::Workspace::Project);
     *project_page = ProjectPage::Configuration;
-}
-
-/// The actions a configuration row offers, as menu buttons: the dialog the
-/// reader picked, if one. Default offers only a new configuration; it can be
-/// neither cloned (start a new one from it instead), renamed nor deleted.
-pub(in crate::workbench) fn configuration_actions_menu(
-    ui: &mut Ui,
-    selection: ConfigurationSelection,
-    write_allowed: bool,
-) -> Option<ConfigurationDialogRequest> {
-    let mut picked = None;
-    let mut item = |ui: &mut Ui, label: &str, request: ConfigurationDialogRequest| {
-        if ui
-            .add_enabled(write_allowed, egui::Button::new(label))
-            .clicked()
-        {
-            picked = Some(request);
-        }
-    };
-    item(
-        ui,
-        "New configuration\u{2026}",
-        ConfigurationDialogRequest::New,
-    );
-    if let ConfigurationSelection::Configuration(id) = selection {
-        item(ui, "Clone\u{2026}", ConfigurationDialogRequest::Clone(id));
-        item(ui, "Rename\u{2026}", ConfigurationDialogRequest::Rename(id));
-        item(ui, "Delete", ConfigurationDialogRequest::Delete(id));
-    }
-    picked
 }
 
 /// What the configuration dialogs draw over and commit against, lent by the
@@ -641,7 +611,7 @@ fn new_dialog(
     (choice, Some(transaction))
 }
 
-/// Clone and Rename: a name, and for Clone whether runs use the copy.
+/// Copy and Rename: a name, and for Copy whether runs use the copy.
 fn name_dialog(
     ctx: &Context,
     dialogs: &mut ConfigurationDialogState,
@@ -652,8 +622,8 @@ fn name_dialog(
     let catalog: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
     let (title, primary, source_name) = match dialogs.open.as_ref() {
         Some(ConfigurationDialog::Clone { source, .. }) => (
-            "Clone configuration",
-            "Clone",
+            "Copy configuration",
+            "Copy",
             catalog.find(*source).map(|source| source.name().to_owned()),
         ),
         Some(ConfigurationDialog::Rename { id, .. }) => (
@@ -667,7 +637,7 @@ fn name_dialog(
         dialogs.close();
         return (DialogChoice::None, None);
     };
-    let description = if primary == "Clone" {
+    let description = if primary == "Copy" {
         format!("The copy holds every binding of {source_name}.")
     } else {
         format!("Rename {source_name}. Runs and its bindings are not affected.")

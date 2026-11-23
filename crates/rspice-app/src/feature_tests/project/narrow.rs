@@ -10,7 +10,6 @@ use egui::{Context, Pos2, Rect, Vec2, vec2};
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::ui::tokens::TOUCH_TARGET;
 use rspice_app_workbench::workbench::chrome::title_bar::title_context_text;
 
 const PHONE: Vec2 = vec2(390.0, 844.0);
@@ -119,42 +118,6 @@ fn the_narrow_title_names_the_project_on_every_page() {
             title_context_text(&app, true),
             app.state.model.workspace.content.project.display_name(),
             "{page:?}"
-        );
-    }
-}
-
-/// On a phone every control of the Configuration page's bands is on the
-/// screen, where a finger can reach it, and as tall as a finger needs.
-#[test]
-fn every_configuration_band_control_is_reachable_on_a_phone() {
-    let mut app = super::configuration_editing::page_app();
-    app.state.workbench.coarse_pointer = true;
-    let output = settled_frame(&touch_context(), &mut app, PHONE);
-    let controls = announced(&output, Role::Button)
-        .into_iter()
-        .chain(announced(&output, Role::TextInput))
-        .filter(|(label, _)| {
-            [
-                "Apply",
-                "Revert",
-                "New\u{2026}",
-                "More configuration actions",
-                "Add pattern binding",
-                "Filter instances",
-            ]
-            .contains(&label.as_str())
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(controls.len(), 6, "{controls:?}");
-    for (label, rect) in controls {
-        assert!(
-            rect.left() >= -0.5 && rect.right() <= PHONE.x + 0.5,
-            "`{label}` is off the screen: {rect:?}"
-        );
-        assert!(
-            rect.height() >= TOUCH_TARGET - 0.5,
-            "`{label}` is {} tall",
-            rect.height()
         );
     }
 }

@@ -703,12 +703,15 @@ def choose_command(browser, label, *, input_burst=False, keyboard=()):
 
 
 def configuration_opening_input(browser):
-    """Typing straight after New configuration is clicked lands in its Name,
-    and Escape leaves the project without the configuration."""
-    name, new = "Browser configuration draft", "New configuration\u2026"
+    """Typing straight after the bar's More > New... is clicked lands in the
+    new configuration's Name, and Escape leaves the project without it."""
+    name, more, new = "Browser configuration draft", "More configuration actions", "New\u2026"
     choose_command(browser, "Configuration sets")
-    wait_for(lambda: any(control["label"] == new and control["role"] == "button"
+    wait_for(lambda: any(control["label"] == more and control["role"] == "button"
                         for control in controls(browser.snapshot())), "the Configuration page")
+    browser.click(more, "button")
+    wait_for(lambda: any(control["label"] == new and control["role"] == "button"
+                        for control in controls(browser.snapshot())), "the More menu")
     browser.click(new, "button", keyboard=(("a", ("\ue009",)), (name, ())))
 
     def names(snapshot):

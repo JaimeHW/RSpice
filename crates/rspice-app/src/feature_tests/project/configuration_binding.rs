@@ -285,8 +285,8 @@ fn a_binding_that_stops_fitting_is_a_problem_and_never_netlists() {
     let output = settle(&ctx, &mut app, Vec::new());
     let row = rows(&output)
         .into_iter()
-        .find(|row| row.label.starts_with("Instance: XF1,"))
-        .expect("XF1 is shown");
+        .find(|row| row.label.starts_with("Instance: Error: XF1,"))
+        .expect("XF1 is shown behind an error's mark");
     assert!(
         row.label.contains("pins do not fit"),
         "the row says so: {}",

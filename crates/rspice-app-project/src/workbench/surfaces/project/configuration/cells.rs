@@ -12,8 +12,10 @@ use crate::workbench::project::configuration_state::{
 
 use super::instances::{TableAction, answer, ident, lead_follows, table_height, view_list};
 
-fn columns() -> [Column; 7] {
-    [
+/// The table's columns. "Inherited view list" stands only while a row has a
+/// binding of its own, the one kind of row it says anything for.
+fn columns(any_own: bool) -> Vec<Column> {
+    let mut columns = vec![
         Column::words("Library", 104.0),
         Column::name("Cell", 120.0),
         Column::name("Cell to use", 120.0)
@@ -21,9 +23,14 @@ fn columns() -> [Column; 7] {
         Column::number("Instances", 84.0),
         Column::words("View found", 110.0),
         Column::name("View to use", 120.0),
-        Column::name("Inherited view list", 140.0)
-            .tooltip("The views a cell binding's instances go back to when it is removed"),
-    ]
+    ];
+    if any_own {
+        columns.push(
+            Column::name("Inherited view list", 140.0)
+                .tooltip("The views a cell binding's instances go back to when it is removed"),
+        );
+    }
+    columns
 }
 
 pub(super) fn cells_table(
@@ -38,14 +45,19 @@ pub(super) fn cells_table(
         .collect::<Vec<_>>();
     let wanted = page.row.as_ref().and_then(|row| tables.row_key(row));
     lead_follows(&mut page.cells_table, &keys, wanted);
-    let columns = columns();
+    let any_own = rows.iter().any(|row| row.to_use != INHERITED);
+    let columns = columns(any_own);
     let response = DataTable::new("configuration.cells", &columns, rows.len())
         .state(&mut page.cells_table)
         .keys(&keys)
         .multi_select()
         .freeze(2)
         .max_height(table_height(ui))
-        .show(ui, |index| cell_cells(&rows[index], &tables.inherited));
+        .show(ui, |index| {
+            let mut cells = cell_cells(&rows[index], &tables.inherited);
+            cells.truncate(columns.len());
+            cells
+        });
     let identity = |index: usize| {
         let row = &rows[index];
         ConfigurationRow::Cell {
@@ -58,7 +70,8 @@ pub(super) fn cells_table(
 
 /// One library/cell. The list it inherits is stated only where it has a
 /// binding of its own, since that list is what removing the binding goes
-/// back to; a cell that inherits says so, and the grid above states the list.
+/// back to; a cell that inherits has a dash there, and the band above
+/// states the list.
 fn cell_cells(row: &CellTableRow, inherited: &str) -> Vec<Cell> {
     let own = row.to_use != INHERITED;
     let found = if !row.in_design {
@@ -71,10 +84,16 @@ fn cell_cells(row: &CellTableRow, inherited: &str) -> Vec<Cell> {
     vec![
         ident(&row.library),
         ident(&row.cell),
-        row.target.as_deref().map_or_else(Cell::empty, ident),
+        row.target
+            .as_deref()
+            .map_or_else(|| Cell::faint(INHERITED), ident),
         Cell::number(row.instances.to_string()).sort_by(SortKey::Number(row.instances as f64)),
         found,
         view_list(&row.to_use),
-        if own { ident(inherited) } else { Cell::empty() },
+        if own {
+            ident(inherited)
+        } else {
+            Cell::absent()
+        },
     ]
 }

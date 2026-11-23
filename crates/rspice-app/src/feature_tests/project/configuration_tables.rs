@@ -80,10 +80,21 @@ pub(super) fn rows(output: &egui::FullOutput) -> Vec<Node> {
 }
 
 /// The row whose words begin with `start`, and where it is on the screen.
+/// A row whose first cell carries a problem's mark is found by its words
+/// too: its severity is read between the head and the words.
 pub(super) fn row_at(output: &egui::FullOutput, start: &str) -> Pos2 {
+    let unmarked = |label: &str| {
+        ["Error: ", "Warning: "]
+            .iter()
+            .find_map(|severity| {
+                let (head, rest) = label.split_once(": ")?;
+                Some(format!("{head}: {}", rest.strip_prefix(severity)?))
+            })
+            .unwrap_or_else(|| label.to_owned())
+    };
     let rows = rows(output);
     rows.iter()
-        .find(|node| node.label.starts_with(start))
+        .find(|node| unmarked(&node.label).starts_with(start))
         .and_then(|node| node.at)
         .unwrap_or_else(|| {
             panic!(

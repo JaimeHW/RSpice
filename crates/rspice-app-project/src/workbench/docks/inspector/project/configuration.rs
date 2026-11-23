@@ -1,14 +1,13 @@
 //! The Configuration page's inspector: the selected row's binding in full,
-//! or, with no row selected, the configuration itself. On Default it states
-//! the built-in facts and edits nothing.
+//! or, with no row selected, what the page's bar and band do not state of
+//! the configuration itself. On Default it states the built-in facts and
+//! edits nothing. Nothing here is an action: the bar, the row menu and the
+//! keys act.
 
 use egui::{Key, TextEdit, Ui};
 use rspice_ui_kit::panels::section_header;
 
-use crate::state::{
-    ConfigurationPlatform, ConfigurationSetDefinition, DEFAULT_STOP_VIEW_TYPES,
-    default_view_search_order,
-};
+use crate::state::{ConfigurationPlatform, ConfigurationSetDefinition};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, name_control, ordered_chips, problem_line, select, text_field};
@@ -19,8 +18,6 @@ use crate::workbench::project::configuration_state::{
     ConfigurationSelection, FieldEdit, ONLY_ON, apply_binding_change, apply_cell_binding_change,
     cell_binding, cell_view_names, inherited_views, instance_binding, only_on_label, used_for_runs,
 };
-
-use super::inspector_action_enabled;
 
 const NO_STOP: &str = "None";
 
@@ -47,19 +44,12 @@ enum InspectorAction {
         inherited: Vec<String>,
         change: BindingChange,
     },
-    UseForRuns(ConfigurationSelection),
     Deselect,
 }
 
 /// The Configuration page's inspector over the page and the model. The
-/// edits it asks for land on the page as it draws; using a configuration for
-/// runs commits a project transaction, so the target is handed back for the
-/// shell to carry out.
-pub fn project_configuration(
-    ui: &mut Ui,
-    page: &mut ConfigurationPageState,
-    model: &Model,
-) -> Option<ConfigurationSelection> {
+/// edits it asks for land on the page as it draws.
+pub fn project_configuration(ui: &mut Ui, page: &mut ConfigurationPageState, model: &Model) {
     let catalog = &model.workspace.content.configuration_sets;
     let shown = &*page;
     let selection = shown.selection(catalog);
@@ -110,18 +100,22 @@ pub fn project_configuration(
             )
         }),
         None => {
-            // While an Apply or a Use for runs is checked, neither is
-            // offered again.
-            let runs_allowed = !model.safe_mode.project_read_only() && !shown.is_checking();
-            match definition {
-                Some(definition) => configuration(ui, model, selection, definition, runs_allowed),
-                None => default_facts(ui, model, runs_allowed),
+            let catalog = &model.workspace.content.configuration_sets;
+            match (selection, definition) {
+                (ConfigurationSelection::Configuration(id), Some(definition)) => {
+                    let revision = catalog.find(id).map_or(0, |applied| applied.revision());
+                    configuration(ui, selection, catalog, revision, definition);
+                }
+                _ => default_facts(ui, catalog),
             }
+            None
         }
     };
     page.field_edit = fields.buffer;
-    let taken = match action? {
-        InspectorAction::UseForRuns(target) => return Some(target),
+    let Some(action) = action else {
+        return;
+    };
+    let taken = match action {
         InspectorAction::Deselect => {
             page.row = None;
             true
@@ -166,7 +160,6 @@ pub fn project_configuration(
             refusal: page.refusal.take(),
         });
     }
-    None
 }
 
 fn edit(
@@ -183,63 +176,44 @@ fn edit(
     }
 }
 
-/// The built-in Default's facts.
-fn default_facts(ui: &mut Ui, model: &Model, runs_allowed: bool) -> Option<InspectorAction> {
-    let project = &model.workspace.content.project;
-    let catalog = &model.workspace.content.configuration_sets;
+/// The built-in Default: its name, and whether runs use it. Its bindings
+/// are the band's to state.
+fn default_facts(ui: &mut Ui, catalog: &crate::state::ConfigurationSetCatalog) {
     property_row(ui, "Name", "Default");
-    property_row(
-        ui,
-        "Top cell",
-        &format!("{}/{}/schematic", project.root_library, project.top_cell),
-    );
-    property_row(ui, "DUT instance", "\u{2014}");
-    let order = default_view_search_order("schematic", false);
-    let mut words = vec!["the instance's own view".to_owned()];
-    words.extend(order.into_iter().skip(1));
-    property_row_wrapped(ui, "View list", &words.join(", then "));
-    property_row_wrapped(
-        ui,
-        "Stop list",
-        &DEFAULT_STOP_VIEW_TYPES
-            .iter()
-            .map(|view_type| view_type.display_name())
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    property_row(ui, "Unresolved cells", "Stop the netlist");
-    used_for_runs_row(ui, ConfigurationSelection::Default, catalog, runs_allowed)
+    used_for_runs_row(ui, ConfigurationSelection::Default, catalog);
+    property_row(ui, "Bindings", "Built in");
 }
 
-/// "Used for runs" as a fact, or the action that makes it one.
+/// Whether runs use the configuration; More > Use for runs makes it so.
 fn used_for_runs_row(
     ui: &mut Ui,
     selection: ConfigurationSelection,
     catalog: &crate::state::ConfigurationSetCatalog,
-    runs_allowed: bool,
-) -> Option<InspectorAction> {
-    if used_for_runs(catalog, selection) {
-        property_row(ui, "Used for runs", "Yes");
-        return None;
-    }
-    property_row(ui, "Used for runs", "No");
-    inspector_action_enabled(ui, "Use for runs", runs_allowed)
-        .then_some(InspectorAction::UseForRuns(selection))
+) {
+    property_row(
+        ui,
+        "Used for runs",
+        if used_for_runs(catalog, selection) {
+            "Yes"
+        } else {
+            "No"
+        },
+    );
 }
 
-/// The configuration itself, with no row selected. Its name is a fact here:
-/// More > Rename… is the one way to rename it.
+/// The configuration itself, with no row selected: what the bar and the band
+/// do not state. Its name is a fact here: More > Rename… is the one way to
+/// rename it. The bindings are counted as the edits stand; the revision is
+/// the one last applied.
 fn configuration(
     ui: &mut Ui,
-    model: &Model,
     selection: ConfigurationSelection,
+    catalog: &crate::state::ConfigurationSetCatalog,
+    revision: u64,
     definition: &ConfigurationSetDefinition,
-    runs_allowed: bool,
-) -> Option<InspectorAction> {
-    let catalog = &model.workspace.content.configuration_sets;
+) {
     property_row(ui, "Name", &definition.name);
-    property_row(ui, "Top cell", &definition.root.display_path());
-    property_row(ui, "DUT instance", &definition.dut_path);
+    used_for_runs_row(ui, selection, catalog);
     property_row(
         ui,
         "Instance bindings",
@@ -250,7 +224,7 @@ fn configuration(
         "Cell bindings",
         &definition.cell_bindings.len().to_string(),
     );
-    used_for_runs_row(ui, selection, catalog, runs_allowed)
+    property_row(ui, "Last applied", &format!("Revision {revision}"));
 }
 
 /// One instance: what it resolved to, and its own binding. While the shown
@@ -313,15 +287,10 @@ fn instance(
             );
             ("", "")
         }
-        None => {
-            property_row_wrapped(
-                ui,
-                "Status",
-                "This instance is not in the design any more. Pick another row.",
-            );
-            return inspector_action_enabled(ui, "Show the configuration", true)
-                .then_some(InspectorAction::Deselect);
-        }
+        // An instance the design no longer holds, as after a Revert or an
+        // edit of the top cell: the inspector goes back to the
+        // configuration rather than describing nothing.
+        None => return resolution.is_some().then_some(InspectorAction::Deselect),
     };
     let definition = definition?;
     let exact = instance_binding(definition, path);
@@ -372,13 +341,7 @@ fn instance(
         },
         editable,
         fields,
-    )
-    .or_else(|| {
-        (editable
-            && own_views.is_some()
-            && inspector_action_enabled(ui, "Inherit the view list", true))
-        .then_some(BindingChange::Inherit)
-    });
+    );
     change.map(|change| InspectorAction::Binding {
         path: path.to_owned(),
         inherited,
@@ -469,13 +432,7 @@ fn cell_facts(
         },
         editable,
         &mut unused,
-    )
-    .or_else(|| {
-        (editable
-            && own_views.is_some()
-            && inspector_action_enabled(ui, "Inherit the view list", true))
-        .then_some(BindingChange::Inherit)
-    });
+    );
     change.map(|change| InspectorAction::CellBinding {
         library: library.to_owned(),
         cell: cell.to_owned(),
@@ -526,9 +483,6 @@ fn pattern_binding(
         fields,
     );
     change = change.or(edited);
-    if editable && inspector_action_enabled(ui, "Remove pattern binding", true) {
-        change = Some(BindingChange::Remove);
-    }
     change.map(|change| InspectorAction::Binding {
         path: pattern.to_owned(),
         inherited: Vec::new(),

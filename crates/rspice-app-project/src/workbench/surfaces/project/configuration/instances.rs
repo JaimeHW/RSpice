@@ -11,7 +11,6 @@
 //! selected rows' bindings in one edit.
 
 use super::*;
-use crate::ui::accessibility::counted;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -24,15 +23,11 @@ use crate::state::{ConfigurationPlatform, ConfigurationSetDefinition, Configurat
 use crate::ui::widgets::table::{
     Cell, Column, DataTable, Group, RowKey, TableResponse, TableState,
 };
-use crate::ui::widgets::{FILTER_CLEAR_INSET, SegmentedWidth, filter_field_clear, segmented};
 use crate::workbench::app_state::model::UnreadLibrary;
 use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationRow, ConfigurationTab, ConfigurationTables, INHERITED,
     InstanceRow, PatternRow, instance_key,
 };
-
-/// The widest the header's filter field grows.
-const FILTER_WIDTH: f32 = 200.0;
 
 /// What the reader asked of the tables this frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,11 +57,14 @@ fn rule_label(rule: HierarchyBindingRule) -> &'static str {
     }
 }
 
+/// The table the bar's switch shows, and what the bar asked of it: the
+/// switch itself, or Add pattern binding.
 pub(super) fn tables(
     ui: &mut Ui,
     cx: &mut Cx<'_, ProjectFeature>,
     selection: ConfigurationSelection,
     resolution: &ConfigurationResolution,
+    asked: Option<TableAction>,
 ) {
     let catalog = &cx.model.workspace.content.configuration_sets;
     let id = match selection {
@@ -80,9 +78,7 @@ pub(super) fn tables(
     // the library is missing, not a view of it.
     let unread = cx.model.unread_libraries();
     let page = &mut cx.state.configuration;
-    let mut actions = tab_header(ui, resolution, page, editable)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let mut actions = asked.into_iter().collect::<Vec<_>>();
     actions.extend(match page.tab {
         ConfigurationTab::Instances => instance_table(ui, page, resolution, visible, &unread),
         ConfigurationTab::Cells => super::cells::cells_table(ui, page, &resolution.tables),
@@ -133,179 +129,6 @@ fn apply(
     }
 }
 
-/// The band over the tables: which table, how many rows it holds, the filter
-/// that finds rows in it, and on Instances the one action that adds to it.
-fn tab_header(
-    ui: &mut Ui,
-    resolution: &ConfigurationResolution,
-    page: &mut ConfigurationPageState,
-    editable: bool,
-) -> Option<TableAction> {
-    let t = Tokens::get(ui.ctx());
-    let tab = page.tab;
-    let meta = match tab {
-        ConfigurationTab::Instances => {
-            let count = resolution.tables.instance_rows;
-            counted(count, "instance", "instances")
-        }
-        ConfigurationTab::Cells => {
-            let cells = counted(resolution.cells.len(), "cell", "cells");
-            match resolution.tables.bindings_not_in_design {
-                0 => cells,
-                unused => format!(
-                    "{cells} \u{b7} {} not in this design",
-                    counted(unused, "binding", "bindings")
-                ),
-            }
-        }
-    };
-    let adds = tab == ConfigurationTab::Instances && editable;
-    // A control tall, and the room around it, so the band holds its controls
-    // at every density. Where the switch, the count, the action and the
-    // least filter do not fit on one row, the action and the filter take a
-    // second.
-    let width = ui.available_width().max(1.0);
-    let row_height = t.metrics.ctl_h + 6.0;
-    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let segments = ["Instances", "Cells"]
-        .iter()
-        .map(|label| {
-            (text_width(ui, label, &theme::sans(tokens::FS_1, FontWeight::Medium)) + 16.0).max(54.0)
-        })
-        .sum::<f32>();
-    let add_width = if adds {
-        Button::new("Add pattern binding").measured_width(ui) + 10.0
-    } else {
-        0.0
-    };
-    let one_row = 16.0
-        + segments
-        + 10.0
-        + text_width(ui, &meta, &meta_font)
-        + 10.0
-        + add_width
-        + FILTER_MIN_WIDTH
-        <= width;
-    let rows = if one_row { 1.0 } else { 2.0 };
-    let (rect, _) = ui.allocate_exact_size(vec2(width, row_height * rows), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    let first = Rect::from_min_size(rect.min, vec2(width, row_height));
-    let mut action = None;
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(first.shrink2(vec2(8.0, 3.0)))
-            .layout(Layout::left_to_right(Align::Center)),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            let mut index = match tab {
-                ConfigurationTab::Instances => 0,
-                ConfigurationTab::Cells => 1,
-            };
-            if segmented(
-                ui,
-                "configuration-tables",
-                &["Instances", "Cells"],
-                &mut index,
-                SegmentedWidth::Natural,
-            ) {
-                action = Some(TableAction::Tab(if index == 0 {
-                    ConfigurationTab::Instances
-                } else {
-                    ConfigurationTab::Cells
-                }));
-            }
-            ui.label(
-                egui::RichText::new(&meta)
-                    .font(meta_font.clone())
-                    .color(t.color.text_faint),
-            );
-            if one_row {
-                filter_and_add(ui, page, tab, adds, &mut action);
-            }
-        },
-    );
-    if !one_row {
-        let second = Rect::from_min_size(first.left_bottom(), vec2(width, row_height));
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(second.shrink2(vec2(8.0, 3.0)))
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                filter_and_add(ui, page, tab, adds, &mut action);
-            },
-        );
-    }
-    action
-}
-
-/// The least the filter field is made before the band takes a second row.
-const FILTER_MIN_WIDTH: f32 = 120.0;
-
-fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
-    ui.painter()
-        .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
-        .size()
-        .x
-}
-
-/// The filter at the band's right end, and the action that adds a pattern
-/// binding before it.
-fn filter_and_add(
-    ui: &mut Ui,
-    page: &mut ConfigurationPageState,
-    tab: ConfigurationTab,
-    adds: bool,
-    action: &mut Option<TableAction>,
-) {
-    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        let (filter, name) = match tab {
-            ConfigurationTab::Instances => (&mut page.instances_table.filter, "Filter instances"),
-            ConfigurationTab::Cells => (&mut page.cells_table.filter, "Filter cells"),
-        };
-        filter_field(ui, filter, name);
-        if adds && Button::new("Add pattern binding").show(ui).clicked() {
-            *action = Some(TableAction::AddPattern);
-        }
-    });
-}
-
-/// The field that keeps only the rows whose words contain what it holds.
-fn filter_field(ui: &mut Ui, filter: &mut String, name: &str) {
-    let t = Tokens::get(ui.ctx());
-    // egui fades the body tone for a hint; the palette's tertiary text keeps
-    // its contrast on the field.
-    let restored = ui.visuals_mut().weak_text_color.replace(t.color.text_faint);
-    // On a row of its own beside one button it takes what the button leaves.
-    let width = FILTER_WIDTH
-        .min(ui.available_width() * 0.4)
-        .max(FILTER_MIN_WIDTH.min(ui.available_width()))
-        .max(1.0);
-    let field = ui.add_sized(
-        [width, t.metrics.ctl_h],
-        egui::TextEdit::singleline(filter)
-            .id_salt(("configuration-filter", name))
-            .hint_text("Filter\u{2026}")
-            .font(theme::field_sans())
-            .vertical_align(egui::Align::Center)
-            .margin(egui::Margin {
-                left: 6,
-                right: FILTER_CLEAR_INSET,
-                top: 2,
-                bottom: 2,
-            }),
-    );
-    ui.visuals_mut().weak_text_color = restored;
-    ui.ctx()
-        .accesskit_node_builder(field.id, |node| node.set_label(name));
-    filter_field_clear(ui, &field, filter);
-}
-
 /// Bind every instance a new pattern names, starting from the first scope
 /// no binding uses yet, and return the pattern so the inspector can edit it.
 fn add_pattern_binding(definition: &mut ConfigurationSetDefinition) -> String {
@@ -344,7 +167,7 @@ pub(super) fn ident(text: impl Into<String>) -> Cell {
 
 /// The Instances table's columns: the tree's, which the pattern rows above
 /// it share. The tree's order is the hierarchy's, so no head sorts it.
-fn instance_columns() -> [Column; 8] {
+fn instance_columns() -> [Column; 7] {
     [
         Column::name("Instance", 140.0).unsortable(),
         Column::name("Cell", 120.0).unsortable(),
@@ -357,7 +180,6 @@ fn instance_columns() -> [Column; 8] {
         // the column takes a share of the room the page has.
         Column::name("Bound by", 132.0).unsortable(),
         Column::words("Model section", 104.0).unsortable(),
-        Column::name("Status", 120.0).unsortable(),
     ]
 }
 
@@ -548,29 +370,35 @@ fn pattern_cells(row: &PatternRow) -> Vec<Cell> {
         row.model_section
             .as_deref()
             .map_or_else(Cell::absent, ident),
-        Cell::empty(),
     ]
 }
 
-/// A view list as a cell: Inherited, or the views. The column holds both,
-/// so it reads in one face, the interface's, as its words do.
+/// A view list as a cell: the views, or a faint Inherited when the row
+/// names none of its own. The column holds both, so it reads in one face,
+/// the interface's, as its words do.
 pub(super) fn view_list(views: &str) -> Cell {
-    Cell::text(views)
+    if views == INHERITED {
+        Cell::faint(INHERITED)
+    } else {
+        Cell::text(views)
+    }
 }
 
-/// The short reason a row is not bound, or `None` when it is.
+/// Why a row is not bound, or `None` when it is.
 fn unbound_reason(status: HierarchyBindingStatus) -> Option<&'static str> {
     match status {
         HierarchyBindingStatus::Resolved | HierarchyBindingStatus::Modified => None,
-        HierarchyBindingStatus::Unresolved => Some("no view found"),
-        HierarchyBindingStatus::Incompatible => Some("pins do not fit"),
-        HierarchyBindingStatus::Recursive => Some("instantiates itself"),
-        HierarchyBindingStatus::DepthLimit => Some("hierarchy too deep"),
+        HierarchyBindingStatus::Unresolved => Some("Not bound: no view found."),
+        HierarchyBindingStatus::Incompatible => Some("Not bound: its pins do not fit."),
+        HierarchyBindingStatus::Recursive => Some("Not bound: it instantiates itself."),
+        HierarchyBindingStatus::DepthLimit => Some("Not bound: the hierarchy is too deep."),
     }
 }
 
 /// One instance of the tree: indented by its depth behind its twist, or,
-/// while a filter is set, named by its whole path at the left edge.
+/// while a filter is set, named by its whole path at the left edge. An
+/// instance that is not bound, or binds with a warning, carries the
+/// problem's mark on its name, and why under the pointer.
 fn instance_cells(
     tables: &ConfigurationTables,
     hierarchy: &[ResolvedHierarchyBinding],
@@ -604,20 +432,30 @@ fn instance_cells(
         Cell::absent()
     };
     let to_use = view_list(tables.instance_to_use(&row.path).unwrap_or(INHERITED));
-    let missing = unbound_reason(binding.status)
-        .and_then(|_| unread.get(&reference.library))
-        .map(|unread| Cell::problem(unread.short, Problem::Failure).hint(unread.sentence.as_str()));
-    let status = match unbound_reason(binding.status) {
-        Some(reason) => Cell::problem(reason, Problem::Failure),
-        None => match binding.warnings.first() {
-            Some(warning) => Cell::problem(warning.as_str(), Problem::Warning),
-            None => Cell::empty(),
-        },
+    // A cell of a library this session could not read is unbound because
+    // the library is missing; that sentence says what to do about it.
+    let problem = match unbound_reason(binding.status) {
+        Some(reason) => Some((
+            Problem::Failure,
+            match (unread.get(&reference.library), &binding.diagnostic) {
+                (Some(unread), _) => unread.sentence.clone(),
+                (None, Some(diagnostic)) => format!("{reason}\n{diagnostic}"),
+                (None, None) => reason.to_owned(),
+            },
+        )),
+        None => binding.warnings.first().map(|warning| {
+            (
+                Problem::Warning,
+                match &binding.diagnostic {
+                    Some(diagnostic) => format!("{warning}\n{diagnostic}"),
+                    None => warning.clone(),
+                },
+            )
+        }),
     };
-    let status = match (missing, &binding.diagnostic) {
-        (Some(missing), _) => missing,
-        (None, Some(diagnostic)) => status.hint(diagnostic.as_str()),
-        (None, None) => status,
+    let instance = match problem {
+        Some((problem, why)) => instance.marked(problem).hint(why),
+        None => instance,
     };
     vec![
         instance,
@@ -625,7 +463,7 @@ fn instance_cells(
         if binding.placed.is_some() {
             ident(format!("{}/{}", reference.library, reference.cell))
         } else {
-            Cell::empty()
+            Cell::faint(INHERITED)
         },
         found,
         to_use,
@@ -635,6 +473,5 @@ fn instance_cells(
         } else {
             ident(&binding.model_section)
         },
-        status,
     ]
 }

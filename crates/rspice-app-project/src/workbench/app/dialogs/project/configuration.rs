@@ -394,7 +394,7 @@ fn prepare(
                         plain_refusal(&error)
                     )
                 })?;
-            added(current, candidate, id, &name, use_for_runs, "Cloned")
+            added(current, candidate, id, &name, use_for_runs, "Copied")
         }
         ConfigurationTransaction::Rename { id, name } => {
             let committed = current

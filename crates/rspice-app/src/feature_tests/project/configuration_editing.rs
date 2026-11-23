@@ -76,6 +76,33 @@ pub(super) fn says(output: &egui::FullOutput, text: &str) -> bool {
         .any(|node| node.label == text || node.value == text)
 }
 
+/// Whether the page bar's report states `fact` among its facts, which it
+/// joins with " \u{b7} " behind the severity of a problem.
+pub(super) fn reports(output: &egui::FullOutput, fact: &str) -> bool {
+    nodes(output).iter().any(|node| {
+        [&node.label, &node.value].into_iter().any(|words| {
+            let said = ["Warning: ", "Error: "]
+                .iter()
+                .find_map(|severity| words.strip_prefix(severity))
+                .unwrap_or(words);
+            said.split(" \u{b7} ").any(|part| part == fact)
+        })
+    })
+}
+
+/// Open the bar's More menu and take `item` from it.
+pub(super) fn from_more(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    output: &egui::FullOutput,
+    item: &str,
+) -> egui::FullOutput {
+    let menu = click(ctx, app, output, Role::Button, |name| {
+        name == "More configuration actions"
+    });
+    click(ctx, app, &menu, Role::Button, |name| name == item)
+}
+
 /// Frames until what was asked for has drawn: a press lands, a popup opens.
 pub(super) fn settle(
     ctx: &Context,
@@ -279,16 +306,27 @@ fn an_inspector_edit_keeps_what_the_cell_binding_chose() {
         "a platform set alone copies no view list: {:?}",
         binding.executable_views
     );
+    // The binding's stop on a schematic is a warning the row reads out
+    // after the instance's name; the rest of the row is the binding's.
     assert!(
         nodes(&output).iter().any(|node| node
             .label
-            .starts_with("Instance: X1, Cell: user/amp, View found: schematic, View to use: Inherited, Bound by: Cell binding")),
-        "the cell binding still binds /X1"
+            .starts_with("Instance: Warning: X1, stop view 'schematic'")
+            && node.label.contains(
+                ", Cell: user/amp, Cell to use: Inherited, View found: schematic, \
+                 View to use: Inherited, Bound by: Cell binding"
+            )),
+        "the cell binding still binds /X1: {:#?}",
+        nodes(&output)
+            .iter()
+            .filter(|node| node.label.contains("X1,"))
+            .map(|node| &node.label)
+            .collect::<Vec<_>>()
     );
 }
 
-/// Choosing to inherit the view list keeps the binding's platform
-/// restriction: the three properties are independent.
+/// Setting a row's view to Inherited from its menu keeps the binding's
+/// platform restriction: the three properties are independent.
 #[test]
 fn inheriting_the_view_list_keeps_the_rest_of_the_binding() {
     let ctx = offscreen();
@@ -296,12 +334,13 @@ fn inheriting_the_view_list_keeps_the_rest_of_the_binding() {
     select_row(&mut app, ConfigurationRow::Instance("/X2".to_owned()));
     let output = settle(&ctx, &mut app, Vec::new());
     let output = pick(&ctx, &mut app, &output, "Only on", "Desktop");
-    click(
+    let at = super::configuration_tables::row_at(&output, "Instance: X2,");
+    super::configuration_tables::take_from_menu(
         &ctx,
         &mut app,
-        &output,
-        egui::accesskit::Role::Button,
-        |name| name == "Inherit the view list",
+        at,
+        "Set view to",
+        Some("Inherited"),
     );
     let definition = shown(&app);
     let binding = instance_binding(&definition, "/X2").expect("the binding stays");
@@ -364,7 +403,7 @@ fn an_invalid_entry_is_refused_at_its_field_and_the_tables_stay() {
     assert!(says(
         &output,
         "Table columns: Instance, Cell, Cell to use, View found, View to use, Bound by, \
-         Model section, Status"
+         Model section"
     ));
 }
 
@@ -384,8 +423,8 @@ fn view_to_use_states_the_whole_list_and_a_pick_moves_a_view_first() {
         .into_iter()
         .find(|node| {
             node.label.starts_with(
-                "Library: user, Cell: amp, Instances: 2, View found: schematic, \
-                 View to use: extracted, schematic",
+                "Library: user, Cell: amp, Cell to use: Inherited, Instances: 2, \
+                 View found: schematic, View to use: extracted, schematic",
             )
         })
         .expect("the row states every view of the binding");
@@ -409,7 +448,7 @@ fn view_to_use_states_the_whole_list_and_a_pick_moves_a_view_first() {
     assert_eq!(binding.executable_views, ["schematic", "extracted"]);
 }
 
-/// The configuration's name is a fact in the inspector; the band's More menu
+/// The configuration's name is a fact in the inspector; the bar's More menu
 /// renames it.
 #[test]
 fn the_inspector_states_the_name_and_rename_is_the_one_way_to_change_it() {
@@ -437,7 +476,7 @@ fn the_inspector_states_the_name_and_rename_is_the_one_way_to_change_it() {
     assert!(says(&menu, "Rename\u{2026}"));
 }
 
-/// The band says when the edits are not applied, and Use for runs on a
+/// The bar marks edits that are not applied, and More > Use for runs on a
 /// configuration with edits uses what the tables show: it applies them.
 #[test]
 fn use_for_runs_applies_the_edits_it_was_pressed_over() {
@@ -461,9 +500,7 @@ fn use_for_runs_applies_the_edits_it_was_pressed_over() {
     let output = settle(&ctx, &mut app, Vec::new());
     assert!(says(&output, "Edits not applied"));
 
-    click(&ctx, &mut app, &output, Role::Button, |name| {
-        name == "Use for runs"
-    });
+    from_more(&ctx, &mut app, &output, "Use for runs");
     let output = paint_until_checked(&ctx, &mut app);
 
     let catalog = &app.state.model.workspace.content.configuration_sets;
@@ -473,11 +510,11 @@ fn use_for_runs_applies_the_edits_it_was_pressed_over() {
         ["schematic", "spice"],
         "the edits were applied first"
     );
-    assert!(says(&output, "Used for runs"));
+    assert!(reports(&output, "used for runs"));
     assert!(!says(&output, "Edits not applied"));
 }
 
-/// While Apply is checked the band says so and offers neither Apply nor Use
+/// While Apply is checked the bar says so and offers neither Apply nor Use
 /// for runs. An edit made meanwhile stops the check; the next Apply lands.
 #[test]
 fn apply_is_checked_off_the_frame_and_an_edit_stops_the_check() {
@@ -495,8 +532,8 @@ fn apply_is_checked_off_the_frame_and_an_edit_stops_the_check() {
         name == "Apply"
     });
     assert!(
-        says(&output, "Checking\u{2026}"),
-        "the band says it is checking"
+        reports(&output, "checking\u{2026}"),
+        "the bar says it is checking"
     );
     assert!(
         disabled(&output, "Apply"),
@@ -509,7 +546,7 @@ fn apply_is_checked_off_the_frame_and_an_edit_stops_the_check() {
     });
     let output = settle(&ctx, &mut app, Vec::new());
     assert!(
-        !says(&output, "Checking\u{2026}"),
+        !reports(&output, "checking\u{2026}"),
         "the edit stopped the check"
     );
     assert!(says(&output, "Edits not applied"));
@@ -733,7 +770,7 @@ fn edits_follow_a_rename_of_the_design_they_were_made_to() {
         .expect("the top cell renames");
     let output = settle(&ctx, &mut app, Vec::new());
     assert!(says(&output, "Edits not applied"), "the edits stay");
-    assert!(!says(&output, OUT_OF_DATE));
+    assert!(!reports(&output, OUT_OF_DATE));
     let edited = shown(&app);
     assert_eq!(edited.root.cell, "top_b", "the edits took the rename");
     assert_eq!(edited.executable_view_policy, ["schematic", "spice"]);
@@ -750,9 +787,9 @@ fn edits_follow_a_rename_of_the_design_they_were_made_to() {
     assert!(!says(&output, "Edits not applied"), "Apply landed them");
 }
 
-/// The band's state as a screen reader has it: the mark's severity, then
-/// the words.
-const OUT_OF_DATE: &str = "Warning: Edits out of date";
+/// The bar's report as a screen reader has it while the edits are out of
+/// date and every instance is bound: the warning's severity, then the facts.
+const OUT_OF_DATE: &str = "edits out of date";
 
 /// A change the project makes to a part the edits change too cannot be
 /// carried over: the band says so at once, Apply is not offered, and Revert
@@ -782,8 +819,14 @@ fn edits_the_project_changed_under_say_so_at_once() {
 
     let output = settle(&ctx, &mut app, Vec::new());
     assert!(
-        says(&output, OUT_OF_DATE),
-        "the band says so before Apply is pressed"
+        reports(&output, OUT_OF_DATE),
+        "the bar says so before Apply is pressed"
+    );
+    assert!(
+        nodes(&output)
+            .iter()
+            .any(|node| node.value.starts_with("Warning: ") && node.value.contains(OUT_OF_DATE)),
+        "behind a warning's mark"
     );
     assert!(disabled(&output, "Apply"), "Apply cannot commit them");
     assert_eq!(
@@ -796,7 +839,7 @@ fn edits_the_project_changed_under_say_so_at_once() {
         name == "Revert"
     });
     let output = click_lowest(&ctx, &mut app, &asked, "Revert");
-    assert!(!says(&output, OUT_OF_DATE));
+    assert!(!reports(&output, OUT_OF_DATE));
     assert_eq!(shown(&app).executable_view_policy, ["spice", "schematic"]);
 }
 

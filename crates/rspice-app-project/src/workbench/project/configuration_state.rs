@@ -600,8 +600,6 @@ pub(crate) struct ConfigurationTables {
     /// The views each exact path's own instance binding names, by the
     /// path's fold key: an instance's view to use.
     instance_views: HashMap<String, String>,
-    /// How many rows the tree holds, opened or not.
-    pub(crate) instance_rows: usize,
     /// The pattern bindings of the shown definition, in its order.
     pub(crate) patterns: Vec<PatternRow>,
     /// Per hierarchy binding: its cell's view-to-use choices, an index into
@@ -735,14 +733,6 @@ impl<'a> InstanceTree<'a> {
             hierarchy,
             unplaced,
         }
-    }
-
-    /// How many rows the tree holds, opened or not.
-    fn len(&self) -> usize {
-        self.hierarchy
-            .occurrences
-            .len()
-            .saturating_add(self.unplaced.len())
     }
 
     fn unplaced_under<'s>(&'s self, path: &InstancePath) -> impl Iterator<Item = &'s Unplaced> {
@@ -1031,7 +1021,6 @@ impl ConfigurationTables {
         );
 
         let instance_views = instance_views(definition);
-        let instance_rows = tree.as_ref().map_or(0, InstanceTree::len);
         let patterns = definition
             .into_iter()
             .flat_map(|definition| &definition.overrides)
@@ -1154,7 +1143,6 @@ impl ConfigurationTables {
             addable_stops,
             inherited,
             instance_views,
-            instance_rows,
             patterns,
             binding_options,
             view_options,

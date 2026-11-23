@@ -356,7 +356,7 @@ fn opening_shortcut_and_repeated_letters_in_one_frame_preserve_the_search() {
 
 /// The browser qualification's configuration path, through whole frames of
 /// the application: the Configurations command shows the page, typing
-/// straight after New configuration\u{2026} is released lands in the new
+/// straight after the bar's More > New\u{2026} is released lands in the new
 /// configuration's Name even in the frame of the release, and Escape leaves
 /// the project without it.
 #[cfg(not(target_arch = "wasm32"))]
@@ -398,27 +398,42 @@ fn typing_straight_after_new_configuration_lands_in_its_name() {
             .collect()
     };
 
-    app.execute_command_key(ShellCommand::ConfigurationSets.key());
-    let tree = run(&mut app, Vec::new());
-    let new = named(&tree, Role::Button, "New configuration\u{2026}");
-    assert_eq!(new.len(), 1, "the page offers one New configuration button");
-    let bounds = new[0].bounds().expect("a laid-out button");
-    let at = pos2(
-        ((bounds.x0 + bounds.x1) / 2.0) as f32,
-        ((bounds.y0 + bounds.y1) / 2.0) as f32,
-    );
-    let press = |pressed| egui::Event::PointerButton {
+    let centre = |node: &Node| {
+        let bounds = node.bounds().expect("a laid-out button");
+        pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        )
+    };
+    let press = |at, pressed| egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
         pressed,
         modifiers: Modifiers::NONE,
     };
+
+    app.execute_command_key(ShellCommand::ConfigurationSets.key());
+    let tree = run(&mut app, Vec::new());
+    let more = named(&tree, Role::Button, "More configuration actions");
+    assert_eq!(more.len(), 1, "the page's bar offers one More");
+    let at = centre(&more[0]);
+    run(
+        &mut app,
+        vec![egui::Event::PointerMoved(at), press(at, true)],
+    );
+    let tree = run(&mut app, vec![press(at, false)]);
+    let new = named(&tree, Role::Button, "New\u{2026}");
+    assert_eq!(new.len(), 1, "More offers one New\u{2026}");
+    let at = centre(&new[0]);
     let name = "Browser configuration draft";
-    run(&mut app, vec![egui::Event::PointerMoved(at), press(true)]);
+    run(
+        &mut app,
+        vec![egui::Event::PointerMoved(at), press(at, true)],
+    );
     let tree = run(
         &mut app,
         vec![
-            press(false),
+            press(at, false),
             primary_key_event(Key::A),
             egui::Event::Text(name.to_owned()),
         ],

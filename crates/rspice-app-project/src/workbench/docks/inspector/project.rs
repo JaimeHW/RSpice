@@ -13,7 +13,6 @@ use egui::Ui;
 use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
 
 use crate::state::command_catalog::CommandKey;
-use crate::ui::widgets::Button;
 use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::lifecycle::project_lifecycle::LifecycleView;
@@ -130,8 +129,8 @@ pub(in crate::workbench) fn project(
             action
         }
         ProjectPage::Configuration => {
-            configuration::project_configuration(ui, inspector.configuration, inspector.model)
-                .map(ProjectInspectorAction::UseForRuns)
+            configuration::project_configuration(ui, inspector.configuration, inspector.model);
+            None
         }
         // Where the checkpoints are kept, and the space they are kept in,
         // stand under the project.
@@ -167,18 +166,4 @@ pub fn inspects_project(
         ProjectPage::Dependencies => dependency_selection.is_none(),
         ProjectPage::History => history_selection.is_none(),
     }
-}
-
-/// One of the inspector's actions: the kit's button, as the page beside it
-/// draws its own, across the inspector's width.
-fn inspector_action_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
-    let width = ui.available_width().max(1.0);
-    let clicked = Button::new(label)
-        .enabled(enabled)
-        .min_width(width)
-        .max_width(width)
-        .show(ui)
-        .clicked();
-    ui.add_space(4.0);
-    clicked
 }
