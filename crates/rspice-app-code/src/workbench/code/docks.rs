@@ -21,7 +21,7 @@ use crate::workbench::state::Workspace;
 
 use super::SourceFeature;
 use super::commands::{SourceDocumentRequest, SourceRequest};
-use super::netlist_first::{self, DeckFacts, deck_fact_rows, deck_facts};
+use super::netlist_first::{self, DeckFacts, deck_fact_rows};
 
 /// The navigator of the code document in front: the Netlist workspace's
 /// outline, or the rail of the Verilog-A view the Design workspace shows.
@@ -125,8 +125,10 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) 
     // the Netlist workspace lists beside it.
     if deck_page(cx) {
         netlist_first::open_deck(cx);
-        let facts = root_deck_facts(cx, ui.ctx());
-        deck_fact_rows(ui, &facts, &[], cx.wb.messages());
+        match root_deck_facts(cx, ui.ctx()) {
+            Some(facts) => deck_fact_rows(ui, &facts, &[], cx.wb.messages()),
+            None => netlist_first::reading_line(ui, cx.wb.messages()),
+        }
         return;
     }
     if cx.wb.workspace != Workspace::Netlist {
@@ -158,13 +160,18 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) 
         && netlist.front.shows_deck()
         && netlist.front.root_kind() == NetlistRoot::Deck
         && active_dependency_in(cx.model, netlist).is_none();
-    let facts = deck_in_front.then(|| root_deck_facts(cx, ui.ctx()));
+    let facts = if deck_in_front {
+        root_deck_facts(cx, ui.ctx())
+    } else {
+        None
+    };
     let pressed = source_editing_inspector(
         ui,
         &SourceInspector {
             model: cx.model,
             netlist: &cx.state.netlist,
             deck_facts: facts.as_ref(),
+            reading_deck: deck_in_front && facts.is_none(),
             messages: cx.wb.messages(),
         },
     );
@@ -191,8 +198,15 @@ fn deck_page(cx: &Cx<'_, SourceFeature>) -> bool {
         && cx.model.is_netlist_first_without_schematic()
 }
 
-/// The project's deck's facts, counted from its root file.
-fn root_deck_facts(cx: &mut Cx<'_, SourceFeature>, ctx: &egui::Context) -> DeckFacts {
-    let index = root_deck_source_index(ctx, cx.model, &mut cx.state.netlist);
-    deck_facts(cx.model, &cx.state.netlist, &index, cx.wb.messages())
+/// The project's deck's facts, counted from its root file: `None` until
+/// its first read is done.
+fn root_deck_facts(cx: &mut Cx<'_, SourceFeature>, ctx: &egui::Context) -> Option<DeckFacts> {
+    let index = root_deck_source_index(ctx, cx.model, &mut cx.state.netlist)?;
+    Some(netlist_first::kept_deck_facts(
+        ctx,
+        cx.model,
+        &cx.state.netlist,
+        &index,
+        cx.wb.messages(),
+    ))
 }

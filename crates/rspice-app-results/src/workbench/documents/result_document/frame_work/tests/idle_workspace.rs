@@ -18,7 +18,12 @@ use crate::workbench::documents::result_document::test_fixtures::{completed_prep
 /// current design, and one completed run of it holding `analysis`. Returns the
 /// document, which follows the newest run of that analysis.
 fn latest_document(state: &mut ResultsTestHost, analysis: AnalysisResult) -> ResultDocumentId {
-    state.model.simulation.source.netlist_content = "* latest\nV1 out 0 1\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("* latest\nV1 out 0 1\n.end\n".to_owned());
     let netlist = &mut state.model.netlist_artifacts;
     netlist.generation_error = None;
     netlist.generated_input_digest = Some(digest(0x60));
@@ -128,7 +133,7 @@ fn latest_tracking_digests_its_netlist_and_runs_once_per_change() {
         .simulation
         .source
         .netlist_content
-        .push_str("* edited\n");
+        .edit(|text| text.push_str("* edited\n"));
     let work = WorkCounts::reset();
     for _ in 0..3 {
         ask(&mut state, document_id);

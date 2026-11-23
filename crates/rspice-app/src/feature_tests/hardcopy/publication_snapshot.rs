@@ -56,8 +56,12 @@ fn analysis(label: &str, waveforms: Vec<RetainedTrace>) -> AnalysisResult {
 #[test]
 fn deck_line_endings_normalize_to_canonical_form() {
     let mut state = AppState::default();
-    state.model.simulation.source.netlist_content =
-        "* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string());
     let deck = effective_deck(publication_reads(&state))
         .expect("deck")
         .deck;
@@ -68,7 +72,12 @@ fn deck_line_endings_normalize_to_canonical_form() {
 #[test]
 fn authored_presentation_and_disclosure_choices_are_sealed() {
     let mut state = AppState::default();
-    state.model.simulation.source.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("* Filter\nR1 in out 1k\n.end".to_string());
     let snapshot = build_publication_snapshot(
         publication_reads(&state),
         &PublicationDraft {
@@ -343,8 +352,12 @@ fn native_engineering_projection_preserves_components_nets_and_signal_identity()
 #[test]
 fn run_results_and_deck_build_a_valid_snapshot() {
     let mut state = AppState::default();
-    state.model.simulation.source.netlist_content =
-        "* RSpice Netlist\nR1 in out 1k\n.end".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("* RSpice Netlist\nR1 in out 1k\n.end".to_string());
     let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.analyses.push({
         let mut result = analysis(

@@ -17,7 +17,12 @@ fn a_runs_assertion_report_is_retained_saved_and_restored() {
     let export_io = MockExportWorkflowIo::default();
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content = RC.to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(RC.to_owned());
     let mut controller = SimulationController::new();
     controller
         .prepare_deck_run(&state)

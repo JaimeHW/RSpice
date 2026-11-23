@@ -86,6 +86,14 @@ fn a_file_changed_on_disk_is_read_again_into_a_clean_tab_when_the_page_shows() {
         app.state.prompt_text(),
         Some("Reloaded amp.cir: changed on disk.")
     );
+    let outline = rspice_app_code::workbench::documents::netlist_document::visible_source_index_now(
+        &app.state.model,
+        &mut app.state.code.netlist,
+    );
+    assert!(
+        outline.describes(ON_DISK),
+        "the outline is the file's text as it now stands"
+    );
 }
 
 /// A tab holding edits keeps them when its file changes on disk, and the

@@ -28,8 +28,8 @@ fn deck_state() -> SourceHarness {
 fn deck_texts(harness: &SourceHarness) -> (String, String) {
     let deck = harness.state.netlist.open_deck.as_ref().unwrap();
     (
-        deck.root.text.clone(),
-        deck.include(DECK_INCLUDE).unwrap().text.clone(),
+        deck.root.text.as_str().to_owned(),
+        deck.include(DECK_INCLUDE).unwrap().text.as_str().to_owned(),
     )
 }
 
@@ -57,7 +57,8 @@ fn the_visible_outline_is_built_once_per_change_and_never_reused_across_one() {
 
     let first = visible_source_index_now(&harness.model, &mut harness.state.netlist);
     let ctx = egui::Context::default();
-    let frame = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist);
+    let frame = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist)
+        .expect("a test's frame waits for the outline");
     assert!(
         std::sync::Arc::ptr_eq(&first, &frame),
         "an unchanged buffer must not be built twice"
@@ -70,7 +71,8 @@ fn the_visible_outline_is_built_once_per_change_and_never_reused_across_one() {
         &mut harness.state.netlist,
         format!("{ROOT}* one more card\n")
     ));
-    let replaced = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist);
+    let replaced = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist)
+        .expect("a test's frame waits for the outline");
     assert!(
         replaced.describes(&format!("{ROOT}* one more card\n")),
         "text put in the buffer without typing is outlined before a frame shows it"
@@ -83,7 +85,8 @@ fn the_visible_outline_is_built_once_per_change_and_never_reused_across_one() {
         typed.clone()
     ));
     harness.state.netlist.typed_revision = Some(harness.state.netlist.revision);
-    let stale = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist);
+    let stale = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist)
+        .expect("while the writer types, the last outline stands in");
     assert!(
         std::sync::Arc::ptr_eq(&replaced, &stale) || stale.describes(&typed),
         "while the writer types, a frame shows the last outline built or the new one, never another"
@@ -354,7 +357,7 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
         &mut harness.state.netlist,
         EDITED.to_owned()
     ));
-    harness.runs.manual_run.last_run_buffer = Some(RAN.to_owned());
+    harness.runs.manual_run.last_run_buffer = Some(RAN.into());
     harness.runs.manual_run.last_run_id = Some(3);
     assert!(open_run_deck_snapshot_in(
         &mut harness.model,
@@ -390,7 +393,7 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
 #[test]
 fn run_deck_snapshot_needs_both_the_run_and_its_deck() {
     let mut harness = deck_state();
-    harness.runs.manual_run.last_run_buffer = Some("ran\n.end\n".to_owned());
+    harness.runs.manual_run.last_run_buffer = Some("ran\n.end\n".into());
     assert!(run_deck_snapshot_run_id_in(&harness.runs).is_none());
     assert!(!open_run_deck_snapshot_in(
         &mut harness.model,
@@ -668,5 +671,70 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
         ExecutedDeckVerification::of(&unsealed.model, 4, 0),
         None,
         "and a run whose decks are not held is not a verdict at all"
+    );
+}
+
+/// Text put in the buffer by other than typing has no outline until its own
+/// is built away from the frame, and the last one built does not stand in
+/// for it; once the build is done, a frame has it.
+#[test]
+fn the_outline_of_text_put_in_the_buffer_arrives_when_its_build_is_done() {
+    let mut harness = deck_state();
+    harness.state.netlist.detach_background_work();
+    let ctx = egui::Context::default();
+    let first = visible_source_index_now(&harness.model, &mut harness.state.netlist);
+    let replaced = format!("{ROOT}* one more card\n");
+    assert!(edit_deck_file(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        replaced.clone()
+    ));
+
+    assert!(
+        visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist).is_none(),
+        "the outline of the text before does not stand in for text put in the buffer"
+    );
+    let built = visible_source_index_now(&harness.model, &mut harness.state.netlist);
+    assert!(built.describes(&replaced));
+    let frame = visible_source_index_in(&ctx, &harness.model, &mut harness.state.netlist)
+        .expect("the frame has the outline once its build is done");
+    assert!(std::sync::Arc::ptr_eq(&built, &frame));
+    assert!(!std::sync::Arc::ptr_eq(&first, &frame));
+}
+
+/// The name under the caret is kept for the revision of the text it was
+/// read from: text replaced under a caret that did not move, to the same
+/// length, is read again.
+#[test]
+fn a_name_under_a_caret_that_did_not_move_is_read_again_once_the_text_changes() {
+    let mut harness = deck_state();
+    let ctx = egui::Context::default();
+    // `V1 out 0 1` is the third line, the caret at its start.
+    harness.state.netlist.cursor_char_index = ROOT.find("V1 out").unwrap();
+    let element = |name: &str| cross_probe::CaretName::Element {
+        name: name.to_owned(),
+        top_level: true,
+        head: true,
+    };
+    cross_probe::follow_caret(&ctx, &harness.model, &mut harness.state.netlist, 2, 0);
+    assert_eq!(
+        cross_probe::caret_name(&harness.model, &harness.state.netlist),
+        Some(&element("V1"))
+    );
+
+    assert!(edit_deck_file(
+        &mut harness.model,
+        &mut harness.state.netlist,
+        ROOT.replace("V1 out", "V2 out")
+    ));
+    assert_eq!(
+        cross_probe::caret_name(&harness.model, &harness.state.netlist),
+        None,
+        "the name read from the text before is not the new text's"
+    );
+    cross_probe::follow_caret(&ctx, &harness.model, &mut harness.state.netlist, 2, 0);
+    assert_eq!(
+        cross_probe::caret_name(&harness.model, &harness.state.netlist),
+        Some(&element("V2"))
     );
 }

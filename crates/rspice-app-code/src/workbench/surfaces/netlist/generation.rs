@@ -64,15 +64,22 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, SourceFeature>) {
     refresh_generated_artifact(cx);
 
     // The deck or the include in front is its file's text, which the editor
-    // edits in place: the buffer follows it, never the other way round.
+    // edits in place: the buffer follows it, never the other way round. The
+    // two share one text and its revision, so a frame compares two numbers;
+    // a file that comes to hold the same text at another revision is
+    // compared once and shared again.
     if cx.state.netlist.front.shows_deck() {
         if let Some(file) =
             crate::workbench::documents::netlist_document::active_deck_file_in(&cx.state.netlist)
-            && cx.model.simulation.source.netlist_content != file.text
+            && file.text.revision() != cx.model.simulation.source.netlist_content.revision()
         {
-            cx.model.simulation.source.netlist_content = file.text.clone();
-            cx.state.netlist.revision = cx.state.netlist.revision.wrapping_add(1);
-            cx.model.invalidate_source_evidence();
+            let text = file.text.clone();
+            let same = text.same_text(&cx.model.simulation.source.netlist_content);
+            cx.model.simulation.source.netlist_content = text;
+            if !same {
+                cx.state.netlist.revision = cx.state.netlist.revision.wrapping_add(1);
+                cx.model.invalidate_source_evidence();
+            }
         }
         return;
     }
@@ -98,7 +105,7 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, SourceFeature>) {
     if let Some(projected) = projected
         && cx.model.simulation.source.netlist_content != projected
     {
-        cx.model.simulation.source.netlist_content = projected;
+        cx.model.simulation.source.netlist_content.set(projected);
         cx.state.netlist.revision = cx.state.netlist.revision.wrapping_add(1);
         cx.model.invalidate_source_evidence();
     }

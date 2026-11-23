@@ -196,7 +196,12 @@ fn the_facts_count_the_deck_while_the_editor_shows_other_text() {
     let mut app = netlist_first_app();
     // An include file open in the editor, or nothing projected into it yet.
     for editor in ["* models.inc\n.model NFET NMOS (LEVEL=1)\n", ""] {
-        editor.clone_into(&mut app.state.model.simulation.source.netlist_content);
+        app.state
+            .model
+            .simulation
+            .source
+            .netlist_content
+            .set(editor.to_owned());
         let index = root_deck_source_index_now(&app.state.model, &mut app.state.code.netlist);
         let facts = deck_facts(
             &app.state.model,

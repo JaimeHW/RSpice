@@ -263,6 +263,7 @@ define_messages! {
     NetlistNavigatorDecks => "Decks",
     NetlistNavigatorDeckStored => "in project",
     NetlistNavigatorDeckMissing => "not found",
+    NetlistReadingText => "Reading…",
     NetlistNavigatorProjectSymbols => "Symbols",
     NetlistNavigatorSymbolsInFiles => "{count} in {files} files",
     NetlistNavigatorProjectReferences => "References",
@@ -1143,7 +1144,7 @@ define_messages! {
     EditorPasteRefused => "The browser did not let RSpice read the clipboard. Press {key} to paste.",
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageCatalog {
     locale: UiTextLocale,
 }

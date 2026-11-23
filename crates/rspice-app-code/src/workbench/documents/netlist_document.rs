@@ -57,6 +57,7 @@ pub use editor::{
 };
 pub(crate) use executed_deck::run_snapshot_source_in;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
+pub(crate) use source_index::current_source_index_in;
 pub use source_index::{
     root_deck_source_index, root_deck_source_index_now, visible_source_index_in,
     visible_source_index_now,
@@ -352,7 +353,7 @@ pub fn redo_netlist_edit(
 /// Replace the text of the file in front, the open deck or an include open
 /// beside it, with `text`. Whether that changed it.
 pub fn edit_deck_file(model: &mut Model, netlist: &mut NetlistDocumentState, text: String) -> bool {
-    let shown = std::mem::replace(&mut model.simulation.source.netlist_content, text);
+    let shown = std::mem::replace(&mut model.simulation.source.netlist_content, text.into());
     if keep_editor_text(model, netlist) {
         return true;
     }
@@ -465,12 +466,10 @@ pub(crate) fn effective_active_document_in(netlist: &NetlistDocumentState) -> Ne
 pub(crate) fn working_deck_source_in<'a>(
     model: &'a Model,
     netlist: &'a NetlistDocumentState,
-) -> &'a str {
+) -> &'a crate::state::RevisedText {
     match netlist.open_deck.as_ref() {
-        Some(deck) if effective_active_document_in(netlist) == NetlistRoot::Deck => {
-            deck.root.text.as_str()
-        }
-        _ => model.simulation.source.netlist_content.as_str(),
+        Some(deck) if effective_active_document_in(netlist) == NetlistRoot::Deck => &deck.root.text,
+        _ => &model.simulation.source.netlist_content,
     }
 }
 
@@ -533,7 +532,7 @@ pub fn open_netlist_dependency_from_root_in(
         .find(|dependency| dependency.locator().logical_identity() == logical_identity)
         .and_then(crate::state::DependencyMetadata::source)
         .ok_or_else(|| messages.text(MessageId::NetlistIncludeGone))?
-        .to_owned();
+        .into();
     put_dependency_in_front(
         model,
         netlist,
@@ -558,7 +557,7 @@ pub(crate) fn put_dependency_in_front(
     root: NetlistRoot,
     root_document_id: crate::state::NetlistDocumentId,
     logical_identity: &str,
-    source: String,
+    source: crate::state::RevisedText,
     messages: MessageCatalog,
 ) -> Result<(), String> {
     let tab = crate::workbench::state::WorkspaceDocumentId::NetlistDependency {
@@ -614,7 +613,7 @@ pub(crate) fn close_active_dependency_in(
             .as_ref()
             .map(|deck| deck.root.text.clone())
             .unwrap_or_default(),
-        _ => model.netlist_artifacts.generated_source.clone(),
+        _ => model.netlist_artifacts.generated_source.clone().into(),
     };
     netlist.requested_line = None;
     netlist.cursor_line = 0;
@@ -676,7 +675,11 @@ pub fn open_generated_primary_in(model: &mut Model, netlist: &mut NetlistDocumen
     }
     netlist.front = NetlistTab::Generated;
     netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = model.netlist_artifacts.generated_source.clone();
+    model
+        .simulation
+        .source
+        .netlist_content
+        .set(model.netlist_artifacts.generated_source.clone());
     netlist.completion_open = false;
     netlist.completion_dismissed_at = None;
     netlist.revision = netlist.revision.wrapping_add(1);
@@ -781,8 +784,11 @@ pub struct NetlistDocumentState {
     last_edit_time: f64,
     /// Revision the last edit typed in the editor left the buffer at. While
     /// the buffer stands there its indexes may trail it by a build; text put
-    /// in the buffer any other way is indexed before a frame shows it.
+    /// in the buffer any other way has none until its own is built.
     typed_revision: Option<u64>,
+    /// Whether the indexes and the check run away from the frame in the
+    /// application's tests too, as they always do outside them.
+    background_detached: bool,
     /// Current parse diagnostics.
     pub diagnostics: std::sync::Arc<NetlistDiagnosticCollection>,
     /// The check of the shown source running away from the editor's
@@ -845,6 +851,12 @@ pub struct NetlistDocumentState {
     /// The same for the project's top-level deck while the editor shows other
     /// text. Read through [`root_deck_source_index`].
     root_deck_index: source_index::SourceIndexSlot,
+    /// Whether the top-level deck is the text the editor shows, compared once
+    /// for each pair of their revisions.
+    root_deck_shown: crate::state::SameTextMemo,
+    /// Whether the deck that would run is the one the last manual run read,
+    /// compared once for each pair of their revisions.
+    pub(crate) run_baseline_shown: crate::state::SameTextMemo,
     /// The name under the caret, as the frame last read it. Read through
     /// [`cross_probe::caret_name`].
     caret_name: cross_probe::CaretNameCache,
@@ -881,6 +893,22 @@ impl NetlistDocumentState {
     /// so its indexes may trail it by a build while the writer types.
     fn is_being_typed(&self) -> bool {
         self.typed_revision == Some(self.revision)
+    }
+
+    /// Whether a frame waits for the indexes of text that was not typed: in
+    /// the application's tests, which read what a frame's text was found to
+    /// hold in that same frame, unless they detached the work.
+    fn waits_for_indexes(&self) -> bool {
+        cfg!(any(test, feature = "test-support")) && !self.background_detached
+    }
+
+    /// Let the indexes and the check run away from the frame, as they do
+    /// outside the application's tests: what a test of a frame that does not
+    /// wait for them asks for.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn detach_background_work(&mut self) {
+        self.background_detached = true;
+        self.live_check.detached = true;
     }
 
     /// Take the schematic cross-probe's line: withdraw the request it made

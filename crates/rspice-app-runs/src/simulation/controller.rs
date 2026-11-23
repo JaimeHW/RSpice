@@ -699,7 +699,8 @@ impl SimulationController {
                     .collect(),
             });
         if dispatch.intent() == SimulationRunIntent::ManualDeck {
-            let manual_source = dispatch.manual_source().unwrap_or_default().to_owned();
+            let manual_source =
+                crate::state::RevisedText::from(dispatch.manual_source().unwrap_or_default());
             let manual_run = &mut state.runs_mut().manual_run;
             manual_run.pending_manual_run_id = Some(run_id);
             manual_run.pending_run_buffer = Some(manual_source);

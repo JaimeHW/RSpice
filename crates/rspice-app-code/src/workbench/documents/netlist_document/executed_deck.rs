@@ -34,7 +34,12 @@ pub(crate) fn run_snapshot_source_in(
     runs: &RunsState,
 ) -> String {
     let Some(selection) = netlist.executed_deck_view else {
-        return runs.manual_run.last_run_buffer.clone().unwrap_or_default();
+        return runs
+            .manual_run
+            .last_run_buffer
+            .as_deref()
+            .unwrap_or_default()
+            .to_owned();
     };
     model
         .simulation

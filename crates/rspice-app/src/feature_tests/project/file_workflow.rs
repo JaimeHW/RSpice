@@ -138,7 +138,12 @@ fn seed_stale_design_execution_context(state: &mut AppState) {
         std::path::Path::new("old.cir"),
         None,
     )];
-    state.model.simulation.source.netlist_content = "old generated deck\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("old generated deck\n.end\n".to_owned());
     state
         .model
         .simulation
@@ -146,8 +151,8 @@ fn seed_stale_design_execution_context(state: &mut AppState) {
         .runs
         .push(rspice_app_state::state::SimulationRun::new(1));
     state.model.simulation.view.active_run_idx = Some(0);
-    state.runs.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
-    state.runs.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
+    state.runs.manual_run.last_run_buffer = Some("last manual run\n.end\n".into());
+    state.runs.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".into());
     state.runs.manual_run.pending_manual_run_id = Some(1);
     state.runs.manual_run.edited_lines.insert(3);
     state.results.analysis.histogram_state.selected = Some("old measurement".to_owned());

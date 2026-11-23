@@ -349,7 +349,12 @@ R2 a 0 {gain}
         .unwrap(),
     );
     harness.state.netlist.front = NetlistTab::Generated;
-    harness.model.simulation.source.netlist_content = deck.to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(deck.to_owned());
     let mut go_to = |needle: &str| {
         harness.state.netlist.cursor_char_index =
             deck.find(needle).expect("a read") + needle.find("gain").expect("a name") + 1;
@@ -533,7 +538,12 @@ fn signature_help_shows_the_subcircuit_the_callers_scope_binds() {
 
 fn hover_state() -> SourceHarness {
     let mut harness = harness();
-    harness.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(HOVER_DECK.to_owned());
     harness
 }
 
@@ -579,7 +589,12 @@ fn value_hover_names_the_line_a_reference_is_defined_on() {
 fn value_hover_over_a_reader_above_a_redefinition_shows_the_final_value() {
     let deck = "hover\n.param w=1u\nM1 d g s b nch W={w}\n.param w=2u\n.end\n";
     let mut harness = harness();
-    harness.model.simulation.source.netlist_content = deck.to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(deck.to_owned());
     let mut hover = |needle: &str| {
         let index = deck.find(needle).expect("deck contains the token");
         value_hover_at(&mut harness, deck, index).expect("hover")
@@ -813,7 +828,12 @@ fn a_refused_quick_fix_does_not_ask_for_a_validate_the_page_no_longer_has() {
 fn a_quick_fix_is_refused_after_an_intervening_edit() {
     let (mut harness, finding) = validated_fix_state();
     let edited = format!("* note\n{FIX_DECK}");
-    harness.model.simulation.source.netlist_content = edited.clone();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(edited.clone());
     harness.state.netlist.revision += 1;
     assert!(
         apply_quick_fix_for_finding(
@@ -829,7 +849,12 @@ fn a_quick_fix_is_refused_after_an_intervening_edit() {
     assert_eq!(harness.model.simulation.source.netlist_content, edited);
 
     let (mut harness, finding) = validated_fix_state();
-    harness.model.simulation.source.netlist_content = edited.clone();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(edited.clone());
     assert!(
         apply_quick_fix_for_finding(
             &mut harness.model,

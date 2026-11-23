@@ -78,7 +78,7 @@ fn manual(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         "fixture authoring must preserve every typed analysis control"
     );
     state.model.simulation.execution.run_intent = super::SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content = source;
+    state.model.simulation.source.netlist_content.set(source);
     let mut controller = super::SimulationController::new();
     controller.prepare_deck_run(&state).unwrap();
     let run = super::run_batch(

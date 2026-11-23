@@ -595,8 +595,11 @@ pub fn run_strip_projection(
             Some(running) => (running, RunStripPhase::Running),
             None => {
                 let run_id = runs.manual_run.last_run_id?;
-                let baseline = runs.manual_run.last_run_buffer.as_deref()?;
-                let phase = if working_deck_source_in(model, netlist) == baseline {
+                let baseline = runs.manual_run.last_run_buffer.as_ref()?;
+                let phase = if netlist
+                    .run_baseline_shown
+                    .same(working_deck_source_in(model, netlist), baseline)
+                {
                     RunStripPhase::Current
                 } else {
                     RunStripPhase::Edited
@@ -1403,7 +1406,7 @@ mod tests {
     fn ran_owned_deck(deck: &str) -> SourceHarness {
         let mut harness = harness();
         open_test_deck(&mut harness, deck);
-        harness.runs.manual_run.last_run_buffer = Some(deck.to_owned());
+        harness.runs.manual_run.last_run_buffer = Some(deck.into());
         harness.runs.manual_run.last_run_id = Some(7);
         seal_manual_run(&mut harness.model, 7, 0xAB, 4);
         harness
@@ -1421,8 +1424,11 @@ mod tests {
         assert_eq!(projection.revision, 4);
     }
 
+    /// The strip says the deck moved past the run on an edit of the same
+    /// length, and that it is current again once it is back to the text the
+    /// run read, at a revision of its own.
     #[test]
-    fn run_strip_warns_once_the_working_deck_moves_past_the_run() {
+    fn run_strip_follows_the_working_deck_past_the_run_and_back() {
         let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
         assert!(
             crate::workbench::documents::netlist_document::edit_deck_file(
@@ -1437,13 +1443,33 @@ mod tests {
                 .map(|projection| projection.phase),
             Some(RunStripPhase::Edited)
         );
+
+        assert!(
+            crate::workbench::documents::netlist_document::edit_deck_file(
+                &mut harness.model,
+                &mut harness.state.netlist,
+                "deck\nR1 out 0 1k\n.op\n.end\n".to_owned()
+            )
+        );
+        assert_eq!(
+            run_strip_projection(&harness.model, &harness.state.netlist, &harness.runs)
+                .map(|projection| projection.phase),
+            Some(RunStripPhase::Current)
+        );
     }
 
     #[test]
     fn run_strip_states_the_run_in_flight_and_never_the_stale_baseline() {
         let mut harness = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        harness.state.netlist.open_deck.as_mut().unwrap().root.text =
-            "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
+        harness
+            .state
+            .netlist
+            .open_deck
+            .as_mut()
+            .unwrap()
+            .root
+            .text
+            .set("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
         seal_manual_run(&mut harness.model, 8, 0xCD, 5);
         harness.runs.manual_run.pending_manual_run_id = Some(8);
 

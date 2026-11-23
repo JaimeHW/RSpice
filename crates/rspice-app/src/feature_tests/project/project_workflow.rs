@@ -1276,7 +1276,12 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     state.model.simulation.execution.trigger_abort = true;
     state.model.simulation.execution.progress = 0.75;
     state.model.simulation.execution.status = "Running stale project".to_string();
-    state.model.simulation.source.netlist_content = "stale netlist".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("stale netlist".to_string());
     state
         .model
         .simulation

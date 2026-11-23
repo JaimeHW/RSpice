@@ -99,20 +99,31 @@ pub(in crate::workbench) fn netlist(
     let root_label =
         active_netlist_artifact_name(parts.model, parts.netlist, parts.runs, parts.messages);
     let messages = parts.messages;
-    let index = crate::workbench::documents::netlist_document::visible_source_index_in(
+    let Some(index) = crate::workbench::documents::netlist_document::visible_source_index_in(
         ui.ctx(),
         parts.model,
         parts.netlist,
-    );
+    ) else {
+        reading_outline(ui, parts, &mut asked);
+        return asked;
+    };
     lib_sections::refresh(parts.model, parts.netlist, parts.source_editing);
-    let projection = NetlistNavigatorProjection::from_index(
+    let projection = kept_projection(
+        ui.ctx(),
         &index,
-        parts.filter,
-        &root_label,
-        parts.netlist.front.shows_generated(),
-        parts.outline_collapsed,
-        &retained_include_facts(parts.model, parts.netlist, parts.source_editing, messages),
-        messages,
+        ProjectionInputs {
+            query: parts.filter.to_owned(),
+            root_label,
+            source_mapped: parts.netlist.front.shows_generated(),
+            collapsed: parts.outline_collapsed.clone(),
+            includes: retained_include_facts(
+                parts.model,
+                parts.netlist,
+                parts.source_editing,
+                messages,
+            ),
+            messages,
+        },
     );
     let project_index = crate::workbench::documents::netlist_document::language::project_index_in(
         ui.ctx(),
@@ -690,6 +701,89 @@ fn missing_deck_outline(
                 },
             );
         });
+}
+
+/// The outline while the text in front is read for the first time: the
+/// decks, the Structure header and a busy line where the rows will be, so
+/// the navigator says the text is being read rather than that it is empty.
+fn reading_outline(
+    ui: &mut Ui,
+    parts: &mut NetlistNavigator<'_>,
+    asked: &mut NetlistNavigatorAsked,
+) {
+    let messages = parts.messages;
+    let height = outline_row_height(ui, parts.coarse_pointer);
+    ScrollArea::vertical()
+        .id_salt("workbench.netlist.navigator")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            decks::list(ui, parts, height, asked);
+            section_header(
+                ui,
+                &messages.text(MessageId::NetlistNavigatorStructure),
+                None,
+            );
+            // Laid as a row: the mark in the rows' icon column.
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), height),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add_space(NETLIST_OUTLINE_PADDING_X + NETLIST_OUTLINE_CARET_COLUMN);
+                    crate::ui::widgets::busy_mark(ui, NETLIST_OUTLINE_ICON_SIZE);
+                    ui.label(messages.text(MessageId::NetlistReadingText));
+                },
+            );
+        });
+}
+
+/// What the outline's rows are worked out from, besides the index.
+#[derive(Clone, PartialEq)]
+struct ProjectionInputs {
+    query: String,
+    root_label: String,
+    source_mapped: bool,
+    collapsed: BTreeSet<OutlineSectionKind>,
+    includes: Vec<IncludeRowFacts>,
+    messages: MessageCatalog,
+}
+
+/// The outline's rows for `index` and `inputs`, worked out once for each:
+/// an idle frame reads the rows rather than walking every entry of the
+/// outline again. The index is told by identity; a new text has a new one.
+fn kept_projection(
+    ctx: &egui::Context,
+    index: &std::sync::Arc<crate::state::NetlistSourceIndex>,
+    inputs: ProjectionInputs,
+) -> std::sync::Arc<NetlistNavigatorProjection> {
+    type Kept = (
+        std::sync::Arc<crate::state::NetlistSourceIndex>,
+        ProjectionInputs,
+        std::sync::Arc<NetlistNavigatorProjection>,
+    );
+    let id = egui::Id::new("workbench.netlist.navigator.projection");
+    if let Some(kept) = ctx.data(|data| data.get_temp::<std::sync::Arc<Kept>>(id))
+        && std::sync::Arc::ptr_eq(&kept.0, index)
+        && kept.1 == inputs
+    {
+        return std::sync::Arc::clone(&kept.2);
+    }
+    let projection = std::sync::Arc::new(NetlistNavigatorProjection::from_index(
+        index,
+        &inputs.query,
+        &inputs.root_label,
+        inputs.source_mapped,
+        &inputs.collapsed,
+        &inputs.includes,
+        inputs.messages,
+    ));
+    let kept = (
+        std::sync::Arc::clone(index),
+        inputs,
+        std::sync::Arc::clone(&projection),
+    );
+    ctx.data_mut(|data| data.insert_temp(id, std::sync::Arc::new(kept)));
+    projection
 }
 
 fn outline_row_height(ui: &Ui, coarse_pointer: bool) -> f32 {

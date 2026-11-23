@@ -32,6 +32,7 @@ mod simulate_pages;
 mod simulation;
 pub mod stimulus_library;
 use rspice_design::symbol;
+mod revised_text;
 pub(crate) mod symbol_resolver;
 mod text_snapshot;
 mod veriloga_receipt;
@@ -56,6 +57,7 @@ pub use connectivity_contract::{
     BundleWidthMismatchPolicy, ConnectivityContract, ConnectivityPolicy,
     GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy,
 };
+pub use revised_text::{RevisedText, SameTextMemo};
 pub use text_snapshot::TextSnapshot;
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.

@@ -19,7 +19,9 @@ use std::path::{Path, PathBuf};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
-use crate::state::{DeckId, NetlistDocumentId, StoredDeck, StoredDeckFile, TextEncoding};
+use crate::state::{
+    DeckId, NetlistDocumentId, RevisedText, StoredDeck, StoredDeckFile, TextEncoding,
+};
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, NetlistRoot, NetlistTab, OwnedNetlistReplacement,
 };
@@ -118,7 +120,7 @@ pub struct OpenFile {
     /// Where the file is.
     pub path: PathBuf,
     /// Its text, every line ending in `\n` (see [`LineEnding::read`]).
-    pub text: String,
+    pub text: RevisedText,
     /// The encoding it was read in and is written back in.
     pub encoding: TextEncoding,
     /// The separators it was read with.
@@ -154,7 +156,7 @@ impl OpenFile {
         Ok(Self {
             line_ending,
             path,
-            text,
+            text: RevisedText::new(text),
             encoding,
             disk: None,
             dirty: false,
@@ -183,7 +185,7 @@ impl OpenFile {
         Self {
             line_ending: LineEnding::detect(&text),
             path: path.into(),
-            text,
+            text: RevisedText::new(text),
             encoding: TextEncoding::Utf8,
             disk: None,
             dirty: false,
@@ -196,20 +198,18 @@ impl OpenFile {
         if self.text == text {
             return false;
         }
-        self.text = text;
+        self.text.set(text);
         self.dirty = true;
         true
     }
 
-    /// Replace the text with a copy of `text`, written over the file's own
-    /// text where it has room; whether that changed it.
-    pub fn edit_to(&mut self, text: &str) -> bool {
-        if self.text == text {
-            return false;
-        }
-        text.clone_into(&mut self.text);
-        self.dirty = true;
-        true
+    /// Hold `text`, shared rather than copied; whether that changed it.
+    /// Whichever way, the file and `text` then share one revision.
+    pub fn edit_to(&mut self, text: &RevisedText) -> bool {
+        let changed = !self.text.same_text(text);
+        self.text = text.clone();
+        self.dirty |= changed;
+        changed
     }
 }
 
@@ -235,7 +235,7 @@ impl OpenDeck {
             id,
             root: OpenFile {
                 path: PathBuf::from(&deck.name),
-                text,
+                text: text.into(),
                 encoding: deck.encoding,
                 line_ending,
                 disk: None,
@@ -404,7 +404,7 @@ fn look_at_disk(file: &OpenFile, messages: MessageCatalog) -> OnDisk {
         return OnDisk::Touched(now);
     }
     OnDisk::Changed(DiskChange {
-        text: read.text,
+        text: read.text.into_string(),
         encoding: read.encoding,
         line_ending: read.line_ending,
         stamp: now,
@@ -1026,7 +1026,7 @@ fn rewrite_named_path(
         .ok_or_else(|| messages.text(MessageId::NetlistNoDeckOpen))?;
     let id = deck.id;
     let include = (request.owner != deck.root.name()).then_some(request.owner.as_str());
-    let open = deck.file(include).map(|file| file.text.clone());
+    let open = deck.file(include).map(|file| file.text.as_str().to_owned());
     let text = match &open {
         Some(text) => text.clone(),
         None => deck
@@ -1361,7 +1361,11 @@ fn close_open_deck(
     });
     netlist.front = NetlistTab::Generated;
     netlist.run_the_plan();
-    model.simulation.source.netlist_content = model.netlist_artifacts.generated_source.clone();
+    model
+        .simulation
+        .source
+        .netlist_content
+        .set(model.netlist_artifacts.generated_source.clone());
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
 }
@@ -1933,7 +1937,7 @@ pub fn show_include(
             let (text, line_ending) = LineEnding::read(stored.text.clone());
             deck.includes.push(OpenFile {
                 path: path.to_path_buf(),
-                text,
+                text: text.into(),
                 encoding: stored.encoding,
                 line_ending,
                 disk: None,

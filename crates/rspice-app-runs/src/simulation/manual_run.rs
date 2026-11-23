@@ -17,11 +17,11 @@ pub struct ManualRunHandoff {
     /// Zero-based lines edited since the last completed manual-deck run.
     pub edited_lines: HashSet<usize>,
     /// Exact editor buffer from the last successful manual-deck run.
-    pub last_run_buffer: Option<String>,
+    pub last_run_buffer: Option<crate::state::RevisedText>,
     /// Numeric `.param` values captured from `last_run_buffer`.
     pub(crate) last_run_params: HashMap<String, f64>,
     /// Editor buffer captured when the current manual-deck run started.
-    pub pending_run_buffer: Option<String>,
+    pub pending_run_buffer: Option<crate::state::RevisedText>,
     /// Run id associated with `pending_run_buffer`.
     pub pending_manual_run_id: Option<u64>,
     /// Run sequence the manual-run baseline was sealed with. This is the only

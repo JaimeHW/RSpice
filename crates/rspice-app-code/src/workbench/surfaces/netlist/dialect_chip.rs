@@ -567,8 +567,12 @@ mod tests {
                 &mut generated.state.netlist,
                 "generated\nR1 out 0 1k\n.op\n.end\n",
             );
-            generated.model.simulation.source.netlist_content =
-                generated.model.netlist_artifacts.generated_source.clone();
+            generated
+                .model
+                .simulation
+                .source
+                .netlist_content
+                .set(generated.model.netlist_artifacts.generated_source.clone());
             generated.state.netlist.front = NetlistTab::Generated;
             generated.state.netlist.active_document_initialized = true;
             let _ = frame(&context, &mut generated, Vec::new());

@@ -581,7 +581,12 @@ fn live_lint_uses_abort_aware_parser_contract() {
 /// A deck in the editor, validated the way the editor validates it.
 fn validated(deck: &str) -> SourceHarness {
     let mut harness = harness();
-    harness.model.simulation.source.netlist_content = deck.to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(deck.to_owned());
     let revision = harness.state.netlist.revision;
     validate_visible_source_in(
         &harness.model,
@@ -737,7 +742,12 @@ fn value_hover_waits_for_the_parse_that_decides_the_branches() {
     let deck = "hover\n.param mode=1\n.if (mode==1)\n.param vth=0.5\n.else\n\
                 .param vth=0.4\n.endif\nV1 a 0 {vth}\n.end\n";
     let mut harness = harness();
-    harness.model.simulation.source.netlist_content = deck.to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(deck.to_owned());
 
     assert_eq!(hover_on(&mut harness, deck, "{vth}", 1), None);
 
@@ -1218,7 +1228,12 @@ fn editor_commit_rejects_generated_artifact_mutation() {
     harness.state.netlist.revision = 4;
 
     // The editor leaves what it shows as the model's source.
-    harness.model.simulation.source.netlist_content = "silently edited\n.end\n".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("silently edited\n.end\n".to_owned());
     let front = harness.state.netlist.front.clone();
     commit_edit(
         &mut harness.model,
@@ -1243,7 +1258,12 @@ fn editor_commit_edits_the_open_deck_and_keeps_its_file() {
     open_deck(&mut harness, "C:/p/amp.cir", "deck\n.op\n.end\n");
     harness.state.netlist.revision = 9;
 
-    harness.model.simulation.source.netlist_content = "deck\n.tran 1n 1u\n.end\n".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\n.tran 1n 1u\n.end\n".to_owned());
     let front = harness.state.netlist.front.clone();
     commit_edit(
         &mut harness.model,
@@ -1280,7 +1300,12 @@ fn editor_commit_over_a_document_no_longer_in_front_is_dropped() {
     open_deck(&mut harness, "C:/p/amp.cir", "deck\n.op\n.end\n");
     harness.state.netlist.revision = 9;
 
-    harness.model.simulation.source.netlist_content = "deck\n.tran 1n 1u\n.end\n".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\n.tran 1n 1u\n.end\n".to_owned());
     commit_edit(
         &mut harness.model,
         &mut harness.state.netlist,
@@ -1728,7 +1753,12 @@ fn closing_an_include_tab_lets_go_of_its_editor() {
 #[test]
 fn a_check_of_a_text_the_editor_moved_past_is_dropped() {
     let mut harness = harness();
-    harness.model.simulation.source.netlist_content = "amp\nR1 a\n.op\n.end\n".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("amp\nR1 a\n.op\n.end\n".to_owned());
     harness.state.netlist.revision = 1;
     let folders = harness.model.library_folders().to_vec();
     let resolutions = BTreeMap::new();
@@ -1749,7 +1779,12 @@ fn a_check_of_a_text_the_editor_moved_past_is_dropped() {
     );
 
     // The writer finishes the card before that check reports.
-    harness.model.simulation.source.netlist_content = "amp\nR1 a 0 1k\n.op\n.end\n".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("amp\nR1 a 0 1k\n.op\n.end\n".to_owned());
     harness.state.netlist.revision = 2;
     receive_check(&mut harness.state.netlist, &folders, before);
     assert_eq!(harness.state.netlist.diag_revision, None);
@@ -1783,7 +1818,12 @@ fn a_check_of_a_text_the_editor_moved_past_is_dropped() {
 #[test]
 fn the_deck_shows_at_once_and_its_findings_once_the_check_reports() {
     let mut harness = harness();
-    harness.model.simulation.source.netlist_content = "amp\nR1 a\n.op\n.end\n".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("amp\nR1 a\n.op\n.end\n".to_owned());
     harness.state.netlist.live_check.detached = true;
     let context = egui::Context::default();
     crate::ui::Theme::default().apply(&context);

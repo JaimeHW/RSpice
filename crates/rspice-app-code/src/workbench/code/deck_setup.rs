@@ -127,7 +127,17 @@ fn printable_card(card: &str) -> String {
 /// so.
 pub(crate) fn show(cx: &mut Cx<'_, SourceFeature>, ui: &mut Ui) {
     let messages = cx.wb.messages();
-    let index = root_deck_source_index(ui.ctx(), cx.model, &mut cx.state.netlist);
+    let Some(index) = root_deck_source_index(ui.ctx(), cx.model, &mut cx.state.netlist) else {
+        let viewport = ui.ctx().content_rect().size();
+        page_bar(
+            ui,
+            &[],
+            messages,
+            document_bar_height(viewport.x, viewport.y, cx.wb.coarse_pointer),
+        );
+        super::netlist_first::reading_line(ui, messages);
+        return;
+    };
     let cards = setup_cards(&index);
     let viewport = ui.ctx().content_rect().size();
     page_bar(

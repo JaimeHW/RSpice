@@ -24,8 +24,12 @@ fn schematic_first_app() -> RSpiceApp {
         &mut app.state.code.netlist,
         "generated\nR1 out 0 1k\n.op\n.end\n",
     );
-    app.state.model.simulation.source.netlist_content =
-        app.state.model.netlist_artifacts.generated_source.clone();
+    app.state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(app.state.model.netlist_artifacts.generated_source.clone());
     app.state.code.netlist.front = NetlistTab::Generated;
     app.state.code.netlist.active_document_initialized = true;
     app

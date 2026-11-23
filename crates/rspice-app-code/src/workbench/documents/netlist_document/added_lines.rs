@@ -55,7 +55,7 @@ pub fn show_added_lines(model: &mut Model, netlist: &mut NetlistDocumentState) -
     }
     netlist.front = NetlistTab::AddedLines;
     netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = text;
+    model.simulation.source.netlist_content.set(text);
     netlist.requested_line = None;
     netlist.cursor_line = 0;
     netlist.completion_open = false;
@@ -86,7 +86,7 @@ pub fn edit_added_lines(
         return false;
     }
     model.workspace.content.project_metadata_dirty = true;
-    model.simulation.source.netlist_content = text;
+    model.simulation.source.netlist_content.set(text);
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
     super::clear_netlist_edit_journal(netlist);

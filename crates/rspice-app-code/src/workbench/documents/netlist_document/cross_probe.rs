@@ -2,13 +2,12 @@
 //! as the engine's index of the shown text reads it, and where the line it
 //! sits on came from in the schematic.
 
-use std::sync::Arc;
-
 use rspice_core::netlist::{DeckIndex, DeckLocation, DeckSymbolKind};
 
 use super::{Model, NetlistDocumentState, NetlistRoot};
 use crate::state::{
-    AnalysisResultSourceDomain, CellViewRef, NetlistDocument, NetlistSourceIndex, SimulationRun,
+    AnalysisResultSourceDomain, CellViewRef, NetlistDocument, NetlistSourceIndex, RevisedText,
+    SimulationRun,
 };
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::documents::virtual_text_editor::SourceSpan;
@@ -49,23 +48,18 @@ impl CaretKey {
 
 /// The name under the caret, read once per caret position and text, so the
 /// editor's menu and the commands answering for it read a lookup rather than
-/// the deck. It keeps the index it was read from, and holds only while that
-/// index describes the text as it stands: text replaced under a caret that
-/// did not move is read again.
+/// the deck. It holds only for the revision of the text it was read from:
+/// text replaced under a caret that did not move is read again.
 #[derive(Debug, Clone, Default)]
 pub struct CaretNameCache {
     key: Option<CaretKey>,
-    index: Option<Arc<NetlistSourceIndex>>,
+    revision: u64,
     name: Option<CaretName>,
 }
 
 impl CaretNameCache {
-    fn holds(&self, netlist: &NetlistDocumentState, source: &str) -> bool {
-        self.key.as_ref() == Some(&CaretKey::of(netlist))
-            && self
-                .index
-                .as_ref()
-                .is_some_and(|index| index.describes(source))
+    fn holds(&self, netlist: &NetlistDocumentState, source: &RevisedText) -> bool {
+        self.key.as_ref() == Some(&CaretKey::of(netlist)) && self.revision == source.revision()
     }
 }
 
@@ -81,19 +75,17 @@ pub(super) fn follow_caret(
     line: usize,
     column: usize,
 ) {
-    let source = model.simulation.source.netlist_content.as_str();
+    let source = &model.simulation.source.netlist_content;
     if netlist.caret_name.holds(netlist, source) {
         return;
     }
-    let index = super::visible_source_index_in(ctx, model, netlist);
-    netlist.caret_name = if index.describes(source) {
-        CaretNameCache {
+    netlist.caret_name = match super::current_source_index_in(ctx, model, netlist) {
+        Some(index) => CaretNameCache {
             key: Some(CaretKey::of(netlist)),
+            revision: source.revision(),
             name: name_on(index.deck(), line + 1, column),
-            index: Some(index),
-        }
-    } else {
-        CaretNameCache::default()
+        },
+        None => CaretNameCache::default(),
     };
 }
 
@@ -116,7 +108,7 @@ pub(crate) fn caret_name_now(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Option<CaretName> {
-    let source = model.simulation.source.netlist_content.as_str();
+    let source = &model.simulation.source.netlist_content;
     if netlist.caret_name.holds(netlist, source) {
         return netlist.caret_name.name.clone();
     }
@@ -125,8 +117,8 @@ pub(crate) fn caret_name_now(
     let name = name_on(index.deck(), line + 1, column);
     netlist.caret_name = CaretNameCache {
         key: Some(CaretKey::of(netlist)),
+        revision: source.revision(),
         name: name.clone(),
-        index: Some(index),
     };
     name
 }

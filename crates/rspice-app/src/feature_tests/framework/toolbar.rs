@@ -106,7 +106,12 @@ fn running_dataset_is_never_presented_as_current() {
     let source = "R1 1 0 1k\n";
     let source_digest = rspice_app_state::state::content_digest(source);
     let generation_input = digest(0x81);
-    app.state.model.simulation.source.netlist_content = source.to_owned();
+    app.state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(source.to_owned());
     app.state.model.netlist_artifacts.generated_input_digest = Some(generation_input);
     app.state
         .model

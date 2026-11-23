@@ -16,7 +16,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
 
     let mut state = AppState::default();
     state.seed_test_deck(EDITED.to_owned());
-    state.runs.manual_run.last_run_buffer = Some(RAN.to_owned());
+    state.runs.manual_run.last_run_buffer = Some(RAN.into());
     state.runs.manual_run.last_run_id = Some(3);
 
     assert!(open_run_deck_snapshot_in(
@@ -78,7 +78,7 @@ fn a_sweep_points_executed_deck_stays_on_screen_on_the_next_frames() {
     const HOT: &str = "task deck\n.OPTIONS TEMP=125\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
 
     let mut app = open_project_app();
-    app.state.runs.manual_run.last_run_buffer = Some(MANUAL.to_owned());
+    app.state.runs.manual_run.last_run_buffer = Some(MANUAL.into());
     app.state.runs.manual_run.last_run_id = Some(3);
     let point = |label: &str, deck: &str| ExecutedDeckPoint {
         label: label.to_owned(),

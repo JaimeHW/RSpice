@@ -17,7 +17,12 @@ const TWO_ANALYSES: &str = "* run log fixture\n\
 fn start_manual_batch(source: &str) -> (RunTestHost, SimulationController) {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content = source.to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .prepare_deck_run(&state)

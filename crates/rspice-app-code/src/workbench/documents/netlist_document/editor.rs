@@ -344,7 +344,7 @@ pub fn show(
         );
         changed = output.changed;
         if changed {
-            buffer = String::from(&text);
+            buffer.set(String::from(&text));
         }
         // Where the caret and the selection stand in bytes, read from the
         // editor's rope rather than counted from the deck's first character.
@@ -409,7 +409,7 @@ pub fn show(
         )
     {
         completion_changed = true;
-        buffer.replace_range(start..end, &text);
+        buffer.edit(|buffer| buffer.replace_range(start..end, &text));
         completion::place_caret(ui, editor_id, caret);
     }
     show_signature_help(ui, netlist, editor_id, anchor, workbench.messages());
@@ -611,7 +611,7 @@ pub fn commit_edit(
     // edit: the generated netlist, a comparison and a run's input are
     // read-only.
     if netlist.front == super::NetlistTab::AddedLines {
-        let lines = model.simulation.source.netlist_content.clone();
+        let lines = model.simulation.source.netlist_content.as_str().to_owned();
         if super::edit_added_lines(model, netlist, lines) {
             netlist.last_edit_time = now;
             netlist.typed_revision = Some(netlist.revision);
@@ -942,7 +942,8 @@ struct CheckedSource {
 struct SourceCheck {
     revision: u64,
     library_folders: Vec<PathBuf>,
-    buffer: String,
+    /// The text checked, shared with the editor rather than copied.
+    buffer: crate::state::RevisedText,
     deck: CheckedDeck,
     source_path: Option<PathBuf>,
     include_search: rspice_simulation::netlist_preparation::IncludeSearchChain,

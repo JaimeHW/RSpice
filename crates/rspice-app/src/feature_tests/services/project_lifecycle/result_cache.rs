@@ -181,7 +181,12 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     state.model.simulation.execution.progress = 0.75;
     state.model.simulation.execution.status = "runtime status".to_owned();
     state.model.simulation.view.data_version += 1;
-    state.model.simulation.source.netlist_content = "runtime preview".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("runtime preview".to_owned());
     assert!(
         snapshot(&state)
             .unwrap()

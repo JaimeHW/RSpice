@@ -44,8 +44,9 @@ fn run_input(replay: &Replay) -> Option<String> {
     let manual = &replay.app.state.runs.manual_run;
     manual
         .pending_run_buffer
-        .clone()
-        .or_else(|| manual.last_run_buffer.clone())
+        .as_deref()
+        .or(manual.last_run_buffer.as_deref())
+        .map(str::to_owned)
 }
 
 /// Whether a run was asked for, has started or has been kept.

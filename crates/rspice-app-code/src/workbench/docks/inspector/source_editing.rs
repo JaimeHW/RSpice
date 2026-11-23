@@ -25,6 +25,9 @@ pub(crate) struct SourceInspector<'a> {
     pub(crate) netlist: &'a NetlistDocumentState,
     /// The deck's facts while the deck's own file is in front.
     pub(crate) deck_facts: Option<&'a crate::workbench::code::netlist_first::DeckFacts>,
+    /// Whether the deck's own file is in front and read for the first time,
+    /// so it has no facts yet.
+    pub(crate) reading_deck: bool,
     pub(crate) messages: MessageCatalog,
 }
 
@@ -514,6 +517,9 @@ fn deck_file_provenance(ui: &mut Ui, reads: &SourceInspector<'_>) {
     let mut rows = vec![Fact::path(&file_label, &path)];
     rows.extend_from_slice(&save);
     fact_rows(ui, &rows);
+    if reads.reading_deck {
+        crate::workbench::code::netlist_first::reading_line(ui, messages);
+    }
 }
 
 fn dependency_provenance(ui: &mut Ui, reads: &SourceInspector<'_>) {

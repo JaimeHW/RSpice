@@ -123,7 +123,7 @@ fn file_text(
             .open_deck
             .as_ref()?
             .file(identity)
-            .map(|file| file.text.clone());
+            .map(|file| file.text.as_str().to_owned());
     }
     let document = canonical_root_document_in(model, netlist, root)?;
     match identity {

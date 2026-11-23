@@ -38,7 +38,11 @@ pub fn open_netlist_comparison(model: &mut Model, netlist: &mut NetlistDocumentS
     netlist.front = NetlistTab::Compare { left, right };
     netlist.front = netlist.front.root();
     netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
+    model
+        .simulation
+        .source
+        .netlist_content
+        .set(netlist.generated_diff_source.clone());
     netlist.completion_open = false;
     netlist.completion_dismissed_at = None;
     netlist.revision = netlist.revision.wrapping_add(1);
@@ -101,7 +105,11 @@ pub fn compare(
     }
     put_comparison_in_front(netlist, left, right);
     netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
+    model
+        .simulation
+        .source
+        .netlist_content
+        .set(netlist.generated_diff_source.clone());
     netlist.requested_line = None;
     netlist.cursor_line = 0;
     netlist.revision = netlist.revision.wrapping_add(1);
@@ -150,7 +158,7 @@ fn side_text(
             .ok_or_else(|| messages.text(MessageId::NetlistPreviousBuildGone)),
         CompareSide::Deck(id) => {
             let deck = open_deck(id)?;
-            Ok((deck.root.text.clone(), deck.root.name()))
+            Ok((deck.root.text.as_str().to_owned(), deck.root.name()))
         }
         CompareSide::DiskFile(id) => {
             let deck = open_deck(id)?;
@@ -192,7 +200,8 @@ fn disk_text(
     })?;
     Ok(
         super::super::deck_files::OpenFile::from_bytes(deck.root.path.clone(), &bytes, messages)?
-            .text,
+            .text
+            .into_string(),
     )
 }
 
@@ -219,7 +228,7 @@ fn run_input_text(
     if runs.manual_run.last_run_id == Some(run)
         && let Some(buffer) = runs.manual_run.last_run_buffer.as_ref()
     {
-        return Ok(buffer.clone());
+        return Ok(buffer.as_str().to_owned());
     }
     let deck = model
         .simulation
@@ -266,8 +275,11 @@ fn return_to_working_deck(
         _ => {
             netlist.front = NetlistTab::Generated;
             netlist.run_the_plan();
-            model.simulation.source.netlist_content =
-                model.netlist_artifacts.generated_source.clone();
+            model
+                .simulation
+                .source
+                .netlist_content
+                .set(model.netlist_artifacts.generated_source.clone());
         }
     }
     netlist.active_document_initialized = true;
@@ -439,7 +451,7 @@ fn project_run_snapshot_in(
     netlist.front = NetlistTab::RunInput { run, point };
     netlist.open_run_input = Some((run, point));
     netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = source;
+    model.simulation.source.netlist_content.set(source);
     netlist.requested_line = None;
     netlist.cursor_line = 0;
     netlist.completion_open = false;

@@ -149,7 +149,7 @@ fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
     let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
     let run = app.state.model.simulation.retained.runs[0].id;
     app.state.seed_test_deck(DECK);
-    app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
+    app.state.runs.manual_run.last_run_buffer = Some(DECK.into());
     app.state.runs.manual_run.last_run_id = Some(run);
     app.state.model.simulation.view.active_run_idx = None;
     app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;

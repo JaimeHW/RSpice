@@ -76,6 +76,13 @@ impl<K: Send + 'static, T: Send + Sync + 'static> BackgroundIndex<K, T> {
         self.built.as_ref().map(|(_, index)| Arc::clone(index))
     }
 
+    /// The last index built, with the key of the text it was built from.
+    pub(crate) fn built(&self) -> Option<(&K, Arc<T>)> {
+        self.built
+            .as_ref()
+            .map(|(key, index)| (key, Arc::clone(index)))
+    }
+
     /// Take a build that has finished.
     fn take_finished(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]

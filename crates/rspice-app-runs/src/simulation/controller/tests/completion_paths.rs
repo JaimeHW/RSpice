@@ -832,8 +832,12 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -872,8 +876,12 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("run-set analysis disables");
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let project_revision = state.model.workspace.content.project.revision();
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
@@ -957,8 +965,12 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
     state.model.sim_setup.options.reltol = 1.0e-4;
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -990,8 +1002,12 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
         .insert_at(AnalysisKind::OperatingPoint, 0)
         .expect("OP inserts as the sole enabled analysis");
     assert_eq!(plan.instances()[0].id(), op_id);
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
     state.model.simulation.execution.request_simulate_run_set();
     let mut controller = SimulationController::new();
 
@@ -1010,13 +1026,17 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
 fn successful_manual_deck_run_promotes_pending_baseline() {
     let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
-    state.model.simulation.source.netlist_content =
-        "deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string());
     let run_id = state.model.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
     state.runs.manual_run.pending_manual_run_id = Some(run_id);
     state.runs.manual_run.pending_run_buffer =
-        Some("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string());
+        Some("deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".into());
     state.runs.manual_run.edited_lines.insert(0);
 
     controller.finish_simulation_batch(&mut state);
@@ -1037,13 +1057,13 @@ fn successful_manual_deck_run_promotes_pending_baseline() {
 fn failed_manual_deck_run_keeps_previous_baseline() {
     let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
-    state.runs.manual_run.last_run_buffer = Some("old\n.op\n.end\n".to_string());
+    state.runs.manual_run.last_run_buffer = Some("old\n.op\n.end\n".into());
     let run = state.model.simulation.start_run();
     let run_id = run.id;
     run.success = false;
     bind_test_run_running(&mut state, &mut controller, run_id);
     state.runs.manual_run.pending_manual_run_id = Some(run_id);
-    state.runs.manual_run.pending_run_buffer = Some("new\n.op\n.end\n".to_string());
+    state.runs.manual_run.pending_run_buffer = Some("new\n.op\n.end\n".into());
 
     controller.finish_simulation_batch(&mut state);
 
@@ -1548,8 +1568,9 @@ fn points_the_live_queue_let_go_of_leave_a_gap_in_the_trace_and_are_counted() {
 #[test]
 fn a_manual_deck_transient_is_drawn_while_it_runs_every_column_of_it() {
     let mut state = RunTestHost::default();
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 1u\n.tran 1u 10m\n.end\n".to_string();
+    state.model.simulation.source.netlist_content.set(
+        "deck\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 1u\n.tran 1u 10m\n.end\n".to_string(),
+    );
     state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
@@ -1585,11 +1606,16 @@ fn a_manual_deck_transient_is_drawn_while_it_runs_every_column_of_it() {
 fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
     let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
-    state.model.simulation.source.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\n.op\nR1 out 0 2k\n.end\n".to_string());
     let run_id = state.model.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
     state.runs.manual_run.pending_manual_run_id = Some(run_id);
-    state.runs.manual_run.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".to_string());
+    state.runs.manual_run.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".into());
 
     controller.finish_simulation_batch(&mut state);
 
@@ -1605,13 +1631,17 @@ fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
 fn a_line_inserted_while_the_deck_ran_marks_that_line_alone() {
     let mut state = RunTestHost::default();
     let mut controller = SimulationController::new();
-    state.model.simulation.source.netlist_content =
-        "deck\n.op\nC1 out 0 1n\nR1 out 0 1k\nR2 out 0 2k\n.end\n".to_string();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\n.op\nC1 out 0 1n\nR1 out 0 1k\nR2 out 0 2k\n.end\n".to_string());
     let run_id = state.model.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
     state.runs.manual_run.pending_manual_run_id = Some(run_id);
     state.runs.manual_run.pending_run_buffer =
-        Some("deck\n.op\nR1 out 0 1k\nR2 out 0 2k\n.end\n".to_string());
+        Some("deck\n.op\nR1 out 0 1k\nR2 out 0 2k\n.end\n".into());
 
     controller.finish_simulation_batch(&mut state);
 

@@ -106,7 +106,7 @@ pub(super) fn section_edit(
     if !active_netlist_source_is_editable_in(model, netlist) {
         return Err(messages.text(MessageId::NetlistLibSectionReadOnly));
     }
-    let source = model.simulation.source.netlist_content.clone();
+    let source = model.simulation.source.netlist_content.as_str().to_owned();
     let line_text = line.to_string();
     let span = section_token_span(&source, line).ok_or_else(|| {
         messages.format(MessageId::NetlistLibLineNotSection, &[("line", &line_text)])

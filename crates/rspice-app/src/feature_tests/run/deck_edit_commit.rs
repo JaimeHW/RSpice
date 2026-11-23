@@ -65,7 +65,8 @@ fn committed(replay: &Replay) -> String {
         .expect("the deck is open")
         .root
         .text
-        .clone()
+        .as_str()
+        .to_owned()
 }
 
 /// The deck the editor shows.

@@ -82,7 +82,7 @@ pub fn seed_deck(model: &mut Model, netlist: &mut NetlistDocumentState, root: &s
     netlist.open_deck = Some(deck);
     netlist.front = NetlistTab::Deck(model.workspace.content.decks[0].id);
     netlist.active_document_initialized = true;
-    model.simulation.source.netlist_content = root.to_owned();
+    model.simulation.source.netlist_content.set(root.to_owned());
     model
         .workspace
         .content

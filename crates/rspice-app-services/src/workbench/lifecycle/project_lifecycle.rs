@@ -2404,7 +2404,7 @@ pub fn revert_document_model(
 /// reset: the editor holds no deck text, no run is pending on the old one,
 /// and execution sees a new design.
 pub fn finish_netlist_source_revert(model: &mut Model) {
-    model.simulation.source.netlist_content.clear();
+    model.simulation.source.netlist_content.set(String::new());
     model.simulation.execution.trigger_simulation = false;
     model.design_execution_epoch = model.design_execution_epoch.wrapping_add(1);
 }

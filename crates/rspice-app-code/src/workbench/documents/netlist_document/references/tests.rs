@@ -26,7 +26,7 @@ fn file_text(harness: &SourceHarness, include: Option<&str>) -> String {
         .open_deck
         .as_ref()
         .and_then(|deck| deck.file(include))
-        .map(|file| file.text.clone())
+        .map(|file| file.text.as_str().to_owned())
         .expect("the file is open")
 }
 

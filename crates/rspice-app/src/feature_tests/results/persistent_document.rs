@@ -95,8 +95,12 @@ fn latest_tracking_fixture() -> LatestFixture {
     let mut app = RSpiceApp::test_instance();
     // Latest tracking only follows runs the current authored source
     // authorizes, so the fixture has to be that source.
-    app.state.model.simulation.source.netlist_content =
-        "* latest tracking\nV1 out 0 1\n.end\n".to_owned();
+    app.state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("* latest tracking\nV1 out 0 1\n.end\n".to_owned());
     let input_digest = digest(0x60);
     app.state.model.netlist_artifacts.generation_error = None;
     app.state.model.netlist_artifacts.generated_input_digest = Some(input_digest);

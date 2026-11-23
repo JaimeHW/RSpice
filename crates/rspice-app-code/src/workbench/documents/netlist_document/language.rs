@@ -141,7 +141,8 @@ struct IndexText {
     dependency_identity: Option<String>,
     display_name: String,
     path: std::path::PathBuf,
-    text: String,
+    /// The file's text, shared with the editor rather than copied.
+    text: crate::state::RevisedText,
 }
 
 /// The files the index of `root` reads: the generated netlist and the files
@@ -184,7 +185,7 @@ fn document_texts(document: &crate::state::NetlistDocument) -> Vec<IndexText> {
         dependency_identity: None,
         display_name: "generated.sp".to_owned(),
         path: std::path::PathBuf::new(),
-        text: document.source().to_owned(),
+        text: document.source().into(),
     }];
     for dependency in document.dependencies() {
         if document.is_veriloga_dependency(dependency) {
@@ -202,7 +203,7 @@ fn document_texts(document: &crate::state::NetlistDocument) -> Vec<IndexText> {
                     .native_origin()
                     .unwrap_or_else(|| locator.logical_identity()),
             ),
-            text: source.to_owned(),
+            text: source.into(),
         });
     }
     texts
@@ -841,16 +842,17 @@ fn shown_root_in(
     Some((root, key))
 }
 
-/// The project index of the root the editor shows, for a frame. While the
-/// writer types, the last index built stands in until the one of the root as
-/// it stands is built; a root changed any other way is indexed before the
-/// frame shows it. It reads the model.
+/// The project index of the root the editor shows, for a frame, built away
+/// from it. While the writer types, the last index built stands in until
+/// the one of the root as it stands is built; a root changed any other way
+/// has none until its own is built. It reads the model.
 pub(crate) fn project_index_in(
     ctx: &egui::Context,
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Option<Arc<NetlistProjectIndex>> {
-    if !netlist.is_being_typed() {
+    let typed = netlist.is_being_typed();
+    if !typed && netlist.waits_for_indexes() {
         return project_index_now(model, netlist);
     }
     let (root, key) = shown_root_in(model, netlist)?;
@@ -864,10 +866,8 @@ pub(crate) fn project_index_in(
             move || wake.request_repaint(),
         );
     }
-    netlist
-        .project_index
-        .last_built()
-        .or_else(|| project_index_now(model, netlist))
+    let (built, index) = netlist.project_index.built()?;
+    (*built == key || typed).then_some(index)
 }
 
 /// The project index of the root the editor shows as it stands, waiting for
@@ -1470,7 +1470,7 @@ fn apply_quick_fix(
     {
         return Err(messages.text(MessageId::NetlistQuickFixNoLongerFits));
     }
-    let mut replacement = source.clone();
+    let mut replacement = source.as_str().to_owned();
     replacement.replace_range(fix.span.clone(), &fix.replacement);
     let edit = if let Some(identity) = netlist.front.include() {
         super::OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)

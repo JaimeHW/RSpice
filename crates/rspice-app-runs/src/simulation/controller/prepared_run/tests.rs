@@ -39,8 +39,12 @@ fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
 fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     state.model.simulation.retained.next_run_id = u64::MAX;
     let baseline = crate::io::capture_simulation_results(&state.model.simulation);
     let mut controller = SimulationController::new();
@@ -266,8 +270,12 @@ fn receipt_backed_manual_project_deck_uses_pdk_models_without_host_paths() {
     let mut state = RunTestHost::default();
     state.provision_test_project_technology_contract();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content =
-        "PDK project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("PDK project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -323,8 +331,12 @@ fn governed_manual_deck_dispatches_pdk_veriloga_runtime_without_host_paths() {
     let mut state = RunTestHost::default();
     state.provision_test_project_veriloga_technology_contract();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content =
-        "PDK Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("PDK Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -529,9 +541,10 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
 fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content =
+    state.model.simulation.source.netlist_content.set(
         "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.tran 10u 5m\n.end\n"
-            .to_owned();
+            .to_owned(),
+    );
 
     let mut controller = SimulationController::new();
     let snapshot =
@@ -648,8 +661,8 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
 fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content = "Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out\n.pnoise dec 10 1 1Meg out=out\n.pxf dec 10 1k 10Meg input=V1 out=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
-            .to_owned();
+    state.model.simulation.source.netlist_content.set("Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out\n.pnoise dec 10 1 1Meg out=out\n.pxf dec 10 1k 10Meg input=V1 out=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
+            .to_owned());
 
     let mut controller = SimulationController::new();
     let snapshot =
@@ -765,8 +778,12 @@ fn an_equal_setup_rebuilt_before_dispatch_does_not_refuse_it() {
 #[test]
 fn manual_include_without_a_deck_file_fails_closed() {
     let mut state = RunTestHost::default();
-    state.model.simulation.source.netlist_content =
-        "deck\n.include models.lib\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\n.include models.lib\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let error =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .expect_err("unbound include must fail");
@@ -1203,8 +1220,12 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
 fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -1245,8 +1266,12 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
 fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -1278,8 +1303,12 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
 fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content =
-        "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
 
     controller.start_simulation(&mut state);
@@ -1416,7 +1445,12 @@ fn an_edit_to_a_validated_manual_deck_refuses_its_run() {
         .prepare_deck_run(&state)
         .expect("the deck validates");
     thread_preparations::take();
-    state.model.simulation.source.netlist_content = MANUAL_DECK.replace("1k", "2k");
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(MANUAL_DECK.replace("1k", "2k"));
 
     let error = controller
         .consume_snapshot_for_dispatch(&state)

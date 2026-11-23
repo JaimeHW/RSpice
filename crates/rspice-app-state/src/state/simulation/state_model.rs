@@ -116,8 +116,9 @@ pub struct RetainedSimulationState {
 /// Working netlist buffer and its schematic cross-probe mapping.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationSourceState {
-    /// Current netlist content (from editor)
-    pub netlist_content: String,
+    /// The text the Netlist page shows: the deck, an include or a
+    /// netlist it only reads. Every write gives it a new revision.
+    pub netlist_content: crate::state::RevisedText,
 
     /// Cross-probing mapping between schematic grid points and SPICE net names
     /// Populated during netlist generation, used for probe mode

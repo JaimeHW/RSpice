@@ -38,7 +38,12 @@ pub fn state_with_current_clean_drc() -> RunTestHost {
 pub fn start_manual_deck(source: &str) -> SimulationRunner {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content = source.to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(source.to_owned());
     start_manual_deck_of(&state)
 }
 
@@ -105,7 +110,12 @@ pub fn run_manual_batch_with_lifecycle(
 ) -> crate::state::SimulationRun {
     let mut state = RunTestHost::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.model.simulation.source.netlist_content = source.to_owned();
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .prepare_deck_run(&state)
@@ -204,7 +214,11 @@ pub fn run_manual_batch_session<H: RunHost + Default>(source: &str) -> H {
     let mut state = H::default();
     let model = state.model_mut();
     model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    model.simulation.source.netlist_content = source.to_owned();
+    model
+        .simulation
+        .source
+        .netlist_content
+        .set(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .prepare_deck_run(&state)

@@ -150,8 +150,12 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
         "CMOS Inverter",
         &mut harness.model.schematic,
     );
-    harness.model.simulation.source.netlist_content =
-        "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned());
 
     let catalog = build_envelope_source_catalog(&harness.model);
 
@@ -164,7 +168,12 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
 fn dependency_source_cache_ignores_document_switches_and_tracks_design_commits() {
     let mut harness = SimulateTestHost::harness();
     let original = envelope_source_catalog_input_digest(&harness.model);
-    harness.model.simulation.source.netlist_content = "unrelated editor document".to_owned();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("unrelated editor document".to_owned());
     assert_eq!(
         envelope_source_catalog_input_digest(&harness.model),
         original
