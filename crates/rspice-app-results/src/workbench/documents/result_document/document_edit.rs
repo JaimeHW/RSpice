@@ -394,7 +394,7 @@ fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), St
         placement: PanePlacement::Below {
             anchor_pane_id: anchor,
         },
-        plotted: super::create_document::every_signal(analysis),
+        plotted: super::create_document::deck_plotted(analysis),
     }));
     let receipt = transact(state, document_id, edits)?;
     if let Some(pane_id) = receipt.created.iter().find_map(|entity| match entity {

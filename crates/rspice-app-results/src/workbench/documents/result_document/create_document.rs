@@ -550,12 +550,15 @@ pub(super) fn run_source_analysis(
     )
 }
 
-/// Every signal of `analysis`, by name: what a new document's pane over it
-/// plots.
-pub(super) fn every_signal(analysis: &AnalysisResult) -> Vec<String> {
+/// The signals of `analysis` its deck or plan names to plot, by name: what a
+/// new document's pane over it plots, as a run's own view does. A run that
+/// names none gives a pane that plots nothing until the reader ticks a
+/// signal; a pane never plots every signal of a run it was not told to.
+pub(super) fn deck_plotted(analysis: &AnalysisResult) -> Vec<String> {
     analysis
         .waveforms
         .iter()
+        .filter(|waveform| waveform.visible)
         .map(|waveform| waveform.name.clone())
         .collect()
 }
@@ -603,7 +606,7 @@ fn build_document(
             kind: pane_kind(resolved.viewer.art),
             viewer_id: resolved.viewer.id.to_owned(),
             binding: Some(binding),
-            plotted: every_signal(resolved.analysis),
+            plotted: deck_plotted(resolved.analysis),
         },
     )?;
     let page_id = document.pages()[0].id;
@@ -656,7 +659,7 @@ fn build_document(
                 viewer_id: resolved.viewer.id.to_owned(),
                 binding: Some(binding),
                 placement,
-                plotted: every_signal(resolved.analysis),
+                plotted: deck_plotted(resolved.analysis),
             })],
         )?;
         let pane_id = receipt
