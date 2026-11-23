@@ -438,7 +438,6 @@ fn show_code_document_impl(
         line_height: editor_font::line_height(text_size),
         gutter_width: editor_font::gutter_width(text_size),
         code_left_padding: CODE_LEFT_PADDING,
-        top_padding: 8.0,
         background: colors.bg_inset,
         hover_background: colors.bg_hover,
         active_background: colors.syntax.current_line,

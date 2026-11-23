@@ -16,7 +16,6 @@ pub(super) fn test_style<'a>(
         line_height: 17.0,
         gutter_width: 47.0,
         code_left_padding: 12.0,
-        top_padding: 8.0,
         background: Color32::BLACK,
         hover_background: Color32::from_gray(24),
         active_background: Color32::from_gray(28),
@@ -546,7 +545,7 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
         .expect("active-line TextRun");
     let bounds = active_text.bounds().expect("active-line bounds");
     assert!(
-        bounds.y0 >= f64::from(style.top_padding + style.line_height),
+        bounds.y0 >= f64::from(style.line_height),
         "line-two accessibility geometry must not overlap line one: {bounds:?}"
     );
 }

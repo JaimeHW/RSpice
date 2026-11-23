@@ -195,7 +195,6 @@ pub(crate) struct VirtualEditorStyle<'a> {
     pub line_height: f32,
     pub gutter_width: f32,
     pub code_left_padding: f32,
-    pub top_padding: f32,
     pub background: Color32,
     pub hover_background: Color32,
     pub active_background: Color32,
@@ -739,8 +738,7 @@ pub(crate) fn show_virtual_text_editor(
             }
 
             let origin = content_rect.min;
-            let first_row = ((viewport.top() - style.top_padding).max(0.0) / style.line_height)
-                .floor() as usize;
+            let first_row = (viewport.top().max(0.0) / style.line_height).floor() as usize;
             let row_count = (viewport.height() / style.line_height).ceil() as usize + 1;
             let code_origin_x = origin.x + style.gutter_width + style.code_left_padding;
             let first_cell = ((viewport.left() + style.gutter_width - code_origin_x).max(0.0)
@@ -1035,8 +1033,7 @@ pub(crate) fn show_virtual_text_editor(
                         && fold_region_at(&mut session, syntax, line).is_some()
                 });
             for (line, span) in viewport_lines {
-                let row_top =
-                    origin.y + style.top_padding + line.visible_row as f32 * style.line_height;
+                let row_top = origin.y + line.visible_row as f32 * style.line_height;
                 let row_rect = egui::Rect::from_min_size(
                     egui::pos2(origin.x + viewport.left(), row_top),
                     Vec2::new(viewport.width(), style.line_height),
@@ -1318,10 +1315,7 @@ pub(crate) fn show_virtual_text_editor(
                     // The whole line's width centred would scroll a
                     // narrow view sideways off the caret.
                     let rect = egui::Rect::from_min_size(
-                        egui::pos2(
-                            origin.x,
-                            origin.y + style.top_padding + visible_row as f32 * style.line_height,
-                        ),
+                        egui::pos2(origin.x, origin.y + visible_row as f32 * style.line_height),
                         Vec2::new(char_width, style.line_height),
                     );
                     ui.scroll_to_rect(rect, Some(egui::Align::Center));
@@ -1453,7 +1447,7 @@ fn primary_caret_anchor(
     let (visible_row, cell) = row_cell_for_char(session, cursor)?;
     Some(egui::pos2(
         code_origin_x + cell as f32 * char_width,
-        origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height + 4.0,
+        origin.y + (visible_row + 1) as f32 * style.line_height + 4.0,
     ))
 }
 
@@ -1596,7 +1590,7 @@ fn page_rows(session: &VirtualEditorSession, ui: &Ui, style: &VirtualEditorStyle
     let height = session
         .viewport_size
         .map_or_else(|| ui.available_height(), |size| size.y);
-    ((height - style.top_padding).max(0.0) / style.line_height).floor() as usize
+    (height.max(0.0) / style.line_height).floor() as usize
 }
 
 fn content_size(
@@ -1614,10 +1608,7 @@ fn content_size(
             + session.maximum_cells as f32 * char_width
             + RIGHT_PADDING
     };
-    Vec2::new(
-        width,
-        style.top_padding + rows as f32 * style.line_height + BOTTOM_PADDING,
-    )
+    Vec2::new(width, rows as f32 * style.line_height + BOTTOM_PADDING)
 }
 
 /// The primary caret's cell in content coordinates, or `None` when its line
@@ -1632,7 +1623,7 @@ fn caret_content_rect(
     Some(egui::Rect::from_min_size(
         egui::pos2(
             style.gutter_width + style.code_left_padding + cell as f32 * char_width,
-            style.top_padding + row as f32 * style.line_height,
+            row as f32 * style.line_height,
         ),
         Vec2::new(char_width, style.line_height),
     ))
@@ -1896,7 +1887,7 @@ fn hit_test(
     style: &VirtualEditorStyle<'_>,
     char_width: f32,
 ) -> (usize, usize) {
-    let row = ((pointer.y - origin.y - style.top_padding) / style.line_height)
+    let row = ((pointer.y - origin.y) / style.line_height)
         .floor()
         .max(0.0) as usize;
     let cell = hit_cell(pointer, origin, viewport, style, char_width);
@@ -3262,7 +3253,7 @@ fn paint_carets_and_ime(
             continue;
         };
         let x = code_origin_x + cell as f32 * char_width;
-        let y = origin.y + style.top_padding + visible_row as f32 * style.line_height;
+        let y = origin.y + visible_row as f32 * style.line_height;
         let rect = egui::Rect::from_min_size(
             egui::pos2(x, y + 1.0),
             Vec2::new(1.25, style.line_height - 2.0),
@@ -3286,8 +3277,7 @@ fn paint_carets_and_ime(
             } else {
                 session.model.cell_at(line, row_start)
             };
-            let y =
-                origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height - 1.0;
+            let y = origin.y + (visible_row + 1) as f32 * style.line_height - 1.0;
             let x = |column: usize| {
                 code_origin_x
                     + session

@@ -43,7 +43,6 @@ use crate::state::netlist_diagnostics::{
 use crate::workbench::documents::editor_font;
 
 const CODE_LEFT_PADDING: f32 = 12.0;
-const CODE_TOP_PADDING: i8 = 8;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
 
@@ -278,7 +277,6 @@ pub fn show(
             line_height: editor_font::line_height(text_size),
             gutter_width: editor_font::gutter_width(text_size),
             code_left_padding: CODE_LEFT_PADDING,
-            top_padding: CODE_TOP_PADDING as f32,
             background: c.bg_inset,
             hover_background: c.bg_hover,
             active_background: c.accent.gamma_multiply(0.075),

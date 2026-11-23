@@ -470,7 +470,7 @@ fn page_down_moves_the_caret_and_the_view_by_one_viewport() {
     let mut bench = Bench::new(&numbered_lines(400), true);
     bench.focus();
     let viewport = bench.session().viewport_size.expect("the view was drawn");
-    let rows = ((viewport.y - 8.0) / LINE_HEIGHT).floor() as usize;
+    let rows = (viewport.y / LINE_HEIGHT).floor() as usize;
     assert!(rows > 5, "the view shows {rows} rows");
 
     let first = bench.key(Key::PageDown, Modifiers::NONE);
@@ -606,7 +606,7 @@ fn a_jump_to_a_line_and_column_lands_the_caret_in_view() {
     );
     assert_caret_in_view(&far, "a jump far below");
     let viewport = bench.session().viewport_size.expect("the view was drawn");
-    let caret_middle = 8.0 + 299.5 * LINE_HEIGHT;
+    let caret_middle = 299.5 * LINE_HEIGHT;
     let view_middle = bench.scroll_offset().y + viewport.y * 0.5;
     assert!(
         (caret_middle - view_middle).abs() <= LINE_HEIGHT,
@@ -637,7 +637,7 @@ fn a_jump_to_a_line_and_column_lands_the_caret_in_view() {
         revealed.cursor_char_index,
         line_start(&bench.source.to_string(), 39)
     );
-    let row_top = 8.0 + 39.0 * LINE_HEIGHT;
+    let row_top = 39.0 * LINE_HEIGHT;
     let view = bench.scroll_offset().y..=bench.scroll_offset().y + viewport.y;
     assert!(
         view.contains(&row_top) && view.contains(&(row_top + LINE_HEIGHT)),
@@ -690,7 +690,7 @@ fn cell(bench: &Bench, row: usize, column: usize) -> egui::Pos2 {
     });
     egui::pos2(
         editor.left() + 47.0 + 12.0 + (column as f32 + 0.3) * char_width,
-        editor.top() + 8.0 + (row as f32 + 0.5) * LINE_HEIGHT,
+        editor.top() + (row as f32 + 0.5) * LINE_HEIGHT,
     )
 }
 
@@ -1210,7 +1210,7 @@ fn the_fold_control_shows_over_a_foldable_line_s_gutter_and_folds_it() {
     let gutter = |row: f32| {
         egui::pos2(
             editor.left() + 40.0,
-            editor.top() + 8.0 + (row + 0.5) * LINE_HEIGHT,
+            editor.top() + (row + 0.5) * LINE_HEIGHT,
         )
     };
 

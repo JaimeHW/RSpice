@@ -90,7 +90,7 @@ fn hover_rasters(
     let pointer = origin
         + egui::vec2(
             GUTTER_W + CODE_LEFT_PADDING + column as f32 * advance,
-            f32::from(CODE_TOP_PADDING) + (row as f32 + 0.5) * LINE_HEIGHT,
+            (row as f32 + 0.5) * LINE_HEIGHT,
         );
     let hovered = crate::ui::raster::render_with_pointer(size, pointer, |ui, background| {
         egui::CentralPanel::default()
@@ -1358,8 +1358,7 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
         let editor = context
             .read_response(editor_id)
             .expect("the editor is on screen");
-        let caret_top =
-            editor.rect.top() + f32::from(CODE_TOP_PADDING) + press as f32 * LINE_HEIGHT;
+        let caret_top = editor.rect.top() + press as f32 * LINE_HEIGHT;
         assert!(
             editor.interact_rect.y_range().contains(caret_top)
                 && editor

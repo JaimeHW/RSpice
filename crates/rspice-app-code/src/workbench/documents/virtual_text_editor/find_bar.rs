@@ -709,8 +709,7 @@ pub(super) fn paint_ticks(
         let Some(row) = row else {
             continue;
         };
-        let centre =
-            track.top() + (style.top_padding + (row as f32 + 0.5) * style.line_height) * scale;
+        let centre = track.top() + (row as f32 + 0.5) * style.line_height * scale;
         let top = (centre - TICK_HEIGHT * 0.5)
             .clamp(track.top(), (track.bottom() - TICK_HEIGHT).max(track.top()));
         if top - last_top < TICK_SPACING {

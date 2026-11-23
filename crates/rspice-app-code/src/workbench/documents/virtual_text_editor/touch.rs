@@ -58,7 +58,7 @@ fn handle_roots(
         let (row, cell) = super::row_cell_for_char(session, index)?;
         Some(egui::pos2(
             origin.x + style.gutter_width + style.code_left_padding + cell as f32 * char_width,
-            origin.y + style.top_padding + (row + 1) as f32 * style.line_height,
+            origin.y + (row + 1) as f32 * style.line_height,
         ))
     };
     Some([root(range.start)?, root(range.end)?])

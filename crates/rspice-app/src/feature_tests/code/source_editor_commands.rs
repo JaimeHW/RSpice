@@ -450,8 +450,8 @@ fn named_editor_origin(output: &egui::FullOutput, name: &str) -> egui::Pos2 {
 /// Where the gutter of the one-based `line` is: a press there lands on the
 /// line's first column.
 fn gutter_of_line(origin: egui::Pos2, line: usize) -> egui::Pos2 {
-    // The code document's top padding and line height.
-    egui::pos2(origin.x + 6.0, origin.y + 8.0 + 17.05 * (line as f32 - 0.5))
+    // The code document's line height: line 1 starts at the top.
+    egui::pos2(origin.x + 6.0, origin.y + 17.05 * (line as f32 - 0.5))
 }
 
 fn menu_item(output: &egui::FullOutput, label: &str) -> Option<(egui::Rect, bool)> {
