@@ -79,7 +79,7 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     let request = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .compile_request
         .as_ref()

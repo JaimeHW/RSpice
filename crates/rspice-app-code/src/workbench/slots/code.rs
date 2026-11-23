@@ -4,9 +4,9 @@
 //! collapsed; and what code shows other features.
 
 use crate::workbench::app::dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
-use crate::workbench::documents::code_workspace::SourceEditingState;
 use crate::workbench::documents::netlist_document::session::NetlistSession;
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
+use crate::workbench::documents::source_editing::SourceEditingState;
 use crate::workbench::framework::feature::{CodePort, NetlistDocumentKey};
 use rspice_app_runs::simulation::{DeckOrigin, ManualDeck};
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
@@ -22,7 +22,7 @@ pub struct SourceState {
     /// Netlist editor state (diagnostics, diff pips).
     pub netlist: crate::workbench::documents::netlist_document::NetlistDocumentState,
     /// The Verilog-A editor's revision-bound operation receipts.
-    pub code_workspace: crate::workbench::documents::code_workspace::SourceEditingState,
+    pub source_editing: crate::workbench::documents::source_editing::SourceEditingState,
     /// Netlist secondary documents explicitly opened by the user. Resolved
     /// include closures can contain thousands of files, so availability alone
     /// must never materialize every include as a tab.
@@ -44,7 +44,7 @@ impl SourceState {
     pub fn diagnostic_sources(
         &self,
     ) -> crate::workbench::app_state::diagnostic_store::SourceCollections<'_> {
-        let code = &self.code_workspace;
+        let code = &self.source_editing;
         let veriloga = code.veriloga.receipt.as_ref();
         crate::workbench::app_state::diagnostic_store::SourceCollections {
             netlist: &self.netlist.diagnostics,
@@ -104,7 +104,7 @@ impl SourceState {
 
     /// The receipt of the project's current Verilog-A compilation.
     pub fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
-        veriloga_compilation_in(&self.code_workspace)
+        veriloga_compilation_in(&self.source_editing)
     }
 }
 
@@ -132,9 +132,9 @@ pub fn manual_deck_in(netlist: &NetlistDocumentState) -> Option<ManualDeck<'_>> 
 /// The receipt of the project's current Verilog-A compilation, as the
 /// Verilog-A editor's state holds it.
 pub fn veriloga_compilation_in(
-    code_workspace: &SourceEditingState,
+    source_editing: &SourceEditingState,
 ) -> Option<&ProjectCompileReceipt> {
-    code_workspace
+    source_editing
         .veriloga
         .receipt
         .as_ref()
@@ -177,8 +177,8 @@ impl CodePort for SourceState {
         sources: &crate::state::ProjectSourceRegistry,
         libraries: &crate::state::LibraryManager,
     ) -> Option<(crate::state::CellViewRef, String)> {
-        crate::workbench::documents::code_workspace::interface_check_finding(
-            &self.code_workspace.veriloga,
+        crate::workbench::documents::source_editing::interface_check_finding(
+            &self.source_editing.veriloga,
             sources,
             libraries,
         )
@@ -196,7 +196,7 @@ impl CodePort for SourceState {
         revision: u64,
         messages: crate::workbench::MessageCatalog,
     ) {
-        use crate::workbench::documents::code_workspace::{
+        use crate::workbench::documents::source_editing::{
             EditorFindings, SourceEditorLanguage, release_closed_code_editors,
             show_veriloga_document_versioned,
         };

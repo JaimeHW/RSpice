@@ -6,7 +6,7 @@ use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
 };
 use rspice_app_code::workbench::code::commands::CodeHandOff;
-use rspice_app_code::workbench::documents::code_workspace::persist_global_veriloga_library;
+use rspice_app_code::workbench::documents::source_editing::persist_global_veriloga_library;
 use rspice_app_design::workbench::app::actions::workspace::{
     HistoryStepParts, project_step_comes_first, take_history_step,
 };
@@ -308,7 +308,7 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
         }
         CodeHandOff::ImportVerilogACells => {
             if let Err(error) = app.commit_veriloga_import()
-                && let Some(form) = app.state.code.code_workspace.veriloga.import_form.as_mut()
+                && let Some(form) = app.state.code.source_editing.veriloga.import_form.as_mut()
             {
                 form.error = Some(error);
             }
@@ -467,7 +467,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 && app.state.model.workspace.content.active_view == view
             {
                 app.state.workbench.activate(Workspace::Design);
-                app.state.code.code_workspace.veriloga.receipt = Some(receipt);
+                app.state.code.source_editing.veriloga.receipt = Some(receipt);
             }
             if persist_global_veriloga {
                 persist_global_veriloga_library(&mut app.state.model);
@@ -484,7 +484,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             app.state.open_workspace_view(view);
             if let Some(receipt) = veriloga {
                 app.state.workbench.activate(Workspace::Design);
-                app.state.code.code_workspace.veriloga.receipt = Some(*receipt);
+                app.state.code.source_editing.veriloga.receipt = Some(*receipt);
             }
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, notice);

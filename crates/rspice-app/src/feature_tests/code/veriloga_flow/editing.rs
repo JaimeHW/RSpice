@@ -5,7 +5,7 @@ use egui::Key;
 
 use super::language_tools::{CTRL, EDITOR, caret_after, op_amp, source, type_text};
 use super::*;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, active_document_is_dirty, save_native,
 };
@@ -62,10 +62,10 @@ fn rename_is_one_undo_across_the_module() {
     let original = source(&user);
     caret_after(&mut user, "vtarget = vslew");
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     let caret = original.find("vslew").expect("the name");
-    code_workspace::open_language_tools_in_bundle(
+    source_editing::open_language_tools_in_bundle(
         &mut user.app.source_editing_parts(),
         selected.bundle().id(),
         &path,
@@ -76,13 +76,13 @@ fn rename_is_one_undo_across_the_module() {
         .app
         .state
         .code
-        .code_workspace
+        .source_editing
         .language_tools
         .as_mut()
         .expect("the form is open");
     tools.query = "vslew".to_owned();
     tools.replacement = "limited".to_owned();
-    code_workspace::commit_language_rename(&mut user.app.source_editing_parts())
+    source_editing::commit_language_rename(&mut user.app.source_editing_parts())
         .expect("the rename applies");
     user.settle();
     let renamed = source(&user);
@@ -98,23 +98,23 @@ fn rename_is_one_undo_across_the_module() {
 fn replace_source_from_file_is_one_undo() {
     let mut user = op_amp();
     let original = source(&user);
-    let path = code_workspace::selected_veriloga_source_in(&user.app.state.model)
+    let path = source_editing::selected_veriloga_source_in(&user.app.state.model)
         .expect("the open view")
         .document()
         .logical_path()
         .to_owned();
     let replacement = original.replace("vslew", "limited");
-    code_workspace::request_veriloga_source_replacement(
+    source_editing::request_veriloga_source_replacement(
         &mut user.app.source_editing_parts(),
         &path,
     )
     .expect("the source can be replaced");
-    code_workspace::complete_veriloga_file_pick(
+    source_editing::complete_veriloga_file_pick(
         &mut user.app.source_editing_parts(),
         "next.va",
         &replacement,
     );
-    code_workspace::commit_veriloga_source_replacement(&mut user.app.source_editing_parts())
+    source_editing::commit_veriloga_source_replacement(&mut user.app.source_editing_parts())
         .expect("the file replaces it");
     user.settle();
     assert_eq!(source(&user), replacement);
@@ -176,7 +176,7 @@ fn compiling_a_saved_source_leaves_its_tab_clean_and_writes_no_profile() {
     user.settle();
     assert!(!open_tab_dirty(&user, &view), "the save cleaned the tab");
     let attempts = |user: &User| {
-        code_workspace::selected_veriloga_source_in(&user.app.state.model)
+        source_editing::selected_veriloga_source_in(&user.app.state.model)
             .expect("the open view")
             .bundle()
             .qualifications()
@@ -190,7 +190,7 @@ fn compiling_a_saved_source_leaves_its_tab_clean_and_writes_no_profile() {
     assert!(!open_tab_dirty(&user, &view), "a compile is not an edit");
     assert!(!active_document_is_dirty(&user.app.state));
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     assert!(
         selected.bundle().build_profile_path().is_none(),
         "nothing changed a setting, so no build profile exists"

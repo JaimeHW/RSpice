@@ -20,7 +20,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::{LifecycleAction, SourceDocumentRequest};
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{Fact, fact_rows, property_row_height, section_block_gap};
-use crate::workbench::documents::code_workspace::{self, SourceEditingState};
+use crate::workbench::documents::source_editing::{self, SourceEditingState};
 use crate::workbench::{MessageCatalog, MessageId};
 
 use super::source_document::{dialog_inset, leaf_name, sections};
@@ -89,7 +89,7 @@ pub(super) fn render(
     let selected = history.selected_revision;
     let error = history.error.clone();
     let held =
-        code_workspace::source_file_mutation_block_reason_in(model, code, platform, messages);
+        source_editing::source_file_mutation_block_reason_in(model, code, platform, messages);
 
     let dialog = Dialog::new(
         messages.format(

@@ -228,7 +228,7 @@ pub(super) fn stimulus_library_digest(
 
 /// The decks, the code workspace's own sources and the added lines.
 pub(super) fn netlist_source_digest(workspace: &ProjectWorkspace) -> Result<ContentDigest, String> {
-    let code_workspace_sources = workspace
+    let project_wide_sources = workspace
         .project_sources
         .iter_bundles()
         .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::ProjectWide))
@@ -236,7 +236,7 @@ pub(super) fn netlist_source_digest(workspace: &ProjectWorkspace) -> Result<Cont
         .collect::<Vec<_>>();
     digest(&(
         &workspace.decks,
-        code_workspace_sources,
+        project_wide_sources,
         &workspace.added_lines,
     ))
 }

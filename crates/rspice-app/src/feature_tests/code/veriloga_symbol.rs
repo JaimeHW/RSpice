@@ -13,7 +13,7 @@ use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::features;
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
 use rspice_app_code::workbench::code::commands::SourceCommand;
-use rspice_app_code::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::documents::source_editing::{
     VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,
 };
 use rspice_app_code::workbench::surfaces::veriloga;

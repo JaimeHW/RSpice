@@ -292,7 +292,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) -> NetlistToolb
             if let Err(error) = crate::workbench::app::open_source_document_dialog_in(
                 cx.wb.workspace,
                 cx.model,
-                &mut cx.state.code_workspace,
+                &mut cx.state.source_editing,
                 &cx.state.netlist,
                 cx.platform, cx.wb.messages(),
             ) {

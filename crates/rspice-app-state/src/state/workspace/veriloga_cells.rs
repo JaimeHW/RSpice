@@ -625,7 +625,7 @@ pub fn place_veriloga_view(
 /// project's top cell, owning the same bundle under the same identity, so a
 /// deck that named it still does. Nothing changes when there is no such
 /// bundle, which is what makes a second load of the same project a no-op.
-pub(crate) fn retire_code_workspace_veriloga(
+pub(crate) fn move_project_wide_veriloga_into_its_cell(
     content: &mut rspice_project::ProjectWorkspace,
     libraries: &mut LibraryManager,
 ) -> Option<String> {
@@ -682,7 +682,7 @@ pub(crate) fn retire_code_workspace_veriloga(
         .and_then(|view| place_veriloga_view(&mut candidate_libraries, &reference, view))
         .and_then(|()| {
             candidate_sources
-                .move_code_workspace_bundle_to_cell_view(reference.clone())
+                .move_project_wide_bundle_to_cell_view(reference.clone())
                 .map_err(|error| error.to_string())
         });
     if let Err(error) = moved {

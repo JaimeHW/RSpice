@@ -24,8 +24,8 @@ use crate::state::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
 use crate::workbench::app_state::Model;
-use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::source_editing::persist_global_veriloga_library;
+use crate::workbench::documents::source_editing::{
     VerilogAImportFormState, VerilogAReplaceReview, VerilogAWorkbenchState,
     close_veriloga_import_form, request_veriloga_import_locate, writable_libraries,
 };
@@ -446,7 +446,7 @@ mod tests {
     use super::*;
     use crate::state::ViewType;
     use crate::workbench::code::tests::harness;
-    use crate::workbench::documents::code_workspace::{
+    use crate::workbench::documents::source_editing::{
         PickedSource, import_dropped_veriloga_sources,
     };
 
@@ -470,7 +470,7 @@ mod tests {
             .collect();
         import_dropped_veriloga_sources(
             &harness.model,
-            &mut harness.state.code_workspace.veriloga,
+            &mut harness.state.source_editing.veriloga,
             dropped,
         )
         .expect("every file is a root");
@@ -481,7 +481,7 @@ mod tests {
         ] {
             let imported = publish_veriloga_import(
                 &mut harness.model,
-                &mut harness.state.code_workspace.veriloga,
+                &mut harness.state.source_editing.veriloga,
             )
             .unwrap_or_else(|error| panic!("{cell}: {error}"));
             assert_eq!(
@@ -497,6 +497,6 @@ mod tests {
                 .map(|view| view.view_type);
             assert_eq!(made, Some(view_type), "{cell}");
         }
-        assert!(harness.state.code_workspace.veriloga.import_form.is_none());
+        assert!(harness.state.source_editing.veriloga.import_form.is_none());
     }
 }

@@ -8,7 +8,7 @@ use crate::workbench::app::veriloga_design_tests::{
 };
 use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_code::workbench::code::commands::SourceCommand;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_state::state::{Point, ProjectSourceId, Wire};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -61,7 +61,7 @@ fn veriloga_with_selected_first_line() -> (egui::Context, RSpiceApp, ProjectSour
         .editor
         .selection
         .select_wire(7);
-    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
+    let editor = source_editing::source_editor_id(bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
     frame_with(
@@ -169,7 +169,7 @@ fn veriloga_with_focused_editor() -> (egui::Context, RSpiceApp, ProjectSourceId)
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
-    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
+    let editor = source_editing::source_editor_id(bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
     (ctx, app, bundle_id)
@@ -203,7 +203,7 @@ fn ctrl_alt_brackets_fold_and_unfold_the_whole_focused_source() {
     use rspice_app_code::workbench::documents::virtual_text_editor::shown_line_count;
 
     let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
-    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
+    let editor = source_editing::source_editor_id(bundle_id, "model.va");
     let lines = shown_line_count(&ctx, editor).expect("the editor is drawn");
     let ctrl_alt = egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::ALT;
 
@@ -269,7 +269,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
         DESKTOP,
         vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
     );
-    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
+    let editor = source_editing::source_editor_id(bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
     frame_with(
@@ -348,7 +348,7 @@ fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
 fn veriloga_caret_on_g() -> (egui::Context, RSpiceApp) {
     let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
     ctx.set_os(egui::os::OperatingSystem::Windows);
-    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
+    let editor = source_editing::source_editor_id(bundle_id, "model.va");
     let source = root_text(&app, bundle_id);
     let on_g = source[..source.find("g * V").expect("a use of g")]
         .chars()
@@ -386,7 +386,7 @@ fn a_verilog_a_editor_keeps_find_references_and_rename_with_their_keys() {
     let form = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .language_tools
         .as_ref()
         .expect("F2 opens Rename symbol");
@@ -744,7 +744,7 @@ fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
     let caret = |app: &RSpiceApp| {
         app.state
             .code
-            .code_workspace
+            .source_editing
             .source_carets
             .get(&(bundle_id, "model.va".to_owned()))
             .copied()
@@ -773,7 +773,7 @@ fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
         "the caret moved to the parameter's definition"
     );
     assert!(
-        app.state.code.code_workspace.language_tools.is_none(),
+        app.state.code.source_editing.language_tools.is_none(),
         "Go to definition jumps rather than opening the tools dialog"
     );
 }

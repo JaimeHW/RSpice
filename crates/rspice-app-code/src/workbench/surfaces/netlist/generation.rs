@@ -344,7 +344,7 @@ pub(super) fn generated_project_source_dependencies(
         )
         .map_err(|error| error.to_string())?;
         let closure =
-            crate::workbench::documents::code_workspace::project_bundle_closure_for_provenance(
+            crate::workbench::documents::source_editing::project_bundle_closure_for_provenance(
                 bundle,
                 binding.selected_module(),
             )

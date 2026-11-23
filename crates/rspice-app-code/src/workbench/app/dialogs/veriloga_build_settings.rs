@@ -34,8 +34,8 @@ use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWor
 use crate::workbench::app_state::{
     Model, PlatformState, VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding,
 };
-use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::source_editing::persist_global_veriloga_library;
+use crate::workbench::documents::source_editing::{
     self, SelectedVerilogASource, SourceEditingState,
 };
 use crate::workbench::{MessageCatalog, MessageId};
@@ -262,7 +262,7 @@ pub fn open_veriloga_build_settings(
     model: &Model,
     form: &mut Option<VerilogABuildSettingsDraft>,
 ) -> Result<(), String> {
-    let source = code_workspace::selected_veriloga_source_in(model)?;
+    let source = source_editing::selected_veriloga_source_in(model)?;
     let resolved = resolve_veriloga_build_profile(source.bundle())?;
     let profile = resolved.profile;
     // A source that does not parse yet still has settings to edit; its entry
@@ -332,7 +332,7 @@ pub fn save_veriloga_build_settings(
     let rebind = module_rebind(model, &draft)?;
     let bundle = draft.source.bundle().id();
     let before_revision = draft.source.bundle().revision();
-    code_workspace::write_veriloga_build_profile(model, code, &draft.source, &profile)?;
+    source_editing::write_veriloga_build_profile(model, code, &draft.source, &profile)?;
     let after_revision = model
         .workspace
         .content

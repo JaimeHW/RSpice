@@ -11,7 +11,7 @@ use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, open_in_design, open_project_app, themed_context,
 };
 use crate::workbench::app_state::AppState;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
@@ -26,7 +26,7 @@ const RETIRED_DEMO: &str = "`include \"constants.vams\"\nmodule sensor_bridge(ou
 /// The same module after its author changed it.
 const EDITED_MODULE: &str = "`include \"constants.vams\"\n`include \"disciplines.vams\"\nmodule sensor_bridge(out, inp, inn);\n  inout out, inp, inn;\n  electrical out, inp, inn;\n  parameter real gain = 50.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
 
-fn code_workspace_owner() -> ProjectSourceOwner {
+fn project_wide_owner() -> ProjectSourceOwner {
     ProjectSourceOwner::ProjectWide
 }
 
@@ -70,7 +70,7 @@ fn legacy_project_at(
         .workspace
         .content
         .project_sources
-        .bundle_for_owner(&code_workspace_owner())
+        .bundle_for_owner(&project_wide_owner())
         .map(ProjectSourceBundle::id)
         .expect("the legacy bundle");
     prepare(&mut state);
@@ -170,7 +170,7 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
             .file
             .workspace
             .project_sources
-            .bundle_for_owner(&code_workspace_owner())
+            .bundle_for_owner(&project_wide_owner())
             .is_none()
     );
 
@@ -236,7 +236,7 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
     .expect("the view's module lookup resolves");
     assert_eq!(binding.selected_module(), "sensor_bridge");
     open_in_design(&mut app.state, &reference);
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model)
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model)
         .expect("the tab has a source");
     assert_eq!(selected.bundle().id(), legacy_id);
 }
@@ -252,7 +252,7 @@ fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&code_workspace_owner())
+            .bundle_for_owner(&project_wide_owner())
             .expect("the legacy bundle");
         let key = rspice_app_state::state::project_sources::project_veriloga_bundle_source_key(
             state.model.workspace.content.project.id(),
@@ -497,7 +497,7 @@ fn a_legacy_source_holding_unicode_case_alias_paths_is_refused_at_load() {
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&code_workspace_owner())
+            .bundle_for_owner(&project_wide_owner())
             .map(ProjectSourceBundle::id)
             .expect("the legacy bundle");
         for path in ["models/étage.vams", "models/other.vams"] {
@@ -597,10 +597,10 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         .active_view
         .library
         .clone();
-    code_workspace::import_dropped_veriloga_sources(
+    source_editing::import_dropped_veriloga_sources(
         &app.state.model,
-        &mut app.state.code.code_workspace.veriloga,
-        vec![code_workspace::PickedSource {
+        &mut app.state.code.source_editing.veriloga,
+        vec![source_editing::PickedSource {
             name: "pair.va".to_owned(),
             contents: TWO_TOP_MODULES.to_owned(),
             folder: None,
@@ -610,7 +610,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     let form = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .import_form
         .clone()
@@ -669,12 +669,12 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
 
     open_in_design(&mut app.state, &second);
     let selected =
-        code_workspace::selected_veriloga_source_in(&app.state.model).expect("second's source");
+        source_editing::selected_veriloga_source_in(&app.state.model).expect("second's source");
     assert_eq!(selected.view(), &second);
     assert_eq!(selected.selected_module(), Some("second"));
     let edited = TWO_TOP_MODULES.replace("/ 1k", "/ 2k");
     assert!(
-        code_workspace::replace_selected_veriloga_file(
+        source_editing::replace_selected_veriloga_file(
             &mut app.source_editing_parts(),
             &selected,
             "pair.va",
@@ -700,7 +700,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(app.state.model.workspace.content.active_view, first);
-    assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
+    assert!(app.state.code.source_editing.veriloga.import_form.is_none());
 }
 
 /// A file the front end cannot read is refused in the form, and committing
@@ -716,10 +716,10 @@ fn import_of_an_unparseable_file_creates_nothing() {
         .libraries_by_key()
         .map(|(_, library)| library.cell_count())
         .sum::<usize>();
-    code_workspace::import_dropped_veriloga_sources(
+    source_editing::import_dropped_veriloga_sources(
         &app.state.model,
-        &mut app.state.code.code_workspace.veriloga,
-        vec![code_workspace::PickedSource {
+        &mut app.state.code.source_editing.veriloga,
+        vec![source_editing::PickedSource {
             name: "broken.va".to_owned(),
             contents: "module broken(p, n;\nendmodule\n".to_owned(),
             folder: None,
@@ -729,7 +729,7 @@ fn import_of_an_unparseable_file_creates_nothing() {
     let form = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .import_form
         .clone()
@@ -795,8 +795,8 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     let text = root_text(&app, &reference);
 
     app.execute_command_key(SourceCommand::ImportVerilogA.key());
-    assert!(app.state.code.code_workspace.veriloga.import_requested);
-    code_workspace::complete_veriloga_file_pick(
+    assert!(app.state.code.source_editing.veriloga.import_requested);
+    source_editing::complete_veriloga_file_pick(
         &mut app.source_editing_parts(),
         "pair.va",
         TWO_TOP_MODULES,
@@ -805,7 +805,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     let form = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .import_form
         .clone()
@@ -814,7 +814,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     assert!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .replace_review
             .is_none()
@@ -866,7 +866,7 @@ fn a_file_dropped_on_the_veriloga_editor_opens_the_import_form() {
     assert_eq!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .import_form
             .as_ref()
@@ -886,14 +886,14 @@ const REPLACEMENT: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;
 /// picker the request asks for never opens.
 fn pick_replacement(app: &mut RSpiceApp) {
     let mut parts = app.source_editing_parts();
-    code_workspace::request_veriloga_source_replacement(&mut parts, "model.va")
+    source_editing::request_veriloga_source_replacement(&mut parts, "model.va")
         .expect("model.va can be replaced");
     assert!(
         parts.code.veriloga.import_requested,
         "Replace from file asks for a file"
     );
-    code_workspace::complete_veriloga_file_pick(&mut parts, "replacement.va", REPLACEMENT);
-    assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
+    source_editing::complete_veriloga_file_pick(&mut parts, "replacement.va", REPLACEMENT);
+    assert!(app.state.code.source_editing.veriloga.import_form.is_none());
 }
 
 /// The confirmation, settled: a few frames so it has faded in.
@@ -926,7 +926,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     let review = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .replace_review
         .clone()
@@ -951,7 +951,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     assert!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .replace_review
             .is_none()
@@ -981,7 +981,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     assert!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .replace_review
             .is_none()

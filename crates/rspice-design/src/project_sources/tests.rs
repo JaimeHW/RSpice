@@ -738,7 +738,7 @@ fn veriloga_registry() -> ProjectSourceRegistry {
 /// identity, same bytes, same validation. Only the owner and the revision
 /// that records the move are new, and the move cannot happen twice.
 #[test]
-fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validation() {
+fn a_project_wide_bundle_moves_to_a_cell_view_keeping_its_identity_and_validation() {
     let mut registry = veriloga_registry();
     let owner = ProjectSourceOwner::ProjectWide;
     let before = registry.bundle_for_owner(&owner).unwrap().id();
@@ -747,7 +747,7 @@ fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validat
     let reference = CellViewRef::new("work", "sensor", "veriloga");
 
     let moved = registry
-        .move_code_workspace_bundle_to_cell_view(reference.clone())
+        .move_project_wide_bundle_to_cell_view(reference.clone())
         .unwrap();
 
     assert_eq!(moved, Some(before));
@@ -770,7 +770,7 @@ fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validat
     );
     assert_eq!(
         registry
-            .move_code_workspace_bundle_to_cell_view(reference)
+            .move_project_wide_bundle_to_cell_view(reference)
             .unwrap(),
         None
     );
@@ -796,7 +796,7 @@ fn a_key_written_before_a_move_reads_back_as_the_current_key_until_the_bytes_cha
 
     let reference = CellViewRef::new("work", "sensor", "veriloga");
     registry
-        .move_code_workspace_bundle_to_cell_view(reference)
+        .move_project_wide_bundle_to_cell_view(reference)
         .unwrap();
     let current_key =
         project_veriloga_bundle_source_key(project, registry.get_bundle(id).unwrap(), "sensor")

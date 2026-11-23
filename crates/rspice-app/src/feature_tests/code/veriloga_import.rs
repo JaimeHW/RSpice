@@ -9,7 +9,7 @@ use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
 use rspice_app_code::workbench::code::commands::SourceCommand;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_state::state::workspace::ImportedInclude;
 use rspice_app_state::state::{CellViewRef, ProjectSourceOwner};
 
@@ -77,10 +77,10 @@ fn click(ctx: &egui::Context, app: &mut RSpiceApp, name: &str) {
 
 fn form(
     app: &RSpiceApp,
-) -> rspice_app_code::workbench::documents::code_workspace::VerilogAImportFormState {
+) -> rspice_app_code::workbench::documents::source_editing::VerilogAImportFormState {
     app.state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .import_form
         .clone()
@@ -115,7 +115,7 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
     let sources = app.state.model.workspace.content.project_sources.clone();
 
     app.execute_command_key(SourceCommand::ImportVerilogA.key());
-    code_workspace::complete_veriloga_files_pick(
+    source_editing::complete_veriloga_files_pick(
         &mut app.source_editing_parts(),
         &[("gainer.va", ROOT)],
         Some(&folder),
@@ -154,9 +154,9 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
     assert_eq!(app.state.model.workspace.content.project_sources, sources);
 
     click(&ctx, &mut app, "Locate…");
-    assert!(app.state.code.code_workspace.veriloga.import_requested);
+    assert!(app.state.code.source_editing.veriloga.import_requested);
     assert_eq!(form(&app).locating.as_deref(), Some("body.inc"));
-    code_workspace::complete_veriloga_file_pick(
+    source_editing::complete_veriloga_file_pick(
         &mut app.source_editing_parts(),
         "body_from_elsewhere.inc",
         BODY,
@@ -196,16 +196,16 @@ fn a_multi_file_drop_imports_each_root_with_the_files_it_includes() {
         ("other.vams", other),
     ]
     .into_iter()
-    .map(|(name, contents)| code_workspace::PickedSource {
+    .map(|(name, contents)| source_editing::PickedSource {
         name: name.to_owned(),
         contents: contents.to_owned(),
         folder: None,
     })
     .collect();
 
-    code_workspace::import_dropped_veriloga_sources(
+    source_editing::import_dropped_veriloga_sources(
         &app.state.model,
-        &mut app.state.code.code_workspace.veriloga,
+        &mut app.state.code.source_editing.veriloga,
         dropped,
     )
     .expect("the drop is read");
@@ -214,14 +214,14 @@ fn a_multi_file_drop_imports_each_root_with_the_files_it_includes() {
     assert_eq!(first.file_name, "gainer.va");
     assert_eq!(first.closure.missing().count(), 0);
     assert_eq!(
-        app.state.code.code_workspace.veriloga.import_queue.len(),
+        app.state.code.source_editing.veriloga.import_queue.len(),
         1,
         "the other root waits its turn"
     );
     app.commit_veriloga_import().expect("gainer is created");
     assert_eq!(form(&app).file_name, "other.vams");
     app.commit_veriloga_import().expect("other is created");
-    assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
+    assert!(app.state.code.source_editing.veriloga.import_form.is_none());
 }
 
 /// Add files on the Files rail adds the picked files to the source in
@@ -234,8 +234,8 @@ fn add_files_on_the_files_rail_adds_the_picked_files_beside_the_open_file() {
     let ctx = themed_context();
 
     click(&ctx, &mut app, "Add files…");
-    assert!(app.state.code.code_workspace.veriloga.import_requested);
-    code_workspace::complete_veriloga_files_pick(
+    assert!(app.state.code.source_editing.veriloga.import_requested);
+    source_editing::complete_veriloga_files_pick(
         &mut app.source_editing_parts(),
         &[("a.inc", "// a\n"), ("b.vh", "// b\n")],
         None,
@@ -253,7 +253,7 @@ fn add_files_on_the_files_rail_adds_the_picked_files_beside_the_open_file() {
     assert!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .import_target
             .is_none()

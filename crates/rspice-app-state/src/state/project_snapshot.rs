@@ -80,7 +80,7 @@ impl ProjectSnapshot {
         // Every project reaches the application through here, so this is
         // where the retired project-wide Verilog-A bundle becomes a cell
         // view. What it created is reported with the load's other repairs.
-        if let Some(notice) = super::workspace::retire_code_workspace_veriloga(
+        if let Some(notice) = super::workspace::move_project_wide_veriloga_into_its_cell(
             &mut file.workspace,
             &mut file.libraries,
         ) {

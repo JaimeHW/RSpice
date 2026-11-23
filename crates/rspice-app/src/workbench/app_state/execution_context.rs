@@ -51,7 +51,7 @@ impl AppState {
         self.code.netlist = Default::default();
         *self.model.netlist_artifacts = Default::default();
         *self.runs.manual_run = Default::default();
-        self.code.code_workspace = Default::default();
+        self.code.source_editing = Default::default();
         self.code.netlist_open_documents.clear();
         self.results.clear_design_scoped(&self.model.preferences);
         self.model.design_checks.drc_results = None;

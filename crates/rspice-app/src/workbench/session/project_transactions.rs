@@ -1658,7 +1658,7 @@ pub(crate) fn void_veriloga_evidence(
     state: &mut AppState,
     sources: &[rspice_app_state::state::ProjectSourceId],
 ) {
-    let veriloga = &mut state.code.code_workspace.veriloga;
+    let veriloga = &mut state.code.source_editing.veriloga;
     let names_a_moved_source = veriloga
         .receipt
         .as_ref()

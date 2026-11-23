@@ -41,7 +41,7 @@ fn has_ac_analysis(setup: &rspice_simulation_contract::setup_state::SimulationSe
 
 /// Write `content` as the project-wide Verilog-A source, the code-workspace
 /// source a project-wide edit reaches, creating it the first time.
-fn edit_code_workspace_source(state: &mut ServicesHost, content: &str) {
+fn edit_project_wide_source(state: &mut ServicesHost, content: &str) {
     let project = &mut state.model.workspace.content;
     if project.project_sources.get().is_some() {
         project.replace_project_source(content.to_owned()).unwrap();
@@ -65,7 +65,7 @@ fn edit_code_workspace_source(state: &mut ServicesHost, content: &str) {
 fn code_document_overlay_copies_project_sources_atomically() {
     let mut state = ServicesHost::default();
     let mut target = snapshot(&state).unwrap();
-    edit_code_workspace_source(&mut state, "module edited; endmodule\n");
+    edit_project_wide_source(&mut state, "module edited; endmodule\n");
     let working = snapshot(&state).unwrap();
 
     target
@@ -85,7 +85,7 @@ fn code_sources_change_generated_netlist_and_execution_identity() {
     let mut state = ServicesHost::default();
     let before = generated_netlist_input_digest(&state).unwrap();
 
-    edit_code_workspace_source(&mut state, "module edited; endmodule\n");
+    edit_project_wide_source(&mut state, "module edited; endmodule\n");
 
     assert_ne!(generated_netlist_input_digest(&state).unwrap(), before);
 }

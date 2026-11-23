@@ -26,7 +26,7 @@ use crate::workbench::app::actions::veriloga_placement::{
 };
 use crate::workbench::app::actions::veriloga_symbol::update_active_veriloga_symbol_in;
 use crate::workbench::code::commands::VerilogAStripRequest;
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::source_editing::{
     EditorFindings, SourceEditingState, SourceEditorLanguage, show_veriloga_document_versioned,
 };
 
@@ -38,16 +38,16 @@ const EDITOR_SCROLLBAR_INSET: f32 = 14.0;
 /// page's context holds, so they are the answers the editor gets. The page
 /// publishes it again as it draws it.
 pub fn prepare(cx: &mut Cx<'_, SourceFeature>) {
-    use crate::workbench::documents::code_workspace::{
+    use crate::workbench::documents::source_editing::{
         active_veriloga_file_path, selected_veriloga_source_in, viewed_veriloga_header,
     };
 
     let Ok(selected) = selected_veriloga_source_in(cx.model) else {
         return;
     };
-    let active_path = active_veriloga_file_path(&cx.state.code_workspace, &selected);
+    let active_path = active_veriloga_file_path(&cx.state.source_editing, &selected);
     let header = viewed_veriloga_header(
-        &cx.state.code_workspace.veriloga,
+        &cx.state.source_editing.veriloga,
         selected.bundle().id(),
         &active_path,
     );
@@ -55,7 +55,7 @@ pub fn prepare(cx: &mut Cx<'_, SourceFeature>) {
         header.map_or_else(|| active_path.clone(), |(identity, _)| identity.to_owned());
     let editor = page_editor(
         cx.model,
-        &cx.state.code_workspace,
+        &cx.state.source_editing,
         cx.platform,
         &selected,
         &shown_path,
@@ -84,7 +84,7 @@ pub fn source_menu_open(ctx: &egui::Context, wb: &WorkbenchSession) -> bool {
 /// beside the module is TOML; its sources, and a built-in header read in
 /// place of one, are Verilog-A.
 fn editor_language(
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::source_editing::SelectedVerilogASource,
     active_path: &str,
     header_shown: bool,
 ) -> SourceEditorLanguage {
@@ -101,17 +101,17 @@ fn page_editor(
     model: &Model,
     code: &SourceEditingState,
     platform: &PlatformState,
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::source_editing::SelectedVerilogASource,
     shown_path: &str,
     editor_language: SourceEditorLanguage,
     editable: bool,
 ) -> ActiveSourceEditor {
     let bundle_id = selected.bundle().id();
     ActiveSourceEditor {
-        id: crate::workbench::documents::code_workspace::source_editor_id(bundle_id, shown_path),
+        id: crate::workbench::documents::source_editing::source_editor_id(bundle_id, shown_path),
         // A built-in header is read here whatever the bundle allows.
         editable: editable
-            && crate::workbench::documents::code_workspace::source_bundle_document_is_editable_in(
+            && crate::workbench::documents::source_editing::source_bundle_document_is_editable_in(
                 model, code, platform, bundle_id, shown_path,
             ),
         // The build profile beside the module is TOML, which the language
@@ -141,7 +141,7 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     handle_veriloga_file_drop(ui.ctx(), cx);
     let t = Tokens::get(ui.ctx());
     let selected =
-        crate::workbench::documents::code_workspace::selected_veriloga_source_in(cx.model);
+        crate::workbench::documents::source_editing::selected_veriloga_source_in(cx.model);
     let mut pressed = None;
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
@@ -155,14 +155,14 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
                 return;
             }
         };
-        let active_path = crate::workbench::documents::code_workspace::active_veriloga_file_path(
-            &cx.state.code_workspace,
+        let active_path = crate::workbench::documents::source_editing::active_veriloga_file_path(
+            &cx.state.source_editing,
             &selected,
         );
         // A built-in header the navigator opened is read in this same well,
         // in place of the file, and never edited.
-        let header = crate::workbench::documents::code_workspace::viewed_veriloga_header(
-            &cx.state.code_workspace.veriloga,
+        let header = crate::workbench::documents::source_editing::viewed_veriloga_header(
+            &cx.state.source_editing.veriloga,
             selected.bundle().id(),
             &active_path,
         );
@@ -230,7 +230,7 @@ pub fn place_offered_device(
     ctx: &egui::Context,
 ) -> Result<(), String> {
     let (target, binding) =
-        take_offered_veriloga_placement(&mut cx.state.code_workspace.veriloga.receipt, cx.model)?;
+        take_offered_veriloga_placement(&mut cx.state.source_editing.veriloga.receipt, cx.model)?;
     cx.wb.outbox.push(VerilogAStripRequest::Place {
         target,
         binding: Box::new(binding),
@@ -254,9 +254,9 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, cx: &mut Cx<'_, SourceFeature>
         .map(dropped_source)
         .collect::<Result<Vec<_>, _>>()
         .and_then(|sources| {
-            crate::workbench::documents::code_workspace::import_dropped_veriloga_sources(
+            crate::workbench::documents::source_editing::import_dropped_veriloga_sources(
                 cx.model,
-                &mut cx.state.code_workspace.veriloga,
+                &mut cx.state.source_editing.veriloga,
                 sources,
             )
         });
@@ -272,7 +272,7 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, cx: &mut Cx<'_, SourceFeature>
 /// One dropped file's name, text and folder.
 fn dropped_source(
     file: &egui::DroppedFile,
-) -> Result<crate::workbench::documents::code_workspace::PickedSource, String> {
+) -> Result<crate::workbench::documents::source_editing::PickedSource, String> {
     let name = (!file.name.trim().is_empty())
         .then(|| file.name.clone())
         .or_else(|| {
@@ -308,7 +308,7 @@ fn dropped_source(
     }
     let contents =
         String::from_utf8(bytes).map_err(|error| format!("{name} is not valid UTF-8: {error}"))?;
-    Ok(crate::workbench::documents::code_workspace::PickedSource {
+    Ok(crate::workbench::documents::source_editing::PickedSource {
         folder: file
             .path
             .as_deref()
@@ -324,7 +324,7 @@ fn dropped_source(
 fn source_editor(
     ui: &mut Ui,
     cx: &mut Cx<'_, SourceFeature>,
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::source_editing::SelectedVerilogASource,
     active_path: &str,
     source: &mut String,
     // `None` when the source changed after its last check.
@@ -358,15 +358,15 @@ fn source_editor(
     );
     let messages = cx.wb.messages();
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    if cx.state.code_workspace.veriloga.pending.is_some() {
+    if cx.state.source_editing.veriloga.pending.is_some() {
         // The strip counts the seconds of a running compile.
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
     }
     // Neutral text, and a mark only where the reader has to act. A clean
     // compile leaves the corner empty and gives the whole row to the path.
-    let status_left = crate::workbench::documents::code_workspace::veriloga_compile_status(
-        &cx.state.code_workspace.veriloga,
+    let status_left = crate::workbench::documents::source_editing::veriloga_compile_status(
+        &cx.state.source_editing.veriloga,
         cx.model.workspace.content.project.id(),
         selected,
         messages,
@@ -424,7 +424,7 @@ fn source_editor(
     let pressed = interface_strip(ui, cx, selected);
     let editor = page_editor(
         cx.model,
-        &cx.state.code_workspace,
+        &cx.state.source_editing,
         cx.platform,
         selected,
         active_path,
@@ -463,11 +463,11 @@ fn source_editor(
                         .map(crate::state::ProjectSourceFile::logical_path),
                 )
                 .map(move |path| {
-                    crate::workbench::documents::code_workspace::source_editor_id(bundle.id(), path)
+                    crate::workbench::documents::source_editing::source_editor_id(bundle.id(), path)
                 })
         })
         .collect::<Vec<_>>();
-    crate::workbench::documents::code_workspace::release_closed_code_editors(
+    crate::workbench::documents::source_editing::release_closed_code_editors(
         ui.ctx(),
         "workbench.veriloga.source",
         &open,
@@ -492,7 +492,7 @@ fn source_editor(
                 &include_files,
             );
             if editable && interaction.changed {
-                match crate::workbench::documents::code_workspace::replace_selected_veriloga_file(
+                match crate::workbench::documents::source_editing::replace_selected_veriloga_file(
                     &mut SourceFeature::workspace_parts(cx),
                     selected,
                     active_path,
@@ -506,7 +506,7 @@ fn source_editor(
                         // The editor goes back to the source as it is stored.
                         crate::workbench::documents::virtual_text_editor::resynchronize(
                             ui.ctx(),
-                            crate::workbench::documents::code_workspace::source_editor_id(
+                            crate::workbench::documents::source_editing::source_editor_id(
                                 selected.bundle().id(),
                                 active_path,
                             ),
@@ -541,13 +541,13 @@ fn source_editor(
     // the cell view in front of the reader.
     let bundle_id = selected.bundle().id();
     if let Some(step) = interaction.unanswered_history {
-        match cx.state.code_workspace.source_edit_history.step(
+        match cx.state.source_editing.source_edit_history.step(
             &mut cx.model.workspace.content,
             bundle_id,
             step,
             cx.wb.messages(),
         ) {
-            Ok(true) => crate::workbench::documents::code_workspace::invalidate_veriloga_evidence(
+            Ok(true) => crate::workbench::documents::source_editing::invalidate_veriloga_evidence(
                 &mut SourceFeature::workspace_parts(cx),
                 bundle_id,
             ),
@@ -560,7 +560,7 @@ fn source_editor(
         cx.wb,
         page_editor(
             cx.model,
-            &cx.state.code_workspace,
+            &cx.state.source_editing,
             cx.platform,
             selected,
             active_path,
@@ -568,15 +568,15 @@ fn source_editor(
             editable,
         ),
     );
-    cx.state.code_workspace.source_carets.insert(
+    cx.state.source_editing.source_carets.insert(
         (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,
     );
     if editor_language == SourceEditorLanguage::VerilogA {
         let project_id = cx.model.workspace.content.project.id();
-        crate::workbench::documents::code_workspace::drive_veriloga_live_check(
+        crate::workbench::documents::source_editing::drive_veriloga_live_check(
             ui.ctx(),
-            &mut cx.state.code_workspace.veriloga,
+            &mut cx.state.source_editing.veriloga,
             project_id,
             selected,
         );
@@ -584,18 +584,18 @@ fn source_editor(
     let selection_key = (bundle_id, active_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
         cx.state
-            .code_workspace
+            .source_editing
             .source_selections
             .insert(selection_key, range);
     } else {
         cx.state
-            .code_workspace
+            .source_editing
             .source_selections
             .remove(&selection_key);
     }
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
-    ) && let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
+    ) && let Err(error) = crate::workbench::documents::source_editing::format_language_document(
         &mut SourceFeature::workspace_parts(cx),
         bundle_id,
         active_path,
@@ -613,17 +613,17 @@ fn source_editor(
 fn interface_strip(
     ui: &mut Ui,
     cx: &Cx<'_, SourceFeature>,
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::source_editing::SelectedVerilogASource,
 ) -> Option<InterfaceAction> {
     use crate::workbench::app_state::model::interface_mismatch_detail;
-    use crate::workbench::documents::code_workspace::{
+    use crate::workbench::documents::source_editing::{
         VerilogAInterfaceFinding, interface_finding, symbol_drift_text, veriloga_receipt,
     };
 
     let reference = selected.view();
     let t = Tokens::get(ui.ctx());
     let messages = cx.wb.messages();
-    let veriloga = &cx.state.code_workspace.veriloga;
+    let veriloga = &cx.state.source_editing.veriloga;
     let receipt = veriloga_receipt(veriloga, cx.model.workspace.content.project.id(), selected);
     let (text, tone, detail, action) = match interface_finding(veriloga, receipt, reference) {
         Some(VerilogAInterfaceFinding::SchematicMismatch { schematic, module }) => (
@@ -764,10 +764,10 @@ enum StripAction {
 
 fn current_diagnostics(
     cx: &Cx<'_, SourceFeature>,
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+    selected: &crate::workbench::documents::source_editing::SelectedVerilogASource,
 ) -> Option<std::sync::Arc<SourceDiagnosticCollection>> {
-    crate::workbench::documents::code_workspace::veriloga_current_diagnostics(
-        &cx.state.code_workspace.veriloga,
+    crate::workbench::documents::source_editing::veriloga_current_diagnostics(
+        &cx.state.source_editing.veriloga,
         cx.model.workspace.content.project.id(),
         selected,
     )

@@ -72,7 +72,7 @@ impl ProjectFile {
                 self.workspace.added_lines = working.workspace.added_lines.clone();
                 self.workspace
                     .project_sources
-                    .synchronize_code_workspace_bundles_from(&working.workspace.project_sources)
+                    .synchronize_project_wide_bundles_from(&working.workspace.project_sources)
                     .map_err(|error| error.to_string())?;
             }
         }

@@ -14,8 +14,8 @@ use rspice_app_code::workbench::surfaces::netlist::{
 /// finding of the deck's own file counts though it names that file.
 #[test]
 fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
-    use rspice_app_code::workbench::documents::code_workspace::{ProblemStep, queue_problem_step};
     use rspice_app_code::workbench::documents::netlist_document;
+    use rspice_app_code::workbench::documents::source_editing::{ProblemStep, queue_problem_step};
     use rspice_app_state::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
     use rspice_vocabulary::diagnostics::DiagnosticSeverity;
 
@@ -67,7 +67,7 @@ fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
                     ui,
                     &mut state.model,
                     &mut state.code.netlist,
-                    &state.code.code_workspace.include_resolutions,
+                    &state.code.source_editing.include_resolutions,
                     &state.runs,
                     &mut state.workbench,
                 );

@@ -202,7 +202,7 @@ impl User {
     /// reported.
     fn caret(&self) -> (usize, usize) {
         let selected =
-            rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+            rspice_app_code::workbench::documents::source_editing::selected_veriloga_source_in(
                 &self.app.state.model,
             )
             .expect("a Verilog-A view is open");
@@ -216,7 +216,7 @@ impl User {
             .app
             .state
             .code
-            .code_workspace
+            .source_editing
             .source_carets
             .get(&(selected.bundle().id(), path))
             .expect("the editor reported its caret");
@@ -244,7 +244,7 @@ impl User {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_was_written() {
-    use rspice_app_code::workbench::documents::code_workspace::SourceEditorSeverity;
+    use rspice_app_code::workbench::documents::source_editing::SourceEditorSeverity;
     use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing;
 
     let (mut user, _, _) = new_device("opamp_bhv", ["inp inn", "out", "vdd vss"]);
@@ -252,7 +252,7 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
     user.settle();
     compile(&mut user);
 
-    let veriloga = &user.app.state.code.code_workspace.veriloga;
+    let veriloga = &user.app.state.code.source_editing.veriloga;
     assert!(
         veriloga.last_failure.is_empty(),
         "a valid module compiles: {:#?}",
@@ -300,13 +300,13 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
     );
     user.expect("Information at line 30, column 36: Denominator can reach zero");
     let selected =
-        rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+        rspice_app_code::workbench::documents::source_editing::selected_veriloga_source_in(
             &user.app.state.model,
         )
         .expect("the module is open");
     assert_eq!(
-        rspice_app_code::workbench::documents::code_workspace::veriloga_compile_status(
-            &user.app.state.code.code_workspace.veriloga,
+        rspice_app_code::workbench::documents::source_editing::veriloga_compile_status(
+            &user.app.state.code.source_editing.veriloga,
             user.app.state.model.workspace.content.project.id(),
             &selected,
             user.app.state.workbench.messages(),
@@ -330,7 +330,7 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
     super::veriloga_interface_tests::edit_source(&mut user.app, &broken);
     user.settle();
     compile(&mut user);
-    let failure = std::sync::Arc::clone(&user.app.state.code.code_workspace.veriloga.last_failure);
+    let failure = std::sync::Arc::clone(&user.app.state.code.source_editing.veriloga.last_failure);
     let mut errors = failure
         .iter()
         .filter(|diagnostic| diagnostic.severity == SourceEditorSeverity::Error)
@@ -375,7 +375,7 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
 
     // F8 steps on through the document's findings and wraps; Shift+F8 steps
     // back.
-    let path = rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+    let path = rspice_app_code::workbench::documents::source_editing::selected_veriloga_source_in(
         &user.app.state.model,
     )
     .expect("a Verilog-A view is open")
@@ -418,14 +418,14 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     super::veriloga_interface_tests::edit_source(&mut user.app, &broken);
     user.settle();
     compile(&mut user);
-    let path = rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+    let path = rspice_app_code::workbench::documents::source_editing::selected_veriloga_source_in(
         &user.app.state.model,
     )
     .expect("a Verilog-A view is open")
     .document()
     .logical_path()
     .to_owned();
-    let failure = std::sync::Arc::clone(&user.app.state.code.code_workspace.veriloga.last_failure);
+    let failure = std::sync::Arc::clone(&user.app.state.code.source_editing.veriloga.last_failure);
     let located = failure.view(Some(&path)).located();
     let count = located.len();
     let (code, gbww) = located
@@ -519,7 +519,7 @@ fn a_pause_in_writing_checks_a_long_module_and_finds_the_error_typed_into_it() {
         user.app
             .state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .last_failure
             .is_empty()
@@ -527,7 +527,7 @@ fn a_pause_in_writing_checks_a_long_module_and_finds_the_error_typed_into_it() {
     let checking = |app: &RSpiceApp| {
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .live_check
             .running
@@ -552,7 +552,7 @@ fn a_pause_in_writing_checks_a_long_module_and_finds_the_error_typed_into_it() {
             user.app
                 .state
                 .code
-                .code_workspace
+                .source_editing
                 .veriloga
                 .pending
                 .is_none(),
@@ -596,7 +596,7 @@ const CMC_ROOTS: [(&str, &str, &str); 4] = [
 /// the library shelf on the top schematic, each model one cell of its own.
 #[test]
 fn compact_models_import_from_their_source_folders_compile_and_place() {
-    use rspice_app_code::workbench::documents::code_workspace;
+    use rspice_app_code::workbench::documents::source_editing;
     use rspice_app_state::state::workspace::ImportedInclude;
 
     let (mut user, top) = new_project();
@@ -606,7 +606,7 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         let text = std::fs::read_to_string(folder.join(root)).expect("the root is readable");
         user.app
             .execute_command_key(SourceCommand::ImportVerilogA.key());
-        code_workspace::complete_veriloga_files_pick(
+        source_editing::complete_veriloga_files_pick(
             &mut user.app.source_editing_parts(),
             &[(root, &text)],
             Some(&folder),
@@ -616,7 +616,7 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
             .app
             .state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .import_form
             .clone()
@@ -642,7 +642,7 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         );
 
         compile(&mut user);
-        let veriloga = &user.app.state.code.code_workspace.veriloga;
+        let veriloga = &user.app.state.code.source_editing.veriloga;
         assert!(
             veriloga.receipt.is_some(),
             "{root} compiles: {:?}",
@@ -765,14 +765,14 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     user.app.state.workbench.activate(Workspace::Design);
     user.settle();
     compile(&mut user);
-    let veriloga = &user.app.state.code.code_workspace.veriloga;
+    let veriloga = &user.app.state.code.source_editing.veriloga;
     assert!(
         veriloga.receipt.is_some(),
         "the copy compiles: {:?}",
         veriloga.last_failure
     );
     let selected =
-        rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+        rspice_app_code::workbench::documents::source_editing::selected_veriloga_source_in(
             &user.app.state.model,
         )
         .expect("the copy is selected");

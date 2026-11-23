@@ -37,7 +37,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let receipt =
         compile_project_bundle_receipt(state.model.workspace.content.project.id(), bundle, None)
             .expect("compile project Verilog-A source");
-    state.code.code_workspace.veriloga.receipt = Some(receipt);
+    state.code.source_editing.veriloga.receipt = Some(receipt);
 
     let bundle = state
         .model
@@ -59,7 +59,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         &state.model.workspace.content.project_sources,
         state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .receipt
             .as_ref()
@@ -83,7 +83,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         &state.model.workspace.content.project_sources,
         state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .receipt
             .as_ref()

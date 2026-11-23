@@ -15,10 +15,10 @@
 
 use rspice_core::library::LibSectionSummary;
 
-use crate::workbench::documents::code_workspace::SourceEditingState;
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, active_netlist_source_is_editable_in,
 };
+use crate::workbench::documents::source_editing::SourceEditingState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 /// Bring the retained-section cache level with the active closure.
@@ -30,13 +30,13 @@ use rspice_app_state::workbench::app_state::model::Model;
 pub(super) fn refresh(
     model: &Model,
     netlist: &NetlistDocumentState,
-    code_workspace: &mut SourceEditingState,
+    source_editing: &mut SourceEditingState,
 ) {
     let Some(document) = super::active_canonical_netlist_document(model, netlist) else {
-        code_workspace.include_lib_sections.clear();
+        source_editing.include_lib_sections.clear();
         return;
     };
-    let cache = &code_workspace.include_lib_sections;
+    let cache = &source_editing.include_lib_sections;
     let mut live = std::collections::BTreeSet::new();
     let mut computed = Vec::new();
     for dependency in document.dependencies() {
@@ -61,7 +61,7 @@ pub(super) fn refresh(
     if computed.is_empty() && live.len() == cache.len() {
         return;
     }
-    let cache = &mut code_workspace.include_lib_sections;
+    let cache = &mut source_editing.include_lib_sections;
     cache.retain(|locator, _| live.contains(locator));
     cache.extend(computed);
 }
@@ -70,10 +70,10 @@ pub(super) fn refresh(
 /// order. A locator with no retained bytes, or one whose library declares
 /// none, offers nothing.
 pub(super) fn declared(
-    code_workspace: &SourceEditingState,
+    source_editing: &SourceEditingState,
     locator: &str,
 ) -> Vec<LibSectionSummary> {
-    code_workspace
+    source_editing
         .include_lib_sections
         .get(locator)
         .map_or_else(Vec::new, |(_, sections)| sections.to_vec())
@@ -281,29 +281,29 @@ mod tests {
         refresh(
             &harness.model,
             &harness.state.netlist,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
         );
 
         assert_eq!(
-            declared(&harness.state.code_workspace, LOCATOR)
+            declared(&harness.state.source_editing, LOCATOR)
                 .iter()
                 .map(|section| section.name.clone())
                 .collect::<Vec<_>>(),
             ["tt", "ff"],
             "the row's alternatives come from the bytes the closure retained"
         );
-        let first = harness.state.code_workspace.include_lib_sections[LOCATOR]
+        let first = harness.state.source_editing.include_lib_sections[LOCATOR]
             .1
             .clone();
         refresh(
             &harness.model,
             &harness.state.netlist,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
         );
         assert!(
             std::sync::Arc::ptr_eq(
                 &first,
-                &harness.state.code_workspace.include_lib_sections[LOCATOR].1
+                &harness.state.source_editing.include_lib_sections[LOCATOR].1
             ),
             "unchanged bytes must not be parsed a second time"
         );
@@ -313,9 +313,9 @@ mod tests {
         refresh(
             &harness.model,
             &harness.state.netlist,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
         );
-        assert!(harness.state.code_workspace.include_lib_sections.is_empty());
+        assert!(harness.state.source_editing.include_lib_sections.is_empty());
     }
 
     #[test]

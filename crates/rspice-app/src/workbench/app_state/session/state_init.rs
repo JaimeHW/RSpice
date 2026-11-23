@@ -134,7 +134,7 @@ mod tests {
     fn a_new_session_compiles_no_veriloga_source() {
         let state = super::default_app_state();
         assert!(
-            state.code.code_workspace.veriloga.receipt.is_none(),
+            state.code.source_editing.veriloga.receipt.is_none(),
             "a new project has no Verilog-A source, so startup compiles none"
         );
     }

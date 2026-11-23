@@ -11,12 +11,12 @@ use super::*;
 use egui::Ui;
 
 use super::source_bundle::{RailAction, SourceRail};
-use crate::workbench::documents::code_workspace;
+use crate::workbench::documents::source_editing;
 
 /// Draw the rail of the Verilog-A view the model has open, and return what
 /// the reader asked of it.
 pub(in crate::workbench) fn show(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAction> {
-    if let Err(error) = code_workspace::selected_veriloga_source_in(parts.model) {
+    if let Err(error) = source_editing::selected_veriloga_source_in(parts.model) {
         // The editor states the same refusal; the panel must not list the
         // files of a bundle the view does not own.
         empty_navigator_row(ui, &error);

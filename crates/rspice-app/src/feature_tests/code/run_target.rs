@@ -256,7 +256,7 @@ fn run_finds_direct_and_transitive_includes_where_they_are() {
     press_run(&mut app);
     assert!(deck_run_started(&app));
 
-    let resolutions = &app.state.code.code_workspace.include_resolutions;
+    let resolutions = &app.state.code.source_editing.include_resolutions;
     let canonical = |path: &std::path::Path| std::fs::canonicalize(path).expect("fixture path");
     assert_eq!(
         resolutions.keys().map(String::as_str).collect::<Vec<_>>(),
@@ -302,7 +302,7 @@ fn run_distinguishes_inline_lib_sections_from_external_lib_paths() {
     assert_eq!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .include_resolutions
             .keys()
             .map(String::as_str)
@@ -356,7 +356,7 @@ fn run_resolves_an_include_only_a_library_folder_holds() {
     let resolution = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .include_resolutions
         .get("device.inc")
         .expect("the run retains where the include resolved");

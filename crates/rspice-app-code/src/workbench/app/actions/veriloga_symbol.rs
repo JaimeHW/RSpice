@@ -10,7 +10,7 @@
 use crate::state::CellViewRef;
 use crate::workbench::WorkbenchSession;
 use crate::workbench::app_state::{Model, publish_symbol_definition_candidate};
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::source_editing::{
     VerilogACellSymbol, reconciled_symbol, symbol_standing,
 };
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;

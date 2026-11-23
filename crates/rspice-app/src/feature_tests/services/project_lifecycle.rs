@@ -110,7 +110,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
 
 /// Write `content` as the project-wide Verilog-A source, the code-workspace
 /// source a project-wide edit reaches, creating it the first time.
-fn edit_code_workspace_source(state: &mut AppState, content: &str) {
+fn edit_project_wide_source(state: &mut AppState, content: &str) {
     let project = &mut state.model.workspace.content;
     if project.project_sources.get().is_some() {
         project.replace_project_source(content.to_owned()).unwrap();
@@ -512,10 +512,10 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
 }
 
 #[test]
-fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() {
+fn reverting_new_cell_view_removes_its_source_without_touching_the_project_wide_source() {
     let mut state = AppState::default();
-    edit_code_workspace_source(&mut state, "module workspace; endmodule\n");
-    let code_workspace = state.model.workspace.content.project_sources.clone();
+    edit_project_wide_source(&mut state, "module workspace; endmodule\n");
+    let project_wide = state.model.workspace.content.project_sources.clone();
     let baseline = snapshot(&state).expect("baseline");
     let (reference, source_id) = insert_cell_veriloga_source(
         &mut state,
@@ -542,7 +542,7 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
     );
     assert_eq!(
         state.model.workspace.content.project_sources.get(),
-        code_workspace.get()
+        project_wide.get()
     );
     assert!(
         state
@@ -565,7 +565,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
         .project_lifecycle
         .accept_project(baseline.clone(), None);
     state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
-    edit_code_workspace_source(&mut state, "module edited; endmodule\n");
+    edit_project_wide_source(&mut state, "module edited; endmodule\n");
     assert!(state.model.workspace.content.project_sources_dirty);
 
     revert_document(&mut state, ProjectDocumentId::NetlistSource).unwrap();

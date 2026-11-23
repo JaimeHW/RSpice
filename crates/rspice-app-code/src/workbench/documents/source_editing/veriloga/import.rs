@@ -14,7 +14,7 @@ use crate::state::{
     LibraryManager, MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle, ProjectSourceFile,
     ProjectSourceId,
 };
-use crate::workbench::documents::code_workspace::SourceEditingParts;
+use crate::workbench::documents::source_editing::SourceEditingParts;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::SourceEditingState;
@@ -534,7 +534,7 @@ pub fn request_veriloga_source_replacement(
         return Err("A Verilog-A/AMS file is already being chosen.".to_owned());
     }
     let selected = super::selected_veriloga_source_in(parts.model)?;
-    if !crate::workbench::documents::code_workspace::source_bundle_document_is_editable_in(
+    if !crate::workbench::documents::source_editing::source_bundle_document_is_editable_in(
         parts.model,
         parts.code,
         parts.platform,

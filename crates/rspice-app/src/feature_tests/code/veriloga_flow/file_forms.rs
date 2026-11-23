@@ -6,14 +6,14 @@ use egui::Key;
 
 use super::language_tools::{NONE, op_amp, type_text};
 use super::*;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_workbench::workbench::localization::MessageId;
 
 const NEW_FORM: &str = "New Verilog-A file";
 
 /// The bundle of the view in front.
 fn bundle(user: &User) -> rspice_app_state::state::ProjectSourceBundle {
-    code_workspace::selected_veriloga_source_in(&user.app.state.model)
+    source_editing::selected_veriloga_source_in(&user.app.state.model)
         .expect("the open view")
         .bundle()
         .clone()
@@ -24,7 +24,7 @@ fn selected(user: &User) -> String {
     user.app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .selected_file
         .as_ref()
@@ -310,7 +310,7 @@ fn revision_history_from_a_file_rows_menu_restores_the_revision_chosen() {
         "the revision restored has no stage.va"
     );
     assert!(
-        user.app.state.code.code_workspace.source_history.is_none(),
+        user.app.state.code.source_editing.source_history.is_none(),
         "a restore closes the history"
     );
 }

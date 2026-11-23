@@ -74,7 +74,7 @@ fn bundle(harness: &SourceHarness) -> &ProjectSourceBundle {
 
 fn open(harness: &mut SourceHarness, action: SourceFileAction, path: &str) {
     let id = bundle(harness).id();
-    code_workspace::open_source_file_dialog_in_bundle(
+    source_editing::open_source_file_dialog_in_bundle(
         &mut SourceFeature::workspace_parts(&mut harness.cx()),
         id,
         action,
@@ -88,7 +88,7 @@ fn open(harness: &mut SourceHarness, action: SourceFileAction, path: &str) {
 fn judged(harness: &mut SourceHarness, name: &str) -> NameCheck {
     let draft = harness
         .state
-        .code_workspace
+        .source_editing
         .source_file_dialog
         .as_mut()
         .expect("a form is open");

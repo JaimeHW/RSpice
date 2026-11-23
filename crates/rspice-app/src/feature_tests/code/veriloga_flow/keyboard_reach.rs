@@ -5,7 +5,7 @@ use egui::{Key, Modifiers};
 
 use super::language_tools::{NONE, caret_after, op_amp, source};
 use super::*;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 
 const COPY: &str = "Copy";
 const SHIFT: Modifiers = Modifiers {
@@ -15,7 +15,7 @@ const SHIFT: Modifiers = Modifiers {
 
 fn file_row(user: &User) -> String {
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     selected.document().logical_path().to_owned()
 }
 

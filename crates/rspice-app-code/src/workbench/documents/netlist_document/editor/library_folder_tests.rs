@@ -48,7 +48,7 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
     validate_visible_source_in(
         &harness.model,
         &mut harness.state.netlist,
-        &harness.state.code_workspace.include_resolutions,
+        &harness.state.source_editing.include_resolutions,
         revision,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
@@ -71,7 +71,7 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
             ui,
             &harness.model,
             &mut harness.state.netlist,
-            &harness.state.code_workspace.include_resolutions,
+            &harness.state.source_editing.include_resolutions,
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
             ),

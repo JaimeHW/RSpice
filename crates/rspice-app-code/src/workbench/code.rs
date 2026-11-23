@@ -33,11 +33,11 @@ use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::netlist_document::cross_probe;
+use crate::workbench::documents::source_editing::{
     ProblemStep, SourceEditingParts, cancel_veriloga_compile, consume_veriloga_compile_request,
     poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
-use crate::workbench::documents::netlist_document::cross_probe;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -60,7 +60,7 @@ pub use source_menus::{
 impl Feature for SourceFeature {
     type State = SourceState;
     type Session = WorkbenchSession;
-    type Handles = crate::workbench::documents::code_workspace::SourceHandles;
+    type Handles = crate::workbench::documents::source_editing::SourceHandles;
     /// The source editor's right-click menu offers these, each greyed while
     /// the dispatcher would not run it.
     const MENU_AVAILABILITY: &'static [CommandKey] = &[
@@ -200,15 +200,15 @@ const DIALOGS: &[FeatureDialog<SourceFeature>] = &[
     FeatureDialog {
         key: DialogKey("code.source_document"),
         is_open: |code| {
-            code.code_workspace.source_document_dialog
-                || code.code_workspace.source_file_dialog.is_some()
-                || code.code_workspace.source_history.is_some()
+            code.source_editing.source_document_dialog
+                || code.source_editing.source_file_dialog.is_some()
+                || code.source_editing.source_history.is_some()
         },
         render: SourceFeature::render_source_document_dialog,
     },
     FeatureDialog {
         key: DialogKey("code.rename_symbol"),
-        is_open: |code| code.code_workspace.language_tools.is_some() || code.deck_rename.is_some(),
+        is_open: |code| code.source_editing.language_tools.is_some() || code.deck_rename.is_some(),
         render: SourceFeature::render_rename_symbol_form,
     },
     FeatureDialog {
@@ -218,12 +218,12 @@ const DIALOGS: &[FeatureDialog<SourceFeature>] = &[
     },
     FeatureDialog {
         key: DialogKey("code.veriloga_import"),
-        is_open: |code| code.code_workspace.veriloga.import_form.is_some(),
+        is_open: |code| code.source_editing.veriloga.import_form.is_some(),
         render: SourceFeature::render_veriloga_import_dialog,
     },
     FeatureDialog {
         key: DialogKey("code.veriloga_replace"),
-        is_open: |code| code.code_workspace.veriloga.replace_review.is_some(),
+        is_open: |code| code.source_editing.veriloga.replace_review.is_some(),
         render: SourceFeature::render_veriloga_replace_dialog,
     },
     FeatureDialog {
@@ -298,7 +298,7 @@ impl CommandSet for SourceCommand {
     /// code document: the deck and a Verilog-A cell view in Design.
     fn availability(self, reads: &Reads<'_, SourceFeature>) -> CommandAvailability {
         let model = reads.model;
-        let code = &reads.state.code_workspace;
+        let code = &reads.state.source_editing;
         let execution_active = model.simulation.execution.has_active_execution();
         let (enabled, reason) = match self {
             Self::NewVerilogADevice => (
@@ -476,7 +476,7 @@ impl CommandSet for SourceCommand {
                     netlist.generated_history.len().saturating_sub(1);
             }
             Self::CancelVerilogACompile => {
-                cancel_veriloga_compile(&mut cx.state.code_workspace, cx.wb);
+                cancel_veriloga_compile(&mut cx.state.source_editing, cx.wb);
             }
             // The focused editor's page takes the step as it draws.
             Self::NextProblem => cx.wb.outbox.push(ProblemStep::Next),
@@ -746,17 +746,17 @@ impl SourceFeature {
         // A source import records intent and completes from the frame loop.
         // It was driven from nowhere once, so a requested import stayed
         // pending forever and blocked every later one.
-        poll_veriloga_import(cx.model, &mut cx.state.code_workspace, cx.wb);
+        poll_veriloga_import(cx.model, &mut cx.state.source_editing, cx.wb);
         // A Verilog-A compile is published here for the same reason: its
         // result belongs to the bundle, not to whichever editor host happens
         // to be on screen when the worker answers.
-        poll_veriloga_compile(cx.model, &mut cx.state.code_workspace, cx.wb);
+        poll_veriloga_compile(cx.model, &mut cx.state.source_editing, cx.wb);
         let deck = crate::workbench::slots::code::manual_deck_in(&cx.state.netlist);
-        consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, deck, ctx);
+        consume_veriloga_compile_request(cx.model, &mut cx.state.source_editing, deck, ctx);
         // Where the open module's symbol stands is measured here, once per
         // library revision, so neither the editor nor the inspector parses it.
         refresh_symbol_standing(
-            &mut cx.state.code_workspace.veriloga,
+            &mut cx.state.source_editing.veriloga,
             &cx.model.library_manager,
             &cx.model.workspace.content.active_view,
             cx.model.workspace.content.active_view_type(),
@@ -783,7 +783,7 @@ impl SourceFeature {
             return;
         }
         cx.own.project_id = project_id;
-        cx.state.code_workspace = Default::default();
+        cx.state.source_editing = Default::default();
         cx.handles.run_controller.clear_prepared_run();
     }
 }
@@ -796,7 +796,7 @@ impl SourceFeature {
         cx: &'c mut Cx<'_, Self>,
     ) -> SourceEditingParts<'c> {
         SourceEditingParts {
-            code: &mut cx.state.code_workspace,
+            code: &mut cx.state.source_editing,
             netlist: &mut cx.state.netlist,
             model: &mut *cx.model,
             wb: &mut *cx.wb,
@@ -844,7 +844,7 @@ impl SourceFeature {
     fn render_veriloga_import_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         if veriloga_import::render_veriloga_import_dialog(
-            &mut cx.state.code_workspace.veriloga,
+            &mut cx.state.source_editing.veriloga,
             cx.model,
             &messages,
             ctx,
@@ -857,7 +857,7 @@ impl SourceFeature {
     fn render_veriloga_replace_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         if veriloga_import::render_veriloga_replace_dialog(
-            &mut cx.state.code_workspace.veriloga.replace_review,
+            &mut cx.state.source_editing.veriloga.replace_review,
             &messages,
             ctx,
         ) {
@@ -870,7 +870,7 @@ impl SourceFeature {
     fn render_source_document_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let code = &mut *cx.state;
         if let Some(request) = source_document::render_source_document_dialog(
-            &mut code.code_workspace,
+            &mut code.source_editing,
             &mut code.netlist,
             cx.model,
             cx.wb,
@@ -889,7 +889,7 @@ impl SourceFeature {
             return;
         }
         if source_language_tools::render_rename_symbol_form(
-            &mut cx.state.code_workspace,
+            &mut cx.state.source_editing,
             cx.model,
             cx.platform,
             ctx,

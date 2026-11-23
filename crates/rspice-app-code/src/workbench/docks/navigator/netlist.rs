@@ -23,8 +23,8 @@ use crate::state::{OutlineSection, OutlineSectionKind};
 use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::documents::code_workspace::SourceEditingState;
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
+use crate::workbench::documents::source_editing::SourceEditingState;
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
@@ -49,7 +49,7 @@ const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
 pub(crate) struct NetlistNavigator<'a> {
     pub(crate) model: &'a mut Model,
     pub(crate) netlist: &'a mut NetlistDocumentState,
-    pub(crate) code_workspace: &'a mut SourceEditingState,
+    pub(crate) source_editing: &'a mut SourceEditingState,
     pub(crate) outline_collapsed: &'a mut BTreeSet<OutlineSectionKind>,
     pub(crate) open_documents:
         &'a mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -104,14 +104,14 @@ pub(in crate::workbench) fn netlist(
         parts.model,
         parts.netlist,
     );
-    lib_sections::refresh(parts.model, parts.netlist, parts.code_workspace);
+    lib_sections::refresh(parts.model, parts.netlist, parts.source_editing);
     let projection = NetlistNavigatorProjection::from_index(
         &index,
         parts.filter,
         &root_label,
         parts.netlist.front.shows_generated(),
         parts.outline_collapsed,
-        &retained_include_facts(parts.model, parts.netlist, parts.code_workspace, messages),
+        &retained_include_facts(parts.model, parts.netlist, parts.source_editing, messages),
         messages,
     );
     let project_index = crate::workbench::documents::netlist_document::language::project_index_in(
@@ -284,7 +284,7 @@ pub(in crate::workbench) fn netlist(
                     // view's source: the row names the view and opens its tab
                     // in Design, the one place a module is edited.
                     if let Some(reference) =
-                        crate::workbench::documents::code_workspace::veriloga_dependency_view(
+                        crate::workbench::documents::source_editing::veriloga_dependency_view(
                             &parts.model.workspace,
                             &row.label,
                         )
@@ -1132,7 +1132,7 @@ fn section_catalog_text(
 pub(super) fn retained_include_facts(
     model: &Model,
     netlist: &NetlistDocumentState,
-    code_workspace: &SourceEditingState,
+    source_editing: &SourceEditingState,
     messages: MessageCatalog,
 ) -> Vec<IncludeRowFacts> {
     let project_paths = model.workspace.content.project.include_search_paths().len();
@@ -1196,7 +1196,7 @@ pub(super) fn retained_include_facts(
             .iter()
             .map(|dependency| {
                 let locator = dependency.requested_locator().to_owned();
-                let resolution = code_workspace.include_resolutions.get(&locator);
+                let resolution = source_editing.include_resolutions.get(&locator);
                 IncludeRowFacts {
                     line: None,
                     state: Some(match dependency.resolution() {
@@ -1222,7 +1222,7 @@ pub(super) fn retained_include_facts(
                             .next()
                             .map(|candidate| candidate.path().display().to_string())
                     }),
-                    sections: lib_sections::declared(code_workspace, &locator),
+                    sections: lib_sections::declared(source_editing, &locator),
                     locator,
                 }
             })

@@ -118,7 +118,7 @@ fn open_code_document(
     line: Option<usize>,
     column: Option<usize>,
 ) {
-    use rspice_app_code::workbench::documents::code_workspace;
+    use rspice_app_code::workbench::documents::source_editing;
     use rspice_app_state::state::ProjectSourceOwner;
 
     let owner = app
@@ -159,9 +159,9 @@ fn open_code_document(
         app.state.prompt(said(MessageId::ProblemRouteEditorHeld));
         return;
     }
-    if code_workspace::select_source_document(
+    if source_editing::select_source_document(
         &app.state.model.workspace,
-        &mut app.state.code.code_workspace,
+        &mut app.state.code.source_editing,
         logical_path,
     )
     .is_none()
@@ -171,9 +171,9 @@ fn open_code_document(
         return;
     }
     if let Some(line) = line {
-        code_workspace::reveal_source_location(
+        source_editing::reveal_source_location(
             ctx,
-            code_workspace::source_editor_id(bundle, logical_path),
+            source_editing::source_editor_id(bundle, logical_path),
             line,
             column.unwrap_or(1),
         );

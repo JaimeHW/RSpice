@@ -663,7 +663,7 @@ mod tests {
         .unwrap();
         harness
             .state
-            .code_workspace
+            .source_editing
             .source_file_dialog
             .as_mut()
             .unwrap()
@@ -681,7 +681,7 @@ mod tests {
         assert_eq!(
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .veriloga
                 .selected_file
                 .as_ref()
@@ -697,7 +697,7 @@ mod tests {
         assert_eq!(
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .source_history
                 .as_ref()
                 .map(|history| history.bundle_id),
@@ -722,7 +722,7 @@ mod tests {
         let editable = |harness: &SourceHarness, path: &str| {
             source_document_is_editable(
                 &harness.model,
-                &harness.state.code_workspace,
+                &harness.state.source_editing,
                 &harness.platform,
                 path,
             )
@@ -761,7 +761,7 @@ mod tests {
         .unwrap();
         harness
             .state
-            .code_workspace
+            .source_editing
             .source_file_dialog
             .as_mut()
             .unwrap()
@@ -779,7 +779,7 @@ mod tests {
         .unwrap();
         harness
             .state
-            .code_workspace
+            .source_editing
             .source_file_dialog
             .as_mut()
             .unwrap()
@@ -797,7 +797,7 @@ mod tests {
         .unwrap();
         harness
             .state
-            .code_workspace
+            .source_editing
             .source_file_dialog
             .as_mut()
             .unwrap()
@@ -815,7 +815,7 @@ mod tests {
         .unwrap();
         let duplicate = harness
             .state
-            .code_workspace
+            .source_editing
             .source_file_dialog
             .as_ref()
             .unwrap()
@@ -853,14 +853,14 @@ mod tests {
             .unwrap();
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .source_file_dialog
                 .as_mut()
                 .unwrap()
                 .proposed_path = path.to_owned();
             let result =
                 commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx()));
-            harness.state.code_workspace.source_file_dialog = None;
+            harness.state.source_editing.source_file_dialog = None;
             result
         };
         create(&mut harness, "Models/étage.va").expect("a new path is created");
@@ -939,7 +939,7 @@ mod tests {
 
         assert_eq!(verilog_a_bundle(&harness).root().content(), original);
         assert!(verilog_a_bundle(&harness).revision().get() > edited_revision.get());
-        assert!(harness.state.code_workspace.source_history.is_none());
+        assert!(harness.state.source_editing.source_history.is_none());
         assert!(harness.model.workspace.content.project_sources_dirty);
     }
 
@@ -998,6 +998,6 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("main file can't be deleted"), "{error}");
-        assert!(harness.state.code_workspace.source_file_dialog.is_none());
+        assert!(harness.state.source_editing.source_file_dialog.is_none());
     }
 }

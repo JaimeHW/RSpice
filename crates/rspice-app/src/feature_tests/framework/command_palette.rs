@@ -261,7 +261,7 @@ fn test_app() -> RSpiceApp {
         last_window_title: String::new(),
         symbol_library: None,
         simulation_controller: rspice_app_runs::simulation::controller::SimulationController::new(),
-        code: rspice_app_code::workbench::documents::code_workspace::SourceHandles { project_id },
+        code: rspice_app_code::workbench::documents::source_editing::SourceHandles { project_id },
         cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
             account: rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(),

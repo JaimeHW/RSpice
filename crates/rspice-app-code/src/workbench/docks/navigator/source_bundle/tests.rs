@@ -19,7 +19,7 @@ fn every_file_in_the_bundle_is_offered_and_selectable() {
         "the view's bundle carries its main file and the stage it includes"
     );
 
-    let root = active_path(&harness.model, &harness.state.code_workspace)
+    let root = active_path(&harness.model, &harness.state.source_editing)
         .expect("bundle root is the default document");
     let other = rows
         .iter()
@@ -27,10 +27,10 @@ fn every_file_in_the_bundle_is_offered_and_selectable() {
         .expect("a non-root file to select");
     let target = other.logical_path.clone();
 
-    select(&harness.model, &mut harness.state.code_workspace, &target);
+    select(&harness.model, &mut harness.state.source_editing, &target);
 
     assert_eq!(
-        active_path(&harness.model, &harness.state.code_workspace).as_deref(),
+        active_path(&harness.model, &harness.state.source_editing).as_deref(),
         Some(target.as_str())
     );
 }

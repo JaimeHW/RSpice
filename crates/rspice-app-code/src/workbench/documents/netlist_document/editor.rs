@@ -2117,7 +2117,7 @@ mod include_shadow_tests {
 
         let mut harness = harness();
         for dependency in processor.resolved_dependencies() {
-            harness.state.code_workspace.include_resolutions.insert(
+            harness.state.source_editing.include_resolutions.insert(
                 dependency.requested_path().to_owned(),
                 dependency.resolution().clone(),
             );
@@ -2129,7 +2129,7 @@ mod include_shadow_tests {
     fn a_shadowed_include_becomes_one_warning_bound_to_its_own_card() {
         let (root, harness) = shadowed_fixture("warned");
         let diagnostics = shadowed_include_diagnostics(
-            &harness.state.code_workspace.include_resolutions,
+            &harness.state.source_editing.include_resolutions,
             "shadow deck\n.include models.lib\n.end\n",
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
@@ -2167,9 +2167,9 @@ mod include_shadow_tests {
         processor
             .expand_content("shadow deck\n.include models.lib\n.end\n", &deck_path)
             .expect("the chain still resolves the include");
-        harness.state.code_workspace.include_resolutions.clear();
+        harness.state.source_editing.include_resolutions.clear();
         for dependency in processor.resolved_dependencies() {
-            harness.state.code_workspace.include_resolutions.insert(
+            harness.state.source_editing.include_resolutions.insert(
                 dependency.requested_path().to_owned(),
                 dependency.resolution().clone(),
             );
@@ -2177,7 +2177,7 @@ mod include_shadow_tests {
 
         assert!(
             shadowed_include_diagnostics(
-                &harness.state.code_workspace.include_resolutions,
+                &harness.state.source_editing.include_resolutions,
                 "shadow deck\n.include models.lib\n.end\n",
                 crate::workbench::MessageCatalog::new(
                     crate::workbench::UiTextLocale::EnglishUnitedStates

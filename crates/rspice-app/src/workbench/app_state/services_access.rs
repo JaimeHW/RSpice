@@ -257,7 +257,7 @@ fn revert_cell_view(
                 &reference.view,
             );
             if source_changed {
-                state.code.code_workspace.veriloga = Default::default();
+                state.code.source_editing.veriloga = Default::default();
             }
         }
         CellViewRevert::Restored { active } => {
@@ -269,7 +269,7 @@ fn revert_cell_view(
                 state.restore_active_schematic_from_workspace();
             }
             if project_lifecycle::revert_cell_view_sources(&mut state.model, baseline, reference)? {
-                state.code.code_workspace.veriloga = Default::default();
+                state.code.source_editing.veriloga = Default::default();
             }
         }
     }
@@ -550,20 +550,20 @@ fn restore_project_structure_preserving_documents(state: &mut AppState, baseline
     let removed = project_lifecycle::retain_project_view_sources(&mut state.model);
     if state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .receipt
         .as_ref()
         .is_some_and(|receipt| removed.contains(&receipt.compilation.token().bundle_id))
         || state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .pending
             .as_ref()
             .is_some_and(|pending| removed.contains(&pending.token.bundle_id))
     {
-        state.code.code_workspace.veriloga = Default::default();
+        state.code.source_editing.veriloga = Default::default();
     }
     state
         .model

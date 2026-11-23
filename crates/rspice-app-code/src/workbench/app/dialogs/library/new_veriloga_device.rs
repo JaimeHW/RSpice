@@ -46,8 +46,8 @@ use crate::state::{VerilogACompileReceipt, VerilogAPlacementHandoff};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::seed_veriloga_view;
-use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
-use crate::workbench::documents::code_workspace::{VerilogAWorkbenchState, writable_libraries};
+use crate::workbench::documents::source_editing::persist_global_veriloga_library;
+use crate::workbench::documents::source_editing::{VerilogAWorkbenchState, writable_libraries};
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// Draft for New Verilog-A device….

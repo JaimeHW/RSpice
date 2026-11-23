@@ -21,7 +21,7 @@ impl RSpiceApp {
         let state = &mut self.state;
         let imported = veriloga_import::publish_veriloga_import(
             &mut state.model,
-            &mut state.code.code_workspace.veriloga,
+            &mut state.code.source_editing.veriloga,
         )?;
         // A cell view is a Design document; the first module opens there.
         state.open_workspace_view(imported.first.clone());
@@ -36,13 +36,13 @@ impl RSpiceApp {
         let created = new_veriloga_device::publish_new_veriloga_device(
             &mut state.model,
             &mut state.code.new_veriloga_device,
-            &mut state.code.code_workspace.veriloga,
+            &mut state.code.source_editing.veriloga,
             &state.workbench.messages(),
         )?;
         // The module is a view of the cell, so it opens as a Design document.
         state.open_workspace_view(created.reference.clone());
         state.workbench.activate(Workspace::Design);
-        state.code.code_workspace.veriloga.receipt = Some(created.receipt);
+        state.code.source_editing.veriloga.receipt = Some(created.receipt);
         state.record(LogSeverity::Info, LogSource::Studio, created.record);
         Ok(created.reference)
     }

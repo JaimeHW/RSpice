@@ -359,7 +359,7 @@ pub(crate) fn compile(user: &mut User) {
     user.app
         .execute_command_key(SourceCommand::CompileVerilogA.key());
     user.wait_for("the compile result", |app| {
-        let veriloga = &app.state.code.code_workspace.veriloga;
+        let veriloga = &app.state.code.source_editing.veriloga;
         veriloga.compile_request.is_none() && veriloga.pending.is_none()
     });
     user.settle();
@@ -383,18 +383,18 @@ pub(crate) fn wired_device() -> (User, Device) {
         user.app
             .state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .last_failure
             .is_empty(),
         "{:?}",
-        user.app.state.code.code_workspace.veriloga.last_failure
+        user.app.state.code.source_editing.veriloga.last_failure
     );
     assert!(
         user.app
             .state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .receipt
             .is_some()

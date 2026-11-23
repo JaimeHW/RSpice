@@ -4,15 +4,15 @@
 //! source feature's, in feature_tests/code/veriloga_interface.
 
 use super::*;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 
 /// Replace the open view's root source with `source`.
 pub(crate) fn edit_source(app: &mut RSpiceApp, source: &str) {
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model)
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model)
         .expect("a Verilog-A view is open");
     let path = selected.document().logical_path().to_owned();
     assert!(
-        code_workspace::replace_selected_veriloga_file(
+        source_editing::replace_selected_veriloga_file(
             &mut app.source_editing_parts(),
             &selected,
             &path,

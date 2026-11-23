@@ -139,7 +139,7 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
         });
     }
     if documents.is_empty() {
-        documents.push(code_workspace_document(model));
+        documents.push(deck_document(model));
     }
     documents
 }
@@ -272,10 +272,10 @@ fn nothing_generated_tab_id() -> crate::state::NetlistDocumentId {
 
 /// The deck's own tab, when the Netlist workspace has no other document to
 /// list.
-fn code_workspace_document(model: &Model) -> WorkspaceDocument {
+fn deck_document(model: &Model) -> WorkspaceDocument {
     WorkspaceDocument {
         id: WorkspaceDocumentId::NetlistSource,
-        label: crate::workbench::documents::code_workspace::active_document_label(&model.workspace),
+        label: crate::workbench::documents::source_editing::active_document_label(&model.workspace),
         icon: WorkbenchIcon::Netlist,
         dirty: model.workspace.content.decks_dirty,
     }

@@ -22,7 +22,7 @@ fn draw_editor(ctx: &egui::Context, app: &mut RSpiceApp, frames: usize) {
                 ui,
                 &mut state.model,
                 &mut state.code.netlist,
-                &state.code.code_workspace.include_resolutions,
+                &state.code.source_editing.include_resolutions,
                 &state.runs,
                 &mut state.workbench,
             );

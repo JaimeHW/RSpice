@@ -21,7 +21,7 @@ mod reference_preparation;
 mod schematic_buffers;
 mod veriloga_cells;
 mod veriloga_starter;
-pub(crate) use veriloga_cells::retire_code_workspace_veriloga;
+pub(crate) use veriloga_cells::move_project_wide_veriloga_into_its_cell;
 pub use veriloga_cells::{
     DeclaredModule, ImportClosure, ImportClosureFile, ImportedInclude, VERILOGA_LIBRARY_NAME,
     VERILOGA_VIEW, declared_cell_interface, hdl_cell_for_module, hdl_view, place_veriloga_view,

@@ -30,7 +30,7 @@ use crate::workbench::app_state::PlatformState;
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::code::commands::LifecycleAction;
 use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::source_editing::{
     self, SourceEditingState, SourceFileAction, SourceIncludeTarget, SourceNavigation,
     SourceOutlineGroup, VerilogAHeaderView, document_navigation,
 };
@@ -41,7 +41,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 /// Verilog-A editor's state, the platform's and the message catalogue.
 pub(crate) struct SourceRail<'a> {
     pub(crate) model: &'a Model,
-    pub(crate) code_workspace: &'a mut SourceEditingState,
+    pub(crate) source_editing: &'a mut SourceEditingState,
     pub(crate) platform: &'a PlatformState,
     pub(crate) messages: MessageCatalog,
 }
@@ -79,9 +79,9 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
                 delete_refusal(bundle, path, messages).map(|reason| (path.to_owned(), reason))
             })
             .collect(),
-        held: code_workspace::source_file_mutation_block_reason_in(
+        held: source_editing::source_file_mutation_block_reason_in(
             parts.model,
-            parts.code_workspace,
+            parts.source_editing,
             parts.platform,
             messages,
         )
@@ -98,7 +98,7 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
         // other, and its row says what it is.
         files_title: MessageId::CodeNavigatorFiles,
         files: bundle_rows(parts.model),
-        active: active_path(parts.model, parts.code_workspace),
+        active: active_path(parts.model, parts.source_editing),
         actions,
         used_in: Some(
             parts
@@ -391,11 +391,11 @@ fn active_bundle(model: &Model) -> Option<&crate::state::ProjectSourceBundle> {
 }
 
 fn active_path(model: &Model, code: &SourceEditingState) -> Option<String> {
-    code_workspace::active_bundle_path(&model.workspace, code)
+    source_editing::active_bundle_path(&model.workspace, code)
 }
 
 fn select(model: &Model, code: &mut SourceEditingState, logical_path: &str) {
-    code_workspace::select_source_document(&model.workspace, code, logical_path);
+    source_editing::select_source_document(&model.workspace, code, logical_path);
 }
 
 /// What a click in the rail asked for, applied once the rows are painted.
@@ -426,7 +426,7 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
         (Some(path), Some(bundle)) => document_navigation(
             parts.model.workspace.content.project.id(),
             bundle,
-            &mut parts.code_workspace.source_index_cache,
+            &mut parts.source_editing.source_index_cache,
             path,
         ),
         _ => SourceNavigation::default(),
@@ -438,7 +438,7 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
     let header = bundle_id
         .zip(rail.active.as_deref())
         .and_then(|(bundle_id, path)| {
-            code_workspace::viewed_veriloga_header(&parts.code_workspace.veriloga, bundle_id, path)
+            source_editing::viewed_veriloga_header(&parts.source_editing.veriloga, bundle_id, path)
         })
         .map(|(identity, _)| identity);
     let mut request = None;
@@ -472,7 +472,7 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
     match request {
         None => {}
         Some(RailRequest::Select(path)) => {
-            select(parts.model, parts.code_workspace, &path);
+            select(parts.model, parts.source_editing, &path);
         }
         Some(RailRequest::Refused(reason)) => return Some(RailAction::Prompt(reason)),
         Some(RailRequest::FileAction(action, path)) => {
@@ -489,16 +489,16 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
         }
         Some(RailRequest::AddFiles(path)) => {
             if let Some(file_actions) = rail.actions.as_ref() {
-                let requested = match code_workspace::source_file_mutation_block_reason_in(
+                let requested = match source_editing::source_file_mutation_block_reason_in(
                     parts.model,
-                    parts.code_workspace,
+                    parts.source_editing,
                     parts.platform,
                     parts.messages,
                 ) {
                     Some(reason) => Err(reason),
-                    None => code_workspace::request_veriloga_add_files(
+                    None => source_editing::request_veriloga_add_files(
                         parts.model,
-                        &mut parts.code_workspace.veriloga,
+                        &mut parts.source_editing.veriloga,
                         file_actions.bundle_id,
                         &path,
                     ),
@@ -509,20 +509,20 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
             }
         }
         Some(RailRequest::Reveal { path, line }) => {
-            select(parts.model, parts.code_workspace, &path);
+            select(parts.model, parts.source_editing, &path);
             if let Some(bundle_id) = bundle_id {
                 // The shared code editor consumes this on its next frame,
                 // which is the frame it shows `path` in.
                 crate::workbench::documents::text_editor_commands::queue_reveal_line(
                     ui.ctx(),
-                    code_workspace::source_editor_id(bundle_id, &path),
+                    source_editing::source_editor_id(bundle_id, &path),
                     line,
                 );
             }
         }
         Some(RailRequest::ViewHeader(identity)) => {
             if let (Some(bundle_id), Some(over)) = (bundle_id, rail.active) {
-                parts.code_workspace.veriloga.viewed_header = Some(VerilogAHeaderView {
+                parts.source_editing.veriloga.viewed_header = Some(VerilogAHeaderView {
                     bundle_id,
                     over,
                     identity,

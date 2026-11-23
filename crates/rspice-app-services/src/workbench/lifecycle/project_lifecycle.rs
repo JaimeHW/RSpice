@@ -2390,7 +2390,7 @@ pub fn revert_document_model(
                 .workspace
                 .content
                 .project_sources
-                .synchronize_code_workspace_bundles_from(&baseline.file.workspace.project_sources)
+                .synchronize_project_wide_bundles_from(&baseline.file.workspace.project_sources)
                 .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
             state.model.workspace.content.decks_dirty = false;
             state.model.workspace.content.project_sources_dirty = false;

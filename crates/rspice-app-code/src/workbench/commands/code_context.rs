@@ -6,7 +6,7 @@
 //! file extension.
 
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::source_editing::{
     SourceEditingState, selected_veriloga_editor_snapshot_in,
 };
 

@@ -124,7 +124,7 @@ pub mod workbench {
         pub mod inspector {
             pub use rspice_app_workbench::workbench::docks::inspector::*;
 
-            pub mod code_workspace;
+            pub mod source_editing;
             pub mod veriloga;
         }
         pub mod navigator {
@@ -138,11 +138,11 @@ pub mod workbench {
     pub mod documents {
         pub use rspice_app_workbench::workbench::documents::*;
 
-        pub mod code_workspace;
         pub mod deck_files;
         pub mod editor_font;
         pub mod netlist_document;
         pub mod netlist_tabs;
+        pub mod source_editing;
         pub mod text_document_model;
         pub mod text_editor_commands;
         pub mod virtual_text_editor;

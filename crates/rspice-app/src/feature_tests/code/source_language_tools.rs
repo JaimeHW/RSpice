@@ -6,7 +6,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{add_veriloga_cell, open_in_design};
 use egui::Context;
 use rspice_app_code::workbench::code::commands::SourceCommand;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_workbench::workbench::localization::MessageId;
 
 /// `resolve_veriloga_compile` was written to gate the compile command and
@@ -80,7 +80,7 @@ fn rename_form(replacement: &str) -> RSpiceApp {
     let caret = source[..source.find("real g").expect("the parameter") + "real ".len()]
         .chars()
         .count();
-    code_workspace::open_language_tools_in_bundle(
+    source_editing::open_language_tools_in_bundle(
         &mut app.source_editing_parts(),
         bundle_id,
         "gain.va",
@@ -90,7 +90,7 @@ fn rename_form(replacement: &str) -> RSpiceApp {
     let tools = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .language_tools
         .as_mut()
         .expect("the form is open");
@@ -182,7 +182,7 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
         } else {
             assert!(!open, "a rename that applied closed the form");
             assert!(
-                app.state.code.code_workspace.language_tools.is_none(),
+                app.state.code.source_editing.language_tools.is_none(),
                 "the transaction is done"
             );
         }

@@ -23,7 +23,7 @@ use crate::state::{
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::{LifecycleAction, SourceDocumentRequest};
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::documents::source_editing::{
     self, SourceEditingState, SourceFileAction, SourceFileDialogState,
 };
 use crate::workbench::{MessageCatalog, MessageId};
@@ -51,7 +51,7 @@ pub(in crate::workbench) fn render(
         .project_sources
         .get_bundle(draft.bundle_id);
     let blocked =
-        code_workspace::source_file_mutation_block_reason_in(model, code, platform, messages);
+        source_editing::source_file_mutation_block_reason_in(model, code, platform, messages);
     let stale = bundle.is_none_or(|bundle| {
         draft.project_id != model.workspace.content.project.id()
             || bundle.revision().get() != draft.bundle_revision
@@ -59,9 +59,9 @@ pub(in crate::workbench) fn render(
     });
     let stale_text = messages.text(MessageId::CodeSourceFileStale);
     let includers = bundle.map_or_else(Vec::new, |bundle| {
-        code_workspace::veriloga_includers_of(bundle, &draft.source_path)
+        source_editing::veriloga_includers_of(bundle, &draft.source_path)
     });
-    let hosts = bundle.map_or_else(Vec::new, code_workspace::veriloga_include_hosts);
+    let hosts = bundle.map_or_else(Vec::new, source_editing::veriloga_include_hosts);
 
     let deleting = draft.action == SourceFileAction::Delete;
     let refusal = bundle

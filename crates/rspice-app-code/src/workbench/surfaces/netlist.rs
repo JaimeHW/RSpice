@@ -72,9 +72,9 @@ pub(super) fn publish_source_editor(
     }
     if let Some(step) = workbench
         .outbox
-        .take::<crate::workbench::documents::code_workspace::ProblemStep>()
+        .take::<crate::workbench::documents::source_editing::ProblemStep>()
     {
-        crate::workbench::documents::code_workspace::queue_problem_step(ctx, editor.id, step);
+        crate::workbench::documents::source_editing::queue_problem_step(ctx, editor.id, step);
     }
 }
 
@@ -87,9 +87,9 @@ pub fn step_netlist_problem(
     workbench: &mut crate::workbench::WorkbenchSession,
     editor_id: egui::Id,
 ) {
-    use crate::workbench::documents::code_workspace;
+    use crate::workbench::documents::source_editing;
 
-    let Some(step) = code_workspace::take_problem_step(ctx, editor_id) else {
+    let Some(step) = source_editing::take_problem_step(ctx, editor_id) else {
         return;
     };
     let buffer = &model.simulation.source.netlist_content;
@@ -117,7 +117,7 @@ pub fn step_netlist_problem(
         .map(|(line, column, _)| (*line, *column))
         .collect::<Vec<_>>();
     let messages = workbench.messages();
-    if step == code_workspace::ProblemStep::AtCaret {
+    if step == source_editing::ProblemStep::AtCaret {
         // The finding the caret is at or after on its line, or else the
         // line's first.
         let before = buffer
@@ -138,7 +138,7 @@ pub fn step_netlist_problem(
         let announcement = found.map_or_else(
             || messages.text(MessageId::SourceDiagnosticNoneAtCaret),
             |(line, column, diagnostic)| {
-                code_workspace::problem_at_caret_announcement(
+                source_editing::problem_at_caret_announcement(
                     messages,
                     diagnostic.severity,
                     &diagnostic.canonical.code,
@@ -151,7 +151,7 @@ pub fn step_netlist_problem(
         workbench.prompt(announcement);
         return;
     }
-    let Some(index) = code_workspace::problem_step_index(
+    let Some(index) = source_editing::problem_step_index(
         ctx,
         editor_id,
         buffer,
@@ -163,7 +163,7 @@ pub fn step_netlist_problem(
         return;
     };
     let (line, column, diagnostic) = located[index];
-    let announcement = code_workspace::problem_step_announcement(
+    let announcement = source_editing::problem_step_announcement(
         messages,
         diagnostic.severity,
         index,
@@ -171,7 +171,7 @@ pub fn step_netlist_problem(
         line,
         &diagnostic.message,
     );
-    code_workspace::reveal_source_location(ctx, editor_id, line, column.unwrap_or(1));
+    source_editing::reveal_source_location(ctx, editor_id, line, column.unwrap_or(1));
     workbench.prompt(announcement);
 }
 
@@ -468,7 +468,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
                 ui,
                 cx.model,
                 &mut cx.state.netlist,
-                &cx.state.code_workspace.include_resolutions,
+                &cx.state.source_editing.include_resolutions,
                 cx.runs,
                 cx.wb,
             );
@@ -1609,7 +1609,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_deck_does_not_inject_unreferenced_code_workspace_veriloga() {
+    fn generated_deck_does_not_inject_unreferenced_project_wide_veriloga() {
         let harness = harness();
         let source = "R1 1 0 1k\n.end\n".to_owned();
 

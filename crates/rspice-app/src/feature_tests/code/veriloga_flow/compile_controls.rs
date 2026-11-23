@@ -9,7 +9,7 @@ use egui::Key;
 
 use super::language_tools::{CTRL_SHIFT, EDITOR, NONE, op_amp, source};
 use super::*;
-use rspice_app_code::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::documents::source_editing::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
 use rspice_simulation::project_veriloga::compile_service::CompileCancellation;
@@ -22,13 +22,13 @@ const DISCARDED: &str = "The source changed during the compile, so its result wa
 /// A compile three seconds in, which answers only when the test sends.
 fn running_compile(user: &mut User) -> (mpsc::Sender<VerilogACompileOutcome>, CompileCancellation) {
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let token = selected.token(user.app.state.model.workspace.content.project.id());
     let (sender, receiver) = mpsc::channel();
     let mut pending = PendingVerilogACompile::new(token, receiver, None, Default::default());
     pending.started = web_time::Instant::now() - Duration::from_secs(3);
     let cancellation = pending.cancellation.clone();
-    user.app.state.code.code_workspace.veriloga.pending = Some(pending);
+    user.app.state.code.source_editing.veriloga.pending = Some(pending);
     user.settle();
     (sender, cancellation)
 }
@@ -36,9 +36,9 @@ fn running_compile(user: &mut User) -> (mpsc::Sender<VerilogACompileOutcome>, Co
 /// What the strip above the source says.
 fn strip(user: &User) -> Option<String> {
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
-    code_workspace::veriloga_compile_status(
-        &user.app.state.code.code_workspace.veriloga,
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+    source_editing::veriloga_compile_status(
+        &user.app.state.code.source_editing.veriloga,
         user.app.state.model.workspace.content.project.id(),
         &selected,
         user.app.state.workbench.messages(),
@@ -50,7 +50,7 @@ fn compiled(user: &User) -> bool {
     user.app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .receipt
         .is_some()
@@ -58,7 +58,7 @@ fn compiled(user: &User) -> bool {
 
 fn wait_for_the_result(user: &mut User) {
     user.wait_for("the compile result", |app| {
-        let veriloga = &app.state.code.code_workspace.veriloga;
+        let veriloga = &app.state.code.source_editing.veriloga;
         veriloga.compile_request.is_none() && veriloga.pending.is_none()
     });
     user.settle();
@@ -102,7 +102,7 @@ fn a_running_compile_counts_and_cancel_stops_it() {
         user.app
             .state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .pending
             .is_none()
@@ -134,7 +134,7 @@ fn an_edit_under_a_running_compile_stops_it_and_says_so() {
         user.app
             .state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .pending
             .is_none()
@@ -157,7 +157,7 @@ fn a_result_for_a_source_that_moved_on_is_discarded_aloud() {
     let mut user = op_amp();
     let (sender, _cancellation) = running_compile(&mut user);
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     let text = format!("{}// x\n", source(&user));
     user.app
@@ -179,7 +179,7 @@ fn a_result_for_a_source_that_moved_on_is_discarded_aloud() {
         user.app
             .state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .pending
             .is_none()
@@ -196,7 +196,7 @@ fn a_finished_compile_says_how_long_it_took_until_the_source_changes() {
         .app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .last_compile_duration
         .as_mut()
@@ -228,14 +228,14 @@ fn a_compile_held_in_a_constant_function_ends_on_cancel_an_edit_or_closing() {
         user.click(EDITOR);
         user.key(Key::F7, NONE);
         user.wait_for("the compile to start", |app| {
-            app.state.code.code_workspace.veriloga.pending.is_some()
+            app.state.code.source_editing.veriloga.pending.is_some()
         });
         let receiver = Arc::clone(
             &user
                 .app
                 .state
                 .code
-                .code_workspace
+                .source_editing
                 .veriloga
                 .pending
                 .as_ref()

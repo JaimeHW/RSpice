@@ -297,7 +297,7 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
         app.state.workbench.workspace,
         rspice_app_state::workbench::workspace::Workspace::Design
     );
-    assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
+    assert!(app.state.code.source_editing.veriloga.receipt.is_some());
     assert!(!app.state.code.new_veriloga_device.open);
 }
 

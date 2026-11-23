@@ -633,14 +633,14 @@ fn creating_veriloga_view_atomically_retains_contract_and_opens_exact_editor() {
         "reached through navigation, not by writing the workspace"
     );
     let selected =
-        rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+        rspice_app_code::workbench::documents::source_editing::selected_veriloga_source_in(
             &app.state.model,
         )
         .unwrap();
     assert_eq!(selected.bundle().id(), bundle.id());
     assert_eq!(selected.selected_module(), Some("precision_amp"));
     assert!(selected.bundle().validation_is_current());
-    assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
+    assert!(app.state.code.source_editing.veriloga.receipt.is_some());
 }
 
 /// A cell with no schematic ports and no symbol pins has no interface yet,
@@ -871,7 +871,7 @@ fn carry_out_in_place(app: &mut RSpiceApp, seeded: SchematicState) {
                 state
                     .workbench
                     .activate(rspice_app_state::workbench::workspace::Workspace::Design);
-                state.code.code_workspace.veriloga.receipt = Some(*receipt);
+                state.code.source_editing.veriloga.receipt = Some(*receipt);
             }
             state.record(
                 rspice_app_state::diagnostics::LogSeverity::Info,

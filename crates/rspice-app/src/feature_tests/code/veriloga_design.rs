@@ -14,14 +14,14 @@ use crate::workbench::app::veriloga_design_tests::{
 };
 use crate::workbench::app_state::AppState;
 use rspice_app_code::workbench::code::commands::SourceCommand;
-use rspice_app_code::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::documents::source_editing::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
 use rspice_app_state::state::{CellViewRef, ProjectSourceId};
 use rspice_app_state::workbench::workspace::Workspace;
 
 fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
-    code_workspace::source_editor_id(bundle_id, logical_path)
+    source_editing::source_editor_id(bundle_id, logical_path)
 }
 
 /// Whether the frame put an editable Verilog-A source editor in front of the
@@ -74,7 +74,7 @@ fn a_veriloga_cell_view_opens_in_design_with_its_editor() {
     assert!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .source_carets
             .contains_key(&(bundle_id, "model.va".to_owned())),
         "the editor is the one over the view's own bundle"
@@ -139,7 +139,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
     let source = module_source("gain", "");
-    app.state.code.code_workspace.source_carets.insert(
+    app.state.code.source_editing.source_carets.insert(
         (bundle_id, "model.va".to_owned()),
         caret_in(&source, "g * V"),
     );
@@ -149,7 +149,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
     let form = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .language_tools
         .as_ref()
         .expect("the form opened");
@@ -161,7 +161,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
-    if let Some(form) = app.state.code.code_workspace.language_tools.as_mut() {
+    if let Some(form) = app.state.code.source_editing.language_tools.as_mut() {
         form.replacement = "conductance".to_owned();
     }
     let enter = egui::Event::Key {
@@ -174,7 +174,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
     frame_with(&ctx, &mut app, DESKTOP, vec![enter]);
 
     assert!(
-        app.state.code.code_workspace.language_tools.is_none(),
+        app.state.code.source_editing.language_tools.is_none(),
         "the form closes on a rename"
     );
     let renamed = app
@@ -203,7 +203,7 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
     let source = module_source("gain", "");
-    app.state.code.code_workspace.source_carets.insert(
+    app.state.code.source_editing.source_carets.insert(
         (bundle_id, "model.va".to_owned()),
         caret_in(&source, "g * V"),
     );
@@ -214,7 +214,7 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
     )
     .expect("the caret is on g");
 
-    assert!(app.state.code.code_workspace.language_tools.is_none());
+    assert!(app.state.code.source_editing.language_tools.is_none());
     assert_eq!(
         app.state
             .model
@@ -304,7 +304,7 @@ fn format_in_a_veriloga_cell_view_formats_that_views_document() {
         "// Behavioral conductance.\nmodule gain(p, n);\n    inout p, n;\n    electrical p, n;\n    parameter real g = 1m;\n    real x;\n    analog I(p, n) <+ g * V(p, n);\nendmodule\n"
     );
     assert!(
-        app.state.code.code_workspace.language_tools.is_none(),
+        app.state.code.source_editing.language_tools.is_none(),
         "Format opens no dialog"
     );
 }
@@ -343,7 +343,7 @@ fn two_cell_views_sharing_a_logical_path_keep_separate_carets() {
     let caret = |bundle_id: ProjectSourceId| {
         app.state
             .code
-            .code_workspace
+            .source_editing
             .source_carets
             .get(&(bundle_id, "model.va".to_owned()))
             .copied()
@@ -371,7 +371,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     let clicked = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .compile_request
         .clone()
@@ -381,7 +381,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     assert!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .compile_request
             .is_none()
@@ -389,7 +389,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     let started = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .pending
         .as_ref()
@@ -407,7 +407,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     );
 
     // The worker answers while Design is still the workspace on screen.
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model).unwrap();
     let receipt = rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),
         selected.bundle(),
@@ -420,7 +420,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
             (**receipt.compilation.report()).clone(),
         )))
         .unwrap();
-    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+    app.state.code.source_editing.veriloga.pending = Some(PendingVerilogACompile::new(
         receipt.compilation.token(),
         receiver,
         None,
@@ -428,11 +428,11 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     ));
     frame(&ctx, &mut app, DESKTOP);
 
-    assert!(app.state.code.code_workspace.veriloga.pending.is_none());
+    assert!(app.state.code.source_editing.veriloga.pending.is_none());
     let published = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .receipt
         .as_ref()
@@ -443,7 +443,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
 /// Frame until the compile in flight answers, as the application would.
 pub(crate) fn wait_for_compile(ctx: &egui::Context, app: &mut RSpiceApp) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
-    while app.state.code.code_workspace.veriloga.pending.is_some() {
+    while app.state.code.source_editing.veriloga.pending.is_some() {
         assert!(
             std::time::Instant::now() < deadline,
             "the compile never answered"
@@ -461,9 +461,9 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "top", "top.va", "top");
     open_in_design(&mut app.state, &reference);
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
-        code_workspace::replace_selected_veriloga_file(
+        source_editing::replace_selected_veriloga_file(
             &mut app.source_editing_parts(),
             &selected,
             "top.va",
@@ -567,15 +567,15 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     let clicked = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .compile_request
         .clone()
         .expect("the click took the closure");
     // The reader types before the frame that starts the compile.
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
-        code_workspace::replace_selected_veriloga_file(
+        source_editing::replace_selected_veriloga_file(
             &mut app.source_editing_parts(),
             &selected,
             "model.va",
@@ -587,25 +587,25 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     let started = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .pending
         .as_ref()
         .expect("the click's compile started")
         .token;
-    let edited = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
+    let edited = source_editing::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(started.closure_digest, clicked.bundle().closure_digest());
     assert_ne!(started.closure_digest, edited.bundle().closure_digest());
     wait_for_compile(&ctx, &mut app);
 
-    let veriloga = &app.state.code.code_workspace.veriloga;
+    let veriloga = &app.state.code.source_editing.veriloga;
     assert!(
         veriloga.receipt.is_none(),
         "a result for the clicked closure is not the edited source's"
     );
     assert!(veriloga.last_failure_token.is_none());
     let messages = app.state.workbench.messages();
-    let (status, problem) = code_workspace::veriloga_compile_status(
+    let (status, problem) = source_editing::veriloga_compile_status(
         veriloga,
         app.state.model.workspace.content.project.id(),
         &edited,
@@ -633,8 +633,8 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     open_in_design(&mut app.state, &reference);
     app.state.workbench.inspector_visible = true;
     let ctx = themed_context();
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
-    code_workspace::replace_selected_veriloga_file(
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model).unwrap();
+    source_editing::replace_selected_veriloga_file(
         &mut app.source_editing_parts(),
         &selected,
         "model.va",
@@ -648,12 +648,12 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     frame(&ctx, &mut app, DESKTOP);
     let output = frame(&ctx, &mut app, DESKTOP);
 
-    let veriloga = &app.state.code.code_workspace.veriloga;
+    let veriloga = &app.state.code.source_editing.veriloga;
     assert!(veriloga.receipt.is_none());
     assert!(!veriloga.last_failure.is_empty(), "the findings are kept");
-    let current = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
+    let current = source_editing::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
-        !code_workspace::veriloga_diagnostics(
+        !source_editing::veriloga_diagnostics(
             veriloga,
             app.state.model.workspace.content.project.id(),
             &current
@@ -705,9 +705,9 @@ fn a_source_edit_marks_its_tab_dirty_and_saving_clears_it() {
     .expect("establish the saved baseline");
     assert!(!tab_is_dirty(&app, &reference));
 
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
-        code_workspace::replace_selected_veriloga_file(
+        source_editing::replace_selected_veriloga_file(
             &mut app.source_editing_parts(),
             &selected,
             "model.va",
@@ -792,7 +792,7 @@ fn session_restore_reopens_the_veriloga_tab_in_design() {
         reopened
             .state
             .code
-            .code_workspace
+            .source_editing
             .source_carets
             .contains_key(&(bundle_id, "model.va".to_owned())),
         "over the restored view's own bundle"

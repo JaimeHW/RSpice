@@ -14,7 +14,7 @@ use crate::workbench::app::veriloga_design_tests::{
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::AppState;
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
-use rspice_app_code::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::documents::source_editing::{
     self, PendingVerilogACompile, VerilogACellSymbol, VerilogACompileOutcome,
 };
 use rspice_app_state::state::VerilogAInterfaceOutcome;
@@ -95,7 +95,7 @@ fn conductance(module: &str, header: &str, declarations: &str) -> String {
 /// Compile the open view and publish the result through the frame loop's
 /// poll, exactly as a worker's answer is published.
 pub(crate) fn compile_and_publish(app: &mut RSpiceApp) {
-    let selected = code_workspace::selected_veriloga_source_in(&app.state.model)
+    let selected = source_editing::selected_veriloga_source_in(&app.state.model)
         .expect("a Verilog-A view is open");
     let receipt = rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),
@@ -109,23 +109,23 @@ pub(crate) fn compile_and_publish(app: &mut RSpiceApp) {
             (**receipt.compilation.report()).clone(),
         )))
         .expect("the channel is open");
-    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+    app.state.code.source_editing.veriloga.pending = Some(PendingVerilogACompile::new(
         receipt.compilation.token(),
         receiver,
         None,
         Default::default(),
     ));
-    code_workspace::poll_veriloga_compile(
+    source_editing::poll_veriloga_compile(
         &mut app.state.model,
-        &mut app.state.code.code_workspace,
+        &mut app.state.code.source_editing,
         &mut app.state.workbench,
     );
     assert!(
-        app.state.code.code_workspace.veriloga.receipt.is_some(),
+        app.state.code.source_editing.veriloga.receipt.is_some(),
         "the compile was published"
     );
-    code_workspace::refresh_symbol_standing(
-        &mut app.state.code.code_workspace.veriloga,
+    source_editing::refresh_symbol_standing(
+        &mut app.state.code.source_editing.veriloga,
         &app.state.model.library_manager,
         &app.state.model.workspace.content.active_view,
         app.state.model.workspace.content.active_view_type(),
@@ -423,7 +423,7 @@ fn a_continuous_vector_is_one_bus_pin_whose_conductors_are_the_modules_terminals
     let abi = &app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .receipt
         .as_ref()
@@ -599,7 +599,7 @@ fn a_discrete_vector_is_one_logic_bus_pin_with_a_conductor_per_bit() {
     let report = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .receipt
         .as_ref()
@@ -670,7 +670,7 @@ fn a_module_that_differs_from_its_cells_schematic_is_refused_and_writes_nothing(
     let receipt = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .receipt
         .as_ref()
@@ -750,7 +750,7 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
     let Some(VerilogACellSymbol::Drifted(drift)) = app
         .state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .symbol_standing
         .of(&reference)
@@ -761,7 +761,7 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
     assert_eq!(drift.missing, ["ctl"]);
     assert_eq!(drift.extra, ["n"]);
     assert_eq!(
-        code_workspace::symbol_drift_text(&drift, app.state.workbench.messages()),
+        source_editing::symbol_drift_text(&drift, app.state.workbench.messages()),
         "Symbol out of date: ctl missing; n no longer in the module"
     );
     assert!(!app.state.model.can_undo_project_design());
@@ -856,7 +856,7 @@ fn a_read_only_library_is_not_written_and_the_compile_says_so() {
     assert!(matches!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .receipt
             .as_ref()

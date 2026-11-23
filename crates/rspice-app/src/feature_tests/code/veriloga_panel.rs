@@ -201,7 +201,7 @@ impl Reader {
         self.app
             .state
             .code
-            .code_workspace
+            .source_editing
             .source_carets
             .get(&(bundle_id, path.to_owned()))
             .copied()

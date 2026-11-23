@@ -159,7 +159,7 @@ fn in_front(
     buffers.sort();
     (
         app.state.workbench.workspace,
-        app.state.code.code_workspace.veriloga.receipt.is_some(),
+        app.state.code.source_editing.veriloga.receipt.is_some(),
         buffers,
     )
 }

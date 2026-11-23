@@ -5,7 +5,7 @@
 use egui::{Event, Key, Modifiers};
 
 use super::*;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
 use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
@@ -31,7 +31,7 @@ pub(super) fn op_amp() -> User {
 
 pub(super) fn source(user: &User) -> String {
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     selected
         .bundle()
@@ -49,8 +49,8 @@ pub(super) fn caret_after(user: &mut User, text: &str) {
 
 fn caret_at(user: &mut User, index: usize) {
     let selected =
-        code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
-    let id = code_workspace::source_editor_id(
+        source_editing::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
+    let id = source_editing::source_editor_id(
         selected.bundle().id(),
         selected.document().logical_path(),
     );

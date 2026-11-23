@@ -4,7 +4,7 @@
 
 use crate::workbench::RSpiceApp;
 use egui::Context;
-use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::source_editing;
 use rspice_app_workbench::workbench::surfaces::register_results_split_region;
 
 /// An application on the page that edits a Verilog-A source, and the owner
@@ -95,7 +95,7 @@ fn refused_source_write() {
         .bundle_for_owner(&owner)
         .unwrap();
     let key = (bundle.id(), bundle.root().logical_path().to_owned());
-    let editor_id = code_workspace::source_editor_id(key.0, &key.1);
+    let editor_id = source_editing::source_editor_id(key.0, &key.1);
     let stored = |app: &RSpiceApp| {
         app.state
             .model
@@ -111,7 +111,7 @@ fn refused_source_write() {
     let caret = |app: &RSpiceApp| {
         app.state
             .code
-            .code_workspace
+            .source_editing
             .source_carets
             .get(&key)
             .copied()

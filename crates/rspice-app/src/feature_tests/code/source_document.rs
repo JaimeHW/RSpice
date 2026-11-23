@@ -22,7 +22,7 @@ fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
     open_source_document_dialog_in(
         state.workbench.workspace,
         &state.model,
-        &mut state.code.code_workspace,
+        &mut state.code.source_editing,
         &state.code.netlist,
         &state.platform,
         state.workbench.messages(),
@@ -50,12 +50,12 @@ fn a_generated_netlist_page_refuses_the_dialog_until_a_deck_is_open() {
     assert!(!available(&app.state));
     let refusal = open_source_document_dialog(&mut app.state).unwrap_err();
     assert!(refusal.contains("read-only"), "{refusal}");
-    assert!(!app.state.code.code_workspace.source_document_dialog);
+    assert!(!app.state.code.source_editing.source_document_dialog);
 
     app.state.seed_test_deck("* deck\nR1 a 0 1k\n.end\n");
     assert!(available(&app.state));
     open_source_document_dialog(&mut app.state).unwrap();
-    assert!(app.state.code.code_workspace.source_document_dialog);
+    assert!(app.state.code.source_editing.source_document_dialog);
     assert!(netlist_lifecycle_facts(&app.state.model, &app.state.code.netlist).is_some());
 }
 
@@ -75,7 +75,7 @@ fn a_veriloga_page_has_no_source_dialog() {
             .messages()
             .text(MessageId::NetlistManageNeedsDeck)
     );
-    assert!(!app.state.code.code_workspace.source_document_dialog);
+    assert!(!app.state.code.source_editing.source_document_dialog);
 }
 
 /// A deck page whose project searches `folders` for includes, its Deck and

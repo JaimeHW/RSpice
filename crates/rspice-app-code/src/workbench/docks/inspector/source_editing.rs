@@ -40,7 +40,7 @@ pub(in crate::workbench) enum FindingPress {
 /// Draw the deck's inspector. Returns what was pressed on a finding: its
 /// row, which the caller sends down the route a Problems row takes, or the
 /// fix it offers.
-pub(in crate::workbench) fn code_workspace_inspector(
+pub(in crate::workbench) fn source_editing_inspector(
     ui: &mut Ui,
     reads: &SourceInspector<'_>,
 ) -> Option<FindingPress> {

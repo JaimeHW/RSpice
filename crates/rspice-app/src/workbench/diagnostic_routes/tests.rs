@@ -118,7 +118,7 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
     assert_eq!(
         app.state
             .code
-            .code_workspace
+            .source_editing
             .veriloga
             .selected_file
             .as_ref()

@@ -25,9 +25,9 @@ use crate::workbench::design_system::inspector::muted_inspector_copy;
 use crate::workbench::design_system::{
     Fact, PANEL_INSET, fact_rows, panel_body, property_row_height, section_block_gap,
 };
-use crate::workbench::documents::code_workspace::{self, SourceEditingParts, SourceEditingState};
 use crate::workbench::documents::deck_files::LineEnding;
 use crate::workbench::documents::netlist_document::{self, NetlistDocumentState};
+use crate::workbench::documents::source_editing::{self, SourceEditingParts, SourceEditingState};
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -203,21 +203,21 @@ pub fn apply_lifecycle_action(
     // draft happens to be open would put one inside the other's section.
     let (outcome, report) = match action {
         LifecycleAction::Commit => (
-            code_workspace::commit_source_file_dialog(parts).map(|_| ()),
+            source_editing::commit_source_file_dialog(parts).map(|_| ()),
             Report::FileTransaction,
         ),
         LifecycleAction::OpenHistory => (
-            code_workspace::open_source_history(parts, logical_path),
+            source_editing::open_source_history(parts, logical_path),
             Report::Console,
         ),
         LifecycleAction::Restore => (
-            code_workspace::commit_source_history_restore(parts).map(|_| ()),
+            source_editing::commit_source_history_restore(parts).map(|_| ()),
             Report::History,
         ),
         // The picker and then the replacement's own confirmation take
         // over from here.
         LifecycleAction::ReplaceFromFile => (
-            code_workspace::request_veriloga_source_replacement(parts, logical_path),
+            source_editing::request_veriloga_source_replacement(parts, logical_path),
             Report::Console,
         ),
     };

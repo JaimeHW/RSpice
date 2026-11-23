@@ -227,7 +227,7 @@ fn new_cell_verilog_a_switch_creates_the_module_view_and_its_generated_symbol() 
         app.state.workbench.workspace,
         rspice_app_state::workbench::workspace::Workspace::Design
     );
-    assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
+    assert!(app.state.code.source_editing.veriloga.receipt.is_some());
 }
 
 #[test]

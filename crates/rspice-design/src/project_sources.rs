@@ -854,7 +854,7 @@ impl ProjectSourceRegistry {
 
     #[must_use]
     pub fn get(&self) -> Option<&ProjectSourceDocument> {
-        self.code_workspace_bundle().map(ProjectSourceBundle::root)
+        self.project_wide_bundle().map(ProjectSourceBundle::root)
     }
 
     #[must_use]
@@ -1186,7 +1186,7 @@ impl ProjectSourceRegistry {
     /// retained in the history. Unlike a rename it keeps its validation: the
     /// move changes no byte, and the closure under its new owner is the
     /// closure that was compiled.
-    pub fn move_code_workspace_bundle_to_cell_view(
+    pub fn move_project_wide_bundle_to_cell_view(
         &mut self,
         reference: CellViewRef,
     ) -> Result<Option<ProjectSourceId>, ProjectSourceError> {
@@ -1293,7 +1293,7 @@ impl ProjectSourceRegistry {
 
     /// Synchronize only singleton Code Workspace sources. Cell-view bundles
     /// are separate lifecycle documents and are preserved exactly.
-    pub fn synchronize_code_workspace_bundles_from(
+    pub fn synchronize_project_wide_bundles_from(
         &mut self,
         source: &Self,
     ) -> Result<bool, ProjectSourceError> {
@@ -1323,7 +1323,7 @@ impl ProjectSourceRegistry {
 
     pub fn replace_content(&mut self, content: String) -> Result<bool, ProjectSourceError> {
         let bundle = self
-            .code_workspace_bundle_mut()
+            .project_wide_bundle_mut()
             .ok_or(ProjectSourceError::MissingLanguage)?;
         let path = bundle.root.file_name.clone();
         bundle.replace_file_content(&path, content)
@@ -1434,7 +1434,7 @@ impl ProjectSourceRegistry {
         file_name: String,
         content: String,
     ) -> Result<bool, ProjectSourceError> {
-        match self.code_workspace_bundle_mut() {
+        match self.project_wide_bundle_mut() {
             Some(bundle) => bundle.replace_root_imported(file_name, content),
             None => {
                 self.insert(ProjectSourceDocument::try_new(file_name, content)?)?;
@@ -1447,7 +1447,7 @@ impl ProjectSourceRegistry {
         &mut self,
     ) -> Result<ProjectSourceValidationIdentity, ProjectSourceError> {
         let bundle = self
-            .code_workspace_bundle_mut()
+            .project_wide_bundle_mut()
             .ok_or(ProjectSourceError::MissingLanguage)?;
         bundle.mark_validated()?;
         Ok(bundle
@@ -1502,13 +1502,13 @@ impl ProjectSourceRegistry {
         Ok(())
     }
 
-    fn code_workspace_bundle(&self) -> Option<&ProjectSourceBundle> {
+    fn project_wide_bundle(&self) -> Option<&ProjectSourceBundle> {
         self.bundles
             .iter()
             .find(|bundle| bundle.owner == ProjectSourceOwner::ProjectWide)
     }
 
-    fn code_workspace_bundle_mut(&mut self) -> Option<&mut ProjectSourceBundle> {
+    fn project_wide_bundle_mut(&mut self) -> Option<&mut ProjectSourceBundle> {
         self.bundles
             .iter_mut()
             .find(|bundle| bundle.owner == ProjectSourceOwner::ProjectWide)

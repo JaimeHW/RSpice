@@ -109,7 +109,7 @@ const VERILOGA: &[ToolbarEntry<SourceFeature>] = &[
 ];
 
 fn compile_pending(reads: &Reads<'_, SourceFeature>) -> bool {
-    reads.state.code_workspace.veriloga.pending.is_some()
+    reads.state.source_editing.veriloga.pending.is_some()
 }
 
 fn no_compile_pending(reads: &Reads<'_, SourceFeature>) -> bool {
@@ -158,13 +158,13 @@ fn generated_netlist_tool(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui, lay
 /// visible editor rather than rewriting text itself. Offered only when that
 /// file may be edited.
 fn veriloga_format_tool(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
-    use crate::workbench::documents::code_workspace;
+    use crate::workbench::documents::source_editing;
 
-    let code = &cx.state.code_workspace;
-    let editor = code_workspace::selected_veriloga_editor_snapshot_in(cx.model, code)
+    let code = &cx.state.source_editing;
+    let editor = source_editing::selected_veriloga_editor_snapshot_in(cx.model, code)
         .ok()
         .filter(|snapshot| {
-            code_workspace::source_bundle_document_is_editable_in(
+            source_editing::source_bundle_document_is_editable_in(
                 cx.model,
                 code,
                 cx.platform,
@@ -173,7 +173,7 @@ fn veriloga_format_tool(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui, layou
             )
         })
         .map(|snapshot| {
-            code_workspace::source_editor_id(snapshot.bundle_id(), snapshot.active_path())
+            source_editing::source_editor_id(snapshot.bundle_id(), snapshot.active_path())
         });
     let response = ui
         .add_enabled_ui(editor.is_some(), |ui| {

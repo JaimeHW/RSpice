@@ -150,12 +150,12 @@ const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
     ("ui.netlist, outside the Netlist workspace", |state| {
         state.code.netlist.comparison_dialog.open = true;
     }),
-    ("ui.code_workspace.source_document_dialog", |state| {
-        state.code.code_workspace.source_document_dialog = true;
+    ("ui.source_editing.source_document_dialog", |state| {
+        state.code.source_editing.source_document_dialog = true;
     }),
-    ("ui.code_workspace.veriloga.import_form", |state| {
-        state.code.code_workspace.veriloga.import_form = Some(
-            rspice_app_code::workbench::documents::code_workspace::VerilogAImportFormState {
+    ("ui.source_editing.veriloga.import_form", |state| {
+        state.code.source_editing.veriloga.import_form = Some(
+            rspice_app_code::workbench::documents::source_editing::VerilogAImportFormState {
                 project_id: state.model.workspace.content.project.id(),
                 file_name: "gain.va".to_owned(),
                 files: std::collections::BTreeMap::new(),

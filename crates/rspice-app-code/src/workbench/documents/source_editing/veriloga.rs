@@ -14,7 +14,7 @@ use crate::state::{ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, Proj
 use crate::workbench::MessageId;
 use rspice_app_workbench::workbench::state::WorkbenchSession;
 
-use crate::workbench::documents::code_workspace::SourceEditingParts;
+use crate::workbench::documents::source_editing::SourceEditingParts;
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_state::workbench::app_state::model::{
     apply_compiled_interface, diagnostic_capacity_failure, receipt_from_report,
@@ -1112,7 +1112,7 @@ mod tests {
 
         let request = harness
             .state
-            .code_workspace
+            .source_editing
             .veriloga
             .compile_request
             .clone()
@@ -1128,7 +1128,7 @@ mod tests {
     fn a_build_profile_is_written_over_the_document_the_bundle_holds() {
         let mut harness = portless_module();
         request_veriloga_compile(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
-        harness.state.code_workspace.veriloga.compile_request = None;
+        harness.state.source_editing.veriloga.compile_request = None;
         let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let revision = selected.bundle().revision();
         let mut profile =
@@ -1140,7 +1140,7 @@ mod tests {
         assert!(
             write_veriloga_build_profile(
                 &mut harness.model,
-                &mut harness.state.code_workspace,
+                &mut harness.state.source_editing,
                 &selected,
                 &profile,
             )
@@ -1158,7 +1158,7 @@ mod tests {
         assert_eq!(resolved.profile, profile);
         let stale = write_veriloga_build_profile(
             &mut harness.model,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
             &selected,
             &profile,
         )
@@ -1268,7 +1268,7 @@ mod tests {
 
         import_dropped_veriloga_sources(
             &harness.model,
-            &mut harness.state.code_workspace.veriloga,
+            &mut harness.state.source_editing.veriloga,
             vec![PickedSource {
                 name: "dropped.va".to_owned(),
                 contents: source.to_owned(),
@@ -1283,7 +1283,7 @@ mod tests {
         );
         let form = harness
             .state
-            .code_workspace
+            .source_editing
             .veriloga
             .import_form
             .as_ref()
@@ -1292,7 +1292,7 @@ mod tests {
         assert!(
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .veriloga
                 .replace_review
                 .is_none()
@@ -1316,7 +1316,7 @@ mod tests {
             &root,
         )
         .unwrap();
-        assert!(harness.state.code_workspace.veriloga.import_requested);
+        assert!(harness.state.source_editing.veriloga.import_requested);
         complete_veriloga_file_pick(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
             "next.va",
@@ -1325,7 +1325,7 @@ mod tests {
 
         let review = harness
             .state
-            .code_workspace
+            .source_editing
             .veriloga
             .replace_review
             .clone()
@@ -1349,7 +1349,7 @@ mod tests {
             original,
             "nothing is replaced before confirming"
         );
-        assert!(harness.state.code_workspace.veriloga.import_form.is_none());
+        assert!(harness.state.source_editing.veriloga.import_form.is_none());
 
         commit_veriloga_source_replacement(&mut SourceFeature::workspace_parts(&mut harness.cx()))
             .unwrap();
@@ -1375,7 +1375,7 @@ mod tests {
         assert!(
             workbench
                 .state
-                .code_workspace
+                .source_editing
                 .source_edit_history
                 .step(
                     &mut workbench.model.workspace.content,
@@ -1399,7 +1399,7 @@ mod tests {
         let sources_before = harness.model.workspace.content.project_sources.clone();
         let source = "module actual_model(p, n); inout p, n; electrical p, n; endmodule\n";
 
-        harness.state.code_workspace.veriloga.import_requested = true;
+        harness.state.source_editing.veriloga.import_requested = true;
         complete_veriloga_file_pick(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
             "behavioral/presentation_name.va",
@@ -1408,7 +1408,7 @@ mod tests {
 
         let form = harness
             .state
-            .code_workspace
+            .source_editing
             .veriloga
             .import_form
             .as_ref()
@@ -1425,7 +1425,7 @@ mod tests {
             harness.model.workspace.content.project_sources,
             sources_before
         );
-        assert!(!harness.state.code_workspace.veriloga.import_requested);
+        assert!(!harness.state.source_editing.veriloga.import_requested);
     }
 
     #[test]
@@ -1470,7 +1470,7 @@ mod tests {
         assert!(
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .veriloga
                 .replace_target
                 .is_none()
@@ -1478,7 +1478,7 @@ mod tests {
         assert!(
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .veriloga
                 .replace_review
                 .is_none(),
@@ -1508,7 +1508,7 @@ mod tests {
             selected.selected_module(),
         )
         .unwrap();
-        harness.state.code_workspace.veriloga.receipt = Some(receipt);
+        harness.state.source_editing.veriloga.receipt = Some(receipt);
         let before = selected.token(harness.model.workspace.content.project.id());
 
         assert!(
@@ -1528,7 +1528,7 @@ mod tests {
         assert!(after.revision > before.revision);
         assert_ne!(after.closure_digest, before.closure_digest);
         assert!(!edited.bundle().validation_is_current());
-        assert!(harness.state.code_workspace.veriloga.receipt.is_none());
+        assert!(harness.state.source_editing.veriloga.receipt.is_none());
         assert!(harness.model.workspace.content.project_sources_dirty);
     }
 
@@ -1543,7 +1543,7 @@ mod tests {
         let root_path = selected.document().logical_path().to_owned();
         add_bundle_file(
             &mut harness.model,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
             bundle_id,
             &root_path,
             "support/constants.vams".to_owned(),
@@ -1600,7 +1600,7 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.source_editing.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
@@ -1609,13 +1609,13 @@ mod tests {
 
         poll_veriloga_compile(
             &mut harness.model,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
             &mut harness.wb,
         );
 
         let published = harness
             .state
-            .code_workspace
+            .source_editing
             .veriloga
             .receipt
             .as_ref()
@@ -1630,7 +1630,7 @@ mod tests {
         assert!(
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .veriloga
                 .last_failure
                 .is_empty()
@@ -1638,7 +1638,7 @@ mod tests {
         assert!(
             harness
                 .state
-                .code_workspace
+                .source_editing
                 .veriloga
                 .last_failure_token
                 .is_none()
@@ -1712,7 +1712,7 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.source_editing.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
@@ -1720,14 +1720,14 @@ mod tests {
         ));
         poll_veriloga_compile(
             &mut harness.model,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
             &mut harness.wb,
         );
 
         // Problems lists every diagnostic of the published receipt.
         let published = harness
             .state
-            .code_workspace
+            .source_editing
             .veriloga
             .receipt
             .as_ref()
@@ -1763,8 +1763,8 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        harness.state.code_workspace.veriloga.receipt = None;
-        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.source_editing.veriloga.receipt = None;
+        harness.state.source_editing.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
@@ -1777,12 +1777,12 @@ mod tests {
 
         poll_veriloga_compile(
             &mut harness.model,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
             &mut harness.wb,
         );
 
-        assert!(harness.state.code_workspace.veriloga.pending.is_none());
-        assert!(harness.state.code_workspace.veriloga.receipt.is_none());
+        assert!(harness.state.source_editing.veriloga.pending.is_none());
+        assert!(harness.state.source_editing.veriloga.receipt.is_none());
         let second_selected = selected_veriloga_source_in(&harness.model).unwrap();
         assert!(!second_selected.matches_token(
             harness.model.workspace.content.project.id(),
@@ -1811,7 +1811,7 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.source_editing.veriloga.pending = Some(PendingVerilogACompile::new(
             receipt.compilation.token(),
             receiver,
             None,
@@ -1829,12 +1829,12 @@ mod tests {
 
         poll_veriloga_compile(
             &mut harness.model,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
             &mut harness.wb,
         );
 
-        assert!(harness.state.code_workspace.veriloga.pending.is_none());
-        assert!(harness.state.code_workspace.veriloga.receipt.is_none());
+        assert!(harness.state.source_editing.veriloga.pending.is_none());
+        assert!(harness.state.source_editing.veriloga.receipt.is_none());
         let changed = selected_veriloga_source_in(&harness.model).unwrap();
         assert!(!changed.matches_token(
             harness.model.workspace.content.project.id(),
@@ -1863,7 +1863,7 @@ mod tests {
         assert!(matches!(outcome, VerilogACompileOutcome::Success(_)));
         let (sender, receiver) = mpsc::channel();
         sender.send(outcome).unwrap();
-        harness.state.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        harness.state.source_editing.veriloga.pending = Some(PendingVerilogACompile::new(
             selected.token(harness.model.workspace.content.project.id()),
             receiver,
             None,
@@ -1872,13 +1872,13 @@ mod tests {
 
         poll_veriloga_compile(
             &mut harness.model,
-            &mut harness.state.code_workspace,
+            &mut harness.state.source_editing,
             &mut harness.wb,
         );
 
         let published = &harness
             .state
-            .code_workspace
+            .source_editing
             .veriloga
             .receipt
             .as_ref()

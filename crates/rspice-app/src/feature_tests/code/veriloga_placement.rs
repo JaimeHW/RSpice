@@ -68,7 +68,7 @@ fn canvas() -> egui::Id {
 fn offered(app: &RSpiceApp) -> Option<VerilogAPlacementHandoff> {
     app.state
         .code
-        .code_workspace
+        .source_editing
         .veriloga
         .receipt
         .as_ref()?
@@ -105,7 +105,7 @@ fn a_new_devices_first_compile_with_a_port_offers_to_place_it_where_it_came_from
     );
     assert_eq!(
         offered_veriloga_placement(
-            app.state.code.code_workspace.veriloga.receipt.as_ref(),
+            app.state.code.source_editing.veriloga.receipt.as_ref(),
             &app.state.model
         )
         .map(|(_, target)| target),

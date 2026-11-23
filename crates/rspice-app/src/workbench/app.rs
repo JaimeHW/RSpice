@@ -28,7 +28,7 @@ use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
 
 use crate::workbench::app_state::AppState;
-use rspice_app_code::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::documents::source_editing::{
     restore_global_veriloga_library, save_global_veriloga_library,
 };
 use rspice_app_workbench::workbench::framework::feature::{CodePort, ModelsPort};
@@ -124,7 +124,7 @@ pub struct RSpiceApp {
     pub(crate) simulation_controller: rspice_app_runs::simulation::controller::SimulationController,
     /// What the source feature keeps between frames: the project its workspace
     /// answers for.
-    pub(crate) code: rspice_app_code::workbench::documents::code_workspace::SourceHandles,
+    pub(crate) code: rspice_app_code::workbench::documents::source_editing::SourceHandles,
     /// What the cloud feature runs: the account session boundary and the
     /// live-session engine that drains it.
     pub(crate) cloud: rspice_app_cloud::workbench::live_session::CloudHandles,
@@ -179,9 +179,9 @@ impl RSpiceApp {
     #[cfg(test)]
     pub(crate) fn source_editing_parts(
         &mut self,
-    ) -> rspice_app_code::workbench::documents::code_workspace::SourceEditingParts<'_> {
-        rspice_app_code::workbench::documents::code_workspace::SourceEditingParts {
-            code: &mut self.state.code.code_workspace,
+    ) -> rspice_app_code::workbench::documents::source_editing::SourceEditingParts<'_> {
+        rspice_app_code::workbench::documents::source_editing::SourceEditingParts {
+            code: &mut self.state.code.source_editing,
             netlist: &mut self.state.code.netlist,
             model: &mut self.state.model,
             wb: &mut self.state.workbench,
@@ -253,7 +253,7 @@ impl RSpiceApp {
             symbol_library: None,
             simulation_controller:
                 rspice_app_runs::simulation::controller::SimulationController::new(),
-            code: rspice_app_code::workbench::documents::code_workspace::SourceHandles {
+            code: rspice_app_code::workbench::documents::source_editing::SourceHandles {
                 project_id,
             },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
@@ -434,7 +434,7 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller,
-            code: rspice_app_code::workbench::documents::code_workspace::SourceHandles { project_id },
+            code: rspice_app_code::workbench::documents::source_editing::SourceHandles { project_id },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account: rspice_app_cloud::services::cloud_account::CloudAccountService::new(Some(
                     cc.egui_ctx.clone(),
@@ -1856,7 +1856,7 @@ mod tests {
             )
             .expect("unique cell-view source");
         assert!(!state.model.workspace.content.project_sources.is_empty());
-        state.code.code_workspace.veriloga.receipt = None;
+        state.code.source_editing.veriloga.receipt = None;
 
         assert!(
             schematic_readiness(&state).is_none(),

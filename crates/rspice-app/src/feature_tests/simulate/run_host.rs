@@ -106,7 +106,7 @@ fn a_frozen_host_keeps_the_compilation_and_the_netlist_code_shows() {
         None,
     )
     .expect("compile project Verilog-A source");
-    app.state.code.code_workspace.veriloga.receipt = Some(receipt);
+    app.state.code.source_editing.veriloga.receipt = Some(receipt);
     app.state.code.netlist.front = NetlistTab::Compare {
         left: CompareSide::PreviousGenerated(0),
         right: CompareSide::Generated,

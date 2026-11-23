@@ -12,7 +12,7 @@ fn show_state(ui: &mut Ui, harness: &mut SourceHarness) -> egui::Response {
         ui,
         &mut harness.model,
         &mut harness.state.netlist,
-        &harness.state.code_workspace.include_resolutions,
+        &harness.state.source_editing.include_resolutions,
         &harness.runs,
         &mut harness.wb,
     )
@@ -586,7 +586,7 @@ fn validated(deck: &str) -> SourceHarness {
     validate_visible_source_in(
         &harness.model,
         &mut harness.state.netlist,
-        &harness.state.code_workspace.include_resolutions,
+        &harness.state.source_editing.include_resolutions,
         revision,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );
@@ -745,7 +745,7 @@ fn value_hover_waits_for_the_parse_that_decides_the_branches() {
     validate_visible_source_in(
         &harness.model,
         &mut harness.state.netlist,
-        &harness.state.code_workspace.include_resolutions,
+        &harness.state.source_editing.include_resolutions,
         revision,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
     );

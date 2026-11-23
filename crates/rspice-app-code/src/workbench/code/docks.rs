@@ -4,17 +4,17 @@
 use crate::workbench::MessageId;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::design_system::inspector::muted_inspector_copy;
-use crate::workbench::docks::inspector::code_workspace::{
-    FindingPress, SourceInspector, code_workspace_inspector,
+use crate::workbench::docks::inspector::source_editing::{
+    FindingPress, SourceInspector, source_editing_inspector,
 };
 use crate::workbench::docks::inspector::veriloga;
 use crate::workbench::docks::navigator::netlist::{NetlistNavigator, netlist as netlist_navigator};
 use crate::workbench::docks::navigator::source_bundle::{RailAction, SourceRail};
 use crate::workbench::docks::navigator::veriloga as veriloga_navigator;
-use crate::workbench::documents::code_workspace::VerilogAInspectorAction;
 use crate::workbench::documents::netlist_document::{
     NetlistRoot, active_dependency_in, root_deck_source_index,
 };
+use crate::workbench::documents::source_editing::VerilogAInspectorAction;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::OpenInDesign;
 use crate::workbench::state::Workspace;
@@ -53,7 +53,7 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) 
         &mut NetlistNavigator {
             model: cx.model,
             netlist: &mut cx.state.netlist,
-            code_workspace: &mut cx.state.code_workspace,
+            source_editing: &mut cx.state.source_editing,
             outline_collapsed: &mut cx.state.netlist_outline_collapsed,
             open_documents: &mut cx.state.netlist_open_documents,
             runs: cx.runs,
@@ -82,7 +82,7 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) 
 fn source_rail<'a>(cx: &'a mut Cx<'_, SourceFeature>) -> SourceRail<'a> {
     SourceRail {
         model: cx.model,
-        code_workspace: &mut cx.state.code_workspace,
+        source_editing: &mut cx.state.source_editing,
         platform: cx.platform,
         messages: cx.wb.messages(),
     }
@@ -130,7 +130,7 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) 
         return;
     }
     if cx.wb.workspace != Workspace::Netlist {
-        let asked = veriloga::show(ui, cx.model, &cx.state.code_workspace, cx.wb.messages());
+        let asked = veriloga::show(ui, cx.model, &cx.state.source_editing, cx.wb.messages());
         // The same road a finding in Problems takes, so the two agree on
         // where the caret lands.
         if let Some(VerilogAInspectorAction::RevealFinding {
@@ -159,7 +159,7 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) 
         && netlist.front.root_kind() == NetlistRoot::Deck
         && active_dependency_in(cx.model, netlist).is_none();
     let facts = deck_in_front.then(|| root_deck_facts(cx, ui.ctx()));
-    let pressed = code_workspace_inspector(
+    let pressed = source_editing_inspector(
         ui,
         &SourceInspector {
             model: cx.model,

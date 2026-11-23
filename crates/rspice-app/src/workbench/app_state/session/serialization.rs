@@ -315,7 +315,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         state.platform.browser_project_binding_receipt = browser_project_binding_receipt;
         // The code workspace `Default` prepared belongs to the bootstrapped
         // project it compiled; the restored project's starts empty.
-        state.code.code_workspace = Default::default();
+        state.code.source_editing = Default::default();
         de.ui.scatter(&mut state);
         state.model.schematic = schematic;
         state.model.workspace = project_workspace;

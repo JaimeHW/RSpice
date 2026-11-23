@@ -96,7 +96,7 @@ fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
     }
     let result = {
         let code = RunCodeFacts {
-            veriloga_compilation: veriloga_compilation_in(&cx.state.code_workspace),
+            veriloga_compilation: veriloga_compilation_in(&cx.state.source_editing),
             manual_deck: manual_deck_in(&cx.state.netlist),
         };
         let host = RunView::new(
@@ -126,7 +126,7 @@ fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
     };
     if let Ok(metadata) = &result {
         record_include_resolutions(
-            &mut cx.state.code_workspace.include_resolutions,
+            &mut cx.state.source_editing.include_resolutions,
             &metadata.sealed_source_dependencies,
         );
     }
@@ -188,7 +188,7 @@ fn bring_findings_current(cx: &mut Cx<'_, SourceFeature>) {
     crate::workbench::documents::netlist_document::bring_findings_current(
         cx.model,
         &mut cx.state.netlist,
-        &cx.state.code_workspace.include_resolutions,
+        &cx.state.source_editing.include_resolutions,
         cx.wb.messages(),
     );
 }

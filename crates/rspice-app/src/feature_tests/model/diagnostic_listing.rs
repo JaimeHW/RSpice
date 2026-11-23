@@ -337,7 +337,7 @@ fn source_collections_count_what_their_rows_say() {
         .mark_currentness(DiagnosticCurrentness::StaleSource);
     let mut waived_code = code("T-WAIVED-CODE");
     waived_code.canonical.suppression = Some(waiver());
-    state.code.code_workspace.veriloga.last_failure = Arc::new(
+    state.code.source_editing.veriloga.last_failure = Arc::new(
         SourceDiagnosticCollection::try_new(vec![stale_code, waived_code, code("T-CODE")])
             .expect("the fixture collection is well formed"),
     );
@@ -498,7 +498,7 @@ fn a_clean_compile_reads_as_no_findings() {
         Some("gain"),
     )
     .expect("the module compiles");
-    state.code.code_workspace.veriloga.receipt = Some(receipt);
+    state.code.source_editing.veriloga.receipt = Some(receipt);
 
     let listed = listing(&state);
     assert_eq!(listed.len(), 0);
