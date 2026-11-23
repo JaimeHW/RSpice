@@ -26,7 +26,7 @@ fn a_row_is_found_by_anything_it_shows() {
         resolved: Some("/models/tt.lib".to_owned()),
         access: "Read-only",
         digest: "12ab".to_owned(),
-        contents: Some(Contents::of(21, "model", "models").and(3, "subckt", "subckts")),
+        contents: Some(Contents::of(21, "model", "models").and(3, "subcircuit", "subcircuits")),
         status: LibraryStatus::neutral("Found", None),
     };
     for shown in [
@@ -37,7 +37,7 @@ fn a_row_is_found_by_anything_it_shows() {
         "../models",
         "12ab",
         "21 models",
-        "3 subckts",
+        "3 subcircuits",
     ] {
         assert!(row.matches(shown), "{shown}");
     }

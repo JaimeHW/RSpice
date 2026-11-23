@@ -561,7 +561,7 @@ pub struct Contents {
     pub count: usize,
     /// The first count in words: "12 cells", "21 models".
     pub words: String,
-    /// A second count, said after the first: "5 corners", "3 subckts".
+    /// A second count, said after the first: "5 corners", "3 subcircuits".
     pub more: Option<String>,
 }
 
@@ -594,9 +594,9 @@ impl Contents {
             .len();
         let models = library.models.len();
         if models == 0 && subcircuits > 0 {
-            Self::of(subcircuits, "subckt", "subckts")
+            Self::of(subcircuits, "subcircuit", "subcircuits")
         } else {
-            Self::of(models, "model", "models").and(subcircuits, "subckt", "subckts")
+            Self::of(models, "model", "models").and(subcircuits, "subcircuit", "subcircuits")
         }
     }
 }
