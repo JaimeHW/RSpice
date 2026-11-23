@@ -789,7 +789,8 @@ fn a_shadowed_include_row_carries_a_warning_marker_and_names_the_other_file() {
 }
 
 /// A locator the closure never retained claims nothing about where it came
-/// from; it says so instead of showing an empty chain.
+/// from; it says so instead of showing an empty chain, under the path the
+/// row may show only the end of.
 #[test]
 fn an_untraced_include_row_says_no_chain_was_walked() {
     let projection = netlist_projection("untraced deck\n.include models.lib\n.end\n", "");
@@ -801,9 +802,11 @@ fn an_untraced_include_row_says_no_chain_was_walked() {
     assert_eq!(
         row.tooltip.as_deref(),
         Some(
-            english()
-                .text(MessageId::NetlistIncludeChainUntraced)
-                .as_str()
+            format!(
+                "models.lib\n{}",
+                english().text(MessageId::NetlistIncludeChainUntraced)
+            )
+            .as_str()
         )
     );
 }
