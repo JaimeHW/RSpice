@@ -1892,19 +1892,16 @@ fn outline_group(
     // English behind it would leave a translated navigator unsearchable by the
     // names it displays.
     // Both ends of a subcircuit share its section; the definition is the row.
-    let declared = section
-        .iter()
-        .copied()
-        .filter(|position| {
-            entry_of(position).is_some_and(|entry| entry.kind() != OutlineEntryKind::EndSubcircuit)
-        })
-        .collect::<Vec<_>>();
-    let section = declared.as_slice();
-    if section.is_empty() {
-        return None;
-    }
+    // The group is drawn every frame, so its declarations are listed once,
+    // in one allocation, and kept as they are unless a filter narrows them.
+    let mut declared = Vec::with_capacity(section.len());
+    declared.extend(section.iter().copied().filter(|position| {
+        entry_of(position).is_some_and(|entry| entry.kind() != OutlineEntryKind::EndSubcircuit)
+    }));
+    let &first = declared.first()?;
+    let declarations = declared.len();
     let label = messages.text(spec.label);
-    if !query.matches_group(&label, section.iter().filter_map(entry_of)) {
+    if !query.matches_group(&label, declared.iter().filter_map(entry_of)) {
         return None;
     }
     // A filter names the declarations it kept, so the group discloses them
@@ -1912,23 +1909,19 @@ fn outline_group(
     let filtering = !query.is_empty() && !query.matches_text(&label);
     let expanded = filtering || !collapsed.contains(&spec.section);
     let selected = if filtering {
-        section
-            .iter()
-            .copied()
+        declared
+            .into_iter()
             .filter(|position| entry_of(position).is_some_and(|entry| query.matches_entry(entry)))
             .collect::<Vec<_>>()
     } else {
-        section.to_vec()
+        declared
     };
     let meta = if filtering {
-        format!("{} of {}", selected.len(), section.len())
+        format!("{} of {declarations}", selected.len())
     } else {
-        section.len().to_string()
+        declarations.to_string()
     };
-    let target = selected
-        .first()
-        .or_else(|| section.first())
-        .and_then(entry_of);
+    let target = entry_of(&selected.first().copied().unwrap_or(first));
     Some(NetlistOutlineGroup {
         row: NetlistNavigatorRow {
             kind: spec.kind,
