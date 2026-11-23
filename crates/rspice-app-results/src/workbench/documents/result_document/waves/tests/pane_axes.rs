@@ -316,6 +316,35 @@ fn ticking_a_hidden_trace_in_the_list_draws_it() {
     );
 }
 
+/// A pane of more curves than its row can name names the first ones that
+/// fit and counts every other one on its trace list's control.
+#[test]
+fn a_pane_of_many_curves_counts_every_curve_its_row_cannot_name() {
+    let ctx = context(crate::ui::Theme::default());
+    let time: Vec<f64> = (0..8).map(|index| f64::from(index) * 1.0e-6).collect();
+    let mut state = transient(
+        (0..400)
+            .map(|ordinal| {
+                let values: Vec<f64> = time.iter().map(|t| f64::from(ordinal) * t).collect();
+                RetainedTrace::new(format!("V(n{ordinal})"), time.clone(), values, "#fff")
+                    .with_unit("V")
+            })
+            .collect(),
+    );
+    show_only(&mut state, |_| true);
+    let output = settled(&ctx, &mut state, FRAME);
+    let named = legend_names(&ctx, &output).len();
+    let counted: usize = output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| &update.nodes)
+        .find_map(|(_, node)| node.label()?.strip_prefix('+')?.parse().ok())
+        .expect("the row counts the curves it cannot name");
+    assert!(named > 0, "the row names the curves that fit");
+    assert_eq!(named + counted, 400, "every curve is named or counted");
+}
+
 /// The names a frame's pane legends give, each with the pane, counted from
 /// the top, whose header row it stands in.
 fn legend_names(ctx: &egui::Context, output: &egui::FullOutput) -> Vec<(String, usize)> {

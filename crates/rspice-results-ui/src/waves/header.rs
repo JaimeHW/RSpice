@@ -406,9 +406,16 @@ pub fn show_header(
     // A name gives way only past a share of the row: hierarchical names keep
     // their leaf, cut from the middle as ViVA cuts them.
     let name_budget = (legend_rect.width() * 0.4).max(72.0);
-    let chips: Vec<LegendEntry> = entries
-        .iter()
-        .map(|entry| match entry {
+    // The row names the entries that fit and counts the rest, so the entries
+    // are measured in order only until the measured ones fill it: a pane of a
+    // million curves measures the handful of names its row can hold.
+    let mut chips: Vec<LegendEntry> = Vec::new();
+    let mut measured = 0.0;
+    for entry in &entries {
+        if measured > legend_rect.width() {
+            break;
+        }
+        let chip = match entry {
             Entry::Signal(trace) => legend_entry(
                 ui,
                 model,
@@ -418,8 +425,10 @@ pub fn show_header(
                 &display_name,
             ),
             Entry::Expression(expression) => expression_entry(ui, expression, name_budget),
-        })
-        .collect();
+        };
+        measured += chip.width;
+        chips.push(chip);
+    }
 
     // Whatever the row cannot name waits behind one control, the pane's
     // trace list, right after the last entry that fits: the drawn curves
@@ -445,7 +454,7 @@ pub fn show_header(
             spacing.interact_size.y = ACTION_ICON_SIDE;
             spacing.button_padding.y = spacing.button_padding.y.min(2.0);
             let folded = folded_axes.len();
-            let fitted = fitted_chips(&chips, legend_rect.width(), |overflow| {
+            let fitted = fitted_chips(&chips, entries.len(), legend_rect.width(), |overflow| {
                 trace_list_label(overflow, hidden_count, folded)
                     .map_or(0.0, |label| chip_width(ui, &label) + 3.0)
             });
@@ -459,7 +468,7 @@ pub fn show_header(
                     &mut output,
                 );
             }
-            let Some(label) = trace_list_label(chips.len() - fitted, hidden_count, folded) else {
+            let Some(label) = trace_list_label(entries.len() - fitted, hidden_count, folded) else {
                 return;
             };
             // Centred on the band as the scale chip and the icon are, and
@@ -834,13 +843,19 @@ fn control_width(ui: &Ui, label: &str) -> f32 {
         + margin
 }
 
-/// How many of `chips` the row shows in `width`: as many as leave room for
-/// the trace list after them, whose width for `n` chips left over is
-/// `list_width(n)`, nothing when it is not drawn.
-fn fitted_chips(chips: &[LegendEntry], width: f32, list_width: impl Fn(usize) -> f32) -> usize {
+/// How many of `chips`, the measured first of the row's `count` entries, the
+/// row shows in `width`: as many as leave room for the trace list after them,
+/// whose width for `n` entries left over is `list_width(n)`, nothing when it
+/// is not drawn.
+fn fitted_chips(
+    chips: &[LegendEntry],
+    count: usize,
+    width: f32,
+    list_width: impl Fn(usize) -> f32,
+) -> usize {
     let mut used = 0.0;
     for (index, chip) in chips.iter().enumerate() {
-        if used + chip.width + list_width(chips.len() - index - 1) > width {
+        if used + chip.width + list_width(count - index - 1) > width {
             return index;
         }
         used += chip.width;
