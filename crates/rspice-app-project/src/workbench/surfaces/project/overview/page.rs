@@ -5,8 +5,9 @@
 //! fact is one row, and every column sets its values on one edge, the one
 //! the widest label on the page leaves. One rule closes the band. The
 //! outputs table fills the rest of the page, flush on all four sides; its
-//! head row is its title. Before any run, one line says so beside the Run
-//! button; a run that measured nothing says where outputs are added.
+//! head row is its title. Before any run the kit's empty state stands in
+//! the table's place and offers the plan's Run; after a run that measured
+//! nothing it says where outputs are added and offers Verify.
 //!
 //! A linked value takes its action on a click or Enter; a row takes its
 //! action on Enter or a double-click, and its context menu offers the same
@@ -15,7 +16,8 @@
 use egui::{Align, Layout, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2};
 
 use crate::ui::panels::{
-    FACT_MARK_ROOM, Fact, elide_text, fact_label_width, fact_rows_on, property_row_height,
+    FACT_MARK_ROOM, Fact, WorkbenchIcon, elide_text, empty_state_with_actions, fact_label_width,
+    fact_rows_on, property_row_height,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -34,9 +36,6 @@ const BAND_COLUMN: f32 = 400.0;
 const BAND_COLUMNS_MOST: usize = 4;
 /// Room above and below the band's rows, so they sit clear of the rules.
 const BAND_PAD: f32 = 4.0;
-/// How tall the line stands that says why there is no table: room for its
-/// button.
-const LINE_H: f32 = 40.0;
 /// The least width of a column of the outputs table. Every column has the
 /// same least and the same share of what is over, so the columns stand
 /// equal across the page, none stretched alone.
@@ -78,10 +77,17 @@ pub(super) fn page(
                 rows.get(row).map(|line| line.action.clone())
             });
         }
-        Outputs::NoRun(run) => empty_line(&mut child, "No runs yet", run, &mut asked),
-        Outputs::Unmeasured(verify) => empty_line(
+        Outputs::NoRun(run) => empty(
             &mut child,
-            "The latest run measured nothing; Verify's Specifications page adds outputs",
+            (WorkbenchIcon::Run, "No runs yet"),
+            "Run the plan to read its outputs against their specifications here.",
+            run,
+            &mut asked,
+        ),
+        Outputs::Unmeasured(verify) => empty(
+            &mut child,
+            (WorkbenchIcon::Verify, "Nothing measured"),
+            "The latest run measured nothing. Outputs are added on Verify's Specifications page.",
             verify,
             &mut asked,
         ),
@@ -262,50 +268,26 @@ impl Asked {
     }
 }
 
-/// One neutral line saying why there is no table, and the button that
-/// fills it.
-fn empty_line(ui: &mut Ui, text: &str, action: &Action, asked: &mut Asked) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, LINE_H), Sense::hover());
-    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
-    let button = Button::new(action.label).enabled(action.enabled);
-    let button_width = button.measured_width(ui);
-    let words = elide_text(
-        ui,
-        text,
-        &font,
-        (width - 2.0 * TABLE_EDGE_INSET - button_width - 12.0).max(0.0),
-    );
-    let galley = ui.painter().layout_no_wrap(words, font, t.color.text_dim);
-    let text_rect = Rect::from_min_size(
-        pos2(
-            rect.left() + TABLE_EDGE_INSET,
-            rect.center().y - galley.size().y * 0.5,
-        ),
-        galley.size(),
-    );
-    let response = ui.interact(text_rect, ui.id().with(("empty", text)), Sense::hover());
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-    let text_right = text_rect.right();
-    ui.painter().galley(text_rect.min, galley, t.color.text_dim);
-    let control_h = t.metrics.ctl_h;
-    let button_rect = Rect::from_min_size(
-        pos2(text_right + 12.0, rect.center().y - control_h * 0.5),
-        vec2(button_width, control_h),
-    );
-    let mut child = ui.new_child(
-        UiBuilder::new()
-            .max_rect(button_rect)
-            .layout(Layout::left_to_right(Align::Center)),
-    );
-    let pressed = button.show(&mut child);
-    let pressed = match action.disabled_reason.filter(|_| !action.enabled) {
-        Some(reason) => pressed.on_disabled_hover_text(reason),
-        None => pressed,
-    };
-    if pressed.clicked() {
+/// The kit's empty state in the table's place: `title` under `icon`, what
+/// fills the table, and `action`'s button, faint with its reason while it
+/// cannot be taken.
+fn empty(
+    ui: &mut Ui,
+    (icon, title): (WorkbenchIcon, &str),
+    description: &str,
+    action: &Action,
+    asked: &mut Asked,
+) {
+    let mut pressed = false;
+    empty_state_with_actions(ui, icon, title, description, |ui| {
+        let response = Button::new(action.label).enabled(action.enabled).show(ui);
+        let response = match action.disabled_reason.filter(|_| !action.enabled) {
+            Some(reason) => response.on_disabled_hover_text(reason),
+            None => response,
+        };
+        pressed |= response.clicked();
+    });
+    if pressed {
         asked.take(action);
     }
 }
