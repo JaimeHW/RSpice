@@ -5,12 +5,14 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::documents::result_document::browser_plot::{
     result_quantity_ticked, set_result_signal_plotted,
 };
-/// Re-exported where the browser's own actions are found: a tick is how a
-/// row is plotted.
-pub use crate::workbench::documents::result_document::set_result_quantity_ticked;
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsParts, compare_availability, exact_result_artifact_text,
     exact_result_signal_last_sample, exact_result_signal_tsv,
+};
+/// Re-exported where the browser's own actions are found: a tick is how a
+/// row is plotted.
+pub use crate::workbench::documents::result_document::{
+    set_result_quantities_ticked, set_result_quantity_ticked,
 };
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Execute, held_back};
@@ -51,9 +53,7 @@ fn tick_result_range(
     ordered_visible: &[ResultBrowserSelectionKey],
 ) {
     let range = state.results.session.browser_range(target, ordered_visible);
-    for key in &range {
-        set_result_quantity_ticked(state, key, true);
-    }
+    set_result_quantities_ticked(state, &range, true);
 }
 
 /// A double click on a row: the signal goes on the plot and its statistics

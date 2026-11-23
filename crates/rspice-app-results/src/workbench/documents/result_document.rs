@@ -165,7 +165,9 @@ pub use waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
 
-pub use browser_plot::{ResultQuantityDrag, set_result_quantity_ticked};
+pub use browser_plot::{
+    ResultQuantityDrag, set_result_quantities_ticked, set_result_quantity_ticked,
+};
 pub use waves::{event_net_plotted, set_event_net_plotted, toggle_visibility, waveform_plotted};
 
 use bars::show as show_sheet_bar;

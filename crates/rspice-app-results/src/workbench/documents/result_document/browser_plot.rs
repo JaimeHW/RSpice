@@ -130,6 +130,81 @@ pub fn set_result_quantity_ticked(
     }
 }
 
+/// Tick or untick every quantity of `keys`, as "Tick visible quantities", a
+/// Shift range, "Plot all" and a saved set do: each signal is found in one
+/// walk of its analysis' columns for all of them, where finding them one at a
+/// time walked a million-column analysis once for each signal.
+pub fn set_result_quantities_ticked<'k>(
+    state: &mut ResultsParts<'_>,
+    keys: impl IntoIterator<Item = &'k ResultBrowserSelectionKey>,
+    ticked: bool,
+) {
+    let keys = keys.into_iter().collect::<Vec<_>>();
+    let found = find_signals(&state.model.simulation.retained.runs, &keys);
+    for (key, found) in keys.into_iter().zip(found) {
+        match (key, found) {
+            (ResultBrowserSelectionKey::Waveform(signal), Some(at)) => {
+                set_found_signal_plotted(state, signal, at, ticked);
+            }
+            (ResultBrowserSelectionKey::Waveform(_), None) => {}
+            (ResultBrowserSelectionKey::Artifact(_), _) => {
+                set_result_quantity_ticked(state, key, ticked);
+            }
+        }
+    }
+}
+
+/// Where each signal of `keys` is: its run, analysis and column, found as
+/// [`SourceWaveformPresentationKey::resolve`] finds one (a name two columns
+/// share finds neither), in one walk of each analysis the keys name.
+fn find_signals(
+    runs: &[crate::state::SimulationRun],
+    keys: &[&ResultBrowserSelectionKey],
+) -> Vec<Option<(usize, usize, usize)>> {
+    use std::collections::HashMap;
+    let mut found = vec![None; keys.len()];
+    let mut wanted = HashMap::<AnalysisPresentationKey, HashMap<&str, Vec<usize>>>::new();
+    for (index, key) in keys.iter().enumerate() {
+        if let ResultBrowserSelectionKey::Waveform(signal) = key {
+            wanted
+                .entry(signal.analysis())
+                .or_default()
+                .entry(signal.source_name())
+                .or_default()
+                .push(index);
+        }
+    }
+    for (analysis_key, names) in wanted {
+        let Some((run_index, run)) = runs
+            .iter()
+            .enumerate()
+            .find(|(_, run)| run.dataset_id == analysis_key.dataset_id())
+        else {
+            continue;
+        };
+        let Some((analysis_index, analysis)) = analysis_key.resolve(&run.data) else {
+            continue;
+        };
+        let mut columns = HashMap::<&str, Option<usize>>::with_capacity(names.len());
+        for (column, waveform) in analysis.waveforms.iter().enumerate() {
+            if names.contains_key(waveform.name.as_str()) {
+                columns
+                    .entry(waveform.name.as_str())
+                    .and_modify(|at| *at = None)
+                    .or_insert(Some(column));
+            }
+        }
+        for (name, indices) in names {
+            if let Some(Some(column)) = columns.get(name) {
+                for index in indices {
+                    found[index] = Some((run_index, analysis_index, *column));
+                }
+            }
+        }
+    }
+    found
+}
+
 /// The event nets a row plots, by their `D()` or `E()` column names: an
 /// event net's own, or a declared bus's members MSB first. `None` for a row
 /// that names neither.
@@ -230,8 +305,37 @@ pub(crate) fn set_result_signal_plotted(
     else {
         return;
     };
+    set_found_signal_plotted(
+        state,
+        key,
+        (run_index, analysis_index, waveform_index),
+        plotted,
+    );
+}
+
+/// [`set_result_signal_plotted`] for a signal found at `(run, analysis,
+/// column)` of the retained runs.
+fn set_found_signal_plotted(
+    state: &mut ResultsParts<'_>,
+    key: &SourceWaveformPresentationKey,
+    (run_index, analysis_index, waveform_index): (usize, usize, usize),
+    plotted: bool,
+) {
     if state.model.simulation.view.active_run_idx == Some(run_index) {
-        if result_signal_ticked(state, key) != plotted {
+        let ticked = state.model.simulation.retained.runs[run_index]
+            .analyses
+            .get(analysis_index)
+            .and_then(|analysis| analysis.waveforms.get(waveform_index))
+            .is_some_and(|waveform| {
+                waveform_plotted(
+                    state.model,
+                    state.results,
+                    key,
+                    &waveform.name,
+                    waveform.visible,
+                )
+            });
+        if ticked != plotted {
             super::toggle_visibility(state, analysis_index, waveform_index);
         }
         if plotted {

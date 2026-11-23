@@ -24,7 +24,8 @@ use super::results_actions::{
     execute, handle_result_artifact_keyboard, handle_result_signal_keyboard,
     plot_and_inspect_signal, result_artifact_context_menu, result_signal_context_menu,
     result_signal_row_id, select_result_analysis_by_key, select_result_artifact,
-    select_result_signal_by_key, set_result_quantity_ticked, update_result_browser_multi_selection,
+    select_result_signal_by_key, set_result_quantities_ticked,
+    update_result_browser_multi_selection,
 };
 use super::results_tree::{InstanceNode, SignalKind, TreeItem, split_hierarchy};
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
@@ -1468,15 +1469,11 @@ fn instance_row(
     response.context_menu(|ui| {
         let plot = format!("Plot all {}", grouped_count(node.count));
         if ui.button(plot).clicked() {
-            for key in instance_leaf_keys(runs, row) {
-                set_result_quantity_ticked(state, &key, true);
-            }
+            set_result_quantities_ticked(state, &instance_leaf_keys(runs, row), true);
             ui.close();
         }
         if ui.button("Remove all from the plot").clicked() {
-            for key in instance_leaf_keys(runs, row) {
-                set_result_quantity_ticked(state, &key, false);
-            }
+            set_result_quantities_ticked(state, &instance_leaf_keys(runs, row), false);
             ui.close();
         }
     });

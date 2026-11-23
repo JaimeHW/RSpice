@@ -16,7 +16,7 @@ use crate::workbench::documents::result_document::signal_sets::{
     MAX_SIGNAL_SET_MEMBERS, MAX_SIGNAL_SETS, signal_set_index, signal_set_name,
 };
 
-use super::results_actions::set_result_quantity_ticked;
+use super::results_actions::set_result_quantities_ticked;
 use super::results_rows::retained_result_artifacts;
 
 /// The member a browser row names: the kind of analysis that retained it and
@@ -210,12 +210,20 @@ pub(super) fn apply_signal_set(
         }
     }
     // Off first, then on, so a net a bus shares comes out plotted.
-    for (key, _) in plot.iter().filter(|(_, wanted)| !wanted) {
-        set_result_quantity_ticked(state, key, false);
-    }
-    for (key, _) in plot.iter().filter(|(_, wanted)| *wanted) {
-        set_result_quantity_ticked(state, key, true);
-    }
+    set_result_quantities_ticked(
+        state,
+        plot.iter()
+            .filter(|(_, wanted)| !wanted)
+            .map(|(key, _)| key),
+        false,
+    );
+    set_result_quantities_ticked(
+        state,
+        plot.iter()
+            .filter(|(_, wanted)| *wanted)
+            .map(|(key, _)| key),
+        true,
+    );
     let plotted = counted(found.len(), "signal", "signals");
     let missing = set
         .members

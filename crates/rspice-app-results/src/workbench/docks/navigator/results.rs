@@ -23,7 +23,7 @@ use super::super::super::commands::result_navigation::{open_run_log, ticked_resu
 use super::super::super::design_system::WorkbenchIcon;
 use super::results_actions::{
     compare_enabled, execute, locate_on_schematic_menu, select_result_analysis_by_key,
-    select_result_browser_key, set_result_quantity_ticked,
+    select_result_browser_key, set_result_quantities_ticked,
 };
 use super::results_rows::{
     ResultCompletenessClass, artifact_hierarchical_name, artifact_signal_kind, expression_header,
@@ -64,27 +64,10 @@ pub(in crate::workbench) fn results(
         state.results.session.clear_checked_signals();
     }
     let query = BrowserQuery::parse(state.workbench.navigator_filter());
-    let mut ticked = ticked_result_quantities(state.model, state.results);
-    // An event net's or a bus's row is ticked while its lane is on the plot,
-    // as a curve's row is while the curve is.
-    ticked.extend(plotted_event_rows(state));
-    // What a set saves and the band's actions act on: the ticked quantities in
-    // the order the runs hold them, each resolved once.
-    let (ticked_ordered, ticked_facts) = {
-        let selection =
-            crate::workbench::documents::result_document::resolve_result_browser_selection(
-                &ticked,
-                &state.model.simulation.retained.runs,
-            );
-        let facts = TickedFacts::of(&selection, state);
-        (
-            selection
-                .into_iter()
-                .map(|(key, _)| key)
-                .collect::<Vec<_>>(),
-            facts,
-        )
-    };
+    let kept = ticked_quantities(ui.ctx(), state);
+    let ticked = &*kept.ticked;
+    let ticked_ordered = &*kept.ordered;
+    let ticked_facts = kept.facts.clone();
     let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/layout read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
@@ -602,7 +585,7 @@ pub(in crate::workbench) fn results(
     if tab == ResultsBrowserTab::Signals && !ticked.is_empty() {
         let t = Tokens::get(ui.ctx());
         let checked = &ticked;
-        let checked_ordered = &ticked_ordered;
+        let checked_ordered = ticked_ordered;
         let TickedFacts {
             exact_validation_error,
             clipboard_sample_count,
@@ -654,9 +637,7 @@ pub(in crate::workbench) fn results(
                             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear ticks")
                         });
                         if clear.clicked() {
-                        for key in checked_ordered {
-                            set_result_quantity_ticked(state, key, false);
-                        }
+                        set_result_quantities_ticked(state, checked_ordered, false);
                         state.results.session.clear_checked_signals();
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -672,9 +653,7 @@ pub(in crate::workbench) fn results(
                     )
                     .clicked()
                 {
-                    for key in &visible_result_keys {
-                        set_result_quantity_ticked(state, key, true);
-                    }
+                    set_result_quantities_ticked(state, &visible_result_keys, true);
                     if let Some(last) = visible_result_keys.last() {
                         state.results.session.set_browser_range_anchor(last.clone());
                     }
@@ -1012,7 +991,106 @@ pub(in crate::workbench) fn results(
         });
 }
 
+/// The ticked quantities, the order the runs hold them in, and what the band
+/// of batch actions needs to know of them, kept between frames with what
+/// they were read from: reading them walks every signal of the active run.
+#[derive(Clone)]
+struct TickedQuantities {
+    revision: crate::state::RunHistoryRevision,
+    fingerprint: u64,
+    ticked: std::sync::Arc<std::collections::HashSet<ResultBrowserSelectionKey>>,
+    ordered: std::sync::Arc<Vec<ResultBrowserSelectionKey>>,
+    facts: TickedFacts,
+}
+
+/// The ticked quantities, read again only when the retained runs or
+/// something else they are read from changed since the frame that last read
+/// them.
+fn ticked_quantities(ctx: &egui::Context, state: &ResultsParts<'_>) -> TickedQuantities {
+    let id = egui::Id::new("rspice.results.browser.ticked");
+    let revision = state.model.simulation.retained.runs.revision();
+    let fingerprint = ticked_fingerprint(state);
+    if let Some(kept) = ctx.data(|data| data.get_temp::<TickedQuantities>(id))
+        && kept.revision == revision
+        && kept.fingerprint == fingerprint
+    {
+        return kept;
+    }
+    let mut ticked = ticked_result_quantities(state.model, state.results);
+    // An event net's or a bus's row is ticked while its lane is on the plot,
+    // as a curve's row is while the curve is.
+    ticked.extend(plotted_event_rows(state));
+    // What a set saves and the band's actions act on: the ticked quantities in
+    // the order the runs hold them, each resolved once.
+    let (ordered, facts) = {
+        let selection =
+            crate::workbench::documents::result_document::resolve_result_browser_selection(
+                &ticked,
+                &state.model.simulation.retained.runs,
+            );
+        let facts = TickedFacts::of(&selection, state);
+        (
+            selection
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<Vec<_>>(),
+            facts,
+        )
+    };
+    let kept = TickedQuantities {
+        revision,
+        fingerprint,
+        ticked: std::sync::Arc::new(ticked),
+        ordered: std::sync::Arc::new(ordered),
+        facts,
+    };
+    ctx.data_mut(|data| data.insert_temp(id, kept.clone()));
+    kept
+}
+
+/// Everything besides the retained runs themselves that what is ticked is
+/// read from, as one number: the data version, the active run and its
+/// overlays, the quantities ticked by hand, the reader's visibility
+/// overrides, and the persistent pane whose traces decide a curve's tick.
+fn ticked_fingerprint(state: &ResultsParts<'_>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let stable = rspice_results_ui::waves::stable_hash;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let view = &state.model.simulation.view;
+    (view.data_version, view.active_run_idx).hash(&mut hasher);
+    view.overlay_dataset_ids.hash(&mut hasher);
+    let session = &state.results.session;
+    // A set's or a map's order is its hasher's: combine its members in any
+    // order.
+    session
+        .checked_result_quantities
+        .iter()
+        .fold(0_u64, |combined, key| combined ^ stable(key))
+        .hash(&mut hasher);
+    session.checked_result_quantities.len().hash(&mut hasher);
+    session
+        .waveform_visibility
+        .iter()
+        .fold(0_u64, |combined, entry| {
+            combined ^ rspice_results_ui::waves::stable_hash(&entry)
+        })
+        .hash(&mut hasher);
+    session.waveform_visibility.len().hash(&mut hasher);
+    if let Some(context) = session.persistent_pane_context {
+        (context.document_id, context.pane_id, context.analysis).hash(&mut hasher);
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(context.document_id)
+            .map(|document| document.revision())
+            .hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 /// What the band of batch actions needs to know of the ticked quantities.
+#[derive(Clone)]
 struct TickedFacts {
     /// Why the first quantity that gives no exact values gives none.
     exact_validation_error: Option<String>,

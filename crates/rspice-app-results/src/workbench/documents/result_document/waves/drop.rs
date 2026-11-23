@@ -7,7 +7,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
 use super::super::ResultsParts;
-use super::super::browser_plot::{ResultQuantityDrag, drag_name, set_result_quantity_ticked};
+use super::super::browser_plot::{ResultQuantityDrag, drag_name, set_result_quantities_ticked};
 
 /// Take browser rows dropped anywhere on the strips' area, `zone`. A
 /// waveform goes on the pane of its unit, a new pane when its unit has none
@@ -57,9 +57,7 @@ pub(super) fn accept_browser_drop(ui: &Ui, state: &mut ResultsParts<'_>, zone: e
     painter.galley(banner.center() - galley.size() * 0.5, galley, t.color.text);
     if ctx.input(|input| input.pointer.any_released()) {
         egui::DragAndDrop::clear_payload(&ctx);
-        for key in &drag.keys {
-            set_result_quantity_ticked(state, key, true);
-        }
+        set_result_quantities_ticked(state, &drag.keys, true);
         ctx.request_repaint();
     }
 }
