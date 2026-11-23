@@ -42,6 +42,9 @@ enum GridEdit {
     Stops(OrderedChipsEdit),
 }
 
+/// What a field draws in its share of the band, and the edit it asks for.
+type FieldBody<'a> = Box<dyn FnOnce(&mut Ui) -> Option<GridEdit> + 'a>;
+
 /// One field of the band: its label, whether its control wraps onto more
 /// lines (a chip list), how wide its control is on one line where that is
 /// more than a field's least, and what it draws, with the edit it asks for.
@@ -49,7 +52,7 @@ struct Field<'a> {
     label: &'static str,
     wraps: bool,
     needs: f32,
-    body: Box<dyn FnOnce(&mut Ui) -> Option<GridEdit> + 'a>,
+    body: FieldBody<'a>,
 }
 
 impl<'a> Field<'a> {

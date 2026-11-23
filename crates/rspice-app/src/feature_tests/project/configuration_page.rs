@@ -429,13 +429,11 @@ fn a_hierarchy_past_a_million_instances_opens_on_the_page_and_netlists() {
 
     // A count is read as a magnitude, its thousands grouped.
     let shown = frame(&mut app, 1440.0);
-    for fact in ["1,082,401 of 1,082,401 instances bound"] {
-        assert!(
-            shown.reports(fact),
-            "the page must state {fact:?}: {:#?}",
-            shown.every_word().collect::<Vec<_>>()
-        );
-    }
+    assert!(
+        shown.reports("1,082,401 of 1,082,401 instances bound"),
+        "the bar must state the count grouped: {:#?}",
+        shown.every_word().collect::<Vec<_>>()
+    );
     let page = &mut app.state.project.configuration;
     assert_eq!(page.visible_instances().len(), 1 + 32);
     let mut open = String::new();
