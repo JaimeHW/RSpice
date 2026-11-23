@@ -710,6 +710,7 @@ fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
             cx.model,
             deck,
             cx.handles.export_io,
+            cx.wb.messages(),
         );
     } else if cx.wb.workspace == Workspace::Netlist {
         let dialog = &mut cx.state.netlist.export_dialog;

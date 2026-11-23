@@ -220,7 +220,8 @@ fn answer_missing(
     }
     #[cfg(not(target_arch = "wasm32"))]
     if locate
-        && let Some(path) = crate::workbench::workflows::netlist_workflow::show_open_deck_dialog()
+        && let Some(path) =
+            crate::workbench::workflows::netlist_workflow::show_open_deck_dialog(messages)
     {
         match deck_files::locate_deck(
             cx.model,

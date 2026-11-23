@@ -203,13 +203,14 @@ fn decode_picked_file(
 
 #[cfg(target_arch = "wasm32")]
 pub fn pick_text_file(
-    filter_name: &'static str,
+    filter_name: impl Into<String>,
     filter_extensions: &'static [&'static str],
     on_complete: impl FnOnce(Result<Option<PickedTextFile>, String>) + 'static,
 ) {
     // The initiating workflow owns the active import lease. Capture its limit
     // before starting the non-abortable browser promise so a later replacement
     // picker cannot change the authority applied to this read.
+    let filter_name = filter_name.into();
     let import_kind = active_text_import_kind();
     let max_bytes = import_kind
         .map(BrowserTextImportKind::max_bytes)
@@ -330,10 +331,11 @@ async fn read_result_file(
 /// and bytes, within the import's ceiling in all.
 #[cfg(target_arch = "wasm32")]
 pub fn pick_files(
-    filter_name: &'static str,
+    filter_name: impl Into<String>,
     filter_extensions: &'static [&'static str],
     on_complete: impl FnOnce(Result<Option<Vec<(String, Vec<u8>)>>, String>) + 'static,
 ) {
+    let filter_name = filter_name.into();
     let max_bytes = active_text_import_kind()
         .map(BrowserTextImportKind::max_bytes)
         .unwrap_or(crate::io::project_io::BROWSER_FILE_BYTES);

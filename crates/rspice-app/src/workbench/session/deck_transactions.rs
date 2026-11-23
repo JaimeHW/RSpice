@@ -9,6 +9,9 @@
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_workbench::workbench::localization::MessageCatalog;
+use rspice_app_workbench::workbench::localization::MessageId;
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -54,7 +57,9 @@ impl AppState {
                 }
             };
         file_import::pick_files(
-            "SPICE decks and ZIP",
+            self.workbench
+                .messages()
+                .text(MessageId::NetlistDecksAndZipFilter),
             DECK_IMPORT_EXTENSIONS,
             move |result| {
                 if file_import::text_import_is_current(token) {
@@ -148,7 +153,7 @@ impl AppState {
         self.record(
             rspice_app_state::diagnostics::LogSeverity::Info,
             rspice_app_state::diagnostics::LogSource::Netlist,
-            format!("Imported {}.", names.join(", ")),
+            messages.format(MessageId::NetlistImported, &[("names", &names.join(", "))]),
         );
         true
     }
@@ -162,15 +167,24 @@ impl AppState {
         &mut self,
         request: rspice_app_state::state::netlist_diagnostics::DeckFileRequest,
     ) -> Result<String, String> {
+        let messages = self.workbench.messages();
         let Some(path) =
             rspice_app_code::workbench::workflows::netlist_workflow::show_add_deck_file_dialog(
                 &request.requested,
+                messages,
             )
         else {
             return Ok(String::new());
         };
-        let bytes = std::fs::read(&path)
-            .map_err(|error| format!("{} could not be read: {error}", path.display()))?;
+        let bytes = std::fs::read(&path).map_err(|error| {
+            messages.format(
+                MessageId::NetlistFileUnreadable,
+                &[
+                    ("name", &path.display().to_string()),
+                    ("error", &error.to_string()),
+                ],
+            )
+        })?;
         let name = path.file_name().map_or_else(
             || path.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
@@ -189,12 +203,17 @@ impl AppState {
         let token =
             file_import::try_begin_text_import(file_import::BrowserTextImportKind::Netlist)?;
         let keep_as = request.keep_as.clone();
-        file_import::pick_text_file("SPICE files", DECK_FILE_EXTENSIONS, move |result| {
-            if file_import::text_import_is_current(token) {
-                DECK_FILE_PICK.with(|slot| *slot.borrow_mut() = Some((token, request, result)));
-            }
-        });
-        Ok(format!("Pick the file to keep as {keep_as}."))
+        let messages = self.workbench.messages();
+        file_import::pick_text_file(
+            messages.text(MessageId::NetlistSpiceFilesFilter),
+            DECK_FILE_EXTENSIONS,
+            move |result| {
+                if file_import::text_import_is_current(token) {
+                    DECK_FILE_PICK.with(|slot| *slot.borrow_mut() = Some((token, request, result)));
+                }
+            },
+        );
+        Ok(messages.format(MessageId::NetlistPickFileToKeep, &[("path", &keep_as)]))
     }
 
     /// Keep `bytes`, the file `name` picked for `request`, with the open
@@ -230,7 +249,9 @@ impl AppState {
             return false;
         }
         let Some(path) =
-            rspice_app_code::workbench::workflows::netlist_workflow::show_open_deck_dialog()
+            rspice_app_code::workbench::workflows::netlist_workflow::show_open_deck_dialog(
+                self.workbench.messages(),
+            )
         else {
             return false;
         };
@@ -264,6 +285,7 @@ impl AppState {
             let Some(path) =
                 rspice_app_code::workbench::workflows::netlist_workflow::show_new_deck_dialog(
                     folder.as_deref(),
+                    self.workbench.messages(),
                 )
             else {
                 return false;
@@ -278,13 +300,18 @@ impl AppState {
     pub(crate) fn save_deck_as(&mut self) -> bool {
         #[cfg(target_arch = "wasm32")]
         {
-            self.prompt("Decks are saved as files on the desktop.");
+            self.prompt(
+                self.workbench
+                    .messages()
+                    .text(MessageId::NetlistDecksSavedOnDesktop),
+            );
             false
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let messages = self.workbench.messages();
             let Some(deck) = self.code.netlist.open_deck.as_ref() else {
-                self.prompt("Open a deck to save it as another.");
+                self.prompt(messages.text(MessageId::NetlistNoDeckOpen));
                 return false;
             };
             let folder = if deck.is_stored() {
@@ -300,13 +327,14 @@ impl AppState {
             };
             let Some(path) =
                 rspice_app_code::workbench::workflows::netlist_workflow::show_deck_save_dialog(
-                    if deck.is_stored() {
-                        "Save Deck As Files"
+                    &messages.text(if deck.is_stored() {
+                        MessageId::NetlistSaveDeckAsFilesTitle
                     } else {
-                        "Save Deck As"
-                    },
+                        MessageId::NetlistSaveDeckAsTitle
+                    }),
                     &deck.root.name(),
                     folder.as_deref(),
+                    messages,
                 )
             else {
                 return false;
@@ -346,6 +374,7 @@ impl AppState {
         #[cfg(not(target_arch = "wasm32"))]
         let written = {
             use rspice_app_code::workbench::workflows::netlist_workflow as pickers;
+            let messages = self.workbench.messages();
             let folder = self
                 .model
                 .workspace
@@ -355,19 +384,32 @@ impl AppState {
                 .map(std::path::Path::to_path_buf)
                 .or_else(dirs::document_dir);
             let picked = if with_files {
-                pickers::show_zip_save_dialog("Export Deck and Files", &name, folder.as_deref())
+                pickers::show_zip_save_dialog(
+                    &messages.text(MessageId::NetlistExportDeckAndFilesTitle),
+                    &name,
+                    folder.as_deref(),
+                    messages,
+                )
             } else {
-                pickers::show_deck_save_dialog("Export Deck", &name, folder.as_deref())
+                pickers::show_deck_save_dialog(
+                    &messages.text(MessageId::NetlistExportDeckTitle),
+                    &name,
+                    folder.as_deref(),
+                    messages,
+                )
             };
             let Some(path) = picked else {
                 return false;
             };
-            std::fs::write(&path, &bytes)
-                .map_err(|error| format!("{} could not be written: {error}", path.display()))
+            std::fs::write(&path, &bytes).map_err(|error| not_written(messages, &path, &error))
         };
         match written {
             Ok(()) => {
-                self.prompt(format!("Exported {name}."));
+                self.prompt(
+                    self.workbench
+                        .messages()
+                        .format(MessageId::NetlistExported, &[("name", &name)]),
+                );
                 true
             }
             Err(error) => {
@@ -389,9 +431,11 @@ impl AppState {
             self.workbench.messages(),
         ) {
             Ok(name) => {
-                self.prompt(format!(
-                    "Saved the deck as {name}; it is read from there now."
-                ));
+                self.prompt(
+                    self.workbench
+                        .messages()
+                        .format(MessageId::NetlistSavedDeckAs, &[("name", &name)]),
+                );
                 true
             }
             Err(error) => {
@@ -412,7 +456,11 @@ impl AppState {
             .trim()
             .is_empty()
         {
-            self.prompt("Generate the netlist before saving it as a deck.");
+            self.prompt(
+                self.workbench
+                    .messages()
+                    .text(MessageId::NetlistGenerateBeforeSavingDeck),
+            );
             return false;
         }
         #[cfg(target_arch = "wasm32")]
@@ -437,9 +485,13 @@ impl AppState {
             let name = format!("{}.cir", self.model.export_file_stem("deck"));
             let Some(path) =
                 rspice_app_code::workbench::workflows::netlist_workflow::show_deck_save_dialog(
-                    "Save Netlist As Deck",
+                    &self
+                        .workbench
+                        .messages()
+                        .text(MessageId::NetlistSaveNetlistAsDeckTitle),
                     &name,
                     folder.as_deref(),
+                    self.workbench.messages(),
                 )
             else {
                 return false;
@@ -457,7 +509,7 @@ impl AppState {
             return false;
         }
         if let Err(error) = std::fs::write(path, self.generated_deck_text()) {
-            self.prompt(format!("{} could not be written: {error}", path.display()));
+            self.prompt(not_written(self.workbench.messages(), path, &error));
             return false;
         }
         let new_project = !self.platform.project_lifecycle.is_open();
@@ -470,7 +522,7 @@ impl AppState {
     #[cfg(not(target_arch = "wasm32"))]
     fn generated_deck_refusal(&self) -> Option<String> {
         if let Some(reason) = self.deck_open_refusal(false) {
-            return Some(reason.to_owned());
+            return Some(reason);
         }
         self.code
             .netlist
@@ -508,7 +560,7 @@ impl AppState {
                 .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
         );
         if let Err(error) = std::fs::write(path, deck.text) {
-            self.prompt(format!("{} could not be written: {error}", path.display()));
+            self.prompt(not_written(self.workbench.messages(), path, &error));
             return false;
         }
         self.open_deck_at(path, new_project)
@@ -560,21 +612,22 @@ impl AppState {
         self.record(
             rspice_app_state::diagnostics::LogSeverity::Info,
             rspice_app_state::diagnostics::LogSource::Netlist,
-            format!("Created deck {name}."),
+            messages.format(MessageId::NetlistCreatedDeck, &[("name", &name)]),
         );
         true
     }
 
     /// Why no deck can be opened now: a run in progress, or a project open
     /// read-only that the deck would be added to.
-    fn deck_open_refusal(&self, new_project: bool) -> Option<&'static str> {
-        if self.model.simulation.execution.has_active_execution() {
-            return Some("A deck cannot be opened while a simulation is running.");
-        }
-        if !new_project && self.model.safe_mode.project_read_only() {
-            return Some("A deck cannot be added: the project is open read-only.");
-        }
-        None
+    fn deck_open_refusal(&self, new_project: bool) -> Option<String> {
+        let refusal = if self.model.simulation.execution.has_active_execution() {
+            MessageId::NetlistDeckOpenWhileRunning
+        } else if !new_project && self.model.safe_mode.project_read_only() {
+            MessageId::NetlistDeckAddReadOnly
+        } else {
+            return None;
+        };
+        Some(self.workbench.messages().text(refusal))
     }
 
     /// Open the deck file at `path`, in a new project around it when
@@ -626,7 +679,7 @@ impl AppState {
         self.record(
             LogSeverity::Info,
             LogSource::Netlist,
-            format!("Opened deck {name}."),
+            messages.format(MessageId::NetlistOpenedDeck, &[("name", &name)]),
         );
         true
     }
@@ -642,13 +695,21 @@ impl AppState {
             return false;
         }
         let [file] = dropped else {
-            self.prompt("Drop one SPICE deck at a time.");
+            self.prompt(
+                self.workbench
+                    .messages()
+                    .text(MessageId::NetlistDropOneDeck),
+            );
             return false;
         };
         #[cfg(not(target_arch = "wasm32"))]
         {
             let Some(path) = file.path.clone() else {
-                self.prompt("Only a deck file on this computer opens as a deck.");
+                self.prompt(
+                    self.workbench
+                        .messages()
+                        .text(MessageId::NetlistDropNotAFile),
+                );
                 return false;
             };
             self.open_deck_at(&path, new_project)
@@ -718,3 +779,15 @@ const DECK_FILE_EXTENSIONS: &[&str] = &[
     "inc", "lib", "mod", "mdl", "sub", "cir", "sp", "spi", "spice", "net", "ckt", "cki", "scs",
     "txt",
 ];
+
+/// Why the file at `path` was not written.
+#[cfg(not(target_arch = "wasm32"))]
+fn not_written(messages: MessageCatalog, path: &std::path::Path, error: &std::io::Error) -> String {
+    messages.format(
+        MessageId::NetlistFileNotWritten,
+        &[
+            ("path", &path.display().to_string()),
+            ("error", &error.to_string()),
+        ],
+    )
+}

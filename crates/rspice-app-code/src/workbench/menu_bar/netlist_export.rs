@@ -6,6 +6,7 @@
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::{MessageCatalog, MessageId};
 
 pub fn action_export_generated_netlist_with_options(
     model: &mut crate::workbench::app_state::Model,
@@ -14,8 +15,8 @@ pub fn action_export_generated_netlist_with_options(
     include_source_map: bool,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
-    use crate::workbench::MessageId;
     let messages = wb.messages();
+    let failed = messages.text(MessageId::NetlistExportFailedTitle);
     let Some(document) = model.netlist_artifacts.generated_document.as_ref() else {
         wb.prompt(messages.text(MessageId::NetlistExportNotGenerated));
         return false;
@@ -42,13 +43,13 @@ pub fn action_export_generated_netlist_with_options(
         return false;
     }
     if !bundle_dependencies {
-        return publish_generated_source(model, &artifact, io);
+        return publish_generated_source(model, &artifact, io, messages);
     }
 
     let bundle = match crate::io::build_generated_bundle(&artifact, include_source_map) {
         Ok(bundle) => bundle,
         Err(error) => {
-            model.report_failure("Netlist bundle export failed", error.to_string());
+            model.report_failure(failed, error.to_string());
             return false;
         }
     };
@@ -57,15 +58,15 @@ pub fn action_export_generated_netlist_with_options(
         &artifact.content_digest().to_string()[..12]
     );
     let picked = io.show_save_dialog(SaveDialogConfig {
-        title: "Export Generated Netlist Bundle",
+        title: &messages.text(MessageId::NetlistExportGeneratedZipTitle),
         default_name: &default_name,
-        filter_name: "RSpice Netlist Bundle",
+        filter_name: &messages.text(MessageId::NetlistZipFilter),
         filter_extensions: &["zip"],
     });
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            model.report_failure("Netlist bundle export failed", error.to_string());
+            model.report_failure(failed, error.to_string());
             return false;
         }
     }) else {
@@ -81,7 +82,7 @@ pub fn action_export_generated_netlist_with_options(
                 LogSeverity::Info,
                 LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
-                    "netlist bundle",
+                    &messages.text(MessageId::NetlistExportedNetlistAndIncludes),
                     &path,
                     None,
                     io,
@@ -90,7 +91,7 @@ pub fn action_export_generated_netlist_with_options(
             true
         }
         Err(error) => {
-            model.report_failure("Netlist bundle export failed", error.to_string());
+            model.report_failure(failed, error.to_string());
             false
         }
     }
@@ -100,24 +101,26 @@ fn publish_generated_source(
     model: &mut crate::workbench::app_state::Model,
     artifact: &crate::state::GeneratedArtifact,
     io: &(impl ExportWorkflowIo + ?Sized),
+    messages: MessageCatalog,
 ) -> bool {
+    let failed = messages.text(MessageId::NetlistExportFailedTitle);
     let source = artifact.source();
     let extension = "spice";
-    let filter_name = "SPICE Netlist";
+    let filter_name = messages.text(MessageId::NetlistNetlistFilter);
     let default_name = format!(
         "generated-{}.{}",
         &artifact.content_digest().to_string()[..12],
         extension
     );
     let Some(mut path) = (match io.show_save_dialog(SaveDialogConfig {
-        title: "Export Generated Netlist",
+        title: &messages.text(MessageId::NetlistExportGeneratedTitle),
         default_name: &default_name,
-        filter_name,
+        filter_name: &filter_name,
         filter_extensions: &[extension],
     }) {
         Ok(path) => path,
         Err(error) => {
-            model.report_failure("Netlist export failed", error.to_string());
+            model.report_failure(failed, error.to_string());
             return false;
         }
     }) else {
@@ -133,7 +136,7 @@ fn publish_generated_source(
                 LogSeverity::Info,
                 LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
-                    filter_name,
+                    &filter_name,
                     &path,
                     None,
                     io,
@@ -142,7 +145,7 @@ fn publish_generated_source(
             true
         }
         Err(error) => {
-            model.report_failure("Netlist export failed", error.to_string());
+            model.report_failure(failed, error.to_string());
             false
         }
     }
@@ -159,6 +162,7 @@ pub struct GeneratedNetlist {
 /// The shell's `build_menu_netlist`, over the model.
 pub fn build_menu_netlist_in(
     model: &crate::workbench::app_state::Model,
+    messages: MessageCatalog,
 ) -> Result<GeneratedNetlist, Vec<String>> {
     let execution_projection = model
         .workspace
@@ -170,9 +174,9 @@ pub fn build_menu_netlist_in(
         .map_err(|error| vec![error.to_string()])?;
     let root_reference = execution_projection.root().clone();
     let Some(root_schematic) = execution_projection.root_schematic() else {
-        return Err(vec![format!(
-            "{} has no schematic to write the deck from",
-            root_reference.display_path()
+        return Err(vec![messages.format(
+            MessageId::NetlistGenerationNoSchematic,
+            &[("cell", &root_reference.display_path().to_string())],
         )]);
     };
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
@@ -194,14 +198,12 @@ pub fn build_menu_netlist_in(
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
     else {
-        return Err(vec![
-            "the design has no active simulation plan to write the deck from".to_owned(),
-        ]);
+        return Err(vec![messages.text(MessageId::NetlistGenerationNoPlan)]);
     };
     let Some(plan_payload) = model.workspace.content.plan_data(plan_id) else {
-        return Err(vec![format!(
-            "simulation plan {plan_id} has no configuration of its own"
-        )]);
+        return Err(vec![
+            messages.text(MessageId::NetlistGenerationNoPlanSettings),
+        ]);
     };
     let generation = rspice_simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
         root_schematic,
@@ -359,7 +361,12 @@ mod tests {
         );
         let io = CaptureIo::default();
 
-        assert!(publish_generated_source(&mut model, &artifact, &io));
+        assert!(publish_generated_source(
+            &mut model,
+            &artifact,
+            &io,
+            MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        ));
         let (path, written) = io.written.take().expect("the deck is written");
         assert_eq!(written.as_bytes(), source.as_bytes());
         assert_eq!(path.extension().and_then(|e| e.to_str()), Some("spice"));

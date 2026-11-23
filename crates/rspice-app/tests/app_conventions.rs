@@ -2152,6 +2152,11 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         "rspice-app-code/src/workbench/documents/deck_files.rs",
         "rspice-app-code/src/workbench/documents/code_workspace/source_files.rs",
         "rspice-app-code/src/workbench/documents/code_workspace/source_edit_history.rs",
+        "rspice-app-code/src/workbench/workflows/netlist_workflow.rs",
+        "rspice-app-code/src/workbench/workflows/netlist_workflow/platform.rs",
+        "rspice-app-code/src/workbench/menu_bar/netlist_actions.rs",
+        "rspice-app-code/src/workbench/menu_bar/netlist_export.rs",
+        "rspice-app/src/workbench/session/deck_transactions.rs",
     ];
     // A literal on a line that names an id, a panic, an assertion or a debug
     // dump is never shown to a reader.

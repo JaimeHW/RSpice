@@ -14,13 +14,13 @@ use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
 };
-use crate::workbench::MessageId;
 use crate::workbench::app_state::Model;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, NetlistRoot, NetlistTab,
 };
 use crate::workbench::framework::feature::Cx;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// Rebuild the immutable generated primary whenever any authoritative project
 /// input changes. Generation happens into a temporary string; a failed build
@@ -171,7 +171,7 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
         return;
     }
 
-    let generated = crate::workbench::menu_bar::build_menu_netlist_in(cx.model);
+    let generated = crate::workbench::menu_bar::build_menu_netlist_in(cx.model, cx.wb.messages());
     let failed = |model: &mut Model, netlist: &mut NetlistDocumentState, error: String| {
         netlist.failed_generation_input_digest = Some(input_digest);
         model.netlist_artifacts.generation_error = Some(error);
@@ -183,6 +183,7 @@ pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
                 input_digest,
                 generated.source,
                 &generated.line_map,
+                cx.wb.messages(),
             ) {
                 Ok(generated_document) => {
                     if let (Some(previous), Some(current)) = (
@@ -258,6 +259,7 @@ pub(super) fn publish_generated_document(
     input_digest: crate::product::ContentDigest,
     source: String,
     line_map: &[rspice_simulation::netlist_gen::WrittenLine],
+    messages: MessageCatalog,
 ) -> Result<NetlistDocument, String> {
     let provenance = GeneratedProvenance::try_new(
         "rspice-netlist-generator/v1",
@@ -274,7 +276,7 @@ pub(super) fn publish_generated_document(
         let mut next = existing.clone();
         let expected_digest = existing
             .generated_artifact()
-            .ok_or_else(|| "The retained generated document has no generated artifact.".to_owned())?
+            .ok_or_else(|| messages.text(MessageId::NetlistGeneratedPreviousMissing))?
             .content_digest();
         next.update_generated_artifact(expected_digest, artifact.clone())
             .map_err(|error| error.to_string())?;

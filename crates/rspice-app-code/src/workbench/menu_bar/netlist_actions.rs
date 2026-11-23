@@ -6,9 +6,9 @@
 
 use super::netlist_export::record_netlist_warnings_in;
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::WorkbenchSession;
 use crate::workbench::app_state::Model;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::{MessageCatalog, MessageId, WorkbenchSession};
 
 /// Export a copy of `deck` as it is in the editor, edits not yet saved
 /// included, to the file the reader picks: in the deck's own encoding and
@@ -18,7 +18,9 @@ pub fn action_export_deck_with_io(
     model: &mut Model,
     deck: &crate::workbench::documents::deck_files::OpenDeck,
     io: &(impl ExportWorkflowIo + ?Sized),
+    messages: MessageCatalog,
 ) {
+    let failed = messages.text(MessageId::NetlistDeckExportFailed);
     let file = &deck.root;
     let name = file.name();
     let extension = std::path::Path::new(&name)
@@ -29,21 +31,21 @@ pub fn action_export_deck_with_io(
     let bytes = match file.encoding.encode(&file.line_ending.write(&file.text)) {
         Ok(bytes) => bytes,
         Err(error) => {
-            model.report_failure("Deck export failed", error);
+            model.report_failure(failed, error);
             return;
         }
     };
     let picked = io.show_save_dialog(SaveDialogConfig {
-        title: "Export Deck",
+        title: &messages.text(MessageId::NetlistExportDeckTitle),
         default_name: &name,
-        filter_name: "SPICE Deck",
+        filter_name: &messages.text(MessageId::NetlistDeckFilter),
         filter_extensions: &[extension.as_str()],
     });
     let mut path = match picked {
         Ok(Some(path)) => path,
         Ok(None) => return,
         Err(error) => {
-            model.report_failure("Deck export failed", error);
+            model.report_failure(failed, error);
             return;
         }
     };
@@ -57,11 +59,14 @@ pub fn action_export_deck_with_io(
                 LogSeverity::Info,
                 LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
-                    "deck", &path, None, io,
+                    &messages.text(MessageId::NetlistExportedDeck),
+                    &path,
+                    None,
+                    io,
                 ),
             );
         }
-        Err(error) => model.report_failure("Deck export failed", error),
+        Err(error) => model.report_failure(failed, error),
     }
 }
 
@@ -72,11 +77,10 @@ pub fn action_export_netlist_with_io(
 ) {
     // The deck the run executes, with every enabled analysis's card, so the
     // file runs in the CLI as the design runs here.
+    let messages = wb.messages();
+    let failed = messages.text(MessageId::NetlistExportFailedTitle);
     if model.schematic.document().components.is_empty() {
-        wb.prompt(
-            wb.messages()
-                .text(crate::workbench::MessageId::NetlistExportNoCircuit),
-        );
+        wb.prompt(messages.text(MessageId::NetlistExportNoCircuit));
         return;
     }
     let exported =
@@ -85,7 +89,7 @@ pub fn action_export_netlist_with_io(
         ) {
             Ok(exported) => exported,
             Err(error) => {
-                model.report_failure("Netlist export failed", error.to_string());
+                model.report_failure(failed, error.to_string());
                 return;
             }
         };
@@ -93,12 +97,12 @@ pub fn action_export_netlist_with_io(
 
     let extension = "spice";
     let default_name = format!("{}.{extension}", model.export_file_stem("circuit"));
-    let filter_name = "SPICE Netlist";
+    let filter_name = messages.text(MessageId::NetlistNetlistFilter);
 
     match io.show_save_dialog(SaveDialogConfig {
-        title: "Export Netlist",
+        title: &messages.text(MessageId::NetlistExportNetlistTitle),
         default_name: &default_name,
-        filter_name,
+        filter_name: &filter_name,
         filter_extensions: &[extension],
     }) {
         Ok(Some(mut path)) => {
@@ -117,10 +121,7 @@ pub fn action_export_netlist_with_io(
             );
             let (netlist_content, sources) = (export.netlist, export.sources);
             if !sources.is_empty() && !io.saved_paths_are_reopenable() {
-                wb.prompt(
-                    wb.messages()
-                        .text(crate::workbench::MessageId::NetlistExportVerilogANeedsZip),
-                );
+                wb.prompt(messages.text(MessageId::NetlistExportVerilogANeedsZip));
                 return;
             }
             let folder = path.parent().map(std::path::Path::to_path_buf);
@@ -139,25 +140,30 @@ pub fn action_export_netlist_with_io(
                 });
             match export {
                 Ok(()) => {
-                    let detail = (!sources.is_empty())
-                        .then(|| format!("{} Verilog-A source files beside it", sources.len()));
+                    let detail = (!sources.is_empty()).then(|| {
+                        messages.counted(
+                            sources.len(),
+                            MessageId::NetlistExportVerilogABesideSingular,
+                            MessageId::NetlistExportVerilogABeside,
+                        )
+                    });
                     model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
-                            filter_name,
+                            &filter_name,
                             &path,
                             detail,
                             io,
                         ),
                     );
                 }
-                Err(e) => model.report_failure("Netlist export failed", e.to_string()),
+                Err(e) => model.report_failure(failed, e.to_string()),
             }
         }
         Ok(None) => {
             // User cancelled - no message needed
         }
-        Err(e) => model.report_failure("Netlist export failed", e.to_string()),
+        Err(e) => model.report_failure(failed, e.to_string()),
     }
 }

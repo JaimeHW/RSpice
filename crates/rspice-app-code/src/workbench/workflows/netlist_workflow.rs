@@ -15,12 +15,10 @@ pub use platform::{
     show_zip_save_dialog,
 };
 
-pub const NETLIST_FILTER: (&str, &[&str]) = (
-    "SPICE Deck",
-    &[
-        "cir", "sp", "spi", "spice", "net", "ckt", "cki", "scs", "lib", "inc", "txt",
-    ],
-);
+/// The extensions a SPICE deck's file goes by.
+pub const NETLIST_EXTENSIONS: &[&str] = &[
+    "cir", "sp", "spi", "spice", "net", "ckt", "cki", "scs", "lib", "inc", "txt",
+];
 
 pub fn normalize_owned_netlist_whitespace(source: &str) -> String {
     if source.is_empty() {
