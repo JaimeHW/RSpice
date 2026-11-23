@@ -593,7 +593,7 @@ pub fn deck_includes(
 ) -> Option<Arc<[String]>> {
     let deck = model.workspace.content.decks.first()?;
     let text = match &deck.source {
-        crate::state::DeckSource::Stored(stored) => stored.text.as_str(),
+        crate::state::DeckSource::Stored(stored) => DeckIncludesText::Kept(&stored.text),
         crate::state::DeckSource::File { .. } => {
             let open = code.manual_deck()?;
             let rspice_app_runs::simulation::DeckOrigin::File(path) = open.origin else {
@@ -609,20 +609,46 @@ pub fn deck_includes(
             if !deck.is_file(path, folder) {
                 return None;
             }
-            open.text
+            DeckIncludesText::Open(open.text)
         }
     };
     let mut identity = DefaultHasher::new();
-    text.hash(&mut identity);
+    text.identity().hash(&mut identity);
     Some(derived(
         ctx,
         "overview.deck includes",
         identity.finish(),
         || {
-            rspice_design::netlist_document::parse_include_directives(text)
+            rspice_design::netlist_document::parse_include_directives(text.as_str())
                 .into_iter()
                 .map(|include| include.locator().to_owned())
                 .collect::<Arc<[String]>>()
         },
     ))
+}
+
+/// The text [`deck_includes`] reads: the deck the project keeps, or the
+/// deck file open in the Netlist workspace. Each is told apart from the
+/// text before it by its identity, so a frame reads no text unless the
+/// text changed.
+#[derive(Clone, Copy)]
+enum DeckIncludesText<'a> {
+    Kept(&'a crate::state::DeckText),
+    Open(&'a crate::state::RevisedText),
+}
+
+impl DeckIncludesText<'_> {
+    fn identity(self) -> (u8, u64) {
+        match self {
+            Self::Kept(text) => (0, text.identity()),
+            Self::Open(text) => (1, text.revision()),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Kept(text) => text.as_str(),
+            Self::Open(text) => text.as_str(),
+        }
+    }
 }

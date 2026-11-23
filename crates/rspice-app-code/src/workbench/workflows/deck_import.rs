@@ -194,14 +194,14 @@ fn stored_deck(
         }
         files.push(StoredDeckFile {
             path,
-            text: file.text.clone(),
+            text: file.text.clone().into(),
             encoding: file.encoding,
         });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(StoredDeck {
         name,
-        text: deck.text.clone(),
+        text: deck.text.clone().into(),
         encoding: deck.encoding,
         files,
     })

@@ -40,6 +40,7 @@ mod source_editor_commands;
 mod source_language_tools;
 mod stored_deck;
 mod stored_deck_files;
+mod stored_deck_typed;
 mod veriloga_build_settings;
 mod veriloga_cell_source;
 mod veriloga_design;

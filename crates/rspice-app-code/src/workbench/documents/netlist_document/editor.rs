@@ -984,10 +984,12 @@ struct SourceCheck {
     /// lines a run reads. A dependency's sections are selected, and its
     /// conditions decided, by the deck that includes it.
     is_dependency: bool,
-    /// For a deck the project keeps as text: where the engine reads the
-    /// shown file, and every file of the deck there, read through them
-    /// rather than any disk.
-    stored: Option<(PathBuf, Vec<(PathBuf, String)>)>,
+    /// For a deck the project keeps as text: the files of the deck, which
+    /// the check reads rather than any disk, put together on its worker.
+    stored: Option<crate::workbench::documents::deck_files::StoredCheck>,
+    /// For a deck the project keeps as text, the model libraries the check
+    /// seals, on its worker, when a line of the deck names a file to read.
+    sealing: Option<Arc<SealingInputs>>,
     /// Whether the text is the Added lines, which are checked for the lines
     /// the generated netlist cannot take rather than parsed as a deck.
     added_lines: bool,
@@ -997,6 +999,46 @@ struct SourceCheck {
     shown_path: Option<PathBuf>,
     /// The words the findings the application states itself are put in.
     messages: crate::workbench::MessageCatalog,
+}
+
+/// The model libraries a check of a deck the project keeps seals, shared
+/// by every check while the catalog and its resolutions stand.
+pub(crate) struct SealingInputs {
+    catalog: rspice_model_library::ModelCatalog,
+    resolutions: rspice_model_library::ModelResolutionRecords,
+}
+
+impl SealingInputs {
+    /// What `manager` seals, copied once for each catalog: a stamp names
+    /// one content for the life of the process, so the copy held for the
+    /// stamps still standing is the catalog as it stands.
+    fn of(manager: &crate::state::model_library::ModelLibraryManager) -> Arc<Self> {
+        static HELD: std::sync::Mutex<Option<([u64; 2], Arc<SealingInputs>)>> =
+            std::sync::Mutex::new(None);
+        let [catalog, resolutions, _] = manager.content_stamp();
+        let mut held = HELD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((stamps, inputs)) = held.as_ref()
+            && *stamps == [catalog, resolutions]
+        {
+            return Arc::clone(inputs);
+        }
+        let inputs = Arc::new(Self {
+            catalog: manager.catalog().clone(),
+            resolutions: manager.resolution_records().clone(),
+        });
+        *held = Some(([catalog, resolutions], Arc::clone(&inputs)));
+        inputs
+    }
+
+    /// The libraries sealed, as a run seals them.
+    fn seal(&self) -> Result<crate::state::model_library::SealedModelExecutionSources, String> {
+        rspice_simulation::model_sources::seal_catalog_execution_sources(
+            &self.catalog,
+            &self.resolutions,
+        )
+    }
 }
 
 /// The deck a check parses.
@@ -1046,16 +1088,18 @@ impl SourceCheck {
             }
         };
         let stored = (netlist.front.root_kind() == super::NetlistRoot::Deck)
-            .then(|| crate::workbench::documents::deck_files::stored_sources(netlist, &buffer))
+            .then(|| crate::workbench::documents::deck_files::stored_check(netlist))
             .flatten();
         // The browser build reads included sources from the libraries it
         // sealed, and checks in place: whether the deck names one is read
         // here, where the libraries can be sealed. A deck kept as text reads
-        // them beside its own files, on the desktop too.
+        // them beside its own files, on the desktop too, and whether it names
+        // one is read on the check's worker, which seals them there.
+        let sealing = stored
+            .is_some()
+            .then(|| SealingInputs::of(&model.model_library_manager));
         let (deck, sealed_sources) = if stored.is_some() {
-            let sealed = first_external_dependency_line(&buffer)
-                .map(|_| model.model_library_manager.seal_execution_sources());
-            (deck, sealed)
+            (deck, None)
         } else if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly {
             let composed = deck.compose();
             let names_external = match &composed {
@@ -1079,6 +1123,7 @@ impl SourceCheck {
             sealed_sources,
             is_dependency,
             stored,
+            sealing,
             added_lines,
             include_resolutions: include_resolutions.clone(),
             shown_path: super::dialect::shown_source_in(model, netlist)
@@ -1112,11 +1157,21 @@ impl SourceCheck {
             sealed_sources,
             is_dependency,
             stored,
+            sealing,
             added_lines,
             include_resolutions,
             shown_path,
             messages,
         } = self;
+        // A deck the project keeps as text: its files put together, and the
+        // libraries sealed when a line of it names a file to read, here
+        // rather than on the frame.
+        let stored = stored.map(|stored| stored.sources(&buffer));
+        let sealed_sources = sealed_sources.or_else(|| {
+            sealing
+                .filter(|_| first_external_dependency_line(&buffer).is_some())
+                .map(|inputs| inputs.seal())
+        });
         if added_lines {
             let validation_id = crate::state::content_digest(&buffer).to_string();
             let mut diagnostics = super::added_lines::refusals(&buffer);

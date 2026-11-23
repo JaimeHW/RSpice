@@ -559,7 +559,7 @@ impl AppState {
                 .file_name()
                 .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
         );
-        if let Err(error) = std::fs::write(path, deck.text) {
+        if let Err(error) = std::fs::write(path, deck.text.as_str()) {
             self.prompt(not_written(self.workbench.messages(), path, &error));
             return false;
         }

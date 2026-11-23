@@ -15,12 +15,13 @@
 use std::collections::HashSet;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use crate::state::{
-    DeckId, NetlistDocumentId, RevisedText, StoredDeck, StoredDeckFile, TextEncoding,
+    DeckId, DeckText, NetlistDocumentId, RevisedText, StoredDeck, StoredDeckFile, TextEncoding,
 };
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, NetlistRoot, NetlistTab, OwnedNetlistReplacement,
@@ -225,6 +226,51 @@ impl OpenFile {
         self.dirty |= changed;
         changed
     }
+
+    /// The file's text as the project keeps it, with the file's own
+    /// separators: shared with the file, not copied.
+    fn kept_text(&self) -> DeckText {
+        DeckText::new(EditedText {
+            text: self.text.clone(),
+            line_ending: self.line_ending,
+            written: OnceLock::new(),
+        })
+    }
+}
+
+/// The text of a file of a deck the project keeps, as the editor left it:
+/// the editor's text, shared, and the separators the file is written with.
+/// It is put in one piece with those separators only when something reads
+/// it so, a save of the project, an export or a run, so a key typed in the
+/// deck copies nothing.
+struct EditedText {
+    text: RevisedText,
+    line_ending: LineEnding,
+    written: OnceLock<String>,
+}
+
+impl crate::state::DeckTextBody for EditedText {
+    fn text(&self) -> &str {
+        match self.line_ending {
+            LineEnding::CrLf | LineEnding::Cr => self
+                .written
+                .get_or_init(|| self.line_ending.write(&self.text).into_owned()),
+            LineEnding::None | LineEnding::Lf | LineEnding::Mixed => self.text.as_str(),
+        }
+    }
+}
+
+/// A text the project keeps as the editor holds it, with the separators it
+/// was written with: the editor's own text when the editor gave it, else
+/// read from it.
+fn editor_text(text: &DeckText) -> (RevisedText, LineEnding) {
+    match text.body::<EditedText>() {
+        Some(edited) => (edited.text.clone(), edited.line_ending),
+        None => {
+            let (text, line_ending) = LineEnding::read(text.as_str().to_owned());
+            (RevisedText::new(text), line_ending)
+        }
+    }
 }
 
 /// The deck open in the Netlist workspace, with the include files opened
@@ -244,12 +290,12 @@ impl OpenDeck {
     /// deck's name and read from nowhere.
     #[must_use]
     pub fn from_stored(id: DeckId, deck: &StoredDeck) -> Self {
-        let (text, line_ending) = LineEnding::read(deck.text.clone());
+        let (text, line_ending) = editor_text(&deck.text);
         Self {
             id,
             root: OpenFile {
                 path: PathBuf::from(&deck.name),
-                text: text.into(),
+                text,
                 encoding: deck.encoding,
                 line_ending,
                 disk: None,
@@ -992,7 +1038,7 @@ pub fn add_file_to_deck(
     };
     let file = StoredDeckFile {
         path: keep_as.to_owned(),
-        text,
+        text: text.into(),
         encoding,
     };
     if added {
@@ -1048,7 +1094,7 @@ fn rewrite_named_path(
             .iter()
             .flatten()
             .find(|file| file.path == request.owner)
-            .map(|file| file.text.clone())
+            .map(|file| file.text.as_str().to_owned())
             .ok_or_else(|| {
                 messages.format(
                     MessageId::NetlistAddFileOwnerGone,
@@ -1093,7 +1139,7 @@ fn rewrite_named_path(
         .and_then(|deck| deck.stored_files.as_mut())
         .and_then(|files| files.iter_mut().find(|file| file.path == request.owner))
     {
-        file.text.clone_from(&changed);
+        file.text = changed.clone().into();
     }
     let content = &mut *model.workspace.content;
     if let Some(file) = content
@@ -1108,7 +1154,7 @@ fn rewrite_named_path(
                 .find(|file| file.path == request.owner)
         })
     {
-        file.text = changed;
+        file.text = changed.into();
     }
     content.decks_dirty = true;
     Ok(())
@@ -1447,39 +1493,62 @@ pub fn save_shown_file(
     save_file(file, messages)
 }
 
-/// For a deck the project keeps as text, in front of the page with `shown`
-/// the text of the file in front: where the engine reads that file, and
-/// every file of the deck where the engine reads it, the one in front with
-/// `shown`. `None` for a deck that is a file.
+/// What a check of a file of a deck the project keeps as text reads beside
+/// the file itself: the deck's name, which of its files is in front, the
+/// deck as the editor holds it while an include is in front, and the files
+/// kept with it. Each is shared with the open deck, so taking it on the
+/// frame reads no text; [`StoredCheck::sources`] puts the files together
+/// on the check's worker.
+#[derive(Debug, Clone)]
+pub struct StoredCheck {
+    name: String,
+    include: Option<String>,
+    root: Option<(RevisedText, LineEnding)>,
+    files: Vec<StoredDeckFile>,
+}
+
+impl StoredCheck {
+    /// Where the engine reads the file in front, and every file of the deck
+    /// where the engine reads it, the one in front with `shown`.
+    #[must_use]
+    pub fn sources(&self, shown: &str) -> (PathBuf, Vec<(PathBuf, String)>) {
+        let include = self.include.as_deref();
+        let root_text = match &self.root {
+            None => shown.to_owned(),
+            Some((text, line_ending)) => line_ending.write(text).into_owned(),
+        };
+        let files = self
+            .files
+            .iter()
+            .map(|file| StoredDeckFile {
+                text: if include == Some(file.path.as_str()) {
+                    shown.into()
+                } else {
+                    file.text.clone()
+                },
+                ..file.clone()
+            })
+            .collect::<Vec<_>>();
+        let (root, sources) =
+            rspice_design::deck::stored_deck_sources(&self.name, &root_text, &files);
+        let at = include.map_or(root, rspice_design::deck::stored_file_identity);
+        (at, sources)
+    }
+}
+
+/// For a deck the project keeps as text, in front of the page: what a check
+/// of the file in front reads beside it. `None` for a deck that is a file.
 #[must_use]
-pub fn stored_sources(
-    netlist: &NetlistDocumentState,
-    shown: &RevisedText,
-) -> Option<(PathBuf, Vec<(PathBuf, String)>)> {
+pub fn stored_check(netlist: &NetlistDocumentState) -> Option<StoredCheck> {
     let deck = netlist.open_deck.as_ref()?;
     let files = deck.stored_files.as_ref()?;
-    // Only a deck the project keeps reads the text in one piece.
-    let shown = shown.as_str();
     let include = netlist.front.include();
-    let root_text = match include {
-        None => shown.to_owned(),
-        Some(_) => deck.root.line_ending.write(&deck.root.text).into_owned(),
-    };
-    let files = files
-        .iter()
-        .map(|file| StoredDeckFile {
-            text: if include == Some(file.path.as_str()) {
-                shown.to_owned()
-            } else {
-                file.text.clone()
-            },
-            ..file.clone()
-        })
-        .collect::<Vec<_>>();
-    let (root, sources) =
-        rspice_design::deck::stored_deck_sources(&deck.root.name(), &root_text, &files);
-    let at = include.map_or(root, rspice_design::deck::stored_file_identity);
-    Some((at, sources))
+    Some(StoredCheck {
+        name: deck.root.name(),
+        include: include.map(str::to_owned),
+        root: include.map(|_| (deck.root.text.clone(), deck.root.line_ending)),
+        files: files.clone(),
+    })
 }
 
 /// Whether the file in front of the Netlist workspace is a file on disk,
@@ -1516,11 +1585,11 @@ pub fn keep_stored_edit(model: &mut Model, deck: &mut OpenDeck, include: Option<
         },
     };
     file.dirty = false;
-    let text = file.line_ending.write(&file.text).into_owned();
+    let text = file.kept_text();
     if let Some(key) = include
         && let Some(stored) = files.iter_mut().find(|stored| stored.path == key)
     {
-        stored.text.clone_from(&text);
+        stored.text = text.clone();
     }
     let content = &mut *model.workspace.content;
     let Some(stored) = content
@@ -1576,7 +1645,7 @@ pub fn new_stored_deck(
     let name = crate::state::new_stored_deck_name(names.iter().map(String::as_str));
     let mut stored = StoredDeck::new(&name);
     if let Some(text) = text {
-        stored.text = text;
+        stored.text = text.into();
     }
     let deck = crate::state::ProjectDeck::stored(stored.clone());
     let open = OpenDeck::from_stored(deck.id, &stored);
@@ -1950,10 +2019,10 @@ pub fn show_include(
                     &[("file", &file_name(path))],
                 )
             })?;
-            let (text, line_ending) = LineEnding::read(stored.text.clone());
+            let (text, line_ending) = editor_text(&stored.text);
             deck.includes.push(OpenFile {
                 path: path.to_path_buf(),
-                text: text.into(),
+                text,
                 encoding: stored.encoding,
                 line_ending,
                 disk: None,

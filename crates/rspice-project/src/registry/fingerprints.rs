@@ -6,6 +6,7 @@ use super::{
     project_descriptor_digest, reference_from_key, result_fingerprint,
 };
 use crate::{ProjectExecutionContext, ProjectFile, ProjectWorkspace};
+use rspice_design::deck::DeckText;
 use rspice_design::library::View;
 use rspice_design::physical_layout::PhysicalLayoutDocument;
 use rspice_design::project_sources::{
@@ -226,19 +227,51 @@ pub(super) fn stimulus_library_digest(
     digest(&workspace.stimulus_library)
 }
 
-/// The decks, the project-wide sources and the added lines.
+/// The decks, the project-wide sources and the added lines, each text a
+/// deck keeps named by its digest, which the text takes once.
 pub(super) fn netlist_source_digest(workspace: &ProjectWorkspace) -> Result<ContentDigest, String> {
+    netlist_source_digest_with(workspace, false)?
+        .ok_or_else(|| "a deck's text gave no digest".to_owned())
+}
+
+/// [`netlist_source_digest`]; with `taken`, from the digests the texts have
+/// taken already, and `None` when a text has taken none.
+pub(super) fn netlist_source_digest_with(
+    workspace: &ProjectWorkspace,
+    taken: bool,
+) -> Result<Option<ContentDigest>, String> {
+    let named = |text: &DeckText| {
+        let digest = if taken {
+            text.digest_taken()
+        } else {
+            Some(text.digest())
+        };
+        digest.map(|digest| DeckText::from(digest.to_string()))
+    };
+    let decks = workspace
+        .decks
+        .iter()
+        .map(|deck| {
+            let mut deck = deck.clone();
+            if let Some(stored) = deck.stored_deck_mut() {
+                stored.text = named(&stored.text)?;
+                for file in &mut stored.files {
+                    file.text = named(&file.text)?;
+                }
+            }
+            Some(deck)
+        })
+        .collect::<Option<Vec<_>>>();
+    let Some(decks) = decks else {
+        return Ok(None);
+    };
     let project_wide_sources = workspace
         .project_sources
         .iter_bundles()
         .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::ProjectWide))
         .map(ProjectSourceBundle::authored_content)
         .collect::<Vec<_>>();
-    digest(&(
-        &workspace.decks,
-        project_wide_sources,
-        &workspace.added_lines,
-    ))
+    digest(&(decks, project_wide_sources, &workspace.added_lines)).map(Some)
 }
 
 /// A cell view's drawing share: the document a save writes of it.

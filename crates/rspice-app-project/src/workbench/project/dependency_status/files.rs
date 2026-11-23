@@ -54,13 +54,14 @@ pub(super) fn files_key(ctx: &egui::Context, model: &Model) -> FilesKey {
         deck.id.hash(&mut held);
         match &deck.source {
             DeckSource::File { path } => path.hash(&mut held),
-            // The text is not hashed on a frame: its length and its files
-            // change with any edit that adds or drops an include line.
+            // The text is not read on a frame: each text is told apart by
+            // its identity, which any edit to it changes.
             DeckSource::Stored(stored) => {
                 stored.name.hash(&mut held);
-                stored.text.len().hash(&mut held);
+                stored.text.identity().hash(&mut held);
                 for file in &stored.files {
                     file.path.hash(&mut held);
+                    file.text.identity().hash(&mut held);
                 }
             }
         }

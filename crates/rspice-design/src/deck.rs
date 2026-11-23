@@ -6,9 +6,14 @@
 //! so there the project keeps the deck's text, and the text of the files its
 //! include lines read.
 
+use std::any::Any;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
+use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 /// A deck's identity in the project: stable when the file moves, new for
@@ -63,7 +68,7 @@ pub struct StoredDeck {
     /// The file name the deck is shown, run and exported under.
     pub name: String,
     /// The exact text, with the line separators it was written with.
-    pub text: String,
+    pub text: DeckText,
     /// The encoding the deck is exported in.
     pub encoding: TextEncoding,
     /// The files its include lines read.
@@ -79,7 +84,7 @@ pub struct StoredDeckFile {
     /// above the deck's own folder.
     pub path: String,
     /// The exact text, with the line separators it was written with.
-    pub text: String,
+    pub text: DeckText,
     /// The encoding the file is exported in.
     pub encoding: TextEncoding,
 }
@@ -91,10 +96,207 @@ impl StoredDeck {
         let title = name.rsplit_once('.').map_or(name, |(stem, _)| stem).trim();
         Self {
             name: name.to_owned(),
-            text: format!("* {title}\n\n.end\n"),
+            text: format!("* {title}\n\n.end\n").into(),
             encoding: TextEncoding::Utf8,
             files: Vec::new(),
         }
+    }
+}
+
+/// The exact text of a deck the project keeps, or of a file kept with it,
+/// with the line separators it was written with.
+///
+/// Cloning one shares the text, whatever its length: the project, a capture
+/// of it, the baseline a save leaves and the open deck all hold the one
+/// text. A text the Netlist editor gives is kept as the editor holds it and
+/// put in one piece, with the file's own separators, only when something
+/// reads it so; a key typed in a deck the project keeps then costs what one
+/// in a deck that is a file costs. Its digest is taken once, the first time
+/// it is asked for.
+#[derive(Clone)]
+pub struct DeckText(Arc<Shared<dyn DeckTextBody>>);
+
+/// What a [`DeckText`] holds: an identity no other text has carried, the
+/// text's digest once it is taken, and the text.
+struct Shared<T: ?Sized> {
+    identity: u64,
+    digest: OnceLock<ContentDigest>,
+    body: T,
+}
+
+/// The identity the next new text takes.
+static NEXT_DECK_TEXT: AtomicU64 = AtomicU64::new(1);
+
+/// A text a [`DeckText`] holds.
+pub trait DeckTextBody: Any + Send + Sync {
+    /// The exact text in one piece, made the first time it is asked for.
+    fn text(&self) -> &str;
+}
+
+impl DeckTextBody for String {
+    fn text(&self) -> &str {
+        self
+    }
+}
+
+impl DeckText {
+    /// `body`, under an identity of its own.
+    #[must_use]
+    pub fn new(body: impl DeckTextBody) -> Self {
+        Self(Arc::new(Shared {
+            identity: NEXT_DECK_TEXT.fetch_add(1, Ordering::Relaxed),
+            digest: OnceLock::new(),
+            body,
+        }))
+    }
+
+    /// The exact text in one piece.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.body.text()
+    }
+
+    /// An identity no other text has carried: equal for clones of one text,
+    /// and two for the same characters held twice. A key that tells two
+    /// texts apart without reading them reads it.
+    #[must_use]
+    pub fn identity(&self) -> u64 {
+        self.0.identity
+    }
+
+    /// Whether `other` is this very text, not merely the same characters:
+    /// told at once, whatever their length.
+    #[must_use]
+    pub fn is(&self, other: &Self) -> bool {
+        self.0.identity == other.0.identity
+    }
+
+    /// What the text holds, as a `T`, when it is one.
+    #[must_use]
+    pub fn body<T: DeckTextBody>(&self) -> Option<&T> {
+        (&self.0.body as &dyn Any).downcast_ref::<T>()
+    }
+
+    /// The SHA-256 digest of the exact text, taken the first time any clone
+    /// of it asks.
+    #[must_use]
+    pub fn digest(&self) -> ContentDigest {
+        *self.0.digest.get_or_init(|| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"rspice-deck-text\0v1\0");
+            hasher.update(self.as_str().as_bytes());
+            ContentDigest::from_bytes(hasher.finalize().into())
+        })
+    }
+
+    /// The digest, when it has been taken.
+    #[must_use]
+    pub fn digest_taken(&self) -> Option<ContentDigest> {
+        self.0.digest.get().copied()
+    }
+
+    /// Whether `other` holds the same characters, as far as that can be told
+    /// without putting a text the editor gave in one piece: at once for one
+    /// text, by their digests when both are taken, and by the characters
+    /// when neither came from the editor. A text the editor gave whose
+    /// digest is not taken yet is an edit made since, and differs.
+    #[must_use]
+    pub fn kept_as(&self, other: &Self) -> bool {
+        if self.is(other) {
+            return true;
+        }
+        if let (Some(one), Some(two)) = (self.digest_taken(), other.digest_taken()) {
+            return one == two;
+        }
+        match (self.body::<String>(), other.body::<String>()) {
+            (Some(one), Some(two)) => one == two,
+            _ => false,
+        }
+    }
+}
+
+impl Default for DeckText {
+    fn default() -> Self {
+        Self::from(String::new())
+    }
+}
+
+impl From<String> for DeckText {
+    fn from(text: String) -> Self {
+        Self::new(text)
+    }
+}
+
+impl From<&str> for DeckText {
+    fn from(text: &str) -> Self {
+        Self::new(text.to_owned())
+    }
+}
+
+impl std::ops::Deref for DeckText {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for DeckText {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Debug for DeckText {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.as_str(), formatter)
+    }
+}
+
+impl std::fmt::Display for DeckText {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Two texts are equal when they hold the same characters: at once when
+/// they are one text.
+impl PartialEq for DeckText {
+    fn eq(&self, other: &Self) -> bool {
+        self.is(other) || self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for DeckText {}
+
+impl PartialEq<str> for DeckText {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for DeckText {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<String> for DeckText {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other
+    }
+}
+
+/// Written as a string, as a deck's text always was.
+impl Serialize for DeckText {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for DeckText {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
     }
 }
 
@@ -131,11 +333,12 @@ pub fn stored_deck_sources(
     let root = stored_file_identity(name);
     let mut sources = Vec::with_capacity(files.len() + 1);
     sources.push((root.clone(), text.to_owned()));
-    sources.extend(
-        files
-            .iter()
-            .map(|file| (stored_file_identity(&file.path), file.text.clone())),
-    );
+    sources.extend(files.iter().map(|file| {
+        (
+            stored_file_identity(&file.path),
+            file.text.as_str().to_owned(),
+        )
+    }));
     (root, sources)
 }
 
@@ -158,6 +361,28 @@ where
 }
 
 impl ProjectDeck {
+    /// Whether `other` is this deck as it was: everything compared, and the
+    /// texts as [`DeckText::kept_as`] compares them, so a deck the editor
+    /// changed is told apart without its text being read.
+    #[must_use]
+    pub fn kept_as(&self, other: &Self) -> bool {
+        self.id == other.id
+            && match (&self.source, &other.source) {
+                (DeckSource::Stored(one), DeckSource::Stored(two)) => {
+                    one.name == two.name
+                        && one.encoding == two.encoding
+                        && one.text.kept_as(&two.text)
+                        && one.files.len() == two.files.len()
+                        && one.files.iter().zip(&two.files).all(|(one, two)| {
+                            one.path == two.path
+                                && one.encoding == two.encoding
+                                && one.text.kept_as(&two.text)
+                        })
+                }
+                _ => self.source == other.source,
+            }
+    }
+
     /// A new deck for the file at `path`, stored relative to `project_folder`
     /// when it is under that folder.
     #[must_use]
@@ -492,7 +717,7 @@ mod tests {
         let mut stored = StoredDeck::new("amp_tb.cir");
         stored.files.push(StoredDeckFile {
             path: "models/amp.lib".to_owned(),
-            text: ".model qn npn\r\n".to_owned(),
+            text: ".model qn npn\r\n".into(),
             encoding: TextEncoding::Latin1,
         });
         let deck = ProjectDeck::stored(stored);

@@ -15,9 +15,17 @@
 //! there. An edit costs no digest, an undo back to where the save left the
 //! drawing reads clean, and only content the history cannot name, and the
 //! drawings at a save, are digested.
+//!
+//! A deck the project keeps as text is read by its texts' digests, each
+//! taken once by the text itself. Once the netlist source is settled on a
+//! baseline, a text with no digest taken is one kept since, an edit in the
+//! Netlist editor or a deck added, and the netlist source reads unsaved
+//! with no digest: a key typed in a 100 MB deck digests nothing. The texts
+//! are digested when the next baseline is settled.
 
 use std::collections::{HashMap, HashSet};
 
+use rspice_design::deck::{DeckText, ProjectDeck};
 use rspice_design::library::ViewType;
 use rspice_design::schematic::owned::Schematic;
 use rspice_design_model::cell_view::CellViewRef;
@@ -25,8 +33,8 @@ use rspice_vocabulary::product::ContentDigest;
 
 use super::fingerprints::{
     drawing_digest, layout_digest, model_catalog_digest, netlist_source_digest,
-    owns_cell_view_sources, simulation_plan_digest, source_digest, stimulus_library_digest,
-    view_digest,
+    netlist_source_digest_with, owns_cell_view_sources, simulation_plan_digest, source_digest,
+    stimulus_library_digest, view_digest,
 };
 use super::{
     DocumentFingerprints, ProjectDocumentId, cell_view_digest, configuration_digest, digest,
@@ -56,6 +64,19 @@ pub struct WorkingDocuments {
     documents: HashMap<ProjectDocumentId, ContentDigest>,
     held: Option<Held>,
     positions: Positions,
+    decks: DeckTexts,
+}
+
+/// How the netlist source reads the texts of the decks the project keeps.
+#[derive(Debug, Clone, Copy, Default)]
+struct DeckTexts {
+    /// Whether the netlist source was settled on the baseline: a text with
+    /// no digest taken is then one kept since, and the netlist source reads
+    /// unsaved from it with no digest.
+    settled: bool,
+    /// Whether the netlist source reads unsaved, a text it holds having no
+    /// digest taken.
+    unsaved: bool,
 }
 
 /// The drawing share digested at each position of a drawing's history.
@@ -119,23 +140,29 @@ impl WorkingDocuments {
     }
 
     /// The documents whose drawing stands at a position named since the
-    /// baseline was settled: each reads unsaved, from its history, with no
-    /// digest of its content.
+    /// baseline was settled, and the netlist source while a deck's text kept
+    /// since has no digest: each reads unsaved, with no digest of its
+    /// content.
     pub fn read_unsaved(&self) -> Vec<ProjectDocumentId> {
-        self.held.as_ref().map_or_else(Vec::new, |held| {
+        let mut unsaved = self.held.as_ref().map_or_else(Vec::new, |held| {
             held.cell_views
                 .iter()
                 .filter(|(_, shares)| shares.position.is_some_and(|position| !position.digested))
                 .map(|(reference, _)| ProjectDocumentId::CellView(reference.clone()))
-                .collect()
-        })
+                .collect::<Vec<_>>()
+        });
+        if self.decks.unsaved {
+            unsaved.push(ProjectDocumentId::NetlistSource);
+        }
+        unsaved
     }
 
     /// Settle the digests on a new `baseline`, as a save, an open or a
     /// revert takes one: every drawing read unsaved from its position is
     /// digested, and each drawing whose cell view the baseline holds as it
-    /// stands is known to stand where the baseline left it. Returns the
-    /// documents whose digest changed. A failure forgets every digest.
+    /// stands is known to stand where the baseline left it; the decks'
+    /// texts are digested, and a text kept after this reads unsaved. Returns
+    /// the documents whose digest changed. A failure forgets every digest.
     pub fn settle(
         &mut self,
         source: &WorkingSource<'_>,
@@ -154,6 +181,19 @@ impl WorkingDocuments {
         baseline: Option<&DocumentFingerprints>,
     ) -> Result<Vec<ProjectDocumentId>, String> {
         let mut changed = Vec::new();
+        if self.decks.unsaved {
+            let netlist = netlist_source_digest(source.workspace)?;
+            digested();
+            self.decks.unsaved = false;
+            if self
+                .documents
+                .insert(ProjectDocumentId::NetlistSource, netlist)
+                != Some(netlist)
+            {
+                changed.push(ProjectDocumentId::NetlistSource);
+            }
+        }
+        self.decks.settled = true;
         if let Some(held) = self.held.as_mut() {
             for (reference, shares) in &mut held.cell_views {
                 let Some(position) = shares
@@ -369,11 +409,18 @@ impl WorkingDocuments {
             workspace_moved,
             &mut || stimulus_library_digest(workspace),
         )?;
+        let decks = &mut self.decks;
+        let mut netlist_unsaved = decks.unsaved;
         document(
             ProjectDocumentId::NetlistSource,
             workspace_moved,
-            &mut || netlist_source_digest(workspace),
+            &mut || {
+                let (digest, unsaved) = netlist_share(workspace, decks.settled)?;
+                netlist_unsaved = unsaved;
+                Ok(digest)
+            },
         )?;
+        decks.unsaved = netlist_unsaved;
 
         let active = matches!(
             workspace.active_view_type(),
@@ -555,6 +602,32 @@ impl Positions {
             },
         ))
     }
+}
+
+/// The netlist source's digest, and whether it reads unsaved. Once the
+/// decks' texts are `settled`, a text with no digest taken is one kept
+/// since, and the source reads unsaved, named by the texts it holds rather
+/// than digested; before, every text is digested.
+fn netlist_share(
+    workspace: &ProjectWorkspace,
+    settled: bool,
+) -> Result<(ContentDigest, bool), String> {
+    if !settled {
+        return Ok((netlist_source_digest(workspace)?, false));
+    }
+    if let Some(netlist) = netlist_source_digest_with(workspace, true)? {
+        return Ok((netlist, false));
+    }
+    let texts = workspace
+        .decks
+        .iter()
+        .filter_map(ProjectDeck::stored_deck)
+        .flat_map(|stored| {
+            std::iter::once(&stored.text).chain(stored.files.iter().map(|file| &file.text))
+        })
+        .map(DeckText::identity)
+        .collect::<Vec<_>>();
+    Ok((digest(&("unsaved deck text", texts))?, true))
 }
 
 /// `held`'s digest while its stamp is `stamp`, else `digest` taken now.

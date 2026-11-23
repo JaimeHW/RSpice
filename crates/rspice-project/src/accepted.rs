@@ -40,10 +40,17 @@ impl AcceptedProject {
     }
 
     /// Whether `working`'s decks and its project sources each differ from
-    /// the accepted content, in that order.
+    /// the accepted content, in that order. A deck's text is compared as
+    /// [`rspice_design::deck::DeckText::kept_as`] compares it, so a deck the
+    /// editor changed since is told apart without its text being read.
     pub fn source_dirty_flags(&self, working: &crate::ProjectWorkspace) -> (bool, bool) {
         let baseline = &self.baseline.workspace;
-        let decks = working.decks != baseline.decks;
+        let decks = working.decks.len() != baseline.decks.len()
+            || working
+                .decks
+                .iter()
+                .zip(&baseline.decks)
+                .any(|(working, baseline)| !working.kept_as(baseline));
         let project_sources = !working
             .project_sources
             .same_authored_content(&baseline.project_sources);
