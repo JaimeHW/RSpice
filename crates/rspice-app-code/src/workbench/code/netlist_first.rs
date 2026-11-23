@@ -87,6 +87,7 @@ pub(super) fn carry_out(cx: &mut Cx<'_, CodeFeature>, action: NetlistFirstAction
             &mut cx.state.netlist,
             &mut cx.state.netlist_open_documents,
             cx.runs,
+            cx.wb.messages(),
         );
         cx.state.netlist.cursor_line = line.saturating_sub(1);
         cx.state.netlist.requested_line = Some(line);
