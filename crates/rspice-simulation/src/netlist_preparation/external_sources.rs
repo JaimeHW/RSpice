@@ -146,19 +146,22 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
     limits: rspice_core::ResourceLimits,
 ) -> Result<(), PreparationError> {
-    reject_deferred_external_sources_with_abort(
+    reject_deferred_external_sources_for_host(
         netlist,
         project_runtimes,
         measurement_references,
+        process_programs::STARTS_PROGRAMS,
         limits,
-        &rspice_core::NoAbort,
     )
 }
 
-/// [`reject_deferred_external_sources_with_project_runtimes`], stopped once
-/// `abort` is raised: it polls `abort` as it reads the deck's lines.
+/// [`reject_deferred_external_sources_with_project_runtimes`] for a deck its
+/// run's preparation parsed as `parsed`, stopped once `abort` is raised: it
+/// polls `abort` as it reads the deck's lines, and reads the lines the
+/// parser skips off `parsed` rather than parsing the deck again.
 pub fn reject_deferred_external_sources_with_abort(
     netlist: &str,
+    parsed: &rspice_core::Netlist,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
     limits: rspice_core::ResourceLimits,
@@ -166,6 +169,7 @@ pub fn reject_deferred_external_sources_with_abort(
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_for_host_with_abort(
         netlist,
+        &UnreadLines::of_parsed(parsed),
         project_runtimes,
         measurement_references,
         process_programs::STARTS_PROGRAMS,
@@ -187,6 +191,7 @@ pub(crate) fn reject_deferred_external_sources_for_host(
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_for_host_with_abort(
         netlist,
+        &UnreadLines::new(netlist),
         project_runtimes,
         measurement_references,
         starts_programs,
@@ -196,9 +201,10 @@ pub(crate) fn reject_deferred_external_sources_for_host(
 }
 
 /// [`reject_deferred_external_sources_for_host`], stopped once `abort` is
-/// raised.
+/// raised, with `unread` naming the lines the parser skips.
 fn reject_deferred_external_sources_for_host_with_abort(
     netlist: &str,
+    unread: &UnreadLines<'_>,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
     starts_programs: bool,
@@ -219,6 +225,7 @@ fn reject_deferred_external_sources_for_host_with_abort(
         project_runtimes,
         starts_programs,
         std::env::var_os("PATH").as_deref(),
+        unread,
         abort,
     )
 }
@@ -241,32 +248,50 @@ fn reject_deferred_external_sources_on(
         project_runtimes,
         starts_programs,
         search_path,
+        &UnreadLines::new(netlist),
         &rspice_core::NoAbort,
     )
 }
 
-/// How many of a deck's lines are read between two polls of the abort
-/// signal: some 25 ms of reading, at about 6 us a line.
-const LINES_PER_ABORT_POLL: usize = 4096;
+/// How many of a deck's records are read between two polls of the abort
+/// signal: a few milliseconds of reading.
+const RECORDS_PER_ABORT_POLL: usize = 4096;
+
+/// Whether a deck's record, as [`for_each_logical_line`] folds it, can name
+/// anything [`deferred_external_source_reason`] refuses. Each reason is a
+/// directive, a code model's card (an instance `A…`, or its `.model`), or a
+/// lookup reading a quoted file, so a record that starts with none of `.`,
+/// `a` and `A` and quotes nothing names nothing, and is passed over without
+/// the reasons being read.
+fn may_name_an_external_source(record: &str) -> bool {
+    matches!(record.as_bytes().first(), Some(b'.' | b'a' | b'A'))
+        || record.bytes().any(|byte| byte == b'"' || byte == b'\'')
+}
 
 /// [`reject_deferred_external_sources_with_project_runtimes`] on a host that
 /// starts programs or not, looking a bare program name up on `search_path`,
-/// stopped once `abort` is raised.
+/// stopped once `abort` is raised. `unread` names the lines the parser skips.
 fn scan_deferred_external_sources(
     netlist: &str,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     starts_programs: bool,
     search_path: Option<&std::ffi::OsStr>,
+    unread: &UnreadLines<'_>,
     abort: &dyn rspice_core::abort_signal::AbortSignal,
 ) -> Result<(), PreparationError> {
-    let records = executable_logical_lines(netlist);
+    // The deck's records are listed whole only for a `d_process` program,
+    // whose instances are looked for among them.
+    let records = std::cell::OnceCell::new();
+    let mut read = 0usize;
     PreparationError::check_abort(abort)?;
-    let unread = UnreadLines::new(netlist);
-    for (index, (line_number, logical_line)) in records.iter().enumerate() {
-        if index % LINES_PER_ABORT_POLL == 0 {
+    for_each_logical_line(netlist, |line_number, logical_line| {
+        read += 1;
+        if read % RECORDS_PER_ABORT_POLL == 0 {
             PreparationError::check_abort(abort)?;
         }
-        let (line_number, logical_line) = (*line_number, logical_line.as_str());
+        if !may_name_an_external_source(logical_line) {
+            return Ok(());
+        }
         if project_runtimes.sources().any(|runtime| {
             project_veriloga_directive_matches_exact_identity(
                 logical_line,
@@ -274,37 +299,37 @@ fn scan_deferred_external_sources(
                 runtime.netlist_alias(),
             )
         }) {
-            continue;
+            return Ok(());
         }
-        if let Some(reason) = deferred_external_source_reason(logical_line) {
-            if reason == "file-backed measurement reference" || reason == CODE_MODEL_DATA_FILE {
-                continue;
-            }
-            if reason == PROCESS_PROGRAM {
-                match admit_process_programs(
-                    &records,
-                    line_number,
-                    logical_line,
-                    starts_programs,
-                    search_path,
-                ) {
-                    Err(refusal) if !unread.contains(line_number) => return Err(refusal),
-                    _ => continue,
-                }
-            }
-            if unread.contains(line_number) {
-                continue;
-            }
-            return Err(PreparationError::new(
-                PreparationStage::SourceChecks,
-                format!(
-                    "Line {} reads a file that is not kept with the run ({reason}): {}",
-                    line_number, logical_line
-                ),
-            ));
+        let Some(reason) = deferred_external_source_reason(logical_line) else {
+            return Ok(());
+        };
+        if reason == "file-backed measurement reference" || reason == CODE_MODEL_DATA_FILE {
+            return Ok(());
         }
-    }
-    Ok(())
+        if reason == PROCESS_PROGRAM {
+            return match admit_process_programs(
+                records.get_or_init(|| executable_logical_lines(netlist)),
+                line_number,
+                logical_line,
+                starts_programs,
+                search_path,
+            ) {
+                Err(refusal) if !unread.contains(line_number) => Err(refusal),
+                _ => Ok(()),
+            };
+        }
+        if unread.contains(line_number) {
+            return Ok(());
+        }
+        Err(PreparationError::new(
+            PreparationStage::SourceChecks,
+            format!(
+                "Line {} reads a file that is not kept with the run ({reason}): {}",
+                line_number, logical_line
+            ),
+        ))
+    })
 }
 
 /// Admit a record's `d_process` programs when this host starts each where
@@ -376,19 +401,29 @@ fn admit_process_programs(
 /// skips every line of a false branch: it comments them out once the deck
 /// and its includes are read (`inp.c` `dotifeval`).
 ///
-/// The deck is parsed on the first question only, so a deck no check would
-/// refuse a line of costs nothing. A deck that does not parse has no line the
-/// parser skips, and every line is checked.
+/// A deck that is not parsed yet is parsed on the first question only, so a
+/// deck no check would refuse a line of costs nothing; a deck its run's
+/// preparation parsed is not parsed again ([`UnreadLines::of_parsed`]). A
+/// deck that does not parse has no line the parser skips, and every line is
+/// checked.
 pub(crate) struct UnreadLines<'a> {
-    deck: &'a str,
+    deck: Option<&'a str>,
     regions: std::cell::OnceCell<Vec<std::ops::RangeInclusive<usize>>>,
 }
 
 impl<'a> UnreadLines<'a> {
     pub(crate) fn new(deck: &'a str) -> Self {
         Self {
-            deck,
+            deck: Some(deck),
             regions: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The lines `parsed`, a deck as parsed, skips: read off the parse.
+    pub(crate) fn of_parsed(parsed: &rspice_core::Netlist) -> Self {
+        Self {
+            deck: None,
+            regions: std::cell::OnceCell::from(unread_regions(parsed)),
         }
     }
 
@@ -397,19 +432,22 @@ impl<'a> UnreadLines<'a> {
     pub(crate) fn contains(&self, line: usize) -> bool {
         self.regions
             .get_or_init(|| {
-                rspice_core::Netlist::parse(self.deck).map_or_else(
-                    |_| Vec::new(),
-                    |parsed| {
-                        parsed
-                            .unread_root_source()
-                            .map(|region| region.lines.clone())
-                            .collect()
-                    },
-                )
+                self.deck
+                    .and_then(|deck| rspice_core::Netlist::parse(deck).ok())
+                    .as_ref()
+                    .map_or_else(Vec::new, unread_regions)
             })
             .iter()
             .any(|lines| lines.contains(&line))
     }
+}
+
+/// The lines of its root source the parse `parsed` skips.
+fn unread_regions(parsed: &rspice_core::Netlist) -> Vec<std::ops::RangeInclusive<usize>> {
+    parsed
+        .unread_root_source()
+        .map(|region| region.lines.clone())
+        .collect()
 }
 
 /// Fold physical SPICE continuation records exactly as the core parser does
@@ -419,30 +457,52 @@ impl<'a> UnreadLines<'a> {
 /// split across continuation boundaries after authorization.
 pub fn executable_logical_lines(source: &str) -> Vec<(usize, String)> {
     let mut logical_lines = Vec::new();
-    let mut pending: Option<(usize, String)> = None;
+    let _ = for_each_logical_line(source, |line, record| {
+        logical_lines.push((line, record.to_owned()));
+        Ok::<(), std::convert::Infallible>(())
+    });
+    logical_lines
+}
 
+/// Each of `source`'s records, as [`executable_logical_lines`] folds them,
+/// with the number of the physical line it starts on, until `each` refuses
+/// one. A record on one physical line is lent where it stands; only a record
+/// that continues is copied, to fold it.
+pub(crate) fn for_each_logical_line<'a, E>(
+    source: &'a str,
+    mut each: impl FnMut(usize, &str) -> Result<(), E>,
+) -> Result<(), E> {
+    // The record being read: in one piece while it stands on one line,
+    // folded once a continuation follows it. At most one is held.
+    let mut standing: Option<(usize, &'a str)> = None;
+    let mut folded: Option<(usize, String)> = None;
     for (index, physical_line) in source.lines().enumerate() {
         let trimmed = executable_source_portion(physical_line).trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
         }
-
         if let Some(rest) = trimmed.strip_prefix('+') {
-            let (_, logical) = pending.get_or_insert_with(|| (index + 1, String::new()));
-            logical.push(' ');
-            logical.push_str(rest);
+            let (_, record) = folded.get_or_insert_with(|| match standing.take() {
+                Some((line, record)) => (line, record.to_owned()),
+                None => (index + 1, String::new()),
+            });
+            record.push(' ');
+            record.push_str(rest);
             continue;
         }
-
-        if let Some(previous) = pending.replace((index + 1, trimmed.to_owned())) {
-            logical_lines.push(previous);
+        if let Some((line, record)) = folded.take() {
+            each(line, &record)?;
+        } else if let Some((line, record)) = standing.take() {
+            each(line, record)?;
         }
+        standing = Some((index + 1, trimmed));
     }
-
-    if let Some(previous) = pending {
-        logical_lines.push(previous);
+    if let Some((line, record)) = folded {
+        each(line, &record)?;
+    } else if let Some((line, record)) = standing {
+        each(line, record)?;
     }
-    logical_lines
+    Ok(())
 }
 
 #[cfg(test)]

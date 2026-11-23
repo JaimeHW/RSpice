@@ -386,38 +386,56 @@ fn deck_hdl_sites(source: &str) -> Vec<(usize, VerilogAInclude)> {
 /// Preparation refuses it either way; counted in the expanded text its line
 /// number points nowhere the author can look, so this finds the file and
 /// line that hold it. A line the parser skips, such as one in a false `.if`
-/// branch, is skipped here too. `None` when no such line is left, or when no
-/// included file holds it as written.
+/// branch, is skipped here too: read off `parsed`, the parse of `expanded`
+/// a run's preparation made, where there is one. `None` when no such line
+/// is left, or when no included file holds it as written.
 pub(crate) fn included_hdl_source_refusal(
     expanded: &str,
     includes: &[ResolvedIncludeDependency],
+    parsed: Option<&rspice_core::Netlist>,
 ) -> Option<PreparationError> {
-    let unread = super::external_sources::UnreadLines::new(expanded);
-    super::executable_logical_lines(expanded)
-        .into_iter()
-        .filter_map(|(number, line)| {
-            let directive = rspice_core::netlist::parse_veriloga_source_directive(&line)?;
-            (!names_sealed_runtime(&directive.file_path) && !unread.contains(number))
-                .then_some((line, directive))
-        })
-        .find_map(|(line, directive)| {
-            includes.iter().find_map(|include| {
-                let number = include
-                    .source()
-                    .lines()
-                    .position(|physical| physical.trim() == line)?
-                    + 1;
-                Some(PreparationError::new(
-                    PreparationStage::SourceChecks,
-                    format!(
-                        "line {number} of '{}': the Verilog-A source '{}' is named on a line \
-                         the run's seal was not given, and a run executes sealed sources only",
-                        include.resolved_path().display(),
-                        directive.file_path.display()
-                    ),
-                ))
-            })
-        })
+    let unread = parsed.map_or_else(
+        || super::external_sources::UnreadLines::new(expanded),
+        super::external_sources::UnreadLines::of_parsed,
+    );
+    let mut refusal = None;
+    let _ = super::external_sources::for_each_logical_line(expanded, |number, line| {
+        // A source is named by a directive: a record that starts none names
+        // none.
+        if !line.starts_with('.') {
+            return Ok(());
+        }
+        let Some(directive) = rspice_core::netlist::parse_veriloga_source_directive(line) else {
+            return Ok(());
+        };
+        if names_sealed_runtime(&directive.file_path) || unread.contains(number) {
+            return Ok(());
+        }
+        let found = includes.iter().find_map(|include| {
+            let number = include
+                .source()
+                .lines()
+                .position(|physical| physical.trim() == line)?
+                + 1;
+            Some(PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!(
+                    "line {number} of '{}': the Verilog-A source '{}' is named on a line \
+                     the run's seal was not given, and a run executes sealed sources only",
+                    include.resolved_path().display(),
+                    directive.file_path.display()
+                ),
+            ))
+        });
+        match found {
+            Some(error) => {
+                refusal = Some(error);
+                Err(())
+            }
+            None => Ok(()),
+        }
+    });
+    refusal
 }
 
 /// Whether a directive names the virtual key of a sealed runtime rather than

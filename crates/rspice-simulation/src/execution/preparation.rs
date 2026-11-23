@@ -1068,11 +1068,13 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
     if let Some(refusal) = crate::netlist_preparation::included_hdl_source_refusal(
         &expanded,
         &sealed_source_dependencies,
+        Some(&hierarchy.parsed),
     ) {
         return Err(refusal);
     }
     crate::netlist_preparation::reject_deferred_external_sources_with_abort(
         &expanded,
+        &hierarchy.parsed,
         &project_veriloga_runtimes,
         &measurement_references,
         inputs.execution_limits(),

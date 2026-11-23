@@ -250,6 +250,7 @@ pub fn prepare_headless_run(
     if let Some(refusal) = crate::netlist_preparation::included_hdl_source_refusal(
         &expanded,
         &sealed_source_dependencies,
+        None,
     ) {
         return Err(refusal.into());
     }
