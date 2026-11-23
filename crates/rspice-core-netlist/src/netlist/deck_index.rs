@@ -240,6 +240,10 @@ pub struct DeckIndex {
     cards: Vec<DeckCard>,
     scopes: Vec<DeckScope>,
     symbols: Vec<DeckSymbol>,
+    /// Where in `symbols` each definition that is not an instance is: the
+    /// names a reader binds by scope, which a deck of many devices has few
+    /// of.
+    definitions: Vec<usize>,
     references: Vec<DeckReference>,
     nodes: Vec<DeckNode>,
     includes: Vec<DeckInclude>,
@@ -283,6 +287,13 @@ impl DeckIndex {
     #[must_use]
     pub fn symbols(&self) -> &[DeckSymbol] {
         &self.symbols
+    }
+
+    /// Every definition but an instance, in source order: the subcircuits,
+    /// models, parameters and functions a reader binds by scope, found
+    /// without reading past the deck's devices.
+    pub fn definitions(&self) -> impl Iterator<Item = &DeckSymbol> + '_ {
+        self.definitions.iter().map(|&index| &self.symbols[index])
     }
 
     /// Every read, in source order.
@@ -357,8 +368,7 @@ impl DeckIndex {
             return 0;
         };
         // A subcircuit's header reads its defaults inside the subcircuit.
-        self.symbols
-            .iter()
+        self.definitions()
             .find(|symbol| symbol.card == card && symbol.kind == DeckSymbolKind::Subcircuit)
             .and_then(|symbol| symbol.opens)
             .unwrap_or(self.cards[card].scope)
@@ -387,8 +397,7 @@ impl DeckIndex {
         let mut visible = Vec::new();
         for level in self.scope_chain(scope) {
             let names = self
-                .symbols
-                .iter()
+                .definitions()
                 .filter(|symbol| symbol.kind == DeckSymbolKind::Parameter && symbol.scope == level)
                 .map(|symbol| symbol.name.to_ascii_uppercase())
                 .collect::<Vec<_>>();
@@ -454,17 +463,22 @@ impl DeckIndex {
     }
 
     fn resolve_in_scope(&self, kind: DeckSymbolKind, name: &str, scope: usize) -> Option<usize> {
-        let candidates = self
-            .symbols
-            .iter()
-            .enumerate()
-            .filter(|(_, symbol)| {
-                symbol.kind == kind
-                    && symbol.scope == scope
-                    && symbol.name.eq_ignore_ascii_case(name)
-            })
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
+        let bound_here = |index: &usize| {
+            let symbol = &self.symbols[*index];
+            symbol.kind == kind && symbol.scope == scope && symbol.name.eq_ignore_ascii_case(name)
+        };
+        // Only an instance is looked for among every name the deck writes.
+        let candidates = if kind == DeckSymbolKind::Instance {
+            (0..self.symbols.len())
+                .filter(bound_here)
+                .collect::<Vec<_>>()
+        } else {
+            self.definitions
+                .iter()
+                .copied()
+                .filter(bound_here)
+                .collect::<Vec<_>>()
+        };
         binding(kind, &candidates, &self.symbols, &HashSet::new())
     }
 }
@@ -1575,6 +1589,14 @@ impl Builder {
         references.sort_by_key(|reference| order(&reference.location));
         self.index.nodes.sort_by_key(|node| order(&node.location));
         self.index.references = references;
+        self.index.definitions = self
+            .index
+            .symbols
+            .iter()
+            .enumerate()
+            .filter(|(_, symbol)| symbol.kind != DeckSymbolKind::Instance)
+            .map(|(index, _)| index)
+            .collect();
         self.index
     }
 }

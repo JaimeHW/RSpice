@@ -727,11 +727,14 @@ impl NetlistProjectIndex {
         kinds: &[DeckSymbolKind],
     ) -> Vec<&DeckSymbol> {
         let reach = self.deck.scope_chain(scope).collect::<Vec<_>>();
-        self.deck
-            .symbols()
-            .iter()
-            .filter(|symbol| kinds.contains(&symbol.kind) && reach.contains(&symbol.scope))
-            .collect()
+        let wanted =
+            |symbol: &&DeckSymbol| kinds.contains(&symbol.kind) && reach.contains(&symbol.scope);
+        // A deck's devices are read only when they are asked for.
+        if kinds.contains(&DeckSymbolKind::Instance) {
+            self.deck.symbols().iter().filter(wanted).collect()
+        } else {
+            self.deck.definitions().filter(wanted).collect()
+        }
     }
 
     /// The node names written in `scope`, and the deck's global ones, each

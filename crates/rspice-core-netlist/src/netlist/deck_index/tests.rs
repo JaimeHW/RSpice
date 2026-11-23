@@ -559,3 +559,32 @@ fn a_name_resolves_through_the_scopes_a_reader_sees() {
             .is_some()
     );
 }
+
+/// The definitions a reader binds by scope are listed in source order without
+/// the deck's devices, and resolve as they did among every name.
+#[test]
+fn definitions_leave_out_the_devices() {
+    let index = index(
+        "* t\n.param w=1\nR1 a b {w}\n.subckt amp in out\nR2 in out 1k\n.ends\n.model dm d\nX1 a b amp\nD1 a 0 dm\n",
+    );
+    let defined = index
+        .definitions()
+        .map(|symbol| (symbol.kind, symbol.name.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        defined,
+        [
+            (DeckSymbolKind::Parameter, "w"),
+            (DeckSymbolKind::Subcircuit, "amp"),
+            (DeckSymbolKind::Model, "dm"),
+        ]
+    );
+    let devices = index
+        .symbols()
+        .iter()
+        .filter(|symbol| symbol.kind == DeckSymbolKind::Instance)
+        .count();
+    assert_eq!(devices + defined.len(), index.symbols().len());
+    assert!(index.resolve(DeckSymbolKind::Model, "DM", 0).is_some());
+    assert!(index.resolve(DeckSymbolKind::Instance, "x1", 0).is_some());
+}
