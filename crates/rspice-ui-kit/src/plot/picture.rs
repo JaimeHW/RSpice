@@ -10,6 +10,10 @@
 //! it is ready the plot keeps the picture it has, carried along with the view
 //! and marked as updating; a newer request supersedes an older one, whose
 //! picture is never shown.
+//!
+//! The web build has no thread to draw on, so it draws every picture on the
+//! frame, and the off-frame drawing is compiled there but never called.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 mod raster;
 #[cfg(test)]

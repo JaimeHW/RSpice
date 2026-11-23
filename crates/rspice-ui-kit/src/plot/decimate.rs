@@ -783,7 +783,9 @@ pub(super) fn reduce(
 
 /// The envelope of stored samples at `view`, waited for: off the frame, a
 /// picture waits for the view's own tile rather than drawing a coarser one.
-/// Whether it is the view's own tile comes with it.
+/// Whether it is the view's own tile comes with it. Unused on the web, which
+/// draws no picture off the frame.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(super) fn stored_envelope_waiting(
     stored: super::spec::StoredSamples<'_>,
     view: TraceView,
