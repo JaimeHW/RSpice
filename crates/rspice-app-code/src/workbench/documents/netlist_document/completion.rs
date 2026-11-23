@@ -1,7 +1,9 @@
 //! Completion popover — the editor's one elevated surface.
 //!
 //! What it offers is what the engine reads where the caret is: the dot
-//! cards, with their signatures, at the head of a line; and, through the
+//! cards, with their signatures, at the head of a line, every analysis from
+//! the parser's own table of them; on an `.options` card, the names the
+//! parser reads there, from its table of options; and, through the
 //! engine's index of the deck, the models, subcircuits and functions the
 //! caret's scope sees, its nodes and its parameters. On an element line it
 //! says which pin comes next, from the subcircuit's port list or the
@@ -57,29 +59,9 @@ struct CompletionPopoverGeometry {
 const POPOVER_DESIRED_WIDTH: f32 = 300.0;
 const POPOVER_SCREEN_MARGIN: f32 = 8.0;
 
-/// Dot-commands with signatures (the popover's static source).
+/// The dot cards that are not analyses, with their signatures. The
+/// analyses are the parser's own table, `ANALYSIS_KEYWORDS`.
 const DOT_COMMANDS: &[(&str, &str, MessageId)] = &[
-    (
-        ".tran",
-        "<step> <stop> [start [maxstep]]",
-        MessageId::NetlistDirectiveTran,
-    ),
-    (
-        ".ac",
-        "dec|oct|lin <points> <fstart> <fstop>",
-        MessageId::NetlistDirectiveAc,
-    ),
-    (
-        ".dc",
-        "<source> <start> <stop> <step>",
-        MessageId::NetlistDirectiveDc,
-    ),
-    (".op", "", MessageId::NetlistDirectiveOp),
-    (
-        ".noise",
-        "v(<out>) <source> dec <pts> <f0> <f1>",
-        MessageId::NetlistDirectiveNoise,
-    ),
     (
         ".meas",
         "tran|ac|dc <name> <type> <signal> …",
@@ -133,18 +115,6 @@ const DOT_COMMANDS: &[(&str, &str, MessageId)] = &[
         MessageId::NetlistDirectiveFunc,
     ),
     (".endl", "[section]", MessageId::NetlistDirectiveEndl),
-    (".tf", "v(<out>) <source>", MessageId::NetlistDirectiveTf),
-    (".sens", "v(<out>) [ac …]", MessageId::NetlistDirectiveSens),
-    (
-        ".pz",
-        "<in+> <in-> <out+> <out-> vol|cur pol|zer|pz",
-        MessageId::NetlistDirectivePz,
-    ),
-    (
-        ".step",
-        "param <name> <start> <stop> <step>",
-        MessageId::NetlistDirectiveStep,
-    ),
     (
         ".plot",
         "<analysis> <signal> …",
@@ -160,12 +130,6 @@ const DOT_COMMANDS: &[(&str, &str, MessageId)] = &[
     (".endif", "", MessageId::NetlistDirectiveEndif),
     (".control", "", MessageId::NetlistDirectiveControl),
     (".endc", "", MessageId::NetlistDirectiveEndc),
-    (".temp", "<celsius>", MessageId::NetlistDirectiveTemp),
-    (
-        ".four",
-        "<freq> <signal> …",
-        MessageId::NetlistDirectiveFour,
-    ),
     (".end", "", MessageId::NetlistDirectiveEnd),
 ];
 
@@ -185,6 +149,11 @@ pub(crate) fn directive_signature_at(
         .find('\n')
         .map_or(source.len(), |index| cursor_byte + index);
     let directive = source[line_start..line_end].split_whitespace().next()?;
+    if let Some(analysis) = rspice_core::netlist::analysis_keyword(directive) {
+        let name = analysis.spellings[0];
+        let title = format!("{name} {}", analysis.signature);
+        return Some((title.trim_end().to_owned(), analysis.description.to_owned()));
+    }
     DOT_COMMANDS
         .iter()
         .find(|(name, _, _)| name.eq_ignore_ascii_case(directive))
@@ -271,12 +240,15 @@ pub fn show(
     let (token_start, token, line_start) =
         token_at(buffer, caret).unwrap_or((caret, String::new(), usize::MAX));
     let pins = pin_help(state, buffer, token_start, messages);
-    if token.is_empty() && pins.is_none() {
+    let parameters = parameter_site(state, buffer, token_start);
+    let unprompted = parameters
+        .as_ref()
+        .is_some_and(ParameterSite::offers_unprompted);
+    if token.is_empty() && pins.is_none() && !unprompted {
         state.completion_open = false;
         return None;
     }
 
-    let parameters = parameter_site(state, buffer, token_start);
     let candidates = collect_candidates(
         state,
         &token,
@@ -357,6 +329,29 @@ fn token_at(buffer: &str, caret: usize) -> Option<(usize, String, usize)> {
     }
     if start == caret {
         return None; // caret not at the end of a token
+    }
+    // On an `.options` card a name joins words with `-`, as the parser reads
+    // `NONLIN-TRAN`: the token starts at its first word.
+    let joined = |at: usize| {
+        let mut word = at - 1;
+        while word > 0 && (chars[word - 1].is_ascii_alphanumeric() || chars[word - 1] == '_') {
+            word -= 1;
+        }
+        (word < at - 1).then_some(word)
+    };
+    let on_options_card = || {
+        let card = card_before(buffer, char_to_byte(buffer, start));
+        card.split_whitespace()
+            .next()
+            .is_some_and(rspice_core::netlist::is_options_card)
+    };
+    if start > 0 && chars[start - 1] == '-' && on_options_card() {
+        while start > 0
+            && chars[start - 1] == '-'
+            && let Some(word) = joined(start)
+        {
+            start = word;
+        }
     }
     // The line's first non-whitespace position (dot-command context check).
     let mut line_begin = start;
@@ -516,6 +511,42 @@ enum ParameterSite {
         element: String,
         parameters: &'static [&'static str],
     },
+    /// On an `.options` card, the names the parser reads where the caret
+    /// is: outside any package, or in the package the card last opened.
+    Options { package: Option<&'static str> },
+}
+
+impl ParameterSite {
+    /// Whether the site's names are offered before any is typed: an
+    /// `.options` card's are, as a list of what the card can set.
+    fn offers_unprompted(&self) -> bool {
+        matches!(self, Self::Options { .. })
+    }
+}
+
+/// Where a name started at byte `start` of an `.options` card goes: outside
+/// any package, or in the package the card last opened. A word that names a
+/// package opens it, as the parser reads the card; one that opens only
+/// before its own names does so when such a name follows it, or nothing yet.
+/// `None` where a value goes, after `=`.
+fn options_site(buffer: &str, start: usize, words: &[&str]) -> Option<ParameterSite> {
+    if buffer[..start].trim_end().ends_with('=') {
+        return None;
+    }
+    let mut package = None;
+    for (at, word) in words.iter().enumerate().skip(1) {
+        let Some(found) = rspice_core::netlist::option_package(&word.to_ascii_uppercase()) else {
+            continue;
+        };
+        let opens = found.opens_alone
+            || words
+                .get(at + 1)
+                .is_none_or(|next| found.lists(&next.to_ascii_uppercase()));
+        if opens {
+            package = Some(found.name);
+        }
+    }
+    Some(ParameterSite::Options { package })
 }
 
 /// The card the token starting at byte `start` of `buffer` is on, from the
@@ -577,6 +608,9 @@ fn parameter_site(
         .filter(|word| !word.is_empty())
         .collect::<Vec<_>>();
     let head = *words.first()?;
+    if rspice_core::netlist::is_options_card(head) {
+        return options_site(buffer, start, &words);
+    }
     if head.eq_ignore_ascii_case(".model") {
         // Past the card's name and type.
         let written_type = *words.get(2)?;
@@ -683,7 +717,77 @@ fn parameter_candidates(
                 insert: spelled(name),
             })
             .collect(),
+        ParameterSite::Options { package } => option_candidates(*package, token, messages),
     }
+}
+
+/// The rows an `.options` card offers for `token` in `package`: the names
+/// the parser reads there, then the packages the card can open, each in
+/// alphabetical order. A name is offered by the spelling being typed, the
+/// one typed whole or else the first the typing starts, and inserted with
+/// its `=`; a package with the blank after it. Either is written in the
+/// case the writer is typing in.
+fn option_candidates(
+    package: Option<&'static str>,
+    token: &str,
+    messages: MessageCatalog,
+) -> Vec<Candidate> {
+    let upper = token.to_ascii_uppercase();
+    let spelled = |name: &str, after: char| {
+        if token.chars().any(|ch| ch.is_ascii_uppercase()) {
+            format!("{name}{after}")
+        } else {
+            format!("{}{after}", name.to_ascii_lowercase())
+        }
+    };
+    let typed = |spellings: &'static [&'static str]| {
+        spellings
+            .iter()
+            .find(|spelling| **spelling == upper)
+            .or_else(|| {
+                spellings
+                    .iter()
+                    .find(|spelling| spelling.starts_with(&upper))
+            })
+            .copied()
+    };
+    let note = |name: &str| match package {
+        Some(package) => messages.format(
+            MessageId::NetlistCompletionPackagedOptionNote,
+            &[("name", name), ("package", package)],
+        ),
+        None => messages.format(MessageId::NetlistCompletionOptionNote, &[("name", name)]),
+    };
+    let mut names = rspice_core::netlist::OPTION_NAMES
+        .iter()
+        .filter(|row| row.scope.admits(package))
+        .filter_map(|row| typed(row.spellings))
+        .map(|name| Candidate {
+            kind: messages.text(MessageId::NetlistCompletionOption),
+            label: name.to_owned(),
+            detail: package.unwrap_or_default().to_owned(),
+            doc: note(name),
+            insert: spelled(name, '='),
+        })
+        .collect::<Vec<_>>();
+    names.sort_by(|a, b| a.label.cmp(&b.label));
+    let mut packages = rspice_core::netlist::OPTION_PACKAGES
+        .iter()
+        .filter(|found| found.name.starts_with(&upper))
+        .map(|found| Candidate {
+            kind: messages.text(MessageId::NetlistCompletionOptionPackage),
+            label: found.name.to_owned(),
+            detail: String::new(),
+            doc: messages.format(
+                MessageId::NetlistCompletionOptionPackageNote,
+                &[("name", found.name)],
+            ),
+            insert: spelled(found.name, ' '),
+        })
+        .collect::<Vec<_>>();
+    packages.sort_by(|a, b| a.label.cmp(&b.label));
+    names.extend(packages);
+    names
 }
 
 /// Filter both sources against the typed prefix. Where a parameter is being
@@ -699,7 +803,7 @@ fn collect_candidates(
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     let lower = token.to_ascii_lowercase();
-    if let Some(site) = parameters.filter(|_| !token.is_empty()) {
+    if let Some(site) = parameters.filter(|site| !token.is_empty() || site.offers_unprompted()) {
         let offered = parameter_candidates(&site, token, messages);
         if !offered.is_empty() {
             return offered;
@@ -769,6 +873,25 @@ fn collect_candidates(
     if token.starts_with('.') {
         if !at_line_start {
             return out;
+        }
+        // An analysis is offered by the spelling being typed, the usual one
+        // when the typing starts it.
+        for analysis in rspice_core::netlist::ANALYSIS_KEYWORDS {
+            let Some(cmd) = analysis
+                .spellings
+                .iter()
+                .find(|spelling| spelling.starts_with(&lower) && **spelling != lower)
+            else {
+                continue;
+            };
+            let signature = analysis.signature;
+            out.push(Candidate {
+                kind: messages.text(MessageId::NetlistCompletionDirective),
+                label: (*cmd).to_owned(),
+                detail: signature.to_owned(),
+                doc: format!("{cmd} {signature} — {}", analysis.description),
+                insert: format!("{cmd} "),
+            });
         }
         for (cmd, signature, doc) in DOT_COMMANDS {
             if cmd.starts_with(&lower) && *cmd != lower {
@@ -1232,5 +1355,152 @@ mod tests {
             !rows.iter().any(|(_, label, _)| label == "nloc"),
             "a model inside a subcircuit is not seen outside it: {rows:?}"
         );
+    }
+
+    /// A deck's editing state, its index built, for rows offered at the end
+    /// of any buffer.
+    fn deck_state() -> NetlistDocumentState {
+        let mut harness = crate::workbench::code::tests::harness();
+        super::super::fixtures::seed_deck(
+            &mut harness.model,
+            &mut harness.state.netlist,
+            HEAD,
+            "* models
+",
+        );
+        assert!(
+            super::super::language::project_index_now(&harness.model, &mut harness.state.netlist)
+                .is_some()
+        );
+        harness.state.netlist
+    }
+
+    /// The rows the popover offers with the caret at the end of `buffer`, the
+    /// token and its site found as `show` finds them.
+    fn rows_at_end(state: &NetlistDocumentState, buffer: &str) -> Vec<Candidate> {
+        let caret = buffer.chars().count();
+        let (token_start, token, line_start) =
+            token_at(buffer, caret).unwrap_or((caret, String::new(), usize::MAX));
+        let pins = pin_help(state, buffer, token_start, english());
+        let parameters = parameter_site(state, buffer, token_start);
+        collect_candidates(
+            state,
+            &token,
+            token_start == line_start,
+            pins,
+            parameters,
+            english(),
+        )
+    }
+
+    #[test]
+    fn every_option_the_parser_reads_is_offered_where_it_reads_it() {
+        use rspice_core::netlist::{OPTION_NAMES, OPTION_PACKAGES};
+        let state = deck_state();
+        let packages = std::iter::once(None)
+            .chain(OPTION_PACKAGES.iter().map(|package| Some(package.name)))
+            .collect::<Vec<_>>();
+        for row in OPTION_NAMES {
+            for package in packages
+                .iter()
+                .filter(|package| row.scope.admits(**package))
+            {
+                // A package that opens only before its own names is written
+                // with one of them first.
+                let opened = match package {
+                    Some(name) => format!("{name} {} ", row.spellings[0]),
+                    None => String::new(),
+                };
+                for spelling in row.spellings {
+                    let card = format!("{HEAD}.options {opened}{spelling}");
+                    let rows = rows_at_end(&state, &card);
+                    assert!(
+                        rows.iter().any(|row| row.label == *spelling),
+                        "{spelling} in {package:?} is not offered: {:?}",
+                        rows.iter().map(|row| &row.label).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+        for package in OPTION_PACKAGES {
+            let rows = rows_at_end(&state, &format!("{HEAD}.options {}", package.name));
+            assert!(
+                rows.iter().any(|row| row.label == package.name),
+                "{} is not offered",
+                package.name
+            );
+        }
+    }
+
+    #[test]
+    fn an_options_card_offers_what_the_parser_reads_where_the_caret_is() {
+        let state = deck_state();
+        let labels = |buffer: &str| {
+            rows_at_end(&state, &format!("{HEAD}{buffer}"))
+                .into_iter()
+                .map(|row| row.label)
+                .collect::<Vec<_>>()
+        };
+        // Before any typing, every name read outside a package, then the
+        // packages.
+        let all = labels(".options ");
+        assert_eq!(all.first().map(String::as_str), Some("ABSTOL"), "{all:?}");
+        assert!(all.contains(&"RELTOL".to_owned()) && all.contains(&"TIMEINT".to_owned()));
+        assert!(
+            !all.contains(&"DELMAX".to_owned()),
+            "DELMAX is TIMEINT's alone"
+        );
+        // In a package, its own names; a closed package reads no others.
+        let timeint = labels(".options timeint ");
+        assert!(timeint.contains(&"DELMAX".to_owned()), "{timeint:?}");
+        assert!(!timeint.contains(&"MAXTIMESTEP".to_owned()), "{timeint:?}");
+        assert!(!timeint.contains(&"GMIN".to_owned()), "{timeint:?}");
+        // An open package reads the names outside packages too.
+        assert!(labels(".options device g").contains(&"GMIN".to_owned()));
+        // A spelling is offered as typed; a value is never a name.
+        assert_eq!(labels(".options min_r"), ["MIN_RES"]);
+        assert_eq!(
+            labels(".options nonlin-tr"),
+            ["NONLIN-TRAN", "NONLIN-TRANSIENT"],
+            "a name joined with - is one name"
+        );
+        assert!(labels(".options reltol=").is_empty());
+        assert!(labels(".options reltol= 1").is_empty());
+        let rows = rows_at_end(&state, &format!("{HEAD}.options timeint rel"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].insert, "reltol=");
+        assert_eq!(rows[0].detail, "TIMEINT");
+        assert_eq!(
+            rows[0].doc,
+            "RELTOL: an option the engine reads after TIMEINT on .options."
+        );
+        assert_eq!(
+            rows_at_end(&state, &format!("{HEAD}.OPTIONS TIME"))[0].insert,
+            "TIMEINT "
+        );
+    }
+
+    #[test]
+    fn every_analysis_the_parser_reads_is_offered_at_the_head_of_a_line() {
+        let state = deck_state();
+        for analysis in rspice_core::netlist::ANALYSIS_KEYWORDS {
+            for spelling in analysis.spellings {
+                let typed = &spelling[..spelling.len() - 1];
+                let rows = rows_at_end(&state, &format!("{HEAD}{typed}"));
+                assert!(
+                    rows.iter()
+                        .any(|row| analysis.spellings.contains(&row.label.as_str())),
+                    "{spelling} is not offered for {typed}"
+                );
+                let (title, detail) = directive_signature_at(&format!("{spelling} "), 0, english())
+                    .expect("an analysis line has its signature");
+                assert!(title.starts_with(analysis.spellings[0]), "{title}");
+                assert_eq!(detail, analysis.description);
+            }
+        }
+        // A spelling not written whole offers its card by the usual one.
+        let rows = rows_at_end(&state, &format!("{HEAD}.fo"));
+        assert!(rows.iter().any(|row| row.label == ".four"));
+        assert!(!rows.iter().any(|row| row.label == ".fourier"));
     }
 }

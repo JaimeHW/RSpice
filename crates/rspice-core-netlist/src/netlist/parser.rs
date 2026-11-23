@@ -58,6 +58,7 @@ mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
 mod forward_params;
+mod option_names;
 mod root_redefinitions;
 mod root_scans;
 mod scopes;
@@ -70,14 +71,21 @@ use root_redefinitions::{
 pub(super) use stream::NumericParseAbort;
 use stream::TokenStream;
 
+use option_names::OptionId;
 use temperature::{
     ParserTemperatures, TemperatureDirective, TemperaturePassError, apply_replayed_temperature,
     is_temp_head, parse_with_consistent_temperatures, prescan_temperature_options,
     replayed_temperature,
 };
 
-pub use commands::analysis::is_analysis_directive;
+pub use commands::analysis::{
+    ANALYSIS_KEYWORDS, AnalysisKeyword, analysis_keyword, is_analysis_directive,
+};
 pub use commands::{option_package_key_is_known, parse_save_probe};
+pub use option_names::{
+    OPTION_NAMES, OPTION_PACKAGES, OPTIONS_CARD_SPELLINGS, OptionName, OptionPackage, OptionScope,
+    is_options_card, option_name, option_package, package_reads_open_names,
+};
 
 /// Apply an ordered control `option` command using the ordinary option grammar.
 /// A private candidate prevents a late invalid assignment from publishing the
@@ -5169,17 +5177,14 @@ fn scan_options_tokens_for_seed(
             option_package = Some(key);
             continue;
         }
-        if option_package.as_deref() == Some("OUTPUT")
-            && matches!(
-                key.as_str(),
-                "INITIAL_INTERVAL" | "INITIALINTERVAL" | "OUTPUTTIMEPOINTS"
-            )
-        {
+        let row = option_name(option_package.as_deref(), &key).map(|row| row.id);
+        if matches!(
+            row,
+            Some(OptionId::OutputInitialInterval | OptionId::OutputTimePoints)
+        ) {
             output_positionals = true;
         }
-        if (key != "SEED" && key != "RNDSEED")
-            || !seed_option_applies_to_package(option_package.as_deref())
-        {
+        if row != Some(OptionId::Seed) {
             follows_equals = has_equals;
             continue;
         }

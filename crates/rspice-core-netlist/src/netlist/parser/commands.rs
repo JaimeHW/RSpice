@@ -231,7 +231,7 @@ pub(super) fn parse_command(
             parse_func_statement(stream, line_num, params, root_redefinitions)?;
         }
         ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
-        ".OPTIONS" | ".OPTION" | ".OPT" | ".OPTS" => {
+        command if super::option_names::is_options_card(command) => {
             let parameter_direction = if defer_scoped_values {
                 // Scoped option bindings have not retained instance directions.
                 if let Some(capture) = parameter_direction {
@@ -1832,27 +1832,7 @@ pub(super) fn expect_option_key(
 /// of it: a header this returns `false` for is read as an ordinary global key,
 /// so every key after it on that card lands in the wrong place.
 pub fn option_package_key_is_known(key_upper: &str) -> bool {
-    matches!(
-        key_upper,
-        "TOPOLOGY"
-            | "FFT"
-            | "MEASURE"
-            | "DEVICE"
-            | "XSPICE"
-            | "TIMEINT"
-            | "NONLIN"
-            | "NONLIN-TRAN"
-            | "NONLIN-TRANSIENT"
-            | "NONLIN-HB"
-            | "NONLIN-CONTINUATION"
-            | "LOCA"
-            | "OUTPUT"
-            | "PARSER"
-            | "RESTART"
-            | "HBINT"
-            | "LINSOL-HB"
-            | "SENSITIVITY"
-    )
+    super::option_names::option_package(key_upper).is_some_and(|package| package.opens_alone)
 }
 
 fn restart_interval_schedule_starts(stream: &TokenStream, params: &ParamContext) -> bool {
@@ -2525,25 +2505,6 @@ pub(super) fn parse_global_command(
             message: ".GLOBAL requires at least one node name".to_string(),
         })
     }
-}
-
-/// Package-specific option sets that do not implement the global seed key
-/// must not select a random stream during the early scan either.
-pub(super) fn seed_option_applies_to_package(package: Option<&str>) -> bool {
-    !matches!(
-        package,
-        Some(
-            "FFT"
-                | "MEASURE"
-                | "HBINT"
-                | "LINSOL-HB"
-                | "NONLIN-HB"
-                | "NONLIN-TRAN"
-                | "NONLIN-TRANSIENT"
-                | "TIMEINT"
-                | "RESTART"
-        )
-    )
 }
 
 pub(super) fn expect_seed_option(

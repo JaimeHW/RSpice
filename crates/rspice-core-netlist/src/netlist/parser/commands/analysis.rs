@@ -99,7 +99,7 @@ pub(in crate::netlist::parser) fn validate_small_signal_states(
     Ok(requests)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum AnalysisHead {
     Op,
     Dc,
@@ -134,46 +134,225 @@ enum AnalysisHead {
 
 impl AnalysisHead {
     fn parse(command: &str) -> Option<Self> {
-        Some(match command {
-            ".OP" => Self::Op,
-            ".DC" => Self::Dc,
-            ".AC" => Self::Ac,
-            ".LIN" => Self::Lin,
-            ".QPNOISE" => Self::Qpnoise,
-            ".QPXF" => Self::Qpxf,
-            ".QPAC" => Self::Qpac,
-            ".QPSS" => Self::Qpss,
-            ".HB" => Self::Hb,
-            ".PSS" => Self::Pss,
-            ".PAC" => Self::Pac,
-            ".PXF" => Self::Pxf,
-            ".PNOISE" => Self::Pnoise,
-            ".PSTB" => Self::Pstb,
-            ".ENVELOPE" => Self::Envelope,
-            ".SP" => Self::Sp,
-            ".STB" => Self::Stb,
-            ".DISTO" => Self::Disto,
-            ".TRAN" | ".TR" => Self::Tran,
-            ".STEP" => Self::Step,
-            ".MC" => Self::MonteCarlo,
-            ".TEMP" => Self::Temp,
-            ".FOUR" | ".FOURIER" => Self::Four,
-            ".FFT" => Self::Fft,
-            ".NOISE" => Self::Noise,
-            ".SENS" => Self::Sensitivity,
-            ".PZ" => Self::PoleZero,
-            ".TF" => Self::Transfer,
-            ".DCMATCH" => Self::DcMatch,
-            _ => return None,
-        })
+        analysis_keyword(command).map(|card| card.head)
     }
+}
+
+/// An analysis card the parser reads: how its first word may be written,
+/// the fields after it, and what it runs. The parser reads the spellings to
+/// know the card; an editor reads the row to offer it.
+#[derive(Debug, Clone, Copy)]
+pub struct AnalysisKeyword {
+    head: AnalysisHead,
+    /// Every spelling of the card's first word, the usual one first.
+    pub spellings: &'static [&'static str],
+    /// The fields after the first word, as its signature.
+    pub signature: &'static str,
+    /// What the card runs, in a sentence.
+    pub description: &'static str,
+}
+
+const fn card(
+    head: AnalysisHead,
+    spellings: &'static [&'static str],
+    signature: &'static str,
+    description: &'static str,
+) -> AnalysisKeyword {
+    AnalysisKeyword {
+        head,
+        spellings,
+        signature,
+        description,
+    }
+}
+
+/// Every analysis card the parser reads, the ones most decks run first.
+pub static ANALYSIS_KEYWORDS: &[AnalysisKeyword] = &[
+    card(
+        AnalysisHead::Tran,
+        &[".tran", ".tr"],
+        "<step> <stop> [start [maxstep]] [uic]",
+        "Transient analysis.",
+    ),
+    card(
+        AnalysisHead::Ac,
+        &[".ac"],
+        "dec|oct|lin <points> <fstart> <fstop>",
+        "Small-signal frequency sweep.",
+    ),
+    card(
+        AnalysisHead::Dc,
+        &[".dc"],
+        "<source> <start> <stop> <step> [<source2> …]",
+        "DC transfer sweep.",
+    ),
+    card(AnalysisHead::Op, &[".op"], "", "DC operating point."),
+    card(
+        AnalysisHead::Noise,
+        &[".noise"],
+        "v(<out>) <source> dec|oct|lin <points> <fstart> <fstop>",
+        "Output-referred noise analysis.",
+    ),
+    card(
+        AnalysisHead::Transfer,
+        &[".tf"],
+        "v(<out>) <source>",
+        "DC transfer function and input/output resistance.",
+    ),
+    card(
+        AnalysisHead::Sensitivity,
+        &[".sens"],
+        "v(<out>) [ac …]",
+        "Sensitivity of an output.",
+    ),
+    card(
+        AnalysisHead::PoleZero,
+        &[".pz"],
+        "<in+> <in-> <out+> <out-> vol|cur pol|zer|pz",
+        "Pole-zero analysis.",
+    ),
+    card(
+        AnalysisHead::Step,
+        &[".step"],
+        "param <name> <start> <stop> <step>",
+        "Repeat the analyses over a parameter.",
+    ),
+    card(
+        AnalysisHead::Temp,
+        &[".temp"],
+        "<celsius> …",
+        "Simulation temperature; several repeat the analyses at each.",
+    ),
+    card(
+        AnalysisHead::Four,
+        &[".four", ".fourier"],
+        "<freq> <signal> …",
+        "Fourier analysis of a transient.",
+    ),
+    card(
+        AnalysisHead::Fft,
+        &[".fft"],
+        "<signal> [<key>=<value> …]",
+        "Spectrum of a transient signal.",
+    ),
+    card(
+        AnalysisHead::MonteCarlo,
+        &[".mc"],
+        "<runs> [<key> <value> …]",
+        "Monte Carlo runs of the analyses.",
+    ),
+    card(
+        AnalysisHead::Disto,
+        &[".disto"],
+        "dec|oct|lin <points> <fstart> <fstop> [f2overf1]",
+        "Small-signal distortion.",
+    ),
+    card(
+        AnalysisHead::Sp,
+        &[".sp"],
+        "dec|oct|lin <points> <fstart> <fstop> [donoise] [port<k>=(…) …]",
+        "S-parameter analysis.",
+    ),
+    card(
+        AnalysisHead::Stb,
+        &[".stb"],
+        "dec|oct|lin <points> <fstart> <fstop> probe=<source> [nyquist=yes|no]",
+        "Loop stability.",
+    ),
+    card(
+        AnalysisHead::Hb,
+        &[".hb"],
+        "<f1> [<f2> …] [harms=<n>] [<key>=<value> …]",
+        "Harmonic balance.",
+    ),
+    card(
+        AnalysisHead::Pss,
+        &[".pss"],
+        "[<gfreq> <tstab> <oscnode> <points> <harms> <sciter>] [<key>=<value> …]",
+        "Periodic steady state.",
+    ),
+    card(
+        AnalysisHead::Pac,
+        &[".pac"],
+        "dec|oct|lin <points> <fstart> <fstop> <key>=<value> …",
+        "Periodic small-signal analysis.",
+    ),
+    card(
+        AnalysisHead::Pxf,
+        &[".pxf"],
+        "dec|oct|lin <points> <fstart> <fstop> <key>=<value> …",
+        "Periodic transfer functions.",
+    ),
+    card(
+        AnalysisHead::Pnoise,
+        &[".pnoise"],
+        "dec|oct|lin <points> <fstart> <fstop> <key>=<value> …",
+        "Periodic noise.",
+    ),
+    card(
+        AnalysisHead::Pstb,
+        &[".pstb"],
+        "probe=<instance> [<key>=<value> …]",
+        "Periodic stability.",
+    ),
+    card(
+        AnalysisHead::Envelope,
+        &[".envelope"],
+        "tstop=<t> [maxstep=<t>] [freeze=(<source>,…)]",
+        "Envelope following.",
+    ),
+    card(
+        AnalysisHead::Qpss,
+        &[".qpss"],
+        "<f1> <f2> … harms=(…) [<key>=<value> …]",
+        "Quasi-periodic steady state.",
+    ),
+    card(
+        AnalysisHead::Qpac,
+        &[".qpac"],
+        "lin|dec|oct <points> <start> <stop> | list=(<offset>,…)",
+        "Quasi-periodic small-signal analysis.",
+    ),
+    card(
+        AnalysisHead::Qpxf,
+        &[".qpxf"],
+        "lin|dec|oct <points> <start> <stop> [<key>=<value> …]",
+        "Quasi-periodic transfer functions.",
+    ),
+    card(
+        AnalysisHead::Qpnoise,
+        &[".qpnoise"],
+        "lin|dec|oct <points> <start> <stop> [<key>=<value> …]",
+        "Quasi-periodic noise.",
+    ),
+    card(
+        AnalysisHead::Lin,
+        &[".lin"],
+        "[sparcalc=<0|1>] [<key>=<value> …]",
+        "Linear network parameters of the circuit's ports.",
+    ),
+    card(
+        AnalysisHead::DcMatch,
+        &[".dcmatch"],
+        "out=v(<node>)|i(<element>) [<key>=<value> …]",
+        "DC mismatch analysis.",
+    ),
+];
+
+/// The analysis whose card's first word `keyword` spells, in any case.
+pub fn analysis_keyword(keyword: &str) -> Option<&'static AnalysisKeyword> {
+    ANALYSIS_KEYWORDS.iter().find(|card| {
+        card.spellings
+            .iter()
+            .any(|spelling| spelling.eq_ignore_ascii_case(keyword))
+    })
 }
 
 /// Whether `keyword`, a dot card's first word as written (`.tran`, `.TR`),
 /// is one this parser reads as an analysis: a card that asks for a study of
 /// the circuit rather than describing it.
 pub fn is_analysis_directive(keyword: &str) -> bool {
-    AnalysisHead::parse(&keyword.to_ascii_uppercase()).is_some()
+    analysis_keyword(keyword).is_some()
 }
 
 impl ParsedAnalysisCard {
@@ -936,6 +1115,23 @@ mod tests {
             ".nodeset", ".ic", ".param", ".options", ".model", "tran", "R1",
         ] {
             assert!(!is_analysis_directive(keyword), "{keyword}");
+        }
+    }
+
+    #[test]
+    fn each_analysis_spelling_is_one_card_s_and_written_as_a_deck_writes_it() {
+        for card in ANALYSIS_KEYWORDS {
+            assert!(!card.spellings.is_empty());
+            for spelling in card.spellings {
+                assert!(spelling.starts_with('.'), "{spelling}");
+                assert_eq!(*spelling, spelling.to_ascii_lowercase());
+                let reader =
+                    analysis_keyword(&spelling.to_ascii_uppercase()).expect("its own card");
+                assert!(
+                    std::ptr::eq(reader, card),
+                    "{spelling} is read as another card"
+                );
+            }
         }
     }
 }

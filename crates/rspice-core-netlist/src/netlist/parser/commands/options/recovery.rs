@@ -7,19 +7,18 @@ use super::*;
 pub(super) fn consume_failed_field(
     stream: &mut TokenStream,
     start: usize,
-    package: Option<&str>,
-    key: &str,
+    id: OptionId,
     params: &ParamContext,
 ) {
     stream.restore_checkpoint(start);
     if !consume_scalar(stream) {
         return;
     }
-    match (package, key) {
-        (Some("TIMEINT"), "BREAKPOINTS") | (Some("OUTPUT"), "OUTPUTTIMEPOINTS") => {
+    match id {
+        OptionId::TimeintBreakpoints | OptionId::OutputTimePoints => {
             while stream.consume(&TokenKind::Comma) && consume_scalar(stream) {}
         }
-        (Some("OUTPUT"), "INITIAL_INTERVAL" | "INITIALINTERVAL") => loop {
+        OptionId::OutputInitialInterval => loop {
             skip_commas(stream);
             if !restart_interval_schedule_starts(stream, params) || !consume_scalar(stream) {
                 break;

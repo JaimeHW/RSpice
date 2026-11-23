@@ -264,12 +264,12 @@ fn scan_temperature_option_line(line: &str, line_num: usize, hints: &mut ParserT
             (TokenKind::Minus, TokenKind::Number(value)) => Some((-value, 2)),
             _ => None,
         };
-        if matches!(key.as_str(), "TEMP" | "TNOM")
-            && matches!(option_package.as_deref(), None | Some("DEVICE"))
+        let row = option_name(option_package.as_deref(), &key).map(|row| row.id);
+        if matches!(row, Some(OptionId::Temp | OptionId::Tnom))
             && let Some((value, width)) = literal
             && let Ok(value) = parse_celsius_option(&key, value, line_num)
         {
-            if key == "TEMP" {
+            if row == Some(OptionId::Temp) {
                 hints.temp = Some(value);
             } else {
                 hints.tnom = Some(value);

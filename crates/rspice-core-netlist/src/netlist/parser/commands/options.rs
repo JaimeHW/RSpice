@@ -1,5 +1,8 @@
 //! Ordered option fields, with failed-pass temperature discovery.
 use super::*;
+use crate::netlist::parser::option_names::{
+    OptionId, option_name, option_package as package_named,
+};
 
 mod recovery;
 
@@ -103,11 +106,14 @@ pub(in crate::netlist::parser) fn parse_options_command(
             continue;
         }
 
-        let is_supported_linsol_package = key_upper == "LINSOL"
-            && matches!(&stream.peek().kind, TokenKind::Ident(next)
-                if next.eq_ignore_ascii_case("TR_PARTITION")
-                    || next.eq_ignore_ascii_case("TRPARTITION"));
-        if !has_equals && (option_package_key_is_known(&key_upper) || is_supported_linsol_package) {
+        // A package that does not open alone opens before one of its own
+        // names: `LINSOL TR_PARTITION`.
+        let opens_before_next = package_named(&key_upper).is_some_and(|package| {
+            !package.opens_alone
+                && matches!(&stream.peek().kind, TokenKind::Ident(next)
+                    if package.lists(&next.to_ascii_uppercase()))
+        });
+        if !has_equals && (option_package_key_is_known(&key_upper) || opens_before_next) {
             if key_upper == "RESTART" {
                 options.restart.get_or_insert_default();
             }
@@ -119,10 +125,25 @@ pub(in crate::netlist::parser) fn parse_options_command(
             .as_deref()
             .map(|package| format!("{package}.{key_upper}"));
 
+        // The table says which names are read where; one it has no row for
+        // here is an unknown option, diagnosed and passed over.
+        let Some(row) = option_name(option_package.as_deref(), &key_upper) else {
+            let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+            ignore_unknown_option(
+                stream,
+                line_num,
+                params,
+                has_equals,
+                warning_key,
+                unknown_warned,
+                diagnostics,
+            );
+            continue;
+        };
         let value_start = stream.checkpoint();
         let result = (|| -> Result<(), ParseError> {
-            match (option_package.as_deref(), key_upper.as_str()) {
-                (None, "RSPICE_STATISTICS") => {
+            match row.id {
+                OptionId::RspiceStatistics => {
                     let known = matches!(&stream.peek().kind, TokenKind::Ident(name)
                         if name.eq_ignore_ascii_case("SAMPLE")
                             || name.eq_ignore_ascii_case("NOMINAL"));
@@ -134,7 +155,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     stream.advance();
                 }
-                (None, "RSPICE_EXP_REPEAT") => {
+                OptionId::RspiceExpRepeat => {
                     let known = matches!(&stream.peek().kind, TokenKind::Ident(name)
                         if name.eq_ignore_ascii_case("QSPICE")
                             || name.eq_ignore_ascii_case("LTSPICE"));
@@ -146,7 +167,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     stream.advance();
                 }
-                (None, "RSPICE_SOURCE") => {
+                OptionId::RspiceSource => {
                     let simulator = match &stream.peek().kind {
                         TokenKind::Ident(name) if name.eq_ignore_ascii_case("QSPICE") => {
                             crate::netlist::SourceSimulator::Qspice
@@ -167,7 +188,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     options.undeclared_subcircuit_m_is_ignored = true;
                     stream.advance();
                 }
-                (None, "RSPICE_DIALECT") => {
+                OptionId::RspiceDialect => {
                     let dialect = match &stream.peek().kind {
                         TokenKind::Ident(name) => match name.to_ascii_uppercase().as_str() {
                             "BEST_AVAILABLE" => Some(crate::config::SpiceDialect::BestAvailable),
@@ -185,7 +206,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     stream.advance();
                     options.spice_dialect = Some(dialect);
                 }
-                (package, "SEED" | "RNDSEED") if seed_option_applies_to_package(package) => {
+                OptionId::Seed => {
                     // The parse pre-scan applies the seed before any parameter
                     // evaluation; this arm validates and records it for
                     // downstream drivers (e.g. per-run Monte-Carlo streams).
@@ -202,7 +223,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     options.seed = Some(expect_seed_option(stream, line_num)?);
                 }
-                (Some("FFT"), "FFT_MODE") => {
+                OptionId::FftMode => {
                     let value = expect_value(stream, line_num, params)?;
                     let mode = parse_usize_option("FFT.FFT_MODE", value, line_num)?;
                     options.fft_mode = Some(match mode {
@@ -218,7 +239,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         }
                     });
                 }
-                (Some("FFT"), "FFT_ACCURATE") => {
+                OptionId::FftAccurate => {
                     options.fft_accurate = Some(parse_fft_boolean_option(
                         stream,
                         line_num,
@@ -227,24 +248,12 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         "FFT_ACCURATE",
                     )?);
                 }
-                (Some("FFT"), "FFTOUT") => {
+                OptionId::FftOut => {
                     options.fft_output_metrics = Some(parse_fft_boolean_option(
                         stream, line_num, params, has_equals, "FFTOUT",
                     )?);
                 }
-                (Some("FFT"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
-                (Some("MEASURE"), "MEASFAIL") => {
+                OptionId::MeasureFail => {
                     let value = expect_value(stream, line_num, params)?;
                     if !value.is_finite() {
                         return Err(ParseError::Syntax {
@@ -269,7 +278,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         }
                     });
                 }
-                (Some("MEASURE"), "DEFAULT_VAL") => {
+                OptionId::MeasureDefaultValue => {
                     let value = expect_value(stream, line_num, params)?;
                     if !value.is_finite() {
                         return Err(ParseError::Syntax {
@@ -279,7 +288,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     options.measure_default_value = Some(value);
                 }
-                (Some("MEASURE"), "USE_CONT_FILES") => {
+                OptionId::MeasureUseContFiles => {
                     let value = expect_value(stream, line_num, params)?;
                     if !value.is_finite() {
                         return Err(ParseError::Syntax {
@@ -291,7 +300,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     options.measure_use_cont_files = Some(value.trunc() != 0.0);
                 }
-                (Some("MEASURE"), "USE_LTTM") => {
+                OptionId::MeasureUseLttm => {
                     let value = expect_value(stream, line_num, params)?;
                     if !value.is_finite() {
                         return Err(ParseError::Syntax {
@@ -315,25 +324,12 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         }
                     });
                 }
-                (Some("MEASURE"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
-                (Some("NONLIN"), "CONTINUATION")
-                | (Some("NONLIN-CONTINUATION"), "CONTINUATION") => {
+                OptionId::NonlinContinuation => {
                     options.nonlinear_continuation = Some(parse_nonlinear_continuation_option(
                         stream, line_num, params,
                     )?);
                 }
-                (Some("LOCA"), "CONPARAM") => {
+                OptionId::LocaConparam => {
                     let TokenKind::Ident(name) = &stream.peek().kind else {
                         return Err(ParseError::Syntax {
                             line: line_num,
@@ -343,7 +339,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     options.loca_continuation_parameters.push(name.clone());
                     stream.advance();
                 }
-                (Some("HBINT"), key) if key.starts_with("NUMFREQ") => {
+                OptionId::HbNumFreq => {
                     // Xyce lists one count per tone, `numfreq=11,7`, or
                     // spells them `numfreq=11 numfreq2=7`.
                     loop {
@@ -365,11 +361,11 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         stream.advance();
                     }
                 }
-                (Some("HBINT"), "SAVEICDATA") => {
+                OptionId::HbSaveIcData => {
                     options.hb_save_ic_data =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("HBINT"), "TAHB") => {
+                OptionId::HbTahb => {
                     let value = expect_value(stream, line_num, params)?;
                     let mode = parse_usize_option("HBINT.TAHB", value, line_num)?;
                     options.hb_time_domain_mode = Some(match mode {
@@ -386,39 +382,15 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         }
                     });
                 }
-                (Some("HBINT"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
-                (Some("LINSOL-HB"), "PREC_TYPE") => {
+                OptionId::LinsolHbPrecType => {
                     options.linsol_hb_preconditioner =
                         Some(parse_xyce_hb_preconditioner_option(stream, line_num)?);
                 }
-                (Some("LINSOL-HB"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
-                (Some("TOPOLOGY"), "SUPERNODE") => {
+                OptionId::TopologySupernode => {
                     options.topology_supernode =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("DEVICE"), "ZERORESISTANCETOL" | "ZERO_RESISTANCE_TOL") => {
+                OptionId::DeviceZeroResistanceTol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_zero_resistance_tol = Some(parse_non_negative_real_option(
                         "DEVICE.ZERORESISTANCETOL",
@@ -426,7 +398,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("DEVICE"), "MINRES" | "MIN_RES") => {
+                OptionId::DeviceMinRes => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_min_resistance = Some(parse_non_negative_real_option(
                         "DEVICE.MINRES",
@@ -434,7 +406,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("DEVICE"), "MINCAP" | "MIN_CAP") => {
+                OptionId::DeviceMinCap => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_min_capacitance = Some(parse_non_negative_real_option(
                         "DEVICE.MINCAP",
@@ -442,29 +414,29 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("DEVICE") | None, "PNJMAXI") => {
+                OptionId::Pnjmaxi => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_pnjmaxi =
                         Some(parse_positive_real_option("PNJMAXI", value, line_num)?);
                 }
-                (Some("DEVICE"), "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING") => {
+                OptionId::DeviceB3soiGminScaling => {
                     options.b3soi_gmin_scaling =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("DEVICE"), "VOLTLIM" | "VOLT_LIM") => {
+                OptionId::DeviceVoltLim => {
                     options.device_voltage_limiting =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("DEVICE"), "DEBUGLEVEL" | "DEBUG_LEVEL") => {
+                OptionId::DeviceDebugLevel => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_debug_level =
                         Some(parse_i64_option("DEVICE.DEBUGLEVEL", value, line_num)?);
                 }
-                (Some("DEVICE"), "SEPARATELOAD" | "SEPARATE_LOAD") => {
+                OptionId::DeviceSeparateLoad => {
                     options.device_separate_load =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("TIMEINT"), "DEBUGLEVEL" | "DEBUG_LEVEL") => {
+                OptionId::TimeintDebugLevel => {
                     let value = expect_value(stream, line_num, params)?;
                     options.timeint_debug_level = Some(parse_xyce_i32_option(
                         "TIMEINT.DEBUGLEVEL",
@@ -472,21 +444,15 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("DEVICE"), "TRYTOCOMPACT" | "TRY_TO_COMPACT") => {
+                OptionId::DeviceTryToCompact => {
                     options.device_try_to_compact =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (None, "TOPOLOGY_SUPERNODE" | "TOPOLOGYSUPERNODE") => {
+                OptionId::GlobalTopologySupernode => {
                     options.topology_supernode =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (
-                    None,
-                    "DEVICE_ZERORESISTANCETOL"
-                    | "DEVICEZERORESISTANCETOL"
-                    | "ZERORESISTANCETOL"
-                    | "ZERO_RESISTANCE_TOL",
-                ) => {
+                OptionId::GlobalZeroResistanceTol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_zero_resistance_tol = Some(parse_non_negative_real_option(
                         "ZERORESISTANCETOL",
@@ -494,29 +460,29 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (None, "MINRES" | "MIN_RES" | "DEVICE_MINRES" | "DEVICEMINRES") => {
+                OptionId::GlobalMinRes => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_min_resistance =
                         Some(parse_non_negative_real_option("MINRES", value, line_num)?);
                 }
-                (None, "MINCAP" | "MIN_CAP" | "DEVICE_MINCAP" | "DEVICE_MIN_CAP") => {
+                OptionId::GlobalMinCap => {
                     let value = expect_value(stream, line_num, params)?;
                     options.device_min_capacitance =
                         Some(parse_non_negative_real_option("MINCAP", value, line_num)?);
                 }
-                (None, "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING" | "DEVICE_B3SOIGMINSCALING") => {
+                OptionId::GlobalB3soiGminScaling => {
                     options.b3soi_gmin_scaling =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (None, "TRYTOCOMPACT" | "TRY_TO_COMPACT" | "DEVICE_TRYTOCOMPACT") => {
+                OptionId::GlobalTryToCompact => {
                     options.device_try_to_compact =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("LINSOL"), "TR_PARTITION" | "TRPARTITION") => {
+                OptionId::LinsolTrPartition => {
                     options.linsol_tr_partition =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (None, "CONNECTRULES") => {
+                OptionId::ConnectRules => {
                     options.connect_rules = Some(parse_restart_string_option(
                         stream,
                         line_num,
@@ -524,7 +490,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     )?);
                 }
                 // The HDL random root seed.
-                (None, "HDLSEED" | "HDL_SEED") => {
+                OptionId::HdlSeed => {
                     let value = expect_u64_literal(stream, line_num, "HDLSEED")?;
                     options.hdl_seed =
                         Some(u32::try_from(value).map_err(|_| ParseError::Syntax {
@@ -535,16 +501,16 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         })?);
                 }
                 // Section 4.3: plusargs, after the command line's.
-                (None, "HDL_PLUSARGS") => {
+                OptionId::HdlPlusargs => {
                     let value = parse_restart_string_option(stream, line_num, "HDL_PLUSARGS")?;
                     options.hdl_plusargs =
                         Some(value.split_whitespace().map(str::to_string).collect());
                 }
-                (None, "HDL_RUNDIR") => {
+                OptionId::HdlRundir => {
                     options.hdl_rundir =
                         Some(parse_restart_string_option(stream, line_num, "HDL_RUNDIR")?);
                 }
-                (None, "HDL_DELAY_SELECT") => {
+                OptionId::HdlDelaySelect => {
                     let selection = match &stream.peek().kind {
                         TokenKind::Ident(word) => crate::config::HdlDelaySelect::parse(word),
                         _ => None,
@@ -556,26 +522,26 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     stream.advance();
                     options.hdl_delay_select = Some(selection);
                 }
-                (None, "HDL_PATH_DELAYS") => {
+                OptionId::HdlPathDelays => {
                     options.hdl_path_delays =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (None, "HDL_TIMING_CHECKS") => {
+                OptionId::HdlTimingChecks => {
                     options.hdl_timing_checks =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (None, "HDL_LIBMAP") => {
+                OptionId::HdlLibmap => {
                     options.hdl_libmap =
                         Some(parse_restart_string_option(stream, line_num, "HDL_LIBMAP")?);
                 }
-                (None, "CONNECTRULES_SOURCE") => {
+                OptionId::ConnectRulesSource => {
                     options.connect_rules_source = Some(parse_restart_string_option(
                         stream,
                         line_num,
                         "CONNECTRULES_SOURCE",
                     )?);
                 }
-                (None, "WREAL_RESOLUTION") => {
+                OptionId::WrealResolution => {
                     let value = parse_restart_string_option(stream, line_num, "WREAL_RESOLUTION")?;
                     use crate::netlist::WrealResolution;
                     options.wreal_resolution = Some(match value.to_ascii_lowercase().as_str() {
@@ -604,14 +570,13 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         }
                     });
                 }
-                (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
-                | (None, "AUTO_BRIDGE" | "AUTOBRIDGE" | "XSPICE_AUTO_BRIDGE") => {
+                OptionId::AutoBridge => {
                     let (enabled, show_generated) =
                         parse_auto_bridge_option(stream, line_num, params, has_equals)?;
                     options.auto_bridge = Some(enabled);
                     options.auto_bridge_show_generated = Some(show_generated);
                 }
-                (Some("NONLIN-TRAN"), "RELTOL") | (Some("NONLIN-TRANSIENT"), "RELTOL") => {
+                OptionId::NonlinTranReltol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.nonlin_transient_reltol = Some(parse_positive_real_option(
                         "NONLIN-TRAN.RELTOL",
@@ -619,7 +584,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("NONLIN-TRAN"), "ABSTOL") | (Some("NONLIN-TRANSIENT"), "ABSTOL") => {
+                OptionId::NonlinTranAbstol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.nonlin_transient_abstol = Some(parse_positive_real_option(
                         "NONLIN-TRAN.ABSTOL",
@@ -627,7 +592,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("NONLIN-TRAN"), "DELTAXTOL") | (Some("NONLIN-TRANSIENT"), "DELTAXTOL") => {
+                OptionId::NonlinTranDeltaxtol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.nonlin_transient_deltaxtol = Some(parse_positive_real_option(
                         "NONLIN-TRAN.DELTAXTOL",
@@ -635,7 +600,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("NONLIN-TRAN"), "RHSTOL") | (Some("NONLIN-TRANSIENT"), "RHSTOL") => {
+                OptionId::NonlinTranRhstol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.nonlin_transient_rhstol = Some(parse_positive_real_option(
                         "NONLIN-TRAN.RHSTOL",
@@ -643,7 +608,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("NONLIN-TRAN"), "MAXSTEP") | (Some("NONLIN-TRANSIENT"), "MAXSTEP") => {
+                OptionId::NonlinTranMaxstep => {
                     let value = expect_value(stream, line_num, params)?;
                     let value = parse_usize_option("NONLIN-TRAN.MAXSTEP", value, line_num)?;
                     if value == 0 {
@@ -654,7 +619,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     options.nonlin_transient_maxstep = Some(value);
                 }
-                (Some("NONLIN-HB"), "MAXSTEP") => {
+                OptionId::NonlinHbMaxstep => {
                     let value = expect_value(stream, line_num, params)?;
                     let value = parse_usize_option("NONLIN-HB.MAXSTEP", value, line_num)?;
                     if value == 0 {
@@ -665,40 +630,15 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     options.nonlin_hb_maxstep = Some(value);
                 }
-                (Some("NONLIN-HB"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
-                (Some("NONLIN-TRAN"), "ENFORCEDEVICECONV" | "ENFORCE_DEVICE_CONV")
-                | (Some("NONLIN-TRANSIENT"), "ENFORCEDEVICECONV" | "ENFORCE_DEVICE_CONV") => {
+                OptionId::NonlinTranEnforceDeviceConv => {
                     options.nonlin_transient_enforce_device_convergence =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("NONLIN-TRAN"), "NOX") | (Some("NONLIN-TRANSIENT"), "NOX") => {
+                OptionId::NonlinTranNox => {
                     options.nonlin_transient_nox =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("NONLIN-TRAN"), _) | (Some("NONLIN-TRANSIENT"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
-                (Some("TIMEINT"), "RELTOL") => {
+                OptionId::TimeintReltol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.timeint_reltol = Some(parse_positive_real_option(
                         "TIMEINT.RELTOL",
@@ -706,7 +646,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("TIMEINT"), "ABSTOL") => {
+                OptionId::TimeintAbstol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.timeint_abstol = Some(parse_positive_real_option(
                         "TIMEINT.ABSTOL",
@@ -714,7 +654,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("TIMEINT"), "DELMAX") => {
+                OptionId::TimeintDelmax => {
                     let value = expect_value(stream, line_num, params)?;
                     options.timeint_delmax = Some(parse_positive_real_option(
                         "TIMEINT.DELMAX",
@@ -722,7 +662,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("TIMEINT"), "MINTIMESTEP" | "MIN_TIMESTEP") => {
+                OptionId::TimeintMinTimestep => {
                     let value = expect_value(stream, line_num, params)?;
                     options.timeint_min_timestep = Some(parse_positive_real_option(
                         "TIMEINT.MINTIMESTEP",
@@ -730,7 +670,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (Some("TIMEINT"), "ERROPTION") => {
+                OptionId::TimeintErroption => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_error_control.is_none() {
                         options.timeint_error_control =
@@ -739,7 +679,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         warn_duplicate_packaged_option("TIMEINT.ERROPTION", line_num, diagnostics);
                     }
                 }
-                (Some("TIMEINT"), "MINTIMESTEPSBP") => {
+                OptionId::TimeintMinTimestepsBp => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_min_steps_between_breakpoints.is_none() {
                         options.timeint_min_steps_between_breakpoints =
@@ -756,7 +696,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         );
                     }
                 }
-                (Some("TIMEINT"), "NLMIN") => {
+                OptionId::TimeintNlmin => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_nlmin.is_none() {
                         options.timeint_nlmin = Some(parse_exact_xyce_nonnegative_integer_option(
@@ -768,7 +708,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         warn_duplicate_packaged_option("TIMEINT.NLMIN", line_num, diagnostics);
                     }
                 }
-                (Some("TIMEINT"), "NLMAX") => {
+                OptionId::TimeintNlmax => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_nlmax.is_none() {
                         options.timeint_nlmax = Some(parse_exact_xyce_nonnegative_integer_option(
@@ -780,7 +720,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         warn_duplicate_packaged_option("TIMEINT.NLMAX", line_num, diagnostics);
                     }
                 }
-                (Some("TIMEINT"), "TIMESTEPSREVERSAL") => {
+                OptionId::TimeintTimestepsReversal => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_timesteps_reversal.is_none() {
                         options.timeint_timesteps_reversal = Some(parse_binary_integer_option(
@@ -798,7 +738,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                 }
                 // N_NLS_Manager.C:277-290 maps any nonzero integer to the
                 // positive return code, after Param::getImmutableValue<int>.
-                (Some("TIMEINT"), "NLNEARCONV") => {
+                OptionId::TimeintNlNearConv => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_nl_near_convergence.is_none() {
                         options.timeint_nl_near_convergence = Some(
@@ -808,7 +748,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         warn_duplicate_packaged_option("TIMEINT.NLNEARCONV", line_num, diagnostics);
                     }
                 }
-                (Some("TIMEINT"), "NLSMALLUPDATE") => {
+                OptionId::TimeintNlSmallUpdate => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_nl_small_update.is_none() {
                         options.timeint_nl_small_update = Some(
@@ -824,7 +764,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                 }
                 // Which derivative columns a `.SENS` table prints; Xyce reads
                 // each as a boolean (N_IO_OutputMgr.C:2845-2870).
-                (Some("SENSITIVITY"), "DIRECT" | "ADJOINT" | "OUTPUTSCALED" | "OUTPUTUNSCALED") => {
+                OptionId::SensitivityColumn => {
                     let name = format!("SENSITIVITY.{key_upper}");
                     let value = expect_value(stream, line_num, params)?;
                     let enabled = parse_xyce_i32_option(&name, value, line_num)? != 0;
@@ -840,7 +780,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         warn_duplicate_packaged_option(&name, line_num, diagnostics);
                     }
                 }
-                (Some("TIMEINT"), "MINORD") => {
+                OptionId::TimeintMinord => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_min_order.is_none() {
                         options.timeint_min_order = Some(parse_xyce_transient_order_option(
@@ -853,7 +793,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         warn_duplicate_packaged_option("TIMEINT.MINORD", line_num, diagnostics);
                     }
                 }
-                (Some("TIMEINT"), "MAXORD") => {
+                OptionId::TimeintMaxord => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_max_order.is_none() {
                         options.timeint_max_order = Some(parse_xyce_transient_order_option(
@@ -866,7 +806,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         warn_duplicate_packaged_option("TIMEINT.MAXORD", line_num, diagnostics);
                     }
                 }
-                (Some("TIMEINT"), "BREAKPOINTS") => {
+                OptionId::TimeintBreakpoints => {
                     let values = parse_time_point_vector_option(
                         stream,
                         line_num,
@@ -881,41 +821,29 @@ pub(in crate::netlist::parser) fn parse_options_command(
                 // unscoped also means a misplaced `TIMEINT MAXTIMESTEP` is
                 // reported by the package's unknown-key arm instead of silently
                 // taking effect.
-                (None, "MAXTIMESTEP" | "MAX_TIMESTEP") => {
+                OptionId::MaxTimestep => {
                     let value = expect_value(stream, line_num, params)?;
                     options.max_timestep =
                         Some(parse_positive_real_option("MAXTIMESTEP", value, line_num)?);
                 }
-                (Some("TIMEINT"), "USEDEVICEMAX" | "USE_DEVICE_MAX") => {
+                OptionId::TimeintUseDeviceMax => {
                     options.timeint_use_device_max_timestep =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("TIMEINT"), "NEWLTE") => {
+                OptionId::TimeintNewLte => {
                     let value = expect_value(stream, line_num, params)?;
                     options.transient_lte_reference =
                         Some(parse_transient_lte_reference_option(value, line_num)?);
                 }
-                (Some("TIMEINT"), "NEWBPSTEPPING") => {
+                OptionId::TimeintNewBpStepping => {
                     let value = expect_value(stream, line_num, params)?;
                     options.transient_new_bp_stepping =
                         Some(parse_new_breakpoint_stepping_option(value, line_num)?);
                 }
-                (Some("TIMEINT"), "METHOD") => {
+                OptionId::TimeintMethod => {
                     options.method = Some(parse_method_option(stream, line_num, params)?);
                 }
-                (Some("TIMEINT"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
-                (Some("RESTART"), "PACK") => {
+                OptionId::RestartPack => {
                     let value = parse_restart_boolean_option(
                         stream,
                         line_num,
@@ -925,7 +853,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     )?;
                     options.restart.get_or_insert_default().pack = Some(value);
                 }
-                (Some("RESTART"), "PRINT_TIMEINT_OPTIONS" | "PRINTTIMEINTOPTIONS") => {
+                OptionId::RestartPrintTimeintOptions => {
                     let value = parse_restart_boolean_option(
                         stream,
                         line_num,
@@ -938,47 +866,35 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         .get_or_insert_default()
                         .print_timeint_options = Some(value);
                 }
-                (Some("RESTART"), "JOB") => {
+                OptionId::RestartJob => {
                     let value = parse_restart_string_option(stream, line_num, "RESTART.JOB")?;
                     options.restart.get_or_insert_default().job = Some(value);
                 }
-                (Some("RESTART"), "START_TIME" | "STARTTIME") => {
+                OptionId::RestartStartTime => {
                     let value = expect_value(stream, line_num, params)?;
                     let value =
                         parse_non_negative_real_option("RESTART.START_TIME", value, line_num)?;
                     options.restart.get_or_insert_default().start_time = Some(value);
                 }
-                (Some("RESTART"), "FILE") => {
+                OptionId::RestartFile => {
                     let value = parse_restart_string_option(stream, line_num, "RESTART.FILE")?;
                     options.restart.get_or_insert_default().file = Some(value);
                 }
-                (Some("RESTART"), "INITIAL_INTERVAL" | "INITIALINTERVAL") => {
+                OptionId::RestartInitialInterval => {
                     let value = expect_value(stream, line_num, params)?;
                     let value =
                         parse_positive_real_option("RESTART.INITIAL_INTERVAL", value, line_num)?;
                     options.restart.get_or_insert_default().initial_interval = Some(value);
                 }
-                (Some("RESTART"), _) => {
-                    let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
-                    ignore_unknown_option(
-                        stream,
-                        line_num,
-                        params,
-                        has_equals,
-                        warning_key,
-                        unknown_warned,
-                        diagnostics,
-                    );
-                }
                 // Spelled unscoped, as ngspice spells `bypass`. A `BYPASS` package
                 // would have to enumerate every key it accepts before an
                 // unenumerated one leaked back out to the global namespace, and
                 // three keys do not need a namespace to stay apart.
-                (_, "BYPASS") => {
+                OptionId::Bypass => {
                     options.bypass =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "BYPASSRELTOL" | "BYPASS_RELTOL") => {
+                OptionId::BypassReltol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.bypass_reltol = Some(parse_non_negative_real_option(
                         "BYPASSRELTOL",
@@ -986,7 +902,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (_, "BYPASSABSTOL" | "BYPASS_ABSTOL") => {
+                OptionId::BypassAbstol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.bypass_abstol = Some(parse_non_negative_real_option(
                         "BYPASSABSTOL",
@@ -994,23 +910,23 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (_, "RELTOL") => {
+                OptionId::Reltol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.reltol = Some(parse_positive_real_option("RELTOL", value, line_num)?);
                 }
-                (_, "ABSTOL") => {
+                OptionId::Abstol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.abstol = Some(parse_positive_real_option("ABSTOL", value, line_num)?);
                 }
-                (_, "VNTOL") => {
+                OptionId::Vntol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.vntol = Some(parse_positive_real_option("VNTOL", value, line_num)?);
                 }
-                (_, "IABSTOL") => {
+                OptionId::Iabstol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.iabstol = Some(parse_positive_real_option("IABSTOL", value, line_num)?);
                 }
-                (_, "RESIDUAL_RELTOL" | "RESRELTOL") => {
+                OptionId::ResidualReltol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.residual_reltol = Some(parse_positive_real_option(
                         "RESIDUAL_RELTOL",
@@ -1018,11 +934,11 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                     )?);
                 }
-                (_, "GMIN") => {
+                OptionId::Gmin => {
                     let value = expect_value(stream, line_num, params)?;
                     options.gmin = Some(parse_non_negative_real_option("GMIN", value, line_num)?);
                 }
-                (_, "RSHUNT") => {
+                OptionId::Rshunt => {
                     let value = expect_value_with_direction(
                         stream,
                         line_num,
@@ -1033,12 +949,12 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     )?;
                     options.rshunt = Some(parse_positive_real_option("RSHUNT", value, line_num)?);
                 }
-                (_, "GSHUNT") => {
+                OptionId::Gshunt => {
                     let value = expect_value(stream, line_num, params)?;
                     options.gshunt =
                         Some(parse_non_negative_real_option("GSHUNT", value, line_num)?);
                 }
-                (_, "CSHUNT") => {
+                OptionId::Cshunt => {
                     let value = expect_value_with_direction(
                         stream,
                         line_num,
@@ -1049,22 +965,22 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     )?;
                     options.cshunt = Some(parse_positive_real_option("CSHUNT", value, line_num)?);
                 }
-                (None, "XMU")
+                OptionId::Xmu
                     if params.expression_dialect() != crate::config::ExpressionDialect::Xyce =>
                 {
                     let value = expect_value(stream, line_num, params)?;
                     options.xmu = Some(parse_xmu_option(value, line_num)?);
                 }
-                (_, "TRTOL") => {
+                OptionId::Trtol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.trtol = Some(parse_positive_real_option("TRTOL", value, line_num)?);
                 }
-                (_, "RAMPTIME") => {
+                OptionId::Ramptime => {
                     let value = expect_value(stream, line_num, params)?;
                     options.ramptime =
                         Some(parse_non_negative_real_option("RAMPTIME", value, line_num)?);
                 }
-                (_, "MAXEVTITER") => {
+                OptionId::MaxEvtIter => {
                     let value = expect_value(stream, line_num, params)?;
                     let passes = parse_usize_option("MAXEVTITER", value, line_num)?;
                     // ngspice's EVTiter runs `passes < max_event_passes`
@@ -1084,15 +1000,12 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             })?,
                     );
                 }
-                (Some("XSPICE"), "DIGITAL_DELAY_TYPE" | "DIGITALDELAYTYPE" | "DIGITAL_DELAY")
-                | (None, "DIGITAL_DELAY_TYPE" | "DIGITALDELAYTYPE" | "XSPICE_DIGITAL_DELAY_TYPE") =>
-                {
+                OptionId::DigitalDelayType => {
                     let value = expect_value(stream, line_num, params)?;
                     options.digital_delay_type =
                         Some(parse_digital_delay_type_option(value, line_num)?);
                 }
-                (Some("XSPICE"), "ESAVE" | "EVENT_SAVE" | "EVENTSAVE")
-                | (None, "XSPICE_ESAVE" | "XSPICE_EVENT_SAVE" | "XSPICE_EVENTSAVE") => {
+                OptionId::EventSave => {
                     options.xspice_event_trace_save = Some(
                         if parse_boolean_option(stream, line_num, params, has_equals)? {
                             crate::netlist::EventSaveSelection::All
@@ -1101,24 +1014,24 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         },
                     );
                 }
-                (_, "CHGTOL") => {
+                OptionId::Chgtol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.chgtol = Some(parse_positive_real_option("CHGTOL", value, line_num)?);
                 }
-                (None, "EVENTFLUXTOL") => {
+                OptionId::EventFluxTol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.eventfluxtol =
                         Some(parse_positive_real_option("EVENTFLUXTOL", value, line_num)?);
                 }
-                (_, "PIVTOL") => {
+                OptionId::Pivtol => {
                     let value = expect_value(stream, line_num, params)?;
                     options.pivtol = Some(parse_positive_real_option("PIVTOL", value, line_num)?);
                 }
-                (_, "PIVREL") => {
+                OptionId::Pivrel => {
                     let value = expect_value(stream, line_num, params)?;
                     options.pivrel = Some(parse_positive_real_option("PIVREL", value, line_num)?);
                 }
-                (None | Some("DEVICE"), "TEMP") => {
+                OptionId::Temp => {
                     if let Some(sink) = temperature_options.as_mut() {
                         sink.parse(
                             temperature::TemperatureOption::Temp,
@@ -1132,7 +1045,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         options.temp = Some(parse_celsius_option("TEMP", value, line_num)?);
                     }
                 }
-                (None | Some("DEVICE"), "TNOM") => {
+                OptionId::Tnom => {
                     if let Some(sink) = temperature_options.as_mut() {
                         sink.parse(
                             temperature::TemperatureOption::Tnom,
@@ -1146,59 +1059,59 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         options.tnom = Some(parse_celsius_option("TNOM", value, line_num)?);
                     }
                 }
-                (_, "SCALE") => {
+                OptionId::Scale => {
                     // Element geometry scale factor (`.options scale`, Xyce's
                     // `.options parser scale`). The circuit builder multiplies
                     // the drawn instance geometry by it once flattened.
                     let value = expect_value(stream, line_num, params)?;
                     options.scale = Some(parse_positive_real_option("SCALE", value, line_num)?);
                 }
-                (_, "ITL1") => {
+                OptionId::Itl1 => {
                     let value = expect_value(stream, line_num, params)?;
                     options.itl1 = Some(parse_usize_option("ITL1", value, line_num)?);
                 }
-                (_, "ITL2") => {
+                OptionId::Itl2 => {
                     let value = expect_value(stream, line_num, params)?;
                     options.itl2 = Some(parse_usize_option("ITL2", value, line_num)?);
                 }
-                (_, "ITL4") => {
+                OptionId::Itl4 => {
                     let value = expect_value(stream, line_num, params)?;
                     options.itl4 = Some(parse_usize_option("ITL4", value, line_num)?);
                 }
-                (_, "ITL6") => {
+                OptionId::Itl6 => {
                     let value = expect_value(stream, line_num, params)?;
                     options.itl6 = Some(parse_usize_option("ITL6", value, line_num)?);
                 }
-                (_, "METHOD") => {
+                OptionId::Method => {
                     options.method = Some(parse_method_option(stream, line_num, params)?);
                 }
                 // The continuation ladder's rungs are switched one at a time
                 // rather than through `NONLIN CONTINUATION`, which selects a
                 // single algorithm to run in place of the ladder.
-                (_, "GMINSTEPPING" | "GMIN_STEPPING") => {
+                OptionId::GminStepping => {
                     options.gmin_stepping =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "SOURCESTEPPING" | "SOURCE_STEPPING" | "SRCSTEPPING") => {
+                OptionId::SourceStepping => {
                     options.source_stepping =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "PSEUDOTRANSIENT" | "PSEUDO_TRANSIENT") => {
+                OptionId::PseudoTransient => {
                     options.pseudo_transient =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "ARCLENGTH" | "ARC_LENGTH") => {
+                OptionId::ArcLength => {
                     options.arc_length =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "DAMPING") => {
+                OptionId::Damping => {
                     options.damping_strategy =
                         Some(parse_damping_option(stream, line_num, params)?);
                 }
-                (_, "SOLVER") => {
+                OptionId::Solver => {
                     options.matrix_solver = Some(parse_matrix_solver_option(stream, line_num)?);
                 }
-                (Some("OUTPUT"), "INITIAL_INTERVAL" | "INITIALINTERVAL") => {
+                OptionId::OutputInitialInterval => {
                     if !options.output_time_points.is_empty() {
                         return Err(ParseError::Syntax {
                             line: line_num,
@@ -1215,7 +1128,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             intervals,
                         });
                 }
-                (Some("OUTPUT"), "OUTPUTTIMEPOINTS") => {
+                OptionId::OutputTimePoints => {
                     if options.output_interval_schedule.is_some() {
                         return Err(ParseError::Syntax {
                             line: line_num,
@@ -1230,34 +1143,34 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     )?;
                     append_canonical_time_points(&mut options.output_time_points, values);
                 }
-                (Some("OUTPUT"), "SNAPSHOTS") => {
+                OptionId::OutputSnapshots => {
                     options.output_snapshots =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("OUTPUT"), "PRINTHEADER") => {
+                OptionId::OutputPrintHeader => {
                     options.output_print_header =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("OUTPUT"), "PRINTFOOTER") => {
+                OptionId::OutputPrintFooter => {
                     options.output_print_footer =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (Some("OUTPUT"), "PHASE_OUTPUT_RADIANS") => {
+                OptionId::OutputPhaseRadians => {
                     options.output_phase_radians =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "INTERP") => {
+                OptionId::Interp => {
                     options.interp =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
-                (_, "NOACCT") => {
+                OptionId::Noacct => {
                     // Ngspice compatibility flag: NOACCT suppresses accounting
                     // output and does not change the solved circuit state.
                     if has_equals {
                         let _ = expect_value(stream, line_num, params)?;
                     }
                 }
-                (_, "ALLOW_SIMPLIFIED_MOS" | "ALLOWSIMPLIFIEDMOS") => {
+                OptionId::AllowSimplifiedMos => {
                     // Bare flag enables; an explicit value of 0 disables.
                     let enabled = if has_equals {
                         expect_value(stream, line_num, params)? != 0.0
@@ -1266,7 +1179,8 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     };
                     options.allow_simplified_mos = Some(enabled);
                 }
-                _ => {
+                // Under Xyce expressions XMU is no option: Xyce has none.
+                OptionId::Xmu => {
                     let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
                     ignore_unknown_option(
                         stream,
@@ -1292,13 +1206,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
             // This pass is already invalid. Consume the failed field through
             // its own grammar boundary so later assignments can select TEMP
             // or TNOM. A fresh pass must validate every field before success.
-            recovery::consume_failed_field(
-                stream,
-                value_start,
-                option_package.as_deref(),
-                &key_upper,
-                params,
-            );
+            recovery::consume_failed_field(stream, value_start, row.id, params);
         }
     }
 
