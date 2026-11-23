@@ -341,7 +341,18 @@ fn idle_workspace_work(
         known
     });
     assert!(known, "the selected trace's statistics are computed");
-    workspace_frame(&ctx, state, &mut controller, document_id);
+    // A plot too large to draw on a frame is drawn off it, reading its
+    // curves there; that is the first frame's work, so idle frames are
+    // counted once its picture has been taken.
+    let drawn = (0..3_000).any(|_| {
+        workspace_frame(&ctx, state, &mut controller, document_id);
+        let drawing = rspice_ui_kit::plot::drawing_off_frame(&ctx);
+        if drawing {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        !drawing
+    });
+    assert!(drawn, "the plots' pictures are drawn");
     let (work, columns, reads) = (WorkCounts::reset(), ColumnWork::read(), store_reads());
     for _ in 0..super::IDLE_FRAMES {
         workspace_frame(&ctx, state, &mut controller, document_id);

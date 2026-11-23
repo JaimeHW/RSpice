@@ -382,6 +382,15 @@ fn store(ctx: &egui::Context) -> Store {
     })
 }
 
+/// Whether a plot drawn in `ctx` has a picture being drawn off the frame
+/// that no frame has yet taken.
+#[cfg(any(test, feature = "test-support"))]
+pub fn drawing_off_frame(ctx: &egui::Context) -> bool {
+    store(ctx)
+        .lock()
+        .is_ok_and(|plots| plots.values().any(|pictures| pictures.pending.is_some()))
+}
+
 /// Draw `spec`'s curves into `painter`, from the picture the plot keeps when
 /// nothing they show has changed. Says whether the plot shows an older
 /// picture while a new one is drawn.

@@ -42,6 +42,8 @@ pub use decimate::DecimationWork;
 pub use decimate::TraceView;
 pub use decimate::{BandMember, DecimationCache, SampleInterpolation, display_columns, sample_at};
 pub use format::{fmt_si_signed, fmt_si_significant, si_tick_label, tick_with_unit};
+#[cfg(any(test, feature = "test-support"))]
+pub use picture::drawing_off_frame;
 pub use render::{
     InteractionMode, PlotResponse, ReadoutRow, ViewChange, Y_LABEL_GAP, equal_scale_ranges,
     floored_span, hairline, plot_rect, set_interaction_mode, show, square_outer_rect,
