@@ -566,7 +566,7 @@ fn convert_stored_transient(
     let device_traces = stored.shell.device_op_traces.len();
     // The names, counts and identities the in-memory check reads, over the first and last rows;
     // the pass below checks every sample.
-    stored.read_span()?;
+    stored.read_span(abort)?;
     ensure_not_aborted(abort)?;
     validate_transient_result_shape(&stored.shell)?;
     ensure_not_aborted(abort)?;
@@ -625,7 +625,7 @@ fn convert_stored_transient(
     let streamed_assertions = if asserted {
         let streamed = stored.assert(netlist, abort, translate)?;
         stored.drop_rows(device_traces);
-        stored.read_span()?;
+        stored.read_span(abort)?;
         streamed
     } else {
         Some(Vec::new())
@@ -633,7 +633,7 @@ fn convert_stored_transient(
     let streamed_measurements = if measured {
         let streamed = stored.measure(netlist, &window, abort, translate)?;
         stored.drop_rows(device_traces);
-        stored.read_span()?;
+        stored.read_span(abort)?;
         streamed
     } else {
         Some(Vec::new())
@@ -673,7 +673,7 @@ fn convert_stored_transient(
                 }
             };
             stored.drop_rows(device_traces);
-            stored.read_span()?;
+            stored.read_span(abort)?;
             (measurements, assertions)
         }
     };

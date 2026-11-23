@@ -21,7 +21,7 @@ use rspice_core::result_sink::SinkStop;
 use rspice_results::store_reader::{SegmentBytes, StoreReader};
 use rspice_results::stored_transient::{
     InstanceParameterAdoption, SlotTarget, clear_rows, fill_event_traces, fill_impulses, fill_rows,
-    fill_span, instance_parameters, slot_targets,
+    fill_span_unless_stopped, instance_parameters, slot_targets,
 };
 use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
 use rspice_results_store::{
@@ -410,7 +410,7 @@ impl StoredTransient {
 
     /// Read the first and last rows into the shell, each instance parameter included: what the
     /// shape checks and the event history read of the run.
-    pub(super) fn read_span(&mut self) -> Result<(), SimulationError> {
+    pub(super) fn read_span(&mut self, abort: &dyn AbortSignal) -> Result<(), SimulationError> {
         let Self {
             shell,
             run,
@@ -418,8 +418,10 @@ impl StoredTransient {
             parameters,
             receipt,
         } = self;
-        run.with_reader(|reader| {
-            fill_span(reader, targets, shell)?;
+        let read = run.with_reader(|reader| {
+            if !fill_span_unless_stopped(reader, targets, shell, &|| abort.is_aborted())? {
+                return Ok(false);
+            }
             let rows = reader.rows();
             let ends: &[u64] = if rows > 1 { &[0, rows - 1] } else { &[0] };
             let mut adoption = InstanceParameterAdoption::of(shell);
@@ -434,9 +436,13 @@ impl StoredTransient {
                 let (device, parameter) = &parameters[index];
                 adoption.adopt(shell, device, parameter, values);
             }
-            Ok(())
-        })
-        .map_err(|error| store_failure(&receipt.path, error))
+            Ok(true)
+        });
+        match read {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(SimulationError::Aborted),
+            Err(error) => Err(store_failure(&receipt.path, error)),
+        }
     }
 
     fn rows(&self) -> Result<usize, SimulationError> {

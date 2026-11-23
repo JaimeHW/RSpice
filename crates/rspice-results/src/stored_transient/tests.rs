@@ -345,3 +345,51 @@ fn an_instance_parameter_is_adopted_once_and_never_over_what_the_device_reported
         ]
     );
 }
+
+/// Reading a run's first and last rows asks before each column whether the reader stopped, and
+/// stops there: what lets Stop answer while a run of a million devices is read back.
+#[test]
+fn the_span_read_stops_at_the_column_where_the_reader_stopped() {
+    let deck = "rc
+v1 in 0 pulse(0 1 10n 1n 1n 200n 400n)
+r1 in out 1k
+c1 out 0 100p
+.end
+";
+    let netlist = Netlist::parse(deck).unwrap();
+    let mut sink = StoreSink::new(MemoryIo::new());
+    Engine::default()
+        .run_tran_into_sink_with_startup_mode_and_abort(
+            &netlist,
+            1e-6,
+            5e-9,
+            TransientStartupMode::OperatingPoint,
+            &NoAbort,
+            &mut sink,
+        )
+        .unwrap();
+    let io = MemoryIo::from_bytes(sink.into_io().unwrap().into_bytes());
+    let mut run = StoredTransientRun::open(io).unwrap();
+    let columns = run.targets.len();
+    assert!(columns > 2, "the deck saves several columns");
+    // Stopped as the second column is reached: one asked about and read, then no more.
+    let asked = std::cell::Cell::new(0);
+    let stopped = || {
+        asked.set(asked.get() + 1);
+        asked.get() > 1
+    };
+    let read =
+        fill_span_unless_stopped(&mut run.reader, &run.targets, &mut run.shell, &stopped).unwrap();
+    assert!(!read, "a stopped read says it stopped");
+    assert_eq!(asked.get(), 2);
+    // Never stopped: every column is asked about once and read.
+    asked.set(0);
+    let never = || {
+        asked.set(asked.get() + 1);
+        false
+    };
+    let read =
+        fill_span_unless_stopped(&mut run.reader, &run.targets, &mut run.shell, &never).unwrap();
+    assert!(read);
+    assert_eq!(asked.get(), columns);
+}

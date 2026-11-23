@@ -739,6 +739,18 @@ pub fn fill_span<I: SegmentIo>(
     targets: &[SlotTarget],
     result: &mut TransientResult,
 ) -> Result<(), StoreError> {
+    fill_span_unless_stopped(reader, targets, result, &|| false).map(|_| ())
+}
+
+/// [`fill_span`], asking `stopped` before each column, since a run of a million devices takes
+/// seconds to read even this much: false, with the columns read so far, once it says the reader
+/// stopped.
+pub fn fill_span_unless_stopped<I: SegmentIo>(
+    reader: &mut SegmentReader<I>,
+    targets: &[SlotTarget],
+    result: &mut TransientResult,
+    stopped: &dyn Fn() -> bool,
+) -> Result<bool, StoreError> {
     let rows = reader.rows();
     let ends: &[u64] = if rows > 1 { &[0, rows - 1] } else { &[0] };
     result.time.clear();
@@ -746,6 +758,9 @@ pub fn fill_span<I: SegmentIo>(
         result.time.extend(reader.read_x(row, 1)?);
     }
     for (slot, &target) in targets.iter().enumerate() {
+        if stopped() {
+            return Ok(false);
+        }
         let Some(column) = target.column(result) else {
             continue;
         };
@@ -754,7 +769,7 @@ pub fn fill_span<I: SegmentIo>(
             column.extend(reader.read_slot(slot, row, 1)?);
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Empty `result`'s time and saved columns again, giving their memory back.
