@@ -225,6 +225,11 @@ pub fn answer(cx: &mut Cx<'_, SourceFeature>, request: SourceRequest) -> Option<
         SourceRequest::OpenDroppedDeck(dropped) => {
             return Some(CodeHandOff::OpenDroppedDeck(dropped));
         }
+        SourceRequest::RunAnyway => {
+            if crate::workbench::code::deck_run::run_anyway(cx) {
+                return Some(CodeHandOff::RunAnyway);
+            }
+        }
     }
     None
 }

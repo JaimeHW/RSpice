@@ -24,6 +24,15 @@
 //! Either leaves Problems current: it lists what the deck's text holds once
 //! the check or the preparation has read it, whichever workspace is in front
 //! afterwards.
+//!
+//! A run that needs more memory than the machine has free, and fits the
+//! memory it has, waits once prepared where a run being prepared waits:
+//! nothing dispatches, the status line and the band above the deck say what
+//! it needs and what is free, and the band offers Run anyway and Stop. Run
+//! anyway keeps the project's unsaved work as an autosave first, then starts
+//! the run prepared; Stop drops it as it drops a run being prepared. A run
+//! that needs more than the machine has is refused before it runs, as any
+//! deck its preparation stops is.
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::simulation::controller::DeckRunVerdict;
@@ -39,6 +48,7 @@ use rspice_app_runs::simulation::ManualDeckCopy;
 use rspice_app_runs::workbench::slots::runs::PreparingDeck;
 use rspice_app_runs::workbench::waiting;
 use rspice_simulation::execution::PreparedRunMetadata;
+use rspice_simulation::execution::run_memory::MemoryWarning;
 use rspice_simulation::preparation::PreparationError;
 
 /// The deck Run runs, checked: its name, its text and what the check
@@ -259,7 +269,11 @@ pub fn request_deck_run(cx: &mut Cx<'_, SourceFeature>) {
             .start_deck_run_preparation(&host, deck.clone());
     }
     let ManualDeckCopy { name, text, .. } = deck;
-    cx.runs.preparing_deck = Some(PreparingDeck { name, text });
+    cx.runs.preparing_deck = Some(PreparingDeck {
+        name,
+        text,
+        memory: None,
+    });
     cx.wb.run_press_route = Some(cx.wb.current_route());
     poll_deck_run(cx);
 }
@@ -267,9 +281,15 @@ pub fn request_deck_run(cx: &mut Cx<'_, SourceFeature>) {
 /// Take the verdict on the deck whose run is being prepared, once there is
 /// one: the run starts, or the deck comes to the front and the notice says
 /// why it did not run, as when the press prepared it. Called once per frame;
-/// does nothing while nothing is prepared or the preparation goes on.
+/// does nothing while nothing is prepared or the preparation goes on, and
+/// while a run prepared waits for the reader to run it anyway.
 pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
-    if cx.runs.preparing_deck.is_none() {
+    if cx
+        .runs
+        .preparing_deck
+        .as_ref()
+        .is_none_or(|deck| deck.memory.is_some())
+    {
         return;
     }
     let controller = &mut *cx.handles.run_controller;
@@ -283,7 +303,7 @@ pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
     } else {
         None
     };
-    let Some(PreparingDeck { name, text }) = cx.runs.preparing_deck.take() else {
+    let Some(PreparingDeck { name, text, .. }) = cx.runs.preparing_deck.take() else {
         return;
     };
     match verdict {
@@ -299,11 +319,65 @@ pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
             );
             cx.model.simulation.execution.request_manual_deck_run();
         }
+        Some(DeckRunVerdict::NeedsMemory { metadata, warning }) => {
+            record_include_resolutions(
+                &mut cx.state.source_editing.include_resolutions,
+                &metadata.sealed_source_dependencies,
+            );
+            hold_for_memory(cx, name, text, warning);
+        }
         Some(DeckRunVerdict::Refused(error)) => {
             refuse(cx, &name, Verdict::DidNotRun, &text, &error);
         }
     }
     bring_findings_current(cx);
+}
+
+/// Hold the run of the deck `name`, prepared from `text` and retained, which
+/// needs more memory than the machine has free (`warning`): it waits where a
+/// run being prepared waits, and nothing of it dispatches until the reader
+/// answers. The Netlist workspace comes to the front, where the band above
+/// the deck asks; the log keeps what it said.
+fn hold_for_memory(
+    cx: &mut Cx<'_, SourceFeature>,
+    name: String,
+    text: crate::state::RevisedText,
+    warning: MemoryWarning,
+) {
+    cx.model.record(
+        LogSeverity::Warning,
+        LogSource::Run,
+        format!("{name}: {}", warning.message()),
+    );
+    cx.runs.preparing_deck = Some(PreparingDeck {
+        name,
+        text,
+        memory: Some(warning),
+    });
+    if cx.wb.workspace != Workspace::Netlist {
+        cx.execute(crate::workbench::framework::command_registry::ids::NETLIST_WORKSPACE);
+    }
+}
+
+/// Run anyway: start the run held for memory, the run its press prepared,
+/// as Run starts a run. The shell keeps the project's unsaved work as an
+/// autosave as this returns, before the run dispatches. Whether a run was
+/// held.
+pub fn run_anyway(cx: &mut Cx<'_, SourceFeature>) -> bool {
+    let Some(PreparingDeck { name, .. }) = cx
+        .runs
+        .preparing_deck
+        .take_if(|deck| deck.memory.is_some())
+    else {
+        return false;
+    };
+    cx.model.record(
+        LogSeverity::Info,
+        LogSource::Run,
+        format!("Running {name} though it needs more memory than is free."),
+    );
+    cx.model.simulation.execution.request_manual_deck_run();
+    true
 }
 
 /// Check and netlist while a deck is what Run runs: check the deck as Run
@@ -378,9 +452,10 @@ fn refuse(
         ),
     };
     // A deck past one of the engine's limits is said to be, in the words
-    // its finding says it in.
+    // its finding says it in; past one sized to the machine, in the words
+    // the preparation said it in.
     let refusal = error
-        .resource_limit()
+        .catalogued_limit()
         .map(|refusal| messages.resource_refusal(refusal));
     let notice = match failure_line(error, text) {
         Some(line) => messages.format(

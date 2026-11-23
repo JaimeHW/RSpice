@@ -31,6 +31,7 @@ use crate::simulation::ManualDeckCopy;
 use crate::simulation::execution::{
     PreparationError, PreparationStage, PreparedRunMetadata, PreparedRunSnapshot,
 };
+use rspice_simulation::execution::run_memory::MemoryWarning;
 
 /// What a deck's preparation came to, as the worker sends it: one case for
 /// each way it ends, each of which the apply turns into a
@@ -38,6 +39,13 @@ use crate::simulation::execution::{
 enum WorkerOutcome {
     /// The run, prepared from the deck as the press took it.
     Prepared(Box<PreparedRunSnapshot>),
+    /// The run, prepared, needs more memory than the machine has free and
+    /// fits what it has installed (`warning`): it waits for the reader to
+    /// run it anyway.
+    NeedsMemory {
+        snapshot: Box<PreparedRunSnapshot>,
+        warning: MemoryWarning,
+    },
     /// Preparing the run refused the deck.
     Refused(PreparationError),
     /// Preparing it reached a Verilog-A source another thread is compiling,
@@ -48,7 +56,13 @@ enum WorkerOutcome {
 impl WorkerOutcome {
     fn of(prepared: Result<PreparedRunSnapshot, PreparationError>) -> Self {
         match prepared {
-            Ok(snapshot) => Self::Prepared(Box::new(snapshot)),
+            Ok(snapshot) => match snapshot.memory_warning() {
+                Some(warning) => Self::NeedsMemory {
+                    snapshot: Box::new(snapshot),
+                    warning,
+                },
+                None => Self::Prepared(Box::new(snapshot)),
+            },
             Err(error) => Self::Refused(error),
         }
     }
@@ -89,6 +103,13 @@ pub enum DeckRunVerdict {
     /// The run was prepared from the deck as the press took it, and is
     /// retained for dispatch.
     Prepared(Box<PreparedRunMetadata>),
+    /// The run was prepared and is retained, and needs more memory than the
+    /// machine has free (`warning`): it dispatches once the reader runs it
+    /// anyway.
+    NeedsMemory {
+        metadata: Box<PreparedRunMetadata>,
+        warning: MemoryWarning,
+    },
     /// Preparing the run refused the deck.
     Refused(PreparationError),
     /// Preparing it reached a Verilog-A source another thread is compiling.
@@ -232,6 +253,13 @@ impl SimulationController {
                 let metadata = Box::new(snapshot.metadata());
                 match self.retain_prepared_run(*snapshot, RetainedRunInputs::Pressed(deck)) {
                     Ok(()) => DeckRunVerdict::Prepared(metadata),
+                    Err(error) => DeckRunVerdict::Refused(error),
+                }
+            }
+            WorkerOutcome::NeedsMemory { snapshot, warning } => {
+                let metadata = Box::new(snapshot.metadata());
+                match self.retain_prepared_run(*snapshot, RetainedRunInputs::Pressed(deck)) {
+                    Ok(()) => DeckRunVerdict::NeedsMemory { metadata, warning },
                     Err(error) => DeckRunVerdict::Refused(error),
                 }
             }

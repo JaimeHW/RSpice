@@ -198,6 +198,8 @@ pub enum SourceRequest {
     SaveDeckFile,
     /// Open the file dropped on the netlist page as a deck.
     OpenDroppedDeck(Vec<egui::DroppedFile>),
+    /// Run anyway: start the deck's run held for more memory than is free.
+    RunAnyway,
 }
 
 impl Request for SourceRequest {
@@ -236,6 +238,10 @@ pub enum CodeHandOff {
     /// Add file…: ask for the file a line of the deck kept as text names,
     /// and keep it with the deck.
     AddDeckFile(crate::state::netlist_diagnostics::DeckFileRequest),
+    /// Run anyway, its run started: keep the project's unsaved work as an
+    /// autosave before the run, which needs more memory than is free,
+    /// dispatches.
+    RunAnyway,
 }
 
 /// What the netlist page's editor typed, undid or redid in its frame, which

@@ -372,6 +372,14 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
                 app.state.prompt(said);
             }
         }
+        // A run that needs more memory than is free may take the machine
+        // down with it: the work it could lose is kept before it starts.
+        CodeHandOff::RunAnyway => {
+            rspice_app_services::workbench::app_state::session::autosave::write_now(
+                &mut app.state,
+                None,
+            );
+        }
     }
 }
 

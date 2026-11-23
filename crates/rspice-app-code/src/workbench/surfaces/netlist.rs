@@ -284,6 +284,16 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
         cx.wb.outbox.push(SourceRequest::OpenDroppedDeck(dropped));
     }
     toolbar::code_toolbar(ui, cx);
+    // A run held for more memory than is free asks above the deck, where the
+    // run's band speaks: Run anyway, or Stop, which Stop's command carries
+    // out as it stops any run.
+    match memory_band(ui, cx.runs, cx.wb.messages()) {
+        Some(MemoryAnswer::RunAnyway) => cx.wb.outbox.push(SourceRequest::RunAnyway),
+        Some(MemoryAnswer::Stop) => {
+            cx.execute(crate::workbench::framework::command_registry::ids::STOP_SIMULATION);
+        }
+        None => {}
+    }
     // The run's band states the run and reports what was clicked; routing
     // that click is this surface's transaction, not the painter's.
     match run_strip(ui, cx.model, &cx.state.netlist, cx.runs, cx.wb.messages()) {
@@ -956,6 +966,48 @@ const fn verification_chip(
         | ExecutedDeckVerification::PointVariant
         | ExecutedDeckVerification::NotRecorded => None,
     }
+}
+
+/// What the reader answered a run held for memory.
+#[derive(Clone, Copy)]
+enum MemoryAnswer {
+    RunAnyway,
+    Stop,
+}
+
+/// The band of a deck's run held because it needs more memory than the
+/// machine has free: the warning's mark, what the run needs against what is
+/// free and installed, and the answers at its far end, Run anyway before
+/// Stop. Nothing while no run is held.
+fn memory_band(
+    ui: &mut Ui,
+    runs: &rspice_app_runs::workbench::slots::runs::RunsState,
+    messages: crate::workbench::MessageCatalog,
+) -> Option<MemoryAnswer> {
+    let warning = runs.memory_warning()?;
+    let words = warning.message();
+    let mut answer = None;
+    advisory_band(ui, Some(Problem::Warning), |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
+            let stop = messages.text(MessageId::NetlistMemoryStop);
+            let stop_hint = messages.text(MessageId::NetlistMemoryStopTooltip);
+            if band_button(ui, &stop, Some(&stop_hint)).clicked() {
+                answer = Some(MemoryAnswer::Stop);
+            }
+            let run = messages.text(MessageId::NetlistMemoryRunAnyway);
+            let run_hint = messages.text(MessageId::NetlistMemoryRunAnywayTooltip);
+            if band_button(ui, &run, Some(&run_hint)).clicked() {
+                answer = Some(MemoryAnswer::RunAnyway);
+            }
+            ui.add_space(RUN_STRIP_GAP);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(&words).truncate())
+                    .on_hover_text(&words);
+            });
+        });
+    });
+    answer
 }
 
 /// One of the band's routes: the kit's compact button, with what it does on

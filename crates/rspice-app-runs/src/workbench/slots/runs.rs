@@ -25,7 +25,8 @@ pub struct RunsState {
     /// Verilog-A compile to end. Runtime only.
     pub waiting: crate::workbench::waiting::WaitingPreparations,
     /// The deck whose run is being prepared away from the frame, as the Run
-    /// press took it. Runtime only.
+    /// press took it, and the run that waits there for more memory than is
+    /// free. Runtime only.
     pub preparing_deck: Option<PreparingDeck>,
 }
 
@@ -35,6 +36,11 @@ pub struct RunsState {
 pub struct PreparingDeck {
     pub name: String,
     pub text: rspice_app_state::state::RevisedText,
+    /// What the run, prepared, needs beyond the memory free, when it needs
+    /// more than is free and fits what is installed: it waits here, with
+    /// Run anyway and Stop, and nothing of it dispatches until the reader
+    /// runs it anyway. The status line and the band above the deck say it.
+    pub memory: Option<rspice_simulation::execution::run_memory::MemoryWarning>,
 }
 
 impl RunsState {
@@ -47,15 +53,26 @@ impl RunsState {
         }
     }
 
-    /// Stop the deck's run being prepared: nothing of it runs. The deck's
-    /// name, for what Stop says, when one was being prepared.
+    /// Stop the deck's run being prepared, or prepared and waiting for more
+    /// memory than is free: nothing of it runs. The deck's name, for what
+    /// Stop says, when one was being prepared.
     pub fn stop_preparing_deck(
         &mut self,
         controller: &mut crate::simulation::controller::SimulationController,
     ) -> Option<String> {
         let deck = self.preparing_deck.take()?;
         controller.cancel_deck_run_preparation();
+        if deck.memory.is_some() {
+            controller.clear_prepared_run();
+        }
         Some(deck.name)
+    }
+
+    /// What the deck's run, prepared and waiting for Run anyway, needs
+    /// beyond the memory free.
+    #[must_use]
+    pub fn memory_warning(&self) -> Option<rspice_simulation::execution::run_memory::MemoryWarning> {
+        self.preparing_deck.as_ref()?.memory
     }
 }
 

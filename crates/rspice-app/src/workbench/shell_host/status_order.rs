@@ -380,6 +380,8 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
     let text = engine_words(app, availability);
     let outcome = run_outcome(app, availability);
     let (text, mark) = match (text, &outcome) {
+        // A run held for memory is a warning to answer, not a run going.
+        (Some(text), _) if held_for_memory(app) => (text, StatusMark::Problem(Problem::Warning)),
         (Some(text), _) => (
             text,
             engine_status_mark(
@@ -406,6 +408,11 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
                 ))
             },
         )
+    } else if let Some(warning) = app.state.runs.memory_warning() {
+        Cow::Owned(format!(
+            "{} Run anyway above the deck runs it; Stop drops it.",
+            warning.message()
+        ))
     } else if let Some(deck) = &app.state.runs.preparing_deck {
         Cow::Owned(format!(
             "Preparing the run of {}. Stop drops it.",
@@ -574,7 +581,8 @@ fn preflight_checking(app: &RSpiceApp) -> Option<PreflightStage> {
 fn engine_words(app: &RSpiceApp, availability: &EngineAvailability) -> Option<String> {
     match preflight_checking(app) {
         Some(stage) => Some(preflight_status(stage)),
-        None => deck_preparing_words(app)
+        None => memory_words(app)
+            .or_else(|| deck_preparing_words(app))
             .or_else(|| waiting_words(app))
             .or_else(|| simulation_engine_status(&app.state.model.simulation, availability)),
     }
@@ -588,6 +596,19 @@ fn deck_preparing_words(app: &RSpiceApp) -> Option<String> {
         .preparing_deck
         .as_ref()
         .map(|_| "Preparing".to_owned())
+}
+
+/// What a deck's run, prepared and waiting for more memory than is free,
+/// needs, against what is free: "Needs about 3.5 GB of memory · 3.1 GB
+/// free".
+fn memory_words(app: &RSpiceApp) -> Option<String> {
+    Some(app.state.runs.memory_warning()?.status())
+}
+
+/// Whether a deck's run waits for the reader to run it anyway or stop it,
+/// and no check speaks over it.
+fn held_for_memory(app: &RSpiceApp) -> bool {
+    app.state.runs.memory_warning().is_some() && preflight_checking(app).is_none()
 }
 
 /// What waits for a Verilog-A compile before it is prepared: a manual deck's
