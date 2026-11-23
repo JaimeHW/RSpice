@@ -89,14 +89,14 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
             parts
                 .model
                 .active_view_read_only()
-                .then(|| messages.text(MessageId::CodeSourceReadOnlyDocumentDetail))
+                .then(|| messages.text(MessageId::SourceReadOnlyDocumentDetail))
         }),
     });
     let rail = Rail {
         id_salt: "workbench.veriloga.navigator",
         // One list: the build profile is a file of the bundle like any
         // other, and its row says what it is.
-        files_title: MessageId::CodeNavigatorFiles,
+        files_title: MessageId::SourceNavigatorFiles,
         files: bundle_rows(parts.model),
         active: active_path(parts.model, parts.source_editing),
         actions,
@@ -188,39 +188,39 @@ impl FileOperation {
 /// names the key that does it from the row, when one does.
 const FILE_MENU: [(MessageId, FileOperation, Option<MessageId>); 7] = [
     (
-        MessageId::CodeSourceNewFile,
+        MessageId::SourceNewFile,
         FileOperation::File(SourceFileAction::New),
         None,
     ),
     (
-        MessageId::CodeSourceRename,
+        MessageId::SourceRename,
         FileOperation::File(SourceFileAction::Rename),
-        Some(MessageId::CodeSourceRenameKey),
+        Some(MessageId::SourceRenameKey),
     ),
     (
-        MessageId::CodeSourceMove,
+        MessageId::SourceMove,
         FileOperation::File(SourceFileAction::Move),
         None,
     ),
     (
-        MessageId::CodeSourceDuplicate,
+        MessageId::SourceDuplicate,
         FileOperation::File(SourceFileAction::Duplicate),
         None,
     ),
     (
-        MessageId::CodeSourceRevisionHistory,
+        MessageId::SourceRevisionHistory,
         FileOperation::History,
         None,
     ),
     (
-        MessageId::CodeSourceReplaceFromFile,
+        MessageId::SourceReplaceFromFile,
         FileOperation::ReplaceFromFile,
         None,
     ),
     (
-        MessageId::CodeSourceDelete,
+        MessageId::SourceDelete,
         FileOperation::File(SourceFileAction::Delete),
-        Some(MessageId::CodeSourceDeleteKey),
+        Some(MessageId::SourceDeleteKey),
     ),
 ];
 
@@ -229,17 +229,17 @@ const TOUCH_CONTROL_HEIGHT: f32 = 44.0;
 
 const FILE_ACTIONS: [(MessageId, SourceFileAction, WorkbenchIcon); 3] = [
     (
-        MessageId::CodeSourceNewFile,
+        MessageId::SourceNewFile,
         SourceFileAction::New,
         WorkbenchIcon::Add,
     ),
     (
-        MessageId::CodeSourceRename,
+        MessageId::SourceRename,
         SourceFileAction::Rename,
         WorkbenchIcon::Text,
     ),
     (
-        MessageId::CodeSourceDelete,
+        MessageId::SourceDelete,
         SourceFileAction::Delete,
         WorkbenchIcon::Trash,
     ),
@@ -301,7 +301,7 @@ fn header_file_actions(
             crate::workbench::design_system::icon_button(
                 ui,
                 WorkbenchIcon::Folder,
-                &messages.text(MessageId::CodeSourceAddFiles),
+                &messages.text(MessageId::SourceAddFiles),
                 false,
                 Vec2::splat(side),
             )
@@ -378,7 +378,7 @@ fn bundle_rows(model: &Model) -> Vec<BundleRow> {
 /// scoped to Verilog-A states.
 const fn role_message(build_profile: bool) -> Option<MessageId> {
     if build_profile {
-        Some(MessageId::CodeNavigatorRoleBuildProfile)
+        Some(MessageId::SourceNavigatorRoleBuildProfile)
     } else {
         None
     }
@@ -451,7 +451,7 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
             ui.set_width(ui.available_width());
             'rows: {
                 if rail.files.is_empty() {
-                    muted(ui, &messages.text(MessageId::CodeNavigatorNoBundle));
+                    muted(ui, &messages.text(MessageId::SourceNavigatorNoBundle));
                     break 'rows;
                 }
                 files_section(ui, &rail, header, messages, &mut request);
@@ -653,7 +653,7 @@ fn includes_section(
 ) {
     section_header(
         ui,
-        &messages.text(MessageId::CodeNavigatorIncludes),
+        &messages.text(MessageId::SourceNavigatorIncludes),
         Some(&navigation.includes.len().to_string()),
     );
     for include in &navigation.includes {
@@ -672,7 +672,7 @@ fn includes_section(
                     source_row_icon(false),
                     &leaf_name(identity),
                     header == Some(*identity),
-                    Some(&messages.text(MessageId::CodeNavigatorIncludeBuiltIn)),
+                    Some(&messages.text(MessageId::SourceNavigatorIncludeBuiltIn)),
                 )
                 .on_hover_text(*identity);
                 if response.clicked() {
@@ -702,8 +702,8 @@ fn includes_section(
                         &announced,
                     )
                 });
-                let response =
-                    response.on_hover_text(messages.text(MessageId::CodeNavigatorIncludeNotFound));
+                let response = response
+                    .on_hover_text(messages.text(MessageId::SourceNavigatorIncludeNotFound));
                 if response.clicked() {
                     *request = Some(RailRequest::Reveal {
                         path: including.clone(),
@@ -716,7 +716,7 @@ fn includes_section(
     if importers.is_empty() {
         return;
     }
-    group_caption(ui, &messages.text(MessageId::CodeNavigatorIncludedBy));
+    group_caption(ui, &messages.text(MessageId::SourceNavigatorIncludedBy));
     for importer in importers {
         let response = nav_row_response(
             ui,
@@ -742,7 +742,7 @@ fn outline_section(
 ) {
     section_header(
         ui,
-        &messages.text(MessageId::CodeNavigatorOutline),
+        &messages.text(MessageId::SourceNavigatorOutline),
         Some(&navigation.outline.len().to_string()),
     );
     let mut group = None;
@@ -824,12 +824,12 @@ fn group_caption(ui: &mut Ui, text: &str) {
 
 const fn outline_group_title(group: SourceOutlineGroup) -> MessageId {
     match group {
-        SourceOutlineGroup::Module => MessageId::CodeNavigatorOutlineModule,
-        SourceOutlineGroup::Ports => MessageId::CodeNavigatorOutlinePorts,
-        SourceOutlineGroup::Parameters => MessageId::CodeNavigatorOutlineParameters,
-        SourceOutlineGroup::Variables => MessageId::CodeNavigatorOutlineVariables,
-        SourceOutlineGroup::Nets => MessageId::CodeNavigatorOutlineNets,
-        SourceOutlineGroup::Functions => MessageId::CodeNavigatorOutlineFunctions,
+        SourceOutlineGroup::Module => MessageId::SourceNavigatorOutlineModule,
+        SourceOutlineGroup::Ports => MessageId::SourceNavigatorOutlinePorts,
+        SourceOutlineGroup::Parameters => MessageId::SourceNavigatorOutlineParameters,
+        SourceOutlineGroup::Variables => MessageId::SourceNavigatorOutlineVariables,
+        SourceOutlineGroup::Nets => MessageId::SourceNavigatorOutlineNets,
+        SourceOutlineGroup::Functions => MessageId::SourceNavigatorOutlineFunctions,
     }
 }
 
@@ -855,7 +855,7 @@ fn used_in_section(
 ) {
     section_header(
         ui,
-        &messages.text(MessageId::CodeNavigatorUsedIn),
+        &messages.text(MessageId::SourceNavigatorUsedIn),
         Some(&used_in.len().to_string()),
     );
     for usage in used_in {

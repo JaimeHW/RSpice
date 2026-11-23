@@ -93,12 +93,12 @@ pub(super) fn render(
 
     let dialog = Dialog::new(
         messages.format(
-            MessageId::CodeSourceHistoryTitle,
+            MessageId::SourceHistoryTitle,
             &[("file", &leaf_name(&source_path))],
         ),
         messages.text(MessageId::CommonClose),
     )
-    .description(messages.text(MessageId::CodeSourceHistoryDescription))
+    .description(messages.text(MessageId::SourceHistoryDescription))
     .size(DialogSize::Confirmation)
     .flush_body()
     // The rows fit at every desktop size; a bar would only reserve a gutter
@@ -113,7 +113,7 @@ pub(super) fn render(
         sections(ui, |ui| {
             band_header(
                 ui,
-                &messages.text(MessageId::CodeSourceRetainedClosures),
+                &messages.text(MessageId::SourceRetainedClosures),
                 (!rows.is_empty())
                     .then(|| rows.len().to_string())
                     .as_deref(),
@@ -174,12 +174,12 @@ fn restore_controls(
     messages: MessageCatalog,
 ) -> bool {
     if !rows.iter().any(|row| !row.current) {
-        muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceNoRetainedRevision));
+        muted_inspector_copy(ui, &messages.text(MessageId::SourceNoRetainedRevision));
         return false;
     }
     let picked = rows.iter().find(|row| selected == Some(row.revision));
     if let Some(row) = picked {
-        let label = messages.text(MessageId::CodeNavigatorFiles);
+        let label = messages.text(MessageId::SourceNavigatorFiles);
         let files = row
             .files
             .iter()
@@ -195,11 +195,11 @@ fn restore_controls(
     // What a restore of the selection would be refused for, said on the
     // button before the press.
     let refusal = match picked {
-        None => Some(messages.text(MessageId::CodeSourceHistoryPickRevision)),
-        Some(row) if row.current => Some(messages.text(MessageId::CodeSourceHistoryAlreadyCurrent)),
+        None => Some(messages.text(MessageId::SourceHistoryPickRevision)),
+        Some(row) if row.current => Some(messages.text(MessageId::SourceHistoryAlreadyCurrent)),
         Some(_) => held.map(str::to_owned),
     };
-    let response = Button::new(&messages.text(MessageId::CodeSourceRestoreAsNewRevision))
+    let response = Button::new(&messages.text(MessageId::SourceRestoreAsNewRevision))
         .enabled(refusal.is_none())
         .show(ui);
     let pressed = response.clicked();
@@ -246,7 +246,7 @@ fn row_font() -> egui::FontId {
 
 fn revision_label(row: &RevisionRow, messages: MessageCatalog) -> String {
     messages.format(
-        MessageId::CodeSourceRevision,
+        MessageId::SourceRevision,
         &[("revision", &row.revision.to_string())],
     )
 }
@@ -254,9 +254,9 @@ fn revision_label(row: &RevisionRow, messages: MessageCatalog) -> String {
 fn files_label(row: &RevisionRow, messages: MessageCatalog) -> String {
     messages.format(
         if row.files.len() == 1 {
-            MessageId::CodeSourceDocumentSingular
+            MessageId::SourceDocumentSingular
         } else {
-            MessageId::CodeSourceDocuments
+            MessageId::SourceDocuments
         },
         &[("count", &row.files.len().to_string())],
     )
@@ -284,9 +284,9 @@ fn revision_row(
     // own; the row says all of it.
     let announced = messages.format(
         if row.current {
-            MessageId::CodeSourceRevisionAccessibleCurrent
+            MessageId::SourceRevisionAccessibleCurrent
         } else {
-            MessageId::CodeSourceRevisionAccessible
+            MessageId::SourceRevisionAccessible
         },
         &[
             ("revision", &row.revision.to_string()),
@@ -327,7 +327,7 @@ fn revision_row(
             let current = painter.text(
                 egui::pos2(right, y),
                 egui::Align2::RIGHT_CENTER,
-                messages.text(MessageId::CodeSourceCurrentClosure),
+                messages.text(MessageId::SourceCurrentClosure),
                 font,
                 t.color.text_dim,
             );

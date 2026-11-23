@@ -245,7 +245,7 @@ fn the_panel_opens_on_its_files_and_states_only_a_role_that_is_not_source() {
     assert!(
         reader.shows(&format!(
             "{PROFILE}, {}",
-            text(MessageId::CodeNavigatorRoleBuildProfile)
+            text(MessageId::SourceNavigatorRoleBuildProfile)
         )),
         "named: {:?}",
         reader.names()
@@ -277,7 +277,7 @@ fn used_in_lists_a_placed_instance_and_opens_it_selected() {
         .expect("the placed instance is in the top schematic");
     let row = format!("{} / {name}", top.cell);
     assert!(
-        reader.shows(&format!("{}, 1", text(MessageId::CodeNavigatorUsedIn))),
+        reader.shows(&format!("{}, 1", text(MessageId::SourceNavigatorUsedIn))),
         "the header counts the one instance; named: {:?}",
         reader.names()
     );
@@ -304,7 +304,7 @@ fn a_built_in_include_is_read_in_place_and_a_file_returns_to_editing() {
 
     reader.click(&format!(
         "disciplines.vams, {}",
-        text(MessageId::CodeNavigatorIncludeBuiltIn)
+        text(MessageId::SourceNavigatorIncludeBuiltIn)
     ));
 
     assert!(

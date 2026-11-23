@@ -191,7 +191,7 @@ pub fn deck_facts(
 /// The deck's facts as every deck page's inspector lists them, `more` after
 /// them in the same list: its file, then what it holds.
 pub fn deck_fact_rows(ui: &mut Ui, facts: &DeckFacts, more: &[Fact<'_>], messages: MessageCatalog) {
-    let file = messages.text(MessageId::CodeSourceFileFile);
+    let file = messages.text(MessageId::SourceFileFile);
     let counts = [
         (MessageId::NetlistFirstLines, facts.lines),
         (MessageId::NetlistFirstDevices, facts.devices),

@@ -508,8 +508,8 @@ fn module_section(
         None,
         |ui| {
             let module_label = messages.text(MessageId::VerilogAModuleRow);
-            let compile_label = messages.text(MessageId::CodeSourceCompile);
-            let line_endings_label = messages.text(MessageId::CodeSourceLineEndings);
+            let compile_label = messages.text(MessageId::SourceCompile);
+            let line_endings_label = messages.text(MessageId::SourceLineEndings);
             let mut facts = vec![Fact::new(&module_label, &module)];
             if let Some((status, problem)) = &compile {
                 let fact = Fact::new(&compile_label, status);

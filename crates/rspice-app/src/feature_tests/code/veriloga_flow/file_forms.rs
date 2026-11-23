@@ -54,7 +54,7 @@ fn new_file(user: &mut User, stem: &str) {
         .state
         .workbench
         .messages()
-        .text(MessageId::CodeSourceNewFile);
+        .text(MessageId::SourceNewFile);
     user.click(&label);
     type_text(user, stem);
 }
@@ -145,10 +145,10 @@ fn the_main_file_cannot_be_deleted_and_says_why() {
     let mut user = op_amp();
     let main = main_file(&user);
     let messages = user.app.state.workbench.messages();
-    let reason = messages.text(MessageId::CodeSourceRootDeleteBlocked);
+    let reason = messages.text(MessageId::SourceRootDeleteBlocked);
 
     // The header's Delete acts on the file in front, the main file: held.
-    user.click(&messages.text(MessageId::CodeSourceDelete));
+    user.click(&messages.text(MessageId::SourceDelete));
     assert!(
         user.find("Delete file").is_none(),
         "the held icon opens nothing"
@@ -221,13 +221,13 @@ fn a_file_rows_menu_offers_every_operation_and_holds_a_refused_one() {
     let messages = user.app.state.workbench.messages();
     let at = open_row_menu(&mut user, &main);
     let items = [
-        MessageId::CodeSourceNewFile,
-        MessageId::CodeSourceRename,
-        MessageId::CodeSourceMove,
-        MessageId::CodeSourceDuplicate,
-        MessageId::CodeSourceRevisionHistory,
-        MessageId::CodeSourceReplaceFromFile,
-        MessageId::CodeSourceDelete,
+        MessageId::SourceNewFile,
+        MessageId::SourceRename,
+        MessageId::SourceMove,
+        MessageId::SourceDuplicate,
+        MessageId::SourceRevisionHistory,
+        MessageId::SourceReplaceFromFile,
+        MessageId::SourceDelete,
     ]
     .map(|item| {
         menu_item(&user, at, &messages.text(item))
@@ -238,7 +238,7 @@ fn a_file_rows_menu_offers_every_operation_and_holds_a_refused_one() {
         "the menu lists them in order: {items:?}"
     );
 
-    press_menu_item(&mut user, at, &messages.text(MessageId::CodeSourceDelete));
+    press_menu_item(&mut user, at, &messages.text(MessageId::SourceDelete));
     assert!(
         user.find("Delete file").is_none(),
         "the held Delete opens nothing"
@@ -248,11 +248,7 @@ fn a_file_rows_menu_offers_every_operation_and_holds_a_refused_one() {
     user.settle();
 
     let at = open_row_menu(&mut user, &main);
-    press_menu_item(
-        &mut user,
-        at,
-        &messages.text(MessageId::CodeSourceDuplicate),
-    );
+    press_menu_item(&mut user, at, &messages.text(MessageId::SourceDuplicate));
     user.expect("Duplicate file");
 }
 
@@ -264,7 +260,7 @@ fn rename_from_a_file_rows_menu_renames_the_file() {
     let main = main_file(&user);
     let messages = user.app.state.workbench.messages();
     let at = open_row_menu(&mut user, &main);
-    press_menu_item(&mut user, at, &messages.text(MessageId::CodeSourceRename));
+    press_menu_item(&mut user, at, &messages.text(MessageId::SourceRename));
     user.expect("Rename file");
 
     type_text(&mut user, "amp");
@@ -290,7 +286,7 @@ fn revision_history_from_a_file_rows_menu_restores_the_revision_chosen() {
     press_menu_item(
         &mut user,
         at,
-        &messages.text(MessageId::CodeSourceRevisionHistory),
+        &messages.text(MessageId::SourceRevisionHistory),
     );
     user.expect(&format!("Revision history \u{b7} {main}"));
 
@@ -304,7 +300,7 @@ fn revision_history_from_a_file_rows_menu_restores_the_revision_chosen() {
         .expect("the revision before the new file is listed");
     user.press(earlier.center(), egui::PointerButton::Primary);
     user.settle();
-    user.click(&messages.text(MessageId::CodeSourceRestoreAsNewRevision));
+    user.click(&messages.text(MessageId::SourceRestoreAsNewRevision));
     assert!(
         !bundle(&user).contains_file("stage.va"),
         "the revision restored has no stage.va"
@@ -335,9 +331,9 @@ fn the_rail_lists_the_files_that_include_the_one_in_front() {
         .count();
     user.expect(&format!(
         "{}, {included}",
-        messages.text(MessageId::CodeNavigatorIncludes)
+        messages.text(MessageId::SourceNavigatorIncludes)
     ));
-    let included_by = messages.text(MessageId::CodeNavigatorIncludedBy);
+    let included_by = messages.text(MessageId::SourceNavigatorIncludedBy);
     let caption = user.expect(&included_by);
     assert!(
         user.named
@@ -353,6 +349,6 @@ fn the_rail_lists_the_files_that_include_the_one_in_front() {
 fn the_inspector_states_the_line_endings_and_the_compile() {
     let user = op_amp();
     let messages = user.app.state.workbench.messages();
-    user.expect(&messages.text(MessageId::CodeSourceLineEndings));
-    user.expect(&messages.text(MessageId::CodeSourceCompile));
+    user.expect(&messages.text(MessageId::SourceLineEndings));
+    user.expect(&messages.text(MessageId::SourceCompile));
 }

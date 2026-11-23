@@ -57,7 +57,7 @@ pub(in crate::workbench) fn render(
             || bundle.revision().get() != draft.bundle_revision
             || bundle.closure_digest() != draft.closure_digest
     });
-    let stale_text = messages.text(MessageId::CodeSourceFileStale);
+    let stale_text = messages.text(MessageId::SourceFileStale);
     let includers = bundle.map_or_else(Vec::new, |bundle| {
         source_editing::veriloga_includers_of(bundle, &draft.source_path)
     });
@@ -70,8 +70,8 @@ pub(in crate::workbench) fn render(
     let name = (!deleting).then(|| check_name(bundle, &draft, messages));
 
     let (title, primary) = titles(&draft, messages);
-    let enter_name = messages.text(MessageId::CodeSourceFileEnterName);
-    let keeps_copy = messages.text(MessageId::CodeSourceFileHistoryKeepsCopy);
+    let enter_name = messages.text(MessageId::SourceFileEnterName);
+    let keeps_copy = messages.text(MessageId::SourceFileHistoryKeepsCopy);
     let status: Result<Option<&str>, &str> = if let Some(reason) = blocked.as_deref() {
         Err(reason)
     } else if stale {
@@ -107,7 +107,7 @@ pub(in crate::workbench) fn render(
         _ => None,
     });
     let adds = messages.format(
-        MessageId::CodeSourceFileAddsInclude,
+        MessageId::SourceFileAddsInclude,
         &[("file", &draft.importer_path)],
     );
 
@@ -120,7 +120,7 @@ pub(in crate::workbench) fn render(
         .status(status)
         .show(ctx, |rows| {
             let field = Id::new(NAME_FIELD);
-            let file = messages.text(MessageId::CodeSourceFileFile);
+            let file = messages.text(MessageId::SourceFileFile);
             match draft.action {
                 SourceFileAction::Delete => {
                     rows.value_mono(&file, &draft.source_path);
@@ -135,9 +135,9 @@ pub(in crate::workbench) fn render(
                 }
             }
             let label = messages.text(match draft.action {
-                SourceFileAction::New => MessageId::CodeSourceFileName,
-                SourceFileAction::Move => MessageId::CodeSourceFileNewPath,
-                _ => MessageId::CodeSourceFileNewName,
+                SourceFileAction::New => MessageId::SourceFileName,
+                SourceFileAction::Move => MessageId::SourceFileNewPath,
+                _ => MessageId::SourceFileNewName,
             });
             let response = rows.text(&label, field, &mut proposed, "");
             edited |= response.changed();
@@ -157,7 +157,7 @@ pub(in crate::workbench) fn render(
                 SourceFileAction::New | SourceFileAction::Duplicate
             );
             if adds_file {
-                let label = messages.text(MessageId::CodeSourceFileIncludedFrom);
+                let label = messages.text(MessageId::SourceFileIncludedFrom);
                 if hosts.len() >= 2 {
                     if let Some(index) = rows.select(&label, INCLUDED_FROM, &importer, &hosts)
                         && let Some(host) = hosts.get(index)
@@ -197,25 +197,22 @@ fn titles(draft: &SourceFileDialogState, messages: MessageCatalog) -> (String, S
     let (title, primary) = match draft.action {
         SourceFileAction::New => {
             return (
-                messages.text(MessageId::CodeSourceFileNewTitle),
-                messages.text(MessageId::CodeSourceCreatePrimary),
+                messages.text(MessageId::SourceFileNewTitle),
+                messages.text(MessageId::SourceCreatePrimary),
             );
         }
         SourceFileAction::Rename => (
-            MessageId::CodeSourceFileRenameTitle,
-            MessageId::CodeSourceRenamePrimary,
+            MessageId::SourceFileRenameTitle,
+            MessageId::SourceRenamePrimary,
         ),
-        SourceFileAction::Move => (
-            MessageId::CodeSourceFileMoveTitle,
-            MessageId::CodeSourceMovePrimary,
-        ),
+        SourceFileAction::Move => (MessageId::SourceFileMoveTitle, MessageId::SourceMovePrimary),
         SourceFileAction::Duplicate => (
-            MessageId::CodeSourceFileDuplicateTitle,
-            MessageId::CodeSourceDuplicatePrimary,
+            MessageId::SourceFileDuplicateTitle,
+            MessageId::SourceDuplicatePrimary,
         ),
         SourceFileAction::Delete => (
-            MessageId::CodeSourceFileDeleteTitle,
-            MessageId::CodeSourceDeletePrimary,
+            MessageId::SourceFileDeleteTitle,
+            MessageId::SourceDeletePrimary,
         ),
     };
     (messages.text(title), messages.text(primary))
@@ -233,11 +230,11 @@ pub(in crate::workbench) fn delete_refusal(
     messages: MessageCatalog,
 ) -> Option<String> {
     if project_source_paths_equal(logical_path, bundle.root().logical_path()) {
-        return Some(messages.text(MessageId::CodeSourceRootDeleteBlocked));
+        return Some(messages.text(MessageId::SourceRootDeleteBlocked));
     }
     if bundle.is_build_profile(logical_path) {
         return Some(messages.format(
-            MessageId::CodeSourceFileRoleBound,
+            MessageId::SourceFileRoleBound,
             &[
                 ("file", logical_path),
                 ("role", &role_label(messages, true)),
@@ -250,7 +247,7 @@ pub(in crate::workbench) fn delete_refusal(
         .find(|edge| project_source_paths_equal(edge.importer(), logical_path))
         .map(|edge| {
             messages.format(
-                MessageId::CodeSourceFileIncludesOthers,
+                MessageId::SourceFileIncludesOthers,
                 &[("file", logical_path), ("dependency", edge.imported())],
             )
         })
@@ -271,12 +268,12 @@ fn include_extent(
 ) -> Option<String> {
     let (one, many) = match edit {
         IncludeEdit::Update => (
-            MessageId::CodeSourceFileUpdatesInclude,
-            MessageId::CodeSourceFileUpdatesIncludes,
+            MessageId::SourceFileUpdatesInclude,
+            MessageId::SourceFileUpdatesIncludes,
         ),
         IncludeEdit::Remove => (
-            MessageId::CodeSourceFileRemovesInclude,
-            MessageId::CodeSourceFileRemovesIncludes,
+            MessageId::SourceFileRemovesInclude,
+            MessageId::SourceFileRemovesIncludes,
         ),
     };
     match includers {
@@ -341,7 +338,7 @@ fn check_name(
             .find(|path| project_source_paths_equal(path, name))
             .unwrap_or(name);
         return NameCheck::Refused(
-            messages.format(MessageId::CodeSourceFileExists, &[("name", existing)]),
+            messages.format(MessageId::SourceFileExists, &[("name", existing)]),
         );
     }
     NameCheck::Ready
@@ -352,21 +349,21 @@ fn name_error(error: &ProjectSourceError, name: &str, messages: MessageCatalog) 
     match error {
         ProjectSourceError::InvalidLogicalPathCharacter { .. }
         | ProjectSourceError::InvalidFileNameCharacters => {
-            messages.text(MessageId::CodeSourceFileNameCharacters)
+            messages.text(MessageId::SourceFileNameCharacters)
         }
         ProjectSourceError::ReservedLogicalPath { .. } | ProjectSourceError::ReservedFileName => {
-            messages.text(MessageId::CodeSourceFileNameReserved)
+            messages.text(MessageId::SourceFileNameReserved)
         }
         ProjectSourceError::LogicalPathTooLong { limit, .. } => messages.format(
-            MessageId::CodeSourceFileNameTooLong,
+            MessageId::SourceFileNameTooLong,
             &[("limit", &limit.to_string())],
         ),
         ProjectSourceError::InvalidFileNameExtension { accepted, .. } => messages.format(
-            MessageId::CodeSourceFileMainExtension,
+            MessageId::SourceFileMainExtension,
             &[("accepted", accepted)],
         ),
         ProjectSourceError::DuplicateLogicalPath { logical_path } => {
-            messages.format(MessageId::CodeSourceFileExists, &[("name", logical_path)])
+            messages.format(MessageId::SourceFileExists, &[("name", logical_path)])
         }
         ProjectSourceError::InvalidLogicalPath { .. }
         | ProjectSourceError::InvalidFileNamePath
@@ -381,18 +378,18 @@ fn name_error(error: &ProjectSourceError, name: &str, messages: MessageCatalog) 
 /// read off the path itself.
 fn path_shape(name: &str) -> Option<MessageId> {
     if name.contains('\\') {
-        return Some(MessageId::CodeSourceFileNameBackslash);
+        return Some(MessageId::SourceFileNameBackslash);
     }
     if name.starts_with('/') || name.chars().nth(1) == Some(':') {
-        return Some(MessageId::CodeSourceFileNameAbsolute);
+        return Some(MessageId::SourceFileNameAbsolute);
     }
     name.split('/').find_map(|part| {
         if part.is_empty() || part == "." || part == ".." {
-            Some(MessageId::CodeSourceFileNameEmptyPart)
+            Some(MessageId::SourceFileNameEmptyPart)
         } else if part != part.trim() {
-            Some(MessageId::CodeSourceFileNameEdgeSpace)
+            Some(MessageId::SourceFileNameEdgeSpace)
         } else if part.ends_with('.') {
-            Some(MessageId::CodeSourceFileNameTrailingPeriod)
+            Some(MessageId::SourceFileNameTrailingPeriod)
         } else {
             None
         }

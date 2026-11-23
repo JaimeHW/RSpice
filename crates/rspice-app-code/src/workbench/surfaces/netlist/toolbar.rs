@@ -405,7 +405,7 @@ fn language_tools_menu(
         )
     });
     // A row the text in front cannot have says why when it is read-only.
-    let read_only = (!tools.editable).then_some(MessageId::CodeSourceReadOnlyDocument);
+    let read_only = (!tools.editable).then_some(MessageId::SourceReadOnlyDocument);
     egui::Popup::menu(&response).show(|ui| {
         ui.set_min_width(180.0);
         let mut row =

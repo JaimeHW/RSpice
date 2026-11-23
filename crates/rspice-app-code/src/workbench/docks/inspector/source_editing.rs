@@ -484,7 +484,7 @@ fn deck_file_provenance(ui: &mut Ui, reads: &SourceInspector<'_>) {
         ) {
             property_row(
                 ui,
-                &messages.text(MessageId::CodeSourceFileFile),
+                &messages.text(MessageId::SourceFileFile),
                 &missing.path.display().to_string(),
             );
             property_row_problem(
@@ -497,7 +497,7 @@ fn deck_file_provenance(ui: &mut Ui, reads: &SourceInspector<'_>) {
         return;
     };
     let encoding = messages.text(MessageId::NetlistEncoding);
-    let line_endings = messages.text(MessageId::CodeSourceLineEndings);
+    let line_endings = messages.text(MessageId::SourceLineEndings);
     let line_ending = file.line_ending.label(messages);
     let save = [
         Fact::new(&encoding, file.encoding.label()),
@@ -509,7 +509,7 @@ fn deck_file_provenance(ui: &mut Ui, reads: &SourceInspector<'_>) {
         crate::workbench::code::netlist_first::deck_fact_rows(ui, facts, &save, messages);
         return;
     }
-    let file_label = messages.text(MessageId::CodeSourceFileFile);
+    let file_label = messages.text(MessageId::SourceFileFile);
     let path = file.path.display().to_string();
     let mut rows = vec![Fact::path(&file_label, &path)];
     rows.extend_from_slice(&save);

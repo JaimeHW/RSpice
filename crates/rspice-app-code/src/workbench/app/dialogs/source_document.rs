@@ -154,9 +154,9 @@ enum Report {
 /// has to come from the same locale the row was painted in.
 pub(super) fn role_label(messages: MessageCatalog, build_profile: bool) -> String {
     messages.text(if build_profile {
-        MessageId::CodeSourceRoleBuildProfile
+        MessageId::SourceRoleBuildProfile
     } else {
-        MessageId::CodeSourceRoleOrdinary
+        MessageId::SourceRoleOrdinary
     })
 }
 
@@ -348,26 +348,22 @@ fn netlist_lifecycle_body(
     // The dialog's body scrolls when the rows outgrow it; a scroll area of
     // its own here only withheld a gutter on the right.
     sections(ui, |ui| {
-        dialog_section(
-            ui,
-            &messages.text(MessageId::CodeSourceCurrentDocument),
-            |ui| {
-                let file = messages.text(if facts.include {
-                    MessageId::NetlistLogicalIdentity
-                } else {
-                    MessageId::NetlistTopDeck
-                });
-                let line_endings = messages.text(MessageId::CodeSourceLineEndings);
-                let line_ending = facts.line_endings.label(messages);
-                fact_rows(
-                    ui,
-                    &[
-                        Fact::path(&file, &facts.project_path).whole(&facts.native_path),
-                        Fact::new(&line_endings, &line_ending),
-                    ],
-                );
-            },
-        );
+        dialog_section(ui, &messages.text(MessageId::SourceCurrentDocument), |ui| {
+            let file = messages.text(if facts.include {
+                MessageId::NetlistLogicalIdentity
+            } else {
+                MessageId::NetlistTopDeck
+            });
+            let line_endings = messages.text(MessageId::SourceLineEndings);
+            let line_ending = facts.line_endings.label(messages);
+            fact_rows(
+                ui,
+                &[
+                    Fact::path(&file, &facts.project_path).whole(&facts.native_path),
+                    Fact::new(&line_endings, &line_ending),
+                ],
+            );
+        });
         include_search_paths(ui, code, model, messages)
     })
 }

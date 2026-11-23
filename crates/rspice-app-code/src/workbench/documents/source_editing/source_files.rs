@@ -40,14 +40,14 @@ fn block_reason(
     platform: &PlatformState,
 ) -> Option<MessageId> {
     if !platform.project_lifecycle.is_open() {
-        Some(MessageId::CodeSourceNeedsProject)
+        Some(MessageId::SourceNeedsProject)
     } else if model.safe_mode.project_read_only() {
-        Some(MessageId::CodeSourceProjectReadOnly)
+        Some(MessageId::SourceProjectReadOnly)
     } else {
         code.veriloga
             .pending
             .is_some()
-            .then_some(MessageId::CodeSourceWaitsForCompile)
+            .then_some(MessageId::SourceWaitsForCompile)
     }
 }
 
@@ -163,7 +163,7 @@ pub fn open_source_file_dialog_in_bundle(
     if action == SourceFileAction::Delete
         && crate::state::project_source_paths_equal(source_path, bundle.root().logical_path())
     {
-        return Err(messages.text(MessageId::CodeSourceFileMainNotDeleted));
+        return Err(messages.text(MessageId::SourceFileMainNotDeleted));
     }
     // A Verilog-A file is added by writing its `include into the file that
     // includes it. A file a role binds — the build profile — is
@@ -211,12 +211,12 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
         .code
         .source_file_dialog
         .clone()
-        .ok_or_else(|| messages.text(MessageId::CodeSourceFileDialogClosed))?;
+        .ok_or_else(|| messages.text(MessageId::SourceFileDialogClosed))?;
     if let Some(reason) = source_file_mutation_block_reason(parts) {
         return Err(reason);
     }
     if draft.project_id != parts.model.workspace.content.project.id() {
-        return Err(messages.text(MessageId::CodeSourceProjectChanged));
+        return Err(messages.text(MessageId::SourceProjectChanged));
     }
     let bundle = parts
         .model
@@ -236,7 +236,7 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
     if bundle.revision().get() != draft.bundle_revision
         || bundle.closure_digest() != draft.closure_digest
     {
-        return Err(messages.text(MessageId::CodeSourceFileStale));
+        return Err(messages.text(MessageId::SourceFileStale));
     }
 
     let proposed = draft.proposed_path.trim();
@@ -284,7 +284,7 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
     };
     if !changed {
         parts.code.source_file_dialog = None;
-        return Ok(messages.text(MessageId::CodeSourceFileNothingChanged));
+        return Ok(messages.text(MessageId::SourceFileNothingChanged));
     }
 
     // A deleted file leaves the reader on the file that included it, else
@@ -301,22 +301,22 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
     parts.code.source_file_dialog = None;
     let message = match draft.action {
         SourceFileAction::New => {
-            messages.format(MessageId::CodeSourceFileCreated, &[("file", proposed)])
+            messages.format(MessageId::SourceFileCreated, &[("file", proposed)])
         }
         SourceFileAction::Duplicate => messages.format(
-            MessageId::CodeSourceFileDuplicated,
+            MessageId::SourceFileDuplicated,
             &[("file", &draft.source_path), ("new", proposed)],
         ),
         SourceFileAction::Rename => messages.format(
-            MessageId::CodeSourceFileRenamed,
+            MessageId::SourceFileRenamed,
             &[("file", &draft.source_path), ("new", proposed)],
         ),
         SourceFileAction::Move => messages.format(
-            MessageId::CodeSourceFileMoved,
+            MessageId::SourceFileMoved,
             &[("file", &draft.source_path), ("new", proposed)],
         ),
         SourceFileAction::Delete => messages.format(
-            MessageId::CodeSourceFileDeleted,
+            MessageId::SourceFileDeleted,
             &[("file", &draft.source_path)],
         ),
     };
@@ -379,16 +379,16 @@ pub fn commit_source_history_restore(parts: &mut SourceEditingParts<'_>) -> Resu
         .code
         .source_history
         .clone()
-        .ok_or_else(|| messages.text(MessageId::CodeSourceHistoryClosed))?;
+        .ok_or_else(|| messages.text(MessageId::SourceHistoryClosed))?;
     if parts.model.workspace.content.project.id() != draft.project_id {
-        return Err(messages.text(MessageId::CodeSourceProjectChanged));
+        return Err(messages.text(MessageId::SourceProjectChanged));
     }
     if let Some(reason) = source_file_mutation_block_reason(parts) {
         return Err(reason);
     }
     let retained_revision = draft
         .selected_revision
-        .ok_or_else(|| messages.text(MessageId::CodeSourceHistoryPickRevision))?;
+        .ok_or_else(|| messages.text(MessageId::SourceHistoryPickRevision))?;
     let bundle = parts
         .model
         .workspace
@@ -402,13 +402,13 @@ pub fn commit_source_history_restore(parts: &mut SourceEditingParts<'_>) -> Resu
     if bundle.revision().get() != draft.bundle_revision
         || bundle.closure_digest() != draft.closure_digest
     {
-        return Err(messages.text(MessageId::CodeSourceHistoryStale));
+        return Err(messages.text(MessageId::SourceHistoryStale));
     }
     let expected_current = bundle.revision();
     let retained_revision =
         crate::product::ObjectRevision::new(retained_revision).map_err(|error| {
             messages.format(
-                MessageId::CodeSourceHistoryRevisionInvalid,
+                MessageId::SourceHistoryRevisionInvalid,
                 &[("error", &error.to_string())],
             )
         })?;
@@ -424,7 +424,7 @@ pub fn commit_source_history_restore(parts: &mut SourceEditingParts<'_>) -> Resu
         .map_err(|error| error.to_string())?;
     if !changed {
         parts.code.source_history = None;
-        return Ok(messages.text(MessageId::CodeSourceHistoryAlreadyCurrent));
+        return Ok(messages.text(MessageId::SourceHistoryAlreadyCurrent));
     }
 
     let restored_bundle = parts
@@ -446,7 +446,7 @@ pub fn commit_source_history_restore(parts: &mut SourceEditingParts<'_>) -> Resu
     super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, draft.bundle_id);
     parts.code.source_history = None;
     let message = messages.format(
-        MessageId::CodeSourceHistoryRestored,
+        MessageId::SourceHistoryRestored,
         &[("revision", &retained_revision.get().to_string())],
     );
     parts

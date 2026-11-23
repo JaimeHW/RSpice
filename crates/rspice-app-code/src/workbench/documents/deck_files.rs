@@ -42,11 +42,11 @@ impl LineEnding {
     #[must_use]
     pub fn label(self, messages: MessageCatalog) -> String {
         messages.text(match self {
-            Self::None => MessageId::CodeSourceLineEndingsNone,
-            Self::Lf => MessageId::CodeSourceLineEndingsLf,
-            Self::CrLf => MessageId::CodeSourceLineEndingsCrLf,
-            Self::Cr => MessageId::CodeSourceLineEndingsCr,
-            Self::Mixed => MessageId::CodeSourceLineEndingsMixedAny,
+            Self::None => MessageId::SourceLineEndingsNone,
+            Self::Lf => MessageId::SourceLineEndingsLf,
+            Self::CrLf => MessageId::SourceLineEndingsCrLf,
+            Self::Cr => MessageId::SourceLineEndingsCr,
+            Self::Mixed => MessageId::SourceLineEndingsMixedAny,
         })
     }
 
