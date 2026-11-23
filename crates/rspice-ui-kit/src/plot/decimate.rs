@@ -258,7 +258,10 @@ impl DecimationCache {
             .retain(|_, (_, last_used)| last_used.saturating_add(1) >= tick);
     }
 
-    fn evict_to_fit(&mut self, incoming_bytes: usize) {
+    /// Make room for an envelope of `incoming_bytes`, and say whether there
+    /// is room: none when every envelope held was drawn this frame and the
+    /// budget is spent.
+    fn evict_to_fit(&mut self, incoming_bytes: usize) -> bool {
         let held = &mut *self.held;
         while let Some((&read, &oldest)) = held.order.first_key_value() {
             let over_budget =
@@ -268,14 +271,17 @@ impl DecimationCache {
             }
             // The least recently read envelope was drawn this frame only if
             // every one was. Past the stale bound alone, only an envelope
-            // this frame has not drawn gives way; see `STALE_ENTRY_CAP`.
-            if !over_budget
-                && held
-                    .map
-                    .get(&oldest)
-                    .is_some_and(|entry| entry.last_used == self.tick)
+            // this frame has not drawn gives way; see `STALE_ENTRY_CAP`. Past
+            // the budget the newcomer is turned away rather than one this
+            // frame drew: a frame reading more envelopes than the budget holds
+            // in the same order each time then keeps the part it read first,
+            // where evicting in order left it with none of them.
+            if held
+                .map
+                .get(&oldest)
+                .is_some_and(|entry| entry.last_used == self.tick)
             {
-                break;
+                return !over_budget;
             }
             held.order.remove(&read);
             if let Some(removed) = held.map.remove(&oldest) {
@@ -288,6 +294,7 @@ impl DecimationCache {
                 }
             }
         }
+        self.resident_bytes.saturating_add(incoming_bytes) <= self.byte_capacity
     }
 
     /// Fetch or compute a bounded display series for one trace at the given
@@ -494,8 +501,7 @@ impl DecimationCache {
             self.held.work.rebuilds += 1;
         }
         let bytes = entry_bytes(envelope.len());
-        if bytes <= self.byte_capacity {
-            self.evict_to_fit(bytes);
+        if bytes <= self.byte_capacity && self.evict_to_fit(bytes) {
             let held = &mut *self.held;
             held.reads += 1;
             let read = held.reads;
@@ -1521,6 +1527,29 @@ mod tests {
         draw_frame(&mut cache, 20_000, &x, &y, view);
         let steady = cache.work().since(first);
         assert_eq!((steady.rebuilds, steady.evictions), (0, 0));
+    }
+
+    /// A frame that reads more envelopes than the budget holds, in the same
+    /// order each time, keeps the part it read first: the next frame finds
+    /// that part, where evicting in order left it finding none.
+    #[test]
+    fn a_frame_reading_more_than_the_budget_holds_keeps_a_stable_part() {
+        let x: Vec<f64> = (0..2_000).map(f64::from).collect();
+        let y: Vec<f64> = x.iter().map(|value| (value * 0.01).sin()).collect();
+        let view = sweep_view(0.0, 1_999.0);
+        let mut cache = DecimationCache::default();
+        draw_frame(&mut cache, 1, &x, &y, view);
+        let one = cache.resident_bytes;
+        cache.invalidate();
+        // Room for a hundred of the thousand curves a frame draws.
+        cache.byte_capacity = one * 100;
+        draw_frame(&mut cache, 1_000, &x, &y, view);
+        let first = cache.work();
+        draw_frame(&mut cache, 1_000, &x, &y, view);
+        let second = cache.work().since(first);
+        assert_eq!(second.hits, 100, "the part the budget holds is found again");
+        assert_eq!(second.rebuilds, 900);
+        assert_eq!(second.evictions, 0, "nothing the frame drew gave way");
     }
 
     /// The stale bound still bounds what the reader has left: a view nobody
