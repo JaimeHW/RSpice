@@ -100,6 +100,16 @@ mod artifacts;
 mod deadline;
 mod response;
 
+/// The limits a cloud run executes under: the engine's shipped ones, fixed.
+///
+/// The cloud's hardware is shared between every account's runs, so a deck
+/// there is held to the limits a service holds input it did not write to,
+/// never to the memory of the machine the run lands on, as a desktop run of
+/// the reader's own deck is.
+fn cloud_limits() -> rspice_core::ResourceLimits {
+    rspice_core::ResourceLimits::default()
+}
+
 pub use deadline::{
     CANCELLED_FAILURE_CODE, DEFAULT_SOLVE_BUDGET, RunAbort, SOLVE_BUDGET_SECONDS_ENV, StopCause,
     TIME_LIMIT_FAILURE_CODE, solve_budget_from_env,
@@ -228,6 +238,7 @@ fn execute_bounded(
         CircuitContent::Deck { expanded_netlist } => expanded_netlist,
     };
 
+    // Parsed under the cloud's own limits, which the validated parse ships.
     let netlist = match Netlist::parse_validated(expanded_netlist) {
         Ok(netlist) => netlist,
         Err(error) => {
@@ -239,10 +250,12 @@ fn execute_bounded(
     };
 
     // Production solver configuration, pinned to the ngspice dialect the
-    // published netlist grammar targets. This is the exact configuration the
-    // release conformance covers; changing it is an engine_build change.
+    // published netlist grammar targets and to the cloud's own limits. This
+    // is the exact configuration the release conformance covers; changing it
+    // is an engine_build change.
     let engine = Engine::new(SimulationConfig {
         spice_dialect: SpiceDialect::Ngspice,
+        resource_limits: cloud_limits(),
         ..SimulationConfig::default()
     });
 
@@ -640,4 +653,24 @@ fn fft_schema_signature(netlist: &Netlist) -> Vec<String> {
             .map(|analysis| format!("output={:?};format={:?}", analysis.output, analysis.format)),
     );
     signature
+}
+
+#[cfg(test)]
+mod cloud_limit_tests {
+    /// A cloud run is held to the engine's shipped limits, whatever machine
+    /// it lands on: a 64 MB deck and 250,000 devices. The machine sizing a
+    /// desktop run gets lives in `rspice-simulation`, which this adapter
+    /// does not reach.
+    #[test]
+    fn a_cloud_run_keeps_the_shipped_limits() {
+        let limits = super::cloud_limits();
+        assert_eq!(limits, rspice_core::ResourceLimits::default());
+        assert_eq!(limits.max_netlist_bytes, 64 * 1024 * 1024);
+        assert_eq!(limits.max_flattened_elements, 250_000);
+        let manifest = include_str!("../Cargo.toml");
+        assert!(
+            !manifest.contains("rspice-simulation"),
+            "the adapter reaches no machine sizing"
+        );
+    }
 }
