@@ -1,4 +1,4 @@
-//! A Verilog-A source's compile, as the receipt the code workspace keeps.
+//! A Verilog-A source's compile, as the receipt the source editor keeps.
 //!
 //! A receipt speaks for one exact revision of a source bundle: its findings
 //! are bound to that revision, so an edit since makes them history. A compile

@@ -20,7 +20,7 @@ use crate::workbench::state::Workspace;
 
 /// Carry out what the source feature raised, in its context `cx`: export the
 /// deck from outside the netlist page, export the bill of materials, open
-/// the generated deck, open the Code workspace's find, validation and
+/// the generated deck, open the source editor's find, validation and
 /// document tools, language navigation from the caret, the Verilog-A
 /// compile and its build settings, and what the feature's dialogs,
 /// navigators and pages committed. What reaches past the context comes back,
@@ -287,7 +287,7 @@ fn answer_source_document(cx: &mut Cx<'_, SourceFeature>, request: SourceDocumen
 
 /// Go to definition, Find references and Rename symbol from the caret of the
 /// source editor on screen, saying why not when it cannot. Verilog-A
-/// answers through the project source index, over the code workspace's
+/// answers through the project source index, over the source editing
 /// parts; a netlist answers through its own language service.
 fn navigate_active_source(cx: &mut Cx<'_, SourceFeature>, command: SourceCommand) {
     let result = if source_editing::design_hosts_veriloga(cx.wb.workspace, &cx.model.workspace) {

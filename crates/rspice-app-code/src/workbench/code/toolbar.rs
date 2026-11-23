@@ -3,7 +3,7 @@
 //! its deck.
 //!
 //! They are the source feature's toolbars, drawn in its context. Each group
-//! asks what the code workspace shows at the point it draws, after any tool
+//! asks what the source editor shows at the point it draws, after any tool
 //! to its left has run.
 
 use crate::state::command_catalog::CommandKey;

@@ -655,7 +655,7 @@ pub fn front_generated(model: &mut Model, netlist: &mut NetlistDocumentState) {
 
 /// Select the immutable generated primary without deleting or changing an
 /// owned source or generated-diff document. This is an explicit document
-/// transition; navigating among Code workspace pages must not call it. It
+/// transition; navigating among the Netlist workspace's pages must not call it. It
 /// works over the model and the netlist editor's state.
 pub fn open_generated_primary_in(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     if model.netlist_artifacts.generated_document.is_none()
@@ -926,7 +926,7 @@ impl NetlistDocumentState {
             .map(|(_, unread)| std::sync::Arc::clone(unread))
     }
 
-    /// Whether a retained Code-workspace transaction owns exclusive input.
+    /// Whether a retained source editing transaction owns exclusive input.
     /// This is queried before painting, so keyboard shortcuts cannot mutate
     /// the document behind a modal during its opening frame.
     pub fn application_modal_open(&self) -> bool {

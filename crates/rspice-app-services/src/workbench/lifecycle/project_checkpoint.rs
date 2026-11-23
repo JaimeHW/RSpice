@@ -2823,7 +2823,7 @@ mod tests {
         state.model.workspace.content.project_sources_dirty = true;
 
         let (manifest, serialized) = prepare_checkpoint(&state, ProjectCheckpointReason::Manual)
-            .expect("complete Code workspace checkpoint prepares");
+            .expect("a checkpoint with the project-wide source prepares");
         assert_eq!(manifest.snapshot_digest, digest(serialized.as_bytes()));
         assert_eq!(manifest.snapshot_byte_len, serialized.len() as u64);
 

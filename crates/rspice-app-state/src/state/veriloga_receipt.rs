@@ -1,5 +1,5 @@
 //! What a Verilog-A compile established about its source: the receipt the
-//! code workspace keeps for the exact source it compiled, what the compile
+//! source editor keeps for the exact source it compiled, what the compile
 //! did to its cell's interface, and the device it made placeable.
 //!
 //! Runtime state only: none of it is persisted.

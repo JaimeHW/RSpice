@@ -60,7 +60,7 @@ fn project_of(source: &str) -> (ProjectId, ProjectSourceRegistry) {
 }
 
 /// The directive a project deck names the design by, and the name its X-card
-/// gives: the module's own, as the code workspace writes it.
+/// gives: the module's own, as the netlist writer writes it.
 fn directive(project_id: ProjectId, sources: &ProjectSourceRegistry) -> (String, String) {
     let bundle = sources.iter_bundles().next().expect("the design's bundle");
     let key = rspice_design::project_sources::project_veriloga_bundle_source_key(

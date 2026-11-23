@@ -108,7 +108,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
     );
 }
 
-/// Write `content` as the project-wide Verilog-A source, the code-workspace
+/// Write `content` as the project-wide Verilog-A source, the
 /// source a project-wide edit reaches, creating it the first time.
 fn edit_project_wide_source(state: &mut AppState, content: &str) {
     let project = &mut state.model.workspace.content;

@@ -1,5 +1,5 @@
 //! Clearing the design's execution context reaches past the results: the
-//! code workspace's runtime and the design check's findings go, a notice
+//! source editing state and the design check's findings go, a notice
 //! loses an offer that names a retired run, and the Console keeps its
 //! history.
 

@@ -39,7 +39,7 @@ fn has_ac_analysis(setup: &rspice_simulation_contract::setup_state::SimulationSe
         .any(|instance| instance.kind() == AnalysisKind::Ac)
 }
 
-/// Write `content` as the project-wide Verilog-A source, the code-workspace
+/// Write `content` as the project-wide Verilog-A source, the
 /// source a project-wide edit reaches, creating it the first time.
 fn edit_project_wide_source(state: &mut ServicesHost, content: &str) {
     let project = &mut state.model.workspace.content;

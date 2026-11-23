@@ -116,7 +116,7 @@ pub enum SourceCommand {
 /// importing a netlist or a Verilog-A file through the file workflow,
 /// importing an LTspice or QSPICE schematic, exporting the deck from outside
 /// the netlist page, exporting the bill of materials, the generated deck, the
-/// selected instance's line in it, the Code workspace's
+/// selected instance's line in it, the source editor's
 /// find and document tools, language navigation from
 /// the caret, the Verilog-A compile, its build settings and the symbol of
 /// the module it compiles; and, from the feature's dialogs, creating the

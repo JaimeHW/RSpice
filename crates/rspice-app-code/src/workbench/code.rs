@@ -738,7 +738,7 @@ fn schematic_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
 /// What the feature settles each frame before any surface draws.
 impl SourceFeature {
     /// Settle, in this order: a project the last frame replaced starts the
-    /// code workspace over, the Verilog-A import and compile that finished
+    /// source editing over, the Verilog-A import and compile that finished
     /// are taken, the compile a request asked for starts, and where the open
     /// module's symbol stands is measured.
     pub fn poll(cx: &mut Cx<'_, Self>, ctx: &Context) {
@@ -775,7 +775,7 @@ impl SourceFeature {
         );
     }
 
-    /// A project replaced since the last check starts the code workspace
+    /// A project replaced since the last check starts source editing
     /// over, and the run prepared for the old project is dropped.
     pub fn reset_after_project_change(cx: &mut Cx<'_, Self>) {
         let project_id = cx.model.workspace.content.project.id();
@@ -788,10 +788,10 @@ impl SourceFeature {
     }
 }
 
-/// What the code workspace's operations take, lent from the feature's
+/// What the source editing operations take, lent from the feature's
 /// context.
 impl SourceFeature {
-    /// The code workspace's parts, lent from `cx` for one call.
+    /// The source editing parts, lent from `cx` for one call.
     pub(in crate::workbench) fn workspace_parts<'c>(
         cx: &'c mut Cx<'_, Self>,
     ) -> SourceEditingParts<'c> {

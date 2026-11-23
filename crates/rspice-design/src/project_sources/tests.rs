@@ -724,7 +724,7 @@ fn veriloga_runtime_identities_separate_project_bundle_and_selected_module() {
     ));
 }
 
-/// A registry holding one project-wide Verilog-A Code Workspace bundle.
+/// A registry holding one project-wide Verilog-A bundle.
 fn veriloga_registry() -> ProjectSourceRegistry {
     let source = ProjectSourceDocument::try_new(
         "sensor.va",
@@ -734,7 +734,7 @@ fn veriloga_registry() -> ProjectSourceRegistry {
     ProjectSourceRegistry::try_from_documents([source]).unwrap()
 }
 
-/// A Code Workspace bundle given to a cell view is the same source: same
+/// A project-wide bundle given to a cell view is the same source: same
 /// identity, same bytes, same validation. Only the owner and the revision
 /// that records the move are new, and the move cannot happen twice.
 #[test]

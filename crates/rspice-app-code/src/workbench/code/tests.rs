@@ -16,7 +16,7 @@ pub(crate) type SourceHarness = FeatureHarness<SourceFeature>;
 
 /// The source feature on its own, over what the application's test instance
 /// starts with: the model over the empty PDK configuration a test session
-/// reads, a new session's workbench, the code workspace answering for that
+/// reads, a new session's workbench, source editing answering for that
 /// project, and the untitled project marked pristine.
 pub(crate) fn harness() -> SourceHarness {
     let model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);

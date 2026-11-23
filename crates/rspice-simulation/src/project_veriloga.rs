@@ -250,7 +250,7 @@ pub struct VerilogASourceOperationToken {
     pub revision: u64,
     pub closure_digest: rspice_vocabulary::product::ContentDigest,
     /// Exact explicit module selection requested by a cell-view contract.
-    /// `None` preserves the Code Workspace's compiler-selected module mode.
+    /// `None` keeps the project-wide source's compiler-selected module mode.
     pub requested_module_digest: Option<rspice_vocabulary::product::ContentDigest>,
 }
 

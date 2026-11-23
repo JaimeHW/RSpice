@@ -92,7 +92,7 @@ pub struct SourceHandles {
     pub project_id: crate::product::ProjectId,
 }
 
-/// What the code workspace's operations read and change, lent for the one
+/// What the source editing operations read and change, lent for the one
 /// call: the source documents' state, the deck's, the model, the session,
 /// the platform's state, and the run tier with its controller and the
 /// export IO.

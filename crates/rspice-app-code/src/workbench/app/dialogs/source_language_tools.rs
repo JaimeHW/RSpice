@@ -180,7 +180,7 @@ fn list_references(
 
 /// Rename symbol: the name under the caret, the new name, and each line
 /// renaming to it changes, before and after, worked out once for each new
-/// name; or why it refuses. Over the Code workspace's state, the model and
+/// name; or why it refuses. Over the source editing state, the model and
 /// the platform's state. Enter renames; Esc and Cancel close. Returns
 /// whether the reader asked for the rename.
 pub(in crate::workbench) fn render_rename_symbol_form(

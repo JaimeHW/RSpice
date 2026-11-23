@@ -70,7 +70,7 @@ pub fn source_document_is_editable(
 }
 
 /// Resolve edit authority for an exact source bundle, over the model, the
-/// Code workspace's runtime state and the platform's. A Verilog-A bundle
+/// source editing state and the platform's. A Verilog-A bundle
 /// belongs to its cell view.
 pub fn source_bundle_document_is_editable_in(
     model: &Model,

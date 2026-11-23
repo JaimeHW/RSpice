@@ -63,7 +63,7 @@ fn revision_rows(bundle: &ProjectSourceBundle) -> Vec<RevisionRow> {
         .collect()
 }
 
-/// Draw the revision history open on the Code workspace's runtime state,
+/// Draw the revision history open on the source editing state,
 /// over the model and the platform's state. Returns the restore it asked
 /// for, which the shell carries out.
 pub(super) fn render(

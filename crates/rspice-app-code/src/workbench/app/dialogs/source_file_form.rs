@@ -8,7 +8,7 @@
 //! name the bundle would reject is said under the field in plain words, and
 //! a file that cannot be deleted says why in the footer.
 //!
-//! The draft is the Code workspace's `source_file_dialog`; committing goes
+//! The draft is the source editing state's `source_file_dialog`; committing goes
 //! through the same transaction every other surface uses.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]

@@ -174,7 +174,7 @@ impl RSpiceApp {
         )
     }
 
-    /// The parts of the application the code workspace's operations read
+    /// The parts of the application the source editing operations read
     /// and change, lent for the one call.
     #[cfg(test)]
     pub(crate) fn source_editing_parts(

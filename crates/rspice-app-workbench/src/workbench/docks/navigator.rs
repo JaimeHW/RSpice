@@ -68,8 +68,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, header_height: f32) {
     let workspace = app.workbench().workspace;
     let section = app.navigator_section(workspace);
     // Canonical navigator order: header, search, then the workspace's own
-    // navigator, which may lead with tabs of its own (the Code workspace's
-    // page tabs, then the page's outline).
+    // navigator, which may lead with tabs of its own.
     header(ui, app, header_height);
     if section.container_draws_search {
         workspace_search(ui, app, workspace, &section.placeholder);

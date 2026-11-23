@@ -36,7 +36,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 const CONTROL_GAP: f32 = 6.0;
 
 /// The shell's `open_source_document_dialog`, over the workspace in front, the model,
-/// the Code workspace's runtime state, the netlist editor's state and the
+/// the source editing state, the netlist editor's state and the
 /// platform's state. Only a deck has the dialog: a Verilog-A file's
 /// operations are on its row of the Files rail.
 pub fn open_source_document_dialog_in(
@@ -165,7 +165,7 @@ pub fn close_netlist_lifecycle(code: &mut SourceEditingState) {
     code.source_document_dialog = false;
 }
 
-/// Draw the source document dialogs over the Code workspace's runtime state,
+/// Draw the source document dialogs over the source editing state,
 /// the netlist editor's state, the model, the workbench session and the
 /// platform's state: an open file form, else an open revision history, else
 /// Deck and include folders. What a choice still needs of the whole

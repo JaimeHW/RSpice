@@ -313,7 +313,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         state.cloud.license = license;
         state.platform.native_project_binding_receipt = native_project_binding_receipt;
         state.platform.browser_project_binding_receipt = browser_project_binding_receipt;
-        // The code workspace `Default` prepared belongs to the bootstrapped
+        // The source editing state `Default` prepared belongs to the bootstrapped
         // project it compiled; the restored project's starts empty.
         state.code.source_editing = Default::default();
         de.ui.scatter(&mut state);

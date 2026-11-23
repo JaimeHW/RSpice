@@ -4,7 +4,7 @@
 //! compilation. Logical paths are portable project identities rather than host
 //! filesystem paths, so the same sealed closure is valid on native and WebAssembly
 //! targets. The registry also provides a deterministic migration for the original
-//! one-document Code Workspace representation.
+//! one-document project-wide source representation.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -189,7 +189,7 @@ const ACCEPTED_ROOT_EXTENSIONS: &[&str] = &[".va", ".vams", ".v"];
 /// [`ACCEPTED_ROOT_EXTENSIONS`] as the sentence that names them.
 const ACCEPTED_ROOT_EXTENSION_TEXT: &str = "'.va', '.vams' or '.v'";
 
-/// Product owner of a source bundle. The Code Workspace owner preserves the
+/// Product owner of a source bundle. The project-wide owner preserves the
 /// singleton editor contract; cell-view owners make hierarchy-bound behavioral
 /// sources first-class project artifacts.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -819,7 +819,7 @@ impl ProjectSourceRegistry {
         Ok(registry)
     }
 
-    /// Insert a compatibility Code Workspace singleton.
+    /// Insert a compatibility project-wide singleton.
     pub fn insert(&mut self, document: ProjectSourceDocument) -> Result<(), ProjectSourceError> {
         if self.get().is_some() {
             return Err(ProjectSourceError::DuplicateLanguage);
@@ -922,7 +922,7 @@ impl ProjectSourceRegistry {
     }
 
     /// Remove cell-view bundles whose owner no longer exists in the project
-    /// library/view catalog. Code Workspace sources are independent documents
+    /// library/view catalog. Project-wide sources are independent documents
     /// and are never affected. Returned identities allow callers to invalidate
     /// transient compiler evidence without relying on paths or display names.
     pub fn retain_cell_view_bundles_for(
@@ -1133,7 +1133,7 @@ impl ProjectSourceRegistry {
     /// Re-own every matching cell-view bundle in one transaction. Bundle
     /// identities remain stable, while revision/digest/validation advance
     /// atomically so stale compiled artifacts cannot publish under the renamed
-    /// owner. Code Workspace sources are never cell-view owned and never move.
+    /// owner. Project-wide sources are never cell-view owned and never move.
     fn rename_cell_view_owners(
         &mut self,
         matches: impl Fn(&CellViewRef) -> bool,
@@ -1178,7 +1178,7 @@ impl ProjectSourceRegistry {
         Ok(changed)
     }
 
-    /// Give the Code Workspace bundle to the cell view `reference`, returning
+    /// Give the project-wide bundle to the cell view `reference`, returning
     /// its identity, or `None` when there is no such bundle.
     ///
     /// The bundle keeps its identity, files, edges and build profile; the
@@ -1259,7 +1259,7 @@ impl ProjectSourceRegistry {
     }
 
     /// Synchronize one cell-view-owned bundle from another registry without
-    /// touching Code Workspace or sibling cell-view sources.
+    /// touching the project-wide source or sibling cell-view sources.
     pub fn synchronize_cell_view_bundle_from(
         &mut self,
         reference: &CellViewRef,
@@ -1291,7 +1291,7 @@ impl ProjectSourceRegistry {
         Ok(true)
     }
 
-    /// Synchronize only singleton Code Workspace sources. Cell-view bundles
+    /// Synchronize only the singleton project-wide source. Cell-view bundles
     /// are separate lifecycle documents and are preserved exactly.
     pub fn synchronize_project_wide_bundles_from(
         &mut self,
@@ -1763,9 +1763,9 @@ pub enum ProjectSourceError {
     QualificationIdentityMismatch,
     #[error("source file '{file_name}' exhausted its revision space")]
     RevisionExhausted { file_name: String },
-    #[error("the project already owns a Verilog-A Code Workspace source")]
+    #[error("the project already has a project-wide Verilog-A source")]
     DuplicateLanguage,
-    #[error("the project has no Verilog-A Code Workspace source")]
+    #[error("the project has no project-wide Verilog-A source")]
     MissingLanguage,
     #[error("project source identity {id} is duplicated")]
     DuplicateIdentity { id: ProjectSourceId },

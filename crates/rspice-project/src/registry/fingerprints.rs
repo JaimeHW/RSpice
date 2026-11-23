@@ -226,7 +226,7 @@ pub(super) fn stimulus_library_digest(
     digest(&workspace.stimulus_library)
 }
 
-/// The decks, the code workspace's own sources and the added lines.
+/// The decks, the project-wide sources and the added lines.
 pub(super) fn netlist_source_digest(workspace: &ProjectWorkspace) -> Result<ContentDigest, String> {
     let project_wide_sources = workspace
         .project_sources

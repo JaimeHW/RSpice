@@ -1,4 +1,4 @@
-//! Governed in-memory Verilog-A compilation for the Code workspace.
+//! Governed in-memory Verilog-A compilation for the sources Design edits.
 
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
@@ -151,7 +151,7 @@ fn view_names_no_module(model: &Model, reference: &crate::state::CellViewRef) ->
 }
 
 /// The open Verilog-A view's source and the file its editor shows, read
-/// from the model and the Code workspace's runtime state alone.
+/// from the model and the source editing state alone.
 pub fn selected_veriloga_editor_snapshot_in(
     model: &Model,
     code: &SourceEditingState,

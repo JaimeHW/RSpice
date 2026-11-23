@@ -383,7 +383,7 @@ pub fn open_executed_deck_in(
 /// Open one point's executed deck and put the reader in front of it.
 ///
 /// Callers ask this from the Verify workspace's corners row, from a run's
-/// receipt in the inspector, and from the code workspace's own run strip, and
+/// receipt in the inspector, and from the Netlist page's own run strip, and
 /// all of them are somewhere else when they ask — so the workspace change
 /// belongs here rather than at each call site, where one of them would
 /// eventually forget it.
