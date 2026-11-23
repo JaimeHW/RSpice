@@ -914,7 +914,10 @@ pub(crate) fn show_virtual_text_editor(
             };
             let sticky_gutter_left = origin.x + viewport.left();
             let sticky_separator = sticky_gutter_left + style.gutter_width;
-            let lanes = GutterLanes::of(style);
+            let lanes = GutterLanes::of(
+                style,
+                line_number_width(session.model.line_count(), char_width),
+            );
             let code_clip = ui.clip_rect().intersect(egui::Rect::from_min_max(
                 egui::pos2(sticky_separator + 1.0, ui.clip_rect().top()),
                 ui.clip_rect().right_bottom(),
@@ -1657,9 +1660,11 @@ fn advance_maximum_column_scan(session: &mut VirtualEditorSession) {
 }
 
 /// Where the gutter's parts sit, as distances from its left edge: a
-/// problem's mark in a lane of its own, clear of the line number; the
-/// number, right-aligned; and a folded line's mark in a lane at the code's
-/// edge. Each lane is as wide as a mark of the text's size and its room.
+/// problem's mark centred in the room left of the widest line number, so a
+/// gutter wider than its parts need keeps the mark in the middle of its room
+/// rather than against the edge; the number, right-aligned; and a folded
+/// line's mark in a lane at the code's edge. Each lane is at least as wide as
+/// a mark of the text's size and its room.
 #[derive(Clone, Copy, Debug)]
 struct GutterLanes {
     mark_side: f32,
@@ -1677,15 +1682,24 @@ impl GutterLanes {
         (GUTTER_MARK_SIDE * style.line_height / GUTTER_MARK_ROW).round()
     }
 
-    fn of(style: &VirtualEditorStyle<'_>) -> Self {
+    /// The lanes of `style`'s gutter beside line numbers at most
+    /// `number_width` wide.
+    fn of(style: &VirtualEditorStyle<'_>, number_width: f32) -> Self {
         let lane = Self::lane(style);
+        let number_right = style.gutter_width - lane;
         Self {
             mark_side: Self::mark_side(style),
-            mark_center: lane * 0.5,
-            number_right: style.gutter_width - lane,
+            mark_center: ((number_right - number_width) * 0.5).max(lane * 0.5),
+            number_right,
             fold_center: style.gutter_width - lane * 0.5,
         }
     }
+}
+
+/// Width of the number of the last of `lines`, in characters `char_width`
+/// wide.
+fn line_number_width(lines: usize, char_width: f32) -> f32 {
+    (lines.max(1).ilog10() + 1) as f32 * char_width
 }
 
 /// `style` with a gutter wide enough for its two lanes and the number of the
@@ -1696,8 +1710,7 @@ fn gutter_fitting<'s, 'a>(
     lines: usize,
     char_width: f32,
 ) -> std::borrow::Cow<'s, VirtualEditorStyle<'a>> {
-    let digits = lines.max(1).ilog10() + 1;
-    let needed = 2.0 * GutterLanes::lane(style) + digits as f32 * char_width;
+    let needed = 2.0 * GutterLanes::lane(style) + line_number_width(lines, char_width);
     if needed <= style.gutter_width {
         return std::borrow::Cow::Borrowed(style);
     }
