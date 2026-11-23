@@ -176,7 +176,7 @@ fn labelled_row<R>(ui: &mut Ui, label: &str, wrap: bool, body: impl FnOnce(&mut 
     );
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
     inner

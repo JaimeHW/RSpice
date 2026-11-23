@@ -191,7 +191,7 @@ fn tab_header(
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border_strong),
     );
     let first = Rect::from_min_size(rect.min, vec2(width, row_height));

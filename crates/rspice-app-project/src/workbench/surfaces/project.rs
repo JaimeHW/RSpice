@@ -180,7 +180,7 @@ pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
         });
     ui.painter().hline(
         shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
+        shown.response.rect.bottom() - 0.5,
         Stroke::new(1.0, tokens.color.border),
     );
 }
@@ -326,7 +326,7 @@ fn workspace_empty_table_row(ui: &mut Ui, width: f32, text: &str) {
         ui.allocate_exact_size(vec2(width, workspace_table_row_height(ui)), Sense::hover());
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, tokens.color.border),
     );
     let font = theme::sans(tokens::FS_0, FontWeight::Regular);

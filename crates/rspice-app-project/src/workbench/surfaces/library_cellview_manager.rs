@@ -172,7 +172,7 @@ fn surface_header(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
         });
     ui.painter().hline(
         shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
+        shown.response.rect.bottom() - 0.5,
         Stroke::new(1.0, tokens.color.border_strong),
     );
     ui.ctx().accesskit_node_builder(shown.response.id, |node| {
@@ -324,7 +324,7 @@ fn page_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         });
     ui.painter().hline(
         shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
+        shown.response.rect.bottom() - 0.5,
         Stroke::new(1.0, tokens.color.border_strong),
     );
     ui.ctx().accesskit_node_builder(shown.response.id, |node| {

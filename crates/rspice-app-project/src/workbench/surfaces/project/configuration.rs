@@ -270,7 +270,7 @@ fn toolbar(
         });
     ui.painter().hline(
         shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
+        shown.response.rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border_strong),
     );
     intent
@@ -626,7 +626,7 @@ fn section_header(ui: &mut Ui, title: &str, meta: &str) {
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border_strong),
     );
     ui.painter().text(

@@ -73,7 +73,7 @@ fn landing_header(ui: &mut Ui) {
     ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
     let content = centered_content_rect(rect, DESKTOP_GUTTER, CONTENT_MAX_WIDTH);
@@ -349,7 +349,7 @@ fn recent_toolbar(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, shown: usize) {
         });
     ui.painter().hline(
         frame.response.rect.x_range(),
-        frame.response.rect.bottom(),
+        frame.response.rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
 }
@@ -573,7 +573,7 @@ fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, problem: Option<
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().hline(
         rect.x_range(),
-        rect.bottom(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
     ui.painter().text(
