@@ -1,7 +1,7 @@
 //! The deck in front of the Netlist workspace, in whole frames of the
 //! application, for a project its deck drives: the generated netlist, with
 //! no schematic to generate one from, stands on a tab beside the deck's,
-//! which brings the deck back, and the project overview's Open deck and
+//! which brings the deck back, and the project overview's Source deck and
 //! the landing's Open the deck bring the deck to the front whatever was
 //! there.
 
@@ -53,15 +53,15 @@ fn the_decks_tab_stands_beside_the_generated_netlist_and_brings_the_deck_back() 
     );
 }
 
-/// Open deck on the project overview's Source deck row brings the deck to
-/// the front of the Netlist workspace, whatever was in front there.
+/// The deck's name on the project overview's Source deck fact brings the
+/// deck to the front of the Netlist workspace, whatever was in front there.
 #[test]
 fn the_overviews_open_deck_brings_the_deck_to_the_front() {
     let (mut replay, _) = deck_project_on_its_generated_netlist();
     replay.app.state.workbench.activate(Workspace::Project);
     replay.app.state.project.project_page = ProjectPage::Overview;
 
-    replay.click("Open deck", Role::Link);
+    replay.click("front_end.sp", Role::Link);
 
     assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
     assert!(
