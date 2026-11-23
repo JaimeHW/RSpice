@@ -1772,7 +1772,7 @@ mod tests {
         assert_eq!(waiting.metadata().memory_warning, Some(warning));
         assert_eq!(
             warning.message(),
-            "This design's 262,145 devices need about 1.3 GB of memory; 512 MB of 16.0 GB is \
+            "This design's 262,145 devices need about 768 MB of memory; 512 MB of 16.0 GB is \
              free. Other programs slow while it runs."
         );
 
@@ -1781,17 +1781,17 @@ mod tests {
         let (deck_within, path_within) = nested_deck("machine-small", 60, 3);
         let small = RunPreparationInputs {
             machine_memory: Some(MachineMemory {
-                installed_bytes: 3 * gigabytes / 4,
-                free_bytes: gigabytes / 2,
+                installed_bytes: gigabytes / 2,
+                free_bytes: gigabytes / 4,
             }),
             ..fixture.inputs()
         };
         let refused = build_prepared_manual_deck(&small, manual(&deck_within, &path_within))
-            .expect_err("768 MB does not hold the design");
+            .expect_err("512 MB does not hold the design");
         assert_eq!(
             refused.message(),
-            "This design has 216,001 devices. Running it needs about 1.0 GB of memory, more than \
-             the 768 MB this computer has. Run it on a computer with more memory."
+            "This design has 216,001 devices. Running it needs about 633 MB of memory, more than \
+             the 512 MB this computer has. Run it on a computer with more memory."
         );
 
         // Without a machine to size them by, the shipped count still holds.

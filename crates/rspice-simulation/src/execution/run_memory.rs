@@ -46,61 +46,78 @@ pub struct MachineMemory {
     pub free_bytes: u64,
 }
 
-/// What one device of the flattened deck costs a run at its peak, from the
-/// deck's flattening through the solved circuit and its first results.
+/// What one device of the flattened deck costs a run at its peak beyond the
+/// deck the editor holds, from the deck's flattening through the solved
+/// circuit and its results: what a run needs that is not yet in use when
+/// Run is pressed.
 ///
-/// Measured on the desktop app running a design of 32^4 resistors placed
-/// through four levels of hierarchy: 1,082,401 devices peaked at 5.0 GB.
-pub(crate) const RUN_BYTES_PER_DEVICE: u64 = 5 * 1024;
+/// Measured with a counting allocator on the release app running the 100 MB
+/// post-layout scale deck to results from the Netlist workspace: its
+/// 1,230,160 devices peaked 3.46 GB above the open deck, 2,811 bytes a
+/// device, and the process's private bytes grew 2.79 GB. Rounded up. With
+/// the deck open, the editor and its check held 4.3 GB more, so the whole
+/// process peaked at 5.8 KB a device.
+pub(crate) const RUN_BYTES_PER_DEVICE: u64 = 3 * 1024;
 
 /// What one circuit node, or one unknown of the system the run solves, costs
-/// a run at its peak: its name and index, its row of the matrix and its
-/// entries in every solution and history vector.
-pub(crate) const RUN_BYTES_PER_UNKNOWN: u64 = 4 * 1024;
-
-/// What one retained result value costs: the sample, its place in a column
-/// and the column's share of what indexes it.
-const RUN_BYTES_PER_RESULT_VALUE: u64 = 16;
-
-/// What one byte of deck text costs the app at its peak while a run of the
-/// deck is prepared: the editor's text, the deck with its includes read in,
-/// the sealed copy the run executes and what the parse keeps of each line's
-/// text.
+/// a run at its peak beyond its devices: its name and index, its row of the
+/// matrix and its entries in every solution vector.
 ///
-/// Measured on the release app preparing, from the Netlist workspace, a
-/// 100 MB deck of comment lines 100 characters long (1.0 M lines, no
-/// devices): it peaked at 6.6 bytes for each byte, once its lines are
-/// counted at [`RUN_BYTES_PER_SOURCE_LINE`].
-const RUN_BYTES_PER_SOURCE_BYTE: u64 = 7;
+/// Measured with a counting allocator on the release app running 200,000
+/// resistors to results from the Netlist workspace: between two nodes they
+/// peaked at 431.7 MB, in a chain of 200,000 nodes at 494.0 MB, 312 bytes a
+/// node. Rounded up.
+pub(crate) const RUN_BYTES_PER_UNKNOWN: u64 = 320;
+
+/// What one result value an analysis keeps in memory costs: the sample, the
+/// working copies it is solved and gathered in, and its place in the
+/// result's columns. A transient streams its values to the results store
+/// and keeps a few hundred kilobytes, so the costliest is an analysis that
+/// keeps them, an AC sweep.
+///
+/// Measured with a counting allocator on the release app running an RC
+/// network's AC sweep of a million frequencies, three signals at each, from
+/// the Netlist workspace: it peaked at 395 MB, 132 bytes a value. Rounded
+/// up.
+const RUN_BYTES_PER_RESULT_VALUE: u64 = 136;
+
+/// What one byte of deck text costs while a run of the deck is prepared,
+/// beyond the deck the editor holds: the deck with its includes read in,
+/// the sealed copy the run executes and what the parse keeps of each line.
+///
+/// Measured with a counting allocator on the release app pressing Run on
+/// the Netlist workspace with the deck open. A 100 MB deck of 1.0 M comment
+/// lines peaked at 622 MB above the open deck, and one of 50 M two-character
+/// lines at 12.5 GB: together, 3.8 bytes a byte and 243 bytes a line
+/// ([`RUN_BYTES_PER_SOURCE_LINE`]). Rounded up.
+const RUN_BYTES_PER_SOURCE_BYTE: u64 = 4;
 
 /// What one line of deck text costs beyond its bytes while a run of the
 /// deck is prepared: its entry in the line index of each copy, and its
 /// place among the parse's logical lines. A device line costs its device
 /// besides, at [`RUN_BYTES_PER_DEVICE`].
 ///
-/// Measured on the release app preparing, from the Netlist workspace, a
-/// 100 MB deck of 50 M two-character comment lines: 170 bytes a line, its
-/// bytes at [`RUN_BYTES_PER_SOURCE_BYTE`] taken out.
-const RUN_BYTES_PER_SOURCE_LINE: u64 = 170;
+/// Measured with [`RUN_BYTES_PER_SOURCE_BYTE`]: 243 bytes a line. Rounded
+/// up.
+const RUN_BYTES_PER_SOURCE_LINE: u64 = 250;
 
 /// What one byte of a data file a source reads (a `PWL file=`, a code
 /// model's table) costs the run that reads it: the file's text while it is
 /// parsed.
 ///
-/// Measured on the release app running a deck whose one source reads a
-/// 100 MB PWL file of 6.3 M points written with 24 digits apiece: it peaked
-/// at 1.1 bytes for each byte of the file, its values counted at
-/// [`RUN_BYTES_PER_DATA_VALUE`].
-const RUN_BYTES_PER_DATA_BYTE: u64 = 2;
+/// Measured with a counting allocator reading 20 MB tables of 1.1 M long
+/// and 4.2 M short values through `table_file`, the costliest reader: 45 MB
+/// and 121 MB at their peaks, together 0.96 bytes a byte and 24 bytes a
+/// value ([`RUN_BYTES_PER_DATA_VALUE`]). `akima_file` costs 0.14 bytes a
+/// byte and 15.7 a value; a PWL file, read as a stream, 0.18 and 15.8.
+/// Rounded up.
+const RUN_BYTES_PER_DATA_BYTE: u64 = 1;
 
 /// What one value of a data file costs the run that reads it: the parsed
-/// value, its share of the point it is in, and the copy the shared cache
-/// keeps between runs.
+/// value and its share of the point it is in.
 ///
-/// Measured on the release app running a deck whose one source reads a
-/// 100 MB PWL file of 25 M points written as short integers: 34 bytes a
-/// value, the file's bytes at [`RUN_BYTES_PER_DATA_BYTE`] taken out.
-const RUN_BYTES_PER_DATA_VALUE: u64 = 34;
+/// Measured with [`RUN_BYTES_PER_DATA_BYTE`]: 24 bytes a value.
+const RUN_BYTES_PER_DATA_VALUE: u64 = 24;
 
 /// The share of the memory installed the shared caches may keep between
 /// runs: one byte in this many. The caches hold what runs read so that a
@@ -183,7 +200,9 @@ pub const POLICY: [(ResourceKind, FieldPolicy); 17] = {
         (ResourceKind::IncludeDepth, Kept),
         // How deep subcircuits nest: a recursion guard, as include depth is.
         (ResourceKind::HierarchyDepth, Kept),
-        // What the flattened deck holds, and the system its run solves.
+        // What the flattened deck holds, and the system its run solves. A
+        // node or an unknown comes with the device that makes it, so each is
+        // sized with one.
         (
             ResourceKind::FlattenedElements,
             Sized {
@@ -193,13 +212,13 @@ pub const POLICY: [(ResourceKind, FieldPolicy); 17] = {
         (
             ResourceKind::CircuitNodes,
             Sized {
-                bytes_each: RUN_BYTES_PER_UNKNOWN,
+                bytes_each: RUN_BYTES_PER_DEVICE + RUN_BYTES_PER_UNKNOWN,
             },
         ),
         (
             ResourceKind::MatrixUnknowns,
             Sized {
-                bytes_each: RUN_BYTES_PER_UNKNOWN,
+                bytes_each: RUN_BYTES_PER_DEVICE + RUN_BYTES_PER_UNKNOWN,
             },
         ),
         // The values one result keeps.
@@ -650,31 +669,31 @@ mod tests {
     fn a_run_fits_warns_or_is_refused_by_the_memory_it_needs() {
         let memory = MachineMemory {
             installed_bytes: 16 * GB,
-            free_bytes: 3 * GB,
+            free_bytes: 2 * GB,
         };
         assert_eq!(check_fits(1000, memory), MemoryFit::Fits);
         let MemoryFit::Warn(warning) = check_fits(1_048_577, memory) else {
-            panic!("five gigabytes fit in sixteen, not in three");
+            panic!("three gigabytes fit in sixteen, not in two");
         };
         assert_eq!(
             warning.message(),
-            "This design's 1,048,577 devices need about 5.0 GB of memory; 3.0 GB of 16.0 GB is \
+            "This design's 1,048,577 devices need about 3.0 GB of memory; 2.0 GB of 16.0 GB is \
              free. Other programs slow while it runs."
         );
         assert_eq!(
             warning.status(),
-            "Needs about 5.0 GB of memory · 3.0 GB free"
+            "Needs about 3.0 GB of memory · 2.0 GB free"
         );
         let small = MachineMemory {
             installed_bytes: GB,
             free_bytes: GB / 2,
         };
-        let MemoryFit::Refuse(refused) = check_fits(250_000, small) else {
-            panic!("1.2 GB does not fit in 1 GB");
+        let MemoryFit::Refuse(refused) = check_fits(500_000, small) else {
+            panic!("1.4 GB does not fit in 1 GB");
         };
         assert_eq!(
             refused.message(),
-            "This design has 250,000 devices. Running it needs about 1.2 GB of memory, more than \
+            "This design has 500,000 devices. Running it needs about 1.4 GB of memory, more than \
              the 1.0 GB this computer has. Run it on a computer with more memory."
         );
     }
@@ -700,7 +719,7 @@ mod tests {
         let refused = too_big_for(error, Some(memory));
         assert_eq!(
             refused.message(),
-            "This design has more than 3,355,443 devices. Running it needs more than the 16.0 GB \
+            "This design has more than 5,592,405 devices. Running it needs more than the 16.0 GB \
              of memory this computer has. Run it on a computer with more memory."
         );
         assert!(
