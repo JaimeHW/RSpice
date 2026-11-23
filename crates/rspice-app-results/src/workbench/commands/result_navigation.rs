@@ -29,6 +29,8 @@ pub(crate) fn ticked_result_quantities(
     let Some(active) = simulation.active_run() else {
         return ticked;
     };
+    let revision = simulation.retained.runs.revision();
+    let indices = &results.session.signal_indices;
     let overlaid = simulation
         .view
         .overlay_dataset_ids
@@ -41,17 +43,47 @@ pub(crate) fn ticked_result_quantities(
             .iter()
             .filter_map(|run| {
                 let other = matching_overlay_analysis(analysis.as_ref(), run)?;
-                Some((AnalysisPresentationKey::new(run.dataset_id, other), other))
+                let other_key = AnalysisPresentationKey::new(run.dataset_id, other);
+                Some((other_key, other, indices.index(&revision, other_key, other)))
             })
             .collect::<Vec<_>>();
-        for waveform in &analysis.waveforms {
+        // The columns whose tick to read. With the analysis indexed, those
+        // its dataset plots and those the reader or the open saved pane
+        // names, for no other column can be on the plot: a tick after a
+        // million-device run is not a walk of a million columns.
+        let columns: Box<dyn Iterator<Item = usize>> =
+            match indices.index(&revision, analysis_key, &analysis.data) {
+                Some(index) => {
+                    let mut columns = index.plotted().to_vec();
+                    let named = results
+                        .session
+                        .waveform_visibility
+                        .keys()
+                        .filter(|key| key.analysis() == analysis_key)
+                        .map(SourceWaveformPresentationKey::source_name)
+                        .chain(pane_trace_labels(model, results, analysis_key));
+                    for name in named {
+                        columns.extend(index.columns_named(&analysis.data, name));
+                    }
+                    columns.sort_unstable();
+                    columns.dedup();
+                    Box::new(columns.into_iter())
+                }
+                None => Box::new(0..analysis.waveforms.len()),
+            };
+        for column in columns {
+            let waveform = &analysis.waveforms[column];
             let key = SourceWaveformPresentationKey::new(analysis_key, waveform.name.clone());
             if !waveform_plotted(model, results, &key, &waveform.name, waveform.visible) {
                 continue;
             }
             ticked.insert(ResultBrowserSelectionKey::Waveform(key));
-            for (other_key, other) in &matches {
-                if other.waveforms.iter().any(|w| w.name == waveform.name) {
+            for (other_key, other, other_index) in &matches {
+                let overlays = match other_index {
+                    Some(index) => index.columns_named(other, &waveform.name).next().is_some(),
+                    None => other.waveforms.iter().any(|w| w.name == waveform.name),
+                };
+                if overlays {
                     ticked.insert(ResultBrowserSelectionKey::Waveform(
                         SourceWaveformPresentationKey::new(*other_key, waveform.name.clone()),
                     ));
@@ -60,6 +92,35 @@ pub(crate) fn ticked_result_quantities(
         }
     }
     ticked
+}
+
+/// The names of the traces of the open saved pane on `analysis`, whose ticks
+/// it decides.
+fn pane_trace_labels<'a>(
+    model: &'a Model,
+    results: &crate::workbench::documents::result_document::ResultsState,
+    analysis: AnalysisPresentationKey,
+) -> Vec<&'a str> {
+    let Some(context) = results
+        .session
+        .persistent_pane_context
+        .filter(|context| context.analysis == analysis)
+    else {
+        return Vec::new();
+    };
+    model
+        .workspace
+        .content
+        .visualization_document(context.document_id)
+        .map(|document| {
+            document
+                .traces()
+                .iter()
+                .filter(|trace| trace.pane_id == context.pane_id)
+                .map(|trace| trace.label.as_str())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Whether "Export result dataset…" has a displayed view to write.

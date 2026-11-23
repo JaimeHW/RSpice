@@ -1028,6 +1028,7 @@ fn ticked_quantities(ctx: &egui::Context, state: &ResultsParts<'_>) -> TickedQua
             crate::workbench::documents::result_document::resolve_result_browser_selection(
                 &ticked,
                 &state.model.simulation.retained.runs,
+                (&state.results.session.signal_indices, &revision),
             );
         let facts = TickedFacts::of(&selection, state);
         (
@@ -1197,8 +1198,8 @@ fn browser_rows(
 
 /// Everything besides the retained runs themselves that the row model reads,
 /// as one number: the data version, the query, the facets, the reader's
-/// recent signals, the active run, and each analysis's integrity and
-/// currentness.
+/// recent signals where the Recent scope lists them, the active run, and each
+/// analysis's integrity and currentness.
 fn browser_rows_fingerprint(
     state: &ResultsParts<'_>,
     integrity: &std::collections::HashMap<AnalysisPresentationKey, bool>,
@@ -1218,12 +1219,16 @@ fn browser_rows_fingerprint(
     state.workbench.navigator_filter().hash(&mut hasher);
     (kind as u8, layout as u8, order as u8, scope as u8).hash(&mut hasher);
     (producer, show_internal, active_run, expression_query_match).hash(&mut hasher);
-    state.results.session.recent_signals.hash(&mut hasher);
-    state
-        .results
-        .session
-        .recent_result_artifacts
-        .hash(&mut hasher);
+    // Only the Recent scope lists by recency: elsewhere a signal ticked, and
+    // so used, leaves the rows as they were.
+    if scope == ResultsBrowserScope::Recent {
+        state.results.session.recent_signals.hash(&mut hasher);
+        state
+            .results
+            .session
+            .recent_result_artifacts
+            .hash(&mut hasher);
+    }
     let reads = state.results_reads();
     for run in state.model.simulation.retained.runs.iter() {
         let valid = |analysis: &crate::state::AnalysisResult| {

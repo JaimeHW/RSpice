@@ -108,6 +108,7 @@ pub(super) fn build_models(
             selection,
             hidden_family_traces,
             waveform_visibility: &std::collections::HashMap::new(),
+            signals: None,
         },
     )
 }

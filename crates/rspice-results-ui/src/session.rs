@@ -723,6 +723,8 @@ pub struct ResultViewerState {
     /// tri-state representation allows a source that defaults hidden to be
     /// revealed without writing into solver-owned result data.
     pub waveform_visibility: VisibilityOverrides,
+    /// The retained analyses' signals by name, made as they are asked for.
+    pub signal_indices: crate::signal_index::SignalIndices,
     /// The colours the view being drawn gives its traces, by signal. A
     /// missing key draws the signal in the run's colour or its palette place;
     /// the run keeps no colour a reader chose.

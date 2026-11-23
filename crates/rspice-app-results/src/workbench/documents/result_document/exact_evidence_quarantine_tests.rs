@@ -79,7 +79,12 @@ fn a_selection_resolved_at_once_answers_as_each_quantity_resolved_alone() {
     }
     let reads = host.results_reads();
 
-    let resolved = resolve_result_browser_selection(&keys, &runs);
+    let indices = rspice_results_ui::signal_index::SignalIndices::default();
+    let resolved = resolve_result_browser_selection(
+        &keys,
+        &runs,
+        (&indices, &host.model.simulation.retained.runs.revision()),
+    );
 
     let mut alone = keys.iter().cloned().collect::<Vec<_>>();
     alone.sort_by_key(|key| result_browser_selection_stable_path(key, &runs).unwrap_or_default());

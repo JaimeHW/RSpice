@@ -708,18 +708,38 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
             .filter(|trace| trace.pane_id == pane_id)
             .collect();
         let names = lanes::EventNames::of(analysis);
-        let mut visibility: Vec<(String, bool, bool)> = analysis
-            .waveforms
-            .iter()
-            .map(|waveform| {
-                let mut held = traces
-                    .iter()
-                    .filter(|trace| trace_signal(trace) == waveform.name)
-                    .peekable();
-                let plotted = held.peek().is_some() && held.all(|trace| trace.visible);
-                (waveform.name.clone(), waveform.visible, plotted)
-            })
-            .collect();
+        // Each signal the pane draws, and whether every trace of it is shown.
+        let mut drawn = HashMap::<&str, bool>::new();
+        for trace in &traces {
+            *drawn.entry(trace_signal(trace)).or_insert(true) &= trace.visible;
+        }
+        let entry = |waveform: &crate::state::RetainedTrace| {
+            let plotted = drawn.get(waveform.name.as_str()).copied().unwrap_or(false);
+            (waveform.name.clone(), waveform.visible, plotted)
+        };
+        // Only a signal the pane draws or the dataset plots can be plotted
+        // other than where its dataset put it, so with the analysis indexed
+        // only those columns are read, not a million.
+        let mut visibility: Vec<(String, bool, bool)> =
+            match state.results.session.signal_indices.index(
+                &state.model.simulation.retained.runs.revision(),
+                key,
+                &analysis.data,
+            ) {
+                Some(index) => {
+                    let mut columns = index.plotted().to_vec();
+                    for name in drawn.keys() {
+                        columns.extend(index.columns_named(&analysis.data, name));
+                    }
+                    columns.sort_unstable();
+                    columns.dedup();
+                    columns
+                        .into_iter()
+                        .map(|column| entry(&analysis.waveforms[column]))
+                        .collect()
+                }
+                None => analysis.waveforms.iter().map(entry).collect(),
+            };
         if let Some(names) = names.as_ref() {
             let listed = lanes::plotted_history_nets(&document, pane_id, names);
             for name in names.history_only() {

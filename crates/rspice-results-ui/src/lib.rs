@@ -36,6 +36,7 @@ pub mod scatter;
 pub mod selection;
 pub mod sensitivity;
 pub mod session;
+pub mod signal_index;
 pub mod smith_chart;
 pub mod soa;
 pub mod strip;

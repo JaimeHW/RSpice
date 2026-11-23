@@ -397,6 +397,18 @@ pub struct ProjectionOptions<'a> {
     /// A strip model holds the curves of the signals on the plot and no
     /// others: the data browser is the catalogue of every signal.
     pub waveform_visibility: &'a HashMap<SourceWaveformPresentationKey, bool>,
+    /// Where an analysis's signals are found by name. With it, a projection
+    /// reads the columns the dataset plots and the ones the reader ticked;
+    /// without it, it walks every column.
+    pub signals: Option<SignalLookup<'a>>,
+}
+
+/// The retained analyses' signal indices, and the revision of the retained
+/// runs they index.
+#[derive(Clone, Copy)]
+pub struct SignalLookup<'a> {
+    pub indices: &'a crate::signal_index::SignalIndices,
+    pub revision: &'a rspice_vocabulary::source_revision::SourceRevision,
 }
 
 /// Build strip models for every plottable analysis of the active run.
@@ -420,6 +432,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         selection,
         hidden_family_traces,
         waveform_visibility,
+        signals,
     } = options;
     let frequency_scale = if ac.linear_frequency {
         XScale::Linear
@@ -522,11 +535,21 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         // its column number: two plotted curves eight columns apart took one
         // hue and one marker. Ranking by the dataset's own visibility, not
         // the reader's, means hiding a curve recolours none of the others.
-        let dataset_plotted = analysis
-            .waveforms
-            .iter()
-            .filter(|waveform| waveform.visible)
-            .count();
+        let index = signals.and_then(|lookup| {
+            lookup
+                .indices
+                .index(lookup.revision, analysis_key, analysis)
+        });
+        let dataset_plotted = index.as_ref().map_or_else(
+            || {
+                analysis
+                    .waveforms
+                    .iter()
+                    .filter(|waveform| waveform.visible)
+                    .count()
+            },
+            |index| index.plotted().len(),
+        );
         let mut plotted_rank = 0;
         let mut added_rank = 0;
         // The colours given so far: no two curves of an analysis share one.
@@ -555,7 +578,27 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         // plots, counted in column order whether shown or not.
         let mut dataset_rank = 0;
         let mut dataset_ranks = HashMap::new();
-        for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
+        // The columns to project. A column neither the dataset nor the reader
+        // plots adds nothing, so with the analysis indexed only the plotted
+        // and the ticked are read: after a million-device run, a tick is not
+        // a walk of a million columns. An analysis of event lanes or STB
+        // reads every column to sort them.
+        let columns: Box<dyn Iterator<Item = usize>> = match index
+            .filter(|_| event_lanes.is_none() && analysis.analysis_type != AnalysisType::Stb)
+        {
+            Some(index) => {
+                let mut columns = index.plotted().to_vec();
+                for name in ticks.keys() {
+                    columns.extend(index.columns_named(analysis, name));
+                }
+                columns.sort_unstable();
+                columns.dedup();
+                Box::new(columns.into_iter())
+            }
+            None => Box::new(0..analysis.waveforms.len()),
+        };
+        for waveform_index in columns {
+            let waveform = &analysis.waveforms[waveform_index];
             // STB's optional complex contour feeds the dedicated Nyquist
             // viewer. Its Bode sheet is the retained loop-gain pair only;
             // presenting the contour's linear magnitude beside an already-dB

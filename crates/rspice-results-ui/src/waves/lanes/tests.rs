@@ -97,6 +97,7 @@ fn model(plotted: &[&str]) -> StripModel {
             selection: None,
             hidden_family_traces: &HashSet::new(),
             waveform_visibility: &Default::default(),
+            signals: None,
         },
         |_| None,
     );

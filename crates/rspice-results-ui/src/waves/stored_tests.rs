@@ -126,6 +126,7 @@ fn models(
             selection: None,
             hidden_family_traces: &HashSet::new(),
             waveform_visibility: &Default::default(),
+            signals: None,
         },
         |_| None,
     );

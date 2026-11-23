@@ -32,31 +32,44 @@ fn wide_transient(signals: usize) -> SimulationRun<AnalysisResult<RetainedTrace>
     run
 }
 
+/// The traces the strip model of `run` holds with `ticks`, built once with
+/// the analysis's signals indexed and once walking every column, which agree.
 fn traces_of(
     run: &SimulationRun<AnalysisResult<RetainedTrace>>,
     ticks: &HashMap<SourceWaveformPresentationKey, bool>,
 ) -> Vec<String> {
-    let models = super::super::build_models(
-        &[run],
-        &ExecutedDeckArchive::default(),
-        &mut DerivedSeries::default(),
-        &Tokens::default(),
-        super::super::ProjectionOptions {
-            phase_continuous: false,
-            complex_display: Default::default(),
-            ac: Default::default(),
-            selection: None,
-            hidden_family_traces: &HashSet::new(),
-            waveform_visibility: ticks,
-        },
-        |_| None,
-    );
-    assert_eq!(models.len(), 1, "one transient builds one strip model");
-    models[0]
-        .traces
-        .iter()
-        .map(|trace| trace.source_waveform_name.clone())
-        .collect()
+    let indices = crate::signal_index::SignalIndices::default();
+    let revision = rspice_vocabulary::source_revision::SourceRevision::default();
+    let built = |signals| {
+        let models = super::super::build_models(
+            &[run],
+            &ExecutedDeckArchive::default(),
+            &mut DerivedSeries::default(),
+            &Tokens::default(),
+            super::super::ProjectionOptions {
+                phase_continuous: false,
+                complex_display: Default::default(),
+                ac: Default::default(),
+                selection: None,
+                hidden_family_traces: &HashSet::new(),
+                waveform_visibility: ticks,
+                signals,
+            },
+            |_| None,
+        );
+        assert_eq!(models.len(), 1, "one transient builds one strip model");
+        models[0]
+            .traces
+            .iter()
+            .map(|trace| trace.source_waveform_name.clone())
+            .collect::<Vec<_>>()
+    };
+    let indexed = built(Some(super::super::SignalLookup {
+        indices: &indices,
+        revision: &revision,
+    }));
+    assert_eq!(indexed, built(None), "an index changes nothing on the plot");
+    indexed
 }
 
 #[test]

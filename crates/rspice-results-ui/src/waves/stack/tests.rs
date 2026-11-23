@@ -70,6 +70,7 @@ fn transient(columns: &[(&str, &str)]) -> StripModel {
             selection: None,
             hidden_family_traces: &std::collections::HashSet::new(),
             waveform_visibility: &Default::default(),
+            signals: None,
         },
         |_| None,
     );

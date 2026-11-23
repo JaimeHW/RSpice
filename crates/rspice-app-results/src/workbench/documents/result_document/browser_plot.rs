@@ -131,16 +131,23 @@ pub fn set_result_quantity_ticked(
 }
 
 /// Tick or untick every quantity of `keys`, as "Tick visible quantities", a
-/// Shift range, "Plot all" and a saved set do: each signal is found in one
-/// walk of its analysis' columns for all of them, where finding them one at a
-/// time walked a million-column analysis once for each signal.
+/// Shift range, "Plot all" and a saved set do: each signal is found in its
+/// analysis's index of signals by name, where finding them one at a time
+/// walked a million-column analysis once for each signal.
 pub fn set_result_quantities_ticked<'k>(
     state: &mut ResultsParts<'_>,
     keys: impl IntoIterator<Item = &'k ResultBrowserSelectionKey>,
     ticked: bool,
 ) {
     let keys = keys.into_iter().collect::<Vec<_>>();
-    let found = find_signals(&state.model.simulation.retained.runs, &keys);
+    let found = find_signals(
+        &state.model.simulation.retained.runs,
+        (
+            &state.results.session.signal_indices,
+            &state.model.simulation.retained.runs.revision(),
+        ),
+        &keys,
+    );
     for (key, found) in keys.into_iter().zip(found) {
         match (key, found) {
             (ResultBrowserSelectionKey::Waveform(signal), Some(at)) => {
@@ -156,9 +163,14 @@ pub fn set_result_quantities_ticked<'k>(
 
 /// Where each signal of `keys` is: its run, analysis and column, found as
 /// [`SourceWaveformPresentationKey::resolve`] finds one (a name two columns
-/// share finds neither), in one walk of each analysis the keys name.
+/// share finds neither), in each analysis's index, or one walk of an analysis
+/// still being run.
 fn find_signals(
     runs: &[crate::state::SimulationRun],
+    (indices, revision): (
+        &rspice_results_ui::signal_index::SignalIndices,
+        &crate::state::RunHistoryRevision,
+    ),
     keys: &[&ResultBrowserSelectionKey],
 ) -> Vec<Option<(usize, usize, usize)>> {
     use std::collections::HashMap;
@@ -185,6 +197,16 @@ fn find_signals(
         let Some((analysis_index, analysis)) = analysis_key.resolve(&run.data) else {
             continue;
         };
+        if let Some(index) = indices.index(revision, analysis_key, &analysis.data) {
+            for (name, keyed) in names {
+                if let Some(column) = index.column(&analysis.data, name) {
+                    for at in keyed {
+                        found[at] = Some((run_index, analysis_index, column));
+                    }
+                }
+            }
+            continue;
+        }
         let mut columns = HashMap::<&str, Option<usize>>::with_capacity(names.len());
         for (column, waveform) in analysis.waveforms.iter().enumerate() {
             if names.contains_key(waveform.name.as_str()) {

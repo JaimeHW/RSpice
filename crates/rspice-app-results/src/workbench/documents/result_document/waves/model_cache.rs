@@ -55,6 +55,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
     let session = &mut results.session;
     let strips = &session.strip_layouts;
     let overlaid = simulation.overlaid_dataset_ids();
+    let revision = simulation.retained.runs.revision();
     results.models.get_or_build(
         ModelCacheInput {
             active_run_idx: simulation.view.active_run_idx,
@@ -67,6 +68,10 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 selection: session.sample_selection.as_ref(),
                 hidden_family_traces: &session.hidden_family_traces,
                 waveform_visibility: &session.waveform_visibility,
+                signals: Some(rspice_results_ui::waves::SignalLookup {
+                    indices: &session.signal_indices,
+                    revision: &revision,
+                }),
             },
             waveform_visibility: &session.waveform_visibility,
             waveform_colors: &session.waveform_colors,

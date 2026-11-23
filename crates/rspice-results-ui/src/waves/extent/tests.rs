@@ -38,6 +38,7 @@ fn each_pane_of_a_two_unit_strip_keeps_its_own_envelope() {
             selection: None,
             hidden_family_traces: &HashSet::new(),
             waveform_visibility: &Default::default(),
+            signals: None,
         },
         |_| None,
     );

@@ -776,6 +776,7 @@ pub(crate) fn copy_cursor_text(
             selection: sample_selection.as_ref(),
             hidden_family_traces: &hidden_family_traces,
             waveform_visibility: &waveform_visibility,
+            signals: None,
         },
     );
     apply_waveform_visibility(

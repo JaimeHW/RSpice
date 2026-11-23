@@ -316,14 +316,19 @@ pub(crate) type ResolvedSignal<'a> = (&'a SimulationRun, &'a AnalysisResult, &'a
 pub(crate) fn resolve_result_browser_selection<'a>(
     keys: &std::collections::HashSet<ResultBrowserSelectionKey>,
     runs: &'a [SimulationRun],
+    (indices, revision): (
+        &rspice_results_ui::signal_index::SignalIndices,
+        &crate::state::RunHistoryRevision,
+    ),
 ) -> Vec<(ResultBrowserSelectionKey, Option<ResolvedSignal<'a>>)> {
     type ResolvedRun<'a> = (&'a SimulationRun, &'a AnalysisResult);
-    /// An analysis's signals by name; a name two signals share finds neither.
-    type NameIndex<'a> = (
-        &'a SimulationRun,
-        &'a AnalysisResult,
-        std::collections::HashMap<&'a str, Option<usize>>,
-    );
+    /// An analysis's signals by name, from its index or else one walk; a name
+    /// two signals share finds neither.
+    enum Names<'a> {
+        Indexed(std::sync::Arc<rspice_results_ui::signal_index::SignalIndex>),
+        Walked(std::collections::HashMap<&'a str, Option<usize>>),
+    }
+    type NameIndex<'a> = (&'a SimulationRun, &'a AnalysisResult, Names<'a>);
     let mut analyses =
         std::collections::HashMap::<AnalysisPresentationKey, Option<NameIndex<'a>>>::new();
     let mut resolved = keys
@@ -337,6 +342,11 @@ pub(crate) fn resolve_result_browser_selection<'a>(
                             .iter()
                             .find(|run| run.dataset_id == signal.analysis().dataset_id())?;
                         let (_, analysis) = signal.analysis().resolve(&run.data)?;
+                        if let Some(index) =
+                            indices.index(revision, signal.analysis(), &analysis.data)
+                        {
+                            return Some((run, analysis, Names::Indexed(index)));
+                        }
                         let mut names = std::collections::HashMap::new();
                         for (index, waveform) in analysis.waveforms.iter().enumerate() {
                             names
@@ -344,11 +354,14 @@ pub(crate) fn resolve_result_browser_selection<'a>(
                                 .and_modify(|found: &mut Option<usize>| *found = None)
                                 .or_insert(Some(index));
                         }
-                        Some((run, analysis, names))
+                        Some((run, analysis, Names::Walked(names)))
                     })
                     .as_ref()?;
                 let (run, analysis): ResolvedRun<'a> = (run, analysis);
-                let index = (*names.get(signal.source_name())?)?;
+                let index = match names {
+                    Names::Indexed(index) => index.column(&analysis.data, signal.source_name())?,
+                    Names::Walked(names) => (*names.get(signal.source_name())?)?,
+                };
                 Some((run, analysis, &analysis.waveforms[index]))
             });
             let path = match (key, signal) {

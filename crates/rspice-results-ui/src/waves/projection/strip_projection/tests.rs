@@ -53,6 +53,7 @@ fn model_of(run: &SimulationRun<AnalysisResult<RetainedTrace>>) -> StripModel {
             selection: None,
             hidden_family_traces: &HashSet::new(),
             waveform_visibility: &Default::default(),
+            signals: None,
         },
         |_| None,
     );
