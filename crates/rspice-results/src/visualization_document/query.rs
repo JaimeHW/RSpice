@@ -29,8 +29,15 @@ pub(super) struct RowIndex(Mutex<RowTables>);
 #[derive(Default)]
 struct RowTables {
     hashing: RandomState,
-    tables: HashMap<(DatasetBinding, usize, Vec<usize>), HashMap<u64, Vec<usize>>>,
+    tables: HashMap<TableRead, RowsByHash>,
 }
+
+/// One table read for some of its columns: its binding, its row count and
+/// the columns read.
+type TableRead = (DatasetBinding, usize, Vec<usize>);
+
+/// The indices of a table's rows by the hash of the values read.
+type RowsByHash = HashMap<u64, Vec<usize>>;
 
 impl RowTables {
     fn hash<'a>(&self, values: impl Iterator<Item = &'a TypedValue>) -> u64 {
@@ -54,7 +61,7 @@ impl RowIndex {
         let key = tables.hash(wanted.iter().map(|(_, value)| *value));
         let table = (dataset.binding, dataset.rows.len(), columns);
         if !tables.tables.contains_key(&table) {
-            let mut rows: HashMap<u64, Vec<usize>> = HashMap::new();
+            let mut rows = RowsByHash::new();
             for (index, row) in dataset.rows.iter().enumerate() {
                 let hash = tables.hash(table.2.iter().map(|column| &row.values[*column]));
                 rows.entry(hash).or_default().push(index);
