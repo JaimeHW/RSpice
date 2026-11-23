@@ -23,7 +23,7 @@ fn the_inspector_and_the_toolbar_name_each_view_by_its_label() {
         let mut headings = Vec::new();
         for _ in 0..2 {
             let (output, _) = page_pass(&ctx, page_input(Vec::new()), |ui| {
-                header(ui, &mut app);
+                header(ui, &mut app, crate::feature_tests::dock_header_height());
                 app.draw(ui);
             });
             headings = output

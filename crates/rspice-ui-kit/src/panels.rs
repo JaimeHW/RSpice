@@ -34,7 +34,6 @@ use crate::tokens::{self, Tokens};
 // status 25, phone nav 54, touch target 44) had no reader — a second, silently
 // diverging copy of numbers `workbench::chrome` already owns.
 pub const ACTIVITY_RAIL_W: f32 = 51.0;
-pub const PANEL_HEADER_H: f32 = 39.0;
 /// Desktop panel tabs use the upgraded mockup's compact 25 px track.
 /// Coarse-pointer layouts still raise this to the shared touch target.
 pub const PANEL_TABS_H: f32 = 25.0;

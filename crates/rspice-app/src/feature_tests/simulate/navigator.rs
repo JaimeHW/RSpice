@@ -39,7 +39,7 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.set_width(width);
-                navigator::show(ui, &mut app);
+                navigator::show(ui, &mut app, crate::feature_tests::dock_header_height());
             });
     });
     let mut lines = Vec::new();
@@ -291,7 +291,7 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
         // panel and is no more a filtered row than the title bar is.
         navigator_painted_lines(228.0, app)
             .into_iter()
-            .filter(|(_, rect)| rect.top() >= rspice_ui_kit::panels::PANEL_HEADER_H)
+            .filter(|(_, rect)| rect.top() >= crate::feature_tests::dock_header_height())
             .map(|(text, _)| text)
             .collect()
     }

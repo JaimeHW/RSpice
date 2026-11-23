@@ -11,7 +11,7 @@ use crate::workbench::framework::requests::{FocusNavigatorSearch, Outbox, Reques
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::state::Workspace;
-use crate::ui::panels::{PANEL_HEADER_H, WorkbenchIcon};
+use crate::ui::panels::WorkbenchIcon;
 use crate::ui::widgets::{FILTER_CLEAR_INSET, filter_field_clear};
 
 pub const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
@@ -61,14 +61,16 @@ pub fn muted(ui: &mut Ui, text: &str) {
         });
 }
 
-pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+/// `header_height` is the document bar's height, so the dock's header and
+/// the bar across the document beside it are one row.
+pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, header_height: f32) {
     ui.spacing_mut().item_spacing.y = 0.0;
     let workspace = app.workbench().workspace;
     let section = app.navigator_section(workspace);
     // Canonical navigator order: header, search, then the workspace's own
     // navigator, which may lead with tabs of its own (the Code workspace's
     // page tabs, then the page's outline).
-    header(ui, app);
+    header(ui, app, header_height);
     if section.container_draws_search {
         workspace_search(ui, app, workspace, &section.placeholder);
     }
@@ -93,10 +95,10 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
     }
 }
 
-pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, height: f32) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), PANEL_HEADER_H),
+        egui::vec2(ui.available_width(), height),
         egui::Sense::hover(),
     );
     ui.painter().hline(

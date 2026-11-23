@@ -20,7 +20,7 @@ fn navigator_heading_and_search_expose_explicit_accesskit_names() {
         .run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.set_width(260.0);
-                header(ui, &mut app);
+                header(ui, &mut app, crate::feature_tests::dock_header_height());
                 panel_search(
                     ui,
                     &mut query,

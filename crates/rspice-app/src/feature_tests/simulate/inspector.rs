@@ -149,7 +149,11 @@ fn simulate_pass(
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| {
-                    rspice_app_workbench::workbench::docks::inspector::show(ui, app)
+                    rspice_app_workbench::workbench::docks::inspector::show(
+                        ui,
+                        app,
+                        crate::feature_tests::dock_header_height(),
+                    )
                 });
         },
     );

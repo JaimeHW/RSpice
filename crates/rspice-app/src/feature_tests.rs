@@ -27,3 +27,14 @@ mod services;
 mod settings;
 mod sheets;
 mod simulate;
+
+/// A dock's header height at a desktop window: the document bar's, as the
+/// shell lays it out. A test that draws a dock on its own passes it.
+fn dock_header_height() -> f32 {
+    rspice_app_workbench::workbench::layout::LayoutSpec::resolve(
+        1_440.0,
+        900.0,
+        &Default::default(),
+    )
+    .document_bar_height
+}

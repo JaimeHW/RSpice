@@ -767,7 +767,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         ui.set_width(260.0);
-                        navigator::show(ui, &mut app);
+                        navigator::show(ui, &mut app, crate::feature_tests::dock_header_height());
                     });
             },
         )
@@ -875,7 +875,7 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.set_width(width);
-                navigator::show(ui, &mut app);
+                navigator::show(ui, &mut app, crate::feature_tests::dock_header_height());
             });
     });
     let mut lines = Vec::new();

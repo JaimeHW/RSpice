@@ -13,7 +13,6 @@ use crate::workbench::framework::host::Point;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::state::Workspace;
-use crate::ui::panels::PANEL_HEADER_H;
 
 pub const INSPECTOR_SCROLL_HISTORY_LIMIT: usize = 64;
 
@@ -142,9 +141,11 @@ pub fn validate_component_model_catalog_binding(
     Ok(())
 }
 
-pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+/// `header_height` is the document bar's height, so the dock's header and
+/// the bar across the document beside it are one row.
+pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, header_height: f32) {
     ui.spacing_mut().item_spacing.y = 0.0;
-    header(ui, app);
+    header(ui, app, header_height);
     let scroll_identity = inspector_scroll_identity(app);
     let mut scroll_memory = ui
         .ctx()
@@ -192,10 +193,10 @@ pub fn inspector_scroll_identity(app: &impl WorkbenchHost) -> String {
     )
 }
 
-pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost) {
+pub fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, height: f32) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), PANEL_HEADER_H),
+        egui::vec2(ui.available_width(), height),
         egui::Sense::hover(),
     );
     ui.painter().hline(

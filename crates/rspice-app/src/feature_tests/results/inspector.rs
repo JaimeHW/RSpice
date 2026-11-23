@@ -413,7 +413,9 @@ pub(crate) fn run_inspector(
         last = Some(ctx.run_ui(input(), |ui| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ui, |ui| show(ui, app));
+                .show(ui, |ui| {
+                    show(ui, app, crate::feature_tests::dock_header_height())
+                });
         }));
     }
     let output = last.expect("three passes ran");
@@ -679,7 +681,9 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output() {
             |ui| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ui, |ui| show(ui, app));
+                    .show(ui, |ui| {
+                        show(ui, app, crate::feature_tests::dock_header_height())
+                    });
             },
         );
         output

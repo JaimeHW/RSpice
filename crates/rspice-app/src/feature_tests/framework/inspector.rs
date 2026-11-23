@@ -291,7 +291,7 @@ fn inspector_header_exposes_its_workspace_heading() {
         .run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.set_width(312.0);
-                header(ui, &mut app);
+                header(ui, &mut app, crate::feature_tests::dock_header_height());
             });
         })
         .platform_output

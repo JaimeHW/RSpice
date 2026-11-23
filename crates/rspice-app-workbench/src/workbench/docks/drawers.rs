@@ -107,7 +107,7 @@ pub fn show(ctx: &Context, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 drawer_frame(&t, DrawerBorder::Box).show(ui, |ui| {
                     ui.set_width(width);
                     ui.set_height(available_height);
-                    super::navigator::show(ui, app);
+                    super::navigator::show(ui, app, layout.document_bar_height);
                     let close = drawer_close_button(ui, "navigator", layout);
                     close_id = Some(close.id);
                     let _ = take_drawer_focus_pending(ctx, Drawer::Navigator);
@@ -146,7 +146,7 @@ pub fn show(ctx: &Context, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 let framed = drawer_frame(&t, border).show(ui, |ui| {
                     ui.set_width(width);
                     ui.set_height(available_height);
-                    super::inspector::show(ui, app);
+                    super::inspector::show(ui, app, layout.document_bar_height);
                     let close = drawer_close_button(ui, "inspector", layout);
                     close_id = Some(close.id);
                     let pending = take_drawer_focus_pending(ctx, Drawer::Inspector);
@@ -772,12 +772,15 @@ fn drawer_close_button(
     response
 }
 
+/// A drawer's close button: a touch target on a compact shell or a coarse
+/// pointer, and otherwise inside the dock header's row, inset alike on every
+/// side.
 pub fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
+    let inset = if layout.coarse_pointer { 0.0 } else { 5.0 };
     let size = if layout.compact_shell || layout.coarse_pointer {
         44.0
     } else {
-        34.0
+        layout.document_bar_height - 2.0 * inset
     };
-    let inset = if layout.coarse_pointer { 0.0 } else { 5.0 };
     (size, inset)
 }

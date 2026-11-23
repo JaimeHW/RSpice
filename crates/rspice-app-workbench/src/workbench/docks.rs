@@ -235,7 +235,11 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout:
     } else {
         panel.exact_size(layout.navigator_width).resizable(false)
     };
-    let shown = panel.show(root, |ui| fill_dock(ui, |ui| navigator::show(ui, app)));
+    let shown = panel.show(root, |ui| {
+        fill_dock(ui, |ui| {
+            navigator::show(ui, app, layout.document_bar_height)
+        })
+    });
     if layout.navigator_resizable && splitter_is_dragged(ctx, NAVIGATOR_PANEL_ID) {
         let actual = shown.response.rect.width();
         app.workbench_mut().navigator_width =
@@ -297,7 +301,11 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout:
         // canvas and adjacent controls as selection content changes.
         panel.exact_size(layout.inspector_width).resizable(false)
     };
-    let shown = panel.show(root, |ui| fill_dock(ui, |ui| inspector::show(ui, app)));
+    let shown = panel.show(root, |ui| {
+        fill_dock(ui, |ui| {
+            inspector::show(ui, app, layout.document_bar_height)
+        })
+    });
     if layout.inspector_resizable && splitter_is_dragged(ctx, INSPECTOR_PANEL_ID) {
         let actual = shown.response.rect.width();
         app.workbench_mut().inspector_width =
