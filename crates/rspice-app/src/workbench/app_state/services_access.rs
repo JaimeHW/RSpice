@@ -715,7 +715,7 @@ pub(crate) fn settle_restart_offer(state: &mut AppState) {
                 LogSeverity::Info,
                 LogSource::Studio,
                 "The unsaved changes this session brought back stay open. The autosave the last \
-                 session left is on the Recovery page.",
+                 session left is on the History page.",
             );
         }
     }
@@ -744,7 +744,7 @@ pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Co
             }
         }
         RecoveredWorkAnswer::OpenSaved(found) => state.prompt(format!(
-            "Opened the saved project. The recovered changes are on the Recovery page as \u{201c}{}\u{201d} until you save.",
+            "Opened the saved project. The recovered changes are on the History page as \u{201c}{}\u{201d} until you save.",
             found.autosave.title()
         )),
         RecoveredWorkAnswer::Compare(found) => {
@@ -755,7 +755,7 @@ pub(crate) fn process_recovered_work_dialog(state: &mut AppState, ctx: &egui::Co
             recovery.set_comparison(id, found.differences);
             state.project.project_checkpoint_selection = Some(id.to_string());
             state.project.project_page =
-                rspice_app_project::workbench::project::workspace_state::ProjectPage::Recovery;
+                rspice_app_project::workbench::project::workspace_state::ProjectPage::History;
             state
                 .workbench
                 .activate(rspice_app_state::workbench::workspace::Workspace::Project);

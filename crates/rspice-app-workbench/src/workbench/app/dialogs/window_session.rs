@@ -114,7 +114,7 @@ enum WindowSessionAction {
     CloseAll,
     WorkspaceLayouts,
     ResetLayout,
-    OpenRecovery,
+    OpenHistory,
     OpenWorkflow(WindowWorkflow),
     Focus(ApplicationWindowId),
     CloseWindow(ApplicationWindowId),
@@ -257,9 +257,9 @@ fn commit_window_manager_action(
             app.execute(ids::WORKSPACE_LAYOUTS);
         }
         WindowSessionAction::ResetLayout => app.execute(ids::RESET_LAYOUT),
-        WindowSessionAction::OpenRecovery => {
+        WindowSessionAction::OpenHistory => {
             app.workbench_mut().window_session_dialog.close();
-            app.execute(ids::PROJECT_RECOVERY);
+            app.execute(ids::PROJECT_HISTORY);
         }
         WindowSessionAction::OpenWorkflow(workflow) => open_window_workflow(app, workflow),
         WindowSessionAction::Focus(window) => {
@@ -767,8 +767,8 @@ fn render_session_page(
         if ui.button("Reset workspace layout\u{2026}").clicked() {
             *action = Some(WindowSessionAction::ResetLayout);
         }
-        if ui.button("Open project recovery\u{2026}").clicked() {
-            *action = Some(WindowSessionAction::OpenRecovery);
+        if ui.button("Open project history\u{2026}").clicked() {
+            *action = Some(WindowSessionAction::OpenHistory);
         }
     });
 }

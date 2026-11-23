@@ -72,7 +72,7 @@ fn press_run_deck(replay: &mut Replay) {
 /// `author_deck` and the native half of `run`: the editor takes the typed
 /// deck, one press of Run checks and runs it, the finished run opens in
 /// Results, a press of the Task log tab shows its DONE row there, and the
-/// palette opens the Recovery page on its Create checkpoint.
+/// palette opens the History page on its Create checkpoint.
 #[test]
 fn the_engine_recovery_script_authors_and_runs_its_deck() {
     let mut replay = Replay::new();
@@ -107,7 +107,7 @@ fn the_engine_recovery_script_authors_and_runs_its_deck() {
         "a press of the Task log tab on Results shows the run's DONE row"
     );
 
-    let recovery = replay.choose_command("Recovery");
+    let recovery = replay.choose_command("History");
     only(&recovery, "Create checkpoint", Role::Button);
 }
 

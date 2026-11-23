@@ -372,7 +372,7 @@ fn a_checkpoint_is_pinned_noted_and_deleted_on_the_recovery_page() {
     create(&mut app.state, ProjectCheckpointReason::TechnologyChange)
         .expect("the checkpoint is written");
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let shown = paint_until(&ctx, &mut app, |text| {
         text.lines().any(|line| line == "1 checkpoint")

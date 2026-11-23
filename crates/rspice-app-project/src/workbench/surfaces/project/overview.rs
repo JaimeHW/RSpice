@@ -194,7 +194,7 @@ impl OverviewIntent {
                 key,
             ),
             Self::OpenCheckpoint(checkpoint) => {
-                cx.execute(ProjectCommand::Page(ProjectPage::Recovery).key());
+                cx.execute(ProjectCommand::Page(ProjectPage::History).key());
                 cx.state.project_checkpoint_selection = Some(checkpoint);
             }
         }

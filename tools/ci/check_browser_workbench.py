@@ -302,7 +302,7 @@ def model_validation_clock(browser):
 
     # Also snapshot the working project: unchanged saved bytes alone could hide
     # an invalid receipt left in memory by the failed operation.
-    choose_command(browser, "Recovery")
+    choose_command(browser, "History")
     before = checkpoint_records(browser)
     started_ms = time.time_ns() // 1_000_000
     browser.click("Create checkpoint", "button")
@@ -456,7 +456,7 @@ def run_with_saved_provider(browser, decision):
     wait_for(lambda: any(c["value"] == "Run 1 finished"
                         for c in controls(browser.snapshot())), "the saved-provider simulation", 120)
     browser.capture("provider-run-completed")
-    choose_command(browser, "Recovery")
+    choose_command(browser, "History")
     before = checkpoint_records(browser)
     started_ms = time.time_ns() // 1_000_000
     browser.click("Create checkpoint", "button")
@@ -901,7 +901,7 @@ def restored_checkpoint_reads_its_run(browser, store):
     kept = results_store_files(browser, store)
     if not any(name.startswith("runs/") for name in kept):
         raise AssertionError(f"The save dropped the segment a checkpoint reads: {kept}")
-    choose_command(browser, "Recovery")
+    choose_command(browser, "History")
     label = "Restore Manual checkpoint into the project"
     # Checkpoints are listed newest first: the top one holds the run.
     restores = wait_for(lambda: sorted((c for c in controls(browser.snapshot())
@@ -1422,7 +1422,7 @@ def run(browser):
     browser.click("Schematic canvas", "canvas")
     configuration_opening_input(browser)
     review_intervals = create_and_resolve_review(browser)
-    choose_command(browser, "Recovery")
+    choose_command(browser, "History")
     wait_for(lambda: any(control["label"] == "Create checkpoint"
                         for control in controls(browser.snapshot())), "the recovery workspace")
     if checkpoint_records(browser):

@@ -396,7 +396,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::Page(ProjectPage::Library).key(),
     ProjectCommand::Page(ProjectPage::Configuration).key(),
     ProjectCommand::Page(ProjectPage::Dependencies).key(),
-    ProjectCommand::Page(ProjectPage::Recovery).key(),
+    ProjectCommand::Page(ProjectPage::History).key(),
     ProjectCommand::Library(LibraryCommand::Rename).key(),
     ProjectCommand::Library(LibraryCommand::CopyCell).key(),
     ProjectCommand::Library(LibraryCommand::CopyLibrary).key(),

@@ -278,7 +278,7 @@ fn each_activity_row_opens_what_it_names() {
         let (ctx, mut app, settled) = settle(app, ProjectPage::Overview);
         let row = row_with(&settled, &["Detail: Revision 2"]);
         click_announced(&ctx, &mut app, settled, &row);
-        assert_eq!(app.state.project.project_page, ProjectPage::Recovery);
+        assert_eq!(app.state.project.project_page, ProjectPage::History);
         assert_eq!(app.state.project.project_checkpoint_selection, Some(older));
     }
 }

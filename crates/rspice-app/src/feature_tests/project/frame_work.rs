@@ -216,7 +216,7 @@ fn idle_work(page: ProjectPage) -> FrameWork {
     for _ in 0..WARM_UP_FRAMES {
         app_frame(&ctx, &mut app, Vec::new());
     }
-    if page == ProjectPage::Recovery {
+    if page == ProjectPage::History {
         paint_until(&ctx, &mut app, |text| text.contains("8 checkpoints"));
     }
     let work = idle_frames(&ctx, &mut app);
@@ -250,7 +250,7 @@ fn the_dependencies_page_does_no_project_work_on_an_idle_frame() {
 fn the_recovery_page_lists_its_checkpoints_off_the_frame_and_idles() {
     let (mut app, folder) = large_project("frame-work-recovery", COMPONENTS);
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
 
     take_work();

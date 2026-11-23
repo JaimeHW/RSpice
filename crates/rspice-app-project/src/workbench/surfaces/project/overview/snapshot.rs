@@ -454,7 +454,7 @@ fn status_rows(
 
     let verify = ids::open_workspace(Workspace::Verify);
     let dependencies = ProjectCommand::Page(ProjectPage::Dependencies).key();
-    let recovery = ProjectCommand::Page(ProjectPage::Recovery).key();
+    let recovery = ProjectCommand::Page(ProjectPage::History).key();
     vec![
         design,
         StatusSnapshot::of(

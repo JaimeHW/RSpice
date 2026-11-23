@@ -642,7 +642,7 @@ impl Host for RSpiceApp {
                 ProjectPage::Library => "Cell view".to_owned(),
                 ProjectPage::Configuration => "Configuration".to_owned(),
                 ProjectPage::Dependencies => "Dependency".to_owned(),
-                ProjectPage::Recovery => "Checkpoint".to_owned(),
+                ProjectPage::History => "Checkpoint".to_owned(),
             },
             Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
             Workspace::Netlist => messages.text(MessageId::CodeInspectorNetlistTitle),
@@ -1490,8 +1490,8 @@ mod tests {
             (ids::NEW_PROJECT, ProjectCommand::NewProject),
             (ids::PROJECT_LAUNCHER, ProjectCommand::ProjectLauncher),
             (
-                ids::PROJECT_RECOVERY,
-                ProjectCommand::Page(ProjectPage::Recovery),
+                ids::PROJECT_HISTORY,
+                ProjectCommand::Page(ProjectPage::History),
             ),
             (ids::SAVE, ProjectCommand::Save),
         ] {

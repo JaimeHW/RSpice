@@ -215,7 +215,7 @@ class BrowserWorkbenchTests(unittest.TestCase):
             # Run no longer moves the reader, so the outcome is read on the
             # Simulation workspace the check opens before the Recovery page.
             self.assertEqual([call.args[1] for call in choose.call_args_list],
-                             ["Open simulation workspace", "Recovery"])
+                             ["Open simulation workspace", "History"])
             self.assertEqual(read.call_count, 4)
             self.assertEqual(result, {"worker_run": "passed", "waveforms": {"V(out)": 2}})
             self.assertEqual((Path(directory) / "model-provider-results.rspiceproj").read_bytes(), raw)

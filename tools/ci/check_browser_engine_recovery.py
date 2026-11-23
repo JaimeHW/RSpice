@@ -174,7 +174,7 @@ def run(browser, fault, cancel_startup=False):
 
     wait_for(completed, "the recovered run's results")
     browser.capture("completed")
-    choose_command(browser, "Recovery")
+    choose_command(browser, "History")
     wait_for(lambda: has_control(browser, "Create checkpoint"), "the recovery workspace")
     started_ms = time.time_ns() // 1_000_000
     browser.click("Create checkpoint", "button")

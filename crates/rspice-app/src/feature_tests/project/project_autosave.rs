@@ -386,7 +386,7 @@ fn after_a_crash_open_the_saved_project_keeps_the_autosave_on_the_recovery_page(
         "asked once"
     );
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let shown = paint_until(&ctx, &mut app, |text| {
         text.contains("Kept for recovery until you save \u{b7} ")
     });
@@ -405,7 +405,7 @@ fn after_a_crash_compare_lists_what_the_autosave_changes() {
         text.contains("The current project differs in 1 document:")
     });
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
-    assert_eq!(app.state.project.project_page, ProjectPage::Recovery);
+    assert_eq!(app.state.project.project_page, ProjectPage::History);
     assert!(
         painted(&shown)
             .lines()

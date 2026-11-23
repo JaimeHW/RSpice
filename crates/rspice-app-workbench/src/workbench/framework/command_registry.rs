@@ -689,7 +689,7 @@ pub mod ids {
         PREFERENCES = "preferences";
         PRINT_HARDCOPY = "print-hardcopy";
         PROJECT_LAUNCHER = "project-launcher";
-        PROJECT_RECOVERY = "project-recovery";
+        PROJECT_HISTORY = "project-history";
         PROJECT_WORKSPACE = "project";
         REDO = "redo";
         RESET_LAYOUT = "reset-workspace-layout";

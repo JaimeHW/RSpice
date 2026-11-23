@@ -66,7 +66,7 @@ impl ProjectLauncherPage {
     /// The pages the launcher lists. A browser keeps no autosave or
     /// checkpoint beside a file for Recovery to list: the work it has not
     /// saved comes back with its session, and a project's own checkpoints
-    /// are on that project's Recovery page.
+    /// are on that project's History page.
     pub const SHOWN: &'static [Self] = Self::shown(cfg!(target_arch = "wasm32"));
 
     pub const fn shown(browser: bool) -> &'static [Self] {
@@ -93,7 +93,7 @@ pub enum ProjectPage {
     Library,
     Configuration,
     Dependencies,
-    Recovery,
+    History,
 }
 
 impl ProjectPage {
@@ -102,7 +102,7 @@ impl ProjectPage {
         Self::Library,
         Self::Configuration,
         Self::Dependencies,
-        Self::Recovery,
+        Self::History,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -113,7 +113,7 @@ impl ProjectPage {
             Self::Library => "Library Manager",
             Self::Configuration => "Configuration",
             Self::Dependencies => "Dependencies",
-            Self::Recovery => "Recovery",
+            Self::History => "History",
         }
     }
 }

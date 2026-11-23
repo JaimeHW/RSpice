@@ -28,7 +28,7 @@ fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
             "project-testbench-configuration",
         ),
         (ProjectPage::Dependencies, "project-dependencies"),
-        (ProjectPage::Recovery, "project-recovery"),
+        (ProjectPage::History, "project-history"),
     ];
     assert_eq!(ProjectPage::ALL.len(), expected.len());
 
@@ -262,7 +262,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         ProjectCommand::Page(ProjectPage::Library),
         ProjectCommand::Page(ProjectPage::Configuration),
         ProjectCommand::Page(ProjectPage::Dependencies),
-        ProjectCommand::Page(ProjectPage::Recovery),
+        ProjectCommand::Page(ProjectPage::History),
     ] {
         assert!(
             command

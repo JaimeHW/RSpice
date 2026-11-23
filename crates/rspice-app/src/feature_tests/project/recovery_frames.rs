@@ -312,7 +312,7 @@ fn a_checkpoint_created_on_the_recovery_page_is_written_while_the_page_paints() 
         create(&mut app.state, ProjectCheckpointReason::Manual).expect("checkpoint written");
     }
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let listed = paint_until(&ctx, &mut app, |text| text.contains("2 checkpoints"));
 
@@ -367,7 +367,7 @@ fn a_damaged_checkpoint_says_what_is_wrong_and_the_console_keeps_the_store_text(
     std::fs::write(&copy, b"cut short").expect("the copy changes on disk");
 
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let listed = paint_until(&ctx, &mut app, |text| text.contains("1 damaged"));
     let text = painted(&listed);
@@ -419,7 +419,7 @@ fn a_damaged_checkpoint_is_named_by_its_name_and_time() {
     std::fs::remove_file(&copy).expect("the copy goes missing");
 
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let listed = paint_until(&ctx, &mut app, |text| text.contains("1 damaged"));
     let text = painted(&listed);
@@ -471,7 +471,7 @@ fn a_checkpoint_that_cannot_be_written_raises_a_notice() {
     let (mut app, root) = saved_project("recovery-page-create-fails");
     create(&mut app.state, ProjectCheckpointReason::Manual).expect("checkpoint written");
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let ctx = offscreen();
     let listed = paint_until(&ctx, &mut app, |text| {
         text.lines().any(|line| line == "1 checkpoint")
@@ -613,7 +613,7 @@ fn after_a_save_as_the_overview_and_the_recovery_page_state_one_revision() {
         painted(&overview)
     );
     // With no checkpoint selected, the inspector beside the page states it.
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let number = &after["Revision ".len()..];
     paint_until(&ctx, &mut app, |text| {
         text.lines()

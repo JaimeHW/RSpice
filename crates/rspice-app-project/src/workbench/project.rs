@@ -77,7 +77,7 @@ impl Feature for ProjectFeature {
         ProjectCommand::Properties.key(),
         ProjectCommand::Page(ProjectPage::Library).key(),
         ProjectCommand::Page(ProjectPage::Dependencies).key(),
-        ProjectCommand::Page(ProjectPage::Recovery).key(),
+        ProjectCommand::Page(ProjectPage::History).key(),
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {

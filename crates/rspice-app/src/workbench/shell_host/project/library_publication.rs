@@ -260,7 +260,7 @@ fn show_restore_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let mut choose_file = false;
     let choice = CommandForm::new("Restore project from publication", "Restore project")
         .describe(
-            "Replace the open project with the copy saved when it was published. A checkpoint of the project as it stands is taken first, so the Recovery page can put it back.",
+            "Replace the open project with the copy saved when it was published. A checkpoint of the project as it stands is taken first, so the History page can put it back.",
         )
         .reading_column()
         .primary_enabled(primary_enabled)
@@ -406,7 +406,7 @@ fn restore_after_checkpoint(
         draft.reason.trim(),
     )?;
     Ok(format!(
-        "Restored the project from publication {label}. The checkpoint \u{201c}{}\u{201d} on the Recovery page holds revision {checkpoint_revision} as it was.",
+        "Restored the project from publication {label}. The checkpoint \u{201c}{}\u{201d} on the History page holds revision {checkpoint_revision} as it was.",
         ProjectCheckpointReason::PublicationRestore.label()
     ))
 }

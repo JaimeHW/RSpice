@@ -308,7 +308,7 @@ fn overview_root_actions_open_the_root_in_the_frame_they_were_clicked_in() {
 /// asked for in.
 #[test]
 fn revision_history_opens_before_the_frame_draws_its_dialogs() {
-    let (ctx, mut app, settled) = settled_on(ProjectPage::Recovery);
+    let (ctx, mut app, settled) = settled_on(ProjectPage::History);
     assert!(!app.state.project.project_revision_history.open);
 
     click_announced(&ctx, &mut app, settled, "Revision history\u{2026}");
@@ -545,7 +545,7 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
     };
 
     let mut app = populated_project_app();
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     let now = rspice_app_state::time_compat::checked_unix_time_ms().expect("clock");
     let name = app.state.model.workspace.content.project.name().to_owned();
     let project_id = app.state.model.workspace.content.project.id().to_string();
@@ -622,7 +622,7 @@ fn the_recovery_page_lists_checkpoints_and_where_they_are_kept() {
             size.y
         );
         for expected in [
-            "Recovery",
+            "History",
             "3 checkpoints",
             "Create checkpoint",
             "Revision history\u{2026}",

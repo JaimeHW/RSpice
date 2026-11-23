@@ -387,7 +387,7 @@ const PROJECT_PAGES_MENU: &[MenuEntry] = &[
     project(ProjectCommand::Page(ProjectPage::Library)).access('L'),
     project(ProjectCommand::Page(ProjectPage::Configuration)).access('C'),
     project(ProjectCommand::Page(ProjectPage::Dependencies)).access('D'),
-    project(ProjectCommand::Page(ProjectPage::Recovery)).access('R'),
+    project(ProjectCommand::Page(ProjectPage::History)).access('H'),
 ];
 
 /// The grid's styles, one of which is drawn; G steps through them.

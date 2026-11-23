@@ -311,7 +311,7 @@ impl CheckpointDamage {
         match self {
             Self::Unreadable => {
                 "Its record could not be read from the disk. If the drive it is on is \
-                 disconnected, reconnect it and open Recovery again; otherwise delete it."
+                 disconnected, reconnect it and open History again; otherwise delete it."
             }
             Self::Record => "Its record is damaged, so what it holds is unknown. Delete it.",
             Self::MissingRecord => {

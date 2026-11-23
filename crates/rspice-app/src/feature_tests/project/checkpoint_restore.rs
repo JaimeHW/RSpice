@@ -50,7 +50,7 @@ fn listed(app: &RSpiceApp) -> Vec<ProjectCheckpointSummary> {
 /// The Recovery page in front, once it lists `count` checkpoints.
 fn recovery_page(ctx: &egui::Context, app: &mut RSpiceApp, count: &str) -> egui::FullOutput {
     app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Recovery;
+    app.state.project.project_page = ProjectPage::History;
     paint_until(ctx, app, |text| text.lines().any(|line| line == count))
 }
 

@@ -118,7 +118,7 @@ pub(in crate::workbench) fn project(
         }
         // The recovery store's state stands under the project while it is
         // not in order.
-        ProjectPage::Recovery if nothing_selected => {
+        ProjectPage::History if nothing_selected => {
             let action = project_properties(ui, inspector);
             project_recovery(ui, inspector);
             action
@@ -126,7 +126,7 @@ pub(in crate::workbench) fn project(
         _ if nothing_selected => project_properties(ui, inspector),
         ProjectPage::Library => project_library(ui, inspector),
         ProjectPage::Dependencies => project_dependency(ui, inspector),
-        ProjectPage::Recovery => {
+        ProjectPage::History => {
             project_recovery(ui, inspector);
             None
         }
@@ -151,7 +151,7 @@ pub fn inspects_project(
         }
         ProjectPage::Configuration => false,
         ProjectPage::Dependencies => dependency_selection.is_none(),
-        ProjectPage::Recovery => checkpoint_selection.is_none(),
+        ProjectPage::History => checkpoint_selection.is_none(),
     }
 }
 

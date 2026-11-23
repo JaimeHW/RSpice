@@ -216,7 +216,7 @@ impl ProjectCommand {
         Self::Page(ProjectPage::Library),
         Self::Page(ProjectPage::Configuration),
         Self::Page(ProjectPage::Dependencies),
-        Self::Page(ProjectPage::Recovery),
+        Self::Page(ProjectPage::History),
         Self::DesignManagement,
         Self::Variants,
         Self::NewVariant,
@@ -270,7 +270,7 @@ impl ProjectCommand {
                 CommandKey::new("project-testbench-configuration")
             }
             Self::Page(ProjectPage::Dependencies) => CommandKey::new("project-dependencies"),
-            Self::Page(ProjectPage::Recovery) => ids::PROJECT_RECOVERY,
+            Self::Page(ProjectPage::History) => ids::PROJECT_HISTORY,
             Self::DesignManagement => CommandKey::new("design-management"),
             Self::Variants => CommandKey::new("design-variants"),
             Self::NewVariant => CommandKey::new("design-new-variant"),

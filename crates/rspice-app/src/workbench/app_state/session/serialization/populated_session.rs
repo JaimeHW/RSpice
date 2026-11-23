@@ -323,7 +323,7 @@ fn populate_workbench(
     state.code.netlist.front =
         rspice_app_code::workbench::documents::netlist_tabs::NetlistTab::AddedLines;
     state.code.netlist.active_document_initialized = true;
-    state.project.project_page = ProjectPage::Recovery;
+    state.project.project_page = ProjectPage::History;
     state.project.project_library_filter = "afe".to_owned();
     state.project.project_checkpoint_selection = Some("checkpoint-2".to_owned());
     state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;

@@ -594,7 +594,7 @@ fn recovery_header(
         let title = ui.painter().text(
             title_rect.left_center(),
             Align2::LEFT_CENTER,
-            "Recovery",
+            "History",
             title_font,
             tokens.color.text,
         );
@@ -620,8 +620,8 @@ fn recovery_header(
             tokens.color.text_dim,
         );
         let announcement = problem.map_or_else(
-            || format!("Recovery · {status}"),
-            |problem| problem.announce(&format!("Recovery · {status}")),
+            || format!("History · {status}"),
+            |problem| problem.announce(&format!("History · {status}")),
         );
         title_response
             .widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), &announcement));
