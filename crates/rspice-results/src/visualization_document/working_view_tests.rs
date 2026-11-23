@@ -631,3 +631,55 @@ fn one_edit_plots_or_takes_off_every_signal_it_names() {
         "a signal taken off keeps its trace, hidden"
     );
 }
+
+/// Any name a run holds can be plotted, and its trace carries it whole as
+/// its label: a signal name and a label share one bound.
+#[test]
+fn a_signal_of_the_longest_name_a_run_holds_plots_under_that_name() {
+    let tran = AnalysisInstanceId::new();
+    let longest = format!("V({})", "n".repeat(MAX_VISUALIZATION_LABEL_BYTES - 3));
+    assert_eq!(longest.len(), MAX_VISUALIZATION_LABEL_BYTES);
+    let mut document = VisualizationDocument::new_working_view(
+        WorkingViewSource::Plan {
+            plan_id: SimulationPlanId::new(),
+        },
+        run(binding(1), &[(tran, AnalysisType::Transient, &[])]),
+        ResultDocumentTracking::pinned(),
+        vec![pane("Transient", tran, &[])],
+    )
+    .expect("a working view");
+    let pane_id = document.pane_of_analysis(tran).expect("the pane").id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: vec![longest.clone()],
+                plotted: true,
+            }],
+        )
+        .expect("the longest name plots");
+    assert_eq!(
+        plotted(&document, pane_id),
+        [(longest.clone(), true, false)],
+        "its trace is labelled with the whole name"
+    );
+    let back: VisualizationDocument =
+        serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+    assert_eq!(back, document, "and reads back with it");
+
+    let longer = format!("{longest}n");
+    assert!(
+        document
+            .transact(
+                document.revision(),
+                vec![DocumentEdit::SetSignalsPlotted {
+                    pane_id,
+                    signals: vec![longer],
+                    plotted: true,
+                }],
+            )
+            .is_err(),
+        "a name no run can hold is refused"
+    );
+}

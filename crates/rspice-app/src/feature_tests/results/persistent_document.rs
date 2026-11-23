@@ -188,7 +188,8 @@ fn unreferenceable_run(
         authored_analysis_id,
         "V(out)",
     );
-    run.label = "R".repeat(2_000);
+    run.label =
+        "R".repeat(rspice_results::visualization_document::MAX_VISUALIZATION_LABEL_BYTES + 1);
     run
 }
 

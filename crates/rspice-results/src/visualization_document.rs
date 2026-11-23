@@ -66,12 +66,15 @@ pub const MAX_SOURCE_TEXT_BYTES_TOTAL: usize = 128 * 1024 * 1024;
 /// worth of text; each is hashed, compared or drawn whole wherever it is
 /// used.
 pub const MAX_VISUALIZATION_KEY_BYTES: usize = 256;
-/// Maximum ordinary title/label length in UTF-8 bytes.
-pub const MAX_VISUALIZATION_LABEL_BYTES: usize = 1_024;
+/// The length of a name or a label in UTF-8 bytes: a title, a trace's label,
+/// and the name of the signal a trace plots. One bound holds for all of them,
+/// so any signal name a run can hold is also a label a trace can carry.
+pub const MAX_VISUALIZATION_LABEL_BYTES: usize = 4_096;
 /// Maximum engineering-unit length in UTF-8 bytes.
 pub const MAX_VISUALIZATION_UNIT_BYTES: usize = 64;
-/// Maximum retained text-valued source cell length in UTF-8 bytes.
-pub const MAX_SOURCE_TEXT_BYTES: usize = 4_096;
+/// The length of a text-valued source cell in UTF-8 bytes. A cell can hold a
+/// signal's name, so it holds any name a label can.
+pub const MAX_SOURCE_TEXT_BYTES: usize = MAX_VISUALIZATION_LABEL_BYTES;
 /// Maximum retained annotation length in UTF-8 bytes.
 pub const MAX_ANNOTATION_TEXT_BYTES: usize = 16_384;
 /// Maximum declared family dimensions in one presentation policy.

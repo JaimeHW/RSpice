@@ -664,13 +664,16 @@ impl SourceDataset {
 }
 
 /// A signal name a trace or figure names: what the run calls it, one line of
-/// at most [`MAX_SOURCE_TEXT_BYTES`] bytes.
+/// at most [`MAX_VISUALIZATION_LABEL_BYTES`] bytes, so it can be a label too.
 fn validate_signal_name(name: &str) -> Result<(), VisualizationError> {
-    if name.is_empty() || name.len() > MAX_SOURCE_TEXT_BYTES || name.chars().any(char::is_control) {
+    if name.is_empty()
+        || name.len() > MAX_VISUALIZATION_LABEL_BYTES
+        || name.chars().any(char::is_control)
+    {
         return Err(VisualizationError::InvalidValue {
             field: "run-source.signal.name",
             message: format!(
-                "a signal name holds 1 to {MAX_SOURCE_TEXT_BYTES} bytes and no control characters"
+                "a signal name holds 1 to {MAX_VISUALIZATION_LABEL_BYTES} bytes and no control characters"
             ),
         });
     }
