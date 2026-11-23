@@ -1073,3 +1073,235 @@ fn a_read_only_text_shows_no_caret() {
     editable.focus();
     assert!(editable.frame(Vec::new()).caret.is_some());
 }
+
+/// A press and a release at `at`, over two frames; what the release showed.
+fn click_at(bench: &mut Bench, at: egui::Pos2) -> Shown {
+    let _ = bench.frame(pointer(at, Some(true), false));
+    bench.frame(pointer(at, Some(false), false))
+}
+
+/// The third click of three selects the line it lands on, with its break,
+/// so a cut takes the whole line; on the last line it runs to the end.
+#[test]
+fn a_third_click_selects_the_line_with_its_break() {
+    let mut bench = Bench::new("alpha beta\ngamma delta\nlast", true);
+    let _ = bench.frame(Vec::new());
+    let at = cell(&bench, 1, 3);
+    let _ = click_at(&mut bench, at);
+    let second = click_at(&mut bench, at);
+    assert_eq!(
+        second.selected,
+        Some((11, 16)),
+        "two clicks select the word"
+    );
+    let third = click_at(&mut bench, at);
+    assert_eq!(third.selected, Some((11, 23)), "three select the line");
+
+    // A pause, so the next clicks start a count of their own.
+    for _ in 0..30 {
+        let _ = bench.frame(Vec::new());
+    }
+    let at = cell(&bench, 2, 1);
+    for _ in 0..2 {
+        let _ = click_at(&mut bench, at);
+    }
+    let last = click_at(&mut bench, at);
+    assert_eq!(
+        last.selected,
+        Some((23, 27)),
+        "the last line runs to the end"
+    );
+}
+
+/// A drag held below the view scrolls the source and carries the selection
+/// into the lines it brings into view; held above, back the other way.
+#[test]
+fn a_drag_held_past_the_view_s_edge_scrolls_and_selects_on() {
+    let mut bench = Bench::new(&numbered_lines(200), true);
+    let _ = bench.frame(Vec::new());
+    let editor = bench
+        .context
+        .read_response(bench.id)
+        .expect("the editor is on screen")
+        .interact_rect;
+    let from = cell(&bench, 0, 2);
+    let _ = bench.frame(pointer(from, Some(true), false));
+    let _ = bench.frame(pointer(from + Vec2::new(0.0, 20.0), None, false));
+    let below = egui::pos2(from.x, editor.bottom() + 30.0);
+    for _ in 0..30 {
+        let _ = bench.frame(pointer(below, None, false));
+    }
+    let scrolled = bench.scroll_offset().y;
+    let shown_rows = (EDITOR.y / LINE_HEIGHT) as usize;
+    assert!(
+        scrolled > LINE_HEIGHT * 4.0,
+        "a drag held below the view scrolls it down, by {scrolled}"
+    );
+    let selection = bench.session().model.selections()[0];
+    let reached = bench
+        .session()
+        .model
+        .line_column_for_char(selection.cursor)
+        .0;
+    assert!(
+        reached > shown_rows,
+        "the selection runs on into the lines scrolled into view, to line {reached}"
+    );
+    assert_eq!(selection.anchor, 2, "it still starts where the drag did");
+
+    let above = egui::pos2(from.x, editor.top() - 30.0);
+    for _ in 0..30 {
+        let _ = bench.frame(pointer(above, None, false));
+    }
+    assert!(
+        bench.scroll_offset().y < scrolled,
+        "held above the view, it scrolls back up"
+    );
+    let _ = bench.frame(pointer(above, Some(false), false));
+}
+
+/// The fold controls a frame painted in the gutter: the boxes, by whether
+/// each holds a plus.
+fn fold_controls(shown: &Shown, gutter_right: f32) -> Vec<bool> {
+    let shapes: Vec<&egui::Shape> = shown
+        .output
+        .shapes
+        .iter()
+        .map(|clipped| &clipped.shape)
+        .collect();
+    shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Rect(rect)
+                if rect.stroke.color == Color32::LIGHT_GRAY
+                    && rect.fill == Color32::TRANSPARENT
+                    && rect.rect.right() <= gutter_right =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+        .map(|marker| {
+            shapes.iter().any(|shape| {
+                matches!(shape, egui::Shape::LineSegment { points, stroke }
+                    if stroke.color == Color32::LIGHT_GRAY
+                        && (points[0].x - marker.center().x).abs() < 0.5
+                        && (points[0].x - points[1].x).abs() < 0.01
+                        && marker.contains(points[0]))
+            })
+        })
+        .collect()
+}
+
+/// A line that starts a region shows its fold control, a box with a minus,
+/// only while the pointer is over its row of the gutter, and a click there
+/// folds the region; the box then holds a plus.
+#[test]
+fn the_fold_control_shows_over_a_foldable_line_s_gutter_and_folds_it() {
+    let source = "module m;\n    analog begin\n        x = 1;\n    end\nendmodule\n";
+    let mut bench = Bench::new(source, true);
+    let _ = bench.frame(Vec::new());
+    let editor = bench
+        .context
+        .read_response(bench.id)
+        .expect("the editor is on screen")
+        .interact_rect;
+    let gutter_right = editor.left() + 47.0;
+    let gutter = |row: f32| {
+        egui::pos2(
+            editor.left() + 40.0,
+            editor.top() + 8.0 + (row + 0.5) * LINE_HEIGHT,
+        )
+    };
+
+    let over_code = bench.frame(pointer(cell(&bench, 0, 2), None, false));
+    assert!(
+        fold_controls(&over_code, gutter_right).is_empty(),
+        "no fold control while the pointer is over the code"
+    );
+    let over_body = bench.frame(pointer(gutter(2.0), None, false));
+    assert!(
+        fold_controls(&over_body, gutter_right).is_empty(),
+        "no fold control beside a line that starts no region"
+    );
+    let over_header = bench.frame(pointer(gutter(0.0), None, false));
+    assert_eq!(
+        fold_controls(&over_header, gutter_right),
+        vec![false],
+        "a box with a minus beside the module's first line"
+    );
+
+    let _ = click_at(&mut bench, gutter(0.0));
+    assert_eq!(
+        bench
+            .session()
+            .model
+            .folds()
+            .iter()
+            .map(|fold| fold.start_line)
+            .collect::<Vec<_>>(),
+        vec![0],
+        "the click folds the module"
+    );
+    let after = bench.frame(pointer(cell(&bench, 0, 2), None, false));
+    assert_eq!(
+        fold_controls(&after, gutter_right),
+        vec![true],
+        "the folded line's box holds a plus"
+    );
+}
+
+/// Thin rules in the border's colour run down the indentation, one at each
+/// indent stop a line reaches, from the code's edge.
+#[test]
+fn indent_guides_rule_each_indent_stop_a_line_reaches() {
+    let source = "module m;\n    analog begin\n        x = 1;\n    end\nendmodule\n";
+    let mut bench = Bench::new(source, true);
+    let _ = bench.frame(Vec::new());
+    let shown = bench.frame(Vec::new());
+    let editor = bench
+        .context
+        .read_response(bench.id)
+        .expect("the editor is on screen")
+        .interact_rect;
+    let separator = editor.left() + 47.0;
+    let code_left = separator + 12.0;
+    let guides: Vec<(f32, f32)> = shown
+        .output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::LineSegment { points, stroke }
+                if stroke.color == Color32::DARK_GRAY
+                    && points[0].x > separator + 1.0
+                    && (points[0].x - points[1].x).abs() < 0.01 =>
+            {
+                Some((points[0].x, (points[0].y + points[1].y) * 0.5))
+            }
+            _ => None,
+        })
+        .collect();
+    let per_row: Vec<usize> = (0..5)
+        .map(|row| {
+            let y = cell(&bench, row, 0).y;
+            guides
+                .iter()
+                .filter(|(_, middle)| (middle - y).abs() < LINE_HEIGHT * 0.5)
+                .count()
+        })
+        .collect();
+    assert_eq!(per_row, vec![0, 1, 2, 1, 0], "guides by row: {guides:?}");
+    let char_width = cell(&bench, 0, 1).x - cell(&bench, 0, 0).x;
+    let mut stops: Vec<f32> = guides.iter().map(|(x, _)| *x).collect();
+    stops.sort_by(f32::total_cmp);
+    stops.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+    assert_eq!(stops.len(), 2, "two stops: {stops:?}");
+    assert!(
+        (stops[0] - code_left).abs() <= 1.0,
+        "the first at the code's edge"
+    );
+    assert!(
+        (stops[1] - (code_left + 4.0 * char_width)).abs() <= 1.0,
+        "the second four cells in"
+    );
+}

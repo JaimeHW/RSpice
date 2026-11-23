@@ -111,6 +111,18 @@ struct VirtualEditorSession {
     /// Where a view handed back from an earlier launch scrolled the text,
     /// until the next frame scrolls there.
     restore_scroll: Option<Vec2>,
+    /// The regions the text folds into, for the gutter's fold control.
+    fold_regions: Option<FoldRegions>,
+}
+
+/// The regions a text folds into, found for one revision of it in one
+/// syntax and kept until either changes.
+#[derive(Clone)]
+struct FoldRegions {
+    revision: u64,
+    syntax: EditorSyntax,
+    /// Each region's first line and the line after its last.
+    regions: Vec<(usize, usize)>,
 }
 
 /// How a caret that moved is brought into view.
@@ -170,6 +182,7 @@ impl Default for VirtualEditorSession {
             find: find_bar::FindBar::default(),
             rows: wrap::Rows::default(),
             restore_scroll: None,
+            fold_regions: None,
         }
     }
 }
@@ -231,6 +244,10 @@ pub(crate) struct SourceSpan {
 const OUTDATED_MARK_OPACITY: f32 = 0.45;
 /// How far in from the view's edge a line that runs past it fades.
 const EDGE_FADE_WIDTH: f32 = 28.0;
+/// How fast a drag held past the top or the bottom of the view scrolls the
+/// source, in points a second for each point the pointer is past the edge,
+/// counting a line besides so it scrolls the moment it leaves.
+const DRAG_SCROLL_RATE: f32 = 8.0;
 
 /// A row the viewport is about to paint, for the language service that lays
 /// it out. Colour is read from the line's start, never from where the view
@@ -808,6 +825,15 @@ pub(crate) fn show_virtual_text_editor(
                 session.preferred_column = None;
                 session.touch.show_handles(session.touch.is_touch());
             }
+            // A third click selects its whole line, with the line's break.
+            if response.triple_clicked()
+                && let Some(pointer) = pointer_position
+            {
+                let (line, _) = hit(&session, pointer);
+                select_line_at(&mut session.model, line);
+                session.drag_anchor = None;
+                session.preferred_column = None;
+            }
             if response.dragged()
                 && !session.touch.is_touch()
                 && let Some(pointer) = pointer_position
@@ -835,6 +861,20 @@ pub(crate) fn show_virtual_text_editor(
                             .char_at_line_column(anchor_line, anchor_column),
                         cursor: session.model.char_at_line_column(line, column),
                     }]);
+                }
+                // Held past the top or the bottom of the view, the drag
+                // scrolls the source toward the pointer, faster the further
+                // past it is, so the selection reaches lines out of view.
+                let view = ui.clip_rect();
+                let past = (pointer.y - view.bottom()).max(0.0) - (view.top() - pointer.y).max(0.0);
+                if past != 0.0 {
+                    let speed = (past.abs() + style.line_height) * DRAG_SCROLL_RATE;
+                    let step = speed * ui.input(|input| input.stable_dt.min(0.1));
+                    ui.scroll_with_delta_animation(
+                        Vec2::new(0.0, -step.copysign(past)),
+                        egui::style::ScrollAnimation::none(),
+                    );
+                    ui.ctx().request_repaint();
                 }
             }
             if response.drag_stopped() {
@@ -966,6 +1006,34 @@ pub(crate) fn show_virtual_text_editor(
                 );
                 hover_char_index = Some(session.model.char_at_line_column(line, column));
             }
+            // A line that starts a region shows its fold control while the
+            // pointer is over its row of the gutter; a click there folds it.
+            let fold_hover = pointer_hover
+                .filter(|pointer| {
+                    response.hovered()
+                        && ui.clip_rect().contains(*pointer)
+                        && pointer.x <= sticky_separator
+                })
+                .map(|pointer| {
+                    hit_test(
+                        &session.model,
+                        &session.rows,
+                        pointer,
+                        origin,
+                        viewport,
+                        style,
+                        char_width,
+                    )
+                    .0
+                })
+                .filter(|&line| {
+                    !session
+                        .model
+                        .folds()
+                        .iter()
+                        .any(|fold| fold.start_line == line)
+                        && fold_region_at(&mut session, syntax, line).is_some()
+                });
             for (line, span) in viewport_lines {
                 let row_top =
                     origin.y + style.top_padding + line.visible_row as f32 * style.line_height;
@@ -1051,6 +1119,19 @@ pub(crate) fn show_virtual_text_editor(
                     char_width,
                     style,
                 );
+                // Thin rules down the indentation, one at each indent stop
+                // the line reaches, so a nested block's depth reads at a
+                // glance.
+                if span.first {
+                    let unit = syntax.indentation().chars().count().max(1);
+                    let guide = Stroke::new(1.0, style.border);
+                    for stop in 0..indent_depth(&session.model, line.logical_line, unit) {
+                        let x = row_painter.round_to_pixel_center(
+                            row_origin_x + (stop * unit) as f32 * char_width,
+                        );
+                        row_painter.vline(x, row_rect.y_range(), guide);
+                    }
+                }
                 let job = layout_line(
                     ui,
                     &LayoutRow {
@@ -1152,8 +1233,11 @@ pub(crate) fn show_virtual_text_editor(
                         style.accent,
                     );
                 }
-                if line.folded_line_count > 0 {
-                    // A box with a plus: the lines it holds open on a click.
+                // A box with a plus: the lines it holds open on a click. A
+                // box with a minus, while the pointer is over the gutter
+                // beside it: the region the line starts folds on one.
+                let folded = line.folded_line_count > 0;
+                if folded || (span.first && fold_hover == Some(line.logical_line)) {
                     let marker = egui::Rect::from_center_size(
                         egui::pos2(sticky_gutter_left + lanes.fold_center, row_rect.center().y),
                         Vec2::splat(lanes.mark_side + 1.0),
@@ -1166,16 +1250,19 @@ pub(crate) fn show_virtual_text_editor(
                         marker.center().y,
                         ink,
                     );
-                    ui.painter().vline(
-                        marker.center().x,
-                        (marker.top() + 2.0)..=(marker.bottom() - 2.0),
-                        ink,
-                    );
+                    if folded {
+                        ui.painter().vline(
+                            marker.center().x,
+                            (marker.top() + 2.0)..=(marker.bottom() - 2.0),
+                            ink,
+                        );
+                    }
                 }
             }
 
             // A folded line opens on a click anywhere in its row of the
-            // gutter, a row tall and the gutter wide whatever the text size.
+            // gutter, a row tall and the gutter wide whatever the text size;
+            // a line that starts a region folds it on one.
             if response.clicked_by(egui::PointerButton::Primary)
                 && let Some(pointer) = response.interact_pointer_pos()
                 && pointer.x <= sticky_separator
@@ -1189,7 +1276,11 @@ pub(crate) fn show_virtual_text_editor(
                     style,
                     char_width,
                 );
-                session.model.unfold_at_line(line);
+                if !session.model.unfold_at_line(line)
+                    && let Some((start, end)) = fold_region_at(&mut session, syntax, line)
+                {
+                    session.model.fold_lines(start, end);
+                }
             }
 
             caret_anchor = primary_caret_anchor(&session, origin, code_origin_x, char_width, style);
@@ -1412,6 +1503,63 @@ fn place_caret(session: &mut VirtualEditorSession, char_index: usize) {
     session.maximum_cells = session
         .maximum_cells
         .max(session.model.maximum_selected_line_cells());
+}
+
+/// Select `line` whole, from its start to the next line's, so a cut or a
+/// copy takes the line with its break; the last line runs to the end.
+fn select_line_at(model: &mut TextDocumentModel, line: usize) {
+    let start = model.char_at_line_column(line, 0);
+    let end = if line + 1 < model.line_count() {
+        model.char_at_line_column(line + 1, 0)
+    } else {
+        model.len_chars()
+    };
+    model.set_selections(vec![TextSelection {
+        anchor: start,
+        cursor: end,
+    }]);
+}
+
+/// How many indent stops `unit` cells apart the leading spaces and tabs
+/// of `line` reach.
+fn indent_depth(model: &TextDocumentModel, line: usize, unit: usize) -> usize {
+    let Some(content) = model.line_content_char_range(line) else {
+        return 0;
+    };
+    let indented = content
+        .take_while(|&index| matches!(model.char_at(index), Some(' ' | '\t')))
+        .count();
+    model.cell_at(line, indented) / unit
+}
+
+/// The widest region `line` starts that folds at least one line away, from
+/// the regions found for the text the model holds: they are found again
+/// only once the text or its syntax has changed.
+fn fold_region_at(
+    session: &mut VirtualEditorSession,
+    syntax: EditorSyntax,
+    line: usize,
+) -> Option<(usize, usize)> {
+    let revision = session.model.revision();
+    let stale = session
+        .fold_regions
+        .as_ref()
+        .is_none_or(|kept| kept.revision != revision || kept.syntax != syntax);
+    if stale {
+        session.fold_regions = Some(FoldRegions {
+            revision,
+            syntax,
+            regions: discover_fold_regions(&session.model, syntax),
+        });
+    }
+    session
+        .fold_regions
+        .as_ref()?
+        .regions
+        .iter()
+        .filter(|(start, end)| *start == line && *end > start + 1)
+        .max_by_key(|(_, end)| *end)
+        .copied()
 }
 
 /// Select the word at `char_index`, or the single character there when it
