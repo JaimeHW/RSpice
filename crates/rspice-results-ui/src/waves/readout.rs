@@ -290,11 +290,15 @@ pub struct MeasurementWording<'a> {
 pub fn measurement_panel(
     ui: &mut Ui,
     derived: &mut DerivedSeries,
-    model: &StripModel,
+    models: &Arc<Vec<StripModel>>,
+    measured: usize,
     generation: u64,
     window: Option<(f64, f64)>,
     wording: MeasurementWording<'_>,
 ) {
+    let Some(model) = models.get(measured) else {
+        return;
+    };
     let title = if window.is_some() {
         "Measurements · A–B"
     } else {
@@ -309,9 +313,12 @@ pub fn measurement_panel(
         strip: super::stable_hash(&model.analysis_key),
         window: window.map(|(a, b)| (a.min(b).to_bits(), a.max(b).to_bits())),
     };
-    let shown = derived
-        .measurements_mut()
-        .shown(of, ui.ctx(), || MeasurementPlan::of(model, window));
+    let shown = derived.measurements_mut().shown(of, ui.ctx(), || PlanOf {
+        models: Arc::clone(models),
+        measured,
+        window,
+        signals: model.traces.iter().filter(|trace| trace.visible).count(),
+    });
     let columns = [
         Column::name("Measurement", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
         Column::name("Value", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
@@ -456,8 +463,29 @@ fn measured_branches(trace: &StripTrace) -> Vec<Option<usize>> {
     }
 }
 
+/// What a measuring measures: the plotted traces of one strip model of a
+/// build, planned off the frame with the measuring itself.
+struct PlanOf {
+    models: Arc<Vec<StripModel>>,
+    measured: usize,
+    window: Option<(f64, f64)>,
+    /// The plotted signals.
+    signals: usize,
+}
+
+impl PlanOf {
+    fn plan(&self) -> MeasurementPlan {
+        self.models
+            .get(self.measured)
+            .map_or_else(MeasurementPlan::default, |model| {
+                MeasurementPlan::of(model, self.window)
+            })
+    }
+}
+
 /// A strip's plotted traces, owned whole so they can be measured off the
 /// frame.
+#[derive(Default)]
 struct MeasurementPlan {
     window: Option<(f64, f64)>,
     traces: Vec<PlannedTrace>,
@@ -531,8 +559,8 @@ struct Measuring {
 }
 
 impl Measuring {
-    fn start(of: MeasuredOf, plan: MeasurementPlan, ctx: &egui::Context) -> Self {
-        let signals = plan.traces.len();
+    fn start(of: MeasuredOf, plan: PlanOf, ctx: &egui::Context) -> Self {
+        let signals = plan.signals;
         let answer = Arc::new(OnceLock::new());
         let stop = Arc::new(AtomicBool::new(false));
         #[cfg(not(target_arch = "wasm32"))]
@@ -541,7 +569,7 @@ impl Measuring {
             let spawned = std::thread::Builder::new()
                 .name("results-measurements".to_owned())
                 .spawn(move || {
-                    let _ = held.set(plan.measure(&halt).map(Arc::new));
+                    let _ = held.set(plan.plan().measure(&halt).map(Arc::new));
                     ctx.request_repaint();
                 });
             // With no thread to be had, the table says nothing rather than
@@ -554,7 +582,7 @@ impl Measuring {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = ctx;
-            let _ = answer.set(plan.measure(&stop).map(Arc::new));
+            let _ = answer.set(plan.plan().measure(&stop).map(Arc::new));
         }
         Self {
             of,
@@ -602,7 +630,7 @@ impl MeasurementsMemo {
         &mut self,
         of: MeasuredOf,
         ctx: &egui::Context,
-        plan: impl FnOnce() -> MeasurementPlan,
+        plan: impl FnOnce() -> PlanOf,
     ) -> Shown {
         self.collect();
         let current = self.done.as_ref().is_some_and(|(done, _)| *done == of);
@@ -617,7 +645,7 @@ impl MeasurementsMemo {
         };
         if start {
             let plan = plan();
-            if plan.traces.is_empty() {
+            if plan.signals == 0 {
                 self.done = Some((of, Arc::new(Measurements::default())));
             } else {
                 self.running = Some(Measuring::start(of, plan, ctx));

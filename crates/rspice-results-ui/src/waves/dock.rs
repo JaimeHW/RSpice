@@ -22,7 +22,7 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 /// Borrowed projections selected and validated by the host for this readout.
 #[derive(Clone, Copy)]
 pub struct ReadoutInput<'a> {
-    pub models: &'a [StripModel],
+    pub models: &'a std::sync::Arc<Vec<StripModel>>,
     /// Which build of the strip models `models` is: what is measured of them
     /// is kept until it changes.
     pub models_generation: u64,
@@ -884,12 +884,12 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultViewerState, source: ReadoutIn
     let models = source.models;
     let cursor_model = state
         .cursor_strip
-        .and_then(|index| models.iter().find(|m| m.analysis_index == index));
+        .and_then(|index| models.iter().position(|m| m.analysis_index == index));
 
     // Statistics over the cursor window (or the full range).
     let cursors = state.cursors;
-    let measured_model = cursor_model.or_else(|| models.first());
-    if let Some(model) = measured_model {
+    let measured_model = cursor_model.or_else(|| (!models.is_empty()).then_some(0));
+    if let Some(measured) = measured_model {
         let window = match (cursors.a, cursors.b) {
             (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
             _ => None,
@@ -897,7 +897,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultViewerState, source: ReadoutIn
         super::readout::measurement_panel(
             ui,
             &mut state.derived,
-            model,
+            models,
+            measured,
             source.models_generation,
             window,
             super::readout::MeasurementWording {

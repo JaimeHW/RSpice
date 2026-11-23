@@ -36,14 +36,16 @@ fn with_readout<R>(
 ) -> R {
     let presentation = state.results_reads().presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let models = need_models.then(|| {
+    let models = if need_models {
         cached_models(
             &state.model.simulation,
             state.results,
             presentation.complex_number_display(),
             tokens,
         )
-    });
+    } else {
+        std::sync::Arc::default()
+    };
     let models_generation = state.results.models.generation();
     let strips = on_screen_strips(state.results_reads());
     // Design notation changes labels only; the rows' keys stay the result's.
@@ -54,7 +56,7 @@ fn with_readout<R>(
     render(
         &mut state.results.session,
         ReadoutInput {
-            models: models.as_deref().map_or(&[], Vec::as_slice),
+            models: &models,
             models_generation,
             on_screen_strips: &strips,
             presentation: presentation.readout(),
