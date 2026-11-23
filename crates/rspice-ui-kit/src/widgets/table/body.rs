@@ -35,6 +35,50 @@ const UNSAVED_ROOM: f32 = UNSAVED_GAP + 2.0 * UNSAVED_RADIUS;
 /// The least gap between a cell's words and the state at its right end.
 const STATE_GAP: f32 = 12.0;
 
+/// The width `cell` shows whole in between two columns, as its row lays it
+/// out: its icon, its words behind any problem mark, its suffix, its state
+/// with the gap before it, then its unsaved dot and trailing mark, inside a
+/// cell's padding. A state is given at most half the cell, so a cell whose
+/// state outweighs its words is as wide as twice its state.
+pub(super) fn whole_width(ui: &Ui, cell: &Cell) -> f32 {
+    let font = if cell.mono {
+        theme::mono(tokens::FS_0, FontWeight::Regular)
+    } else {
+        theme::sans(tokens::FS_0, FontWeight::Regular)
+    };
+    let width = |text: String| {
+        ui.painter()
+            .layout_no_wrap(text, font.clone(), egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    let mark = |problem: bool| {
+        if problem {
+            crate::widgets::PROBLEM_MARK_ADVANCE
+        } else {
+            0.0
+        }
+    };
+    let mut words = width(cell.text.clone()) + mark(matches!(cell.ink, Ink::Problem(_)));
+    if cell.icon.is_some() {
+        words += LEAD_ICON_SIDE + LEAD_ICON_GAP;
+    }
+    if let Some(suffix) = &cell.suffix {
+        words += width(format!(" \u{b7} {suffix}"));
+    }
+    if let Some((state, problem)) = &cell.state {
+        let state = width(state.clone()) + mark(problem.is_some());
+        words = (words + STATE_GAP + state).max(2.0 * state);
+    }
+    if cell.unsaved {
+        words += UNSAVED_ROOM;
+    }
+    if cell.trailing.is_some() {
+        words += LEAD_ICON_SIDE + LEAD_ICON_GAP;
+    }
+    words.ceil() + 2.0 * CELL_PAD
+}
+
 /// Where one row goes and how it is marked.
 pub(super) struct RowPlace<'g> {
     /// The row's index in the page's own order.

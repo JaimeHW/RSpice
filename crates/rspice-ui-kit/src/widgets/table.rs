@@ -240,6 +240,29 @@ pub fn least_width(columns: &[Column]) -> f32 {
         .max(NARROW_W + 1.0)
 }
 
+/// The width a column headed `head` takes to show each of `cells` whole, as
+/// a row lays it out, and never less than its head with room for the sort
+/// mark: a column sized from what it holds. A page measures it when its
+/// rows change, not on every frame.
+pub fn fitted_width<'c>(ui: &Ui, head: &str, cells: impl IntoIterator<Item = &'c Cell>) -> f32 {
+    let head = ui
+        .painter()
+        .layout_no_wrap(
+            head.to_owned(),
+            theme::sans(crate::tokens::FS_0, theme::FontWeight::Medium),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
+        .ceil()
+        + SORT_MARK_ROOM
+        + 2.0 * CELL_PAD;
+    cells
+        .into_iter()
+        .map(|cell| body::whole_width(ui, cell))
+        .fold(head, f32::max)
+}
+
 /// The widths `columns` take across `available` points: fixed columns at their
 /// width, the spare shared among the flexible ones by their share. When the
 /// fixed widths and the flexible minimums exceed `available`, every column
