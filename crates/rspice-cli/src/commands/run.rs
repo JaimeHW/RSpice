@@ -1048,11 +1048,14 @@ fn run_recorded_deck(
 
 /// Failure text for the run report: simulation errors carry their bare
 /// message (re-wrapping at exit would otherwise print
-/// "Simulation failed: Simulation failed: ...").
+/// "Simulation failed: Simulation failed: ..."), a limit the run went past
+/// said as the desktop app says it.
 fn simulation_error_message(e: &CliError) -> String {
     match e {
         CliError::SimulationError { message, .. } => message.clone(),
-        CliError::CoreSimulationError { source, .. } => source.to_string(),
+        CliError::CoreSimulationError { source, .. } => {
+            crate::cli::refusal::simulation_words(source)
+        }
         other => other.to_string(),
     }
 }

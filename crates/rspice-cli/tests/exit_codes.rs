@@ -634,6 +634,36 @@ fn resource_environment_override_takes_precedence_over_config_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A run that goes past a limit while it runs says so as the desktop app
+/// does, then in the engine's words.
+#[test]
+fn a_limit_a_run_goes_past_reads_as_the_app_says_it() {
+    let dir = test_dir("flattened_limit");
+    let deck = dir.join("divider.sp");
+    std::fs::write(
+        &deck,
+        "* divider\nV1 in 0 1\nR1 in mid 1k\nR2 mid 0 1k\n.op\n.end\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice_with_envs(
+        &["--quiet", "run", deck.to_str().unwrap()],
+        &[("RSPICE_MAX_FLATTENED_ELEMENTS", "2")],
+    );
+
+    assert_eq!(output.status.code(), Some(75));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "This circuit has more than 2 devices with its subcircuits expanded; a circuit can \
+             have at most 2. (flattened_elements limit exceeded"
+        ),
+        "{stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn failed_step_point_fails_the_command_without_truncated_success() {
     let dir = test_dir("bad_step_point");
