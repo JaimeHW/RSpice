@@ -399,7 +399,7 @@ impl WorkerRequest {
         Ok(Self {
             id,
             request: WorkerSimulationRequest::try_from(request)?,
-            netlist: input.netlist.clone(),
+            netlist: input.netlist.to_string(),
             source_path: input
                 .source_path
                 .as_ref()
@@ -437,7 +437,7 @@ impl WorkerRequest {
         (
             SimulationRequest::from(self.request),
             NetlistInput {
-                netlist: self.netlist,
+                netlist: self.netlist.into(),
                 source_path: self.source_path.map(PathBuf::from),
                 // The browser has no deck directory: a relative path is the
                 // worker's virtual root's.

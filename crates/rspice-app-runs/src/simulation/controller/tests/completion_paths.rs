@@ -851,7 +851,11 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
         .current_provenance
         .as_ref()
         .map(AnalysisResultProvenance::source_domain);
-    let cached_netlist = controller.cached_netlist.clone().unwrap_or_default();
+    let cached_netlist = controller
+        .cached_netlist
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned();
     let run_count = state.model.simulation.retained.runs.len();
     let status = state.model.simulation.execution.status.clone();
     controller.abort();
@@ -978,7 +982,11 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
         .expect("explicit validation authorizes the exact manual deck");
 
     controller.start_simulation(&mut state);
-    let cached_netlist = controller.cached_netlist.clone().unwrap_or_default();
+    let cached_netlist = controller
+        .cached_netlist
+        .as_deref()
+        .unwrap_or_default()
+        .to_owned();
     controller.abort();
 
     assert_eq!(cached_netlist, "deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n");

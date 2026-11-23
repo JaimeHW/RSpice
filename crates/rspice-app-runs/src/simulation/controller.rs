@@ -233,7 +233,7 @@ pub struct SimulationController {
     /// Total number of analyses in current batch
     pub total_analyses: usize,
     /// Cached netlist for multi-analysis runs (avoids regeneration)
-    cached_netlist: Option<String>,
+    cached_netlist: Option<std::sync::Arc<str>>,
     /// Runtime coordinator for transient-derived viewer data (eye/FFT).
     pub transient_post: transient_post::TransientPostCoordinator,
     /// App-state design epoch this controller's runner/queue belong to.
@@ -602,7 +602,7 @@ impl SimulationController {
         self.runner.begin_hdl_run();
         self.total_analyses = dispatch.task_count();
         self.current_analysis_idx = 0;
-        self.cached_netlist = Some(dispatch.executable_netlist().to_owned());
+        self.cached_netlist = Some(std::sync::Arc::clone(dispatch.shared_executable_netlist()));
 
         // The design a schematic run solves is the cell its cross-probe map
         // was read off; a typed deck is its file.
@@ -703,13 +703,11 @@ impl SimulationController {
                 run_id,
                 points: dispatch
                     .tasks()
-                    .map(|task| {
-                        let deck = std::sync::Arc::clone(task.executable_netlist());
-                        crate::state::ExecutedDeckPoint {
-                            model_sources: crate::state::sealed_model_sources(&deck),
-                            label: task.label().to_owned(),
-                            deck,
-                        }
+                    .map(|task| crate::state::ExecutedDeckPoint {
+                        // Read out of this very deck where the run was prepared.
+                        model_sources: task.sealed_model_sources().to_vec(),
+                        label: task.label().to_owned(),
+                        deck: std::sync::Arc::clone(task.executable_netlist()),
                     })
                     .collect(),
             });
@@ -1031,8 +1029,8 @@ impl SimulationController {
                 return None;
             };
             Some(
-                rspice_simulation::execution_identity::operating_point_effective_source_digest(
-                    next_analysis.executable_netlist(),
+                rspice_simulation::execution_identity::operating_point_effective_source_digest_of(
+                    next_analysis.executable_netlist_digest(),
                     config.run_point.clone(),
                 ),
             )

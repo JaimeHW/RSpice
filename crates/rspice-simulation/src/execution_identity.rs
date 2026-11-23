@@ -165,8 +165,20 @@ pub fn operating_point_effective_source_digest(
     source: &str,
     run_point: OpRunPointContext,
 ) -> ContentDigest {
+    operating_point_effective_source_digest_of(
+        rspice_design::netlist_document::content_digest(source),
+        run_point,
+    )
+}
+
+/// [`operating_point_effective_source_digest`], with the source's content
+/// digest already read.
+pub fn operating_point_effective_source_digest_of(
+    source: ContentDigest,
+    run_point: OpRunPointContext,
+) -> ContentDigest {
     let mut writer = CanonicalWriter::new("rspice.op-effective-source/v1");
-    writer.digest(rspice_design::netlist_document::content_digest(source));
+    writer.digest(source);
     writer.option(run_point.supply_voltage.as_ref(), |writer, value| {
         writer.f64(*value);
     });

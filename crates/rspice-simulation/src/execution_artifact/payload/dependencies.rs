@@ -17,10 +17,19 @@ impl ResolvedExecutionDependencies {
         if self.bindings.is_empty() {
             return;
         }
-        self.source = Some(DependencySourceContext {
-            executable: rspice_design::netlist_document::content_digest(executable),
+        self.bind_source_digest(
+            rspice_design::netlist_document::content_digest(executable),
             basis,
-        });
+        );
+    }
+
+    /// [`Self::bind_source`], with the executable source's content digest
+    /// already read.
+    pub fn bind_source_digest(&mut self, executable: ContentDigest, basis: ContentDigest) {
+        if self.bindings.is_empty() {
+            return;
+        }
+        self.source = Some(DependencySourceContext { executable, basis });
     }
 
     pub fn validate_source_basis(

@@ -1240,7 +1240,7 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
     controller.total_analyses = 2;
-    controller.cached_netlist = Some("existing sealed batch".to_owned());
+    controller.cached_netlist = Some("existing sealed batch".into());
 
     controller.start_authorized_snapshot(&mut state);
 

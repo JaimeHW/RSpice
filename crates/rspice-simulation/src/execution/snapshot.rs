@@ -352,6 +352,27 @@ pub struct PreparedTask {
     /// it is, and the card's one time or the sealed checkpoint's. Known at
     /// binding; `None` for every other task.
     transient_state: Option<rspice_results::provenance::AnalysisResultTransientState>,
+    /// What the frame a run starts in reads of this task's deck, read once
+    /// the snapshot has composed it. `None` until then.
+    deck_facts: Option<TaskDeckFacts>,
+}
+
+/// What the frame a run starts in reads of a task's deck, read where the
+/// snapshot is made: the model sources its sealed-source comments name, and
+/// its content digest when the task's start reads one.
+#[derive(Debug, Clone)]
+struct TaskDeckFacts {
+    digest: Option<ContentDigest>,
+    model_sources: Arc<[String]>,
+}
+
+impl TaskDeckFacts {
+    fn of(deck: &str, digested: bool) -> Self {
+        Self {
+            digest: digested.then(|| rspice_design::netlist_document::content_digest(deck)),
+            model_sources: rspice_model_library::sealed_model_sources(deck).into(),
+        }
+    }
 }
 
 impl PreparedTask {
@@ -394,7 +415,18 @@ impl PreparedTask {
             monte_carlo_resumes: Arc::from([]),
             transient_resumes: Arc::from([]),
             transient_state: None,
+            deck_facts: None,
         }
+    }
+
+    /// Whether this task's start reads its deck's digest: an operating point
+    /// names the source it solved by it, and a task bound to an earlier
+    /// task's result binds the source it runs.
+    fn start_reads_digest(&self) -> bool {
+        matches!(
+            self.task.config,
+            Some(rspice_simulation_contract::config::AnalysisConfig::DcOp(_))
+        ) || !self.dependency_bindings.is_empty()
     }
 
     /// Record the transient state this task's card linearizes around.
@@ -657,6 +689,10 @@ pub struct AuthorizedTaskDispatch {
     task: QueuedAnalysis,
     saved_output_contracts: Vec<PreparedSavedOutput>,
     executable_netlist: Arc<str>,
+    /// `executable_netlist`'s content digest, where preparation read it.
+    executable_digest: Option<ContentDigest>,
+    /// The model sources `executable_netlist`'s sealed-source comments name.
+    sealed_model_sources: Arc<[String]>,
     source_basis_digest: ContentDigest,
     project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: crate::measurement_references::PreparedMeasurementReferences,
@@ -713,6 +749,11 @@ impl AuthorizedRunDispatch {
     }
 
     pub fn executable_netlist(&self) -> &str {
+        &self.executable_netlist
+    }
+
+    /// [`Self::executable_netlist`], shared rather than copied.
+    pub fn shared_executable_netlist(&self) -> &Arc<str> {
         &self.executable_netlist
     }
 
@@ -803,7 +844,10 @@ impl AuthorizedTaskDispatch {
             artifacts,
         )?;
         dependencies.validate_for_spec(&self.task.spec, &self.task.spec_options)?;
-        dependencies.bind_source(&self.executable_netlist, self.source_basis_digest);
+        if !self.dependency_bindings.is_empty() {
+            dependencies
+                .bind_source_digest(self.executable_netlist_digest(), self.source_basis_digest);
+        }
         Ok(ResolvedTaskDispatch {
             dispatch: self,
             dependencies,
@@ -845,6 +889,21 @@ impl AuthorizedTaskDispatch {
 
     pub fn executable_netlist(&self) -> &Arc<str> {
         &self.executable_netlist
+    }
+
+    /// The content digest of [`Self::executable_netlist`]: read when the run
+    /// was prepared for a task whose start reads it, else read here.
+    pub fn executable_netlist_digest(&self) -> ContentDigest {
+        self.executable_digest.unwrap_or_else(|| {
+            rspice_design::netlist_document::content_digest(&self.executable_netlist)
+        })
+    }
+
+    /// The model sources [`Self::executable_netlist`]'s sealed-source
+    /// comments name, in the order they appear, read when the run was
+    /// prepared.
+    pub fn sealed_model_sources(&self) -> &[String] {
+        &self.sealed_model_sources
     }
 }
 
@@ -999,7 +1058,7 @@ pub struct PreparedRunSnapshot {
     source_digest: ContentDigest,
     pvt_points: Vec<PreparedPvtPoint>,
     tasks: Vec<PreparedTask>,
-    executable_netlist: String,
+    executable_netlist: Arc<str>,
     save_policy: SavePolicy,
     model_identities: Vec<ModelSourceIdentity>,
     project_model_sources: Vec<PreparedModelSourceIdentity>,
@@ -1767,6 +1826,21 @@ impl PreparedRunSnapshot {
         let hierarchy_map = hierarchy_map::sealed(parts.cross_probe.as_ref())
             .map_err(|error| PreparationError::new(PreparationStage::Authorization, error))?;
 
+        // What the frame a run starts in reads of each task's deck, read here
+        // with the rest of its preparation. The run's own deck is read once
+        // for every task that runs it.
+        let mut run_deck: Option<TaskDeckFacts> = None;
+        for task in &mut parts.tasks {
+            PreparationError::check_abort(abort)?;
+            let digested = task.start_reads_digest();
+            task.deck_facts = Some(match task.executable_netlist_override.as_deref() {
+                Some(deck) => TaskDeckFacts::of(deck, digested),
+                None => run_deck
+                    .get_or_insert_with(|| TaskDeckFacts::of(&parts.executable_netlist, true))
+                    .clone(),
+            });
+        }
+
         let snapshot = Self {
             execution_limits: parts.execution_limits,
             digest,
@@ -1777,7 +1851,7 @@ impl PreparedRunSnapshot {
             source_digest: parts.source_digest,
             pvt_points,
             tasks: parts.tasks,
-            executable_netlist: parts.executable_netlist,
+            executable_netlist: Arc::from(parts.executable_netlist),
             save_policy: parts.save_policy,
             model_identities: parts.model_identities,
             project_model_sources: parts.project_model_sources,
@@ -1891,7 +1965,7 @@ impl PreparedRunSnapshot {
         }
         let hierarchy_map = self.hierarchy_map;
         let source_lines = self.source_lines.as_ref();
-        let executable_netlist: Arc<str> = Arc::from(self.executable_netlist);
+        let executable_netlist = self.executable_netlist;
         let run_source_lines = source_lines.and_then(|lines| {
             super::source_lines::aligned_line_map(lines, &executable_netlist, &executable_netlist)
         });
@@ -1904,6 +1978,15 @@ impl PreparedRunSnapshot {
             .tasks
             .into_iter()
             .map(|prepared| {
+                let deck_facts = prepared.deck_facts.unwrap_or_else(|| {
+                    TaskDeckFacts::of(
+                        prepared
+                            .executable_netlist_override
+                            .as_deref()
+                            .unwrap_or(&executable_netlist),
+                        true,
+                    )
+                });
                 let touchstone_export = if matches!(
                     &prepared.task.spec,
                     rspice_simulation_contract::analysis_spec::AnalysisSpec::SParameter { .. }
@@ -1940,6 +2023,8 @@ impl PreparedRunSnapshot {
                         .executable_netlist_override
                         .map(Arc::<str>::from)
                         .unwrap_or_else(|| Arc::clone(&executable_netlist)),
+                    executable_digest: deck_facts.digest,
+                    sealed_model_sources: deck_facts.model_sources,
                     project_veriloga_runtimes: prepared
                         .veriloga_runtimes
                         .unwrap_or_else(|| project_veriloga_runtimes.clone()),

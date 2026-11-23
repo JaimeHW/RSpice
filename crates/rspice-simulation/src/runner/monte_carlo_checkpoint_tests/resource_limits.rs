@@ -49,7 +49,7 @@ fn monte_carlo_custom_limits_survive_worker_transport_and_cached_resume() {
             }
             options.mc_histogram_bins = Some(5);
             if variation == McVariationSource::DeckStatistics {
-                input.netlist = input.netlist.replace("r=1k", "r={unif(1k,0.2)}");
+                input.netlist = input.netlist.replace("r=1k", "r={unif(1k,0.2)}").into();
             }
             policy(&mut request).trial_range = Some(0..3);
             let (expected, _) = run_and_capture(request.clone(), input.clone());

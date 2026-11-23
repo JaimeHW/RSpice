@@ -69,7 +69,7 @@ fn fixture() -> (SimulationRequest, NetlistInput) {
             }),
         },
         NetlistInput {
-            netlist: deck,
+            netlist: deck.into(),
             source_path: None,
             project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![
                 runtime,
@@ -304,6 +304,7 @@ fn transient_checkpoint_worker_roundtrip_resumes_mixed_events_and_extended_horiz
                 changed_input.netlist = changed_input
                     .netlist
                     .replace("R1 qdiv out 1k", "R1 qdiv out 2k")
+                    .into()
             }
             1 => {
                 let SimulationRequest::Spec { spec, .. } = &mut request else {

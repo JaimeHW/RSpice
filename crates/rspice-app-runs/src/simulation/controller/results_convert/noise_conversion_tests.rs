@@ -296,7 +296,7 @@ fn sparameter_result_retains_solved_references_despite_a_stale_cached_deck() {
     let mut controller = SimulationController::new();
     controller.cached_netlist = Some(
         "* stale deck\nP1 IN 0 PORT=1 Z0=50 AC 1\nR1 IN OUT 50\nP2 OUT 0 PORT=2 Z0=50\n.end\n"
-            .to_owned(),
+            .into(),
     );
     controller.current_spec = Some(AnalysisSpec::SParameter {
         do_noise: false,

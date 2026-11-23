@@ -86,7 +86,7 @@ pub(crate) enum SimulationRequest {
 
 #[derive(Debug, Clone)]
 pub(crate) struct NetlistInput {
-    netlist: String,
+    netlist: Arc<str>,
     source_path: Option<PathBuf>,
     /// The directory the run's relative HDL file paths resolve against: its
     /// source's own, as `rspice run` resolves them beside its deck.
@@ -536,7 +536,7 @@ impl SimulationRunner {
             NetlistInput {
                 measurement_references: Default::default(),
                 data_files: Default::default(),
-                netlist,
+                netlist: netlist.into(),
                 source_path,
                 project_veriloga_runtimes: Default::default(),
                 dependencies: Default::default(),
@@ -683,7 +683,7 @@ pub(crate) fn prepared_request(
         },
     };
     let input = NetlistInput {
-        netlist: executable_netlist.to_string(),
+        netlist: executable_netlist,
         source_path: None,
         hdl_deck_directory,
         project_veriloga_runtimes,
@@ -1419,7 +1419,7 @@ mod tests {
             NetlistInput {
                 measurement_references: Default::default(),
                 data_files: Default::default(),
-                netlist: netlist.to_owned(),
+                netlist: netlist.into(),
                 source_path: None,
                 project_veriloga_runtimes: Default::default(),
                 dependencies,
