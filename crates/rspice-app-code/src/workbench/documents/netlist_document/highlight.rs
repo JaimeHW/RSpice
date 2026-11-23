@@ -47,6 +47,15 @@ struct SourceReading {
     by_line: Option<Box<[Vec<Range<usize>>]>>,
 }
 
+/// A large Spectre source's comments are a list for every line: whoever lets
+/// go of a reading last, a newer one replacing it, they are freed away from
+/// that thread.
+impl Drop for SourceReading {
+    fn drop(&mut self) {
+        rspice_design::freed_away::free_away(&mut self.by_line);
+    }
+}
+
 impl SourceReading {
     fn of(text: &TextSnapshot, source: ShownSource) -> Self {
         let revision = text.revision();

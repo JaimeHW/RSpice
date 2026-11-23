@@ -102,6 +102,14 @@ pub(crate) struct NetlistProjectIndex {
     files: Vec<IndexedFile>,
 }
 
+/// The index of a large deck is millions of small allocations: whoever lets
+/// go of it last, it is freed away from that thread.
+impl Drop for NetlistProjectIndex {
+    fn drop(&mut self) {
+        rspice_design::freed_away::free_away(self);
+    }
+}
+
 /// One file of the index: where it opens, and the text it was indexed from.
 #[derive(Debug, Clone)]
 struct IndexedFile {
@@ -290,15 +298,13 @@ impl NetlistProjectIndex {
             })
             .collect();
 
-        let mut index = Self {
-            symbols,
-            references,
-            raw_hierarchy,
-            source_count: files.len(),
-            deck,
-            files,
-            ..Self::default()
-        };
+        let mut index = Self::default();
+        index.symbols = symbols;
+        index.references = references;
+        index.raw_hierarchy = raw_hierarchy;
+        index.source_count = files.len();
+        index.deck = deck;
+        index.files = files;
         index.expand_hierarchy();
         index.symbols.sort_by(|left, right| {
             left.name

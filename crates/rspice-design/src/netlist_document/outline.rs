@@ -541,6 +541,14 @@ pub struct NetlistSourceIndex {
     outline: NetlistOutline,
 }
 
+/// The index of a large deck is millions of small allocations: whoever lets
+/// go of it last, it is freed away from that thread.
+impl Drop for NetlistSourceIndex {
+    fn drop(&mut self) {
+        crate::freed_away::free_away(self);
+    }
+}
+
 impl NetlistSourceIndex {
     /// The index of `source` read as a root deck.
     #[must_use]

@@ -7,6 +7,7 @@ pub mod connectivity_contract;
 pub mod deck;
 pub mod drc;
 pub mod fast_hash;
+pub mod freed_away;
 pub mod foreign_schematic;
 pub mod hierarchy;
 pub mod library;

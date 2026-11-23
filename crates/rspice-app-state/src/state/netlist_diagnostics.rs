@@ -283,6 +283,15 @@ pub struct NetlistDiagnosticCollection {
     includes: Arc<[CheckedInclude]>,
 }
 
+/// A large deck's findings are as many allocations as it has findings:
+/// whoever lets go of them last, a check landing replaces them, they are
+/// freed away from that thread.
+impl Drop for NetlistDiagnosticCollection {
+    fn drop(&mut self) {
+        rspice_design::freed_away::free_away(self);
+    }
+}
+
 /// One `.include` or `.lib` line the check read, and the file it found.
 #[derive(Debug, Clone)]
 pub struct CheckedInclude {

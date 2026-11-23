@@ -209,29 +209,27 @@ fn expanded_hierarchy_stops_at_recursive_subcircuit_edges() {
         line,
         column: 1,
     };
-    let mut index = NetlistProjectIndex {
-        raw_hierarchy: vec![
-            RawHierarchyInstance {
-                parent: None,
-                instance: "XTOP".to_owned(),
-                target: "A".to_owned(),
-                location: location(1),
-            },
-            RawHierarchyInstance {
-                parent: Some("A".to_owned()),
-                instance: "XB".to_owned(),
-                target: "B".to_owned(),
-                location: location(3),
-            },
-            RawHierarchyInstance {
-                parent: Some("B".to_owned()),
-                instance: "XA".to_owned(),
-                target: "A".to_owned(),
-                location: location(6),
-            },
-        ],
-        ..NetlistProjectIndex::default()
-    };
+    let mut index = NetlistProjectIndex::default();
+    index.raw_hierarchy = vec![
+        RawHierarchyInstance {
+            parent: None,
+            instance: "XTOP".to_owned(),
+            target: "A".to_owned(),
+            location: location(1),
+        },
+        RawHierarchyInstance {
+            parent: Some("A".to_owned()),
+            instance: "XB".to_owned(),
+            target: "B".to_owned(),
+            location: location(3),
+        },
+        RawHierarchyInstance {
+            parent: Some("B".to_owned()),
+            instance: "XA".to_owned(),
+            target: "A".to_owned(),
+            location: location(6),
+        },
+    ];
 
     index.expand_hierarchy();
 
