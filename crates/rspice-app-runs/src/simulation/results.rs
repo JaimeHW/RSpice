@@ -11,7 +11,9 @@ pub fn retained_manual_fixture(
     source: &str,
     kind: crate::state::AnalysisType,
 ) -> crate::state::AnalysisResult {
-    let run = super::controller::test_execution::run_manual_batch(source);
+    let run = super::controller::test_execution::plot_every_signal(
+        super::controller::test_execution::run_manual_batch(source),
+    );
     let mut analysis = run
         .analyses
         .iter()
@@ -19,7 +21,8 @@ pub fn retained_manual_fixture(
         .expect("checked batch contains the requested fixture analysis")
         .clone();
     // Display and legacy-import fixtures are detached from this checked run.
-    // They retain numerical evidence but must not claim its run identity.
+    // They retain numerical evidence but must not claim its run identity, and
+    // they plot every signal, as an imported result does.
     analysis.provenance = None;
     analysis
 }

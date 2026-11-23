@@ -167,6 +167,9 @@ impl SimulationController {
                     analysis_result.error_message = Some(message);
                 }
                 self.materialize_current_saved_outputs(&mut analysis_result);
+                if self.previews_every_column() {
+                    self.plot_deck_outputs(&mut analysis_result.waveforms);
+                }
                 // The Console has had the prose as the engine logged it; the
                 // run's batch gets the conditions, one record each for the
                 // whole run.
@@ -375,6 +378,7 @@ impl SimulationController {
                     crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
                 self.live_transient.clear();
                 self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
+                self.current_deck_outputs = Default::default();
                 self.current_run_id = None;
                 self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
                 self.current_analysis_idx = 0;

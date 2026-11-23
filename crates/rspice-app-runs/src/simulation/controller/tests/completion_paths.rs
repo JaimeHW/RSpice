@@ -1563,48 +1563,60 @@ fn points_the_live_queue_let_go_of_leave_a_gap_in_the_trace_and_are_counted() {
     );
 }
 
-/// A manual deck names no outputs of its own: it keeps every column the engine writes, so
-/// its transient is drawn while it runs, every column of it.
+/// A manual deck keeps every column the engine writes, so its transient offers every column
+/// of it while it runs, and plots only the outputs the deck names: none, when it names none.
 #[test]
-fn a_manual_deck_transient_is_drawn_while_it_runs_every_column_of_it() {
-    let mut state = RunTestHost::default();
-    state.model.simulation.source.netlist_content.set(
-        "deck\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 1u\n.tran 1u 10m\n.end\n".to_string(),
-    );
-    state.model.simulation.execution.request_manual_deck_run();
-    let mut controller = SimulationController::new();
-    controller
-        .prepare_deck_run(&state)
-        .expect("explicit validation authorizes the exact manual deck");
-    controller.start_simulation(&mut state);
-    let streams = controller.streams_live();
-    let window = controller.live_window();
-    controller
-        .live_transient
-        .ingest((0..3).map(two_signal_point).collect());
-    controller.publish_live_preview(&mut state.model);
-    let drawn = state.model.simulation.active_run().and_then(|run| {
-        run.analyses
-            .iter()
-            .find(|analysis| analysis.is_live_partial())
-            .map(|analysis| {
-                analysis
-                    .waveforms
-                    .iter()
-                    .map(|waveform| waveform.name.clone())
-                    .collect::<Vec<_>>()
-            })
-    });
-    controller.abort();
+fn a_manual_deck_transient_offers_every_column_live_and_plots_what_it_names() {
+    for (card, named) in [("", &[][..]), (".probe V(out)\n", &["out"][..])] {
+        let mut state = RunTestHost::default();
+        state.model.simulation.source.netlist_content.set(format!(
+            "deck\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 1u\n.tran 1u 10m\n{card}.end\n"
+        ));
+        state.model.simulation.execution.request_manual_deck_run();
+        let mut controller = SimulationController::new();
+        controller
+            .prepare_deck_run(&state)
+            .expect("explicit validation authorizes the exact manual deck");
+        controller.start_simulation(&mut state);
+        let streams = controller.streams_live();
+        let window = controller.live_window();
+        controller
+            .live_transient
+            .ingest((0..3).map(two_signal_point).collect());
+        controller.publish_live_preview(&mut state.model);
+        let live = state.model.simulation.active_run().and_then(|run| {
+            run.analyses
+                .iter()
+                .find(|analysis| analysis.is_live_partial())
+                .map(|analysis| {
+                    let offered = analysis
+                        .waveforms
+                        .iter()
+                        .map(|waveform| waveform.name.clone())
+                        .collect::<Vec<_>>();
+                    let plotted = analysis
+                        .waveforms
+                        .iter()
+                        .filter(|waveform| waveform.visible)
+                        .map(|waveform| waveform.name.clone())
+                        .collect::<Vec<_>>();
+                    (offered, plotted)
+                })
+        });
+        controller.abort();
 
-    assert!(streams, "a deck's transient offers its samples live");
-    assert_eq!(window, Some((0.0, 10e-3)));
-    assert_eq!(drawn, Some(vec!["out".to_owned(), "ref".to_owned()]));
+        assert!(streams, "a deck's transient offers its samples live");
+        assert_eq!(window, Some((0.0, 10e-3)));
+        let (offered, plotted) = live.expect("the live result is shown");
+        assert_eq!(offered, ["out", "ref"], "{card:?}");
+        assert_eq!(plotted, named, "{card:?}");
+    }
 }
 
 /// A manual deck that writes its segment as it runs is drawn from it: the live result holds
 /// every column in name order, the order the finished result keeps, and the view shows the
-/// same traces, each found by its name for probing, while the run goes on.
+/// same traces, each found by its name for probing, while the run goes on. The deck names no
+/// output, so none of them is plotted.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_manual_decks_live_preview_from_its_segment_is_every_column_in_name_order() {
@@ -1638,11 +1650,13 @@ fn a_manual_decks_live_preview_from_its_segment_is_every_column_in_name_order() 
                     .iter()
                     .find(|analysis| analysis.is_live_partial() && !analysis.waveforms.is_empty())
                     .map(|analysis| {
-                        analysis
+                        let plotted = analysis.waveforms.iter().filter(|w| w.visible).count();
+                        let names = analysis
                             .waveforms
                             .iter()
                             .map(|waveform| waveform.name.clone())
-                            .collect::<Vec<_>>()
+                            .collect::<Vec<_>>();
+                        (names, plotted)
                     })
             });
         if let Some(drawn) = drawn {
@@ -1666,7 +1680,9 @@ fn a_manual_decks_live_preview_from_its_segment_is_every_column_in_name_order() 
         .collect::<Vec<_>>();
     controller.abort();
 
+    let (drawn, plotted) = drawn;
     assert_eq!(drawn, ["I(C1)", "I(R1)", "I(V1)", "IN", "OUT"]);
+    assert_eq!(plotted, 0, "a deck that names no output plots none");
     assert_eq!(shown, drawn);
     assert_eq!(found, [Some(0), Some(1), Some(2), Some(3), Some(4)]);
 }

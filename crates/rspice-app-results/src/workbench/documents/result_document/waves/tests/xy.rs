@@ -783,8 +783,12 @@ fn a_saved_view_keeps_its_strip_against_a_signal_and_the_span() {
 }
 
 /// A host on a run the real controller solved, its first analysis active.
+/// A host on the run of `deck`, with every signal it offers ticked.
 fn solved_host(deck: &str) -> ResultsTestHost {
-    let run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch(deck);
+    use rspice_app_runs::simulation::controller::test_execution::{
+        plot_every_signal, run_manual_batch,
+    };
+    let run = plot_every_signal(run_manual_batch(deck));
     let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs.push(run);
     state.model.simulation.view.active_run_idx = Some(0);

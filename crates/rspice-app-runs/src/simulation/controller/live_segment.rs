@@ -14,6 +14,7 @@ use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use rspice_simulation::execution::DeckOutputs;
 use rspice_simulation::live_transient::{LiveRows, open_live_rows};
 
 use crate::state::{RetainedTrace, ShownWaveforms};
@@ -26,14 +27,15 @@ type Opening = JoinHandle<Result<Option<(LiveRows, Option<LivePreview>)>, String
 
 /// A manual deck's live preview as one opening built it: every column as a trace, in the order
 /// the finished result lists them, by name, so its panes and colours stay where they are when
-/// the run ends; and the view's copy of them.
+/// the run ends; and the view's copy of them. It plots what the deck names, as the finished
+/// result does; the rest wait in the data browser.
 pub(super) struct LivePreview {
     pub(super) traces: Vec<RetainedTrace>,
     pub(super) shown: ShownWaveforms,
 }
 
 impl LivePreview {
-    fn of(rows: &LiveRows) -> Self {
+    fn of(rows: &LiveRows, outputs: &DeckOutputs) -> Self {
         // A trace stores no colour, as a finished run's do: the palette colours it by its
         // slot, so the live plot's colours are the ones the finished result keeps.
         let mut traces = rows
@@ -41,9 +43,9 @@ impl LivePreview {
             .iter()
             .cloned()
             .map(|data| RetainedTrace {
+                visible: outputs.plots(&data.name),
                 data,
                 color: String::new(),
-                visible: true,
             })
             .collect::<Vec<_>>();
         traces.sort_by(|left, right| left.name.cmp(&right.name));
@@ -100,9 +102,9 @@ impl LiveSegmentFollower {
     /// Take a finished opening and begin the next one when it is due; whether the rows grew.
     ///
     /// `path` is the segment the run is writing now, `None` once it stopped writing; the rows
-    /// already found stay until [`Self::clear`]. With `build_preview`, each opening also
+    /// already found stay until [`Self::clear`]. Given the deck's `outputs`, each opening also
     /// builds the live preview of every column, for [`Self::take_preview`].
-    pub(super) fn poll(&mut self, path: Option<PathBuf>, build_preview: bool) -> bool {
+    pub(super) fn poll(&mut self, path: Option<PathBuf>, outputs: Option<&DeckOutputs>) -> bool {
         let mut grew = false;
         if self.opening.as_ref().is_some_and(JoinHandle::is_finished)
             && let Some(opening) = self.opening.take()
@@ -145,11 +147,12 @@ impl LiveSegmentFollower {
             && self.opened_at.is_none_or(|at| at.elapsed() >= REOPEN_EVERY)
         {
             self.opened_at = Some(Instant::now());
+            let outputs = outputs.cloned();
             self.opening = std::thread::Builder::new()
                 .name("rspice-live-rows".to_owned())
                 .spawn(move || {
                     Ok(open_live_rows(&path)?.map(|rows| {
-                        let preview = build_preview.then(|| LivePreview::of(&rows));
+                        let preview = outputs.map(|outputs| LivePreview::of(&rows, &outputs));
                         (rows, preview)
                     }))
                 })
@@ -206,7 +209,7 @@ mod tests {
         ));
         std::fs::write(&path, b"").expect("an empty segment file is written");
         let mut follower = LiveSegmentFollower::default();
-        follower.poll(Some(path.clone()), false);
+        follower.poll(Some(path.clone()), None);
         while follower
             .opening
             .as_ref()
@@ -214,11 +217,11 @@ mod tests {
         {
             std::thread::sleep(Duration::from_millis(5));
         }
-        follower.poll(Some(path.clone()), false);
+        follower.poll(Some(path.clone()), None);
         let failure = follower.take_failure();
         let stopped = follower.stopped;
         std::thread::sleep(REOPEN_EVERY);
-        follower.poll(Some(path.clone()), false);
+        follower.poll(Some(path.clone()), None);
         let opened_again = follower.opening.is_some();
         follower.clear();
         let _ = std::fs::remove_file(&path);

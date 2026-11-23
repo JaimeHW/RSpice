@@ -7,6 +7,7 @@ mod calculator;
 mod clear_history;
 mod commands;
 mod create_document;
+mod deck_outputs;
 mod document_edit;
 mod expression_diagnostics;
 pub(super) mod histogram_publication;

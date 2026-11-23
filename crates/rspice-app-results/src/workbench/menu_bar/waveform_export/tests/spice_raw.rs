@@ -29,7 +29,8 @@ fn state_with_run(deck: &str) -> ResultsTestHost {
     state_with_typed_result(run.analyses[0].clone())
 }
 
-/// The file "Export dataset…" writes in `preference`, and its media type.
+/// The file "Export dataset…" writes of every signal in `preference`, and
+/// its media type.
 fn exported(state: &mut ResultsTestHost, preference: usize) -> (Vec<u8>, String) {
     state
         .model
@@ -43,7 +44,10 @@ fn exported(state: &mut ResultsTestHost, preference: usize) -> (Vec<u8>, String)
     action_export_dataset_with_io(
         &mut state.results_parts(),
         &io,
-        &DatasetExportChoice::default(),
+        &DatasetExportChoice {
+            signals: ExportedSignals::All,
+            ..DatasetExportChoice::default()
+        },
     );
     assert_eq!(
         io.dialog_titles.borrow().as_slice(),

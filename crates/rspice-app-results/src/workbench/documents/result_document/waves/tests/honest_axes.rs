@@ -502,7 +502,10 @@ fn a_dc_sweeps_ruler_names_the_quantity_it_sweeps() {
             "TEMP \u{b7} \u{b0}C",
         ),
     ] {
-        let run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch(deck);
+        use rspice_app_runs::simulation::controller::test_execution::{
+            plot_every_signal, run_manual_batch,
+        };
+        let run = plot_every_signal(run_manual_batch(deck));
         let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs.push(run);
         state.model.simulation.view.active_run_idx = Some(0);

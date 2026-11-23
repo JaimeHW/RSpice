@@ -186,6 +186,8 @@ pub struct SimulationController {
     /// Source domain authenticated by the active run dispatch. Manual-deck
     /// task IDs are deterministic source projections, not plan-owned IDs.
     current_source_domain: AnalysisResultSourceDomain,
+    /// The outputs the running manual deck names: what its run plots.
+    current_deck_outputs: crate::simulation::execution::DeckOutputs,
     /// Stable run ID that owns the in-flight batch.
     pub current_run_id: Option<u64>,
     /// When the runner took the active task, for its line in the run's log.
@@ -281,6 +283,7 @@ impl SimulationController {
             current_save_policy:
                 crate::simulation::execution::SavePolicy::RetainEngineProducedResults,
             current_source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            current_deck_outputs: Default::default(),
             current_run_id: None,
             current_task_started: None,
             current_advisories: Vec::new(),
@@ -584,6 +587,7 @@ impl SimulationController {
         self.successful_analysis_instances.clear();
         self.execution_artifacts.clear();
         self.current_source_domain = source_domain;
+        self.current_deck_outputs = dispatch.deck_outputs().clone();
         self.current_save_policy = dispatched_save_policy;
         // One count of what the run's tasks write to the results store, held to its plan's
         // storage budget as they write it.
@@ -812,6 +816,7 @@ impl SimulationController {
             crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
         self.clear_live_preview();
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
+        self.current_deck_outputs = Default::default();
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;
@@ -1517,9 +1522,11 @@ impl SimulationController {
     fn publish_live_transient_samples(&mut self, model: &mut Model) {
         let deltas = self.runner.drain_transient_samples();
         #[cfg(not(target_arch = "wasm32"))]
-        let grew = self
-            .live_segment
-            .poll(self.runner.live_segment(), self.plots_every_column());
+        let grew = self.live_segment.poll(
+            self.runner.live_segment(),
+            self.previews_every_column()
+                .then_some(&self.current_deck_outputs),
+        );
         #[cfg(target_arch = "wasm32")]
         let grew = false;
         #[cfg(not(target_arch = "wasm32"))]
@@ -1560,18 +1567,25 @@ impl SimulationController {
     /// streams, or every column of a manual deck, unless live delivery is turned off.
     fn streams_live(&self) -> bool {
         self.current_save_policy.live_streaming_enabled()
-            && (self.plots_every_column()
+            && (self.previews_every_column()
                 || self.current_saved_output_contracts.iter().any(|contract| {
                     contract.streaming()
                         == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
                 }))
     }
 
-    /// A manual deck's task, which names no outputs of its own: its result is every column
-    /// the engine writes, and so is its live plot.
-    fn plots_every_column(&self) -> bool {
+    /// A manual deck's task, which no plan names outputs for: its result is every column the
+    /// engine writes, and so is its live preview. Either plots only what the deck names.
+    fn previews_every_column(&self) -> bool {
         self.current_source_domain == AnalysisResultSourceDomain::ManualDeck
             && self.current_saved_output_contracts.is_empty()
+    }
+
+    /// Plot, of a manual deck's waveforms, those the deck names and no other.
+    pub(super) fn plot_deck_outputs(&self, waveforms: &mut [RetainedTrace]) {
+        for waveform in waveforms {
+            waveform.visible = self.current_deck_outputs.plots(&waveform.name);
+        }
     }
 
     /// Forget the running task's live samples and the rows followed for it.
@@ -1696,7 +1710,7 @@ impl SimulationController {
             )
         };
         let mut shown = None;
-        let waveforms = if self.plots_every_column() && from_segment {
+        let waveforms = if self.previews_every_column() && from_segment {
             // Every column of a segment is built with each opening, off the frame, and the
             // frame only swaps it in: between openings there is nothing new to draw.
             let Some((traces, built)) = self.take_built_preview() else {
@@ -1704,11 +1718,12 @@ impl SimulationController {
             };
             shown = Some(built);
             traces
-        } else if self.plots_every_column() {
+        } else if self.previews_every_column() {
             // In the order the finished result lists them, by name, so its panes and colours
             // stay where they are when the run ends.
             let mut every = std::mem::take(&mut self.live_source(analysis_type, &label).waveforms);
             every.sort_by(|left, right| left.name.cmp(&right.name));
+            self.plot_deck_outputs(&mut every);
             every
         } else {
             materialize_live_saved_outputs(&self.live_source(analysis_type, &label), &contracts)
@@ -1947,6 +1962,7 @@ impl SimulationController {
         self.current_save_policy =
             crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
         self.current_source_domain = AnalysisResultSourceDomain::SimulationPlan;
+        self.current_deck_outputs = Default::default();
         self.current_run_id = None;
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;

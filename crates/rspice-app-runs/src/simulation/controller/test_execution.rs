@@ -104,6 +104,17 @@ pub fn run_manual_batch(source: &str) -> crate::state::SimulationRun {
     run_manual_batch_with_lifecycle(source, SimulationRunLifecycle::Completed)
 }
 
+/// `run` as a reader sees it once every signal it offers is ticked: a deck
+/// that names no output plots none until the reader ticks it.
+pub fn plot_every_signal(mut run: crate::state::SimulationRun) -> crate::state::SimulationRun {
+    for analysis in &mut run.analyses {
+        for waveform in &mut analysis.waveforms {
+            waveform.visible = true;
+        }
+    }
+    run
+}
+
 pub fn run_manual_batch_with_lifecycle(
     source: &str,
     expected_lifecycle: SimulationRunLifecycle,
