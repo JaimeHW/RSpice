@@ -576,6 +576,10 @@ impl RSpiceApp {
         }
         #[cfg(target_arch = "wasm32")]
         self.state.poll_deck_import();
+        // A deck file read away from the frame opens on the first frame
+        // after its read.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.state.poll_deck_open();
         #[cfg(target_arch = "wasm32")]
         if let Some(event) = self.state.poll_browser_project_save() {
             self.handle_save_continuation_event(event);

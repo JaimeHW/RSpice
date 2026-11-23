@@ -1436,7 +1436,10 @@ fn close_open_deck(
     model.invalidate_source_evidence();
 }
 
-/// Locate: the deck `id` is read from `path` from now on, and opens.
+/// Locate: the deck `id` is read from `path` from now on, and opens;
+/// whether it did now. A deck read away from the frame is read from `path`
+/// once it reads, and the frame that opens it says so; a file that does not
+/// read leaves the deck where it was.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn locate_deck(
     model: &mut Model,
@@ -1446,23 +1449,41 @@ pub fn locate_deck(
     id: DeckId,
     path: &Path,
     messages: MessageCatalog,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let root = read_file(&path, messages)?;
-    let folder = model
+    if !model
         .workspace
         .content
-        .project
-        .data_root()
-        .map(Path::to_path_buf);
-    let content = &mut *model.workspace.content;
-    let deck = content
         .decks
-        .iter_mut()
-        .find(|deck| deck.id == id)
-        .ok_or_else(|| messages.text(MessageId::NetlistDeckNotInProject))?;
-    deck.source = crate::state::ProjectDeck::for_file(&path, folder.as_deref()).source;
-    content.decks_dirty = true;
+        .iter()
+        .any(|deck| deck.id == id)
+    {
+        return Err(messages.text(MessageId::NetlistDeckNotInProject));
+    }
+    if reads_away() {
+        std::fs::File::open(&path)
+            .map_err(|error| unreadable(messages, &path.display().to_string(), &error))?;
+        let file = path.clone();
+        start_reading(
+            model,
+            netlist,
+            open_documents,
+            id,
+            (true, Some(path)),
+            messages,
+            move || {
+                read_file(&file, messages).map(|root| OpenDeck {
+                    id,
+                    root,
+                    includes: Vec::new(),
+                    stored_files: None,
+                })
+            },
+        )?;
+        return Ok(false);
+    }
+    let root = read_file(&path, messages)?;
+    relocate(model, id, &path);
     install_open_deck(
         model,
         netlist,
@@ -1475,7 +1496,22 @@ pub fn locate_deck(
             stored_files: None,
         },
     );
-    Ok(())
+    Ok(true)
+}
+
+/// The project's deck `id` is read from the file at `path` from now on.
+fn relocate(model: &mut Model, id: DeckId, path: &Path) {
+    let folder = model
+        .workspace
+        .content
+        .project
+        .data_root()
+        .map(Path::to_path_buf);
+    let content = &mut *model.workspace.content;
+    if let Some(deck) = content.decks.iter_mut().find(|deck| deck.id == id) {
+        deck.source = crate::state::ProjectDeck::for_file(path, folder.as_deref()).source;
+        content.decks_dirty = true;
+    }
 }
 
 /// Save the file in front of the Netlist workspace: the deck, or the
@@ -1722,9 +1758,11 @@ fn unused_name(name: &str, taken: &[String]) -> String {
         .unwrap_or_else(|| name.to_owned())
 }
 
-/// Open the deck at `path`: add it to the project unless it is one of the
-/// project's decks already, and bring it to the front. The deck open before
-/// it goes, so one with unsaved edits stops this.
+/// Open the deck at `path`, read on this frame: add it to the project
+/// unless it is one of the project's decks already, and bring it to the
+/// front. The deck open before it goes, so one with unsaved edits stops
+/// this. The application reads the file away from the frame first
+/// ([`read_deck_file_away`]) and opens what it read ([`open_read_deck`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn open_deck(
     model: &mut Model,
@@ -1735,25 +1773,47 @@ pub fn open_deck(
     messages: crate::workbench::MessageCatalog,
 ) -> Result<(), String> {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    if shown_if_open(model, netlist, &path, messages)? {
+        return Ok(());
+    }
+    let root = read_file(&path, messages)?;
+    open_read_deck(model, netlist, open_documents, runs, root, messages)
+}
+
+/// Whether the deck file at `path` is the open deck, now brought to the
+/// front; why no other deck can open in its place, its edits unsaved.
+#[cfg(not(target_arch = "wasm32"))]
+fn shown_if_open(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    path: &Path,
+    messages: MessageCatalog,
+) -> Result<bool, String> {
     if let Some(open) = &netlist.open_deck {
         if open.root.path == path {
             show_deck(model, netlist);
-            return Ok(());
+            return Ok(true);
         }
         if let Some(unsaved) = open.unsaved() {
             return Err(save_first(messages, unsaved));
         }
     }
-    // Away from the frame only whether the file opens is found here, so a
-    // file that is not there is refused before the project lists it; its
-    // text is read on a thread of its own.
-    let root = if reads_away() {
-        std::fs::File::open(&path)
-            .map_err(|error| unreadable(messages, &path.display().to_string(), &error))?;
-        None
-    } else {
-        Some(read_file(&path, messages)?)
-    };
+    Ok(false)
+}
+
+/// Open `root`, a deck file already read, as [`open_deck`] opens one.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn open_read_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    root: OpenFile,
+    messages: MessageCatalog,
+) -> Result<(), String> {
+    if shown_if_open(model, netlist, &root.path, messages)? {
+        return Ok(());
+    }
     let folder = model
         .workspace
         .content
@@ -1765,43 +1825,17 @@ pub fn open_deck(
         .content
         .decks
         .iter()
-        .find(|deck| deck.is_file(&path, folder.as_deref()))
+        .find(|deck| deck.is_file(&root.path, folder.as_deref()))
     {
         Some(deck) => deck.id,
         None => {
-            let deck = crate::state::ProjectDeck::for_file(&path, folder.as_deref());
+            let deck = crate::state::ProjectDeck::for_file(&root.path, folder.as_deref());
             let id = deck.id;
             let content = &mut *model.workspace.content;
             content.decks.push(deck);
             content.decks_dirty = true;
             id
         }
-    };
-    let Some(root) = root else {
-        if netlist
-            .reading_deck
-            .as_ref()
-            .is_some_and(|reading| reading.id == id)
-        {
-            show_deck_being_read(netlist);
-            return Ok(());
-        }
-        return start_reading(
-            model,
-            netlist,
-            open_documents,
-            id,
-            true,
-            messages,
-            move || {
-                read_file(&path, messages).map(|root| OpenDeck {
-                    id,
-                    root,
-                    includes: Vec::new(),
-                    stored_files: None,
-                })
-            },
-        );
     };
     install_open_deck(
         model,
@@ -1860,6 +1894,34 @@ pub fn open_deck_by_id(
     id: DeckId,
     messages: crate::workbench::MessageCatalog,
 ) -> Result<(), String> {
+    open_project_deck_by_id(model, netlist, open_documents, runs, id, true, messages)
+}
+
+/// Reopen the project's deck `id`, as a restored session does: as
+/// [`open_deck_by_id`] opens it, except that the log says why a deck read
+/// away from the frame did not read.
+pub fn restore_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    id: DeckId,
+    messages: crate::workbench::MessageCatalog,
+) -> Result<(), String> {
+    open_project_deck_by_id(model, netlist, open_documents, runs, id, false, messages)
+}
+
+/// [`open_deck_by_id`], the page saying why a deck read away from the frame
+/// did not read when `prompt`, else the log.
+fn open_project_deck_by_id(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    id: DeckId,
+    prompt: bool,
+    messages: crate::workbench::MessageCatalog,
+) -> Result<(), String> {
     if netlist.open_deck.as_ref().is_some_and(|deck| deck.id == id) {
         show_deck(model, netlist);
         return Ok(());
@@ -1896,7 +1958,7 @@ pub fn open_deck_by_id(
             netlist,
             open_documents,
             id,
-            true,
+            (prompt, None),
             messages,
             move || read_project_deck(&deck, folder.as_deref(), messages),
         );
@@ -2002,7 +2064,7 @@ pub fn open_project_deck(
             netlist,
             open_documents,
             id,
-            false,
+            (false, None),
             messages,
             move || read_project_deck(&deck, folder.as_deref(), messages),
         ) {
@@ -2077,47 +2139,49 @@ pub struct DeckRead {
     /// Whether the page says why, should the deck not read, as it does for a
     /// deck the reader opened; else the log does.
     prompt: bool,
-    read: Arc<Mutex<mpsc::Receiver<Result<OpenDeck, String>>>>,
+    /// The file a located deck is read from once it reads.
+    located: Option<PathBuf>,
+    read: ReadAway<Result<OpenDeck, String>>,
 }
 
-/// Where a deck's read stands.
-enum Landed {
+/// What a thread of its own reads, until a frame takes it.
+#[derive(Debug)]
+struct ReadAway<T>(Arc<Mutex<mpsc::Receiver<T>>>);
+
+impl<T> Clone for ReadAway<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+/// Where a read away from the frame stands.
+enum Landed<T> {
     Reading,
-    Read(Result<OpenDeck, String>),
+    Read(T),
     /// The read ended with nothing to take.
     Lost,
 }
 
-impl DeckRead {
-    /// Read a deck with `read` on a thread of its own, which also makes its
-    /// text ready for the editor, so the frame that shows it reads nothing
-    /// in proportion to it.
-    fn start(
-        id: DeckId,
-        prompt: bool,
-        read: impl FnOnce() -> Result<OpenDeck, String> + Send + 'static,
-    ) -> std::io::Result<Self> {
+impl<T: Send + 'static> ReadAway<T> {
+    /// Read with `read` on a thread of its own, which asks for the frame
+    /// that takes it.
+    fn start(read: impl FnOnce() -> T + Send + 'static) -> std::io::Result<Self> {
         let (sender, receiver) = mpsc::channel();
         std::thread::Builder::new()
             .name("deck-read".to_owned())
             .spawn(move || {
-                let read = read().inspect(|deck| deck.root.text.ready_for_editor());
-                if sender.send(read).is_ok()
+                if sender.send(read()).is_ok()
                     && let Some(wake) = DECK_READ_WAKER.get()
                 {
                     wake();
                 }
             })?;
-        Ok(Self {
-            id,
-            prompt,
-            read: Arc::new(Mutex::new(receiver)),
-        })
+        Ok(Self(Arc::new(Mutex::new(receiver))))
     }
 
     /// Where the read stands, waiting for it to end when `wait`.
-    fn landed(&self, wait: bool) -> Landed {
-        let Ok(receiver) = self.read.lock() else {
+    fn landed(&self, wait: bool) -> Landed<T> {
+        let Ok(receiver) = self.0.lock() else {
             return Landed::Lost;
         };
         let received = if wait {
@@ -2135,20 +2199,104 @@ impl DeckRead {
     }
 }
 
+impl DeckRead {
+    /// Read a deck with `read` on a thread of its own, which also makes its
+    /// text ready for the editor, so the frame that shows it reads nothing
+    /// in proportion to it.
+    fn start(
+        id: DeckId,
+        (prompt, located): (bool, Option<PathBuf>),
+        read: impl FnOnce() -> Result<OpenDeck, String> + Send + 'static,
+    ) -> std::io::Result<Self> {
+        let read =
+            ReadAway::start(move || read().inspect(|deck| deck.root.text.ready_for_editor()))?;
+        Ok(Self {
+            id,
+            prompt,
+            located,
+            read,
+        })
+    }
+}
+
+/// A deck file read away from the frame before anything opens it, so a
+/// file that does not read as text is refused before a project is made
+/// around it or lists it. [`open_read_deck`] opens what it read.
+#[derive(Debug, Clone)]
+pub struct DeckFileRead {
+    path: PathBuf,
+    read: ReadAway<Result<OpenFile, String>>,
+}
+
+impl DeckFileRead {
+    /// The file being read.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The file once it is read, waiting for its read when `wait`: `None`
+    /// while it is read.
+    #[must_use]
+    pub fn landed(&self, wait: bool, messages: MessageCatalog) -> Option<Result<OpenFile, String>> {
+        match self.read.landed(wait) {
+            Landed::Reading => None,
+            Landed::Read(read) => Some(read),
+            Landed::Lost => Some(Err(unreadable(
+                messages,
+                &self.path.display().to_string(),
+                &std::io::Error::from(std::io::ErrorKind::Interrupted),
+            ))),
+        }
+    }
+}
+
+/// Read the deck file at `path` away from the frame, as the application
+/// reads one before it opens it: `None` where decks are read on the frame
+/// that opens them. A file that does not open is refused at once.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_deck_file_away(
+    path: &Path,
+    messages: MessageCatalog,
+) -> Option<Result<DeckFileRead, String>> {
+    if !reads_away() {
+        return None;
+    }
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let refused =
+        |error: &dyn std::fmt::Display| unreadable(messages, &path.display().to_string(), error);
+    if let Err(error) = std::fs::File::open(&path) {
+        return Some(Err(refused(&error)));
+    }
+    let file = path.clone();
+    Some(
+        ReadAway::start(move || {
+            read_file(&file, messages).inspect(|file| file.text.ready_for_editor())
+        })
+        .map_err(|error| refused(&error))
+        .map(|read| DeckFileRead {
+            path: path.clone(),
+            read,
+        }),
+    )
+}
+
 /// Read the project's deck `id` away from the frame with `read`. The deck
 /// open before goes, as it does when a deck opens; the deck's tab comes to
 /// the front at once, saying it is reading, and the frame after the read
-/// takes it. Why it was not read, when no thread could read it.
+/// takes it. Why it was not read, when no thread could read it. `said` is
+/// whether the page says why the deck did not read, and the file a located
+/// deck is read from once it reads.
 fn start_reading(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
     id: DeckId,
-    prompt: bool,
+    said: (bool, Option<PathBuf>),
     messages: MessageCatalog,
     read: impl FnOnce() -> Result<OpenDeck, String> + Send + 'static,
 ) -> Result<(), String> {
-    let reading = DeckRead::start(id, prompt, read)
+    let reading = DeckRead::start(id, said, read)
         .map_err(|error| unreadable(messages, &deck_name(model, id), &error))?;
     close_open_deck(model, netlist, open_documents);
     netlist.unreadable_deck = None;
@@ -2202,9 +2350,11 @@ pub fn reading_deck_in_front(netlist: &NetlistDocumentState) -> bool {
 
 /// Take the deck read away from the frame once its read is done, waiting
 /// for it when `wait`: it becomes the open deck, in front unless its tab
-/// was closed meanwhile. A deck that did not read is left unreadable, as
-/// one read on the frame is: why is returned for the page to say when the
-/// reader opened the deck, and the log says it otherwise.
+/// was closed meanwhile, and a located deck is read from its new file from
+/// then on, which is returned for the page to say. A deck that did not read
+/// is left unreadable, as one read on the frame is: why is returned, as an
+/// error, for the page to say when the reader opened the deck, and the log
+/// says it otherwise.
 pub fn land_deck_read(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -2212,8 +2362,8 @@ pub fn land_deck_read(
     runs: &mut RunsState,
     wait: bool,
     messages: MessageCatalog,
-) -> Option<String> {
-    let read = match netlist.reading_deck.as_ref()?.landed(wait) {
+) -> Option<Result<String, String>> {
+    let read = match netlist.reading_deck.as_ref()?.read.landed(wait) {
         Landed::Reading => return None,
         Landed::Read(read) => read,
         Landed::Lost => {
@@ -2227,16 +2377,27 @@ pub fn land_deck_read(
     };
     let reading = netlist.reading_deck.take()?;
     match read {
-        Ok(deck) if netlist.deck_tab_closed => {
-            // Its tab closed while it was read: the deck is open, as a deck
-            // whose tab was closed is, until it is shown again.
-            netlist.open_deck = Some(deck);
-            runs.manual_run.edited_lines.clear();
-            None
-        }
         Ok(deck) => {
-            install_open_deck(model, netlist, open_documents, runs, deck);
-            None
+            let located = reading.located.as_deref().map(|path| {
+                let said = messages.format(
+                    MessageId::NetlistDeckLocated,
+                    &[
+                        ("name", &deck_name(model, reading.id)),
+                        ("path", &path.display().to_string()),
+                    ],
+                );
+                relocate(model, reading.id, path);
+                said
+            });
+            if netlist.deck_tab_closed {
+                // Its tab closed while it was read: the deck is open, as a
+                // deck whose tab was closed is, until it is shown again.
+                netlist.open_deck = Some(deck);
+                runs.manual_run.edited_lines.clear();
+            } else {
+                install_open_deck(model, netlist, open_documents, runs, deck);
+            }
+            located.map(Ok)
         }
         Err(error) => {
             let id = reading.id;
@@ -2247,7 +2408,7 @@ pub fn land_deck_read(
                 netlist.front = NetlistTab::Generated;
             }
             if reading.prompt {
-                Some(error)
+                Some(Err(error))
             } else {
                 model.record(
                     crate::diagnostics::LogSeverity::Error,

@@ -112,6 +112,11 @@ fn netlist_session(state: &AppState) -> NetlistSession {
 
 /// Store the application's session, and launch again from it, drawn twice.
 pub(super) fn relaunch(app: &mut RSpiceApp) -> RSpiceApp {
+    relaunch_on(&themed_context(), app)
+}
+
+/// [`relaunch`], drawn in `ctx`.
+fn relaunch_on(ctx: &egui::Context, app: &mut RSpiceApp) -> RSpiceApp {
     let mut storage = MemoryStorage::default();
     app.state.store_session(&mut storage);
     let mut restored = AppState::restore_eframe_session(&storage).expect("the session restores");
@@ -119,9 +124,8 @@ pub(super) fn relaunch(app: &mut RSpiceApp) -> RSpiceApp {
     crate::workbench::app_state::services_access::initialize_from_session(&mut restored);
     let mut reopened = RSpiceApp::test_instance();
     reopened.state = restored;
-    let ctx = themed_context();
-    frame(&ctx, &mut reopened, DESKTOP);
-    frame(&ctx, &mut reopened, DESKTOP);
+    frame(ctx, &mut reopened, DESKTOP);
+    frame(ctx, &mut reopened, DESKTOP);
     reopened
 }
 
@@ -173,6 +177,40 @@ fn a_launch_reopens_the_netlist_workspace_as_the_last_one_left_it() {
         netlist_session(state),
         left,
         "every tab, the one in front and the deck's caret, selection, scroll and search come back"
+    );
+}
+
+/// A launch that reads its deck away from the frame, as the application
+/// does, reopens the same workspace: the tabs over the deck wait for its
+/// read and reopen on the frame it lands in.
+#[test]
+fn a_launch_reading_its_deck_away_from_the_frame_reopens_the_workspace_over_it() {
+    let (deck, include) = deck_on_disk();
+    let mut app = working_app(&deck, &include);
+    let left = netlist_session(&app.state);
+    rspice_app_code::workbench::documents::deck_files::read_decks_away_here();
+
+    let ctx = themed_context();
+    let mut reopened = relaunch_on(&ctx, &mut app);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while reopened.state.code.netlist.open_deck.is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the deck never opened"
+        );
+        frame(&ctx, &mut reopened, DESKTOP);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    for _ in 0..3 {
+        frame(&ctx, &mut reopened, DESKTOP);
+    }
+
+    let state = &reopened.state;
+    assert_eq!(state.code.netlist.cursor_line, 139);
+    assert_eq!(
+        netlist_session(state),
+        left,
+        "every tab, the one in front and the deck's view come back"
     );
 }
 

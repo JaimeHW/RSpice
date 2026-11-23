@@ -749,7 +749,7 @@ impl SourceFeature {
         Self::reset_after_project_change(cx);
         // A deck read away from the frame opens on the first frame after the
         // read, whichever workspace is in front.
-        if let Some(refusal) = crate::workbench::documents::deck_files::land_deck_read(
+        if let Some(said) = crate::workbench::documents::deck_files::land_deck_read(
             cx.model,
             &mut cx.state.netlist,
             &mut cx.state.netlist_open_documents,
@@ -757,7 +757,8 @@ impl SourceFeature {
             false,
             cx.wb.messages(),
         ) {
-            cx.wb.prompt(refusal);
+            let (Ok(said) | Err(said)) = said;
+            cx.wb.prompt(said);
         }
         // A source import records intent and completes from the frame loop.
         // It was driven from nowhere once, so a requested import stayed

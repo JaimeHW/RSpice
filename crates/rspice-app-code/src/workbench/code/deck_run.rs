@@ -199,16 +199,22 @@ fn bring_project_deck(cx: &mut Cx<'_, SourceFeature>) -> bool {
 }
 
 /// Take the deck being read, waiting for its read: why it did not read,
-/// when it did not.
+/// when it did not. What the page says of a deck that read is said.
 fn land_deck_read(cx: &mut Cx<'_, SourceFeature>) -> Option<String> {
-    deck_files::land_deck_read(
+    match deck_files::land_deck_read(
         cx.model,
         &mut cx.state.netlist,
         &mut cx.state.netlist_open_documents,
         cx.runs,
         true,
         cx.wb.messages(),
-    )
+    )? {
+        Ok(said) => {
+            cx.wb.prompt(said);
+            None
+        }
+        Err(refusal) => Some(refusal),
+    }
 }
 
 /// Make Problems say what the text the check read holds, whichever

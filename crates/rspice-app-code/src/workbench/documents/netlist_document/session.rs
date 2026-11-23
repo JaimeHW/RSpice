@@ -161,7 +161,8 @@ pub fn restores_a_deck(netlist: &NetlistDocumentState) -> bool {
 /// files open beside it and beside the generated netlist, its run input and
 /// its comparison, with its tab in front and each document's view handed to
 /// its editor. What can no longer be opened is said on the log, and the
-/// rest still opens.
+/// rest still opens. A deck read away from the frame is read first: the
+/// rest reopens over it on the frame its read lands in.
 pub fn reopen(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -182,32 +183,28 @@ pub fn reopen(
     {
         return;
     }
+    // So is a deck the reader opened from the list while it was read.
+    if session.deck.is_some_and(|deck| {
+        netlist
+            .reading_deck
+            .as_ref()
+            .is_some_and(|reading| reading.id != deck)
+    }) {
+        return;
+    }
     let mut refusals = Vec::new();
     if let Some(deck) = session.deck {
         // The last launch's includes reopen over the deck, so the deck is
-        // read before they are, on this frame.
-        let opened = crate::workbench::documents::deck_files::open_deck_by_id(
-            model,
-            netlist,
-            open_documents,
-            runs,
-            deck,
-            messages,
-        )
-        .and_then(|()| {
-            crate::workbench::documents::deck_files::land_deck_read(
-                model,
-                netlist,
-                open_documents,
-                runs,
-                true,
-                messages,
-            )
-            .map_or(Ok(()), Err)
-        });
-        if let Err(refusal) = opened {
-            model.record(LogSeverity::Error, LogSource::Netlist, refusal);
-        } else {
+        // read before they are.
+        if !reopen_deck(model, netlist, open_documents, runs, deck, messages) {
+            netlist.pending_session = Some(session);
+            return;
+        }
+        if netlist
+            .open_deck
+            .as_ref()
+            .is_some_and(|open| open.id == deck)
+        {
             for path in &session.deck_includes {
                 if let Err(refusal) = crate::workbench::documents::deck_files::show_include(
                     model,
@@ -271,6 +268,46 @@ pub fn reopen(
     for refusal in refusals {
         model.record(LogSeverity::Warning, LogSource::Netlist, refusal);
     }
+}
+
+/// Reopen the restored session's deck `deck`: whether it is read, open or
+/// not readable, or still being read away from the frame. Why it could not
+/// be opened is said on the log.
+fn reopen_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    deck: DeckId,
+    messages: MessageCatalog,
+) -> bool {
+    use crate::workbench::documents::deck_files;
+
+    let reading = |netlist: &NetlistDocumentState| {
+        netlist
+            .reading_deck
+            .as_ref()
+            .is_some_and(|reading| reading.id == deck)
+    };
+    if netlist.open_deck.is_some() || netlist.unreadable_deck == Some(deck) {
+        return true;
+    }
+    if !reading(netlist)
+        && let Err(refusal) =
+            deck_files::restore_deck(model, netlist, open_documents, runs, deck, messages)
+    {
+        model.record(LogSeverity::Error, LogSource::Netlist, refusal);
+    }
+    match deck_files::land_deck_read(model, netlist, open_documents, runs, false, messages) {
+        Some(Ok(said)) => {
+            model.record(LogSeverity::Info, LogSource::Netlist, said);
+        }
+        Some(Err(refusal)) => {
+            model.record(LogSeverity::Error, LogSource::Netlist, refusal);
+        }
+        None => {}
+    }
+    !reading(netlist)
 }
 
 /// Put `tab` in front as its own route does, when it opened.

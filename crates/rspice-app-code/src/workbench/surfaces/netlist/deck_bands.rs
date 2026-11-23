@@ -235,13 +235,15 @@ fn answer_missing(
             &path,
             messages,
         ) {
-            Ok(()) => cx.wb.prompt(messages.format(
+            // A deck read away from the frame says so on the frame it opens.
+            Ok(true) => cx.wb.prompt(messages.format(
                 MessageId::NetlistDeckLocated,
                 &[
                     ("name", &missing.name),
                     ("path", &path.display().to_string()),
                 ],
             )),
+            Ok(false) => {}
             Err(error) => cx.wb.prompt(error),
         }
     }
