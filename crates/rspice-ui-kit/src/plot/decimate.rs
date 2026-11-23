@@ -7,7 +7,7 @@
 //! pass and is cached keyed by (data identity, column count, x-range), so a
 //! steady view costs only the cheap data→screen transform per frame.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 mod blocks;
@@ -51,6 +51,11 @@ pub struct DecimationCache {
 #[derive(Debug, Clone, Default)]
 struct Held {
     map: HashMap<CacheKey, Entry>,
+    /// The key of each envelope by when it was last read, least recently
+    /// first: what eviction takes from, without looking at the rest.
+    order: BTreeMap<u64, CacheKey>,
+    /// Counts the reads, so each envelope's place in `order` is its own.
+    reads: u64,
     /// Block extrema of the long ascending traces the last frames reduced,
     /// so a pan or zoom re-reduces them a block at a time. Each is about a
     /// twentieth of its trace's values and lives only while frames keep
@@ -92,7 +97,16 @@ impl DecimationWork {
 #[derive(Debug, Clone)]
 struct Entry {
     envelope: Arc<[[f64; 2]]>,
+    /// The frame that last drew it.
     last_used: u64,
+    /// Its place in [`Held::order`].
+    read: u64,
+}
+
+/// What an envelope of `points` holds the cache to: its points, its entry
+/// and its place in the eviction order.
+const fn entry_bytes(points: usize) -> usize {
+    points * size_of::<[f64; 2]>() + size_of::<(CacheKey, Entry)>() + size_of::<(u64, CacheKey)>()
 }
 
 /// Which reduction produced an entry. Two of them answer different questions
@@ -163,14 +177,9 @@ pub struct TraceView {
 /// that draws more traces than this keeps every envelope it drew: with a hard
 /// bound, a 500-run family read in a cycle missed on every lookup and rebuilt
 /// every envelope on every repaint, a hover included. What the current frame
-/// draws is bounded by the byte budget and [`ENTRY_CEILING`] alone.
+/// draws is bounded by the byte budget alone, which counts each entry's own
+/// size beside its points.
 const STALE_ENTRY_CAP: usize = 256;
-
-/// Absolute entry bound, the current frame's own envelopes included.
-///
-/// Eviction scans every entry for the least recently used one, so the scan
-/// stays cheap even for a caller that never advances the frame tick.
-const ENTRY_CEILING: usize = 16_384;
 
 /// Samples per column, across a trace's whole extent, from which its block
 /// index pays for itself.
@@ -228,6 +237,7 @@ impl DecimationCache {
     /// Discard derived samples while preserving the configured memory budget.
     pub fn invalidate(&mut self) {
         self.held.map.clear();
+        self.held.order.clear();
         self.held.blocks.clear();
         self.resident_bytes = 0;
     }
@@ -240,37 +250,41 @@ impl DecimationCache {
             self.version = version;
         }
         self.tick = self.tick.wrapping_add(1);
+        // A block index lives while frames keep drawing from it: the last
+        // frame's stay for this one, older ones go, in one pass a frame.
+        let tick = self.tick;
+        self.held
+            .blocks
+            .retain(|_, (_, last_used)| last_used.saturating_add(1) >= tick);
     }
 
     fn evict_to_fit(&mut self, incoming_bytes: usize) {
-        while !self.held.map.is_empty() {
+        let held = &mut *self.held;
+        while let Some((&read, &oldest)) = held.order.first_key_value() {
             let over_budget =
                 self.resident_bytes.saturating_add(incoming_bytes) > self.byte_capacity;
-            let over_ceiling = self.held.map.len() >= ENTRY_CEILING;
-            if !over_budget && !over_ceiling && self.held.map.len() < STALE_ENTRY_CAP {
+            if !over_budget && held.map.len() < STALE_ENTRY_CAP {
                 break;
             }
-            let Some((oldest, last_used)) = self
-                .held
-                .map
-                .iter()
-                .min_by_key(|(_, entry)| entry.last_used)
-                .map(|(key, entry)| (*key, entry.last_used))
-            else {
-                break;
-            };
-            // Past the stale bound alone, only an envelope this frame has not
-            // drawn gives way; see `STALE_ENTRY_CAP`.
-            if !over_budget && !over_ceiling && last_used == self.tick {
+            // The least recently read envelope was drawn this frame only if
+            // every one was. Past the stale bound alone, only an envelope
+            // this frame has not drawn gives way; see `STALE_ENTRY_CAP`.
+            if !over_budget
+                && held
+                    .map
+                    .get(&oldest)
+                    .is_some_and(|entry| entry.last_used == self.tick)
+            {
                 break;
             }
-            if let Some(removed) = self.held.map.remove(&oldest) {
+            held.order.remove(&read);
+            if let Some(removed) = held.map.remove(&oldest) {
                 self.resident_bytes = self
                     .resident_bytes
-                    .saturating_sub(removed.envelope.len() * size_of::<[f64; 2]>());
+                    .saturating_sub(entry_bytes(removed.envelope.len()));
                 #[cfg(any(test, feature = "test-support"))]
                 {
-                    self.held.work.evictions += 1;
+                    held.work.evictions += 1;
                 }
             }
         }
@@ -436,8 +450,8 @@ impl DecimationCache {
     }
 
     /// The block extrema of one trace, read now if no index of these very
-    /// samples is held. Building one drops the indices no frame has drawn
-    /// from since the frame before.
+    /// samples is held. The indices no frame has drawn from since the frame
+    /// before go as each frame begins.
     fn block_index(
         &mut self,
         trace_key: u64,
@@ -452,9 +466,6 @@ impl DecimationCache {
             .is_some_and(|(index, _)| index.describes(x, y))
         {
             let index = Arc::new(blocks::BlockIndex::build(x, y)?);
-            self.held
-                .blocks
-                .retain(|_, (_, last_used)| last_used.saturating_add(1) >= tick);
             self.held.blocks.insert(trace_key, (index, tick));
         }
         let (index, last_used) = self.held.blocks.get_mut(&trace_key)?;
@@ -463,11 +474,16 @@ impl DecimationCache {
     }
 
     fn lookup(&mut self, key: &CacheKey) -> Option<Arc<[[f64; 2]]>> {
-        let hit = self.held.map.get_mut(key)?;
+        let held = &mut *self.held;
+        let hit = held.map.get_mut(key)?;
         hit.last_used = self.tick;
+        held.reads += 1;
+        held.order.remove(&hit.read);
+        hit.read = held.reads;
+        held.order.insert(hit.read, *key);
         #[cfg(any(test, feature = "test-support"))]
         {
-            self.held.work.hits += 1;
+            held.work.hits += 1;
         }
         Some(Arc::clone(&hit.envelope))
     }
@@ -477,16 +493,26 @@ impl DecimationCache {
         {
             self.held.work.rebuilds += 1;
         }
-        let bytes = envelope.len() * size_of::<[f64; 2]>();
+        let bytes = entry_bytes(envelope.len());
         if bytes <= self.byte_capacity {
             self.evict_to_fit(bytes);
-            self.held.map.insert(
+            let held = &mut *self.held;
+            held.reads += 1;
+            let read = held.reads;
+            if let Some(replaced) = held.map.insert(
                 key,
                 Entry {
                     envelope: Arc::clone(envelope),
                     last_used: self.tick,
+                    read,
                 },
-            );
+            ) {
+                held.order.remove(&replaced.read);
+                self.resident_bytes = self
+                    .resident_bytes
+                    .saturating_sub(entry_bytes(replaced.envelope.len()));
+            }
+            held.order.insert(read, key);
             self.resident_bytes = self.resident_bytes.saturating_add(bytes);
         }
     }
@@ -1368,7 +1394,7 @@ mod tests {
         let next = cache.series(1, &x, &[0.0, 1.0, 0.0], sweep_view(0.0, 2.0), false, None);
         assert!(first.iter().all(|point| point[1] == 0.0));
         assert!(next.iter().any(|point| point[1] == 1.0));
-        assert_eq!(cache.resident_bytes, next.len() * size_of::<[f64; 2]>());
+        assert_eq!(cache.resident_bytes, entry_bytes(next.len()));
     }
 
     /// Oracle 6: a hysteresis trace through the cache reaches an
@@ -1479,6 +1505,22 @@ mod tests {
             (0, 0, 1_500),
             "a steady frame must reuse every envelope it drew on the frame before"
         );
+    }
+
+    /// A frame of more curves than the cache once counted keeps every
+    /// envelope it drew while their bytes fit: a pane of twenty thousand
+    /// ticked signals rebuilds none of them on the next frame.
+    #[test]
+    fn a_frame_of_twenty_thousand_short_curves_rebuilds_nothing_on_the_next() {
+        let x = [0.0, 1.0, 2.0];
+        let y = [0.0, 1.0, 0.0];
+        let view = sweep_view(0.0, 2.0);
+        let mut cache = DecimationCache::default();
+        draw_frame(&mut cache, 20_000, &x, &y, view);
+        let first = cache.work();
+        draw_frame(&mut cache, 20_000, &x, &y, view);
+        let steady = cache.work().since(first);
+        assert_eq!((steady.rebuilds, steady.evictions), (0, 0));
     }
 
     /// The stale bound still bounds what the reader has left: a view nobody
