@@ -122,3 +122,46 @@ fn the_generated_netlist_shows_the_designs_added_lines_and_follows_their_edit() 
     assert!(shown.contains(&block(".nodeset v(out)=2")), "{shown}");
     assert!(!shown.contains("v(out)=1"), "{shown}");
 }
+
+/// Compare generated revisions opens its dialog on the build before the
+/// one shown: the last the page kept as the design changed.
+#[test]
+fn compare_generated_revisions_opens_on_the_build_before_the_one_shown() {
+    use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
+    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+    use rspice_design::added_lines::set_added_lines;
+
+    let reference = crate::workbench::examples::hierarchy_reference::build();
+    let mut app = RSpiceApp::test_instance();
+    app.state = reference.state;
+    let ctx = themed_context();
+    let build = |app: &mut RSpiceApp, nodeset: &str| {
+        set_added_lines(
+            &mut app.state.model.workspace.content.added_lines,
+            &reference.top,
+            format!(".nodeset v(out)={nodeset}\n"),
+        );
+        frame(&ctx, app, DESKTOP);
+        frame(&ctx, app, DESKTOP);
+    };
+    build(&mut app, "1");
+    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    build(&mut app, "2");
+    build(&mut app, "3");
+    let history = app.state.code.netlist.generated_history.len();
+    assert_eq!(history, 2, "the builds of 1 and 2 are kept");
+    assert_eq!(
+        app.command_availability(CodeCommand::CompareGeneratedRevisions.key()),
+        CommandAvailability::Available
+    );
+
+    app.execute_command_key(CodeCommand::CompareGeneratedRevisions.key());
+    frame(&ctx, &mut app, DESKTOP);
+
+    let dialog = &app.state.code.netlist.comparison_dialog;
+    assert!(dialog.open, "the dialog is on screen");
+    assert_eq!(dialog.selected_history_index, history - 1);
+    let kept = app.state.code.netlist.generated_history[history - 1].source();
+    assert!(kept.contains(".nodeset v(out)=2"), "{kept}");
+}

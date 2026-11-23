@@ -1515,3 +1515,96 @@ SYMATTR Value 1k
     );
     assert!(inside && clear, "{sheet}");
 }
+
+/// A QSPICE drawing, as Import QSPICE schematic… reads the file the reader
+/// picks, lands as an LTspice one does: its cell is the project's top, with
+/// its parts on the sheet, and its transient is the active plan's.
+#[test]
+fn an_imported_qspice_schematic_is_the_project_s_cell_and_plan() {
+    use rspice_app_state::state::ComponentType;
+
+    // QSPICE writes its guillemets as single bytes after its own header.
+    let drawing = "«schematic
+  «component (0,0) 0 0
+    «symbol V
+      «type: V»
+      «text (100,150) 1 7 0 0x1000000 -1 -1 \"V1\"»
+      «text (100,-150) 1 7 0 0x1000000 -1 -1 \"SINE(0 1 1K)\"»
+      «pin (0,200) (0,0) 1 0 0 0x1000000 -1 \"+\"»
+      «pin (0,-200) (0,0) 1 0 0 0x1000000 -1 \"-\"»
+    »
+  »
+  «component (600,400) 2 0
+    «symbol R
+      «type: R»
+      «text (100,150) 1 7 0 0x1000000 -1 -1 \"R1\"»
+      «text (100,-150) 1 7 0 0x1000000 -1 -1 \"1K\"»
+      «pin (0,200) (0,0) 1 0 0 0x1000000 -1 \"1\"»
+      «pin (0,-200) (0,0) 1 0 0 0x1000000 -1 \"2\"»
+    »
+  »
+  «net (0,-400) 1 13 0 \"GND\"»
+  «net (1000,400) 1 7 0 \"GND\"»
+  «wire (0,-200) (0,-400) \"GND\"»
+  «wire (0,200) (0,400) \"in\"»
+  «wire (0,400) (400,400) \"in\"»
+  «wire (800,400) (1000,400) \"GND\"»
+  «text (0,-900) 0.8 7 0 0x1000000 -1 -1 \".tran 3m\"»
+»
+";
+    let mut bytes = vec![0xFF, 0xD8, 0xFF, 0xDB];
+    for character in drawing.chars() {
+        match character {
+            '«' => bytes.push(0xAB),
+            '»' => bytes.push(0xBB),
+            other => bytes.extend_from_slice(other.to_string().as_bytes()),
+        }
+    }
+    let folder = drawing_folder();
+    let file = folder.join("divider.qsch");
+    std::fs::write(&file, bytes).expect("schematic");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+
+    let said = import_foreign_schematic_file(&mut app, &file, ForeignTool::Qspice, &mut replace)
+        .expect("the schematic imports");
+    let _ = std::fs::remove_dir_all(&folder);
+
+    assert!(said.contains("QSPICE"), "{said}");
+    let model = &app.state.model;
+    assert_eq!(model.workspace.content.project.top_cell, "divider");
+    assert_eq!(model.workspace.content.active_view.cell, "divider");
+    // Each GND net flag is a ground part; the sine source is RSpice's.
+    let mut parts = model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .map(|part| (part.kind, part.name.as_str()))
+        .collect::<Vec<_>>();
+    parts.sort_by_key(|(_, name)| *name);
+    let grounds = parts
+        .iter()
+        .filter(|(kind, _)| *kind == ComponentType::Ground)
+        .count();
+    parts.retain(|(kind, _)| *kind != ComponentType::Ground);
+    assert_eq!(grounds, 2);
+    assert_eq!(
+        parts,
+        [
+            (ComponentType::Resistor, "R1"),
+            (ComponentType::VoltageSourceSin, "V1")
+        ]
+    );
+    let plan = model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the imported plan");
+    let [instance] = plan.instances() else {
+        panic!("one analysis, not {}", plan.instances().len());
+    };
+    let AnalysisDraft::Transient(tran) = instance.draft() else {
+        panic!("a transient analysis");
+    };
+    assert_eq!(tran.stop.as_str(), "3m");
+}

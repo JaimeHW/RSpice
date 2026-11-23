@@ -241,6 +241,56 @@ fn fold_all_discovers_language_regions_and_unfold_all_restores_every_line() {
     );
 }
 
+/// Unfold at caret opens the one fold the caret's line is in and leaves the
+/// others folded; on a line in no fold it opens nothing.
+#[test]
+fn unfold_at_caret_opens_only_the_fold_the_caret_is_in() {
+    let mut session = VirtualEditorSession {
+        model: TextDocumentModel::from_source(
+            "module gain(in, out);\n  analog begin\n    V(out) <+ V(in);\n  end\nendmodule\nmodule other;\nendmodule\n",
+        ),
+        ..VirtualEditorSession::default()
+    };
+    handle_view_command(
+        &mut session,
+        EditorSyntax::VerilogA,
+        EditorViewCommand::FoldAll,
+    );
+    let folds = |session: &VirtualEditorSession| {
+        session
+            .model
+            .folds()
+            .iter()
+            .map(|fold| (fold.start_line, fold.end_line))
+            .collect::<Vec<_>>()
+    };
+    let [first, second] = folds(&session)[..] else {
+        panic!("each module folds: {:?}", folds(&session));
+    };
+
+    let caret = session.model.char_at_line_column(second.0, 3);
+    session
+        .model
+        .set_selections(vec![TextSelection::caret(caret)]);
+    handle_view_command(
+        &mut session,
+        EditorSyntax::VerilogA,
+        EditorViewCommand::UnfoldAtCaret,
+    );
+    assert_eq!(folds(&session), [first], "the second module opens alone");
+
+    let end = session.model.len_chars();
+    session
+        .model
+        .set_selections(vec![TextSelection::caret(end)]);
+    handle_view_command(
+        &mut session,
+        EditorSyntax::VerilogA,
+        EditorViewCommand::UnfoldAtCaret,
+    );
+    assert_eq!(folds(&session), [first], "past every fold nothing opens");
+}
+
 #[test]
 fn requested_line_unfolds_and_reveals_a_collapsed_target() {
     let context = egui::Context::default();
