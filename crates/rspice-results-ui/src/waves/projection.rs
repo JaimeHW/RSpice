@@ -1015,6 +1015,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             traces,
             dataset_ranks,
             dataset_plotted: dataset_rank,
+            signal_columns: analysis.waveforms.len(),
             complex_sources: strip_projection::complex_sources(analysis),
             grid_ascending: false,
             x_range: None,

@@ -1252,7 +1252,7 @@ fn show_strip_plot(
     // A strip with signals and nothing of them plotted has no pane, and so
     // no legend to enable one in: they wait in the Data browser.
     let Some(x_domain) = model.x_range else {
-        if !model.traces.is_empty() || !model.lane_traces.is_empty() {
+        if model.signal_columns > 0 || !model.traces.is_empty() || !model.lane_traces.is_empty() {
             nothing_plotted(ui, host);
         } else {
             well_hint(ui, NO_SAMPLES);

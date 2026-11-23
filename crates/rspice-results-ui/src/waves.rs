@@ -264,6 +264,10 @@ pub struct StripModel {
     /// How many curves the dataset plots: the first place a curve the reader
     /// adds can take.
     pub dataset_plotted: usize,
+    /// How many signals the analysis holds, on the plot or not: a strip with
+    /// some and none plotted waits for the Data browser, while one with none
+    /// has nothing to plot.
+    pub signal_columns: usize,
     /// The analysis' complex signals, which a strip may show in any
     /// projection.
     pub complex_sources: Vec<ComplexSource>,
