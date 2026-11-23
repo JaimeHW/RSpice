@@ -354,6 +354,13 @@ pub fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
                     .into_iter()
                     .map(PreflightAdvisory::from),
             );
+            // A run that needs more memory than is free is a warning the
+            // report states with its numbers.
+            report.advisories.extend(
+                metadata
+                    .memory_warning
+                    .map(|warning| PreflightAdvisory::from(warning.message())),
+            );
             let refused = engine_refusals::engine_refusal_issues(state.model(), &refusals);
             if refused.is_empty() {
                 report.prepared = Some(contract_of(*metadata));
