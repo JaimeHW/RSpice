@@ -71,7 +71,9 @@ impl RunsState {
     /// What the deck's run, prepared and waiting for Run anyway, needs
     /// beyond the memory free.
     #[must_use]
-    pub fn memory_warning(&self) -> Option<rspice_simulation::execution::run_memory::MemoryWarning> {
+    pub fn memory_warning(
+        &self,
+    ) -> Option<rspice_simulation::execution::run_memory::MemoryWarning> {
         self.preparing_deck.as_ref()?.memory
     }
 }

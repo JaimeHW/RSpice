@@ -364,10 +364,8 @@ fn hold_for_memory(
 /// autosave as this returns, before the run dispatches. Whether a run was
 /// held.
 pub fn run_anyway(cx: &mut Cx<'_, SourceFeature>) -> bool {
-    let Some(PreparingDeck { name, .. }) = cx
-        .runs
-        .preparing_deck
-        .take_if(|deck| deck.memory.is_some())
+    let Some(PreparingDeck { name, .. }) =
+        cx.runs.preparing_deck.take_if(|deck| deck.memory.is_some())
     else {
         return false;
     };
