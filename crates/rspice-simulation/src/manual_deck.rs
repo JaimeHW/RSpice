@@ -80,9 +80,26 @@ pub fn build_manual_deck_queue_with_runtimes(
     source: &str,
     runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
 ) -> Result<Vec<QueuedAnalysis>, ManualDeckError> {
+    build_manual_deck_queue_with_abort(
+        reference_temperature_celsius,
+        source,
+        runtimes,
+        &rspice_core::NoAbort,
+    )
+}
+
+/// [`build_manual_deck_queue_with_runtimes`], whose parse of the deck stops
+/// once `abort` is raised. A stopped parse is refused as one that failed;
+/// whoever raised `abort` reads no verdict from it.
+pub fn build_manual_deck_queue_with_abort(
+    reference_temperature_celsius: f64,
+    source: &str,
+    runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> Result<Vec<QueuedAnalysis>, ManualDeckError> {
     let source = compose_manual_deck_source(source);
-    let parsed =
-        Netlist::parse(&source).map_err(|err| vec![format!("Netlist parse error: {err}")])?;
+    let parsed = Netlist::parse_with_abort(&source, abort)
+        .map_err(|err| vec![format!("Netlist parse error: {err}")])?;
     let periodic_tasks = periodic::parse_periodic_tasks(&parsed, &source, runtimes)?;
     queue_manual_deck_analyses(
         reference_temperature_celsius,

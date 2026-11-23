@@ -799,7 +799,7 @@ pub fn manual_deck_hdl<R, A>(
     ),
     PreparationError,
 > {
-    expand_manual_deck(inputs, &manual, false).map(|deck| {
+    expand_manual_deck(inputs, &manual, false, &rspice_core::NoAbort).map(|deck| {
         (
             deck_external_cells(&deck.expanded),
             deck_delay_select(&deck.expanded),
@@ -815,6 +815,7 @@ fn expand_manual_deck<R, A>(
     inputs: &RunPreparationInputs<'_, R, A>,
     manual: &ManualSourceInputs<'_>,
     seal_hdl: bool,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
 ) -> Result<ExpandedManualDeck, PreparationError> {
     let source = manual.source;
     if source.trim().is_empty() {
@@ -849,6 +850,7 @@ fn expand_manual_deck<R, A>(
         rspice_model_library::ModelExecutionPlan::model_cards,
     );
     let composed = manual_deck::compose_manual_deck_source(source);
+    PreparationError::check_abort(abort)?;
     let mut composed = crate::analysis_preparation::apply_reference_model_bindings_to_netlist(
         &composed,
         &model_cards,
@@ -877,6 +879,7 @@ fn expand_manual_deck<R, A>(
             "The deck has no file, so its .include and .lib lines have no folder to be read from.",
         ));
     }
+    PreparationError::check_abort(abort)?;
     let sealed_hdl = if seal_hdl {
         crate::netlist_preparation::seal_deck_hdl_sources(
             &composed,
@@ -889,6 +892,7 @@ fn expand_manual_deck<R, A>(
             ..Default::default()
         }
     };
+    PreparationError::check_abort(abort)?;
     // A source line an included file writes is sealed where the expansion
     // puts it, by the file and line that wrote it.
     let crate::netlist_preparation::dependencies::ExpandedManualDependencies {
@@ -904,6 +908,7 @@ fn expand_manual_deck<R, A>(
         &sealed_models,
         &|location| sealed_hdl.included_line(location),
     )?;
+    PreparationError::check_abort(abort)?;
     let source_lines = source_lines.map(|lines| (lines, expanded.clone()));
     let crate::netlist_preparation::SealedDeckHdl {
         runtimes: deck_hdl_runtimes,
@@ -965,7 +970,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         deck_hdl_dependencies,
         has_project_technology,
         source_lines,
-    } = expand_manual_deck(inputs, &manual, true)?;
+    } = expand_manual_deck(inputs, &manual, true, abort)?;
     // A sealed Verilog-A source is a dependency like an include: the run
     // refuses to dispatch once the host no longer gives the bytes it sealed.
     sealed_source_dependencies.extend(deck_hdl_dependencies);
@@ -1035,16 +1040,18 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
             definitions,
         )
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
+    PreparationError::check_abort(abort)?;
     if let Some(refusal) = crate::netlist_preparation::included_hdl_source_refusal(
         &expanded,
         &sealed_source_dependencies,
     ) {
         return Err(refusal);
     }
-    reject_deferred_external_sources_with_project_runtimes(
+    crate::netlist_preparation::reject_deferred_external_sources_with_abort(
         &expanded,
         &project_veriloga_runtimes,
         &measurement_references,
+        abort,
     )?;
     // The files the deck's code models read, from beside the deck, held
     // only while reading a `.PSS` elaborates it.
@@ -1058,10 +1065,11 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         .then(|| data_files.hold(inputs.execution_limits()))
         .transpose()
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
-    let queued_tasks = manual_deck::build_manual_deck_queue_with_runtimes(
+    let queued_tasks = manual_deck::build_manual_deck_queue_with_abort(
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
         &expanded,
         &project_veriloga_runtimes,
+        abort,
     )
     .map_err(|error| {
         // A card an included file wrote is named by that file and line, as

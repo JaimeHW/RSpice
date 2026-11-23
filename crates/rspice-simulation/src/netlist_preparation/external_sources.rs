@@ -142,11 +142,28 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
 ) -> Result<(), PreparationError> {
-    reject_deferred_external_sources_for_host(
+    reject_deferred_external_sources_with_abort(
+        netlist,
+        project_runtimes,
+        measurement_references,
+        &rspice_core::NoAbort,
+    )
+}
+
+/// [`reject_deferred_external_sources_with_project_runtimes`], stopped once
+/// `abort` is raised: it polls `abort` as it reads the deck's lines.
+pub fn reject_deferred_external_sources_with_abort(
+    netlist: &str,
+    project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> Result<(), PreparationError> {
+    reject_deferred_external_sources_for_host_with_abort(
         netlist,
         project_runtimes,
         measurement_references,
         process_programs::STARTS_PROGRAMS,
+        abort,
     )
 }
 
@@ -160,6 +177,24 @@ pub(crate) fn reject_deferred_external_sources_for_host(
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
     starts_programs: bool,
 ) -> Result<(), PreparationError> {
+    reject_deferred_external_sources_for_host_with_abort(
+        netlist,
+        project_runtimes,
+        measurement_references,
+        starts_programs,
+        &rspice_core::NoAbort,
+    )
+}
+
+/// [`reject_deferred_external_sources_for_host`], stopped once `abort` is
+/// raised.
+fn reject_deferred_external_sources_for_host_with_abort(
+    netlist: &str,
+    project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
+    starts_programs: bool,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> Result<(), PreparationError> {
     measurement_references
         .validate_source(netlist)
         .map_err(|error| {
@@ -168,11 +203,13 @@ pub(crate) fn reject_deferred_external_sources_for_host(
                 format!("The netlist reads a file that is not kept with the run: {error}"),
             )
         })?;
-    reject_deferred_external_sources_on(
+    PreparationError::check_abort(abort)?;
+    scan_deferred_external_sources(
         netlist,
         project_runtimes,
         starts_programs,
         std::env::var_os("PATH").as_deref(),
+        abort,
     )
 }
 
@@ -182,15 +219,43 @@ pub(crate) const PROCESS_PROGRAM_CAPABILITY: &str = "xspice.d_process.program";
 
 /// [`reject_deferred_external_sources_with_project_runtimes`] on a host that
 /// starts programs or not, looking a bare program name up on `search_path`.
+#[cfg(test)]
 fn reject_deferred_external_sources_on(
     netlist: &str,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     starts_programs: bool,
     search_path: Option<&std::ffi::OsStr>,
 ) -> Result<(), PreparationError> {
+    scan_deferred_external_sources(
+        netlist,
+        project_runtimes,
+        starts_programs,
+        search_path,
+        &rspice_core::NoAbort,
+    )
+}
+
+/// How many of a deck's lines are read between two polls of the abort
+/// signal: a few milliseconds of reading.
+const LINES_PER_ABORT_POLL: usize = 4096;
+
+/// [`reject_deferred_external_sources_with_project_runtimes`] on a host that
+/// starts programs or not, looking a bare program name up on `search_path`,
+/// stopped once `abort` is raised.
+fn scan_deferred_external_sources(
+    netlist: &str,
+    project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    starts_programs: bool,
+    search_path: Option<&std::ffi::OsStr>,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> Result<(), PreparationError> {
     let records = executable_logical_lines(netlist);
+    PreparationError::check_abort(abort)?;
     let unread = UnreadLines::new(netlist);
-    for (line_number, logical_line) in &records {
+    for (index, (line_number, logical_line)) in records.iter().enumerate() {
+        if index % LINES_PER_ABORT_POLL == 0 {
+            PreparationError::check_abort(abort)?;
+        }
         let (line_number, logical_line) = (*line_number, logical_line.as_str());
         if project_runtimes.sources().any(|runtime| {
             project_veriloga_directive_matches_exact_identity(

@@ -22,6 +22,7 @@ mod process_programs;
 pub(crate) use external_sources::reject_deferred_external_sources_for_host;
 pub use external_sources::{
     contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
+    reject_deferred_external_sources_with_abort,
     reject_deferred_external_sources_with_project_runtimes,
 };
 pub(crate) use hdl_sources::included_hdl_source_refusal;
