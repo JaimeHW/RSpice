@@ -508,6 +508,38 @@ pub struct WaveformLook {
     pub name: Option<String>,
 }
 
+/// The reader's ticks: a signal named here is on the plot or off it whatever
+/// its dataset chose. Every edit gives them a new revision, so what is built
+/// from them asks whether they changed without reading them all.
+#[derive(Debug, Clone, Default)]
+pub struct VisibilityOverrides {
+    overrides: HashMap<SourceWaveformPresentationKey, bool>,
+    revision: rspice_vocabulary::source_revision::SourceRevision,
+}
+
+impl VisibilityOverrides {
+    /// Equal to an earlier revision while no edit was made since it.
+    pub fn revision(&self) -> rspice_vocabulary::source_revision::SourceRevision {
+        self.revision.clone()
+    }
+}
+
+impl std::ops::Deref for VisibilityOverrides {
+    type Target = HashMap<SourceWaveformPresentationKey, bool>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.overrides
+    }
+}
+
+impl std::ops::DerefMut for VisibilityOverrides {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // Any mutable borrow may edit them.
+        self.revision.advance();
+        &mut self.overrides
+    }
+}
+
 /// Device-local result viewer state over explicit retained identities.
 #[derive(Debug, Clone, Default)]
 pub struct ResultViewerState {
@@ -690,7 +722,7 @@ pub struct ResultViewerState {
     /// A missing key means "use the immutable dataset default". Keeping this
     /// tri-state representation allows a source that defaults hidden to be
     /// revealed without writing into solver-owned result data.
-    pub waveform_visibility: HashMap<SourceWaveformPresentationKey, bool>,
+    pub waveform_visibility: VisibilityOverrides,
     /// The colours the view being drawn gives its traces, by signal. A
     /// missing key draws the signal in the run's colour or its palette place;
     /// the run keeps no colour a reader chose.

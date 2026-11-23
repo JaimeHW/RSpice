@@ -849,7 +849,10 @@ pub(super) fn show_virtualized_result_signals(
     selected_trace: Option<&rspice_results_ui::selection::SelectedResultTrace>,
     selected_artifact: Option<&ResultArtifactPresentationKey>,
     ordered_visible: &[ResultBrowserSelectionKey],
-    ticked: &[ResultBrowserSelectionKey],
+    (ticked_set, ticked): (
+        &std::collections::HashSet<ResultBrowserSelectionKey>,
+        &[ResultBrowserSelectionKey],
+    ),
     filtering: bool,
     kind: ResultsBrowserKind,
     scope: ResultsBrowserScope,
@@ -1083,6 +1086,11 @@ pub(super) fn show_virtualized_result_signals(
                                 selected.analysis_key() == analysis.presentation_key
                                     && selected.source_name() == signal.name
                             });
+                            // The tick is read as the row is drawn, so ticking
+                            // a signal leaves the row model as it was.
+                            let signal_ticked = ticked_set.contains(
+                                &ResultBrowserSelectionKey::Waveform(signal.identity.clone()),
+                            );
                             let responses = result_quantity_row(
                                 ui,
                                 result_signal_row_id(&ResultBrowserSelectionKey::Waveform(
@@ -1099,7 +1107,7 @@ pub(super) fn show_virtualized_result_signals(
                                 signal.value.as_deref(),
                                 color,
                                 signal_selected,
-                                signal.visible,
+                                signal_ticked,
                             );
                             if responses.selection.drag_started() {
                                 start_browser_drag(
@@ -1149,7 +1157,7 @@ pub(super) fn show_virtualized_result_signals(
                                 &responses.selection,
                                 state,
                                 &signal.identity,
-                                signal.visible,
+                                signal_ticked,
                             );
                         }
                         ResultSignalVirtualRow::Artifact {
@@ -1193,7 +1201,7 @@ pub(super) fn show_virtualized_result_signals(
                                 // The tick is the one the count above reads: an
                                 // event net's or a bus's row is ticked while its
                                 // lane is plotted, however it got there.
-                                ticked.contains(&selection_key),
+                                ticked_set.contains(&selection_key),
                             );
                             if responses.selection.drag_started()
                                 && is_plottable_artifact(artifact.identity.canonical_name())

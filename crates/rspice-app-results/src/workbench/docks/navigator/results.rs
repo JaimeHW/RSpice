@@ -188,13 +188,13 @@ pub(in crate::workbench) fn results(
         .collect::<std::collections::HashMap<_, _>>();
     // The row model is kept until something it is built from changes: the
     // retained runs or the state of one of their analyses, the query and the
-    // facets, what is ticked, or what was recent. Building it walks every
-    // retained signal and copies its name, which no idle frame should do.
+    // facets, or what was recent. Building it walks every retained signal and
+    // copies its name, which no idle frame and no tick should do: a row reads
+    // its tick as it is drawn.
     let fingerprint = browser_rows_fingerprint(
         &*state,
         &analysis_integrity,
         (kind, layout, order, scope, producer_facet, show_internal),
-        ticked,
         (active_run, expression_query_match),
     );
     let runs = browser_rows(ui.ctx(), &*state, fingerprint, || {
@@ -294,9 +294,6 @@ pub(in crate::workbench) fn results(
                             Some(ResultSignal {
                                 kind: SignalKind::of_waveform(&waveform.name, quantity_kind),
                                 waveform_index,
-                                visible: ticked.contains(&ResultBrowserSelectionKey::Waveform(
-                                    identity.clone(),
-                                )),
                                 identity,
                                 name: waveform.name.clone(),
                                 unit: unit.to_owned(),
@@ -764,7 +761,7 @@ pub(in crate::workbench) fn results(
             selected_trace.as_ref(),
             selected_artifact.as_ref(),
             &visible_result_keys,
-            ticked_ordered,
+            (ticked, ticked_ordered),
             !query.is_empty(),
             kind,
             scope,
@@ -997,6 +994,8 @@ pub(in crate::workbench) fn results(
 #[derive(Clone)]
 struct TickedQuantities {
     revision: crate::state::RunHistoryRevision,
+    /// The reader's visibility overrides, compared by revision.
+    visibility: rspice_vocabulary::source_revision::SourceRevision,
     fingerprint: u64,
     ticked: std::sync::Arc<std::collections::HashSet<ResultBrowserSelectionKey>>,
     ordered: std::sync::Arc<Vec<ResultBrowserSelectionKey>>,
@@ -1009,9 +1008,11 @@ struct TickedQuantities {
 fn ticked_quantities(ctx: &egui::Context, state: &ResultsParts<'_>) -> TickedQuantities {
     let id = egui::Id::new("rspice.results.browser.ticked");
     let revision = state.model.simulation.retained.runs.revision();
+    let visibility = state.results.session.waveform_visibility.revision();
     let fingerprint = ticked_fingerprint(state);
     if let Some(kept) = ctx.data(|data| data.get_temp::<TickedQuantities>(id))
         && kept.revision == revision
+        && kept.visibility == visibility
         && kept.fingerprint == fingerprint
     {
         return kept;
@@ -1039,6 +1040,7 @@ fn ticked_quantities(ctx: &egui::Context, state: &ResultsParts<'_>) -> TickedQua
     };
     let kept = TickedQuantities {
         revision,
+        visibility,
         fingerprint,
         ticked: std::sync::Arc::new(ticked),
         ordered: std::sync::Arc::new(ordered),
@@ -1050,8 +1052,9 @@ fn ticked_quantities(ctx: &egui::Context, state: &ResultsParts<'_>) -> TickedQua
 
 /// Everything besides the retained runs themselves that what is ticked is
 /// read from, as one number: the data version, the active run and its
-/// overlays, the quantities ticked by hand, the reader's visibility
-/// overrides, and the persistent pane whose traces decide a curve's tick.
+/// overlays, the quantities ticked by hand, and the persistent pane whose
+/// traces decide a curve's tick. The reader's visibility overrides are
+/// compared by their revision instead.
 fn ticked_fingerprint(state: &ResultsParts<'_>) -> u64 {
     use std::hash::{Hash, Hasher};
     let stable = rspice_results_ui::waves::stable_hash;
@@ -1068,14 +1071,6 @@ fn ticked_fingerprint(state: &ResultsParts<'_>) -> u64 {
         .fold(0_u64, |combined, key| combined ^ stable(key))
         .hash(&mut hasher);
     session.checked_result_quantities.len().hash(&mut hasher);
-    session
-        .waveform_visibility
-        .iter()
-        .fold(0_u64, |combined, entry| {
-            combined ^ rspice_results_ui::waves::stable_hash(&entry)
-        })
-        .hash(&mut hasher);
-    session.waveform_visibility.len().hash(&mut hasher);
     if let Some(context) = session.persistent_pane_context {
         (context.document_id, context.pane_id, context.analysis).hash(&mut hasher);
         state
@@ -1201,9 +1196,9 @@ fn browser_rows(
 }
 
 /// Everything besides the retained runs themselves that the row model reads,
-/// as one number: the data version, the query, the facets, what is ticked,
-/// the reader's recent signals, the active run, and each analysis's
-/// integrity and currentness.
+/// as one number: the data version, the query, the facets, the reader's
+/// recent signals, the active run, and each analysis's integrity and
+/// currentness.
 fn browser_rows_fingerprint(
     state: &ResultsParts<'_>,
     integrity: &std::collections::HashMap<AnalysisPresentationKey, bool>,
@@ -1215,22 +1210,14 @@ fn browser_rows_fingerprint(
         Option<AnalysisPresentationKey>,
         bool,
     ),
-    ticked: &std::collections::HashSet<ResultBrowserSelectionKey>,
     (active_run, expression_query_match): (Option<usize>, bool),
 ) -> u64 {
     use std::hash::{Hash, Hasher};
-    let stable = rspice_results_ui::waves::stable_hash;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     state.model.simulation.view.data_version.hash(&mut hasher);
     state.workbench.navigator_filter().hash(&mut hasher);
     (kind as u8, layout as u8, order as u8, scope as u8).hash(&mut hasher);
     (producer, show_internal, active_run, expression_query_match).hash(&mut hasher);
-    // A set's order is its hasher's: combine its members in any order.
-    ticked
-        .iter()
-        .fold(0_u64, |combined, key| combined ^ stable(key))
-        .hash(&mut hasher);
-    ticked.len().hash(&mut hasher);
     state.results.session.recent_signals.hash(&mut hasher);
     state
         .results
@@ -2378,7 +2365,6 @@ pub(super) struct ResultSignal {
     /// The samples it holds, which the sample order sorts by.
     pub(super) samples: usize,
     pub(super) color: String,
-    pub(super) visible: bool,
     pub(super) value: Option<String>,
     /// The row's typed metadata, empty when there is nothing to say.
     pub(super) meta: String,

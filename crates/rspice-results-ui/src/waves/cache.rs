@@ -21,7 +21,7 @@ pub struct ModelCacheInput<'a> {
     pub overlay_dataset_ids: &'a [DatasetId],
     pub viewer: ResultViewer,
     pub projection: ProjectionOptions<'a>,
-    pub waveform_visibility: &'a HashMap<SourceWaveformPresentationKey, bool>,
+    pub waveform_visibility: &'a crate::session::VisibilityOverrides,
     /// The colours the view gives its traces, by signal.
     pub waveform_colors: &'a HashMap<SourceWaveformPresentationKey, TraceColor>,
     /// The styles and names the view gives its traces, by signal.
@@ -54,6 +54,9 @@ pub struct ModelsCache {
 #[derive(Clone)]
 struct CachedModels {
     fingerprint: u64,
+    /// The reader's ticks the models were built from, compared by revision:
+    /// hashing a hundred thousand ticks every frame cost more than the frame.
+    visibility: rspice_vocabulary::source_revision::SourceRevision,
     decks: ExecutedDeckArchive,
     models: Arc<Vec<StripModel>>,
 }
@@ -128,13 +131,6 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
         .collect::<Vec<_>>();
     hidden.sort_unstable_by_key(stable_hash);
     hidden.hash(&mut h);
-    let mut visibility = input
-        .waveform_visibility
-        .iter()
-        .map(|(key, visible)| (stable_hash(key), *visible))
-        .collect::<Vec<_>>();
-    visibility.sort_unstable();
-    visibility.hash(&mut h);
     let mut colors = input
         .waveform_colors
         .iter()
@@ -169,8 +165,10 @@ impl ModelsCache {
         ) -> Vec<StripModel>,
     ) -> Arc<Vec<StripModel>> {
         let fp = models_fingerprint(&input, tokens);
+        let visibility = input.waveform_visibility.revision();
         if let Some(cached) = &self.cached
             && cached.fingerprint == fp
+            && cached.visibility == visibility
             && cached.decks.shares_content_with(executed_decks)
         {
             return Arc::clone(&cached.models);
@@ -220,6 +218,7 @@ impl ModelsCache {
         }
         self.cached = Some(CachedModels {
             fingerprint: fp,
+            visibility,
             decks: executed_decks.clone(),
             models: Arc::clone(&models),
         });
