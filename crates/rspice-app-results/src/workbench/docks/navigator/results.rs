@@ -194,7 +194,7 @@ pub(in crate::workbench) fn results(
         &*state,
         &analysis_integrity,
         (kind, layout, order, scope, producer_facet, show_internal),
-        &ticked,
+        ticked,
         (active_run, expression_query_match),
     );
     let runs = browser_rows(ui.ctx(), &*state, fingerprint, || {
@@ -764,7 +764,7 @@ pub(in crate::workbench) fn results(
             selected_trace.as_ref(),
             selected_artifact.as_ref(),
             &visible_result_keys,
-            &ticked_ordered,
+            ticked_ordered,
             !query.is_empty(),
             kind,
             scope,
