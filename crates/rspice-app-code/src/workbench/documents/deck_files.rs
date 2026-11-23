@@ -207,6 +207,20 @@ impl OpenFile {
     /// Whichever way, the file and `text` then share one revision.
     pub fn edit_to(&mut self, text: &RevisedText) -> bool {
         let changed = !self.text.same_text(text);
+        self.hold(text, changed)
+    }
+
+    /// Hold the text an editor left after an edit, shared rather than
+    /// copied; whether that changed it. The editor gives a text a revision
+    /// of its own only when it changes it, so the two revisions say so
+    /// without the two texts being compared, as an edit that keeps the
+    /// length, typing over a selection, would otherwise compare them.
+    pub fn take_typed(&mut self, text: &RevisedText) -> bool {
+        let changed = self.text.revision() != text.revision();
+        self.hold(text, changed)
+    }
+
+    fn hold(&mut self, text: &RevisedText, changed: bool) -> bool {
         self.text = text.clone();
         self.dirty |= changed;
         changed

@@ -497,8 +497,8 @@ impl SimulationController {
             return;
         }
 
-        let dispatch = match self.consume_snapshot_for_dispatch(state) {
-            Ok(dispatch) => dispatch,
+        let (dispatch, manual_text) = match self.consume_snapshot_and_text(state) {
+            Ok(consumed) => consumed,
             Err(error) => {
                 if state.model().simulation.execution.run_intent
                     == SimulationRunIntent::SimulateRunSet
@@ -515,7 +515,7 @@ impl SimulationController {
             // advertise authority the controller no longer owns.
             state.runs_mut().preflight.invalidate();
         }
-        if let Err(error) = self.start_authorized_dispatch(state, dispatch, None) {
+        if let Err(error) = self.start_authorized_dispatch(state, dispatch, None, manual_text) {
             let model = state.model_mut();
             model.record(
                 LogSeverity::Error,
@@ -528,12 +528,15 @@ impl SimulationController {
 
     /// Open a run for an authorized dispatch and start its first task.
     ///
-    /// A campaign member names its membership and the plan it runs.
+    /// A campaign member names its membership and the plan it runs. A manual
+    /// deck's run keeps `manual_text`, the text its snapshot was prepared
+    /// from, as the text it ran.
     fn start_authorized_dispatch(
         &mut self,
         state: &mut impl RunHost,
         mut dispatch: crate::simulation::execution::AuthorizedRunDispatch,
         campaign_member: Option<(crate::state::SimulationCampaignMembership, &str)>,
+        manual_text: Option<crate::state::RevisedText>,
     ) -> Result<(), crate::simulation::execution::PreparationError> {
         let (campaign_membership, member_plan) = campaign_member.unzip();
         if let Some(membership) = campaign_membership.as_ref() {
@@ -711,8 +714,11 @@ impl SimulationController {
                     .collect(),
             });
         if dispatch.intent() == SimulationRunIntent::ManualDeck {
-            let manual_source =
-                crate::state::RevisedText::from(dispatch.manual_source().unwrap_or_default());
+            // The text the run read, shared with the deck it was prepared
+            // from; copied from the snapshot only when none was kept.
+            let manual_source = manual_text.unwrap_or_else(|| {
+                crate::state::RevisedText::from(dispatch.manual_source().unwrap_or_default())
+            });
             let manual_run = &mut state.runs_mut().manual_run;
             manual_run.pending_manual_run_id = Some(run_id);
             manual_run.pending_run_buffer = Some(manual_source);

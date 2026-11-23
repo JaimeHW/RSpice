@@ -157,6 +157,10 @@ struct RunSetReads {
 /// What only preparing a manual deck reads, beside its text, which the
 /// snapshot holds.
 struct ManualDeckReads {
+    /// The text the snapshot was prepared from, shared with the deck: its
+    /// revision says at dispatch, however long the deck, that the deck is
+    /// still the one prepared, and the run keeps it as the text it ran.
+    text: crate::state::RevisedText,
     origin: Option<PathBuf>,
     origin_identity: Option<PathBuf>,
     topology_revision: u64,
@@ -305,6 +309,7 @@ impl RunInputIdentity {
         let live = LiveInputs::of(state);
         let deck = super::prepared_run::manual_source_inputs(state)?;
         let reads = KindReads::ManualDeck(Box::new(ManualDeckReads {
+            text: manual_text(state).clone(),
             origin: deck.origin.map(Path::to_path_buf),
             origin_identity: origin_identity(deck.origin),
             topology_revision: live.schematic_topology_revision,
@@ -353,14 +358,10 @@ impl RunInputIdentity {
 
     /// The first input the session no longer holds as it was captured, named
     /// for the reader, or `None` when every one is unchanged.
-    fn moved_in(
-        &self,
-        state: &impl RunHost,
-        snapshot: &PreparedRunSnapshot,
-    ) -> Option<&'static str> {
+    fn moved_in(&self, state: &impl RunHost) -> Option<&'static str> {
         self.first_moved(state, |live| match &self.0.reads {
             KindReads::RunSet(reads) => reads.compared(state.model(), live),
-            KindReads::ManualDeck(reads) => reads.compared(state, live, snapshot),
+            KindReads::ManualDeck(reads) => reads.compared(state, live),
         })
     }
 
@@ -480,19 +481,14 @@ impl RunSetReads {
 }
 
 impl ManualDeckReads {
-    /// The deck's text is compared with the text `snapshot` was prepared
+    /// The deck's text is compared with the text the snapshot was prepared
     /// from.
-    fn compared(
-        &self,
-        state: &impl RunHost,
-        live: &LiveInputs<'_>,
-        snapshot: &PreparedRunSnapshot,
-    ) -> Compared {
-        let document_unchanged =
-            super::prepared_run::manual_source_inputs(state).is_ok_and(|deck| {
-                Some(deck.source) == snapshot.manual_source()
-                    && deck.origin == self.origin.as_deref()
-            });
+    fn compared(&self, state: &impl RunHost, live: &LiveInputs<'_>) -> Compared {
+        // The snapshot holds the very text `self.text` holds, so a deck at
+        // its revision is the deck prepared, told without reading either.
+        let document_unchanged = super::prepared_run::manual_source_inputs(state)
+            .is_ok_and(|deck| deck.origin == self.origin.as_deref())
+            && manual_text(state).same_text(&self.text);
         let first = vec![
             (document_unchanged, "the netlist"),
             (
@@ -976,7 +972,25 @@ pub(super) struct RetainedRunInputs {
     pub(super) source_files: SourceFileAnswers,
 }
 
+/// The text a manual run reads, as [`super::prepared_run::manual_source_inputs`]
+/// reads it: the deck in front, else the editor's text.
+fn manual_text(state: &impl RunHost) -> &crate::state::RevisedText {
+    state.manual_deck().map_or_else(
+        || &state.model().simulation.source.netlist_content,
+        |deck| deck.text,
+    )
+}
+
 impl RetainedRunInputs {
+    /// The text a manual deck's snapshot was prepared from, shared with the
+    /// deck it was read from; `None` for a run set.
+    pub(super) fn manual_text(&self) -> Option<&crate::state::RevisedText> {
+        match &self.identity.0.reads {
+            KindReads::ManualDeck(reads) => Some(&reads.text),
+            KindReads::RunSet(_) => None,
+        }
+    }
+
     /// Refuse unless nothing `snapshot` was prepared from has moved: the
     /// session's inputs, the external model files its seal read, the files
     /// its includes spliced in, and the data files its sources were routed
@@ -995,7 +1009,7 @@ impl RetainedRunInputs {
         }
         self.refused_if_moved(
             state.model(),
-            self.identity.moved_in(state, snapshot),
+            self.identity.moved_in(state),
             snapshot.sealed_source_dependencies(),
         )
     }

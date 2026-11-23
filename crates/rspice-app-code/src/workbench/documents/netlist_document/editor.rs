@@ -618,7 +618,7 @@ pub fn commit_edit(
         }
         return;
     }
-    if !super::keep_editor_text(model, netlist) {
+    if !super::keep_editor_text(model, netlist, true) {
         return;
     }
     netlist.last_edit_time = now;

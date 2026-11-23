@@ -1054,8 +1054,12 @@ impl SimulationController {
                 }
             };
             let member_index = membership.member_index();
-            match self.start_authorized_dispatch(state, dispatch, Some((membership, &member_name)))
-            {
+            match self.start_authorized_dispatch(
+                state,
+                dispatch,
+                Some((membership, &member_name)),
+                None,
+            ) {
                 Ok(()) => return Ok(()),
                 Err(error) => {
                     let line = state.model_mut().record(
@@ -1182,13 +1186,30 @@ impl SimulationController {
         &mut self,
         state: &impl RunHost,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
+        self.consume_snapshot_and_text(state)
+            .map(|(dispatch, _)| dispatch)
+    }
+
+    /// [`Self::consume_snapshot_for_dispatch`], with the text a manual
+    /// deck's snapshot was prepared from, shared with the deck rather than
+    /// copied out of the snapshot.
+    pub(super) fn consume_snapshot_and_text(
+        &mut self,
+        state: &impl RunHost,
+    ) -> Result<(AuthorizedRunDispatch, Option<crate::state::RevisedText>), PreparationError> {
         let intent = state.model().simulation.execution.run_intent;
         let inputs = self.retained_run_inputs.take();
-        self.run_authorization.consume(intent, |snapshot| {
-            inputs
-                .ok_or_else(super::run_inputs::unaccounted_run)?
-                .still_current(state, snapshot)
-        })
+        let text = inputs
+            .as_ref()
+            .and_then(super::run_inputs::RetainedRunInputs::manual_text)
+            .cloned();
+        self.run_authorization
+            .consume(intent, |snapshot| {
+                inputs
+                    .ok_or_else(super::run_inputs::unaccounted_run)?
+                    .still_current(state, snapshot)
+            })
+            .map(|dispatch| (dispatch, text))
     }
 
     pub fn build_prepared_snapshot(
