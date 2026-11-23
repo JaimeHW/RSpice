@@ -10,7 +10,7 @@ use crate::visualization_document::{
     FamilyPredicate, TypedValue, ValueType,
 };
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 mod plan;
 pub use plan::{
@@ -245,10 +245,12 @@ impl FamilyManifest {
             return Ok(self.points.iter().map(|point| point.source_index).collect());
         };
         validate_manifest_predicate(self, &filter.predicate)?;
+        let compiled = CompiledFilter::of(&filter.predicate);
         self.points
             .iter()
             .filter_map(|point| {
-                evaluate_manifest_predicate(self, point, &filter.predicate)
+                compiled
+                    .matches(self, point)
                     .map(|matches| matches.then_some(point.source_index))
                     .transpose()
             })
@@ -366,7 +368,94 @@ fn require_typed_filter_value(
     }
 }
 
-fn evaluate_manifest_predicate(
+/// A filter made ready to evaluate on every point of a family: each set
+/// membership holds its members in a hash set, so a pick of every run of a
+/// large Monte Carlo costs one lookup a point, not one comparison a member.
+enum CompiledFilter<'a> {
+    /// A constant, comparison or range, evaluated as written.
+    Leaf(&'a FamilyPredicate),
+    In {
+        dimension: &'a DocumentFamilyDimension,
+        members: HashSet<ExactValue<'a>>,
+    },
+    All(Vec<CompiledFilter<'a>>),
+    Any(Vec<CompiledFilter<'a>>),
+    Not(Box<CompiledFilter<'a>>),
+}
+
+impl<'a> CompiledFilter<'a> {
+    fn of(predicate: &'a FamilyPredicate) -> Self {
+        match predicate {
+            FamilyPredicate::In { dimension, values } => Self::In {
+                dimension,
+                members: values.iter().filter_map(ExactValue::of).collect(),
+            },
+            FamilyPredicate::All { predicates } => {
+                Self::All(predicates.iter().map(Self::of).collect())
+            }
+            FamilyPredicate::Any { predicates } => {
+                Self::Any(predicates.iter().map(Self::of).collect())
+            }
+            FamilyPredicate::Not { predicate } => Self::Not(Box::new(Self::of(predicate))),
+            FamilyPredicate::Constant { .. }
+            | FamilyPredicate::Compare { .. }
+            | FamilyPredicate::Between { .. } => Self::Leaf(predicate),
+        }
+    }
+
+    fn matches(&self, manifest: &FamilyManifest, point: &FamilyPoint) -> Result<bool, String> {
+        match self {
+            Self::Leaf(predicate) => evaluate_leaf(manifest, point, predicate),
+            Self::In { dimension, members } => {
+                let candidate = manifest_typed_value(manifest, point, dimension)?;
+                Ok(ExactValue::of(&candidate).is_some_and(|value| members.contains(&value)))
+            }
+            Self::All(children) => {
+                for child in children {
+                    if !child.matches(manifest, point)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            Self::Any(children) => {
+                for child in children {
+                    if child.matches(manifest, point)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            Self::Not(child) => child.matches(manifest, point).map(|value| !value),
+        }
+    }
+}
+
+/// A value as set membership compares it: exactly, a real by its bits, as
+/// [`exact_typed_value_eq`] does. A missing value is no member.
+#[derive(PartialEq, Eq, Hash)]
+enum ExactValue<'a> {
+    Real(u64),
+    Integer(i64),
+    Boolean(bool),
+    Text(&'a str),
+}
+
+impl<'a> ExactValue<'a> {
+    fn of(value: &'a TypedValue) -> Option<Self> {
+        match value {
+            TypedValue::Real(value) => Some(Self::Real(value.to_bits())),
+            TypedValue::Integer(value) => Some(Self::Integer(*value)),
+            TypedValue::Boolean(value) => Some(Self::Boolean(*value)),
+            TypedValue::Text(value) => Some(Self::Text(value)),
+            TypedValue::Missing(_) => None,
+        }
+    }
+}
+
+/// One predicate evaluated on one point; a set membership or a group goes
+/// through its compiled filter.
+fn evaluate_leaf(
     manifest: &FamilyManifest,
     point: &FamilyPoint,
     predicate: &FamilyPredicate,
@@ -381,12 +470,10 @@ fn evaluate_manifest_predicate(
             let candidate = manifest_typed_value(manifest, point, dimension)?;
             compare_typed_values(&candidate, value, *operator)
         }
-        FamilyPredicate::In { dimension, values } => {
-            let candidate = manifest_typed_value(manifest, point, dimension)?;
-            Ok(values
-                .iter()
-                .any(|value| exact_typed_value_eq(&candidate, value)))
-        }
+        FamilyPredicate::In { .. }
+        | FamilyPredicate::All { .. }
+        | FamilyPredicate::Any { .. }
+        | FamilyPredicate::Not { .. } => CompiledFilter::of(predicate).matches(manifest, point),
         FamilyPredicate::Between {
             dimension,
             lower,
@@ -408,25 +495,6 @@ fn evaluate_manifest_predicate(
                 upper_cmp,
                 Ordering::Less | Ordering::Equal if *include_upper || upper_cmp != Ordering::Equal
             ))
-        }
-        FamilyPredicate::All { predicates } => {
-            for predicate in predicates {
-                if !evaluate_manifest_predicate(manifest, point, predicate)? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        }
-        FamilyPredicate::Any { predicates } => {
-            for predicate in predicates {
-                if evaluate_manifest_predicate(manifest, point, predicate)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        FamilyPredicate::Not { predicate } => {
-            evaluate_manifest_predicate(manifest, point, predicate).map(|value| !value)
         }
     }
 }

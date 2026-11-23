@@ -300,3 +300,49 @@ fn family_x_requires_finite_lossless_numeric_projection() {
         .unwrap_err();
     assert!(error.contains("cannot be represented losslessly"));
 }
+
+/// A filter picking every other run of a ten-thousand-run Monte Carlo by
+/// sample number keeps exactly those runs, in source order, and its negation
+/// keeps exactly the rest.
+#[test]
+fn a_pick_of_thousands_of_runs_keeps_exactly_those_runs() {
+    const RUNS: usize = 10_000;
+    let manifest = FamilyManifest {
+        dimensions: vec![dimension(
+            "sample",
+            "Sample",
+            None,
+            FamilyValueKind::Integer,
+        )],
+        points: (0..RUNS)
+            .map(|index| point(index, [("sample", FamilyValue::Integer(index as u64 + 1))]))
+            .collect(),
+        omitted_points: 0,
+    };
+    let sample = DocumentFamilyDimension::new("sample", ValueType::Integer).unwrap();
+    let picked = FamilyPredicate::In {
+        dimension: sample,
+        values: (1..=RUNS as i64)
+            .filter(|run| run % 2 == 0)
+            .map(TypedValue::Integer)
+            .collect(),
+    };
+    let kept = |predicate: FamilyPredicate| {
+        manifest
+            .matching_source_indices_for_filter(Some(&FamilyFilterExpression {
+                source: "sample in {2, 4, 6}".to_owned(),
+                predicate,
+            }))
+            .unwrap()
+    };
+    assert_eq!(
+        kept(picked.clone()),
+        (0..RUNS).filter(|index| index % 2 == 1).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        kept(FamilyPredicate::Not {
+            predicate: Box::new(picked),
+        }),
+        (0..RUNS).filter(|index| index % 2 == 0).collect::<Vec<_>>()
+    );
+}
