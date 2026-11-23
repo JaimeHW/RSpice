@@ -1189,6 +1189,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/app/dialogs/source_document.rs", "fixtures"),
             ("workbench/code.rs", "commands"),
             ("workbench/code.rs", "deck_run"),
+            ("workbench/code.rs", "deck_setup"),
             ("workbench/code.rs", "netlist_first"),
             ("workbench/code.rs", "requests"),
             ("workbench/code.rs", "toolbar"),

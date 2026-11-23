@@ -1,12 +1,14 @@
-//! Netlist-first design surface.
+//! Netlist-first surfaces.
 //!
 //! A project opened from a deck has no schematic to draw, so the Design
 //! surface is Design's own empty canvas, as when no document is open: it
 //! says there is no schematic, names the deck the project runs, and offers
 //! the two ways on, the deck in the Netlist workspace or a schematic made
-//! here. The deck's facts are the inspector's, the same rows the Netlist
-//! workspace lists beside the deck. It is the code feature's surface, drawn
-//! in that feature's context while the deck is the project's simulation.
+//! here. Simulate has no plan to edit for it, and lists the deck's own setup
+//! instead (see [`super::deck_setup`]). The deck's facts are the
+//! inspector's, the same rows the Netlist workspace lists beside the deck.
+//! These are the code feature's surface, drawn in that feature's context
+//! while the deck is the project's simulation.
 
 use egui::Ui;
 
@@ -19,12 +21,14 @@ use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Cx, Execute};
 use crate::workbench::framework::requests::ShowProjectDeck;
-use crate::workbench::state::WorkbenchSession;
+use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{MessageCatalog, MessageId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetlistFirstAction {
     OpenNetlistWorkspace,
+    /// The deck in the Netlist workspace with the caret on this 1-based line.
+    OpenAtLine(usize),
     CreateSchematic,
 }
 
@@ -34,15 +38,21 @@ pub enum NetlistFirstAction {
 /// Open SPICE deck does; creating a schematic runs its command.
 pub fn raise_netlist_first_action(wb: &mut WorkbenchSession, action: NetlistFirstAction) {
     match action {
-        NetlistFirstAction::OpenNetlistWorkspace => wb.outbox.push(ShowProjectDeck),
+        NetlistFirstAction::OpenNetlistWorkspace | NetlistFirstAction::OpenAtLine(_) => {
+            wb.outbox.push(ShowProjectDeck);
+        }
         NetlistFirstAction::CreateSchematic => wb.outbox.push(Execute(ids::NEW_CELL)),
     }
 }
 
-/// The surface the code feature registers: Design's empty canvas, in its
-/// context.
+/// The surface the code feature registers, in its context: on Design the
+/// empty canvas, on Simulate the deck's own setup.
 pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
     open_deck(cx);
+    if cx.wb.workspace == Workspace::Simulate {
+        super::deck_setup::show(cx, ui);
+        return;
+    }
     let messages = cx.wb.messages();
     let name = deck_name(cx.model, &cx.state.netlist, messages);
     let open = messages.text(MessageId::NetlistFirstOpenInNetlist);
@@ -65,6 +75,23 @@ pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
     if let Some(action) = action {
         raise_netlist_first_action(cx.wb, action);
     }
+}
+
+/// [`raise_netlist_first_action`], with the caret put on the line an
+/// [`NetlistFirstAction::OpenAtLine`] names once the deck is in front.
+pub(super) fn carry_out(cx: &mut Cx<'_, CodeFeature>, action: NetlistFirstAction) {
+    if let NetlistFirstAction::OpenAtLine(line) = action {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::workbench::documents::deck_files::show_project_deck(
+            cx.model,
+            &mut cx.state.netlist,
+            &mut cx.state.netlist_open_documents,
+            cx.runs,
+        );
+        cx.state.netlist.cursor_line = line.saturating_sub(1);
+        cx.state.netlist.requested_line = Some(line);
+    }
+    raise_netlist_first_action(cx.wb, action);
 }
 
 /// Open the project's deck as the Netlist page does: a restored session has

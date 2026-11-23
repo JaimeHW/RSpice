@@ -13,6 +13,7 @@ mod deck_disk;
 #[cfg(not(target_arch = "wasm32"))]
 mod deck_in_front;
 mod deck_save_as;
+mod deck_setup;
 mod generated_netlist_jumps;
 mod netlist_cross_probe;
 #[cfg(not(target_arch = "wasm32"))]

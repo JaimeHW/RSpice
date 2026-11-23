@@ -220,6 +220,11 @@ impl Host for RSpiceApp {
                             );
                         }
                     }
+                    // A deck runs as written: its own setup cards stand in for
+                    // the plan editor, drawn by the code feature.
+                    Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
+                        features::show_surface::<CodeFeature>(app, ui);
+                    }
                     // The surface's carried-over transactions land before
                     // the shell takes the answers it reads.
                     Workspace::Simulate => {
@@ -275,8 +280,12 @@ impl Host for RSpiceApp {
                         features::show_navigator::<CodeFeature>(app, ui);
                         app.after_contribution();
                     }
-                    // A deck project's Design page, a Verilog-A module's: the
-                    // code feature's navigator.
+                    // A deck project's Design and Simulate pages, a Verilog-A
+                    // module's: the code feature's navigator.
+                    Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
+                        features::show_navigator::<CodeFeature>(app, ui);
+                        app.after_contribution();
+                    }
                     Workspace::Design
                         if app.state.is_netlist_first_without_schematic()
                             || app
@@ -368,6 +377,10 @@ impl Host for RSpiceApp {
                             );
                         }
                     }
+                    // A deck project's Simulate page inspects its deck.
+                    Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
+                        features::show_inspector::<CodeFeature>(app, ui);
+                    }
                     Workspace::Simulate => {
                         features::show_inspector::<SimulateFeature>(app, ui);
                         app.after_contribution();
@@ -397,7 +410,7 @@ impl Host for RSpiceApp {
             // The toolbar's lane: the tools of whoever its scope names.
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
                 use rspice_app_code::workbench::code::toolbar::{
-                    NETLIST_TOOLBAR, VERILOGA_TOOLBAR,
+                    DECK_SETUP_TOOLBAR, NETLIST_TOOLBAR, VERILOGA_TOOLBAR,
                 };
                 use rspice_app_design::workbench::design::DesignFeature;
                 use rspice_app_design::workbench::design::toolbar::{
@@ -473,6 +486,16 @@ impl Host for RSpiceApp {
                                 layout,
                             );
                             app.after_contribution();
+                        }
+                        // A deck runs as written: no plan to validate, preflight
+                        // or set options for, only the deck to open.
+                        Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
+                            features::show_toolbar::<CodeFeature>(
+                                app,
+                                ui,
+                                DECK_SETUP_TOOLBAR,
+                                layout,
+                            );
                         }
                         Workspace::Simulate => simulation_tools(ui, app, layout),
                         Workspace::Stimulus => {
@@ -565,7 +588,12 @@ impl Host for RSpiceApp {
             // it, because the query and the kind/sort facets filter the tab
             // that is showing — a search above the tabs would read as
             // filtering all three at once.
-            container_draws_search: !matches!(workspace, Workspace::Design | Workspace::Results),
+            // A deck project's Simulate page lists no setup to filter.
+            container_draws_search: match workspace {
+                Workspace::Design | Workspace::Results => false,
+                Workspace::Simulate => !app.state.is_netlist_first_without_schematic(),
+                _ => true,
+            },
             pins_scroll_bar: match workspace {
                 Workspace::Verify => Some(
                     rspice_app_simulate::workbench::docks::navigator::verify::verification_navigator_requires_scroll,
@@ -618,8 +646,10 @@ impl Host for RSpiceApp {
             },
             Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
             Workspace::Netlist => messages.text(MessageId::CodeInspectorNetlistTitle),
-            // A deck project's Design page inspects its deck.
-            Workspace::Design if app.state.is_netlist_first_without_schematic() => {
+            // A deck project's Design and Simulate pages inspect its deck.
+            Workspace::Design | Workspace::Simulate
+                if app.state.is_netlist_first_without_schematic() =>
+            {
                 messages.text(MessageId::CodeInspectorNetlistTitle)
             }
             // A result sheet's context panel is named by the sheet it is
@@ -671,15 +701,19 @@ impl Host for RSpiceApp {
                 .project
                 .display_name()
                 .to_owned(),
-            // A deck project has no cell view in Design to name.
-            Workspace::Design if app.state.is_netlist_first_without_schematic() => app
-                .state
-                .model
-                .workspace
-                .content
-                .project
-                .display_name()
-                .to_owned(),
+            // A deck project has no cell view in Design or plan in Simulate
+            // to name.
+            Workspace::Design | Workspace::Simulate
+                if app.state.is_netlist_first_without_schematic() =>
+            {
+                app.state
+                    .model
+                    .workspace
+                    .content
+                    .project
+                    .display_name()
+                    .to_owned()
+            }
             Workspace::Design => design_title_cell(&app.state.model),
             Workspace::Simulate => "Simulation plan".to_owned(),
             Workspace::Stimulus => "Stimulus Library".to_owned(),

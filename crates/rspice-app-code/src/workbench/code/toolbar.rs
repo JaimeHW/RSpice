@@ -1,5 +1,6 @@
-//! The code toolbars: the Verilog-A cell view's build and source tools, and
-//! the Netlist workspace's.
+//! The code toolbars: the Verilog-A cell view's build and source tools, the
+//! Netlist workspace's, and the way from a deck project's Simulate page to
+//! its deck.
 //!
 //! They are the code feature's toolbars, drawn in its context. Each group
 //! asks what the code workspace shows at the point it draws, after any tool
@@ -21,10 +22,15 @@ use crate::workbench::layout::LayoutSpec;
 pub const VERILOGA_TOOLBAR: ToolbarId = ToolbarId::new("code.veriloga");
 /// The toolbar of the Netlist workspace.
 pub const NETLIST_TOOLBAR: ToolbarId = ToolbarId::new("code.netlist");
+/// The toolbar of a deck project's Simulate page.
+pub const DECK_SETUP_TOOLBAR: ToolbarId = ToolbarId::new("code.deck-setup");
 
 /// Every toolbar the code feature registers.
-pub const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<CodeFeature>])] =
-    &[(VERILOGA_TOOLBAR, VERILOGA), (NETLIST_TOOLBAR, NETLIST)];
+pub const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<CodeFeature>])] = &[
+    (VERILOGA_TOOLBAR, VERILOGA),
+    (NETLIST_TOOLBAR, NETLIST),
+    (DECK_SETUP_TOOLBAR, DECK_SETUP),
+];
 
 /// A command drawn as a labelled button.
 const fn labelled(
@@ -204,6 +210,15 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
 ///
 /// Find is deliberately absent: the page's own toolbar sits directly under
 /// this one and owns it.
+/// Toolbar of a deck project's Simulate page: the deck, in front of the
+/// Netlist workspace, where it is changed. Running it is the run control's,
+/// which reads Run deck there.
+const DECK_SETUP: &[ToolbarEntry<CodeFeature>] = &[labelled(
+    ids::SHOW_RUN_DECK,
+    WorkbenchIcon::Netlist,
+    "Open in Netlist",
+)];
+
 const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
     ToolbarEntry::Only(
         generated_netlist_in_front,

@@ -31,12 +31,15 @@ use super::netlist_first::{self, DeckFacts, deck_fact_rows, deck_facts};
 pub(super) fn show_navigator(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
     // A deck project's Design page has no schematic, so nothing of one to
     // list: every group would be empty, and its one occurrence the empty top
-    // cell.
-    if deck_design_page(cx) {
-        muted_inspector_copy(
-            ui,
-            &cx.wb.messages().text(MessageId::NetlistFirstNoSchematic),
-        );
+    // cell. Its Simulate page has no plan, whose setup is what Simulate's
+    // navigator lists.
+    if deck_page(cx) {
+        let says = if cx.wb.workspace == Workspace::Simulate {
+            MessageId::NetlistFirstNoPlan
+        } else {
+            MessageId::NetlistFirstNoSchematic
+        };
+        muted_inspector_copy(ui, &cx.wb.messages().text(says));
         return;
     }
     if cx.wb.workspace != Workspace::Netlist {
@@ -110,9 +113,9 @@ fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
 /// deck, or the Verilog-A view the Design workspace shows.
 /// Revealing a Verilog-A finding routes the diagnostics in place.
 pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
-    // A deck project's Design page inspects the deck: the facts the Netlist
-    // workspace lists beside it.
-    if deck_design_page(cx) {
+    // A deck project's Design and Simulate pages inspect the deck: the facts
+    // the Netlist workspace lists beside it.
+    if deck_page(cx) {
         netlist_first::open_deck(cx);
         let facts = root_deck_facts(cx, ui.ctx());
         deck_fact_rows(ui, &facts, &[], cx.wb.messages());
@@ -173,10 +176,11 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
     }
 }
 
-/// Whether the docks are the Design page's of a project whose simulation is
-/// its deck and which has no schematic.
-fn deck_design_page(cx: &Cx<'_, CodeFeature>) -> bool {
-    cx.wb.workspace == Workspace::Design && cx.model.is_netlist_first_without_schematic()
+/// Whether the docks are the Design or Simulate page's of a project whose
+/// simulation is its deck and which has no schematic.
+fn deck_page(cx: &Cx<'_, CodeFeature>) -> bool {
+    matches!(cx.wb.workspace, Workspace::Design | Workspace::Simulate)
+        && cx.model.is_netlist_first_without_schematic()
 }
 
 /// The project's deck's facts, counted from its root file.

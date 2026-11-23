@@ -4,6 +4,7 @@
 
 pub mod commands;
 pub mod deck_run;
+pub mod deck_setup;
 mod docks;
 pub mod netlist_first;
 mod netlist_format;

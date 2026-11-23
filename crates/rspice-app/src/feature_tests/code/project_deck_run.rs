@@ -80,24 +80,20 @@ fn run_away_from_the_netlist_workspace_runs_the_deck() {
 }
 
 /// A launch that reopens away from the Netlist workspace has the deck's
-/// entry, not its text: Run names the deck all the same, opens it as the
-/// Netlist workspace does and runs it.
+/// entry, not its text: Run opens it as the Netlist workspace does and runs
+/// it. The Project workspace names nothing of the deck; Design and Simulate,
+/// which draw the run control, open the deck to list it.
 #[test]
 fn run_away_from_the_netlist_workspace_opens_a_deck_the_launch_has_not_read() {
     let mut app = netlist_first_app();
-    app.state.workbench.activate(Workspace::Simulate);
+    app.state.workbench.activate(Workspace::Project);
     let mut reopened = relaunch(&mut app);
-    assert_eq!(reopened.state.workbench.workspace, Workspace::Simulate);
+    assert_eq!(reopened.state.workbench.workspace, Workspace::Project);
     assert!(
         reopened.state.code.netlist.open_deck.is_none(),
-        "the Simulate workspace has not opened the deck"
+        "the Project workspace has not opened the deck"
     );
 
-    let (label, disabled) = run_control(&mut reopened).expect("Simulate draws the run control");
-    assert!(
-        label.starts_with("Run deck front_end.sp") && !disabled,
-        "Run names the deck before it is read: {label}"
-    );
     reopened.execute_command_key(ids::RUN_SIMULATION);
 
     assert!(
