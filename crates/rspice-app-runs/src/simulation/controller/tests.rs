@@ -727,6 +727,94 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
 /// A finished DC sweep's samples move into the results store as it is retained: its curves read
 /// one stored window of the shared sweep axis, and the engine's buffers are let go rather than
 /// kept beside them.
+/// A frame that receives a task's result converts none of it: the run keeps
+/// it, and the view shows it, on a later frame, once it has been converted
+/// away from the frame. Until then the run is still in progress.
+#[test]
+fn a_completed_result_is_converted_away_from_the_frame_that_receives_it() {
+    let mut state = RunTestHost::default();
+    let mut controller = SimulationController::new();
+    let export_io = MockExportWorkflowIo::default();
+    let run_sequence = state.model.simulation.start_run().id;
+    bind_test_run_running(&mut state, &mut controller, run_sequence);
+    controller.current_spec = Some(AnalysisSpec::Transient {
+        stop_time: 2.0e-9,
+        step_time: 1.0e-9,
+        start_time: 0.0,
+        max_timestep: None,
+        uic: false,
+    });
+    controller.current_provenance = Some(synthetic_result_provenance());
+    controller.current_analysis_idx = 1;
+    controller.total_analyses = 1;
+    let mut waveforms = std::collections::HashMap::new();
+    waveforms.insert(
+        "V(out)".to_string(),
+        rspice_simulation::results::SampledWaveform {
+            name: "V(out)".to_string(),
+            x_values: Vec::new().into(),
+            y_values: exact_vec(&[0.0, 0.5, 1.0]).into(),
+            y_unit: "V".to_string(),
+            is_complex: false,
+            y_imag: None,
+        },
+    );
+    controller.accept_completion_off_frame(
+        &mut state,
+        &export_io,
+        Ok(crate::simulation::SimulationResult::Transient {
+            spectra: Vec::new(),
+            hdl_output: Vec::new(),
+            checks: Default::default(),
+            time: exact_vec(&[0.0, 1.0e-9, 2.0e-9]).into(),
+            waveforms,
+            measurements: Vec::new(),
+            periodic_state: None,
+            convergence: Default::default(),
+            events: Default::default(),
+            store: None,
+        }),
+    );
+    let run = |state: &RunTestHost| {
+        state
+            .model
+            .simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .expect("the run is kept")
+            .clone()
+    };
+    assert!(
+        run(&state).analyses.is_empty(),
+        "the frame that received the result converted it"
+    );
+    assert!(controller.is_running(), "the run ended before its result was kept");
+    assert!(state.model.simulation.execution.has_active_execution());
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while controller.is_running() {
+        assert!(std::time::Instant::now() < deadline, "the result was never kept");
+        controller.poll_completion(&mut state, &export_io);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let run = run(&state);
+    assert_eq!(run.analyses.len(), 1, "the converted result is kept once");
+    assert_eq!(run.lifecycle, SimulationRunLifecycle::Completed);
+    assert!(!state.model.simulation.execution.has_active_execution());
+    let shown = state
+        .model
+        .simulation
+        .view
+        .waveforms
+        .iter()
+        .find(|waveform| waveform.name == "V(out)")
+        .expect("the view shows the kept analysis");
+    assert!(
+        shown.y.is_stored(),
+        "the view shows the samples as the run keeps them, in its results store"
+    );
+}
+
 #[test]
 fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
     let mut state = RunTestHost::default();

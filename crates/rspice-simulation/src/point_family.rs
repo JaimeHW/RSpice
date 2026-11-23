@@ -202,6 +202,13 @@ impl PointFamilyRegistry {
         });
     }
 
+    /// Whether the result of `instance` is a point a family is assembled
+    /// from, which [`Self::capture_result`] keeps.
+    #[must_use]
+    pub fn reduces(&self, instance: AnalysisInstanceId) -> bool {
+        self.reductions.contains_key(&instance)
+    }
+
     /// Whether this task's turn assembles a family rather than reaching the
     /// engine. True exactly for a declaration whose points were expanded, which
     /// is the one thing that makes its own solve redundant.

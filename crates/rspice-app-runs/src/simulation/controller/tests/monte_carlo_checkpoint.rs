@@ -100,7 +100,11 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
     let (mut controller, mut state) = controller_fixture(request);
     (_, controller.runner) = start_checkpoint_run(&source);
     wait_until_finished_unpolled(&controller.runner);
-    controller.poll_completion(&mut state, &MockExportWorkflowIo::default());
+    crate::simulation::controller::test_execution::poll_until_kept(
+        &mut controller,
+        &mut state,
+        &MockExportWorkflowIo::default(),
+    );
     let run = state.model.simulation.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Completed);
     assert!(run.success);

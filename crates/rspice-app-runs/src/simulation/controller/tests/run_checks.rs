@@ -32,7 +32,7 @@ fn a_runs_assertion_report_is_retained_saved_and_restored() {
     let run_sequence = controller.current_run_id.expect("the batch has a run");
     while controller.has_active_batch() {
         test_execution::wait_until_finished_unpolled(&controller.runner);
-        controller.poll_completion(&mut state, &export_io);
+        test_execution::poll_until_kept(&mut controller, &mut state, &export_io);
     }
 
     let run = state
@@ -157,7 +157,7 @@ fn corpus_c12_fail_files_one_row_per_testbench_error_as_the_cli_prints_them() {
     let run_sequence = controller.current_run_id.expect("the batch has a run");
     while controller.has_active_batch() {
         test_execution::wait_until_finished_unpolled(&controller.runner);
-        controller.poll_completion(&mut state, &export_io);
+        test_execution::poll_until_kept(&mut controller, &mut state, &export_io);
     }
 
     let run = state
@@ -246,7 +246,7 @@ fn samples_after_the_stop_time_are_one_warning_row_and_warn_the_run() {
     let run_sequence = controller.current_run_id.expect("the batch has a run");
     while controller.has_active_batch() {
         test_execution::wait_until_finished_unpolled(&controller.runner);
-        controller.poll_completion(&mut state, &export_io);
+        test_execution::poll_until_kept(&mut controller, &mut state, &export_io);
     }
 
     let run = state

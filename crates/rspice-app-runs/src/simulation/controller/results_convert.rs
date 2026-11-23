@@ -6,6 +6,7 @@ use crate::state::{FloquetSpectrumEvidence, PeriodicNoiseOutputQuantity};
 #[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 impl SimulationController {
     pub(super) fn retain_periodic_noise_result_metadata(&self, result: &mut AnalysisResult) {
         rspice_simulation::result_conversion::retain_periodic_noise_metadata(
@@ -26,28 +27,39 @@ impl SimulationController {
         let label = self.analysis_name(config).to_string();
         self.convert_to_analysis_result_with_metadata_owned(sim_result, analysis_type, &label)
     }
+}
 
+impl SimulationController {
     pub(in crate::simulation) fn convert_to_analysis_result_with_metadata_owned(
         &self,
         sim_result: crate::simulation::SimulationResult,
         analysis_type: AnalysisType,
         label: &str,
     ) -> AnalysisResult {
-        let retained =
-            rspice_simulation::result_conversion::convert(sim_result, analysis_type, label, || {
-                crate::time_compat::unix_epoch().as_secs_f64()
-            });
-        AnalysisResult {
-            // A trace stores no colour until the reader picks one: the canvas
-            // theme's palette colours it by its slot, so a light canvas gets
-            // inks that stand off paper and a dark one inks that stand off
-            // black, and the logic lanes beside it share the same cycle.
-            data: retained.map_waveforms(|data| crate::state::RetainedTrace {
-                data,
-                color: String::new(),
-                visible: true,
-            }),
-        }
+        analysis_of(sim_result, analysis_type, label)
+    }
+}
+
+/// `sim_result` as the run's analysis `label`, of `analysis_type`.
+pub(super) fn analysis_of(
+    sim_result: crate::simulation::SimulationResult,
+    analysis_type: AnalysisType,
+    label: &str,
+) -> AnalysisResult {
+    let retained =
+        rspice_simulation::result_conversion::convert(sim_result, analysis_type, label, || {
+            crate::time_compat::unix_epoch().as_secs_f64()
+        });
+    AnalysisResult {
+        // A trace stores no colour until the reader picks one: the canvas
+        // theme's palette colours it by its slot, so a light canvas gets
+        // inks that stand off paper and a dark one inks that stand off
+        // black, and the logic lanes beside it share the same cycle.
+        data: retained.map_waveforms(|data| crate::state::RetainedTrace {
+            data,
+            color: String::new(),
+            visible: true,
+        }),
     }
 }
 

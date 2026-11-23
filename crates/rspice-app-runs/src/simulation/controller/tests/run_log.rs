@@ -72,7 +72,7 @@ fn a_tasks_last_engine_lines_land_in_its_run_before_the_next_task_dispatches() {
     assert_eq!(controller.total_analyses, 2);
 
     test_execution::wait_until_finished_unpolled(&controller.runner);
-    controller.poll_completion(&mut state, &export_io);
+    test_execution::poll_until_kept(&mut controller, &mut state, &export_io);
     // A batch that ended or failed on its first task resets the index to 0;
     // say how it ended rather than only that it did.
     assert_eq!(
@@ -105,7 +105,7 @@ fn a_tasks_last_engine_lines_land_in_its_run_before_the_next_task_dispatches() {
     );
 
     test_execution::wait_until_finished_unpolled(&controller.runner);
-    controller.poll_completion(&mut state, &export_io);
+    test_execution::poll_until_kept(&mut controller, &mut state, &export_io);
     assert!(!controller.has_active_batch());
     assert_eq!(inventory_lines(&state, run_sequence), 2);
 }
@@ -120,7 +120,7 @@ fn a_run_writes_its_start_and_end_in_the_session_and_its_account_in_its_own_log(
     let (mut state, mut controller) = start_manual_batch(TWO_ANALYSES);
     let run_sequence = controller.current_run_id.expect("the batch has a run");
     while controller.has_active_batch() {
-        test_execution::wait_until_finished_unpolled(&controller.runner);
+        test_execution::wait_until_settled(&controller);
         controller.update(&mut state, &export_io);
     }
 
@@ -203,7 +203,7 @@ fn a_typed_decks_parse_warnings_are_warnings_in_its_runs_log() {
     );
     let run_sequence = controller.current_run_id.expect("the deck has a run");
     while controller.has_active_batch() {
-        test_execution::wait_until_finished_unpolled(&controller.runner);
+        test_execution::wait_until_settled(&controller);
         controller.update(&mut state, &export_io);
     }
     let run = state

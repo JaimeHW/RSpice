@@ -82,6 +82,34 @@ pub fn wait_until_finished_unpolled(runner: &SimulationRunner) {
     );
 }
 
+/// Wait for what `controller` does next to be ready: the result its runner
+/// is solving, or the one it is converting away from the frame.
+pub fn wait_until_settled(controller: &SimulationController) {
+    let Some(finishing) = &controller.finishing else {
+        wait_until_finished_unpolled(&controller.runner);
+        return;
+    };
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !finishing.is_converted() {
+        assert!(Instant::now() < deadline, "the result's conversion timed out");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Poll `controller` until the result its runner finished is kept: the
+/// frame that finds a result only starts converting it.
+pub fn poll_until_kept(
+    controller: &mut SimulationController,
+    state: &mut impl RunHost,
+    export_io: &(impl ExportWorkflowIo + ?Sized),
+) {
+    controller.poll_completion(state, export_io);
+    while controller.finishing.is_some() {
+        wait_until_settled(controller);
+        controller.poll_completion(state, export_io);
+    }
+}
+
 pub fn run_manual_deck(source: &str) -> SimulationResult {
     finish(start_manual_deck(source))
 }

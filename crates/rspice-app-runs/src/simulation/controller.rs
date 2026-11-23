@@ -232,6 +232,10 @@ pub struct SimulationController {
     /// not dispatched, so its plotting family is assembled from the point
     /// results when its own turn in the queue comes.
     point_families: crate::simulation::point_family::PointFamilyRegistry,
+    /// The completion whose result is being converted away from the frame.
+    finishing: Option<completion::Finishing>,
+    /// The run whose last completion left the view showing it as it is kept.
+    view_current_for: Option<u64>,
     /// Current analysis index (1-based for display: "Analysis 2/4")
     pub current_analysis_idx: usize,
     /// Total number of analyses in current batch
@@ -308,6 +312,8 @@ impl SimulationController {
             successful_analysis_instances: HashSet::new(),
             execution_artifacts: HashMap::new(),
             point_families: crate::simulation::point_family::PointFamilyRegistry::default(),
+            finishing: None,
+            view_current_for: None,
             current_analysis_idx: 0,
             total_analyses: 0,
             cached_netlist: None,
@@ -338,8 +344,9 @@ impl SimulationController {
         self.reset_if_design_replaced(state);
         self.report_unreadable_columns(state);
 
-        // Handle simulation trigger
-        if state.model().simulation.execution.trigger_simulation {
+        // Handle simulation trigger; one asked for while a result is converted
+        // starts once it is kept.
+        if state.model().simulation.execution.trigger_simulation && self.finishing.is_none() {
             log::info!(
                 "Simulation triggered ({} analyses enabled)",
                 state.model().sim_setup.enabled_analysis_instance_count()
@@ -766,6 +773,10 @@ impl SimulationController {
         let model = state.model_mut();
         if self.design_execution_epoch == model.design_execution_epoch {
             return;
+        }
+        // A result being converted belongs to the design that ran.
+        if let Some(finishing) = self.finishing.take() {
+            self.release(finishing);
         }
 
         let interrupted = self.current_run_id.filter(|run_sequence| {
@@ -1949,7 +1960,11 @@ impl SimulationController {
         // Complete the run (syncs waveforms and selects first analysis)
         if let Some(run_id) = completed_run_id {
             if model.simulation.select_run_by_sequence(run_id) {
-                model.simulation.complete_run();
+                // The view already shows what the run's last completion left
+                // it; syncing it again copied every waveform once more.
+                if self.view_current_for.take() != Some(run_id) {
+                    model.simulation.complete_run();
+                }
                 run_lines::announce_run_end(model, run_id);
             } else {
                 model.record(
@@ -2221,6 +2236,9 @@ impl SimulationController {
         state: &mut impl RunHost,
         export_io: &(impl ExportWorkflowIo + ?Sized),
     ) {
+        if self.finish_converted(state, export_io) {
+            return;
+        }
         // Update status display with multi-analysis progress
         let status = self.runner.status();
         let model = state.model_mut();
@@ -2263,14 +2281,14 @@ impl SimulationController {
                 Some(error) => Err(SimulationError::InvalidConfig(error)),
                 None => result,
             };
-            self.accept_completion(state, export_io, result);
+            self.accept_completion_off_frame(state, export_io, result);
         }
     }
 
     /// Check if a simulation is currently running
     #[cfg(any(test, feature = "test-support"))]
     pub fn is_running(&self) -> bool {
-        self.runner.is_running()
+        self.runner.is_running() || self.finishing.is_some()
     }
 
     fn ui_progress_fraction(progress: Option<f32>, is_running: bool) -> f64 {
