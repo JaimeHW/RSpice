@@ -142,11 +142,12 @@ const ROUTED: &[RoutedCommand<SourceFeature>] = &[
         key: ids::RUN_SIMULATION,
         takes: runs_a_deck,
         // The deck Run names runs once it can be read: a deck whose file is
-        // missing waits until it is found.
+        // missing waits until it is found. A run being prepared is Stop's.
         enabled: |reads| {
             let execution = &reads.model.simulation.execution;
             !execution.has_active_execution()
                 && !execution.trigger_simulation
+                && reads.runs.preparing_deck.is_none()
                 && run_deck_readable(reads)
         },
         execute: deck_run::request_deck_run,
@@ -740,8 +741,10 @@ impl SourceFeature {
     /// Settle, in this order: a project the last frame replaced starts the
     /// source editing over, a deck read away from the frame opens, the
     /// Verilog-A import and compile that finished
-    /// are taken, the compile a request asked for starts, and where the open
-    /// module's symbol stands is measured.
+    /// are taken, the compile a request asked for starts, where the open
+    /// module's symbol stands is measured, and the verdict on a deck's run
+    /// prepared away from the frame is taken, before the frame dispatches
+    /// runs.
     pub fn poll(cx: &mut Cx<'_, Self>, ctx: &Context) {
         Self::reset_after_project_change(cx);
         // A deck read away from the frame opens on the first frame after the
@@ -774,6 +777,7 @@ impl SourceFeature {
             &cx.model.workspace.content.active_view,
             cx.model.workspace.content.active_view_type(),
         );
+        deck_run::poll_deck_run(cx);
     }
 
     /// Bring the project's deck to the front of the Netlist page: the open
@@ -789,7 +793,8 @@ impl SourceFeature {
     }
 
     /// A project replaced since the last check starts source editing
-    /// over, and the run prepared for the old project is dropped.
+    /// over, and the run prepared, or being prepared, for the old project is
+    /// dropped.
     pub fn reset_after_project_change(cx: &mut Cx<'_, Self>) {
         let project_id = cx.model.workspace.content.project.id();
         if project_id == cx.own.project_id {
@@ -798,6 +803,7 @@ impl SourceFeature {
         cx.own.project_id = project_id;
         cx.state.source_editing = Default::default();
         cx.handles.run_controller.clear_prepared_run();
+        cx.runs.stop_preparing_deck(cx.handles.run_controller);
     }
 }
 

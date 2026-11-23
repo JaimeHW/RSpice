@@ -386,6 +386,7 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
                 availability,
                 app.state.model.simulation.execution.has_active_execution()
                     || checking.is_some()
+                    || app.state.runs.preparing_deck.is_some()
                     || !app.state.runs.waiting.is_empty(),
             ),
         ),
@@ -405,6 +406,11 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
                 ))
             },
         )
+    } else if let Some(deck) = &app.state.runs.preparing_deck {
+        Cow::Owned(format!(
+            "Preparing the run of {}. Stop drops it.",
+            deck.name
+        ))
     } else if !app.state.runs.waiting.is_empty() {
         Cow::Borrowed("Waits for the Verilog-A compile running in the background. Stop drops it.")
     } else if let Some(outcome) = &outcome {
@@ -452,6 +458,7 @@ fn run_outcome(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Run
 
     let simulation = &app.state.model.simulation;
     if app.state.runs.preflight.checking.is_some()
+        || app.state.runs.preparing_deck.is_some()
         || simulation_engine_status(simulation, availability).is_some()
     {
         return None;
@@ -561,14 +568,26 @@ fn preflight_checking(app: &RSpiceApp) -> Option<PreflightStage> {
         .and(app.simulation_controller.preflight_stage())
 }
 
-/// What the engine is doing, when that is worth a word: a check, a run, a
-/// start or a failure. An idle, ready engine says nothing.
+/// What the engine is doing, when that is worth a word: a check, a run
+/// being prepared or running, a start or a failure. An idle, ready engine
+/// says nothing.
 fn engine_words(app: &RSpiceApp, availability: &EngineAvailability) -> Option<String> {
     match preflight_checking(app) {
         Some(stage) => Some(preflight_status(stage)),
-        None => waiting_words(app)
+        None => deck_preparing_words(app)
+            .or_else(|| waiting_words(app))
             .or_else(|| simulation_engine_status(&app.state.model.simulation, availability)),
     }
+}
+
+/// What the bar says while a deck's run is prepared away from the frame:
+/// the phase, as a run set's preparation names it.
+fn deck_preparing_words(app: &RSpiceApp) -> Option<String> {
+    app.state
+        .runs
+        .preparing_deck
+        .as_ref()
+        .map(|_| "Preparing".to_owned())
 }
 
 /// What waits for a Verilog-A compile before it is prepared: a manual deck's

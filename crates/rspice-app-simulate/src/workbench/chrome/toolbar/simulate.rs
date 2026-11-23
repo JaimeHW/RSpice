@@ -56,6 +56,8 @@ pub(in crate::workbench) struct RunControls<'a> {
     pub(in crate::workbench) model: &'a Model,
     /// A preflight is preparing its run or building its decks.
     pub(in crate::workbench) checking: bool,
+    /// A deck's run is being prepared.
+    pub(in crate::workbench) preparing_deck: bool,
     /// Run, or Stop while a run or a preflight is active.
     pub(in crate::workbench) primary: RunEntry,
     pub(in crate::workbench) preflight: RunEntry,
@@ -86,10 +88,12 @@ pub(in crate::workbench) fn run_controls(
     layout: LayoutSpec,
 ) -> Option<CommandKey> {
     let model = controls.model;
-    // A preflight preparing its run or building its decks is stopped the way
-    // a run is: the control is Stop until it finishes.
+    // A preflight preparing its run or building its decks, and a deck's run
+    // being prepared, are stopped the way a run is: the control is Stop until
+    // they finish.
     let checking = controls.checking;
-    let execution_active = model.simulation.execution.has_active_execution() || checking;
+    let preparing = checking || controls.preparing_deck;
+    let execution_active = model.simulation.execution.has_active_execution() || preparing;
     let cancellation_pending = model.simulation.cancellation_is_pending();
     let command = controls.primary.key;
     let mut pressed = None;
@@ -102,7 +106,7 @@ pub(in crate::workbench) fn run_controls(
     let radius = t.radius.round().clamp(0.0, u8::MAX as f32) as u8;
     let label = match &controls.deck {
         Some(_) if !execution_active => "Run deck".to_owned(),
-        _ => run_control_label_for(model, checking, layout),
+        _ => run_control_label_for(model, preparing, layout),
     };
     let label_width = ui
         .painter()
@@ -127,6 +131,8 @@ pub(in crate::workbench) fn run_controls(
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let accessibility_label = if checking {
                 "Stop the preflight check".to_owned()
+            } else if controls.preparing_deck {
+                "Stop preparing the deck's run".to_owned()
             } else if cancellation_pending {
                 "Simulation cancellation in progress".to_owned()
             } else if execution_active {

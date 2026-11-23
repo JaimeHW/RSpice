@@ -106,11 +106,13 @@ impl CommandSet for SimulateCommand {
             }
             Self::Run => (
                 !simulation.execution.has_active_execution()
-                    && !simulation.execution.trigger_simulation,
+                    && !simulation.execution.trigger_simulation
+                    && reads.runs.preparing_deck.is_none(),
                 "a run is already in progress",
             ),
             Self::Stop => (
                 reads.runs.preflight.checking.is_some()
+                    || reads.runs.preparing_deck.is_some()
                     || !reads.runs.waiting.is_empty()
                     || simulation.can_request_abort_active_run(),
                 if simulation.cancellation_is_pending() {
@@ -150,6 +152,12 @@ impl CommandSet for SimulateCommand {
                 if cx.runs.preflight.checking.is_some() {
                     // The frame loop stops it before it looks for a verdict.
                     cx.runs.preflight.request_check_cancel();
+                } else if let Some(deck) = cx.runs.stop_preparing_deck(cx.handles.run_controller) {
+                    // Nothing of a run still being prepared has started.
+                    let message = format!("Stopped {deck} before it ran.");
+                    cx.model
+                        .record(LogSeverity::Info, LogSource::Run, message.clone());
+                    cx.wb.prompt(message);
                 } else if !cx.runs.waiting.is_empty() {
                     let dropped = cx.runs.waiting.cancel().join(" and ");
                     let message = format!("Stopped {dropped} waiting for the Verilog-A compile.");

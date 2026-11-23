@@ -24,6 +24,17 @@ pub struct RunsState {
     /// A manual deck's validation and a campaign's start that wait for a
     /// Verilog-A compile to end. Runtime only.
     pub waiting: crate::workbench::waiting::WaitingPreparations,
+    /// The deck whose run is being prepared away from the frame, as the Run
+    /// press took it. Runtime only.
+    pub preparing_deck: Option<PreparingDeck>,
+}
+
+/// A deck whose run is being prepared: what the press took, which names the
+/// deck in what the run's verdict says, and finds the line a refusal names.
+#[derive(Debug, Clone)]
+pub struct PreparingDeck {
+    pub name: String,
+    pub text: rspice_app_state::state::RevisedText,
 }
 
 impl RunsState {
@@ -34,6 +45,17 @@ impl RunsState {
             preflight_report_retained: self.preflight.report.is_some(),
             review_markers,
         }
+    }
+
+    /// Stop the deck's run being prepared: nothing of it runs. The deck's
+    /// name, for what Stop says, when one was being prepared.
+    pub fn stop_preparing_deck(
+        &mut self,
+        controller: &mut crate::simulation::controller::SimulationController,
+    ) -> Option<String> {
+        let deck = self.preparing_deck.take()?;
+        controller.cancel_deck_run_preparation();
+        Some(deck.name)
     }
 }
 

@@ -6,23 +6,27 @@
 //! as the Netlist workspace does and makes it what Run runs there; a deck
 //! whose file cannot be read holds the press, and the notice says why.
 //!
-//! The press checks the deck as a run reads it, includes read where they are,
-//! and starts the run in the same press when the check finds nothing to stop
-//! it. A deck the check stops does not run: the deck comes to the front,
-//! where the editor marks its errors, and the notice names the deck and why.
-//! A check that would read a Verilog-A source still compiling on another
-//! thread waits for that compile beside the frame instead of holding it: the
-//! status bar says so, the frame loop runs the deck once the compile ends,
-//! and Stop drops it.
+//! Run takes the deck as it stands at the press, its text shared rather than
+//! copied, and has its run prepared away from the frame: includes read where
+//! they are, the deck parsed, flattened and sealed. The status bar says the
+//! run is preparing meanwhile, Stop drops it, and an edit made meanwhile is
+//! not the run's. The run starts once it is prepared. A deck its preparation
+//! stops does not run: the deck comes to the front, where the editor marks
+//! its errors, and the notice names the deck and why. A preparation that
+//! would read a Verilog-A source still compiling on another thread waits for
+//! that compile beside the frame instead of holding it: the status bar says
+//! so, the frame loop runs the deck once the compile ends, and Stop drops it.
 //!
-//! Check and netlist checks the same deck the same way and starts nothing:
-//! the notice says that nothing stops it running, or names the deck, the
-//! line and why, with the deck in front.
+//! Check and netlist checks the deck the same way, in the press, and starts
+//! nothing: the notice says that nothing stops it running, or names the
+//! deck, the line and why, with the deck in front.
 //!
-//! Either press leaves Problems current: it lists what the text the press
-//! read holds, whichever workspace is in front afterwards.
+//! Either leaves Problems current: it lists what the deck's text holds once
+//! the check or the preparation has read it, whichever workspace is in front
+//! afterwards.
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::simulation::controller::DeckRunVerdict;
 use crate::workbench::MessageId;
 use crate::workbench::code::SourceFeature;
 use crate::workbench::documents::deck_files;
@@ -31,6 +35,8 @@ use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::slots::{manual_deck_in, veriloga_compilation_in};
 use crate::workbench::state::Workspace;
 use crate::workbench::workflows::netlist_workflow::record_include_resolutions;
+use rspice_app_runs::simulation::ManualDeckCopy;
+use rspice_app_runs::workbench::slots::runs::PreparingDeck;
 use rspice_app_runs::workbench::waiting;
 use rspice_simulation::execution::PreparedRunMetadata;
 use rspice_simulation::preparation::PreparationError;
@@ -54,20 +60,20 @@ enum DeckCheck {
     Checked(Box<CheckedDeck>),
 }
 
-/// Check the deck Run runs as a run reads it: its files looked at on disk
-/// and saved first, so the check reads what their tabs show; where the check
-/// found its includes recorded. What it prepared is retained for the run
-/// that follows when `for_run`.
-fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
+/// Take the deck Run runs as it stands: its files looked at on disk and
+/// saved first, so what is taken is what their tabs show. `None` when there
+/// is no deck to take, or its files held the press, which the notices have
+/// said; an empty deck is not taken either, and the notice says it is empty.
+fn take_deck(cx: &mut Cx<'_, SourceFeature>) -> Option<ManualDeckCopy> {
     // A deck still being read is the deck Run runs once it is read.
     if let Some(refusal) = land_deck_read(cx) {
         cx.wb.prompt(refusal);
-        return DeckCheck::Held;
+        return None;
     }
     if cx.wb.workspace != Workspace::Netlist && !bring_project_deck(cx) {
-        return DeckCheck::Held;
+        return None;
     }
-    // A file changed on disk under edits holds the check until the reader
+    // A file changed on disk under edits holds the press until the reader
     // answers for it.
     match deck_files::sync_before_run(cx.model, &mut cx.state.netlist, cx.wb.messages()) {
         Ok(notices) => {
@@ -77,32 +83,38 @@ fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
         }
         Err(why) => {
             cx.wb.prompt(why);
-            return DeckCheck::Held;
+            return None;
         }
     }
-    let Some((name, text)) =
-        manual_deck_in(&cx.state.netlist).map(|deck| (deck.name.to_owned(), deck.text.clone()))
-    else {
-        return DeckCheck::Held;
-    };
-    // An empty deck has nothing for a check to read: it comes to the front
-    // and the notice says it is empty, and nothing more.
-    if text.trim().is_empty() {
+    // The deck's text is shared with the deck, not copied.
+    let deck = manual_deck_in(&cx.state.netlist).map(ManualDeckCopy::of)?;
+    // An empty deck has nothing to read: it comes to the front and the
+    // notice says it is empty, and nothing more.
+    if deck.text.trim().is_empty() {
         deck_files::show_deck(cx.model, &mut cx.state.netlist);
         let notice = cx
             .wb
             .messages()
-            .format(MessageId::NetlistDeckEmpty, &[("name", &name)]);
+            .format(MessageId::NetlistDeckEmpty, &[("name", &deck.name)]);
         cx.model
             .record(LogSeverity::Error, LogSource::Netlist, notice.clone());
         cx.wb.prompt(notice);
         bring_findings_current(cx);
-        return DeckCheck::Held;
+        return None;
     }
+    Some(deck)
+}
+
+/// Check the deck Run runs as a run reads it, in the press, and record
+/// where the check found its includes.
+fn check_deck_run(cx: &mut Cx<'_, SourceFeature>) -> DeckCheck {
+    let Some(deck) = take_deck(cx) else {
+        return DeckCheck::Held;
+    };
     let result = {
         let code = RunCodeFacts {
             veriloga_compilation: veriloga_compilation_in(&cx.state.source_editing),
-            manual_deck: manual_deck_in(&cx.state.netlist),
+            manual_deck: Some(deck.deck()),
         };
         let host = RunView::new(
             &mut *cx.model,
@@ -113,17 +125,12 @@ fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
             code,
             cx.commands,
         );
-        let controller = &mut *cx.handles.run_controller;
         waiting::unless_compiling(|| {
-            if for_run {
-                controller.prepare_deck_run(&host)
-            } else {
-                crate::simulation::controller::SimulationController::build_prepared_snapshot(
-                    &host,
-                    crate::state::SimulationRunIntent::ManualDeck,
-                )
-                .map(|snapshot| snapshot.metadata())
-            }
+            crate::simulation::controller::SimulationController::build_prepared_snapshot(
+                &host,
+                crate::state::SimulationRunIntent::ManualDeck,
+            )
+            .map(|snapshot| snapshot.metadata())
         })
     };
     let Some(result) = result else {
@@ -135,6 +142,7 @@ fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
             &metadata.sealed_source_dependencies,
         );
     }
+    let ManualDeckCopy { name, text, .. } = deck;
     DeckCheck::Checked(Box::new(CheckedDeck { name, text, result }))
 }
 
@@ -214,27 +222,80 @@ fn bring_findings_current(cx: &mut Cx<'_, SourceFeature>) {
     );
 }
 
-/// Check the deck Run runs and run it, or say why it did not run.
+/// Take the deck Run runs and have its run prepared away from the frame
+/// from it; [`poll_deck_run`] runs it once it is prepared, or says why it
+/// did not run. Where the run is prepared in the press, that is now.
 pub fn request_deck_run(cx: &mut Cx<'_, SourceFeature>) {
     cx.runs.waiting.deck_run = false;
     if waiting::compiling() {
         cx.runs.waiting.deck_run = true;
         return;
     }
-    let CheckedDeck { name, text, result } = match check_deck_run(cx, true) {
-        DeckCheck::Held => return,
-        DeckCheck::Compiling => {
+    let Some(deck) = take_deck(cx) else {
+        return;
+    };
+    {
+        let code = RunCodeFacts {
+            veriloga_compilation: veriloga_compilation_in(&cx.state.source_editing),
+            manual_deck: Some(deck.deck()),
+        };
+        let host = RunView::new(
+            &mut *cx.model,
+            &mut *cx.runs,
+            &mut *cx.wb,
+            &*cx.platform,
+            &mut cx.peers,
+            code,
+            cx.commands,
+        );
+        cx.handles
+            .run_controller
+            .start_deck_run_preparation(&host, deck.clone());
+    }
+    let ManualDeckCopy { name, text, .. } = deck;
+    cx.runs.preparing_deck = Some(PreparingDeck { name, text });
+    cx.wb.run_press_route = Some(cx.wb.current_route());
+    poll_deck_run(cx);
+}
+
+/// Take the verdict on the deck whose run is being prepared, once there is
+/// one: the run starts, or the deck comes to the front and the notice says
+/// why it did not run, as when the press prepared it. Called once per frame;
+/// does nothing while nothing is prepared or the preparation goes on.
+pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
+    if cx.runs.preparing_deck.is_none() {
+        return;
+    }
+    let controller = &mut *cx.handles.run_controller;
+    // A preparation the controller dropped, as a replaced design drops it,
+    // has no verdict to wait for.
+    let verdict = if controller.deck_run_preparing() {
+        match controller.poll_deck_run_preparation() {
+            Some(verdict) => Some(verdict),
+            None => return,
+        }
+    } else {
+        None
+    };
+    let Some(PreparingDeck { name, text }) = cx.runs.preparing_deck.take() else {
+        return;
+    };
+    match verdict {
+        None => return,
+        Some(DeckRunVerdict::Compiling) => {
             cx.runs.waiting.deck_run = true;
             return;
         }
-        DeckCheck::Checked(checked) => *checked,
-    };
-    match result {
-        Ok(_) => {
-            cx.wb.run_press_route = Some(cx.wb.current_route());
+        Some(DeckRunVerdict::Prepared(metadata)) => {
+            record_include_resolutions(
+                &mut cx.state.source_editing.include_resolutions,
+                &metadata.sealed_source_dependencies,
+            );
             cx.model.simulation.execution.request_manual_deck_run();
         }
-        Err(error) => refuse(cx, &name, Verdict::DidNotRun, &text, &error),
+        Some(DeckRunVerdict::Refused(error)) => {
+            refuse(cx, &name, Verdict::DidNotRun, &text, &error);
+        }
     }
     bring_findings_current(cx);
 }
@@ -244,7 +305,7 @@ pub fn request_deck_run(cx: &mut Cx<'_, SourceFeature>) {
 /// it running, or names the line and why, with the deck in front.
 pub fn check_deck(cx: &mut Cx<'_, SourceFeature>) {
     let messages = cx.wb.messages();
-    let CheckedDeck { name, text, result } = match check_deck_run(cx, false) {
+    let CheckedDeck { name, text, result } = match check_deck_run(cx) {
         DeckCheck::Held => return,
         DeckCheck::Compiling => {
             cx.wb

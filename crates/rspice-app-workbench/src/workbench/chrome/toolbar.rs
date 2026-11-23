@@ -247,17 +247,17 @@ pub fn toolbar_outer_gap(viewport_width: f32) -> f32 {
 }
 
 pub fn run_control_label(app: &impl WorkbenchHost, layout: LayoutSpec) -> String {
-    run_control_label_for(app.model(), app.run_preflight_checking(), layout)
+    run_control_label_for(app.model(), app.run_preparing(), layout)
 }
 
-/// [`run_control_label`] over what it reads: the model, and whether a
-/// preflight is preparing its run.
+/// [`run_control_label`] over what it reads: the model, and whether a run
+/// is being prepared.
 pub fn run_control_label_for(
     model: &crate::workbench::app_state::Model,
-    checking: bool,
+    preparing: bool,
     layout: LayoutSpec,
 ) -> String {
-    if checking {
+    if preparing {
         "Stop".to_owned()
     } else if model.simulation.cancellation_is_pending() {
         "Stopping…".to_owned()

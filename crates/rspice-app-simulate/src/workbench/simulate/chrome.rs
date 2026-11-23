@@ -103,10 +103,13 @@ fn apply_run_chip_request(cx: &mut Cx<'_, SimulateFeature>, request: RunChipRequ
 /// Stop while a run or a preflight is active, the dispatcher's answers for
 /// it and the menu's other two entries, and why it is unavailable.
 fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunControls<'a> {
-    // A preflight preparing its run or building its decks is stopped the way
-    // a run is: the control is Stop until it finishes.
+    // A preflight preparing its run or building its decks, and a deck's run
+    // being prepared, are stopped the way a run is: the control is Stop until
+    // they finish.
     let checking = cx.runs.preflight.checking.is_some();
-    let execution_active = cx.model.simulation.execution.has_active_execution() || checking;
+    let preparing_deck = cx.runs.preparing_deck.is_some();
+    let execution_active =
+        cx.model.simulation.execution.has_active_execution() || checking || preparing_deck;
     let primary = if execution_active {
         SimulateCommand::Stop
     } else {
@@ -137,6 +140,7 @@ fn run_control_parts<'a>(cx: &'a Cx<'_, SimulateFeature>, ui: &egui::Ui) -> RunC
     RunControls {
         model: cx.model,
         checking,
+        preparing_deck,
         primary,
         preflight: entry(SimulateCommand::Preflight.key()),
         options: entry(SimulateCommand::Options.key()),

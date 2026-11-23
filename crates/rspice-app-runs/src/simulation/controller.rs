@@ -65,6 +65,10 @@ mod analysis_run_config;
 mod analysis_spec_build;
 mod completion;
 use analysis_spec_build::analysis_inputs;
+mod deck_preparation;
+#[cfg(any(test, feature = "test-support"))]
+pub use deck_preparation::{DeckPreparationHold, prepare_deck_runs_away_here};
+pub use deck_preparation::{DeckRunVerdict, prepare_deck_runs_away_from_frame};
 mod engine_check;
 pub use engine_check::{PreflightOutcome, PreflightStage, PreflightVerdict};
 #[cfg(test)]
@@ -250,6 +254,12 @@ pub struct SimulationController {
     preflight: Option<engine_check::PendingPreflight>,
     #[cfg(any(test, feature = "test-support"))]
     preflight_test_hooks: engine_check::PreflightTestHooks,
+    /// A deck's run being prepared away from the frame, from the deck a Run
+    /// press took.
+    deck_preparation: Option<deck_preparation::PendingDeckPreparation>,
+    /// A test's hold on the next deck preparation's worker.
+    #[cfg(any(test, feature = "test-support"))]
+    deck_preparation_hold: Option<deck_preparation::WorkerHold>,
     /// Run-bound automatic export policy captured by immutable preflight.
     touchstone_export_policy: TouchstoneExportPolicy,
     /// Frozen, declared-order multi-plan campaign. Each member is an
@@ -309,6 +319,9 @@ impl SimulationController {
             preflight: None,
             #[cfg(any(test, feature = "test-support"))]
             preflight_test_hooks: engine_check::PreflightTestHooks::default(),
+            deck_preparation: None,
+            #[cfg(any(test, feature = "test-support"))]
+            deck_preparation_hold: None,
             touchstone_export_policy: TouchstoneExportPolicy::disabled(),
             active_campaign: None,
         }
@@ -497,7 +510,7 @@ impl SimulationController {
             return;
         }
 
-        let (dispatch, manual_text) = match self.consume_snapshot_and_text(state) {
+        let (dispatch, prepared_deck) = match self.consume_snapshot_and_deck(state) {
             Ok(consumed) => consumed,
             Err(error) => {
                 if state.model().simulation.execution.run_intent
@@ -515,7 +528,7 @@ impl SimulationController {
             // advertise authority the controller no longer owns.
             state.runs_mut().preflight.invalidate();
         }
-        if let Err(error) = self.start_authorized_dispatch(state, dispatch, None, manual_text) {
+        if let Err(error) = self.start_authorized_dispatch(state, dispatch, None, prepared_deck) {
             let model = state.model_mut();
             model.record(
                 LogSeverity::Error,
@@ -529,14 +542,15 @@ impl SimulationController {
     /// Open a run for an authorized dispatch and start its first task.
     ///
     /// A campaign member names its membership and the plan it runs. A manual
-    /// deck's run keeps `manual_text`, the text its snapshot was prepared
-    /// from, as the text it ran.
+    /// deck's run keeps the text of `prepared_deck`, the deck its snapshot
+    /// was prepared from, as the text it ran, and is named by it when a Run
+    /// press took it.
     fn start_authorized_dispatch(
         &mut self,
         state: &mut impl RunHost,
         mut dispatch: crate::simulation::execution::AuthorizedRunDispatch,
         campaign_member: Option<(crate::state::SimulationCampaignMembership, &str)>,
-        manual_text: Option<crate::state::RevisedText>,
+        prepared_deck: Option<run_inputs::PreparedDeck>,
     ) -> Result<(), crate::simulation::execution::PreparationError> {
         let (campaign_membership, member_plan) = campaign_member.unzip();
         if let Some(membership) = campaign_membership.as_ref() {
@@ -553,12 +567,16 @@ impl SimulationController {
         let run_receipt = dispatch.prepared_run_receipt(source_domain)?;
 
         // A typed deck is named by its file, and its findings point at lines
-        // of that file.
+        // of that file: the deck the press took, else the deck in front.
+        let (manual_text, pressed_deck) =
+            prepared_deck.map(|deck| (deck.text, deck.pressed)).unzip();
         let manual_deck = (dispatch.intent() == SimulationRunIntent::ManualDeck)
             .then(|| {
-                state
-                    .manual_deck()
-                    .map(crate::simulation::ManualDeckCopy::of)
+                pressed_deck.flatten().or_else(|| {
+                    state
+                        .manual_deck()
+                        .map(crate::simulation::ManualDeckCopy::of)
+                })
             })
             .flatten();
         // A run outside every plan is kept under the project's own limit, or
@@ -807,6 +825,7 @@ impl SimulationController {
         self.cached_netlist = None;
         self.clear_prepared_run();
         self.cancel_preflight();
+        self.cancel_deck_run_preparation();
         self.current_config = None;
         self.current_spec = None;
         self.current_analysis_label = None;

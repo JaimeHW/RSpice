@@ -967,9 +967,28 @@ impl SourceFileAnswers {
 
 /// What a retained run was prepared from, held beside it until it is
 /// dispatched or dropped.
-pub(super) struct RetainedRunInputs {
-    pub(super) identity: RunInputIdentity,
-    pub(super) source_files: SourceFileAnswers,
+pub(super) enum RetainedRunInputs {
+    /// A run prepared from the live session, whose dispatch refuses it once
+    /// anything it read has moved.
+    Held {
+        identity: RunInputIdentity,
+        source_files: SourceFileAnswers,
+    },
+    /// A deck's run prepared from the deck as a Run press took it, and from
+    /// the session as the press froze it. What it runs was fixed at the
+    /// press: an edit made since is not the run's, so its dispatch asks again
+    /// only of the host files its seal and its includes read.
+    Pressed(crate::simulation::ManualDeckCopy),
+}
+
+/// The deck a manual run's snapshot was prepared from, as its dispatch
+/// keeps and names it.
+pub(super) struct PreparedDeck {
+    /// The text the run read, shared with the deck it was read from.
+    pub(super) text: crate::state::RevisedText,
+    /// The deck as a Run press took it, which names the run; `None` for a
+    /// run prepared from the deck in front, which the deck in front names.
+    pub(super) pressed: Option<crate::simulation::ManualDeckCopy>,
 }
 
 /// The text a manual run reads, as [`super::prepared_run::manual_source_inputs`]
@@ -982,12 +1001,21 @@ fn manual_text(state: &impl RunHost) -> &crate::state::RevisedText {
 }
 
 impl RetainedRunInputs {
-    /// The text a manual deck's snapshot was prepared from, shared with the
-    /// deck it was read from; `None` for a run set.
-    pub(super) fn manual_text(&self) -> Option<&crate::state::RevisedText> {
-        match &self.identity.0.reads {
-            KindReads::ManualDeck(reads) => Some(&reads.text),
-            KindReads::RunSet(_) => None,
+    /// The deck a manual deck's snapshot was prepared from, its text shared
+    /// with the deck it was read from; `None` for a run set.
+    pub(super) fn prepared_deck(&self) -> Option<PreparedDeck> {
+        match self {
+            Self::Held { identity, .. } => match &identity.0.reads {
+                KindReads::ManualDeck(reads) => Some(PreparedDeck {
+                    text: reads.text.clone(),
+                    pressed: None,
+                }),
+                KindReads::RunSet(_) => None,
+            },
+            Self::Pressed(deck) => Some(PreparedDeck {
+                text: deck.text.clone(),
+                pressed: Some(deck.clone()),
+            }),
         }
     }
 
@@ -1004,54 +1032,74 @@ impl RetainedRunInputs {
         state: &impl RunHost,
         snapshot: &PreparedRunSnapshot,
     ) -> Result<(), PreparationError> {
-        if !self.identity.describes(snapshot) {
-            return Err(unaccounted_run());
+        match self {
+            Self::Held {
+                identity,
+                source_files,
+            } => {
+                if !identity.describes(snapshot) {
+                    return Err(unaccounted_run());
+                }
+                refused_if_moved(
+                    state.model(),
+                    identity.refusal(),
+                    identity.moved_in(state),
+                    snapshot.sealed_source_dependencies(),
+                    Some(source_files),
+                )
+            }
+            Self::Pressed(_) => {
+                if snapshot.intent() != SimulationRunIntent::ManualDeck {
+                    return Err(unaccounted_run());
+                }
+                refused_if_moved(
+                    state.model(),
+                    DECK_CHANGED_SINCE_CHECK,
+                    None,
+                    snapshot.sealed_source_dependencies(),
+                    None,
+                )
+            }
         }
-        self.refused_if_moved(
-            state.model(),
-            self.identity.moved_in(state),
-            snapshot.sealed_source_dependencies(),
-        )
     }
+}
 
-    /// Refuse when `moved` names a session input that moved, or when a host
-    /// file the run was prepared from has: the external model files its seal
-    /// read, `dependencies`, the files its includes spliced in, and the data
-    /// files its sources were routed to.
-    fn refused_if_moved(
-        &self,
-        model: &Model,
-        moved: Option<&'static str>,
-        dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
-    ) -> Result<(), PreparationError> {
-        let refused = self.identity.refusal();
-        let refuse = |stage: PreparationStage, what: &str| {
-            Err(PreparationError::new(stage, format!("{refused} · {what}")))
-        };
-        if let Some(input) = moved {
-            return refuse(PreparationStage::Authorization, &format!("{input} changed"));
-        }
-        if let Err(error) = rspice_simulation::model_sources::verify_plan_external_model_sources(
-            model.model_library_manager.catalog(),
-            &model.sim_setup.model_bindings,
-        ) {
-            return refuse(PreparationStage::ModelBindings, &error);
-        }
-        if let Err(error) =
-            rspice_simulation::netlist_preparation::dependencies::verify_host_dependencies(
-                dependencies,
-            )
-        {
-            return refuse(PreparationStage::Authorization, &error);
-        }
-        if let Some(path) = self.source_files.moved() {
-            return refuse(
-                PreparationStage::Authorization,
-                &format!("the data file '{path}' changed"),
-            );
-        }
-        Ok(())
+/// Refuse, saying `refused` first, when `moved` names a session input that
+/// moved, or when a host file the run was prepared from has: the external
+/// model files its seal read, `dependencies`, the files its includes spliced
+/// in, and the data files its sources were routed to, as `source_files`
+/// recorded them.
+fn refused_if_moved(
+    model: &Model,
+    refused: &str,
+    moved: Option<&'static str>,
+    dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
+    source_files: Option<&SourceFileAnswers>,
+) -> Result<(), PreparationError> {
+    let refuse = |stage: PreparationStage, what: &str| {
+        Err(PreparationError::new(stage, format!("{refused} · {what}")))
+    };
+    if let Some(input) = moved {
+        return refuse(PreparationStage::Authorization, &format!("{input} changed"));
     }
+    if let Err(error) = rspice_simulation::model_sources::verify_plan_external_model_sources(
+        model.model_library_manager.catalog(),
+        &model.sim_setup.model_bindings,
+    ) {
+        return refuse(PreparationStage::ModelBindings, &error);
+    }
+    if let Err(error) =
+        rspice_simulation::netlist_preparation::dependencies::verify_host_dependencies(dependencies)
+    {
+        return refuse(PreparationStage::Authorization, &error);
+    }
+    if let Some(path) = source_files.and_then(SourceFileAnswers::moved) {
+        return refuse(
+            PreparationStage::Authorization,
+            &format!("the data file '{path}' changed"),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

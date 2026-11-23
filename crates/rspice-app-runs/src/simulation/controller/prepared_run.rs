@@ -190,8 +190,6 @@ impl FrozenRunPreparation {
         let projection = model.plan_execution_projection().map_err(|error| {
             PreparationError::new(PreparationStage::DesignChecks, error.to_string())
         })?;
-        let schematic =
-            rspice_design::projection::ProjectionSource::projection_source(&model.schematic);
         let runs = model.simulation.retained.runs.to_vec();
         let active_run = model.simulation.active_run().and_then(|active| {
             model
@@ -201,46 +199,10 @@ impl FrozenRunPreparation {
                 .iter()
                 .position(|run| std::ptr::eq(run, active))
         });
+        let configuration_sets = (**plan_configuration_sets(model)?).clone();
         Ok(Self {
             projection,
-            inputs: FrozenRunInputs {
-                sim_setup: SimulationSetup::clone(&model.sim_setup),
-                schematic: model.schematic.document().clone(),
-                schematic_file: schematic.current_file.map(std::path::Path::to_path_buf),
-                schematic_topology_revision: schematic.schematic.topology_version(),
-                selected_components: model.schematic.session.editor.selection.components.clone(),
-                selection_occurrence: model.workspace.content.active_occurrence().cloned(),
-                runs,
-                active_run,
-                plan_payloads: model.workspace.content.simulation_plan_payloads.clone(),
-                project: model.workspace.content.project.clone(),
-                models: model.model_library_manager.catalog().clone(),
-                resolutions: model.model_library_manager.resolution_records().clone(),
-                registry: model.pdk_config.technology_registry.clone(),
-                layouts: model.workspace.content.physical_layout_documents().clone(),
-                libraries: model.library_manager.catalog().clone(),
-                project_sources: model.workspace.content.project_sources.clone(),
-                design_management: (*model.workspace.content.design_management).clone(),
-                configuration_sets: (**plan_configuration_sets(model)?).clone(),
-                stimulus_library: model.workspace.content.stimulus_library.clone(),
-                imported_checkpoints: model
-                    .simulation
-                    .retained
-                    .imported_monte_carlo_checkpoints
-                    .clone(),
-                imported_transient_checkpoints: model
-                    .simulation
-                    .retained
-                    .imported_transient_checkpoints
-                    .clone(),
-                max_parallel_workers: model.preferences.solver_worker_limit(),
-                machine_memory: super::machine_memory::machine_memory(),
-                library_folders: model.library_folders().to_vec(),
-                compilation: state.veriloga_compilation().cloned(),
-                design_checks: model.configured_root_design_check_config(),
-                added_lines: model.workspace.content.added_lines.clone(),
-                source_files: Default::default(),
-            },
+            inputs: FrozenRunInputs::of(state, configuration_sets, runs, active_run),
         })
     }
 
@@ -265,7 +227,95 @@ impl FrozenRunPreparation {
     }
 }
 
+/// What preparing a deck's run reads, frozen at the Run press: the deck as
+/// the press took it, its text shared rather than copied, and the session's
+/// inputs as [`run_preparation_inputs`] lends them. A deck's run reads none
+/// of the retained runs, so none is copied.
+pub(crate) struct FrozenDeckPreparation {
+    inputs: FrozenRunInputs,
+    deck: crate::simulation::ManualDeckCopy,
+}
+
+impl FrozenDeckPreparation {
+    /// Copy what preparing the run of `deck` reads of `state`.
+    pub(crate) fn freeze(state: &impl RunHost, deck: crate::simulation::ManualDeckCopy) -> Self {
+        let configuration_sets = (*state.model().workspace.content.configuration_sets).clone();
+        Self {
+            inputs: FrozenRunInputs::of(state, configuration_sets, Vec::new(), None),
+            deck,
+        }
+    }
+
+    /// Prepare the deck's run from what was frozen, as
+    /// [`SimulationController::prepare_deck_run`] prepares it from the live
+    /// state, stopped once `abort` is raised.
+    pub(super) fn prepare(
+        &self,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<PreparedRunSnapshot, PreparationError> {
+        #[cfg(any(test, feature = "test-support"))]
+        thread_preparations::record(SimulationRunIntent::ManualDeck);
+        crate::simulation::execution::preparation::build_prepared_manual_deck_with_abort(
+            &self.inputs.view(),
+            deck_source_inputs(self.deck.deck()),
+            abort,
+        )
+    }
+}
+
 impl FrozenRunInputs {
+    /// Copy what preparing a run reads of `state`, with the configuration
+    /// catalog its runs elaborate under, and the retained runs it reads with
+    /// the index of the active one among them.
+    fn of(
+        state: &impl RunHost,
+        configuration_sets: rspice_design::configuration_set::ConfigurationSetCatalog,
+        runs: Vec<crate::state::SimulationRun>,
+        active_run: Option<usize>,
+    ) -> Self {
+        let model = state.model();
+        let schematic =
+            rspice_design::projection::ProjectionSource::projection_source(&model.schematic);
+        Self {
+            sim_setup: SimulationSetup::clone(&model.sim_setup),
+            schematic: model.schematic.document().clone(),
+            schematic_file: schematic.current_file.map(std::path::Path::to_path_buf),
+            schematic_topology_revision: schematic.schematic.topology_version(),
+            selected_components: model.schematic.session.editor.selection.components.clone(),
+            selection_occurrence: model.workspace.content.active_occurrence().cloned(),
+            runs,
+            active_run,
+            plan_payloads: model.workspace.content.simulation_plan_payloads.clone(),
+            project: model.workspace.content.project.clone(),
+            models: model.model_library_manager.catalog().clone(),
+            resolutions: model.model_library_manager.resolution_records().clone(),
+            registry: model.pdk_config.technology_registry.clone(),
+            layouts: model.workspace.content.physical_layout_documents().clone(),
+            libraries: model.library_manager.catalog().clone(),
+            project_sources: model.workspace.content.project_sources.clone(),
+            design_management: (*model.workspace.content.design_management).clone(),
+            configuration_sets,
+            stimulus_library: model.workspace.content.stimulus_library.clone(),
+            imported_checkpoints: model
+                .simulation
+                .retained
+                .imported_monte_carlo_checkpoints
+                .clone(),
+            imported_transient_checkpoints: model
+                .simulation
+                .retained
+                .imported_transient_checkpoints
+                .clone(),
+            max_parallel_workers: model.preferences.solver_worker_limit(),
+            machine_memory: super::machine_memory::machine_memory(),
+            library_folders: model.library_folders().to_vec(),
+            compilation: state.veriloga_compilation().cloned(),
+            design_checks: model.configured_root_design_check_config(),
+            added_lines: model.workspace.content.added_lines.clone(),
+            source_files: Default::default(),
+        }
+    }
+
     /// The frozen copy, lent in the shape [`run_preparation_inputs`] lends
     /// the live state.
     fn view(&self) -> RunPreparationInputs<'_> {
@@ -841,7 +891,7 @@ impl SimulationController {
         let metadata = snapshot.metadata();
         self.retain_prepared_run(
             snapshot,
-            super::run_inputs::RetainedRunInputs {
+            super::run_inputs::RetainedRunInputs::Held {
                 identity,
                 source_files: Default::default(),
             },
@@ -1186,30 +1236,35 @@ impl SimulationController {
         &mut self,
         state: &impl RunHost,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
-        self.consume_snapshot_and_text(state)
+        self.consume_snapshot_and_deck(state)
             .map(|(dispatch, _)| dispatch)
     }
 
-    /// [`Self::consume_snapshot_for_dispatch`], with the text a manual
-    /// deck's snapshot was prepared from, shared with the deck rather than
-    /// copied out of the snapshot.
-    pub(super) fn consume_snapshot_and_text(
+    /// [`Self::consume_snapshot_for_dispatch`], with the deck a manual
+    /// deck's snapshot was prepared from, its text shared with the deck
+    /// rather than copied out of the snapshot.
+    pub(super) fn consume_snapshot_and_deck(
         &mut self,
         state: &impl RunHost,
-    ) -> Result<(AuthorizedRunDispatch, Option<crate::state::RevisedText>), PreparationError> {
+    ) -> Result<
+        (
+            AuthorizedRunDispatch,
+            Option<super::run_inputs::PreparedDeck>,
+        ),
+        PreparationError,
+    > {
         let intent = state.model().simulation.execution.run_intent;
         let inputs = self.retained_run_inputs.take();
-        let text = inputs
+        let deck = inputs
             .as_ref()
-            .and_then(super::run_inputs::RetainedRunInputs::manual_text)
-            .cloned();
+            .and_then(super::run_inputs::RetainedRunInputs::prepared_deck);
         self.run_authorization
             .consume(intent, |snapshot| {
                 inputs
                     .ok_or_else(super::run_inputs::unaccounted_run)?
                     .still_current(state, snapshot)
             })
-            .map(|dispatch| (dispatch, text))
+            .map(|dispatch| (dispatch, deck))
     }
 
     pub fn build_prepared_snapshot(
@@ -1278,30 +1333,37 @@ pub fn manual_source_inputs_in<'a>(
     deck: Option<crate::simulation::ManualDeck<'a>>,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'a>, PreparationError> {
     Ok(match deck {
-        Some(deck) => crate::simulation::execution::preparation::ManualSourceInputs {
-            source: deck.text.as_str(),
-            // A deck the project keeps as text has no folder: it reads the
-            // files kept with it.
-            origin: match deck.origin {
-                crate::simulation::DeckOrigin::File(path) => Some(path),
-                crate::simulation::DeckOrigin::Stored { .. } => None,
-            },
-            stored: match deck.origin {
-                crate::simulation::DeckOrigin::File(_) => None,
-                crate::simulation::DeckOrigin::Stored { files } => Some(
-                    crate::simulation::execution::preparation::StoredDeckInputs {
-                        name: deck.name,
-                        files,
-                    },
-                ),
-            },
-        },
+        Some(deck) => deck_source_inputs(deck),
         None => crate::simulation::execution::preparation::ManualSourceInputs {
             source: model.simulation.source.netlist_content.as_str(),
             origin: model.schematic.session.current_file.as_deref(),
             stored: None,
         },
     })
+}
+
+/// The deck `deck`, as a manual run reads it.
+fn deck_source_inputs(
+    deck: crate::simulation::ManualDeck<'_>,
+) -> crate::simulation::execution::preparation::ManualSourceInputs<'_> {
+    crate::simulation::execution::preparation::ManualSourceInputs {
+        source: deck.text.as_str(),
+        // A deck the project keeps as text has no folder: it reads the
+        // files kept with it.
+        origin: match deck.origin {
+            crate::simulation::DeckOrigin::File(path) => Some(path),
+            crate::simulation::DeckOrigin::Stored { .. } => None,
+        },
+        stored: match deck.origin {
+            crate::simulation::DeckOrigin::File(_) => None,
+            crate::simulation::DeckOrigin::Stored { files } => Some(
+                crate::simulation::execution::preparation::StoredDeckInputs {
+                    name: deck.name,
+                    files,
+                },
+            ),
+        },
+    }
 }
 
 /// Stable cache identity for analysis-independent design inspection.
@@ -1386,7 +1448,7 @@ impl SimulationController {
         };
         self.retain_prepared_run(
             snapshot,
-            super::run_inputs::RetainedRunInputs {
+            super::run_inputs::RetainedRunInputs::Held {
                 identity,
                 source_files: Default::default(),
             },

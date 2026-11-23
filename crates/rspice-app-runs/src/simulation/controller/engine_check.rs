@@ -223,7 +223,7 @@ impl SimulationController {
                 let retained = if current {
                     self.retain_prepared_run(
                         *snapshot,
-                        RetainedRunInputs {
+                        RetainedRunInputs::Held {
                             identity: pending.identity,
                             source_files,
                         },
