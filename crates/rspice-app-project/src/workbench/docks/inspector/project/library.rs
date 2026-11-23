@@ -217,13 +217,18 @@ pub fn project_library(
         property_row(ui, "State", "modified");
     }
 
-    section_header(ui, "Validation", checks_meta);
+    // A view with no checks and nothing using it has no Validation to state:
+    // the section is left out rather than shown empty.
+    let usage = usage.filter(|usage| !usage.is_empty());
+    if checks_meta.is_some() || checks.is_some() || usage.is_some() {
+        section_header(ui, "Validation", checks_meta);
+    }
     if let Some(checks) = &checks {
         property_row(ui, "Checks", checks);
     }
     // One row, naming the consumers rather than counting them and then
     // naming the first of them underneath.
-    if let Some(usage) = usage.filter(|usage| !usage.is_empty()) {
+    if let Some(usage) = usage {
         property_row(ui, "Used by", &usage.join(", "));
     }
 
