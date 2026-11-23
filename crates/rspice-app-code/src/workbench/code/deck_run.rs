@@ -369,11 +369,11 @@ pub fn run_anyway(cx: &mut Cx<'_, SourceFeature>) -> bool {
     else {
         return false;
     };
-    cx.model.record(
-        LogSeverity::Info,
-        LogSource::Run,
-        format!("Running {name} though it needs more memory than is free."),
-    );
+    let said = cx
+        .wb
+        .messages()
+        .format(MessageId::NetlistMemoryRunningAnyway, &[("name", &name)]);
+    cx.model.record(LogSeverity::Info, LogSource::Run, said);
     cx.model.simulation.execution.request_manual_deck_run();
     true
 }
