@@ -354,7 +354,7 @@ fn a_deck_that_cannot_be_read_says_why_and_changes_nothing() {
         original_project_id
     );
     let prompt = state.prompt_text().expect("the reason is shown");
-    assert!(prompt.contains("could not be read"), "{prompt}");
+    assert!(prompt.contains("missing.cir cannot be read"), "{prompt}");
 }
 
 /// A project open read-only takes no deck.
