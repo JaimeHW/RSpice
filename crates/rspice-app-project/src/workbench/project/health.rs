@@ -1,11 +1,11 @@
 //! Where each subject of the project stands, one function per subject.
 //!
-//! The Overview's status rows, the inspector and the status bar each state
-//! some of these: the checks of the cell view runs start from, the deck a
-//! netlist-first project runs, the configuration runs use, the latest run,
-//! what Verify judged of it, the model sources, the libraries the project
-//! depends on, and the work not yet saved. Every one of them reads its words
-//! and its mark from here, so no two places can disagree about a subject.
+//! The Overview's band, the inspector and the status bar each state some
+//! of these: the configuration runs use, the technology, the model files
+//! the project reads, its deck, the checks of the cell view runs start
+//! from, how the latest run went, what Verify judged of it, and the work a
+//! save would write. Every one of them reads its words and its mark from here, so no
+//! two places can disagree about a subject.
 //!
 //! One rule for the mark: a subject that has not been run yet is neutral, a
 //! result the design has moved on from is the caution, and only what stops
@@ -18,9 +18,11 @@
 
 use crate::state::SimulationRunLifecycle;
 use crate::ui::accessibility::{counted, finding_counts_and_notes};
-use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app_state::{DesignCheckStatus, Model, PlatformState, SlotFacts};
-use crate::workbench::project::dependency_status::{DependencyKind, dependency_rows, shown_path};
+use crate::workbench::lifecycle::project_lifecycle::{
+    LifecycleView, ProjectDocumentId, dirty_documents,
+};
+use crate::workbench::project::dependency_status::{shown_path, technology_status};
 use crate::workbench::surfaces::project::derived::derived;
 use crate::workbench::surfaces::project::overview::Tone;
 
@@ -47,42 +49,6 @@ impl SubjectStatus {
     }
 }
 
-/// The subject that says whether the design itself is sound: the schematic
-/// checks of the cell view runs start from, or the deck a netlist-first
-/// project runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DesignSubject {
-    SchematicChecks,
-    SourceDeck,
-}
-
-impl DesignSubject {
-    pub fn of(model: &Model) -> Self {
-        if model.is_netlist_first_without_schematic() {
-            Self::SourceDeck
-        } else {
-            Self::SchematicChecks
-        }
-    }
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::SchematicChecks => "Schematic checks",
-            Self::SourceDeck => "Source deck",
-        }
-    }
-}
-
-/// The design subject the project has, and where it stands.
-pub fn design(model: &Model, facts: SlotFacts) -> (DesignSubject, SubjectStatus) {
-    let subject = DesignSubject::of(model);
-    let status = match subject {
-        DesignSubject::SchematicChecks => schematic_checks(model, facts),
-        DesignSubject::SourceDeck => source_deck(model),
-    };
-    (subject, status)
-}
-
 /// The checks of the cell view runs start from: the configuration's root
 /// when one is used for runs, else the project's top schematic.
 pub fn schematic_checks(model: &Model, facts: SlotFacts) -> SubjectStatus {
@@ -105,9 +71,9 @@ pub fn schematic_checks(model: &Model, facts: SlotFacts) -> SubjectStatus {
             } else {
                 Tone::Neutral
             };
-            SubjectStatus::new(tone, state, root)
+            SubjectStatus::new(tone, state, "")
         }
-        DesignCheckStatus::NotRun => SubjectStatus::neutral("Not run", root),
+        DesignCheckStatus::NotRun => SubjectStatus::neutral("Not run", ""),
         DesignCheckStatus::Stale(_) => SubjectStatus::new(
             Tone::Warn,
             "Out of date",
@@ -117,15 +83,6 @@ pub fn schematic_checks(model: &Model, facts: SlotFacts) -> SubjectStatus {
             SubjectStatus::new(Tone::Error, "Unavailable", reason)
         }
     }
-}
-
-/// Whether `library`/`cell` is the starter cell a netlist-first project
-/// keeps pristine: its top, which its deck stands in for. It is no part of
-/// the design the reader made, so neither the Overview's Cells table nor
-/// the library rail lists it.
-pub fn is_starter_cell(model: &Model, netlist_first: bool, library: &str, cell: &str) -> bool {
-    let project = &model.workspace.content.project;
-    netlist_first && library == project.root_library && cell == project.top_cell
 }
 
 /// The name a netlist-first project's deck goes by: its file's name.
@@ -138,14 +95,21 @@ pub fn deck_name(model: &Model) -> Option<String> {
         .map(|deck| deck.name())
 }
 
-/// The deck a netlist-first project runs. The deck is a file the run reads
-/// and checks, so the project knows its name and where it is, not how its
-/// text reads.
-pub fn source_deck(model: &Model) -> SubjectStatus {
+/// The project's deck: its name, and how many files its include lines name
+/// where its text is at hand (`None` where it is not). A netlist-first
+/// project with no deck has nothing to run.
+pub fn source_deck(model: &Model, includes: Option<usize>) -> SubjectStatus {
     let Some(name) = deck_name(model) else {
         return SubjectStatus::new(Tone::Error, "Unavailable", "The project has no deck");
     };
-    SubjectStatus::neutral("Checked at run", name)
+    SubjectStatus::neutral(
+        name,
+        match includes {
+            None => String::new(),
+            Some(0) => "no includes".to_owned(),
+            Some(includes) => counted(includes, "include", "includes"),
+        },
+    )
 }
 
 /// The configuration the next run uses: the one the active plan names, else
@@ -190,16 +154,13 @@ pub fn configuration(ctx: &egui::Context, model: &Model) -> SubjectStatus {
     };
     let projection = model.plan_execution_projection();
     match projection {
+        // The Testbench row names the root it binds from.
         Ok(projection) => SubjectStatus::neutral(
             active.name(),
-            format!(
-                "{} \u{b7} {}",
-                active.root().display_path(),
-                counted(
-                    projection.plan().bindings().len(),
-                    "instance bound",
-                    "instances bound"
-                )
+            counted(
+                projection.plan().bindings().len(),
+                "instance bound",
+                "instances bound",
             ),
         ),
         // A library that could not be read is named as what is missing,
@@ -215,36 +176,77 @@ pub fn configuration(ctx: &egui::Context, model: &Model) -> SubjectStatus {
     }
 }
 
-/// The newest run the project keeps.
-pub fn latest_run(model: &Model) -> SubjectStatus {
-    let Some(run) = model.simulation.retained.runs.first() else {
-        let detail = if model.is_netlist_first_without_schematic() {
-            "Run the deck to produce results"
-        } else {
-            "Run the active plan to produce results"
-        };
-        return SubjectStatus::neutral("No runs", detail);
+/// A day, in milliseconds: inside one an age is told, past one a date.
+const DAY_MS: u64 = 86_400_000;
+
+/// How far ahead of the clock a time may read and still be now: a run
+/// started this instant is stamped to the nearest millisecond, which can
+/// round past the clock read after it.
+const AHEAD_MS: u64 = 1_000;
+
+/// A time as a row says it: how long ago inside a day, the date and time
+/// past one or ahead of the clock.
+pub fn told(at_ms: u64, now_ms: u64) -> String {
+    match now_ms.checked_sub(at_ms) {
+        Some(ago) if ago < DAY_MS => {
+            crate::time_compat::relative_age(std::time::Duration::from_millis(ago))
+        }
+        None if at_ms - now_ms <= AHEAD_MS => {
+            crate::time_compat::relative_age(std::time::Duration::ZERO)
+        }
+        _ => crate::time_compat::local_stamp(at_ms),
+    }
+}
+
+/// A run's start in seconds since the epoch as milliseconds; `None` for a
+/// time no clock could have read.
+pub fn unix_seconds_to_millis(seconds: f64) -> Option<u64> {
+    if !seconds.is_finite() || seconds < 0.0 || seconds > u64::MAX as f64 / 1_000.0 {
+        return None;
+    }
+    Some((seconds * 1_000.0).round() as u64)
+}
+
+/// A run as a list names it: "Run 12", with its name where it was given
+/// one, and without the start time its label ends with, which is stated
+/// beside it.
+pub fn run_title(sequence: u64, label: &str) -> String {
+    let prefix = format!("Run {sequence}");
+    let name = without_start_stamp(label);
+    if name.starts_with(&prefix) {
+        name.to_owned()
+    } else {
+        format!("{prefix} \u{b7} {name}")
+    }
+}
+
+/// `label` without the start time a run's label ends with: " (1:04:01 PM)",
+/// or " (21 Nov 2026, 1:04:01 PM)" with its date.
+fn without_start_stamp(label: &str) -> &str {
+    let Some((name, stamp)) = label
+        .strip_suffix(')')
+        .and_then(|rest| rest.rsplit_once(" ("))
+    else {
+        return label;
     };
-    let measurements: usize = run
-        .analyses
-        .iter()
-        .map(|analysis| analysis.measurements.len())
-        .sum();
-    SubjectStatus::new(
-        lifecycle_tone(run.lifecycle, run.success),
-        format!(
-            "Run {} \u{b7} {}",
-            run.id,
-            lifecycle_label(run.lifecycle, run.success)
-        ),
-        format!(
-            "{} \u{b7} {} \u{b7} {}",
-            counted(run.analyses.len(), "analysis", "analyses"),
-            counted(measurements, "measurement", "measurements"),
-            run.execution_target
-                .map_or("engine not recorded", |target| target.label()),
-        ),
-    )
+    let Some(stamp) = stamp
+        .strip_suffix(" AM")
+        .or_else(|| stamp.strip_suffix(" PM"))
+    else {
+        return label;
+    };
+    let (date, time) = match stamp.rsplit_once(", ") {
+        Some((date, time)) => (Some(date), time),
+        None => (None, stamp),
+    };
+    let digits = |text: &str| !text.is_empty() && text.chars().all(|c| c.is_ascii_digit());
+    let clock = !time.is_empty() && time.split(':').all(digits);
+    let dated = date.is_none_or(|date| {
+        let parts = date.split(' ').collect::<Vec<_>>();
+        matches!(parts.as_slice(), [day, month, year]
+            if digits(day) && digits(year) && month.chars().all(|c| c.is_ascii_alphabetic()))
+    });
+    if clock && dated { name } else { label }
 }
 
 /// What a run's lifecycle reads as.
@@ -304,169 +306,70 @@ pub fn verification_words(model: &Model) -> Option<String> {
     Some(parts.join(" \u{b7} "))
 }
 
-/// What Verify judged of the selected run, read from the sheet it builds
-/// once per change.
-pub fn verification(model: &Model) -> SubjectStatus {
-    let sheet = model.simulation.verification_sheet();
-    let specifications = sheet.map_or(0, |sheet| sheet.rows.len());
-    if specifications == 0 {
-        return SubjectStatus::neutral("No specifications", "The active plan sets no limits");
+/// The project's technology, as the Dependencies page states it: `None`
+/// for a project with none that needs none, which is the ordinary case.
+pub fn technology(model: &Model) -> Option<SubjectStatus> {
+    let status = technology_status(model);
+    let binding = model.workspace.content.project.technology_binding();
+    if status.mark != Tone::Neutral {
+        return Some(SubjectStatus::new(
+            status.mark,
+            status.label,
+            status.detail.unwrap_or_default(),
+        ));
     }
-    let Some(words) = verification_words(model) else {
-        let detail = sheet.and_then(|sheet| sheet.refusal()).map_or_else(
-            || counted(specifications, "specification", "specifications"),
-            str::to_owned,
-        );
-        return SubjectStatus::neutral("Not judged", detail);
-    };
-    let counts = sheet.map(|sheet| sheet.summary.counts).unwrap_or_default();
-    let tone = if counts.fail + counts.error > 0 {
-        Tone::Error
-    } else {
-        Tone::Neutral
-    };
-    let run = model
-        .simulation
-        .active_run()
-        .map_or_else(String::new, |run| format!("Run {}", run.id));
-    SubjectStatus::new(tone, words, run)
+    let binding = binding?;
+    Some(SubjectStatus::neutral(
+        binding.display_label(),
+        binding.pdk_package().map_or_else(
+            || binding.model_library().to_owned(),
+            |pin| format!("PDK {} {}", pin.package_id(), pin.revision()),
+        ),
+    ))
 }
 
-/// What the model catalogue holds, as its last scan found it. Whether each
-/// model library's files are still there is the library's own status, which
-/// [`dependencies`] states.
-pub fn model_sources(ctx: &egui::Context, model: &Model) -> SubjectStatus {
+/// How many model files the model catalogue reads, by their paths, counted
+/// once per change of the catalogue.
+pub fn model_file_count(ctx: &egui::Context, model: &Model) -> usize {
     let manager = &model.model_library_manager;
-    let (libraries, models, sources) =
-        derived(ctx, "health.model sources", manager.content_stamp(), || {
-            let libraries = manager.libraries_sorted();
-            let sources = libraries
-                .iter()
-                .flat_map(|library| library.source_closure.iter().map(|pin| &pin.path))
-                .collect::<std::collections::BTreeSet<_>>()
-                .len();
-            (
-                manager.library_count(),
-                manager.total_model_count(),
-                sources,
-            )
-        });
-    let scan_errors = &model.pdk_config.scan_errors;
-    if let Some(first) = scan_errors.first() {
-        return SubjectStatus::new(
-            Tone::Warn,
-            counted(scan_errors.len(), "file not read", "files not read"),
-            first.clone(),
-        );
-    }
-    if libraries == 0 {
-        return SubjectStatus::neutral("No model libraries", "Runs read only built-in models");
-    }
-    SubjectStatus::neutral(
-        counted(models, "model", "models"),
-        format!(
-            "{} \u{b7} {}",
-            counted(libraries, "library", "libraries"),
-            counted(sources, "model file", "model files")
-        ),
-    )
+    derived(ctx, "health.model files", manager.content_stamp(), || {
+        manager
+            .libraries_sorted()
+            .iter()
+            .flat_map(|library| library.source_closure.iter().map(|pin| &pin.path))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    })
 }
 
-/// What the project reads, each as the Dependencies page states it: its
-/// libraries counted, and whatever of it needs attention named.
-pub fn dependencies(ctx: &egui::Context, model: &Model) -> SubjectStatus {
-    let rows = dependency_rows(ctx, model);
-    let flagged = rows
-        .iter()
-        .filter(|row| row.status.mark != Tone::Neutral)
-        .map(|row| {
-            let name = match row.library.kind {
-                DependencyKind::Technology => "Technology",
-                _ => row.library.shown_name(),
-            };
-            (name, &row.status)
-        })
-        .collect::<Vec<_>>();
-    let libraries = rows
-        .iter()
-        .filter(|row| row.library.kind.is_library())
-        .count();
-    let tone = flagged
-        .iter()
-        .map(|(_, status)| status.mark)
-        .fold(Tone::Neutral, worse);
-    match flagged.as_slice() {
-        [] => SubjectStatus::neutral(
-            counted(libraries, "library", "libraries"),
-            model
-                .workspace
-                .content
-                .project
-                .technology_binding()
-                .map_or_else(
-                    || "No technology".to_owned(),
-                    |binding| format!("Technology {}", binding.display_label()),
-                ),
-        ),
-        [(name, status)] => SubjectStatus::new(
-            tone,
-            format!("{name}: {}", status.label.to_lowercase()),
-            status.detail.clone().unwrap_or_default(),
-        ),
-        [(name, status), ..] => SubjectStatus::new(
-            tone,
-            format!("{} need attention", flagged.len()),
-            format!("{name}: {}", status.label.to_lowercase()),
-        ),
-    }
+/// The documents a save would write, each as the reader knows it: the
+/// project file's documents with unsaved changes, and each cell view of a
+/// library kept in a folder of its own with edits here, which that file
+/// does not hold.
+pub fn unsaved_documents(model: &Model, lifecycle: &LifecycleView<'_>) -> Vec<String> {
+    let dirty = dirty_documents(lifecycle);
+    let mut documents = dirty.iter().map(document_name).collect::<Vec<_>>();
+    documents.extend(
+        model
+            .unsaved_library_cellviews()
+            .into_iter()
+            .filter(|reference| !dirty.contains(&ProjectDocumentId::CellView(reference.clone())))
+            .map(|reference| reference.display_path()),
+    );
+    documents
 }
 
-/// What the health line says when the store that keeps the project's
-/// checkpoints cannot be read: what is wrong and what to do, as Recovery
-/// says it. What the system said goes to the Console, never to the line.
-#[cfg(not(target_arch = "wasm32"))]
-const CHECKPOINTS_UNREADABLE: &str = "Checkpoints could not be read. Check that you may open \
-     their folder; the Console has what the system said.";
-#[cfg(target_arch = "wasm32")]
-const CHECKPOINTS_UNREADABLE: &str = "Checkpoints could not be read. Check that this site may \
-     store data; the Console has what the browser said.";
-
-/// The work a save would write, and what the History page can bring back.
-/// The checkpoints are counted once the page's catalogue has listed them;
-/// a store that could not be listed, or holds damaged checkpoints, is the
-/// caution.
-pub fn unsaved_work(
-    unsaved_documents: usize,
-    saved: bool,
-    recovery: &ProjectCheckpointRecoveryState,
-) -> SubjectStatus {
-    let state = if !saved {
-        "Not saved".to_owned()
-    } else if unsaved_documents == 0 {
-        "Saved".to_owned()
-    } else {
-        counted(unsaved_documents, "unsaved document", "unsaved documents")
-    };
-    if recovery.error.is_some() {
-        return SubjectStatus::new(Tone::Warn, state, CHECKPOINTS_UNREADABLE);
+/// A project document as the reader knows it.
+fn document_name(document: &ProjectDocumentId) -> String {
+    match document {
+        ProjectDocumentId::ProjectConfiguration => "Project settings".to_owned(),
+        ProjectDocumentId::CellView(reference) => reference.display_path(),
+        ProjectDocumentId::SimulationPlan => "Simulation plans".to_owned(),
+        ProjectDocumentId::ResultHistory => "Run history".to_owned(),
+        ProjectDocumentId::ModelCatalog => "Model catalog".to_owned(),
+        ProjectDocumentId::NetlistSource => "Source deck".to_owned(),
+        ProjectDocumentId::StimulusLibrary => "Stimulus library".to_owned(),
     }
-    if !recovery.quarantined.is_empty() {
-        return SubjectStatus::new(
-            Tone::Warn,
-            state,
-            counted(
-                recovery.quarantined.len(),
-                "damaged checkpoint",
-                "damaged checkpoints",
-            ),
-        );
-    }
-    let detail = if recovery.initialized {
-        counted(recovery.checkpoints.len(), "checkpoint", "checkpoints")
-    } else {
-        String::new()
-    };
-    SubjectStatus::neutral(state, detail)
 }
 
 /// Where the project file is, as the lifecycle bound it: the file a desktop
@@ -513,51 +416,5 @@ pub const fn worse(left: Tone, right: Tone) -> Tone {
         (Tone::Error, _) | (_, Tone::Error) => Tone::Error,
         (Tone::Warn, _) | (_, Tone::Warn) => Tone::Warn,
         (Tone::Neutral, Tone::Neutral) => Tone::Neutral,
-    }
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-
-    /// A checkpoint folder that cannot be read is named on the health line
-    /// in plain words, with what to do; what the system said is left to the
-    /// Console.
-    #[test]
-    fn unreadable_checkpoints_read_in_plain_words() {
-        let recovery = ProjectCheckpointRecoveryState {
-            initialized: true,
-            error: Some(
-                "project recovery directory 'D:\\designs\\amp.rspice-recovery' could not be \
-                 read: Access is denied. (os error 5)"
-                    .to_owned(),
-            ),
-            ..Default::default()
-        };
-        let status = unsaved_work(0, true, &recovery);
-        assert_eq!(status.tone, Tone::Warn);
-        assert_eq!(status.state, "Saved");
-        assert!(
-            status
-                .detail
-                .starts_with("Checkpoints could not be read. Check that you may open")
-                && status
-                    .detail
-                    .ends_with("the Console has what the system said."),
-            "{}",
-            status.detail
-        );
-        for system in [
-            "Access is denied",
-            "os error",
-            "rspice-recovery",
-            "directory",
-        ] {
-            assert!(
-                !status.detail.contains(system),
-                "the line repeats what the system said: {}",
-                status.detail
-            );
-        }
     }
 }

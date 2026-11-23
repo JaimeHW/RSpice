@@ -311,29 +311,6 @@ fn a_parameter_states_where_its_card_is_written() {
     }
 }
 
-/// The project overview's model closure raises `ShowProjectModels`; the shell
-/// answers it by opening the Models workspace on the project's own catalog,
-/// whatever scope the workspace was left on.
-#[test]
-fn showing_the_project_models_always_opens_the_project_catalog_scope() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.models.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
-    app.state
-        .workbench
-        .outbox
-        .push(rspice_app_workbench::workbench::framework::requests::ShowProjectModels);
-    app.after_contribution();
-
-    assert_eq!(
-        app.state.workbench.workspace,
-        rspice_app_state::workbench::workspace::Workspace::Models
-    );
-    assert_eq!(
-        app.state.models.models_view.catalog_scope,
-        ModelsCatalogScope::Project
-    );
-}
-
 /// Every heading of the project catalog stands over its own column while the
 /// rows scroll.
 ///

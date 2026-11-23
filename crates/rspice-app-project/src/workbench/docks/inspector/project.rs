@@ -5,7 +5,6 @@
 pub mod configuration;
 mod dependency;
 mod library;
-mod overview;
 mod properties;
 mod recovery;
 
@@ -27,7 +26,6 @@ use crate::workbench::project::workspace_state::ProjectPage;
 
 use dependency::project_dependency;
 pub use library::project_library;
-use overview::overview_findings;
 use properties::project_properties;
 use recovery::{history_checkpoints, history_record};
 
@@ -123,11 +121,7 @@ pub(in crate::workbench) fn project(
         inspector.history_selection,
     );
     match inspector.page {
-        ProjectPage::Overview => {
-            let action = project_properties(ui, inspector);
-            overview_findings(ui, inspector);
-            action
-        }
+        ProjectPage::Overview => project_properties(ui, inspector),
         ProjectPage::Configuration => {
             configuration::project_configuration(ui, inspector.configuration, inspector.model);
             None

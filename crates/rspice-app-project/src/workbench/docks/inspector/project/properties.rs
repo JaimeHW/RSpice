@@ -69,6 +69,16 @@ pub(super) fn project_properties(
     {
         property_row(ui, "Saved", &saved);
     }
+    // What a save would write, counted, each named under the pointer.
+    let unsaved = health::unsaved_documents(model, &inspector.lifecycle);
+    let count = match unsaved.len() {
+        0 => "None".to_owned(),
+        count => crate::ui::accessibility::counted(count, "document", "documents"),
+    };
+    let row = property_row(ui, "Unsaved", &count);
+    if !unsaved.is_empty() {
+        row.on_hover_text(unsaved.join("\n"));
+    }
 
     section_header(ui, "Setup", None);
     let top = format!("{}/{}", properties.root_library, properties.top_cell);

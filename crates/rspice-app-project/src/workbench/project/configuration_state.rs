@@ -30,11 +30,12 @@ pub(crate) const INHERITED: &str = "Inherited";
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// Times this thread walked a configuration's bindings, its instance
-    /// paths or the libraries' views to draw the Configuration page.
+    /// paths or the libraries' views to draw the Configuration page, or
+    /// the elaborated design to count it for the Overview.
     pub static CONFIGURATION_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn count_scan() {
+pub(crate) fn count_scan() {
     #[cfg(any(test, feature = "test-support"))]
     CONFIGURATION_SCANS.with(|scans| scans.set(scans.get() + 1));
 }

@@ -11,7 +11,7 @@ use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement;
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::workbench::framework::command_registry::ids;
+use rspice_app_workbench::workbench::framework::feature::Feature as _;
 use rspice_app_workbench::workbench::framework::host::{Host, Point};
 
 /// The Project workspace as the shell draws it on the stage.
@@ -168,25 +168,29 @@ pub(super) fn click_announced(
     project_frame(ctx, app, click)
 }
 
-/// The project feature reads the Configurations command's availability
-/// from the snapshot its context is lent with: the dispatcher's real answer
-/// for the command, so it runs with an open project and not while a project
-/// operation runs or with no project open.
+/// The project feature reads the availability of every command the
+/// Overview offers from the snapshot its context is lent with: the
+/// dispatcher's own answer, with a project open, while a project operation
+/// runs, and with none open.
 #[test]
-fn the_configurations_command_availability_reads_through_the_snapshot() {
-    fn runs(app: &mut RSpiceApp) -> bool {
-        features::cx_with_foreign_answers::<ProjectFeature>(app, |_| true)
-            .foreign_availability(ids::CONFIGURATION_SETS)
-            .is_available()
+fn the_overviews_command_availability_reads_through_the_snapshot() {
+    fn agrees(app: &mut RSpiceApp, when: &str) {
+        for &key in ProjectFeature::FOREIGN_AVAILABILITY {
+            let dispatcher = app.command_availability(key).is_available();
+            let read = features::cx_with_foreign_answers::<ProjectFeature>(app, |_| true)
+                .foreign_availability(key)
+                .is_available();
+            assert_eq!(read, dispatcher, "{key:?} {when}");
+        }
     }
     let mut app = RSpiceApp::test_instance();
-    assert!(runs(&mut app), "an open project runs it");
+    agrees(&mut app, "with a project open");
     begin_project_replacement(&mut app.state).expect("a project replacement starts");
-    assert!(!runs(&mut app), "a project operation holds it");
+    agrees(&mut app, "while a project operation runs");
 
     let mut app = RSpiceApp::test_instance();
     app.state.close_project_session();
-    assert!(!runs(&mut app), "no open project, so it cannot run");
+    agrees(&mut app, "with no project open");
 }
 
 /// A click on a view in the Library browser selects it, and the next frame
@@ -232,75 +236,48 @@ fn a_click_in_the_library_browser_selects_that_view() {
     assert!(selected(&next, second) && !selected(&next, first));
 }
 
-/// The label of the control `output` announces whose label starts with
-/// `prefix`.
-fn announced_starting(output: &egui::FullOutput, prefix: &str) -> String {
-    output
+/// The latest run's value opens the newest run in Results as the page
+/// returns, inside the stage's step of the frame that took the click.
+#[test]
+fn overview_latest_run_opens_the_run_in_the_frame_it_was_clicked_in() {
+    let (ctx, mut app, settled) = settled(populated_project_app(), ProjectPage::Overview);
+    let latest = settled
         .platform_output
         .accesskit_update
         .as_ref()
-        .expect("the frame publishes its tree")
+        .expect("the settled frame publishes its tree")
         .nodes
         .iter()
-        .find_map(|(_, node)| node.label().filter(|label| label.starts_with(prefix)))
-        .unwrap_or_else(|| panic!("the frame announces a control starting `{prefix}`"))
-        .to_owned()
-}
+        .find_map(|(_, node)| {
+            let label = node.label()?;
+            (node.role() == egui::accesskit::Role::Link && label.starts_with("Run "))
+                .then(|| label.to_owned())
+        })
+        .expect("the latest run's value is a link");
 
-/// History… on the Overview runs its command as the page returns, inside
-/// the stage's step of the frame: the History page is in front in the
-/// frame it was asked for in.
-#[test]
-fn overview_history_opens_the_history_page_in_the_frame_it_was_clicked_in() {
-    let (ctx, mut app, settled) = settled_on(ProjectPage::Overview);
+    click_announced(&ctx, &mut app, settled, &latest);
 
-    click_announced(&ctx, &mut app, settled, "History\u{2026}");
-
-    assert_eq!(app.state.project.project_page, ProjectPage::History);
-}
-
-/// The latest run on the Overview is selected and its workspace opened as
-/// the page returns, inside the stage's step of the frame that took the
-/// click.
-#[test]
-fn overview_latest_run_opens_its_workspace_in_the_frame_it_was_clicked_in() {
-    let (ctx, mut app, _) = settled_on(ProjectPage::Overview);
-    app.state.model.simulation.start_run();
-    let mut settled = project_frame(&ctx, &mut app, Vec::new());
-    for _ in 0..2 {
-        settled = project_frame(&ctx, &mut app, Vec::new());
-    }
-    let latest_run = announced_starting(&settled, "Latest run:");
-
-    click_announced(&ctx, &mut app, settled, &latest_run);
-
-    assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+    assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
 }
 
-/// Open top schematic and the schematic checks row on the Overview open
-/// the project's root in Design as the page returns, inside the stage's
-/// step of the frame that took the click.
+/// Checks never run read "Not run", and the value opens and checks the
+/// project's root in Design as the page returns, inside the stage's step of
+/// the frame that took the click.
 #[test]
-fn overview_root_actions_open_the_root_in_the_frame_they_were_clicked_in() {
-    for label in ["Open top schematic", "Schematic checks:"] {
-        let (ctx, mut app, settled) = settled_on(ProjectPage::Overview);
-        let label = announced_starting(&settled, label);
-        let project = &app.state.model.workspace.content.project;
-        let root = rspice_app_state::state::CellViewRef::new(
-            &project.root_library,
-            &project.top_cell,
-            rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-        );
+fn overview_run_checks_opens_the_root_in_the_frame_it_was_clicked_in() {
+    let (ctx, mut app, settled) = settled_on(ProjectPage::Overview);
+    let project = &app.state.model.workspace.content.project;
+    let root = rspice_app_state::state::CellViewRef::new(
+        &project.root_library,
+        &project.top_cell,
+        rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+    );
 
-        click_announced(&ctx, &mut app, settled, &label);
+    click_announced(&ctx, &mut app, settled, "Not run");
 
-        assert_eq!(app.state.workbench.workspace, Workspace::Design, "{label}");
-        assert_eq!(
-            app.state.model.workspace.content.active_view, root,
-            "{label}"
-        );
-    }
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(app.state.model.workspace.content.active_view, root);
 }
 
 pub(super) fn populated_project_app() -> RSpiceApp {
@@ -435,17 +412,12 @@ fn painted_project_page(size: egui::Vec2, mut pass: impl FnMut(&mut Ui)) -> Stri
     painted_text(&output)
 }
 
-/// The overview names the live project, its cards, its retained operations
-/// and the finding that stops a run — never placeholder copy — at every
-/// supported width. A table's row is read whole from what it announces,
-/// since a phone's table cuts its cells to their columns.
+/// The Overview states the live project as its band of facts over the
+/// latest run's outputs, at every desktop width: never placeholder copy,
+/// no fact twice, and no finding the Problems panel lists.
 #[test]
 fn the_overview_states_the_project_from_live_state() {
-    for size in [
-        egui::vec2(1440.0, 900.0),
-        egui::vec2(820.0, 1180.0),
-        egui::vec2(390.0, 844.0),
-    ] {
+    for size in [egui::vec2(1440.0, 900.0), egui::vec2(1000.0, 700.0)] {
         let mut app = populated_project_app();
         app.state.project.project_page = ProjectPage::Overview;
         let ctx = egui::Context::default();
@@ -461,41 +433,25 @@ fn the_overview_states_the_project_from_live_state() {
             },
         );
         let text = painted_text(&output);
-        for expected in [
-            "lna-frontend-28g",
-            "Project status",
-            "Verification",
-            "Model sources",
-            "Dependencies",
-            "Unsaved work",
-            "Cells",
-            "All cells",
-            "Activity",
-            "All runs",
-            "Open top schematic",
+        // Dependencies is a page tab's name too.
+        for (expected, times) in [
+            ("Plan", 1),
+            ("Hierarchy", 1),
+            ("Devices", 1),
+            ("Dependencies", 2),
+            ("Checks", 1),
+            ("Latest run", 1),
+            ("Analyses", 1),
+            ("Engine", 1),
+            ("1 error \u{b7} 1 warning", 1),
+            ("R3 has an unconnected pin", 0),
+            ("Output", 1),
+            ("Value", 1),
         ] {
-            assert!(
-                text.contains(expected),
-                "{expected:?} missing at {}x{}:\n{text}",
-                size.x,
-                size.y
-            );
-        }
-        let announced = output
-            .platform_output
-            .accesskit_update
-            .expect("the frame publishes its tree")
-            .nodes
-            .into_iter()
-            .filter_map(|(_, node)| node.label().or(node.value()).map(str::to_owned))
-            .collect::<Vec<_>>();
-        for expected in [
-            "Library published · analog-core-1.2.0",
-            "R3 has an unconnected pin",
-        ] {
-            assert!(
-                announced.iter().any(|label| label.contains(expected)),
-                "{expected:?} not announced at {}x{}:\n{announced:#?}",
+            assert_eq!(
+                text.lines().filter(|line| *line == expected).count(),
+                times,
+                "{expected:?} {times} times at {}x{}:\n{text}",
                 size.x,
                 size.y
             );
@@ -509,18 +465,18 @@ fn the_overview_states_the_project_from_live_state() {
 fn the_netlist_first_overview_names_the_deck() {
     let mut app = netlist_first_project_app();
     let text = painted_project_page(egui::vec2(1440.0, 900.0), |ui| show(ui, &mut app));
-    for expected in [
-        "Open SPICE deck",
-        "Source deck",
-        "Checked at run",
-        "front_end.sp",
-    ] {
-        assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+    for expected in ["Source deck", "front_end.sp"] {
+        assert!(
+            text.lines().any(|line| line.starts_with(expected)),
+            "{expected:?} missing:\n{text}"
+        );
     }
-    assert!(
-        !text.contains("Open top schematic"),
-        "the schematic action leaked into a deck-driven project:\n{text}"
-    );
+    for absent in ["Hierarchy", "Devices", "Checks", "Not run"] {
+        assert!(
+            !text.lines().any(|line| line == absent),
+            "{absent:?} leaked into a deck-driven project:\n{text}"
+        );
+    }
 }
 
 /// The History page over a catalog this test controls, rather than

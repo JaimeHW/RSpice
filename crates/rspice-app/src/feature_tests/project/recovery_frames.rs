@@ -238,6 +238,32 @@ pub(super) fn paint_until(
     }
 }
 
+/// Paint until the frame announces `label` with a value `done` holds for:
+/// a path the inspector elides to its width is announced whole.
+fn paint_until_announced(
+    ctx: &Context,
+    app: &mut RSpiceApp,
+    label: &str,
+    done: impl Fn(&str) -> bool,
+) -> egui::FullOutput {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let output = app_frame(ctx, app, Vec::new());
+        if super::configuration_editing::nodes(&output)
+            .iter()
+            .any(|node| node.label == label && done(&node.value))
+        {
+            return output;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the frame never announced {label:?} as waited for:\n{}",
+            painted(&output)
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// A saved, clean project in its own folder, so its checkpoints are kept
 /// there and nowhere else on the machine.
 pub(super) fn saved_project(label: &str) -> (RSpiceApp, std::path::PathBuf) {
@@ -646,10 +672,10 @@ fn the_restore_autosave_dialog_states_the_age_it_was_offered_with() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// After a Save as, the Overview's header and the line over the Recovery
-/// page state one revision, the project's, and the header names the new
-/// file, on frames painted one after another in one context, as a reader
-/// moving between the pages sees them.
+/// After a Save as, the inspector beside the Overview and the one beside the
+/// Recovery page state one revision, the project's, and the project
+/// inspector names the new file, on frames painted one after another in one
+/// context, as a reader moving between the pages sees them.
 #[test]
 fn after_a_save_as_the_overview_and_the_history_page_state_one_revision() {
     let (mut app, root) = saved_project("save-as-revision");
@@ -668,17 +694,23 @@ fn after_a_save_as_the_overview_and_the_history_page_state_one_revision() {
     );
     let revision = |app: &RSpiceApp| {
         format!(
-            "Revision {}",
+            "revision {}",
             app.state.model.workspace.content.project.revision().get()
         )
+    };
+    // The project inspector beside the Overview: at that revision, with
+    // nothing left to save.
+    let saved_at = |text: &str, revision: &str| {
+        let lines = text.lines().collect::<Vec<_>>();
+        let number = &revision["revision ".len()..];
+        lines.windows(2).any(|pair| pair == ["Revision", number])
+            && lines.windows(2).any(|pair| pair == ["Unsaved", "None"])
     };
     let ctx = offscreen();
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Overview;
     let before = revision(&app);
-    paint_until(&ctx, &mut app, |text| {
-        text.contains(&format!("{before} \u{b7} "))
-    });
+    paint_until(&ctx, &mut app, |text| saved_at(text, &before));
 
     assert!(
         app.state
@@ -686,9 +718,10 @@ fn after_a_save_as_the_overview_and_the_history_page_state_one_revision() {
     );
     let after = revision(&app);
     assert_eq!(after, before, "a Save as keeps the project's revision");
-    let overview = paint_until(&ctx, &mut app, |text| text.contains("Amplifier.rspiceproj"));
+    let named = |path: &str| path.ends_with("Amplifier.rspiceproj");
+    let overview = paint_until_announced(&ctx, &mut app, "Location", named);
     assert!(
-        painted(&overview).contains(&format!("{after} \u{b7} ")),
+        saved_at(&painted(&overview), &after),
         "{}",
         painted(&overview)
     );
@@ -702,8 +735,8 @@ fn after_a_save_as_the_overview_and_the_history_page_state_one_revision() {
             .any(|pair| pair == ["Revision", number])
     });
     app.state.project.project_page = ProjectPage::Overview;
-    let overview = paint_until(&ctx, &mut app, |text| text.contains("Amplifier.rspiceproj"));
-    assert!(painted(&overview).contains(&format!("{after} \u{b7} ")));
+    let overview = paint_until_announced(&ctx, &mut app, "Location", named);
+    assert!(saved_at(&painted(&overview), &after));
     let _ = std::fs::remove_dir_all(root);
 }
 

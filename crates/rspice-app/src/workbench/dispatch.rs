@@ -70,7 +70,7 @@ use rspice_app_workbench::workbench::framework::requests::{
     ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
     OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
     ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
-    SelectAnalysisInstance, SetFamilyFilter, ShowOnSchematic, ShowProjectDeck, ShowProjectModels,
+    SelectAnalysisInstance, SetFamilyFilter, ShowOnSchematic, ShowProjectDeck,
     ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
 };
 
@@ -587,14 +587,6 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, place: ShowOnSchematic| {
                 app.state.navigation().show_on_schematic(place);
-            },
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app, ShowProjectModels| {
-                ModelsFeature::show_project_models(&mut features::cx(app));
-                app.execute_command_key(ids::MODELS_CATALOG);
             },
         );
         requests::drain(

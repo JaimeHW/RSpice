@@ -15,7 +15,6 @@ use egui::{Event, Modifiers, PointerButton, Pos2};
 use crate::feature_tests::replay::Replay;
 use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_project::workbench::surfaces::project::overview::CELL_ROW_BUILDS;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DIRTY_AUDITS, DIRTY_RECOMPUTES, active_document_is_dirty, has_unsaved_changes,
 };
@@ -264,33 +263,6 @@ fn a_project_closed_mid_edit_lands_without_checking_the_edit() {
         materialization_count(),
         0,
         "the landing's first frame projects no design for the edit left behind"
-    );
-    drop(replay);
-    let _ = std::fs::remove_dir_all(folder);
-}
-
-/// The Overview's Cells table counts each schematic's parts: a placed part
-/// derives it once, on the frame of the edit, and not again when the editor
-/// writes the drawing back a frame later.
-#[test]
-fn a_placed_part_derives_the_overview_cells_once() {
-    let (mut replay, folder) = saved_project("edit-work-overview-cells");
-    replay.app.state.workbench.activate(Workspace::Project);
-    replay.app.state.project.project_page = ProjectPage::Overview;
-    idle(&mut replay, WARM_UP_FRAMES);
-    // The first edit after the save also marks the drawing's tab unsaved,
-    // which the table shows; the second is the one counted.
-    let _ = work_of(&mut replay, place);
-    CELL_ROW_BUILDS.with(|count| count.set(0));
-    let _ = work_of(&mut replay, |app| {
-        app.state.model.schematic.with_undo("Place", |schematic| {
-            schematic.add_component(ComponentType::Capacitor, Point::new(200, 400));
-        });
-    });
-    assert_eq!(
-        CELL_ROW_BUILDS.with(std::cell::Cell::get),
-        1,
-        "the Cells table is derived once for the placed part"
     );
     drop(replay);
     let _ = std::fs::remove_dir_all(folder);

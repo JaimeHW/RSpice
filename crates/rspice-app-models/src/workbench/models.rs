@@ -27,9 +27,7 @@ use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
     FeatureSurface, NoHandles, Reads, held_back,
 };
-use crate::workbench::models::workspace_state::{
-    ModelsCatalogScope, ModelsWorkbenchDialog, PackReleaseConfirmation,
-};
+use crate::workbench::models::workspace_state::{ModelsWorkbenchDialog, PackReleaseConfirmation};
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
@@ -182,12 +180,6 @@ impl ModelsFeature {
     /// binding or a symbol another feature made from the catalog reports it.
     pub fn note_receipt(cx: &mut Cx<'_, ModelsFeature>, result: Result<String, String>) {
         cx.state.models_view.note_receipt(result);
-    }
-
-    /// Scope the Models workspace's catalog to the project's own models, for
-    /// the caller to show the catalog.
-    pub fn show_project_models(cx: &mut Cx<'_, ModelsFeature>) {
-        cx.state.models_view.catalog_scope = ModelsCatalogScope::Project;
     }
 
     /// Leave no model selected, as a history step that took away the

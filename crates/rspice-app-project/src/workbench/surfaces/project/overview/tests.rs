@@ -4,10 +4,11 @@
 //! completed failure rendered in the shape of a success, and a time the
 //! reader cannot place.
 
-use super::activity::{run_title, unix_seconds_to_millis};
-use super::header::{header_facts, import_deck_intent};
 use super::*;
 use crate::state::SimulationRunLifecycle;
+use crate::workbench::project::health::{
+    lifecycle_label, lifecycle_tone, run_title, told, unix_seconds_to_millis,
+};
 
 #[test]
 fn completed_failure_is_not_rendered_as_success() {
@@ -24,8 +25,13 @@ fn completed_failure_is_not_rendered_as_success() {
 #[test]
 fn run_title_does_not_duplicate_retained_sequence_prefix() {
     // A label that only says when the run started reads as the run: the
-    // When column states the time.
+    // row states the time.
     assert_eq!(run_title(12, "Run 12 (10:31:02 AM)"), "Run 12");
+    assert_eq!(run_title(12, "Run 12 (21 Nov 2026, 1:04:01 PM)"), "Run 12");
+    assert_eq!(
+        run_title(12, "fast corner (21 Nov 2026, 1:04:01 PM)"),
+        "Run 12 \u{b7} fast corner"
+    );
     assert_eq!(
         run_title(12, "Run 12 (fast corner)"),
         "Run 12 (fast corner)"
@@ -33,78 +39,21 @@ fn run_title_does_not_duplicate_retained_sequence_prefix() {
     assert_eq!(run_title(12, "corner sweep"), "Run 12 · corner sweep");
 }
 
-fn operation_at(timestamp_ms: Option<u64>) -> OperationSnapshot {
-    let (timestamp_ms, stamp) = OperationSnapshot::dated(timestamp_ms);
-    OperationSnapshot {
-        timestamp_ms,
-        stamp,
-        event: String::new(),
-        configuration: String::new(),
-        elapsed: None,
-        detail: String::new(),
-        tone: Tone::Neutral,
-        intent: None,
-    }
-}
-
-/// Inside a day the Activity table says how long ago; past one, or for a
-/// time ahead of the clock, the date and time, which the pointer reads in
-/// full on every row.
+/// Inside a day the Latest run fact says how long ago; past one, or for a
+/// time ahead of the clock, the date and time.
 #[test]
-fn an_operation_says_how_long_ago_inside_a_day_and_its_date_past_one() {
+fn a_run_says_how_long_ago_inside_a_day_and_its_date_past_one() {
     assert_eq!(unix_seconds_to_millis(f64::NAN), None);
     assert_eq!(unix_seconds_to_millis(-1.0), None);
     assert_eq!(unix_seconds_to_millis(1.25), Some(1_250));
 
     let at = 1_700_000_000_000;
     let full = crate::time_compat::local_stamp(at);
-    let full = full.as_str();
-    let operation = operation_at(Some(at));
-    let when = |now: u64| {
-        operation
-            .when(now)
-            .map(|(short, full)| (short, full.to_owned()))
-    };
-    assert_eq!(
-        when(at + 30_000),
-        Some(("just now".to_owned(), full.to_owned()))
-    );
-    assert_eq!(
-        when(at + 2 * 3_600_000),
-        Some(("2 h ago".to_owned(), full.to_owned()))
-    );
-    assert_eq!(
-        when(at + 25 * 3_600_000),
-        Some((full.to_owned(), full.to_owned()))
-    );
-    assert_eq!(when(at - 60_000), Some((full.to_owned(), full.to_owned())));
-    assert_eq!(operation_at(None).when(at), None);
-}
-
-#[test]
-fn run_destination_only_leaves_simulate_for_schematic_projects() {
-    assert_eq!(run_destination(true, false), Workspace::Results);
-    assert_eq!(run_destination(true, true), Workspace::Results);
-    assert_eq!(run_destination(false, false), Workspace::Simulate);
-    assert_eq!(run_destination(false, true), Workspace::Netlist);
-}
-
-#[test]
-fn overview_import_deck_uses_the_independent_netlist_project_workflow() {
-    assert_eq!(
-        import_deck_intent(),
-        OverviewIntent::Command(ids::OPEN_NETLIST)
-    );
-}
-
-/// The line under the name says the revision, and where the file is only
-/// once there is one: "Not yet saved" there was the Unsaved work row's fact a
-/// second time.
-#[test]
-fn the_header_states_the_revision_and_the_file_once_there_is_one() {
-    assert_eq!(header_facts(1, None), "Revision 1");
-    assert_eq!(
-        header_facts(4, Some("C:/work/amp.rspiceproj")),
-        "Revision 4 \u{b7} C:/work/amp.rspiceproj"
-    );
+    assert_eq!(told(at, at + 30_000), "just now");
+    assert_eq!(told(at, at + 2 * 3_600_000), "2 h ago");
+    assert_eq!(told(at, at + 25 * 3_600_000), full);
+    // A run started this instant can be stamped a millisecond past the
+    // clock read after it.
+    assert_eq!(told(at, at - 1), "just now");
+    assert_eq!(told(at, at - 60_000), full);
 }

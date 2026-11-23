@@ -51,7 +51,6 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::{ProjectCommand, ProjectRequest};
 use library_dialogs::new_view::existing_symbol_view;
 use library_dialogs::new_view_target;
-pub(crate) use revision_history::schematic_row_key;
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage, ProjectPage};
 
 /// The project feature.
@@ -63,19 +62,12 @@ impl Feature for ProjectFeature {
     type Handles = NoHandles;
     /// The Overview offers these, each drawn as the dispatcher answers it.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
-        ids::open_workspace(Workspace::Simulate),
+        ids::RUN_SIMULATION,
+        ids::OPEN_PROBLEMS,
         ids::open_workspace(Workspace::Results),
         ids::open_workspace(Workspace::Netlist),
         ids::open_workspace(Workspace::Verify),
-        ids::CONFIGURATION_SETS,
-        ids::MODELS_CATALOG,
-        ids::OPEN_NETLIST,
-        ProjectCommand::NewCell.key(),
-        ProjectCommand::RevisionHistory.key(),
-        ProjectCommand::Properties.key(),
-        ProjectCommand::Page(ProjectPage::Library).key(),
         ProjectCommand::Page(ProjectPage::Dependencies).key(),
-        ProjectCommand::Page(ProjectPage::History).key(),
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {

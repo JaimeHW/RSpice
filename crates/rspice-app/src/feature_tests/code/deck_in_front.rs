@@ -1,8 +1,8 @@
 //! The deck in front of the Netlist workspace, in whole frames of the
 //! application, for a project its deck drives: the generated netlist, with
 //! no schematic to generate one from, stands on a tab beside the deck's,
-//! which brings the deck back, and the project overview's Open SPICE deck
-//! and the landing's Open the deck bring the deck to the front whatever was
+//! which brings the deck back, and the project overview's Open deck and
+//! the landing's Open the deck bring the deck to the front whatever was
 //! there.
 
 use egui::accesskit::Role;
@@ -53,15 +53,15 @@ fn the_decks_tab_stands_beside_the_generated_netlist_and_brings_the_deck_back() 
     );
 }
 
-/// Open SPICE deck on the project overview brings the deck to the front of
-/// the Netlist workspace, whatever was in front there.
+/// Open deck on the project overview's Source deck row brings the deck to
+/// the front of the Netlist workspace, whatever was in front there.
 #[test]
-fn open_spice_deck_brings_the_deck_to_the_front() {
+fn the_overviews_open_deck_brings_the_deck_to_the_front() {
     let (mut replay, _) = deck_project_on_its_generated_netlist();
     replay.app.state.workbench.activate(Workspace::Project);
     replay.app.state.project.project_page = ProjectPage::Overview;
 
-    replay.click("Open SPICE deck", Role::Button);
+    replay.click("Open deck", Role::Link);
 
     assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
     assert!(

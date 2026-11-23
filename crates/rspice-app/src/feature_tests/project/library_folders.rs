@@ -23,7 +23,9 @@ use rspice_app_project::workbench::project::library_dialogs::library_files::{
     LibraryFileIntent, answer_next_folder_pick, run_library_file_intent,
 };
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_project::workbench::surfaces::project::overview::{OverviewSnapshot, Tone};
+use rspice_app_project::workbench::surfaces::project::overview::{
+    OverviewIntent, OverviewSnapshot, Tone,
+};
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     ProjectCloseDestination, has_unsaved_changes_fresh,
 };
@@ -593,18 +595,21 @@ fn recovered(folders: &Folders) -> RSpiceApp {
     app
 }
 
-/// The Overview's Unsaved work, and what the close review names.
+/// What the project inspector counts as unsaved, and what the close review
+/// names.
 fn unsaved(app: &mut RSpiceApp) -> (String, String) {
-    let snapshot = OverviewSnapshot::capture(
-        &egui::Context::default(),
-        &features::cx_with_foreign_answers(app, |_| true),
-    );
-    let row = snapshot
-        .statuses
-        .iter()
-        .find(|status| status.area == "Unsaved work")
-        .expect("the Overview has an Unsaved work row")
-        .state()
+    app.state.workbench.activate(Workspace::Project);
+    app.state.project.project_page = ProjectPage::Overview;
+    let ctx = offscreen();
+    for _ in 0..2 {
+        app_frame(&ctx, app, Vec::new());
+    }
+    let inspector = painted(&app_frame(&ctx, app, Vec::new()));
+    let row = inspector
+        .lines()
+        .skip_while(|line| *line != "Unsaved")
+        .nth(1)
+        .unwrap_or_else(|| panic!("the inspector counts unsaved work: {inspector}"))
         .to_owned();
     app.state
         .workbench
@@ -645,7 +650,7 @@ fn a_recovered_edit_counts_as_unsaved_and_takes_its_lock_once_edited_again() {
         "so is the stage's"
     );
     let (row, review) = unsaved(&mut app);
-    assert_eq!(row, "2 unsaved documents");
+    assert_eq!(row, "2 documents");
     for cell in CELLS {
         assert!(
             review.contains(&named(cell)),
@@ -713,7 +718,7 @@ fn a_recovered_edit_to_a_library_out_of_reach_counts_as_unsaved() {
         "the edit is held"
     );
     let (row, review) = unsaved(&mut app);
-    assert_eq!(row, "1 unsaved document");
+    assert_eq!(row, "1 document");
     assert!(
         review.contains(&named("amp")),
         "the review names amp:\n{review}"
@@ -825,7 +830,7 @@ fn a_held_edit_goes_back_over_a_library_the_paths_page_finds() {
 }
 
 /// What the Dependencies page's table and inspector say about `work`,
-/// and the Overview's Dependencies row, agree with `label` and `mark`.
+/// and the Overview's Dependencies pane, agree with `label` and `mark`.
 fn assert_every_place_says(app: &mut RSpiceApp, label: &str, mark: Option<&str>) {
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Dependencies;
@@ -838,39 +843,37 @@ fn assert_every_place_says(app: &mut RSpiceApp, label: &str, mark: Option<&str>)
         &egui::Context::default(),
         &features::cx_with_foreign_answers(app, |_| true),
     );
-    let overview = snapshot
-        .statuses
-        .iter()
-        .find(|status| status.area == "Dependencies")
-        .expect("the Overview has a Dependencies row");
     let status = app
         .state
         .model
         .reference_status(LIBRARY)
         .expect("work has a status");
     assert_eq!(status.label(), label, "the one status function");
+    let overview = snapshot
+        .fact("Dependencies")
+        .expect("the Overview states its dependencies");
     match mark {
-        None => {
-            assert_eq!(overview.tone(), Tone::Neutral, "{}", overview.text());
-            assert!(!overview.text().contains(LIBRARY), "{}", overview.text());
-        }
+        None => assert_eq!(overview.tone, Tone::Neutral, "{}", overview.value),
         Some(mark) => {
             let tone = if mark == "Warning" {
                 Tone::Warn
             } else {
                 Tone::Error
             };
+            assert_eq!(overview.tone, tone, "{}", overview.value);
+            assert!(
+                overview
+                    .value
+                    .ends_with(&format!("1 {}", label.to_lowercase())),
+                "the Overview counts it in the same words: {}",
+                overview.value
+            );
             assert_eq!(
-                (overview.tone(), overview.text()),
-                (
-                    tone,
-                    format!(
-                        "{LIBRARY}: {} \u{b7} {}",
-                        label.to_lowercase(),
-                        status.detail().unwrap_or_default()
-                    )
-                ),
-                "the Overview"
+                overview.link.as_ref().map(|link| &link.intent),
+                Some(&OverviewIntent::OpenDependency(Some(
+                    DependencyLibrary::design(LIBRARY)
+                ))),
+                "the Overview's value opens the Dependencies page on it"
             );
         }
     }
@@ -1247,7 +1250,7 @@ fn a_librarys_gone_folder_reads_one_sentence_live_and_after_reopen() {
 /// A design that places a cell of a library whose folder could not be read
 /// says the library is what is missing, and where it is repaired, wherever
 /// it says why the design does not resolve: the Overview's Configuration
-/// row and the Design rails.
+/// fact and the Design rails.
 #[test]
 fn a_design_placing_a_cell_of_a_missing_library_names_the_library() {
     use crate::workbench::examples::hierarchy_reference;
@@ -1289,21 +1292,17 @@ fn a_design_placing_a_cell_of_a_missing_library_names_the_library() {
         Some(said),
         "the Design rails"
     );
-    app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Overview;
     let snapshot = OverviewSnapshot::capture(
         &egui::Context::default(),
         &features::cx_with_foreign_answers(&mut app, |_| true),
     );
     let configuration = snapshot
-        .statuses
-        .iter()
-        .find(|status| status.area == "Configuration")
-        .expect("the Overview has a Configuration row");
+        .fact("Configuration")
+        .expect("the Overview says the configuration cannot run");
     assert!(
-        configuration.text().ends_with(said),
+        configuration.value.ends_with(said),
         "the Overview: {}",
-        configuration.text()
+        configuration.value
     );
     let _ = std::fs::remove_dir_all(&root);
 }

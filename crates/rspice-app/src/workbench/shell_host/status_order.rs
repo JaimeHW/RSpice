@@ -610,7 +610,6 @@ fn shown_rollup(app: &RSpiceApp, availability: &EngineAvailability) -> Option<Sp
         return None;
     }
     let sheet = simulation.verification_sheet()?;
-    // The Overview's Verification row says it in the same words.
     let words =
         rspice_app_project::workbench::project::health::verification_words(&app.state.model)?;
     let counts = sheet.summary.counts;
@@ -994,11 +993,14 @@ mod tests {
         );
     }
 
-    /// The Overview's Verification row and the run segment state the
-    /// specifications in the same words, marked alike.
+    /// The Overview's outputs and the run segment agree on what the run
+    /// fails: the outputs' failing verdicts are the ones the segment counts,
+    /// marked alike.
     #[test]
-    fn the_overview_and_the_run_segment_state_the_specifications_alike() {
-        use rspice_app_project::workbench::surfaces::project::overview::{OverviewSnapshot, Tone};
+    fn the_overview_and_the_run_segment_agree_on_what_fails() {
+        use rspice_app_project::workbench::surfaces::project::overview::{
+            Outputs, OverviewSnapshot, Tone,
+        };
         use rspice_app_simulate::workbench::surfaces::verify::raster::seed_corner;
 
         let mut app = RSpiceApp::test_instance();
@@ -1007,24 +1009,22 @@ mod tests {
             &egui::Context::default(),
             &crate::workbench::features::cx_with_foreign_answers(&mut app, |_| true),
         );
-        let verification = snapshot
-            .statuses
+        let Outputs::Judged { rows, .. } = &snapshot.outputs else {
+            panic!("the corner run is judged: {:?}", snapshot.outputs);
+        };
+        let failing = rows
             .iter()
-            .find(|status| status.area == "Verification")
-            .expect("the Overview has a Verification row");
-        let run = app.state.model.simulation.active_run().map(|run| run.id);
-        assert_eq!(
-            run_segment(&mut app),
-            Some((
-                format!(
-                    "Run {} \u{b7} {}",
-                    run.expect("the corner run is active"),
-                    verification.state()
-                ),
-                StatusMark::Problem(Problem::Failure)
-            ))
+            .filter(|row| row.verdict == Some(("Fail", Tone::Error)))
+            .count();
+        assert!(failing > 0, "{rows:?}");
+        let (words, mark) = run_segment(&mut app).expect("the corner run has a segment");
+        let counted = format!("{failing} {}", if failing == 1 { "fails" } else { "fail" });
+        assert!(words.ends_with(&counted), "{words} counts {counted}");
+        assert!(
+            words.contains(&format!("of {} specification", rows.len())),
+            "{words}"
         );
-        assert_eq!(verification.tone(), Tone::Error);
+        assert_eq!(mark, StatusMark::Problem(Problem::Failure));
     }
 
     /// Pressing the roll-up opens Verify on Specifications with the failing

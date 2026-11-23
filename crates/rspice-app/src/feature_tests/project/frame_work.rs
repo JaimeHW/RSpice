@@ -351,24 +351,27 @@ fn kept_snapshot(ctx: &Context, app: &mut RSpiceApp) -> OverviewSnapshot {
 }
 
 /// The Overview keeps what it derived between frames, so what it keeps has
-/// to follow the project: a cell, a component and a model library added
-/// since the last frame are all shown on the next one.
+/// to follow the project: a library and a model library added since the
+/// last frame are counted on the next one, in the words a fresh read says.
 #[test]
 fn the_overview_follows_what_changed_since_its_last_frame() {
     let mut app = overview_app();
     let ctx = offscreen();
-    let cells = app.state.model.library_manager.total_cell_count();
     let _ = app_frame(&ctx, &mut app, Vec::new());
-    assert_eq!(kept_snapshot(&ctx, &mut app).cells.len(), cells);
+    let dependencies = |ctx: &Context, app: &mut RSpiceApp| {
+        kept_snapshot(ctx, app)
+            .fact("Dependencies")
+            .expect("the Overview states its dependencies")
+            .value
+            .clone()
+    };
+    let before = dependencies(&ctx, &mut app);
 
     let mut late = Library::new("late");
     let mut cell = Cell::new("added");
     cell.add_view(View::new("schematic", ViewType::Schematic));
     late.add_cell(cell);
     app.state.model.library_manager.add_library(late);
-    app.state.model.schematic.with_undo("Place", |schematic| {
-        schematic.add_component(ComponentType::Resistor, Point::new(0, 0));
-    });
     app.state
         .model
         .model_library_manager
@@ -380,34 +383,13 @@ fn the_overview_follows_what_changed_since_its_last_frame() {
         .expect("the model library imports");
 
     let next = painted(&app_frame(&ctx, &mut app, Vec::new()));
-    let kept = kept_snapshot(&ctx, &mut app);
-    assert_eq!(kept.cells.len(), cells + 1, "the added cell is listed");
+    let kept = dependencies(&ctx, &mut app);
+    let fresh = dependencies(&Context::default(), &mut app);
+    assert_eq!(kept, fresh, "what the page kept follows the project");
+    assert_ne!(kept, before, "the added library is counted");
     assert!(
-        kept.cells
-            .iter()
-            .any(|cell| cell.library == "late" && cell.name == "added"),
-        "{:?}",
-        kept.cells
-    );
-    let instances = app
-        .state
-        .model
-        .schematic
-        .editor_ref()
-        .design
-        .document()
-        .components
-        .len();
-    assert_eq!(
-        kept.cells[0].instances,
-        Some(instances),
-        "the placed component is counted on the top cell's row"
-    );
-    let models = app.state.model.model_library_manager.total_model_count();
-    assert!(
-        next.lines()
-            .any(|line| line.starts_with(&format!("{models} models \u{b7}"))),
-        "the imported model is counted: {next}"
+        next.lines().any(|line| line == kept),
+        "the row says it: {next}"
     );
 }
 

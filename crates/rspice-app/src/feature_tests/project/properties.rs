@@ -100,9 +100,8 @@ fn choose_top(replay: &mut Replay, cell: &str) {
 }
 
 /// File > Project properties…, from any page and with the inspector hidden,
-/// shows the project inspector beside the Overview, with nothing selected
-/// and the project's Name taking the keys: what is typed renames the
-/// project.
+/// shows the project inspector beside the Overview, with the project's Name
+/// taking the keys: what is typed renames the project.
 #[test]
 fn project_properties_lands_on_the_inspector_with_the_name_taking_the_keys() {
     let folder = unique_temp_dir("project-properties-command");

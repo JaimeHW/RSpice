@@ -1,981 +1,628 @@
-//! The Overview's snapshot: what the page shows, read once per frame from the
-//! project, its lifecycle, the checks, the run history, the catalogue and the
-//! checkpoints before anything is drawn.
+//! What the Overview says, read once per frame from the project, its
+//! design, the checks, the run history, Verify's judge and the catalogues
+//! before anything is drawn.
 //!
 //! # Derived on change, not on a frame
 //!
-//! What has to walk the design or the catalogues to be known — the cells and
-//! their instances, the activity register, the model sources, the deck's line
-//! count, the blocking findings — is derived once and kept in the frame
-//! context beside the identity of what it was derived from: a content stamp,
-//! a catalogue revision, the run history's revision, the diagnostic store's
-//! generation. A frame in which none of those moved derives nothing, so the
-//! page costs the same on a project of eight thousand instances as on an
-//! empty one.
+//! What has to walk the design, a catalogue or a text to be known — the
+//! device census, the dependency statuses, the model files, the deck's
+//! include lines — is derived once and kept in the frame context beside the
+//! identity of what it was derived from. A frame in which none of those
+//! moved derives nothing, so the page costs the same on a project of eight
+//! thousand instances as on an empty one.
 //!
-//! Each status row's words and mark are its subject's, from
-//! [`crate::workbench::project::health`]; the row adds only the action that
-//! addresses it.
+//! Each fact's words and mark are its subject's, from
+//! [`crate::workbench::project::health`], the dependency ledger, the
+//! checks' receipt and Verify's sheet: nothing here judges anything again.
 
-use std::collections::BTreeSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher as _};
 use std::sync::Arc;
 
-use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
-use crate::workbench::app_state::design_checks::finding_identities;
-use crate::workbench::app_state::{DesignCheckStatus, Model, PlatformState};
+use rspice_app_state::results::{RowStatus, difference_text, format_value, limit_text};
+
+use crate::state::{AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, SimulationRun};
+use crate::ui::accessibility::counted;
+use crate::workbench::app_state::{DesignCheckStatus, Model};
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::feature::Cx;
-use crate::workbench::lifecycle::project_lifecycle::{
-    ProjectDocumentId, accepted_generation, dirty_documents,
-};
+use crate::workbench::framework::feature::{CodePort, Cx};
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::health::{self, DesignSubject, SubjectStatus};
-use crate::workbench::project::schematic_row_key;
+use crate::workbench::project::dependency_status::{DependencyKind, dependency_rows};
+use crate::workbench::project::health::{self, SubjectStatus, worse};
 use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::project::{ProjectFeature, lifecycle_view};
 use crate::workbench::state::Workspace;
-use rspice_design::drc::DrcSeverity;
 
 use super::super::derived::derived;
-use super::activity::{run_title, unix_seconds_to_millis};
-use super::{
-    OverviewIntent, Tone, command_gate, lifecycle_label, lifecycle_tone, run_destination,
-    singular_or_plural,
-};
+use super::census::design_census;
+use super::{OverviewIntent, Tone, command_gate};
 
-/// A day, in milliseconds: inside one an age is told, past one a date.
-pub(super) const DAY_MS: u64 = 86_400_000;
-
-/// A time as a table says it, and in full for the pointer: how long ago
-/// inside a day, the date and time past one. `None` where there is no time.
-fn told(at: Option<u64>, stamp: &str, now_ms: u64) -> Option<(String, &str)> {
-    let at = at?;
-    let short = match now_ms.checked_sub(at) {
-        Some(ago) if ago < DAY_MS => {
-            crate::time_compat::relative_age(std::time::Duration::from_millis(ago))
-        }
-        _ => stamp.to_owned(),
-    };
-    Some((short, stamp))
-}
-
+/// What a linked value, a row or an empty table's button does: its words,
+/// what it asks for, and whether it can be taken now.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatusSnapshot {
-    pub area: &'static str,
-    pub(crate) state: String,
-    pub(crate) detail: String,
-    pub action: &'static str,
-    pub(crate) tone: Tone,
+pub struct Action {
+    pub label: &'static str,
     pub intent: OverviewIntent,
-    pub(super) enabled: bool,
-    pub(super) disabled_reason: Option<&'static str>,
+    pub enabled: bool,
+    pub disabled_reason: Option<&'static str>,
 }
 
-impl StatusSnapshot {
-    fn of(
-        area: &'static str,
-        status: SubjectStatus,
-        action: &'static str,
+impl Action {
+    fn new(
+        label: &'static str,
         intent: OverviewIntent,
         (enabled, disabled_reason): (bool, Option<&'static str>),
     ) -> Self {
         Self {
-            area,
-            state: status.state,
-            detail: status.detail,
-            action,
-            tone: status.tone,
+            label,
             intent,
             enabled,
             disabled_reason,
         }
     }
+}
 
-    /// The row's words as the page paints them: the state, then the detail
-    /// when there is one.
-    pub fn text(&self) -> String {
-        if self.detail.is_empty() {
-            self.state.clone()
-        } else {
-            format!("{} \u{b7} {}", self.state, self.detail)
+/// One fact of the summary band: what it is, its value, the mark the
+/// reader has to see, and where its value leads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryFact {
+    pub label: &'static str,
+    pub value: String,
+    pub tone: Tone,
+    pub link: Option<Action>,
+}
+
+impl SummaryFact {
+    fn new(label: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            label,
+            value: value.into(),
+            tone: Tone::Neutral,
+            link: None,
         }
     }
 
-    /// The row's state alone, the words the chips and the inspector repeat.
-    pub fn state(&self) -> &str {
-        &self.state
+    /// A subject's state and the one line beside it, as one value.
+    fn of(label: &'static str, status: SubjectStatus) -> Self {
+        let value = if status.detail.is_empty() {
+            status.state
+        } else {
+            format!("{} \u{b7} {}", status.state, status.detail)
+        };
+        Self {
+            tone: status.tone,
+            ..Self::new(label, value)
+        }
     }
 
-    pub const fn tone(&self) -> Tone {
-        self.tone
+    const fn toned(mut self, tone: Tone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    fn linked(mut self, link: Option<Action>) -> Self {
+        self.link = link;
+        self
     }
 }
 
-/// One finding that stops a run, as the strip under the status rows lists
-/// it: what is wrong, then where.
+/// One specification Verify judged of the run: its output, its value or
+/// the spread of its values, its limit, the margin to it, and the verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProblemSnapshot {
-    pub message: String,
-    /// Where it is: an object or a net of the design, a line of the deck.
-    pub path: String,
-    pub tone: Tone,
-    /// Its identity in the Problems list, which the link stands on; `None`
-    /// for a deck's diagnostic, which its editor keeps.
-    pub finding: Option<uuid::Uuid>,
+pub struct SpecificationLine {
+    pub output: String,
+    /// The measurement behind the output, when it is named apart from it.
+    pub measurement: Option<String>,
+    /// The worst value it took: the one value of a run of one point.
+    pub value: Option<String>,
+    /// The least and greatest values across the run's points or trials.
+    pub min: Option<String>,
+    pub max: Option<String>,
+    /// Where the worst value was: the corner, the trial or the point.
+    pub worst_at: Option<String>,
+    pub limit: Option<String>,
+    pub margin: Option<String>,
+    pub verdict: Option<(&'static str, Tone)>,
+    pub action: Action,
 }
 
-/// One row of the Cells table: a cell of the project's libraries, or the
-/// deck a netlist-first project is made of.
+/// One measurement of a run that no limit judges.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CellRowSnapshot {
-    pub name: String,
-    pub library: String,
-    /// The Library column's words in full where they are short for more: a
-    /// deck's whole path beside the folder it is in.
-    pub library_hint: Option<String>,
-    /// What the cell is to the project: its top, a testbench a configuration
-    /// runs, its deck; empty for any other cell.
-    pub role: &'static str,
-    pub views: String,
-    /// The instances on its schematic, where the project holds one.
-    pub instances: Option<usize>,
-    /// One of its views has unsaved changes.
-    pub unsaved: bool,
-    /// When a save last wrote a change to one of its views; `None` for a
-    /// cell no save has written.
-    pub saved_ms: Option<u64>,
-    /// That time as a date and a time, written once when the rows are
-    /// derived.
-    pub(super) saved_stamp: String,
-    /// What opening the row does: its schematic, else the view it has.
-    pub intent: OverviewIntent,
+pub struct MeasurementLine {
+    pub output: String,
+    pub value: String,
+    pub action: Action,
 }
 
-impl CellRowSnapshot {
-    /// When a save last wrote it, as the Modified column says it and in full
-    /// for the pointer, told as the Activity card tells a time.
-    pub fn modified(&self, now_ms: u64) -> Option<(String, &str)> {
-        told(self.saved_ms, &self.saved_stamp, now_ms)
-    }
-}
-
-/// One row of the Activity table: a run, a validated revision, a library
-/// publication or a checkpoint, and when it happened.
-#[derive(Debug, Clone, PartialEq)]
-pub struct OperationSnapshot {
-    /// When it happened; `None` where its record keeps no time.
-    pub timestamp_ms: Option<u64>,
-    /// When it happened, as a date and a time.
-    pub(super) stamp: String,
-    pub event: String,
-    /// The configuration a run elaborated, as an ADE run history names the
-    /// design its test ran; empty for any other row, and for a run that
-    /// recorded none.
-    pub configuration: String,
-    /// How long a run took, in seconds.
-    pub elapsed: Option<f64>,
-    /// The rest, least needed last: a run's engine ends it, so a narrow
-    /// table gives that up before anything else.
-    pub detail: String,
-    pub(crate) tone: Tone,
-    pub intent: Option<OverviewIntent>,
-}
-
-impl OperationSnapshot {
-    /// A record's time, and its date and time as the pointer reads them,
-    /// written once when the register is derived.
-    pub(super) fn dated(timestamp_ms: Option<u64>) -> (Option<u64>, String) {
-        (
-            timestamp_ms,
-            timestamp_ms.map_or_else(String::new, crate::time_compat::local_stamp),
-        )
-    }
-
-    /// When it happened as the table says it, and in full for the pointer:
-    /// how long ago inside a day, the date and time past one. `None` where
-    /// its record keeps no time.
-    pub fn when(&self, now_ms: u64) -> Option<(String, &str)> {
-        told(self.timestamp_ms, &self.stamp, now_ms)
-    }
-}
-
+/// The table under the band: the latest run's outputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SourceDeckSnapshot {
-    pub(super) name: String,
-    /// Where the deck's file is, as the project stores it; `None` for a deck
-    /// the project keeps as text.
-    pub(super) path: Option<std::path::PathBuf>,
+pub enum Outputs {
+    /// Verify's verdicts. A run of several points or trials is read by its
+    /// spread, `spread` heading where the worst was ("Worst corner"); a run
+    /// of one point by its one value.
+    Judged {
+        spread: Option<&'static str>,
+        rows: Vec<SpecificationLine>,
+    },
+    /// What the run measured, where no limit judges it.
+    Measured(Vec<MeasurementLine>),
+    /// No run yet: what runs one.
+    NoRun(Action),
+    /// A run that measured nothing: where outputs are added.
+    Unmeasured(Action),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// The Overview, as it stands this frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverviewSnapshot {
-    pub(super) project_name: String,
-    pub(super) project_revision: u64,
-    /// Where the project file is, or `None` before it is first saved.
-    pub(crate) location: Option<String>,
-    pub descriptor_root: String,
+    /// The project runs a deck and has no drawing of its own yet.
     pub netlist_first: bool,
-    pub statuses: Vec<StatusSnapshot>,
-    /// The findings that stop a run, worst first: none while the checks
-    /// pass, have not run or are out of date, which their row says.
-    pub problems: Vec<ProblemSnapshot>,
-    /// The deck a netlist-first project is made of, listed before its cells.
-    pub deck: Option<CellRowSnapshot>,
-    /// Every cell of the project's libraries: the top cell, the testbenches,
-    /// those with unsaved changes, then the rest, each lot most recently
-    /// saved first.
-    pub cells: Arc<[CellRowSnapshot]>,
-    /// Every operation the project keeps, newest first.
-    pub operations: Arc<[OperationSnapshot]>,
-    /// The time the operations' ages are told against.
-    pub now_ms: u64,
+    /// The summary band's facts, in reading order.
+    pub facts: Vec<SummaryFact>,
+    /// What the reader has to know about the verdicts before reading them:
+    /// that they are of another run, or why Verify cannot judge.
+    pub note: Option<String>,
+    pub outputs: Outputs,
 }
 
 impl OverviewSnapshot {
-    /// The Cells table's rows in the order it lists them.
-    pub fn cell_rows(&self) -> impl Iterator<Item = &CellRowSnapshot> {
-        self.deck.iter().chain(self.cells.iter())
-    }
-
-    /// The Cells table's row `index`.
-    pub fn cell_row(&self, index: usize) -> Option<&CellRowSnapshot> {
-        match (&self.deck, index) {
-            (Some(deck), 0) => Some(deck),
-            (Some(_), index) => self.cells.get(index - 1),
-            (None, index) => self.cells.get(index),
+    /// Read the Overview from `cx`, deriving on `ctx` only what changed.
+    pub fn capture(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> Self {
+        let model = &*cx.model;
+        let netlist_first = model.is_netlist_first_without_schematic();
+        let mut facts = vec![SummaryFact::new(
+            "Plan",
+            model.sim_setup.active_plan_name().as_str(),
+        )];
+        // The inspector names the configuration the project marks for runs;
+        // the page says which one runs only where that is not it, or where
+        // it cannot run.
+        if !netlist_first {
+            let status = health::configuration(ctx, model);
+            let marked = model
+                .workspace
+                .content
+                .configuration_sets
+                .active()
+                .map_or("Default", |configuration| configuration.name());
+            if status.tone != Tone::Neutral || status.state != marked {
+                facts.push(SummaryFact::of("Configuration", status));
+            }
+        }
+        // A deck-driven project keeps its top cell pristine: it has no
+        // hierarchy or drawing to check until it has a schematic.
+        if !netlist_first && let Some(census) = design_census(ctx, model) {
+            facts.push(SummaryFact::new("Hierarchy", census.hierarchy_text()));
+            facts.push(SummaryFact::new("Devices", census.devices_text()));
+        }
+        if netlist_first || !model.workspace.content.decks.is_empty() {
+            let includes =
+                deck_includes(ctx, model, cx.peers.code()).map(|includes| includes.len());
+            let deck = command_gate(cx, ids::open_workspace(Workspace::Netlist));
+            facts.push(
+                SummaryFact::of("Source deck", health::source_deck(model, includes)).linked(Some(
+                    Action::new("Open deck", OverviewIntent::OpenProjectDeck, deck),
+                )),
+            );
+        }
+        facts.push(dependencies(ctx, cx));
+        if !netlist_first {
+            facts.push(checks(cx));
+        }
+        facts.extend(latest_run(cx));
+        let (note, outputs) = outputs(cx);
+        Self {
+            netlist_first,
+            facts,
+            note,
+            outputs,
         }
     }
 
-    pub fn cell_row_count(&self) -> usize {
-        usize::from(self.deck.is_some()) + self.cells.len()
+    /// The band's fact under `label`.
+    pub fn fact(&self, label: &str) -> Option<&SummaryFact> {
+        self.facts.iter().find(|fact| fact.label == label)
     }
 }
 
-fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
-    let deck = model.workspace.content.decks.first()?;
-    // A deck the project keeps as text has no path; its row says so.
-    let path = match &deck.source {
-        crate::state::DeckSource::File { path } => Some(path.clone()),
-        crate::state::DeckSource::Stored(_) => None,
+/// Whether a project is open: what checking its cells needs.
+fn open_gate(cx: &Cx<'_, ProjectFeature>) -> (bool, Option<&'static str>) {
+    let open = cx.platform.project_lifecycle.is_open();
+    (open, (!open).then_some("no project is open"))
+}
+
+/// What the project reads, counted, and what of it is wrong, counted by
+/// how it is wrong; its value opens the Dependencies page, on the first
+/// thing wrong.
+fn dependencies(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> SummaryFact {
+    let model = &*cx.model;
+    let rows = dependency_rows(ctx, model);
+    let of_kind = |kind| rows.iter().filter(|row| row.library.kind == kind).count();
+    // What the project reads, each kind it reads counted.
+    let mut said = [
+        (of_kind(DependencyKind::Design), "library", "libraries"),
+        (
+            health::model_file_count(ctx, model),
+            "model file",
+            "model files",
+        ),
+        (
+            of_kind(DependencyKind::IncludePath),
+            "include path",
+            "include paths",
+        ),
+    ]
+    .into_iter()
+    .filter(|(count, _, _)| *count > 0)
+    .map(|(count, one, many)| counted(count, one, many))
+    .collect::<Vec<_>>();
+    let wrong = rows
+        .iter()
+        .filter(|row| row.status.mark != Tone::Neutral)
+        .collect::<Vec<_>>();
+    let scan_errors = model.pdk_config.scan_errors.len();
+    let mut tone = wrong
+        .iter()
+        .fold(Tone::Neutral, |tone, row| worse(tone, row.status.mark));
+    if said.is_empty() && wrong.is_empty() && scan_errors == 0 {
+        said.push("None".to_owned());
+    } else if wrong.is_empty() && scan_errors == 0 {
+        said.push("all found".to_owned());
+    }
+    // Each way a dependency is wrong, counted, in the order first met.
+    let mut ways: Vec<(String, usize)> = Vec::new();
+    for row in &wrong {
+        let way = row.status.label.to_lowercase();
+        match ways.iter_mut().find(|(said, _)| *said == way) {
+            Some((_, count)) => *count += 1,
+            None => ways.push((way, 1)),
+        }
+    }
+    said.extend(
+        ways.into_iter()
+            .map(|(way, count)| format!("{count} {way}")),
+    );
+    if scan_errors > 0 {
+        tone = worse(tone, Tone::Warn);
+        said.push(counted(
+            scan_errors,
+            "model file not read",
+            "model files not read",
+        ));
+    }
+    let page = command_gate(cx, ProjectCommand::Page(ProjectPage::Dependencies).key());
+    let first = wrong.first().map(|row| row.library.clone());
+    SummaryFact::new("Dependencies", said.join(" \u{b7} "))
+        .toned(tone)
+        .linked(Some(Action::new(
+            "Open in Dependencies",
+            OverviewIntent::OpenDependency(first),
+            page,
+        )))
+}
+
+/// How the last checks of the cell view runs start from went. Checks not
+/// run, or run on a drawing changed since, offer to run them; findings
+/// open the Problems panel that lists them.
+fn checks(cx: &Cx<'_, ProjectFeature>) -> SummaryFact {
+    let model = &*cx.model;
+    let facts = cx.runs.slot_facts(cx.peers.design().review_markers());
+    let status = model.simulation_root_design_check_status(facts);
+    let run_checks = Action::new(
+        "Run checks",
+        OverviewIntent::CheckSimulationRoot,
+        open_gate(cx),
+    );
+    match &status {
+        // What the last checks found was of a drawing since changed.
+        DesignCheckStatus::Stale(_) => SummaryFact::new("Checks", "Out of date")
+            .toned(Tone::Warn)
+            .linked(Some(run_checks)),
+        _ => {
+            let fact = SummaryFact::of("Checks", health::schematic_checks(model, facts));
+            let link = match status.last_receipt() {
+                None => Some(run_checks),
+                Some(receipt) if !receipt.result.violations().is_empty() => Some(Action::new(
+                    "Show in Problems",
+                    OverviewIntent::Command(ids::OPEN_PROBLEMS),
+                    command_gate(cx, ids::OPEN_PROBLEMS),
+                )),
+                Some(_) => None,
+            };
+            fact.linked(link)
+        }
+    }
+}
+
+/// The newest run: how it went, when and for how long, which opens it in
+/// Results; what it analysed; and the engine it ran on. Nothing before the
+/// first run.
+fn latest_run(cx: &Cx<'_, ProjectFeature>) -> Vec<SummaryFact> {
+    let model = &*cx.model;
+    let Some(run) = model.simulation.retained.runs.first() else {
+        return Vec::new();
     };
-    Some(SourceDeckSnapshot {
-        name: deck.name(),
-        path,
+    let now_ms = u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX);
+    let mut ended = health::lifecycle_label(run.lifecycle, run.success).to_owned();
+    if let Some(at) = health::unix_seconds_to_millis(run.timestamp) {
+        ended = format!("{ended} {}", health::told(at, now_ms));
+    }
+    let said = [
+        health::run_title(run.id, &run.label),
+        ended,
+        crate::quantity::format_elapsed(run.elapsed_time),
+    ];
+    let results = (!run.analyses.is_empty()).then(|| {
+        Action::new(
+            "Open in Results",
+            OverviewIntent::OpenResults,
+            command_gate(cx, ids::open_workspace(Workspace::Results)),
+        )
+    });
+    let mut facts = vec![
+        SummaryFact::new("Latest run", said.join(" \u{b7} "))
+            .toned(health::lifecycle_tone(run.lifecycle, run.success))
+            .linked(results),
+    ];
+    if !run.analyses.is_empty() {
+        let analyses = run
+            .analyses
+            .iter()
+            .map(analysis_words)
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ");
+        facts.push(SummaryFact::new("Analyses", analyses));
+    }
+    if let Some(target) = run.execution_target {
+        facts.push(SummaryFact::new("Engine", target.label()));
+    }
+    facts
+}
+
+/// An analysis in a few words: its kind, where it swept, and over how many
+/// points. "Transient to 1 ms · 1001 points", "Corner sweep · 7 corners".
+fn analysis_words(analysis: &AnalysisResult) -> String {
+    let mut words = sentence_case(analysis.analysis_type.display_name());
+    if let Some(family) = family_words(analysis) {
+        return format!("{words} \u{b7} {family}");
+    }
+    if let Some(sweep) = sweep(analysis) {
+        words = format!("{words} {sweep}");
+    }
+    match points(analysis) {
+        Some(points) if points > 1 => format!("{words} \u{b7} {points} points"),
+        _ => words,
+    }
+}
+
+/// `title` in sentence case: each word after the first lowered, but for a
+/// word all in capitals, which is an initialism. "AC Analysis" reads
+/// "AC analysis".
+fn sentence_case(title: &str) -> String {
+    title
+        .split(' ')
+        .enumerate()
+        .map(|(index, word)| {
+            let initialism = word.chars().all(|letter| !letter.is_lowercase());
+            if index == 0 || initialism {
+                word.to_owned()
+            } else {
+                word.to_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// What a family swept, counted: its axis only numbers its members.
+fn family_words(analysis: &AnalysisResult) -> Option<String> {
+    use AnalysisResultFamilyMetadata as Family;
+    Some(match analysis.family_metadata.as_ref()? {
+        Family::Corner { corner_labels, .. } => counted(corner_labels.len(), "corner", "corners"),
+        Family::MonteCarlo { runs_completed, .. } => counted(*runs_completed, "trial", "trials"),
+        Family::Parametric {
+            target,
+            sweep_values,
+            ..
+        } => format!(
+            "{target} {} \u{2013} {}, {}",
+            format_value(*sweep_values.first()?, ""),
+            format_value(*sweep_values.last()?, ""),
+            counted(sweep_values.len(), "step", "steps")
+        ),
+        Family::Optimization { iterations, .. } => {
+            counted(iterations.len(), "iteration", "iterations")
+        }
+        _ => return None,
     })
 }
 
-/// The deck as the first row of a netlist-first project's Cells table: what
-/// it is under Views, and where its file is where a cell's library is, by
-/// the folder holding it, the whole path on hover.
-fn deck_row(deck: &SourceDeckSnapshot) -> CellRowSnapshot {
-    // A deck under the project folder is stored relative to it: its folder
-    // as written, or the project's own when it has none. One elsewhere is
-    // named by the folder holding it.
-    let (library, library_hint) = match &deck.path {
-        Some(path) => {
-            let folder = path
-                .parent()
-                .filter(|folder| !folder.as_os_str().is_empty());
-            let library = match folder {
-                None => "Project folder".to_owned(),
-                Some(folder) if path.is_relative() => folder.to_string_lossy().into_owned(),
-                Some(folder) => folder.file_name().map_or_else(
-                    || folder.to_string_lossy().into_owned(),
-                    |name| name.to_string_lossy().into_owned(),
-                ),
-            };
-            (
-                library,
-                Some(crate::workbench::project::dependency_status::shown_path(
-                    path,
-                )),
-            )
-        }
-        None => ("In the project".to_owned(), None),
-    };
-    CellRowSnapshot {
-        name: deck.name.clone(),
-        library,
-        library_hint,
-        role: "Deck",
-        views: "SPICE deck".to_owned(),
-        instances: None,
-        unsaved: false,
-        saved_ms: None,
-        saved_stamp: String::new(),
-        intent: OverviewIntent::Command(ids::open_workspace(Workspace::Netlist)),
+/// Where an analysis swept, in its coordinate's unit: from its first
+/// coordinate to its last, or where a transient stopped.
+fn sweep(analysis: &AnalysisResult) -> Option<String> {
+    let (first, last) = analysis.waveforms.first()?.as_ref().x.ends()?;
+    let unit = analysis.waveform_coordinate_unit().unwrap_or("");
+    Some(if analysis.analysis_type == AnalysisType::Transient {
+        format!("to {}", format_value(last, unit))
+    } else {
+        format!(
+            "{} \u{2013} {}",
+            format_value(first, unit),
+            format_value(last, unit)
+        )
+    })
+}
+
+/// How many points an analysis solved: its sweep's, or the one point an
+/// operating point is.
+fn points(analysis: &AnalysisResult) -> Option<usize> {
+    match analysis.waveforms.first() {
+        Some(waveform) => Some(waveform.as_ref().x.len()),
+        None => analysis.dc_op.as_ref().map(|_| 1),
     }
 }
 
-impl OverviewSnapshot {
-    /// What the page shows now, with what has to walk the project to be
-    /// known kept in `ctx` until what it was derived from changes.
-    pub fn capture(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> Self {
-        let project = &cx.model.workspace.content.project;
-        // The project file's documents with unsaved changes, and each
-        // cellview of a library kept in a folder of its own with edits here,
-        // which that file does not hold: each is one document.
-        let dirty = dirty_documents(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
-        let dirty_documents = dirty.len()
-            + cx.model
-                .unsaved_library_cellviews()
-                .into_iter()
-                .filter(|reference| {
-                    !dirty.contains(&ProjectDocumentId::CellView(reference.clone()))
-                })
-                .count();
-        let netlist_first = cx.model.is_netlist_first_without_schematic();
-        let source_deck = source_deck_snapshot(cx.model);
+/// Verify's words for a verdict, and the tone it is inked in: only a fail
+/// and an error are the failure, and a near pass the caution.
+const fn verdict(status: RowStatus) -> (&'static str, Tone) {
+    match status {
+        RowStatus::Pass => ("Pass", Tone::Neutral),
+        RowStatus::Near => ("Near", Tone::Warn),
+        RowStatus::Fail => ("Fail", Tone::Error),
+        RowStatus::Error => ("Error", Tone::Error),
+        RowStatus::NotMeasured => ("Not measured", Tone::Neutral),
+        RowStatus::Waived => ("Waived", Tone::Neutral),
+        RowStatus::Tracked => ("Tracked", Tone::Neutral),
+    }
+}
 
-        let location = health::location(cx.model, cx.platform);
-        let statuses = status_rows(ctx, cx, netlist_first, dirty_documents, location.is_some());
-        // A deck's findings are its run's: the deck is checked when it runs.
-        let problems = if netlist_first {
-            Vec::new()
-        } else {
-            blocking_findings(ctx, cx)
-        };
-        let deck = if netlist_first {
-            source_deck.as_ref().map(deck_row)
+/// What a spread's worst point is called, by what the run swept: a corner,
+/// a Monte Carlo trial, or else a point of the sweep.
+fn worst_head(run: Option<&SimulationRun>) -> &'static str {
+    use AnalysisResultFamilyMetadata as Family;
+    let family = run
+        .into_iter()
+        .flat_map(|run| &run.analyses)
+        .find_map(|analysis| analysis.family_metadata.as_ref());
+    match family {
+        Some(Family::Corner { .. }) => "Worst corner",
+        Some(Family::MonteCarlo { .. }) => "Worst trial",
+        _ => "Worst point",
+    }
+}
+
+/// The latest run's outputs: Verify's verdicts where the plan sets limits,
+/// else what the run measured; and what the reader has to know first.
+fn outputs(cx: &Cx<'_, ProjectFeature>) -> (Option<String>, Outputs) {
+    let model = &*cx.model;
+    let verify = command_gate(cx, ids::open_workspace(Workspace::Verify));
+    let sheet = model
+        .simulation
+        .verification_sheet()
+        .filter(|sheet| !sheet.rows.is_empty());
+    let judged_run = model.simulation.active_run();
+    if let Some(sheet) = sheet {
+        let note = if !sheet.is_judged() {
+            sheet.refusal().map(str::to_owned)
+        } else if model.simulation.view.active_run_idx != Some(0) {
+            judged_run.map(|run| format!("Judged on Run {}, the run Results has selected", run.id))
         } else {
             None
         };
-        let cells = derived(
-            ctx,
-            "overview.cells",
-            CellsKey::of(cx.model, cx.platform, netlist_first),
-            || {
-                #[cfg(any(test, feature = "test-support"))]
-                CELL_ROW_BUILDS.with(|count| count.set(count.get() + 1));
-                cell_rows(cx.model, netlist_first)
-            },
-        );
-
-        let now_ms =
-            u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX);
-        let recovery = &cx.state.project_checkpoint_recovery;
-        let operations = derived(
-            ctx,
-            "overview.operations",
-            OperationsKey::of(cx.model, recovery),
-            || retained_operations(cx.model, recovery),
-        );
-
-        Self {
-            project_name: project.display_name().to_owned(),
-            project_revision: project.revision().get(),
-            location,
-            descriptor_root: format!("{}/{}", project.root_library, project.top_cell),
-            netlist_first,
-            statuses,
-            problems,
-            deck,
-            cells,
-            operations,
-            now_ms,
-        }
+        let rows = sheet
+            .rows
+            .iter()
+            .map(|row| {
+                let unit = row.unit.as_str();
+                let worst = row.worst.as_ref();
+                let value = worst.and_then(|worst| worst.value);
+                let extremes = row.extremes();
+                SpecificationLine {
+                    output: row.name.clone(),
+                    measurement: (!row.name.eq_ignore_ascii_case(&row.measurement))
+                        .then(|| row.measurement.clone()),
+                    value: value.map(|value| format_value(value, unit)),
+                    min: extremes.map(|(least, _)| format_value(least, unit)),
+                    max: extremes.map(|(_, most)| format_value(most, unit)),
+                    worst_at: worst.and_then(|worst| sheet.worst_at(worst)),
+                    limit: limit_text(&row.comparison, unit),
+                    margin: value
+                        .zip(worst.and_then(|worst| worst.signed_margin))
+                        .map(|(value, margin)| difference_text(margin, value, unit)),
+                    verdict: row.status.map(verdict),
+                    action: Action::new(
+                        "Show in Verify",
+                        OverviewIntent::OpenVerify(Some(row.measurement.clone())),
+                        verify,
+                    ),
+                }
+            })
+            .collect();
+        // A run of several points, or of Monte Carlo trials, has a spread.
+        let swept = sheet.points.len() > 1
+            || sheet.rows.iter().any(|row| {
+                row.statistics
+                    .as_ref()
+                    .is_some_and(|statistics| statistics.distribution.count > 1)
+            });
+        let spread = swept.then(|| worst_head(judged_run));
+        return (note, Outputs::Judged { spread, rows });
     }
+    let open_verify = Action::new("Open Verify", OverviewIntent::OpenVerify(None), verify);
+    let Some(run) = judged_run.or_else(|| model.simulation.retained.runs.first()) else {
+        let run = Action::new(
+            "Run",
+            OverviewIntent::Command(ids::RUN_SIMULATION),
+            command_gate(cx, ids::RUN_SIMULATION),
+        );
+        return (None, Outputs::NoRun(run));
+    };
+    // A plan that sets no limit: the run's measurements, as the console
+    // spells them, each opening Verify, where a limit is added.
+    let measured = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.measurements)
+        .map(|measurement| MeasurementLine {
+            output: measurement.name.clone(),
+            value: rspice_app_workbench::workbench::docks::console::measurement_table_row(
+                measurement,
+                "",
+                None,
+            )
+            .value,
+            action: open_verify.clone(),
+        })
+        .collect::<Vec<_>>();
+    let outputs = if measured.is_empty() {
+        Outputs::Unmeasured(open_verify)
+    } else {
+        Outputs::Measured(measured)
+    };
+    (None, outputs)
 }
 
-/// The status rows, one per subject, each with the action that addresses it.
-fn status_rows(
+/// What the project's deck's include lines name, in the order it names
+/// them, where its text is at hand: a deck the project keeps as text, or a
+/// deck file the Netlist workspace has open. `None` where the text is not
+/// at hand. Read again only when the text changes.
+pub fn deck_includes(
     ctx: &egui::Context,
-    cx: &Cx<'_, ProjectFeature>,
-    netlist_first: bool,
-    dirty_documents: usize,
-    saved: bool,
-) -> Vec<StatusSnapshot> {
-    let model = &*cx.model;
-    let facts = cx.runs.slot_facts(cx.peers.design().review_markers());
-    let (subject, design) = health::design(model, facts);
-    let design = match subject {
-        DesignSubject::SourceDeck => {
-            let command = ids::open_workspace(Workspace::Netlist);
-            StatusSnapshot::of(
-                subject.label(),
-                design,
-                "Open deck",
-                OverviewIntent::Command(command),
-                command_gate(cx, command),
-            )
-        }
-        DesignSubject::SchematicChecks => {
-            let enabled = cx.platform.project_lifecycle.is_open();
-            StatusSnapshot::of(
-                subject.label(),
-                design,
-                "Run checks",
-                OverviewIntent::CheckSimulationRoot,
-                (enabled, (!enabled).then_some("no project is open")),
-            )
-        }
-    };
-
-    let latest_run = match model.simulation.retained.runs.first() {
-        None => {
-            let command = ids::open_workspace(run_destination(false, netlist_first));
-            StatusSnapshot::of(
-                "Latest run",
-                health::latest_run(model),
-                if netlist_first {
-                    "Open deck"
-                } else {
-                    "Open analyses"
-                },
-                OverviewIntent::Command(command),
-                command_gate(cx, command),
-            )
-        }
-        Some(run) => {
-            let has_dataset = !run.analyses.is_empty();
-            let destination = run_destination(has_dataset, netlist_first);
-            // The Activity table, beside the row, lists this run with its
-            // analyses, measurements and engine; the row says how it ended.
-            let status = SubjectStatus {
-                detail: String::new(),
-                ..health::latest_run(model)
+    model: &Model,
+    code: &dyn CodePort,
+) -> Option<Arc<[String]>> {
+    let deck = model.workspace.content.decks.first()?;
+    let text = match &deck.source {
+        crate::state::DeckSource::Stored(stored) => stored.text.as_str(),
+        crate::state::DeckSource::File { .. } => {
+            let open = code.manual_deck()?;
+            let rspice_app_runs::simulation::DeckOrigin::File(path) = open.origin else {
+                return None;
             };
-            StatusSnapshot::of(
-                "Latest run",
-                status,
-                match (has_dataset, netlist_first) {
-                    (true, _) => "Open results",
-                    (false, true) => "Open deck",
-                    (false, false) => "Open analyses",
-                },
-                OverviewIntent::OpenRun(0),
-                command_gate(cx, ids::open_workspace(destination)),
-            )
-        }
-    };
-
-    let verify = ids::open_workspace(Workspace::Verify);
-    let dependencies = ProjectCommand::Page(ProjectPage::Dependencies).key();
-    let recovery = ProjectCommand::Page(ProjectPage::History).key();
-    vec![
-        design,
-        StatusSnapshot::of(
-            "Configuration",
-            health::configuration(ctx, model),
-            "Manage",
-            OverviewIntent::Command(ids::CONFIGURATION_SETS),
-            command_gate(cx, ids::CONFIGURATION_SETS),
-        ),
-        latest_run,
-        StatusSnapshot::of(
-            "Verification",
-            health::verification(model),
-            "Open Verify",
-            OverviewIntent::Command(verify),
-            command_gate(cx, verify),
-        ),
-        StatusSnapshot::of(
-            "Model sources",
-            health::model_sources(ctx, model),
-            "Inspect",
-            OverviewIntent::OpenProjectModels,
-            command_gate(cx, ids::MODELS_CATALOG),
-        ),
-        StatusSnapshot::of(
-            "Dependencies",
-            health::dependencies(ctx, model),
-            "Open dependencies",
-            OverviewIntent::Command(dependencies),
-            command_gate(cx, dependencies),
-        ),
-        StatusSnapshot::of(
-            "Unsaved work",
-            health::unsaved_work(
-                dirty_documents,
-                saved,
-                &cx.state.project_checkpoint_recovery,
-            ),
-            "Open recovery",
-            OverviewIntent::Command(recovery),
-            command_gate(cx, recovery),
-        ),
-    ]
-}
-
-/// What the Cells table is read from, by identity: the catalogue, the save
-/// that last wrote the project (which stamps the views it wrote without
-/// changing the catalogue), every schematic (whose instances it counts), the
-/// configurations (whose roots are the testbenches), the documents with
-/// unsaved changes and the top.
-#[derive(Clone, PartialEq)]
-struct CellsKey {
-    catalog: u64,
-    saved: u64,
-    /// The part count of every schematic the rows count instances from.
-    schematics: (usize, u64, u64),
-    configurations: u64,
-    unsaved: u64,
-    top: u64,
-    netlist_first: bool,
-}
-
-impl CellsKey {
-    fn of(model: &Model, platform: &PlatformState, netlist_first: bool) -> Self {
-        let content = &model.workspace.content;
-        let mut configurations = DefaultHasher::new();
-        for configuration in content.configuration_sets.configurations() {
-            configuration.id().hash(&mut configurations);
-            configuration.revision().hash(&mut configurations);
-        }
-        let mut unsaved = DefaultHasher::new();
-        for document in content.open_views.iter().filter(|document| document.dirty) {
-            document.reference.library.hash(&mut unsaved);
-            document.reference.cell.hash(&mut unsaved);
-        }
-        let mut top = DefaultHasher::new();
-        content.project.root_library.hash(&mut top);
-        content.project.top_cell.hash(&mut top);
-        Self {
-            catalog: model.library_manager.catalog().stamp(),
-            saved: accepted_generation(platform),
-            schematics: schematic_part_counts(model),
-            configurations: configurations.finish(),
-            unsaved: unsaved.finish(),
-            top: top.finish(),
-            netlist_first,
-        }
-    }
-}
-
-/// Which of a cell's views a row opens: its schematic, else its testbench,
-/// else its code, else its symbol, else whatever it has.
-const fn opening_rank(view_type: ViewType) -> u8 {
-    match view_type {
-        ViewType::Schematic => 0,
-        ViewType::Testbench => 1,
-        ViewType::VerilogA | ViewType::VerilogAms | ViewType::Verilog | ViewType::Spice => 2,
-        ViewType::Symbol => 3,
-        _ => 4,
-    }
-}
-
-/// Every cell of the project's libraries, in the order the Cells table lists
-/// them: the top cell, the cells a configuration runs as its testbench, the
-/// cells with unsaved changes, then the rest; each lot the most recently
-/// saved first, and the cells no save has written by library and name. The
-/// cell a netlist-first project keeps pristine is not part of the design
-/// the reader made, so it is not listed.
-fn cell_rows(model: &Model, netlist_first: bool) -> Arc<[CellRowSnapshot]> {
-    let content = &model.workspace.content;
-    let project = &content.project;
-    let testbenches = content
-        .configuration_sets
-        .configurations()
-        .iter()
-        .map(|configuration| {
-            (
-                configuration.root().library.as_str(),
-                configuration.root().cell.as_str(),
-            )
-        })
-        .collect::<BTreeSet<_>>();
-    let unsaved = content
-        .open_views
-        .iter()
-        .filter(|document| document.dirty)
-        .map(|document| {
-            (
-                document.reference.library.as_str(),
-                document.reference.cell.as_str(),
-            )
-        })
-        .collect::<BTreeSet<_>>();
-    let components = |reference: &CellViewRef| {
-        if content.active_view == *reference {
-            Some(
-                model
-                    .schematic
-                    .editor_ref()
-                    .design
-                    .document()
-                    .components
-                    .len(),
-            )
-        } else {
-            content
-                .schematic_buffers
-                .get(&reference.key())
-                .map(|schematic| schematic.document().components.len())
-        }
-    };
-    let mut rows = Vec::new();
-    for library in model.library_manager.libraries_sorted() {
-        for cell in library.cells_sorted() {
-            if health::is_starter_cell(model, netlist_first, &library.name, &cell.name) {
-                continue;
-            }
-            let top = library.name == project.root_library && cell.name == project.top_cell;
-            let named = (library.name.as_str(), cell.name.as_str());
-            let testbench = testbenches.contains(&named);
-            let unsaved = unsaved.contains(&named);
-            let views = cell.views_sorted();
-            let reference = |view: &str| CellViewRef::new(&library.name, &cell.name, view);
-            let instances = views
-                .iter()
-                .find(|view| view.view_type == ViewType::Schematic)
-                .and_then(|view| components(&reference(&view.name)));
-            let intent = views
-                .iter()
-                .min_by_key(|view| {
-                    (
-                        opening_rank(view.view_type),
-                        view.name != crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-                    )
-                })
-                .map_or_else(
-                    || OverviewIntent::ShowInLibrary {
-                        library: library.name.clone(),
-                        cell: Some(cell.name.clone()),
-                    },
-                    |view| OverviewIntent::OpenView(reference(&view.name), view.view_type),
-                );
-            let saved_ms = views.iter().filter_map(|view| view.saved_at).max();
-            let rank = if top {
-                0
-            } else if testbench {
-                1
-            } else if unsaved {
-                2
-            } else {
-                3
-            };
-            rows.push((
-                rank,
-                CellRowSnapshot {
-                    name: cell.name.clone(),
-                    library: library.display_name().to_owned(),
-                    library_hint: None,
-                    role: if top {
-                        "Top"
-                    } else if testbench {
-                        "Testbench"
-                    } else {
-                        ""
-                    },
-                    views: views
-                        .iter()
-                        .map(|view| view.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    instances,
-                    unsaved,
-                    saved_ms,
-                    saved_stamp: saved_ms.map_or_else(String::new, crate::time_compat::local_stamp),
-                    intent,
-                },
-            ));
-        }
-    }
-    // Stable, so the cells of a rank saved alike, or never, keep the
-    // catalogue's library and name order.
-    rows.sort_by_key(|(rank, row)| (*rank, std::cmp::Reverse(row.saved_ms)));
-    rows.into_iter().map(|(_, row)| row).collect()
-}
-
-/// What the activity register is read from, by identity: the run history,
-/// every schematic (whose validated revisions it lists), the project's
-/// publications and its checkpoints.
-#[derive(Clone, PartialEq)]
-struct OperationsKey {
-    runs: crate::state::RunHistoryRevision,
-    schematics: (usize, u64, u64),
-    /// The newest library publication's receipt digest. The receipts are
-    /// hash-chained, so it names every publication before it as well.
-    publications: Option<crate::product::ContentDigest>,
-    /// How many checkpoints are listed, and the first and last of them.
-    checkpoints: (usize, Option<uuid::Uuid>, Option<uuid::Uuid>),
-    /// The configurations a run's row reads its configuration against.
-    configurations: u64,
-}
-
-impl OperationsKey {
-    fn of(model: &Model, recovery: &ProjectCheckpointRecoveryState) -> Self {
-        let checkpoints = &recovery.checkpoints;
-        Self {
-            runs: model.simulation.retained.runs.revision(),
-            schematics: schematic_stamps(model),
-            publications: model
+            let folder = model
                 .workspace
                 .content
                 .project
-                .library_publications()
-                .last()
-                .map(|receipt| receipt.receipt_digest()),
-            checkpoints: (
-                checkpoints.len(),
-                checkpoints
-                    .first()
-                    .map(|checkpoint| checkpoint.checkpoint_id()),
-                checkpoints
-                    .last()
-                    .map(|checkpoint| checkpoint.checkpoint_id()),
-            ),
-            configurations: model.workspace.content.configuration_sets.stamp(),
-        }
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-thread_local! {
-    /// Times this thread derived the Overview's Cells table.
-    pub static CELL_ROW_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// The part count of each schematic the Cells table counts instances from,
-/// as it reads them: the editor's for the view in front and the buffer's for
-/// every other, folded without regard to the buffers' order. An edit that
-/// adds or removes a part moves the fold once, on the frame it is made; one
-/// that moves a part or draws a wire does not, and neither does the buffer
-/// the editor writes back for the view in front a frame later.
-fn schematic_part_counts(model: &Model) -> (usize, u64, u64) {
-    let active = model.workspace.content.active_view.key();
-    let editor = std::iter::once((
-        Some(&active),
-        model
-            .schematic
-            .editor_ref()
-            .design
-            .document()
-            .components
-            .len(),
-    ));
-    let buffers = model
-        .workspace
-        .content
-        .schematic_buffers
-        .iter()
-        .filter(|(key, _)| **key != active)
-        .map(|(key, schematic)| (Some(key), schematic.document().components.len()));
-    fold(
-        editor.chain(buffers),
-        model.workspace.content.schematic_buffers.len(),
-    )
-}
-
-/// `entries` folded without regard to their order.
-fn fold<K: Hash, V: Hash>(
-    entries: impl Iterator<Item = (K, V)>,
-    count: usize,
-) -> (usize, u64, u64) {
-    let mut folded_xor = 0_u64;
-    let mut folded_sum = 0_u64;
-    for entry in entries {
-        let mut hasher = DefaultHasher::new();
-        entry.hash(&mut hasher);
-        let entry = hasher.finish();
-        folded_xor ^= entry;
-        folded_sum = folded_sum.wrapping_add(entry.rotate_left(17));
-    }
-    (count, folded_xor, folded_sum)
-}
-
-/// The content stamps of the open editor's schematic and of every buffered
-/// one, folded without regard to the buffers' order: an edit to any of them,
-/// or a buffer added or dropped, moves the fold.
-fn schematic_stamps(model: &Model) -> (usize, u64, u64) {
-    let editor = std::iter::once((None, model.schematic.editor_ref().design.content_stamp()));
-    let buffers = model
-        .workspace
-        .content
-        .schematic_buffers
-        .iter()
-        .map(|(key, schematic)| (Some(key), schematic.content_stamp()));
-    fold(
-        editor.chain(buffers),
-        model.workspace.content.schematic_buffers.len(),
-    )
-}
-
-/// The runs, validated revisions, library publications and checkpoints the
-/// project keeps, newest first: every one of them, since the table scrolls.
-/// A plain save keeps no record of its own, so none is listed for it.
-fn retained_operations(
-    model: &Model,
-    recovery: &ProjectCheckpointRecoveryState,
-) -> Arc<[OperationSnapshot]> {
-    let mut operations = model
-        .simulation
-        .retained
-        .runs
-        .iter()
-        .enumerate()
-        .map(|(index, run)| {
-            let measurement_count = run
-                .analyses
-                .iter()
-                .map(|analysis| analysis.measurements.len())
-                .sum();
-            let (timestamp_ms, stamp) =
-                OperationSnapshot::dated(unix_seconds_to_millis(run.timestamp));
-            // The design the run elaborated, as an ADE run history names
-            // its test's design; a run that recorded none says nothing.
-            let configuration = run
-                .prepared_receipt()
-                .and_then(|receipt| receipt.configuration())
-                .map(|recorded| {
-                    crate::state::workspace::recorded_configuration_words(
-                        &model.workspace.content.configuration_sets,
-                        recorded,
-                    )
-                })
-                .unwrap_or_default();
-            OperationSnapshot {
-                timestamp_ms,
-                stamp,
-                event: format!(
-                    "{} \u{b7} {}",
-                    run_title(run.id, &run.label),
-                    lifecycle_label(run.lifecycle, run.success)
-                ),
-                configuration,
-                elapsed: Some(run.elapsed_time),
-                detail: format!(
-                    "{} {} \u{b7} {measurement_count} {} \u{b7} {}",
-                    run.analyses.len(),
-                    singular_or_plural(run.analyses.len(), "analysis", "analyses"),
-                    singular_or_plural(measurement_count, "measurement", "measurements"),
-                    run.execution_target
-                        .map_or("engine not recorded", |target| target.label()),
-                ),
-                tone: lifecycle_tone(run.lifecycle, run.success),
-                intent: Some(OverviewIntent::OpenRun(index)),
+                .path
+                .as_deref()
+                .and_then(std::path::Path::parent);
+            if !deck.is_file(path, folder) {
+                return None;
             }
-        })
-        .collect::<Vec<_>>();
-    let mut retained_revision_ids = BTreeSet::new();
-    for schematic in std::iter::once(model.schematic.editor_ref().design)
-        .chain(model.workspace.content.schematic_buffers.values())
-    {
-        for revision in schematic.document().validated_revisions.records() {
-            if !retained_revision_ids.insert(revision.id().as_uuid()) {
-                continue;
-            }
-            let findings = revision.finding_counts();
-            let tone = if findings.blockers > 0 {
-                Tone::Error
-            } else if findings.advisories > 0 {
-                Tone::Warn
-            } else {
-                Tone::Neutral
-            };
-            let (timestamp_ms, stamp) = OperationSnapshot::dated(Some(revision.created_unix_ms()));
-            operations.push(OperationSnapshot {
-                timestamp_ms,
-                stamp,
-                event: format!("{} validated", revision.view_identity()),
-                configuration: String::new(),
-                elapsed: None,
-                detail: format!(
-                    "{} \u{b7} project revision {} \u{b7} {}",
-                    revision.revision_note(),
-                    revision.project_revision(),
-                    revision.author()
-                ),
-                tone,
-                intent: Some(OverviewIntent::OpenRevision(schematic_row_key(
-                    revision.id(),
-                ))),
-            });
+            open.text
         }
-    }
-    // Published library snapshots carry their own creation time. The
-    // hash-chained library *mutation* receipts beside them are deliberately
-    // absent: they record a sequence and no timestamp, so this time-ordered
-    // register could only show them by inventing a time for them.
-    for publication in model.workspace.content.project.library_publications() {
-        let (timestamp_ms, stamp) = OperationSnapshot::dated(Some(publication.created_unix_ms()));
-        operations.push(OperationSnapshot {
-            timestamp_ms,
-            stamp,
-            event: format!("Library published \u{b7} {}", publication.label()),
-            configuration: String::new(),
-            elapsed: None,
-            detail: format!(
-                "#{:04} \u{b7} library revision {} \u{b7} {} \u{b7} {}",
-                publication.sequence(),
-                publication.library_revision(),
-                publication.reason(),
-                publication.actor_id()
-            ),
-            tone: Tone::Neutral,
-            intent: Some(OverviewIntent::Command(
-                ProjectCommand::Page(ProjectPage::Library).key(),
-            )),
-        });
-    }
-    for checkpoint in &recovery.checkpoints {
-        let (timestamp_ms, stamp) = OperationSnapshot::dated(Some(checkpoint.created_unix_ms()));
-        operations.push(OperationSnapshot {
-            timestamp_ms,
-            stamp,
-            event: checkpoint.reason().label().to_owned(),
-            configuration: String::new(),
-            elapsed: None,
-            detail: format!("Revision {}", checkpoint.project_revision()),
-            tone: Tone::Neutral,
-            intent: Some(OverviewIntent::OpenCheckpoint(
-                checkpoint.checkpoint_id().to_string(),
-            )),
-        });
-    }
-    // Newest first; a record with no time after every dated one.
-    operations.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
-    operations.into()
-}
-
-/// The findings of the cell view runs start from that stop a run, worst
-/// first, each with its identity in the Problems list. Checks not run yet,
-/// out of date or unavailable are the Schematic checks row's to say: the
-/// strip names findings.
-pub fn blocking_findings(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> Vec<ProblemSnapshot> {
-    let model = &*cx.model;
-    let DesignCheckStatus::Current(receipt) = model.simulation_root_design_check_status(
-        cx.runs.slot_facts(cx.peers.design().review_markers()),
-    ) else {
-        return Vec::new();
     };
-    let root = model.workspace.content.simulation_root_reference();
-    // A published check moves the store's generation, so the findings are
-    // listed again only when a check is.
-    derived(
+    let mut identity = DefaultHasher::new();
+    text.hash(&mut identity);
+    Some(derived(
         ctx,
-        "overview.blocking findings",
-        (model.diagnostics.generation(), root.key()),
+        "overview.deck includes",
+        identity.finish(),
         || {
-            let result = &receipt.result;
-            let mut findings = result
-                .violations()
-                .iter()
-                .zip(finding_identities(&root, result))
-                .filter(|(violation, _)| {
-                    matches!(
-                        violation.severity,
-                        DrcSeverity::Critical | DrcSeverity::Error
-                    )
-                })
-                .map(|(violation, finding)| {
-                    (
-                        violation.severity == DrcSeverity::Critical,
-                        ProblemSnapshot {
-                            message: violation.message.clone(),
-                            path: violation.location.display(),
-                            tone: Tone::Error,
-                            finding: Some(finding),
-                        },
-                    )
-                })
-                .collect::<Vec<_>>();
-            // Critical first, each severity in the order the checks found them.
-            findings.sort_by_key(|(critical, _)| !*critical);
-            findings.into_iter().map(|(_, finding)| finding).collect()
+            rspice_design::netlist_document::parse_include_directives(text)
+                .into_iter()
+                .map(|include| include.locator().to_owned())
+                .collect::<Arc<[String]>>()
         },
-    )
+    ))
 }

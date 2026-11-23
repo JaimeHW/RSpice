@@ -13,6 +13,7 @@ use super::recovery_frames::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use rspice_app_project::workbench::project::health;
 use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
@@ -20,7 +21,8 @@ use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointReason, list,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
-    SaveScope, active_document_is_dirty, has_unsaved_changes, has_unsaved_changes_fresh,
+    LifecycleSource as _, SaveScope, active_document_is_dirty, has_unsaved_changes,
+    has_unsaved_changes_fresh,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{CellViewRef, ComponentType, Point};
@@ -287,8 +289,9 @@ fn after_a_crash_a_cell_only_the_autosave_holds_is_offered_as_new_in_it() {
     let _ = std::fs::remove_dir_all(folder);
 }
 
-/// A cell only the kept autosave holds has never been saved: the Overview's
-/// Cells table says "Unsaved" for when it was modified, not a dash.
+/// A cell only the kept autosave holds has never been saved: the project
+/// inspector beside the Overview counts it among the documents a save would
+/// write.
 #[test]
 fn a_kept_cell_never_saved_reads_unsaved_on_the_overview() {
     let (folder, _) = crashed_session_making("autosave-crash-cell-overview", &[CRASH_NEW_CELL]);
@@ -300,42 +303,36 @@ fn a_kept_cell_never_saved_reads_unsaved_on_the_overview() {
     );
     app.state.workbench.activate(Workspace::Project);
     app.state.project.project_page = ProjectPage::Overview;
-    let row = |output: &egui::FullOutput| {
-        output
-            .platform_output
-            .accesskit_update
-            .as_ref()
-            .and_then(|update| {
-                update.nodes.iter().find_map(|(_, node)| {
-                    node.label()
-                        .filter(|label| label.starts_with("Cell: crashcell"))
-                        .map(str::to_owned)
-                })
-            })
-    };
     let deadline = Instant::now() + Duration::from_secs(60);
-    let label = loop {
-        let shown = app_frame(&ctx, &mut app, Vec::new());
-        if let Some(label) = row(&shown) {
-            break label;
+    loop {
+        let shown = painted(&app_frame(&ctx, &mut app, Vec::new()));
+        let documents = health::unsaved_documents(&app.state.model, &app.state.lifecycle_view());
+        if documents
+            .iter()
+            .any(|document| document.ends_with("crashcell/schematic"))
+        {
+            let count = match documents.len() {
+                1 => "1 document".to_owned(),
+                count => format!("{count} documents"),
+            };
+            assert!(
+                shown.lines().skip_while(|line| *line != "Unsaved").nth(1) == Some(count.as_str()),
+                "the inspector counts {count}:\n{shown}"
+            );
+            break;
         }
-        assert!(
-            Instant::now() < deadline,
-            "no crashcell row:\n{}",
-            painted(&shown)
-        );
-    };
-    assert!(label.contains("Modified: Unsaved"), "{label}");
+        assert!(Instant::now() < deadline, "no crashcell:\n{shown}");
+    }
     let _ = std::fs::remove_dir_all(folder);
 }
 
 /// A crashed session whose technology this computer does not have: the
 /// question says so before anything is kept, and the Console and the
-/// Overview's Dependencies row say it in the same words.
+/// Overview's Design pane say it in the same words.
 #[test]
 fn after_a_crash_a_technology_not_installed_here_is_said_in_the_question() {
     let (folder, _) = crashed_session_making("autosave-crash-technology", &[CRASH_TECHNOLOGY]);
-    let (app, ctx, asked) = open_after_crash(&folder);
+    let (app, _, asked) = open_after_crash(&folder);
     let model = &app.state.model;
     let notice = model
         .workspace
@@ -358,9 +355,10 @@ fn after_a_crash_a_technology_not_installed_here_is_said_in_the_question() {
             .any(|entry| entry.message == notice),
         "the Console says it in the same words"
     );
-    let dependencies = rspice_app_project::workbench::project::health::dependencies(&ctx, model);
-    assert_eq!(dependencies.state, "Technology: not installed");
-    assert_eq!(dependencies.detail, notice);
+    let technology = rspice_app_project::workbench::project::health::technology(model)
+        .expect("the Overview states the technology");
+    assert_eq!(technology.state, "Not installed");
+    assert_eq!(technology.detail, notice);
     let _ = std::fs::remove_dir_all(folder);
 }
 

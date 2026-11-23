@@ -220,7 +220,7 @@ pub struct ProjectState {
     /// The History page: its filter, kind and table, the journal's rows and
     /// what it asks about a schematic revision.
     pub history: Box<crate::workbench::project::revision_history::HistoryPageState>,
-    /// The Overview's tables: their order, sized columns, selection and
+    /// The Overview's outputs table: its sized columns, selection and
     /// scroll. Presentation only; they belong to the open project.
     pub overview_tables: crate::workbench::surfaces::project::overview::OverviewTables,
     /// Device-local projection retained by the Library/Cellview specialist

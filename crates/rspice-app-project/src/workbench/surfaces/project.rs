@@ -12,7 +12,6 @@ pub mod landing;
 pub mod library;
 pub mod library_publication;
 pub mod overview;
-mod page;
 pub(crate) mod recovery;
 mod technology;
 

@@ -8,16 +8,11 @@
 
 use std::time::{Duration, Instant};
 
-use egui::Context;
-
 use super::configuration_editing::{nodes, pick, settle};
 use super::recovery_frames::{offscreen, painted};
+use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
-use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
-use rspice_app_project::workbench::surfaces::project::overview::{
-    OverviewIntent, OverviewSnapshot,
-};
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::product::SimulationPlanId;
@@ -367,32 +362,19 @@ fn recorded(
         .clone()
 }
 
-/// The configuration each run row on the Overview's Activity card names, as
-/// the page keeps it: its Configuration column, which the card keeps at
-/// every width.
-fn activity(ctx: &Context, app: &mut RSpiceApp) -> Vec<String> {
-    app.state.workbench.activate(Workspace::Project);
-    app.state.project.project_page = ProjectPage::Overview;
-    settle(ctx, app, Vec::new());
-    OverviewSnapshot::capture(ctx, &features::cx_with_foreign_answers(app, |_| true))
-        .operations
-        .iter()
-        .filter(|operation| matches!(operation.intent, Some(OverviewIntent::OpenRun(_))))
-        .map(|operation| operation.configuration.clone())
-        .collect()
-}
-
-/// That a run row names `words` as its configuration.
-fn row_naming(rows: &[String], words: &str) {
-    assert!(
-        rows.iter().any(|configuration| configuration == words),
-        "no run row names {words:?}: {rows:#?}"
-    );
+/// The name the newest run recorded for its configuration.
+fn newest_configuration(app: &RSpiceApp) -> String {
+    app.state.model.simulation.retained.runs[0]
+        .prepared_receipt()
+        .and_then(|receipt| receipt.configuration())
+        .expect("a design run records its configuration")
+        .name
+        .clone()
 }
 
 /// One session, two plans on two configurations, run side by side as one
 /// campaign: each run elaborates its own plan's configuration and its result
-/// names it by identity, name and revision, the Overview's activity rows and
+/// names it by identity, name and revision, the Overview's Latest run and
 /// the run's inspector say which, and a configuration changed or deleted
 /// since reads so. The record survives the project's save and reopen.
 #[test]
@@ -436,9 +418,8 @@ fn two_plans_on_two_configurations_run_together_and_each_result_names_its_own() 
     );
     assert_eq!(marked(&app), Some(reference), "neither run moved the mark");
 
-    let rows = activity(&ctx, &mut app);
-    row_naming(&rows, REFERENCE);
-    row_naming(&rows, VENDOR);
+    let newest = newest_configuration(&app);
+    assert!([REFERENCE, VENDOR].contains(&newest.as_str()), "{newest}");
 
     // Saved and reopened, each run still names its configuration.
     let project =
@@ -475,9 +456,6 @@ fn two_plans_on_two_configurations_run_together_and_each_result_names_its_own() 
         .remove(vendor, revision_of(vendor))
         .expect("a configuration not marked for runs can be deleted");
     publish(&mut app, catalog);
-    let rows = activity(&ctx, &mut app);
-    row_naming(&rows, &format!("{REFERENCE} (changed)"));
-    row_naming(&rows, &format!("{VENDOR} (deleted)"));
 
     // The run's details in the Results inspector say the same.
     let index = app
