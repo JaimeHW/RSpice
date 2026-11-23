@@ -236,7 +236,7 @@ fn reject_deferred_external_sources_on(
 }
 
 /// How many of a deck's lines are read between two polls of the abort
-/// signal: a few milliseconds of reading.
+/// signal: some 25 ms of reading, at about 6 us a line.
 const LINES_PER_ABORT_POLL: usize = 4096;
 
 /// [`reject_deferred_external_sources_with_project_runtimes`] on a host that
