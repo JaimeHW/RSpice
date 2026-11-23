@@ -100,6 +100,7 @@ pub mod workbench {
         pub mod navigator {
             pub mod results;
             pub mod results_actions;
+            mod results_catalogue;
             pub mod results_rows;
             pub(crate) mod results_runs;
             mod results_sets;

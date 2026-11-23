@@ -25,6 +25,7 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::super::super::commands::result_navigation::{open_run_log, producing_run};
 use super::results::{RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT, ResultArtifact};
+use super::results_rows::VisibleKeys;
 use rspice_app_workbench::workbench::docks::navigator::row_context_menu;
 use rspice_schematic_editor::view::cross_probe;
 
@@ -32,11 +33,11 @@ use rspice_schematic_editor::view::cross_probe;
 pub(super) fn update_result_browser_multi_selection(
     state: &mut ResultsParts<'_>,
     target: &ResultBrowserSelectionKey,
-    ordered_visible: &[ResultBrowserSelectionKey],
+    ordered_visible: &VisibleKeys<'_>,
     modifiers: egui::Modifiers,
 ) {
     if modifiers.shift {
-        tick_result_range(state, target, ordered_visible);
+        tick_result_range(state, target, ordered_visible.keys());
     } else {
         let ticked = result_quantity_ticked(state, target);
         set_result_quantity_ticked(state, target, !ticked);
@@ -75,7 +76,7 @@ pub(super) fn handle_result_signal_keyboard(
     response: &egui::Response,
     state: &mut ResultsParts<'_>,
     current: &SourceWaveformPresentationKey,
-    ordered_visible: &[ResultBrowserSelectionKey],
+    visible: &VisibleKeys<'_>,
 ) {
     if !response.has_focus() {
         return;
@@ -88,7 +89,7 @@ pub(super) fn handle_result_signal_keyboard(
         update_result_browser_multi_selection(
             state,
             &ResultBrowserSelectionKey::Waveform(current.clone()),
-            ordered_visible,
+            visible,
             modifiers,
         );
         return;
@@ -114,6 +115,7 @@ pub(super) fn handle_result_signal_keyboard(
         return;
     };
     let current_key = ResultBrowserSelectionKey::Waveform(current.clone());
+    let ordered_visible = visible.keys();
     let Some(index) = ordered_visible.iter().position(|key| key == &current_key) else {
         return;
     };
@@ -138,7 +140,7 @@ pub(super) fn handle_result_artifact_keyboard(
     response: &egui::Response,
     state: &mut ResultsParts<'_>,
     artifact: &ResultArtifact,
-    ordered_visible: &[ResultBrowserSelectionKey],
+    visible: &VisibleKeys<'_>,
 ) {
     if !response.has_focus() {
         return;
@@ -149,7 +151,7 @@ pub(super) fn handle_result_artifact_keyboard(
         .ctx
         .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
     {
-        update_result_browser_multi_selection(state, &current, ordered_visible, modifiers);
+        update_result_browser_multi_selection(state, &current, visible, modifiers);
         return;
     }
     if response
@@ -172,6 +174,7 @@ pub(super) fn handle_result_artifact_keyboard(
     } else {
         return;
     };
+    let ordered_visible = visible.keys();
     let Some(index) = ordered_visible.iter().position(|key| key == &current) else {
         return;
     };

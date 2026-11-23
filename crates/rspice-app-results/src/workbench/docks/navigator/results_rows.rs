@@ -14,8 +14,8 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::super::super::design_system::WorkbenchIcon;
 use super::results::{
-    ResultArtifact, ResultArtifactKind, ResultRun, ResultSignalVirtualRow, ResultsBrowserKind,
-    ResultsBrowserScope, data_state_meta, result_browser_dataset_expanded,
+    ResultAnalysis, ResultArtifact, ResultArtifactKind, ResultRun, ResultSignalVirtualRow,
+    ResultsBrowserKind, ResultsBrowserScope, data_state_meta, result_browser_dataset_expanded,
     result_browser_group_expanded, result_browser_instance_expanded, results_browser_clear_filters,
     set_result_browser_dataset_expanded, set_result_browser_group_expanded,
     set_result_browser_instance_expanded,
@@ -656,44 +656,189 @@ pub(super) struct InstanceRow<'a> {
 }
 
 /// The signal list as the reader sees it: one row per dataset, analysis,
-/// open instance and listed quantity, in screen order.
+/// open instance and listed quantity, in screen order. A run of quantities is
+/// held as one span, so laying a million of them out is one entry, and a row
+/// of one is made only when it is drawn.
 pub(super) struct SignalRows<'a> {
-    pub(super) rows: Vec<ResultSignalVirtualRow>,
+    spans: Vec<RowSpan<'a>>,
+    /// The screen row each span starts at.
+    starts: Vec<usize>,
     pub(super) instances: Vec<InstanceRow<'a>>,
     /// Quantities under open heads, which is what "nothing matches" counts.
     pub(super) quantity_rows: usize,
+    /// Whether an open analysis's listing is still being made.
+    pub(super) pending: bool,
 }
 
-impl SignalRows<'_> {
-    /// The quantities on screen, top to bottom: what a Shift range and
-    /// "Tick visible quantities" act on.
-    pub(super) fn visible_keys(&self, runs: &[ResultRun]) -> Vec<ResultBrowserSelectionKey> {
-        self.rows
-            .iter()
-            .filter_map(|row| match *row {
-                ResultSignalVirtualRow::Signal {
+/// Rows in screen order: a head, an instance or a note is one row, a span of
+/// quantities as many rows as it holds.
+#[derive(Clone, Copy)]
+enum RowSpan<'a> {
+    One(ResultSignalVirtualRow),
+    /// The quantities at one level of an analysis's tree.
+    Items {
+        run: usize,
+        analysis: usize,
+        items: &'a [TreeItem],
+        depth: usize,
+    },
+    /// A flat list's signals, then its other results.
+    Flat {
+        run: usize,
+        analysis: usize,
+        signals: usize,
+        artifacts: usize,
+    },
+}
+
+impl RowSpan<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::One(_) => 1,
+            Self::Items { items, .. } => items.len(),
+            Self::Flat {
+                signals, artifacts, ..
+            } => signals + artifacts,
+        }
+    }
+
+    fn row(&self, offset: usize) -> ResultSignalVirtualRow {
+        match *self {
+            Self::One(row) => row,
+            Self::Items {
+                run,
+                analysis,
+                items,
+                depth,
+            } => match items[offset] {
+                TreeItem::Signal(signal) => ResultSignalVirtualRow::Signal {
                     run,
                     analysis,
                     signal,
-                    ..
-                } => Some(ResultBrowserSelectionKey::Waveform(
-                    runs[run].analyses[analysis].signals[signal]
-                        .identity
-                        .clone(),
-                )),
-                ResultSignalVirtualRow::Artifact {
+                    depth,
+                },
+                TreeItem::Artifact(artifact) => ResultSignalVirtualRow::Artifact {
                     run,
                     analysis,
                     artifact,
-                    ..
-                } => Some(ResultBrowserSelectionKey::Artifact(
-                    runs[run].analyses[analysis].artifacts[artifact]
-                        .identity
-                        .clone(),
-                )),
-                _ => None,
-            })
-            .collect()
+                    depth,
+                },
+            },
+            Self::Flat {
+                run,
+                analysis,
+                signals,
+                ..
+            } => {
+                if offset < signals {
+                    ResultSignalVirtualRow::Signal {
+                        run,
+                        analysis,
+                        signal: offset,
+                        depth: 0,
+                    }
+                } else {
+                    ResultSignalVirtualRow::Artifact {
+                        run,
+                        analysis,
+                        artifact: offset - signals,
+                        depth: 0,
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<'a> SignalRows<'a> {
+    fn push(&mut self, span: RowSpan<'a>) {
+        if span.len() > 0 {
+            self.starts.push(self.len());
+            self.spans.push(span);
+        }
+    }
+
+    fn push_row(&mut self, row: ResultSignalVirtualRow) {
+        self.push(RowSpan::One(row));
+    }
+
+    /// The rows on the list, at one row height each.
+    pub(super) fn len(&self) -> usize {
+        self.starts
+            .last()
+            .zip(self.spans.last())
+            .map_or(0, |(start, span)| start + span.len())
+    }
+
+    /// Row `index` of the list, top to bottom.
+    pub(super) fn row(&self, index: usize) -> ResultSignalVirtualRow {
+        let span = self.starts.partition_point(|start| *start <= index) - 1;
+        self.spans[span].row(index - self.starts[span])
+    }
+
+    /// Whether any quantity is on the list.
+    pub(super) fn has_quantities(&self) -> bool {
+        self.spans
+            .iter()
+            .any(|span| matches!(span, RowSpan::Items { .. } | RowSpan::Flat { .. }))
+    }
+
+    /// The quantities on screen, top to bottom: what a Shift range and "Tick
+    /// visible quantities" act on, read only when one of them does.
+    pub(super) fn visible_keys<'b>(&'b self, runs: &'b [ResultRun]) -> VisibleKeys<'b>
+    where
+        'a: 'b,
+    {
+        VisibleKeys {
+            rows: self,
+            runs,
+            keys: std::cell::OnceCell::new(),
+        }
+    }
+}
+
+/// The keys of the quantities on the list, top to bottom, made the first
+/// time something reads them.
+pub(super) struct VisibleKeys<'a> {
+    rows: &'a SignalRows<'a>,
+    runs: &'a [ResultRun],
+    keys: std::cell::OnceCell<Vec<ResultBrowserSelectionKey>>,
+}
+
+impl VisibleKeys<'_> {
+    pub(super) fn keys(&self) -> &[ResultBrowserSelectionKey] {
+        self.keys.get_or_init(|| {
+            let runs = self.runs;
+            self.rows
+                .spans
+                .iter()
+                .flat_map(|span| (0..span.len()).map(|offset| span.row(offset)))
+                .filter_map(|row| match row {
+                    ResultSignalVirtualRow::Signal {
+                        run,
+                        analysis,
+                        signal,
+                        ..
+                    } => {
+                        let analysis = &runs[run].analyses[analysis];
+                        Some(ResultBrowserSelectionKey::Waveform(
+                            analysis.signals.identity(signal, analysis.presentation_key),
+                        ))
+                    }
+                    ResultSignalVirtualRow::Artifact {
+                        run,
+                        analysis,
+                        artifact,
+                        ..
+                    } => Some(ResultBrowserSelectionKey::Artifact(
+                        runs[run].analyses[analysis].artifacts[artifact]
+                            .identity
+                            .clone(),
+                    )),
+                    _ => None,
+                })
+                .collect()
+        })
     }
 }
 
@@ -707,9 +852,11 @@ pub(super) fn signal_rows<'a>(
     filtering: bool,
 ) -> SignalRows<'a> {
     let mut list = SignalRows {
-        rows: Vec::new(),
+        spans: Vec::new(),
+        starts: Vec::new(),
         instances: Vec::new(),
         quantity_rows: 0,
+        pending: false,
     };
     for (run_position, run) in runs.iter().enumerate() {
         let run_expanded = filtering
@@ -718,7 +865,7 @@ pub(super) fn signal_rows<'a>(
                 run.dataset_id,
                 active_run == Some(run.run_index) || runs.len() == 1,
             );
-        list.rows.push(ResultSignalVirtualRow::Dataset {
+        list.push_row(ResultSignalVirtualRow::Dataset {
             run: run_position,
             expanded: run_expanded,
         });
@@ -726,8 +873,7 @@ pub(super) fn signal_rows<'a>(
             continue;
         }
         if run.analyses.is_empty() {
-            list.rows
-                .push(ResultSignalVirtualRow::DatasetOmission { run: run_position });
+            list.push_row(ResultSignalVirtualRow::DatasetOmission { run: run_position });
             continue;
         }
         for (analysis_position, analysis) in run.analyses.iter().enumerate() {
@@ -735,7 +881,7 @@ pub(super) fn signal_rows<'a>(
                 && active_analysis == Some(analysis.analysis_index);
             let expanded = filtering
                 || result_browser_group_expanded(ctx, analysis.presentation_key, analysis_active);
-            list.rows.push(ResultSignalVirtualRow::Analysis {
+            list.push_row(ResultSignalVirtualRow::Analysis {
                 run: run_position,
                 analysis: analysis_position,
                 expanded,
@@ -743,15 +889,16 @@ pub(super) fn signal_rows<'a>(
             if !expanded {
                 continue;
             }
+            list.pending |= analysis.signals.pending();
             if analysis.signals.is_empty() && analysis.artifacts.is_empty() {
-                list.rows.push(ResultSignalVirtualRow::Omission {
+                list.push_row(ResultSignalVirtualRow::Omission {
                     run: run_position,
                     analysis: analysis_position,
                 });
                 continue;
             }
             list.quantity_rows += analysis.signals.len() + analysis.artifacts.len();
-            match &analysis.tree {
+            match analysis.signals.tree() {
                 Some(tree) => push_instance_rows(
                     ctx,
                     &mut list,
@@ -761,25 +908,12 @@ pub(super) fn signal_rows<'a>(
                     0,
                     filtering,
                 ),
-                None => {
-                    list.rows.extend((0..analysis.signals.len()).map(|signal| {
-                        ResultSignalVirtualRow::Signal {
-                            run: run_position,
-                            analysis: analysis_position,
-                            signal,
-                            depth: 0,
-                        }
-                    }));
-                    list.rows
-                        .extend((0..analysis.artifacts.len()).map(|artifact| {
-                            ResultSignalVirtualRow::Artifact {
-                                run: run_position,
-                                analysis: analysis_position,
-                                artifact,
-                                depth: 0,
-                            }
-                        }));
-                }
+                None => list.push(RowSpan::Flat {
+                    run: run_position,
+                    analysis: analysis_position,
+                    signals: analysis.signals.len(),
+                    artifacts: analysis.artifacts.len(),
+                }),
             }
         }
     }
@@ -804,7 +938,7 @@ fn push_instance_rows<'a>(
             analysis,
             node: child,
         });
-        list.rows.push(ResultSignalVirtualRow::Instance {
+        list.push_row(ResultSignalVirtualRow::Instance {
             instance: list.instances.len() - 1,
             depth,
             expanded,
@@ -821,22 +955,37 @@ fn push_instance_rows<'a>(
             );
         }
     }
-    for item in &node.items {
-        list.rows.push(match *item {
-            TreeItem::Signal(signal) => ResultSignalVirtualRow::Signal {
-                run,
-                analysis,
-                signal,
-                depth,
-            },
-            TreeItem::Artifact(artifact) => ResultSignalVirtualRow::Artifact {
-                run,
-                analysis,
-                artifact,
-                depth,
-            },
-        });
-    }
+    list.push(RowSpan::Items {
+        run,
+        analysis,
+        items: &node.items,
+        depth,
+    });
+}
+
+/// Waveform `index` of `analysis` as its run holds it now, where the analysis
+/// still stands where the browser's rows were built from it.
+fn retained_waveform<'a>(
+    state: &'a ResultsParts<'_>,
+    run: &ResultRun,
+    analysis: &ResultAnalysis,
+    index: usize,
+) -> Option<&'a crate::state::RetainedTrace> {
+    let retained = state
+        .model
+        .simulation
+        .retained
+        .runs
+        .get(run.run_index)
+        .filter(|retained| retained.dataset_id == run.dataset_id)?;
+    retained
+        .analyses
+        .get(analysis.analysis_index)
+        .filter(|held| {
+            AnalysisPresentationKey::new(retained.dataset_id, held) == analysis.presentation_key
+        })?
+        .waveforms
+        .get(index)
 }
 
 pub(super) fn show_virtualized_result_signals(
@@ -848,7 +997,7 @@ pub(super) fn show_virtualized_result_signals(
     active_analysis: Option<usize>,
     selected_trace: Option<&rspice_results_ui::selection::SelectedResultTrace>,
     selected_artifact: Option<&ResultArtifactPresentationKey>,
-    ordered_visible: &[ResultBrowserSelectionKey],
+    ordered_visible: &VisibleKeys<'_>,
     (ticked_set, ticked): (
         &std::collections::HashSet<ResultBrowserSelectionKey>,
         &[ResultBrowserSelectionKey],
@@ -860,7 +1009,7 @@ pub(super) fn show_virtualized_result_signals(
     // A row labels the conductor the design drew; its identity stays the deck
     // name the engine answered under.
     let notations = bus_notations(&state.model.workspace, &state.model.schematic);
-    let rows = &list.rows;
+    let rows = list.len();
     let signal_rows = list.quantity_rows;
 
     let row_height = result_browser_row_height(&Tokens::get(ui.ctx()));
@@ -876,25 +1025,25 @@ pub(super) fn show_virtualized_result_signals(
             // Rows abut, as a tree's do: the row is the stride.
             ui.spacing_mut().item_spacing.y = 0.0;
             let row_stride = row_height;
-            ui.set_height(row_stride * rows.len() as f32);
+            ui.set_height(row_stride * rows as f32);
             let mut visible_start = (viewport.min.y / row_stride).floor().max(0.0) as usize;
             let visible_end =
-                ((viewport.max.y / row_stride).ceil() as usize + 1).min(rows.len());
-            if visible_end == rows.len() {
+                ((viewport.max.y / row_stride).ceil() as usize + 1).min(rows);
+            if visible_end == rows {
                 let visible_count = visible_end.saturating_sub(visible_start);
-                visible_start = rows.len().saturating_sub(visible_count);
+                visible_start = rows.saturating_sub(visible_count);
             }
-            let (render_start, render_end) = if rows.len()
+            let (render_start, render_end) = if rows
                 >= RESULT_BROWSER_VIRTUALIZATION_THRESHOLD
             {
                 (
                     visible_start.saturating_sub(RESULT_BROWSER_OVERSCAN_ROWS),
                     visible_end
                         .saturating_add(RESULT_BROWSER_OVERSCAN_ROWS)
-                        .min(rows.len()),
+                        .min(rows),
                 )
             } else {
-                (0, rows.len())
+                (0, rows)
             };
             let y_min = ui.max_rect().top() + render_start as f32 * row_stride;
             let y_max = ui.max_rect().top() + render_end as f32 * row_stride;
@@ -902,12 +1051,7 @@ pub(super) fn show_virtualized_result_signals(
                 egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), y_min..=y_max);
             ui.scope_builder(egui::UiBuilder::new().max_rect(render_rect), |ui| {
                 ui.skip_ahead_auto_ids(render_start);
-                for row in rows
-                    .iter()
-                    .take(render_end)
-                    .skip(render_start)
-                    .copied()
-                {
+                for row in (render_start..render_end).map(|index| list.row(index)) {
                     ui.allocate_ui_with_layout(
                         egui::vec2(ui.available_width(), row_height),
                         egui::Layout::top_down(egui::Align::Min),
@@ -1039,7 +1183,9 @@ pub(super) fn show_virtualized_result_signals(
                         }
                         ResultSignalVirtualRow::Omission { run, analysis } => {
                             let analysis = &runs[run].analyses[analysis];
-                            let reason = if analysis.total_signals == 0
+                            let reason = if analysis.signals.pending() {
+                                "Listing signals\u{2026}"
+                            } else if analysis.total_signals == 0
                                 && analysis.domain == "scalar solution"
                             {
                                 "Values are in the OP sheet"
@@ -1064,9 +1210,20 @@ pub(super) fn show_virtualized_result_signals(
                             signal,
                             depth,
                         } => {
-                            let in_tree = runs[run].analyses[analysis].tree.is_some();
-                            let analysis = &runs[run].analyses[analysis];
-                            let signal = &analysis.signals[signal];
+                            let result_run = &runs[run];
+                            let analysis = &result_run.analyses[analysis];
+                            let in_tree = analysis.signals.tree().is_some();
+                            let signal = analysis.signals.signal(
+                                signal,
+                                analysis.presentation_key,
+                                retained_waveform(
+                                    state,
+                                    result_run,
+                                    analysis,
+                                    analysis.signals.waveform_index(signal),
+                                ),
+                            );
+                            let signal = &signal;
                             let shown = notations.display(&signal.name);
                             // Under an instance a row names the signal inside
                             // it; the instance rows above it carry the path.
@@ -1166,8 +1323,8 @@ pub(super) fn show_virtualized_result_signals(
                             artifact,
                             depth,
                         } => {
-                            let in_tree = runs[run].analyses[analysis].tree.is_some();
                             let analysis = &runs[run].analyses[analysis];
+                            let in_tree = analysis.signals.tree().is_some();
                             let artifact = &analysis.artifacts[artifact];
                             let full_name = drawn_artifact_name(artifact, &notations);
                             let measurement = artifact
@@ -1260,7 +1417,7 @@ pub(super) fn show_virtualized_result_signals(
             "The rest of this run's signals are listed when it ends.",
         );
     }
-    if signal_rows == 0 {
+    if signal_rows == 0 && !list.pending {
         muted(
             ui,
             if state.model.simulation.retained.runs.is_empty() {
@@ -1350,9 +1507,9 @@ pub(super) fn instance_leaf_keys(
         .leaves()
         .into_iter()
         .map(|leaf| match leaf {
-            TreeItem::Signal(index) => {
-                ResultBrowserSelectionKey::Waveform(analysis.signals[index].identity.clone())
-            }
+            TreeItem::Signal(index) => ResultBrowserSelectionKey::Waveform(
+                analysis.signals.identity(index, analysis.presentation_key),
+            ),
             TreeItem::Artifact(index) => {
                 ResultBrowserSelectionKey::Artifact(analysis.artifacts[index].identity.clone())
             }

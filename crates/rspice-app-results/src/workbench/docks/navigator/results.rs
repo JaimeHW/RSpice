@@ -9,8 +9,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::browser_plot::result_quantity_ticked;
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, ResultsParts, analysis_default_unit, browser_signal_unit,
-    retained_evidence_is_valid,
+    AnalysisPresentationKey, ResultsParts, retained_evidence_is_valid,
 };
 use crate::workbench::framework::requests::{ExportResultQuantities, FocusNavigatorSearch};
 use crate::workbench::results::commands::ResultsCommand;
@@ -25,18 +24,16 @@ use super::results_actions::{
     compare_enabled, execute, locate_on_schematic_menu, select_result_analysis_by_key,
     select_result_browser_key, set_result_quantities_ticked,
 };
+use super::results_catalogue::{ListedArtifact, ListedSignals, ListingAsk, Quantity};
 use super::results_rows::{
     ResultCompletenessClass, artifact_hierarchical_name, artifact_signal_kind, expression_header,
     is_plottable_artifact, result_analysis_browser_status, result_analysis_completeness,
-    result_analysis_domain, result_browser_manifest_row, result_quantity_kind_label,
-    result_run_completeness, result_run_operational_label, retained_result_artifacts,
-    show_virtualized_result_signals, signal_row, signal_rows,
+    result_analysis_domain, result_browser_manifest_row, result_run_completeness,
+    result_run_operational_label, retained_result_artifacts, show_virtualized_result_signals,
+    signal_row, signal_rows,
 };
 use super::results_sets::{save_ticked_as_set, signal_sets_menu};
-use super::results_tree::{
-    BrowserQuery, InstanceNode, SignalKind, TreeItem, build_tree, is_generated_node,
-    split_hierarchy,
-};
+use super::results_tree::{BrowserQuery, SignalKind};
 use rspice_app_workbench::workbench::docks::navigator::muted;
 use rspice_app_workbench::workbench::docks::navigator::{
     PANEL_SEARCH_MARGIN_X, search_focus_requested,
@@ -186,19 +183,36 @@ pub(in crate::workbench) fn results(
             (key, valid)
         })
         .collect::<std::collections::HashMap<_, _>>();
+    // Each analysis's signals are read from its catalogue, which a large
+    // analysis fills a slice a frame, and listed away from the frame when the
+    // analysis is large; the generation moves as either arrives.
+    let catalogued = super::results_catalogue::advance(
+        ui.ctx(),
+        state.model.simulation.retained.runs.iter().flat_map(|run| {
+            run.analyses.iter().map(move |analysis| {
+                (
+                    AnalysisPresentationKey::new(run.dataset_id, analysis),
+                    analysis,
+                )
+            })
+        }),
+    );
     // The row model is kept until something it is built from changes: the
     // retained runs or the state of one of their analyses, the query and the
-    // facets, or what was recent. Building it walks every retained signal and
-    // copies its name, which no idle frame and no tick should do: a row reads
-    // its tick as it is drawn.
+    // facets, what was recent, or a catalogue or listing that arrived.
+    // Building it reads each analysis, never each of its signals: a row reads
+    // its signal from the listing, and its tick, as it is drawn.
     let fingerprint = browser_rows_fingerprint(
         &*state,
         &analysis_integrity,
         (kind, layout, order, scope, producer_facet, show_internal),
-        (active_run, expression_query_match),
+        (active_run, expression_query_match, catalogued),
     );
-    let runs = browser_rows(ui.ctx(), &*state, fingerprint, || {
-        state.model.simulation
+    let ctx = ui.ctx().clone();
+    let model = browser_rows(ui.ctx(), &*state, fingerprint, || {
+        BrowserModel {
+        loaded: loaded_signals(&ctx, &*state, show_internal),
+        runs: state.model.simulation
         .retained.runs
         .iter()
         .enumerate()
@@ -242,82 +256,6 @@ pub(in crate::workbench) fn results(
                         || query.matches_word(integrity)
                         || query.matches_word(completeness)
                         || query.matches_word(currentness_label);
-                    let mut signals = analysis
-                        .waveforms
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, waveform)| {
-                            show_internal || !is_generated_node(&waveform.name)
-                        })
-                        .filter(|(_, waveform)| {
-                            // The unit the signal actually reads in decides
-                            // its kind. Treating "not a current" as a voltage
-                            // filed noise densities and decibel magnitudes
-                            // under Voltage.
-                            let unit = browser_signal_unit(
-                                &waveform.name,
-                                waveform.unit.as_deref(),
-                                analysis_default_unit(analysis.analysis_type),
-                            );
-                            kind.admits(unit)
-                        })
-                        .filter_map(|(waveform_index, waveform)| {
-                            let unit = browser_signal_unit(
-                                &waveform.name,
-                                waveform.unit.as_deref(),
-                                analysis.analysis_type.axis_info().3,
-                            );
-                            let quantity_kind =
-                                result_quantity_kind_label(&waveform.name, unit);
-                            if !analysis_query_matches
-                                && !query.matches_name(&waveform.name)
-                                && !query.matches_word(unit)
-                                && !query.matches_word(quantity_kind)
-                                && !query.matches_word("vector")
-                            {
-                                return None;
-                            }
-                            let identity = SourceWaveformPresentationKey::new(
-                                presentation_key,
-                                waveform.name.clone(),
-                            );
-                            let in_scope = match scope {
-                                ResultsBrowserScope::All => true,
-                                ResultsBrowserScope::Recent => state.results
-                                    .session.recent_signal_rank(&identity)
-                                    .is_some(),
-                            };
-                            if !in_scope {
-                                return None;
-                            }
-                            let samples = waveform.y.len();
-                            Some(ResultSignal {
-                                kind: SignalKind::of_waveform(&waveform.name, quantity_kind),
-                                waveform_index,
-                                identity,
-                                name: waveform.name.clone(),
-                                unit: unit.to_owned(),
-                                samples,
-                                color: waveform.color.clone(),
-                                // Nothing: every row of a waveform list is a
-                                // vector, the unit rides the value, and the
-                                // sample count is not something a reader acts
-                                // on from here.
-                                meta: String::new(),
-                                // A swept quantity has no one value: the last
-                                // sample is the end of the sweep, and read
-                                // against the row's name it passes for "the
-                                // value of V(out)". A solved scalar does have
-                                // one, and states it.
-                                value: (samples == 1)
-                                    .then(|| waveform.y.samples(..).find(|v| v.is_finite()))
-                                    .flatten()
-                                    .map(|value| {
-                                        crate::ui::plot::fmt_si_significant(value, unit, 4)
-                                    }),
-                            })
-                        })
-                        .collect::<Vec<_>>();
                     // The row's meta line stays typed metadata: kind, shape,
                     // sample count. Data state belongs to the producing
                     // analysis, so appending it here would repeat one word down
@@ -345,22 +283,59 @@ pub(in crate::workbench) fn results(
                         .collect::<Vec<_>>();
                     if scope == ResultsBrowserScope::Recent {
                         // Recent means recency order; the sort facet yields.
-                        signals.sort_by_key(|signal| {
-                            state.results
-                                .session.recent_signal_rank(&signal.identity)
-                                .unwrap_or(usize::MAX)
-                        });
                         artifacts.sort_by_key(|artifact| {
                             state.results
                                 .session.recent_result_artifact_rank(&artifact.identity)
                                 .unwrap_or(usize::MAX)
                         });
                     } else if layout == ResultsBrowserLayout::Flat {
-                        order.sort_signals(&mut signals);
                         order.sort_artifacts(&mut artifacts);
                     }
-                    let matches_analysis =
-                        analysis_query_matches || !signals.is_empty() || !artifacts.is_empty();
+                    // The signals the query and the facets let through, made
+                    // from the analysis's catalogue: on the frame for a small
+                    // analysis, away from it for a large one.
+                    let signals = super::results_catalogue::listed(
+                        &ctx,
+                        presentation_key,
+                        analysis,
+                        ListingAsk {
+                            query: query.clone(),
+                            analysis_matches: analysis_query_matches,
+                            kind,
+                            show_internal,
+                            order,
+                            layout,
+                            recent: (scope == ResultsBrowserScope::Recent).then(|| {
+                                state
+                                    .results
+                                    .session
+                                    .recent_signals
+                                    .iter()
+                                    .filter(|recent| recent.analysis() == presentation_key)
+                                    .map(|recent| recent.source_name().to_owned())
+                                    .collect()
+                            }),
+                            artifacts: if layout == ResultsBrowserLayout::Tree {
+                                artifacts
+                                    .iter()
+                                    .map(|artifact| ListedArtifact {
+                                        path: artifact_hierarchical_name(artifact).to_owned(),
+                                        unit: artifact.unit.clone(),
+                                        kind_rank: artifact_signal_kind(artifact)
+                                            .map_or(u8::MAX, SignalKind::rank),
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            },
+                        },
+                    );
+                    // An analysis whose listing is still being made stays in
+                    // view, saying so, until it is.
+                    let matches_analysis = analysis_query_matches
+                        || signals.pending()
+                        || !signals.is_empty()
+                        || !artifacts.is_empty();
                     // A deck that labelled its analysis with the same code the
                     // kind glyph carries would print that code twice; the
                     // canonical name is the useful title in that case.
@@ -372,46 +347,7 @@ pub(in crate::workbench) fn results(
                     } else {
                         analysis.label.clone()
                     };
-                    // The tree lists what the filters let through, so every
-                    // branch it holds leads to a match.
-                    let tree = (layout == ResultsBrowserLayout::Tree).then(|| {
-                        let mut tree = build_tree(
-                            signals
-                                .iter()
-                                .enumerate()
-                                .map(|(index, signal)| (TreeItem::Signal(index), signal.name.as_str()))
-                                .chain(artifacts.iter().enumerate().map(|(index, artifact)| {
-                                    (
-                                        TreeItem::Artifact(index),
-                                        artifact_hierarchical_name(artifact),
-                                    )
-                                })),
-                        );
-                        // Recent keeps recency order and run order the
-                        // order the run wrote them in; otherwise each level
-                        // reads by the order's group and then by name: by
-                        // kind, as a hierarchy browser's do, by unit, or by
-                        // sample count.
-                        if scope != ResultsBrowserScope::Recent
-                            && order != ResultsBrowserOrder::RunOrder
-                        {
-                            let group = order.groups(&signals, &artifacts);
-                            tree.sort(&|item| match item {
-                                TreeItem::Signal(index) => (
-                                    group.of_signal(&signals[index]),
-                                    split_hierarchy(&signals[index].name).leaf,
-                                ),
-                                TreeItem::Artifact(index) => (
-                                    group.of_artifact(&artifacts[index]),
-                                    split_hierarchy(artifact_hierarchical_name(&artifacts[index]))
-                                        .leaf,
-                                ),
-                            });
-                        }
-                        tree
-                    });
                     matches_analysis.then(|| ResultAnalysis {
-                        tree,
                         domain: result_analysis_domain(
                             analysis.analysis_type,
                             analysis.waveforms.first(),
@@ -419,16 +355,12 @@ pub(in crate::workbench) fn results(
                         // Hidden internal nodes are not part of what the
                         // browser lists, so the head does not count them as
                         // filtered away.
-                        total_signals: analysis.waveforms.len() + total_artifacts
-                            - if show_internal {
-                                0
-                            } else {
-                                analysis
-                                    .waveforms
-                                    .iter()
-                                    .filter(|waveform| is_generated_node(&waveform.name))
-                                    .count()
-                            },
+                        total_signals: super::results_catalogue::loaded(
+                            &ctx,
+                            presentation_key,
+                            analysis,
+                            show_internal,
+                        ) + total_artifacts,
                         data_state: result_analysis_data_state(
                             source_currentness,
                             completeness_class,
@@ -491,8 +423,10 @@ pub(in crate::workbench) fn results(
                 analyses,
             })
         })
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>(),
+    }
     });
+    let runs = &model.runs;
 
     let signal_count = runs
         .iter()
@@ -501,12 +435,12 @@ pub(in crate::workbench) fn results(
         .sum::<usize>();
     let signal_list = signal_rows(
         ui.ctx(),
-        &runs,
+        runs,
         active_run,
         active_analysis,
         !query.is_empty(),
     );
-    let visible_result_keys = signal_list.visible_keys(&runs);
+    let visible_result_keys = signal_list.visible_keys(runs);
     let tab = results_browser_tab_band(ui, [signal_count, runs.len(), expressions.len()]);
     // How much of the tab's inventory a filter is holding back: two numbers
     // at the query's end, which is where the reader asked for less.
@@ -517,34 +451,7 @@ pub(in crate::workbench) fn results(
             ResultsBrowserTab::Expressions => expressions.len(),
         };
         let loaded = match tab {
-            ResultsBrowserTab::Signals => state
-                .model
-                .simulation
-                .retained
-                .runs
-                .iter()
-                .map(|run| {
-                    run.analyses
-                        .iter()
-                        .map(|analysis| {
-                            // Hidden internal nodes are not loaded into the
-                            // browser, so they do not read as filtered out.
-                            analysis
-                                .waveforms
-                                .iter()
-                                .filter(|waveform| {
-                                    show_internal || !is_generated_node(&waveform.name)
-                                })
-                                .count()
-                                + retained_result_artifacts(
-                                    analysis,
-                                    AnalysisPresentationKey::new(run.dataset_id, analysis),
-                                )
-                                .len()
-                        })
-                        .sum::<usize>()
-                })
-                .sum(),
+            ResultsBrowserTab::Signals => model.loaded,
             ResultsBrowserTab::Datasets => state.model.simulation.retained.runs.len(),
             ResultsBrowserTab::Expressions => expression_source.len(),
         };
@@ -645,13 +552,14 @@ pub(in crate::workbench) fn results(
                             button_menu(&actions, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
                 if ui
                     .add_enabled(
-                        !visible_result_keys.is_empty(),
+                        signal_list.has_quantities(),
                         egui::Button::new("Tick visible quantities"),
                     )
                     .clicked()
                 {
-                    set_result_quantities_ticked(state, &visible_result_keys, true);
-                    if let Some(last) = visible_result_keys.last() {
+                    let visible = visible_result_keys.keys();
+                    set_result_quantities_ticked(state, visible, true);
+                    if let Some(last) = visible.last() {
                         state.results.session.set_browser_range_anchor(last.clone());
                     }
                     ui.close();
@@ -754,7 +662,7 @@ pub(in crate::workbench) fn results(
         show_virtualized_result_signals(
             ui,
             state,
-            &runs,
+            runs,
             &signal_list,
             active_run,
             active_analysis,
@@ -1160,7 +1068,36 @@ enum ResultsBrowserTab {
 struct BrowserRows {
     revision: crate::state::RunHistoryRevision,
     fingerprint: u64,
-    runs: std::sync::Arc<Vec<ResultRun>>,
+    model: std::sync::Arc<BrowserModel>,
+}
+
+/// The rows the filters let through, and how many quantities there are
+/// before them.
+struct BrowserModel {
+    runs: Vec<ResultRun>,
+    /// Every retained analysis's quantities the browser lists before its
+    /// filters: its signals, less internal nodes unless they are shown, and
+    /// its other results.
+    loaded: usize,
+}
+
+/// The quantities the browser lists before its filters, across every
+/// retained analysis.
+fn loaded_signals(ctx: &egui::Context, state: &ResultsParts<'_>, show_internal: bool) -> usize {
+    state
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .flat_map(|run| {
+            run.analyses.iter().map(move |analysis| {
+                let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+                super::results_catalogue::loaded(ctx, key, analysis, show_internal)
+                    + retained_result_artifacts(analysis, key).len()
+            })
+        })
+        .sum()
 }
 
 /// The row model `build` makes, built again only when the retained runs or
@@ -1169,37 +1106,38 @@ fn browser_rows(
     ctx: &egui::Context,
     state: &ResultsParts<'_>,
     fingerprint: u64,
-    build: impl FnOnce() -> Vec<ResultRun>,
-) -> std::sync::Arc<Vec<ResultRun>> {
+    build: impl FnOnce() -> BrowserModel,
+) -> std::sync::Arc<BrowserModel> {
     let id = egui::Id::new("rspice.results.browser.row-model");
     let revision = state.model.simulation.retained.runs.revision();
     if let Some(kept) = ctx.data(|data| data.get_temp::<BrowserRows>(id))
         && kept.revision == revision
         && kept.fingerprint == fingerprint
     {
-        return kept.runs;
+        return kept.model;
     }
     crate::workbench::documents::result_document::frame_work::note(
         crate::workbench::documents::result_document::frame_work::DatasetWalk::BrowserRows,
     );
-    let runs = std::sync::Arc::new(build());
+    let model = std::sync::Arc::new(build());
     ctx.data_mut(|data| {
         data.insert_temp(
             id,
             BrowserRows {
                 revision,
                 fingerprint,
-                runs: std::sync::Arc::clone(&runs),
+                model: std::sync::Arc::clone(&model),
             },
         );
     });
-    runs
+    model
 }
 
 /// Everything besides the retained runs themselves that the row model reads,
 /// as one number: the data version, the query, the facets, the reader's
-/// recent signals where the Recent scope lists them, the active run, and each
-/// analysis's integrity and currentness.
+/// recent signals where the Recent scope lists them, the active run, each
+/// analysis's integrity and currentness, and the generation of the
+/// catalogues and listings.
 fn browser_rows_fingerprint(
     state: &ResultsParts<'_>,
     integrity: &std::collections::HashMap<AnalysisPresentationKey, bool>,
@@ -1211,7 +1149,7 @@ fn browser_rows_fingerprint(
         Option<AnalysisPresentationKey>,
         bool,
     ),
-    (active_run, expression_query_match): (Option<usize>, bool),
+    (active_run, expression_query_match, catalogued): (Option<usize>, bool, u64),
 ) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -1219,6 +1157,7 @@ fn browser_rows_fingerprint(
     state.workbench.navigator_filter().hash(&mut hasher);
     (kind as u8, layout as u8, order as u8, scope as u8).hash(&mut hasher);
     (producer, show_internal, active_run, expression_query_match).hash(&mut hasher);
+    catalogued.hash(&mut hasher);
     // Only the Recent scope lists by recency: elsewhere a signal ticked, and
     // so used, leaves the rows as they were.
     if scope == ResultsBrowserScope::Recent {
@@ -2355,20 +2294,17 @@ pub(super) struct ResultAnalysis {
     /// paints no word for it; it explains the retained fraction on the tooltip.
     pub(super) data_state: ResultAnalysisDataState,
     pub(super) success: bool,
-    pub(super) signals: Vec<ResultSignal>,
+    /// The signals the filters let through, with the instance tree over them
+    /// and `artifacts` in the tree layout.
+    pub(super) signals: ListedSignals,
     pub(super) artifacts: Vec<ResultArtifact>,
-    /// The instance tree over `signals` and `artifacts`, in the tree layout.
-    pub(super) tree: Option<InstanceNode>,
 }
 
+/// A listed signal's row, made when the row is drawn.
 pub(super) struct ResultSignal {
     pub(super) waveform_index: usize,
     pub(super) identity: SourceWaveformPresentationKey,
     pub(super) name: String,
-    /// The unit the signal reads in, which the unit order sorts by.
-    pub(super) unit: String,
-    /// The samples it holds, which the sample order sorts by.
-    pub(super) samples: usize,
     pub(super) color: String,
     pub(super) value: Option<String>,
     /// The row's typed metadata, empty when there is nothing to say.
@@ -2491,22 +2427,15 @@ impl ResultsBrowserOrder {
         }
     }
 
-    /// Put a flat list's signals in this order.
-    pub(super) fn sort_signals(self, signals: &mut [ResultSignal]) {
-        let by_name =
-            |left: &ResultSignal, right: &ResultSignal| natural_cmp(&left.name, &right.name);
+    /// How two signals of a flat list read in this order. The run's order
+    /// is a stable sort's: every pair ties.
+    pub(super) fn compare(self, left: Quantity<'_>, right: Quantity<'_>) -> std::cmp::Ordering {
+        let by_name = || natural_cmp(left.name, right.name);
         match self {
-            Self::Name => signals.sort_by(by_name),
-            Self::Unit => signals.sort_by(|left, right| {
-                natural_cmp(&left.unit, &right.unit).then_with(|| by_name(left, right))
-            }),
-            Self::Samples => signals.sort_by(|left, right| {
-                right
-                    .samples
-                    .cmp(&left.samples)
-                    .then_with(|| by_name(left, right))
-            }),
-            Self::RunOrder => {}
+            Self::Name => by_name(),
+            Self::Unit => natural_cmp(left.unit, right.unit).then_with(by_name),
+            Self::Samples => right.samples.cmp(&left.samples).then_with(by_name),
+            Self::RunOrder => std::cmp::Ordering::Equal,
         }
     }
 
@@ -2526,27 +2455,35 @@ impl ResultsBrowserOrder {
 
     /// The groups a tree level reads in under this order, before names:
     /// kinds, units, or sample counts.
-    pub(super) fn groups(
+    /// `signals` are each listed signal's unit and samples, `artifact_units`
+    /// each listed artifact's unit.
+    pub(super) fn groups<'a>(
         self,
-        signals: &[ResultSignal],
-        artifacts: &[ResultArtifact],
+        signals: impl IntoIterator<Item = (&'a str, usize)>,
+        artifact_units: impl IntoIterator<Item = &'a str>,
     ) -> OrderGroups {
         let mut units: Vec<String> = Vec::new();
         let mut counts: Vec<usize> = Vec::new();
         match self {
             Self::Unit => {
+                let mut seen = std::collections::HashSet::new();
                 units = signals
-                    .iter()
-                    .map(|signal| signal.unit.clone())
-                    .chain(artifacts.iter().map(|artifact| artifact.unit.clone()))
+                    .into_iter()
+                    .map(|(unit, _)| unit)
+                    .chain(artifact_units)
+                    .filter(|unit| seen.insert(*unit))
+                    .map(str::to_owned)
                     .collect();
                 units.sort_by(|left, right| natural_cmp(left, right));
-                units.dedup();
             }
             Self::Samples => {
-                counts = signals.iter().map(|signal| signal.samples).collect();
+                let mut seen = std::collections::HashSet::new();
+                counts = signals
+                    .into_iter()
+                    .map(|(_, samples)| samples)
+                    .filter(|samples| seen.insert(*samples))
+                    .collect();
                 counts.sort_unstable_by(|left, right| right.cmp(left));
-                counts.dedup();
             }
             Self::Name | Self::RunOrder => {}
         }
@@ -2573,30 +2510,29 @@ impl OrderGroups {
         })
     }
 
-    pub(super) fn of_signal(&self, signal: &ResultSignal) -> u8 {
+    /// The group of a signal reading in `unit`, holding `samples`, of `kind`.
+    pub(super) fn of_signal(&self, unit: &str, samples: usize, kind: SignalKind) -> u8 {
         match self.order {
             ResultsBrowserOrder::Unit => {
-                Self::rank(self.units.iter().position(|unit| *unit == signal.unit))
+                Self::rank(self.units.iter().position(|held| held == unit))
             }
-            ResultsBrowserOrder::Samples => Self::rank(
-                self.counts
-                    .iter()
-                    .position(|count| *count == signal.samples),
-            ),
-            ResultsBrowserOrder::Name | ResultsBrowserOrder::RunOrder => signal.kind.rank(),
+            ResultsBrowserOrder::Samples => {
+                Self::rank(self.counts.iter().position(|count| *count == samples))
+            }
+            ResultsBrowserOrder::Name | ResultsBrowserOrder::RunOrder => kind.rank(),
         }
     }
 
-    pub(super) fn of_artifact(&self, artifact: &ResultArtifact) -> u8 {
+    /// The group of an artifact reading in `unit` whose kind ranks at
+    /// `kind_rank`.
+    pub(super) fn of_artifact(&self, unit: &str, kind_rank: u8) -> u8 {
         match self.order {
             ResultsBrowserOrder::Unit => {
-                Self::rank(self.units.iter().position(|unit| *unit == artifact.unit))
+                Self::rank(self.units.iter().position(|held| held == unit))
             }
             // No samples to count: after the signals, by name.
             ResultsBrowserOrder::Samples => u8::MAX,
-            ResultsBrowserOrder::Name | ResultsBrowserOrder::RunOrder => {
-                artifact_signal_kind(artifact).map_or(u8::MAX, SignalKind::rank)
-            }
+            ResultsBrowserOrder::Name | ResultsBrowserOrder::RunOrder => kind_rank,
         }
     }
 }
