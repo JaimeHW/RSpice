@@ -41,7 +41,10 @@ pub fn capture_run(run: &SimulationRun) -> ProjectSimulationRun {
     // A preview drawn from the segment holds nothing in memory, and recording each of its
     // columns is what froze the window, half a minute at a time, while a million-device run
     // drew its preview: the record is taken again whenever the preview grows.
-    let previews = run.analyses.iter().any(|analysis| analysis.is_live_partial());
+    let previews = run
+        .analyses
+        .iter()
+        .any(|analysis| analysis.is_live_partial());
     if !previews && !run.holds_samples_in_memory() {
         return ProjectSimulationRun::from(run);
     }

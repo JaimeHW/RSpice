@@ -180,7 +180,8 @@ fn a_running_runs_record_names_none_of_its_preview_columns_however_it_holds_them
         AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "Transient")
             .with_waveforms(waveforms),
     );
-    run.store_samples().expect("the preview's columns are kept in a segment");
+    run.store_samples()
+        .expect("the preview's columns are kept in a segment");
     assert!(!run.holds_samples_in_memory());
 
     let record = crate::io::capture_run(&run);

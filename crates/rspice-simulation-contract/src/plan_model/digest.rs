@@ -216,7 +216,11 @@ mod tests {
         plan.commit_configuration_change("Added design variable vdd.")
             .expect("commits");
         let receipt = &plan.configuration_receipts()[0];
-        assert!(receipt.digest().is_some_and(|digest| digest.starts_with("fnv1a64")));
+        assert!(
+            receipt
+                .digest()
+                .is_some_and(|digest| digest.starts_with("fnv1a64"))
+        );
         assert_eq!(receipt.status_line(), "Added design variable vdd.");
     }
 }
