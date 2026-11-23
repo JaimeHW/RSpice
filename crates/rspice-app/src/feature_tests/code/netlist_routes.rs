@@ -10,7 +10,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, frame, frame_with, open_project_app, themed_context,
 };
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::netlist_document;
 use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
 use rspice_app_code::workbench::documents::virtual_text_editor::{
@@ -30,12 +30,12 @@ use rspice_app_workbench::workbench::framework::host::Host;
 /// view's compile, its build settings and its symbol, and the schematic's
 /// jump into the generated netlist. Every other command of the feature acts
 /// on the Netlist workspace, a command added later included.
-const ELSEWHERE: [CodeCommand; 5] = [
-    CodeCommand::CompileVerilogA,
-    CodeCommand::CancelVerilogACompile,
-    CodeCommand::VerilogABuildSettings,
-    CodeCommand::VerilogAOpenSymbol,
-    CodeCommand::ShowInNetlist,
+const ELSEWHERE: [SourceCommand; 5] = [
+    SourceCommand::CompileVerilogA,
+    SourceCommand::CancelVerilogACompile,
+    SourceCommand::VerilogABuildSettings,
+    SourceCommand::VerilogAOpenSymbol,
+    SourceCommand::ShowInNetlist,
 ];
 
 /// A deck with parameters, a derived one and a card that reads both, so a
@@ -102,7 +102,7 @@ fn every_command_the_netlist_workspace_offers_has_a_key_or_a_menu_row() {
         (CommandPlatform::Browser, egui::os::OperatingSystem::Nix),
     ] {
         let rows = menu_keys(&app, platform, os);
-        let unreached: Vec<&str> = CodeCommand::ALL
+        let unreached: Vec<&str> = SourceCommand::ALL
             .into_iter()
             .filter(|command| !ELSEWHERE.contains(command))
             .filter(|command| {
@@ -127,7 +127,7 @@ fn every_command_the_netlist_workspace_offers_has_a_key_or_a_menu_row() {
 #[test]
 fn show_value_is_a_row_of_the_deck_editors_menus() {
     let (_ctx, app) = deck_on_the_netlist_workspace(VALUE_DECK);
-    let key = CodeCommand::ShowValueAtCaret.key();
+    let key = SourceCommand::ShowValueAtCaret.key();
     for entries in [
         app.source_editor_menu(),
         app.menu_entries(
@@ -255,7 +255,7 @@ fn show_value_reads_the_name_the_caret_ends_and_says_when_there_is_none() {
     let (ctx, mut app) = deck_on_the_netlist_workspace(VALUE_DECK);
     let after = VALUE_DECK.find(".param l=").expect("l is defined") + ".param l".len();
     caret_at(&ctx, &mut app, after);
-    app.execute_command_key(CodeCommand::ShowValueAtCaret.key());
+    app.execute_command_key(SourceCommand::ShowValueAtCaret.key());
     frame(&ctx, &mut app, DESKTOP);
     let shown = frame(&ctx, &mut app, DESKTOP);
     assert!(
@@ -267,7 +267,7 @@ fn show_value_reads_the_name_the_caret_ends_and_says_when_there_is_none() {
 
     // The title line names no parameter, expression or model.
     caret_at(&ctx, &mut app, 2);
-    app.execute_command_key(CodeCommand::ShowValueAtCaret.key());
+    app.execute_command_key(SourceCommand::ShowValueAtCaret.key());
     frame(&ctx, &mut app, DESKTOP);
     assert_eq!(
         app.state.prompt_text(),

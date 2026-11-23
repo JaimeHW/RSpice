@@ -6,11 +6,11 @@
 //! the code feature's command table to find a row for every command the
 //! editor answers.
 
-use super::commands::CodeCommand;
+use super::commands::SourceCommand;
 use super::{MenuContext, MenuEntry, Separator, ids};
 
 /// The command's row under the label it declares.
-const fn code(command: CodeCommand) -> MenuEntry {
+const fn code(command: SourceCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -43,52 +43,52 @@ const SELECT_ALL: MenuEntry = MenuEntry::command(ids::SELECT_ALL).access('A');
 /// Finding and replacing text, and going to a line or the bracket that
 /// matches.
 const FIND: &[MenuEntry] = &[
-    code(CodeCommand::FindCodeDocument).access('F'),
-    code(CodeCommand::ReplaceInCodeDocument).access('M'),
-    code(CodeCommand::GoToLine).access('G'),
-    code(CodeCommand::GoToMatchingBracket).access('B'),
+    code(SourceCommand::FindCodeDocument).access('F'),
+    code(SourceCommand::ReplaceInCodeDocument).access('M'),
+    code(SourceCommand::GoToLine).access('G'),
+    code(SourceCommand::GoToMatchingBracket).access('B'),
 ];
 
 /// What is done to the lines under the caret or the selection.
 const LINE: &[MenuEntry] = &[
-    code(CodeCommand::ToggleLineComment).access('M'),
-    code(CodeCommand::IndentLines).access('I'),
-    code(CodeCommand::OutdentLines).access('O'),
-    code(CodeCommand::DuplicateLine).access('D'),
-    code(CodeCommand::DeleteLine).access('L'),
-    code(CodeCommand::MoveLineUp).access('U'),
-    code(CodeCommand::MoveLineDown).access('W'),
+    code(SourceCommand::ToggleLineComment).access('M'),
+    code(SourceCommand::IndentLines).access('I'),
+    code(SourceCommand::OutdentLines).access('O'),
+    code(SourceCommand::DuplicateLine).access('D'),
+    code(SourceCommand::DeleteLine).access('L'),
+    code(SourceCommand::MoveLineUp).access('U'),
+    code(SourceCommand::MoveLineDown).access('W'),
 ];
 
 /// The document's language: what a hover would say at the caret, going to
 /// what a name refers to and renaming it, where the language service
 /// answers them, and formatting.
 const LANGUAGE: &[MenuEntry] = &[
-    code(CodeCommand::ShowValueAtCaret).access('W'),
+    code(SourceCommand::ShowValueAtCaret).access('W'),
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
         &[
-            code(CodeCommand::GoToDefinition).access('E'),
-            code(CodeCommand::FindReferences).access('I'),
-            code(CodeCommand::RenameSymbol).access('Y'),
+            code(SourceCommand::GoToDefinition).access('E'),
+            code(SourceCommand::FindReferences).access('I'),
+            code(SourceCommand::RenameSymbol).access('Y'),
         ],
     ),
-    code(CodeCommand::FormatDocument).access('O'),
+    code(SourceCommand::FormatDocument).access('O'),
 ];
 
 /// The problems the language finds in the document.
 const PROBLEMS: &[MenuEntry] = &[
-    code(CodeCommand::NextProblem).access('X'),
-    code(CodeCommand::PreviousProblem).access('V'),
-    code(CodeCommand::ShowProblemAtCaret).access('H'),
+    code(SourceCommand::NextProblem).access('X'),
+    code(SourceCommand::PreviousProblem).access('V'),
+    code(SourceCommand::ShowProblemAtCaret).access('H'),
 ];
 
 /// From the line under the caret to what the schematic drew it from, and to
 /// a waveform of the run.
 const CROSS_PROBE: &[MenuEntry] = &[
-    code(CodeCommand::ShowInSchematic).access('H'),
-    code(CodeCommand::PlotNodeVoltage).access('V'),
-    code(CodeCommand::PlotDeviceCurrent).access('L'),
+    code(SourceCommand::ShowInSchematic).access('H'),
+    code(SourceCommand::PlotNodeVoltage).access('V'),
+    code(SourceCommand::PlotDeviceCurrent).access('L'),
 ];
 
 /// Edit, while a source editor is the document on screen.
@@ -110,16 +110,16 @@ pub const SOURCE_EDIT_MENU: &[MenuEntry] = &[
 
 /// View > Folding, while a source editor is the document on screen.
 pub const SOURCE_FOLDING_MENU: &[MenuEntry] = &[
-    code(CodeCommand::FoldSelection).access('F'),
-    code(CodeCommand::UnfoldAtCaret).access('C'),
-    code(CodeCommand::FoldAll).access('A'),
-    code(CodeCommand::UnfoldAll).access('U'),
+    code(SourceCommand::FoldSelection).access('F'),
+    code(SourceCommand::UnfoldAtCaret).access('C'),
+    code(SourceCommand::FoldAll).access('A'),
+    code(SourceCommand::UnfoldAll).access('U'),
 ];
 
 /// The View menu's rows while a source editor is the document on screen.
 pub const SOURCE_VIEW_ROWS: &[MenuEntry] = &[
     MenuEntry::submenu("Folding", SOURCE_FOLDING_MENU).access('L'),
-    code(CodeCommand::ToggleWordWrap).access('W'),
+    code(SourceCommand::ToggleWordWrap).access('W'),
 ];
 
 /// The source editor's right-click menu: the language group first, as the
@@ -137,5 +137,5 @@ pub const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     group(CLIPBOARD),
     SELECT_ALL,
     Separator,
-    code(CodeCommand::ToggleLineComment).access('M'),
+    code(SourceCommand::ToggleLineComment).access('M'),
 ];

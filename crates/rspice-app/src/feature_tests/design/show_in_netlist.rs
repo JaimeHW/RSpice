@@ -306,7 +306,7 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
 #[test]
 fn an_instance_placed_after_the_last_generation_is_shown_at_its_own_card() {
     use crate::workbench::RSpiceApp;
-    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_code::workbench::code::commands::SourceCommand;
     use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 
     let mut app = RSpiceApp::test_instance();
@@ -325,7 +325,7 @@ fn an_instance_placed_after_the_last_generation_is_shown_at_its_own_card() {
         .editor
         .selection
         .select_only_component(first);
-    app.execute_command_key(CodeCommand::ShowInNetlist.key());
+    app.execute_command_key(SourceCommand::ShowInNetlist.key());
     assert_eq!(
         app.state.workbench.workspace,
         Workspace::Netlist,
@@ -347,11 +347,11 @@ fn an_instance_placed_after_the_last_generation_is_shown_at_its_own_card() {
         .selection
         .select_only_component(placed);
     assert_eq!(
-        app.command_availability(CodeCommand::ShowInNetlist.key()),
+        app.command_availability(SourceCommand::ShowInNetlist.key()),
         CommandAvailability::Available,
         "a deck older than the instance is no reason to refuse the jump"
     );
-    app.execute_command_key(CodeCommand::ShowInNetlist.key());
+    app.execute_command_key(SourceCommand::ShowInNetlist.key());
 
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
     let name = app

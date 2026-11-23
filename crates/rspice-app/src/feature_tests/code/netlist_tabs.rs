@@ -615,7 +615,7 @@ impl rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowI
 /// front it opens the generated netlist's export dialog.
 #[test]
 fn export_writes_the_deck_in_front_and_the_generated_netlist_behind_its_dialog() {
-    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_code::workbench::code::commands::SourceCommand;
 
     let mut app = plan_and_deck_session();
     let edited = DECK.replace("1k", "4k7");
@@ -629,7 +629,7 @@ fn export_writes_the_deck_in_front_and_the_generated_netlist_behind_its_dialog()
     let copy = folder.join("copy.cir");
     app.export_workflow_io = Box::new(SavesTo(copy.clone()));
 
-    app.execute_command_key(CodeCommand::ExportNetlist.key());
+    app.execute_command_key(SourceCommand::ExportNetlist.key());
 
     assert_eq!(
         std::fs::read_to_string(&copy).expect("the export wrote the deck"),
@@ -642,7 +642,7 @@ fn export_writes_the_deck_in_front_and_the_generated_netlist_behind_its_dialog()
 
     let generated = tab_labelled(&app, "Generated netlist").id;
     assert!(activate_document(&mut app.state, &generated));
-    app.execute_command_key(CodeCommand::ExportNetlist.key());
+    app.execute_command_key(SourceCommand::ExportNetlist.key());
     assert!(
         app.state.code.netlist.export_dialog.open,
         "the generated netlist exports through its dialog"

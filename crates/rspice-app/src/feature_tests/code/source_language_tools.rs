@@ -5,7 +5,7 @@
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{add_veriloga_cell, open_in_design};
 use egui::Context;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_workbench::workbench::localization::MessageId;
 
@@ -46,7 +46,7 @@ fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
     app.state
         .workbench
         .activate(rspice_app_state::workbench::workspace::Workspace::Design);
-    let enabled_before = app.command_key_enabled(CodeCommand::CompileVerilogA.key());
+    let enabled_before = app.command_key_enabled(SourceCommand::CompileVerilogA.key());
     assert!(
         enabled_before,
         "a writable project compiles the Verilog-A cell view in front"
@@ -55,7 +55,7 @@ fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
     app.state.model.safe_mode.active = true;
     app.state.model.safe_mode.applied.open_project_read_only = true;
     assert!(
-        !app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
+        !app.command_key_enabled(SourceCommand::CompileVerilogA.key()),
         "a read-only project cannot compile; it was enabled before as {enabled_before}"
     );
 }

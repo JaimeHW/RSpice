@@ -93,7 +93,7 @@ fn a_running_compile_counts_and_cancel_stops_it() {
     assert!(
         !user
             .app
-            .command_key_enabled(CodeCommand::CompileVerilogA.key())
+            .command_key_enabled(SourceCommand::CompileVerilogA.key())
     );
 
     user.click(CANCEL);
@@ -115,7 +115,7 @@ fn a_running_compile_counts_and_cancel_stops_it() {
     user.expect(COMPILE);
     assert!(
         user.app
-            .command_key_enabled(CodeCommand::CompileVerilogA.key())
+            .command_key_enabled(SourceCommand::CompileVerilogA.key())
     );
 }
 

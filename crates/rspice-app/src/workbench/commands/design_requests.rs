@@ -36,7 +36,7 @@ pub(in crate::workbench) fn answer_surface_request(
         DesignSurfaceRequest::ShowInNetlist => state
             .workbench
             .outbox
-            .push(rspice_app_code::workbench::code::commands::CodeRequest::ShowInNetlist),
+            .push(rspice_app_code::workbench::code::commands::SourceRequest::ShowInNetlist),
         DesignSurfaceRequest::CopyToEditableLibrary { library, cell } => {
             if let Err(error) = state
                 .project

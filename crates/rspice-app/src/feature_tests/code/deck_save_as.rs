@@ -9,7 +9,7 @@
 use super::netlist_workflow::{Folder, app_with_deck};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::deck_files::LineEnding;
 use rspice_app_code::workbench::documents::netlist_document::{NetlistTab, edit_deck_file};
 use rspice_app_state::state::TextEncoding;
@@ -29,7 +29,7 @@ fn save_deck_as_writes_the_deck_where_asked_and_the_project_reads_it_from_there(
     let folder = Folder::new();
     let old = folder.write("legacy.cir", LEGACY);
     let mut app = app_with_deck(&old);
-    assert!(app.command_key_enabled(CodeCommand::SaveDeckAs.key()));
+    assert!(app.command_key_enabled(SourceCommand::SaveDeckAs.key()));
     assert!(edit_deck_file(
         &mut app.state.model,
         &mut app.state.code.netlist,
@@ -68,14 +68,14 @@ fn the_generated_netlist_saved_as_a_deck_names_the_design_and_opens_as_a_deck() 
     let reference = crate::workbench::examples::hierarchy_reference::build();
     let mut app = RSpiceApp::test_instance();
     app.state = reference.state;
-    assert!(!app.command_key_enabled(CodeCommand::SaveNetlistAsDeck.key()));
-    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    assert!(!app.command_key_enabled(SourceCommand::SaveNetlistAsDeck.key()));
+    app.execute_command_key(SourceCommand::GenerateNetlist.key());
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
     let generated = app.state.model.netlist_artifacts.generated_source.clone();
     assert!(!generated.trim().is_empty(), "the netlist is generated");
-    assert!(app.command_key_enabled(CodeCommand::SaveNetlistAsDeck.key()));
+    assert!(app.command_key_enabled(SourceCommand::SaveNetlistAsDeck.key()));
     let design = app
         .state
         .model

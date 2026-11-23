@@ -24,7 +24,7 @@ use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
 /// One command of the code feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodeCommand {
+pub enum SourceCommand {
     /// A cell whose Verilog-A module the reader writes next, with the symbol
     /// its ports generate.
     NewVerilogADevice,
@@ -135,7 +135,7 @@ pub enum CodeCommand {
 /// Each command, dialog step, navigator, page dialog or page that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CodeRequest {
+pub enum SourceRequest {
     OpenNetlist,
     NewDeck,
     SaveDeckAs,
@@ -200,11 +200,11 @@ pub enum CodeRequest {
     OpenDroppedDeck(Vec<egui::DroppedFile>),
 }
 
-impl Request for CodeRequest {
+impl Request for SourceRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// What answering a [`CodeRequest`] leaves to the shell, because it reaches
+/// What answering a [`SourceRequest`] leaves to the shell, because it reaches
 /// past the code feature's context: opening or importing a netlist or a
 /// Verilog-A file through the file workflow, importing an LTspice or QSPICE
 /// schematic, showing design's selected instance in the generated deck,
@@ -473,7 +473,7 @@ pub const fn new_deck_label(browser: bool) -> &'static str {
     }
 }
 
-impl CodeCommand {
+impl SourceCommand {
     /// Every command the registry lists, in the feature's own order.
     pub const ALL: [Self; 48] = [
         Self::NewVerilogADevice,

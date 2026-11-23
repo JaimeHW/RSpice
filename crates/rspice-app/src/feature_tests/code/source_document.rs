@@ -11,7 +11,7 @@ use crate::workbench::app::veriloga_flow_tests::User;
 use rspice_app_code::workbench::app::dialogs::source_document::{
     netlist_lifecycle_facts, open_source_document_dialog_in, source_document_dialog_is_available,
 };
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::localization::MessageId;
 use std::path::PathBuf;
@@ -93,7 +93,7 @@ fn deck_dialog(folders: &[&str]) -> User {
         .expect("the folders are a valid chain");
     let mut user = User::new(app);
     user.app
-        .execute_command_key(CodeCommand::ManageSourceDocument.key());
+        .execute_command_key(SourceCommand::ManageSourceDocument.key());
     user.settle();
     let title = user
         .app

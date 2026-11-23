@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use super::*;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
 use rspice_app_state::workbench::workspace::Workspace;
@@ -354,10 +354,10 @@ pub(crate) fn new_project() -> (User, CellViewRef) {
 pub(crate) fn compile(user: &mut User) {
     assert!(
         user.app
-            .command_key_enabled(CodeCommand::CompileVerilogA.key())
+            .command_key_enabled(SourceCommand::CompileVerilogA.key())
     );
     user.app
-        .execute_command_key(CodeCommand::CompileVerilogA.key());
+        .execute_command_key(SourceCommand::CompileVerilogA.key());
     user.wait_for("the compile result", |app| {
         let veriloga = &app.state.code.code_workspace.veriloga;
         veriloga.compile_request.is_none() && veriloga.pending.is_none()

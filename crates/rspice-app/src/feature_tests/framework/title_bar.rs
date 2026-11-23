@@ -9,7 +9,7 @@ use egui::{Context, Frame, Id, Key, Modifiers, Popup, Rect, Ui};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{ShellCommand, command_registry};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
@@ -352,7 +352,7 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
         ProjectCommand::OpenProject.declared_spec(),
         ProjectCommand::Save.declared_spec(),
         SimulateCommand::Run.declared_spec(),
-        CodeCommand::GenerateNetlist.declared_spec(),
+        SourceCommand::GenerateNetlist.declared_spec(),
     ] {
         let declared = command
             .bindings

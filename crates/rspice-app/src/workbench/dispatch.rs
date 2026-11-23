@@ -42,7 +42,7 @@ use crate::workbench::features;
 use crate::workbench::menu_bar::FileMenuAction;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::code::commands::{
-    CodeCommand, CodeRequest, NetlistEditorRequest, VerilogAStripRequest,
+    NetlistEditorRequest, SourceCommand, SourceRequest, VerilogAStripRequest,
 };
 use rspice_app_code::workbench::code::requests as code_requests;
 use rspice_app_design::schematic::view::{DesignSurfaceRequest, PlotProbedTrace};
@@ -82,7 +82,7 @@ fn runs_among_editor_keys(key: CommandKey) -> bool {
     key == ShellCommand::CommandPalette.key()
         || WorkbenchCommand::from_key(key)
             .is_some_and(|command| command.source_editor_request().is_some())
-        || CodeCommand::from_key(key)
+        || SourceCommand::from_key(key)
             .is_some_and(|command| command.source_editor_request().is_some())
 }
 
@@ -660,7 +660,7 @@ impl RSpiceApp {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |app, request: CodeRequest| answer_code_request(app, request),
+            |app, request: SourceRequest| answer_code_request(app, request),
         );
         requests::drain(
             self,
@@ -757,7 +757,7 @@ fn answer_void_veriloga_evidence(app: &mut RSpiceApp) {
 /// Have the code feature answer what it raised, in its context, holding
 /// whether an application-modal dialog is open, taken as the answer starts.
 /// What reaches past the feature the shell carries out straight after.
-fn answer_code_request(app: &mut RSpiceApp, request: CodeRequest) {
+fn answer_code_request(app: &mut RSpiceApp, request: SourceRequest) {
     let modal_open = app.state.application_modal_open();
     let hand_off = code_requests::answer(
         &mut features::cx::<CodeFeature>(app).with_application_modal(modal_open),

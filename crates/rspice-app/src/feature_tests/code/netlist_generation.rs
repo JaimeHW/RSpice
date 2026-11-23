@@ -83,7 +83,7 @@ fn a_failed_generation_states_its_reason_with_a_full_ring_and_is_not_rebuilt() {
 #[test]
 fn the_generated_netlist_shows_the_designs_added_lines_and_follows_their_edit() {
     use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
-    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_code::workbench::code::commands::SourceCommand;
     use rspice_design::added_lines::set_added_lines;
 
     let reference = crate::workbench::examples::hierarchy_reference::build();
@@ -100,7 +100,7 @@ fn the_generated_netlist_shows_the_designs_added_lines_and_follows_their_edit() 
         &reference.top,
         ".nodeset v(out)=1\n".to_owned(),
     );
-    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    app.execute_command_key(SourceCommand::GenerateNetlist.key());
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
@@ -128,7 +128,7 @@ fn the_generated_netlist_shows_the_designs_added_lines_and_follows_their_edit() 
 #[test]
 fn compare_generated_revisions_opens_on_the_build_before_the_one_shown() {
     use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
-    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_code::workbench::code::commands::SourceCommand;
     use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
     use rspice_design::added_lines::set_added_lines;
 
@@ -146,17 +146,17 @@ fn compare_generated_revisions_opens_on_the_build_before_the_one_shown() {
         frame(&ctx, app, DESKTOP);
     };
     build(&mut app, "1");
-    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    app.execute_command_key(SourceCommand::GenerateNetlist.key());
     build(&mut app, "2");
     build(&mut app, "3");
     let history = app.state.code.netlist.generated_history.len();
     assert_eq!(history, 2, "the builds of 1 and 2 are kept");
     assert_eq!(
-        app.command_availability(CodeCommand::CompareGeneratedRevisions.key()),
+        app.command_availability(SourceCommand::CompareGeneratedRevisions.key()),
         CommandAvailability::Available
     );
 
-    app.execute_command_key(CodeCommand::CompareGeneratedRevisions.key());
+    app.execute_command_key(SourceCommand::CompareGeneratedRevisions.key());
     frame(&ctx, &mut app, DESKTOP);
 
     let dialog = &app.state.code.netlist.comparison_dialog;

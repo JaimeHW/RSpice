@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand, command_registry};
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutKind,
@@ -137,7 +137,7 @@ fn command_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
         checked: Host::checked(app, spec.key),
         context_live: spec.context.matches(&app.state.workbench, &app.state.model),
     };
-    let code = CodeCommand::from_key(spec.key);
+    let code = SourceCommand::from_key(spec.key);
     CommandRow {
         index,
         id: spec.key.as_str(),
@@ -150,13 +150,13 @@ fn command_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
         mutates_window_session: ShellCommand::from_key(spec.key)
             .is_some_and(ShellCommand::mutates_window_session),
         palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
-        source_editor_only: code.is_some_and(CodeCommand::source_editor_only),
-        navigates_source_language: code.is_some_and(CodeCommand::navigates_source_language),
+        source_editor_only: code.is_some_and(SourceCommand::source_editor_only),
+        navigates_source_language: code.is_some_and(SourceCommand::navigates_source_language),
         repeatable: spec.flags.contains(CommandFlags::REPEATABLE),
         commits_inspector_edit: spec.flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT),
         edits_active_document: spec.flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT),
         source_editor_request: code
-            .and_then(CodeCommand::source_editor_request)
+            .and_then(SourceCommand::source_editor_request)
             .or_else(|| {
                 WorkbenchCommand::from_key(spec.key)
                     .and_then(WorkbenchCommand::source_editor_request)
@@ -331,10 +331,10 @@ fn the_registry_order_breaks_ties_as_the_command_registry_does() {
 /// Pairs of commands that share a chord in contexts of equal precedence, the
 /// earlier first in the registry's order.
 const TIED_PAIRS: [(CommandKey, CommandKey); 2] = [
-    (ids::DUPLICATE, CodeCommand::DuplicateLine.key()),
+    (ids::DUPLICATE, SourceCommand::DuplicateLine.key()),
     (
         DesignCommand::PlaceWire.key(),
-        CodeCommand::ToggleLineComment.key(),
+        SourceCommand::ToggleLineComment.key(),
     ),
 ];
 

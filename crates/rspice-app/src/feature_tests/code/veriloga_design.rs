@@ -13,7 +13,7 @@ use crate::workbench::app::veriloga_design_tests::{
     themed_context,
 };
 use crate::workbench::app_state::AppState;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
@@ -101,8 +101,8 @@ fn find_in_a_veriloga_cell_view_opens_that_views_find_bar() {
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
-    assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
-    app.execute_command_key(CodeCommand::FindCodeDocument.key());
+    assert!(app.command_key_enabled(SourceCommand::FindCodeDocument.key()));
+    app.execute_command_key(SourceCommand::FindCodeDocument.key());
     for _ in 0..3 {
         frame(&ctx, &mut app, DESKTOP);
     }
@@ -144,7 +144,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_source_bundle(&mut app.code_workspace_parts(), CodeCommand::RenameSymbol)
+    super::navigate_source_bundle(&mut app.code_workspace_parts(), SourceCommand::RenameSymbol)
         .expect("the caret is on g");
     let form = app
         .state
@@ -208,8 +208,11 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_source_bundle(&mut app.code_workspace_parts(), CodeCommand::FindReferences)
-        .expect("the caret is on g");
+    super::navigate_source_bundle(
+        &mut app.code_workspace_parts(),
+        SourceCommand::FindReferences,
+    )
+    .expect("the caret is on g");
 
     assert!(app.state.code.code_workspace.language_tools.is_none());
     assert_eq!(
@@ -362,8 +365,8 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     open_in_design(&mut app.state, &reference);
     let ctx = themed_context();
 
-    assert!(app.command_key_enabled(CodeCommand::CompileVerilogA.key()));
-    app.execute_command_key(CodeCommand::CompileVerilogA.key());
+    assert!(app.command_key_enabled(SourceCommand::CompileVerilogA.key()));
+    app.execute_command_key(SourceCommand::CompileVerilogA.key());
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     let clicked = app
         .state
@@ -504,7 +507,7 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
     app.state.seed_test_deck(deck(&app));
 
     let ctx = themed_context();
-    app.execute_command_key(CodeCommand::CompileVerilogA.key());
+    app.execute_command_key(SourceCommand::CompileVerilogA.key());
     frame(&ctx, &mut app, DESKTOP);
     wait_for_compile(&ctx, &mut app);
     app.state.seed_test_deck(deck(&app));
@@ -560,7 +563,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     open_in_design(&mut app.state, &reference);
     let ctx = themed_context();
 
-    app.execute_command_key(CodeCommand::CompileVerilogA.key());
+    app.execute_command_key(SourceCommand::CompileVerilogA.key());
     let clicked = app
         .state
         .code
@@ -639,7 +642,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     )
     .unwrap();
 
-    app.execute_command_key(CodeCommand::CompileVerilogA.key());
+    app.execute_command_key(SourceCommand::CompileVerilogA.key());
     frame(&ctx, &mut app, DESKTOP);
     wait_for_compile(&ctx, &mut app);
     frame(&ctx, &mut app, DESKTOP);

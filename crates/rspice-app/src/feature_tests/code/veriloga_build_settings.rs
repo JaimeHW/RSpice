@@ -13,7 +13,7 @@ use crate::workbench::app::veriloga_design_tests::{
 use rspice_app_code::workbench::app::dialogs::veriloga_build_settings::{
     VerilogABuildSettingsDraft, save_veriloga_build_settings,
 };
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::localization::{MessageId, UiTextLocale};
@@ -139,8 +139,8 @@ fn click(ctx: &egui::Context, app: &mut RSpiceApp, name: &str) {
 #[test]
 fn build_settings_round_trips_every_field_through_the_profile_document() {
     let mut app = veriloga_view_holding(TWO_MODULES);
-    assert!(app.command_key_enabled(CodeCommand::VerilogABuildSettings.key()));
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    assert!(app.command_key_enabled(SourceCommand::VerilogABuildSettings.key()));
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
 
     let form = draft(&mut app);
     assert_eq!(form.modules, ["gain", "gain_fast"]);
@@ -197,7 +197,7 @@ fn build_settings_round_trips_every_field_through_the_profile_document() {
         "the view compiles the entry module chosen"
     );
 
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
     let reread = draft(&mut app);
     assert_eq!(reread.entry_module, "gain_fast");
     assert!(reread.generated_rust && reread.native_x64_jit && reread.reject_fallback);
@@ -219,7 +219,7 @@ fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
     let mut app = veriloga_view_holding(TWO_MODULES);
     let before = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(before.selected_module(), Some("gain"));
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
     assert!(save(&mut app).unwrap());
 
@@ -281,7 +281,7 @@ fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
         TWO_MODULES.to_owned(),
     )
     .unwrap();
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
     assert!(save(&mut app).unwrap());
     compile_and_publish(&mut app);
@@ -327,7 +327,7 @@ fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
 #[test]
 fn build_settings_undo_refuses_after_a_later_source_edit() {
     let mut app = veriloga_view_holding(TWO_MODULES);
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
     draft(&mut app).entry_module = "gain_fast".to_owned();
     assert!(save(&mut app).unwrap());
     let saved = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
@@ -363,8 +363,8 @@ fn build_settings_save_is_refused_on_a_read_only_project() {
         },
         String::new(),
     );
-    assert!(app.command_key_enabled(CodeCommand::VerilogABuildSettings.key()));
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    assert!(app.command_key_enabled(SourceCommand::VerilogABuildSettings.key()));
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
     let before = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     draft(&mut app).generated_rust = true;
 
@@ -417,7 +417,7 @@ fn gap_between_fields(output: &egui::FullOutput, above: MessageId, name: Message
 #[test]
 fn a_refused_entry_is_stated_under_its_field_and_holds_save() {
     let mut app = veriloga_view_holding(TWO_MODULES);
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
     let ctx = themed_context();
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     let output = frame_with(&ctx, &mut app, DESKTOP, Vec::new());
@@ -501,7 +501,7 @@ fn a_refused_entry_is_stated_under_its_field_and_holds_save() {
 fn save_and_compile_compiles_with_the_new_settings() {
     let mut app = veriloga_view_holding(NEEDS_A_DEFINE);
     let ctx = themed_context();
-    app.execute_command_key(CodeCommand::CompileVerilogA.key());
+    app.execute_command_key(SourceCommand::CompileVerilogA.key());
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     wait_for_compile(&ctx, &mut app);
     assert!(
@@ -517,7 +517,7 @@ fn save_and_compile_compiles_with_the_new_settings() {
             .is_empty()
     );
 
-    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    app.execute_command_key(SourceCommand::VerilogABuildSettings.key());
     draft(&mut app).define_draft = "GAIN_VALUE=2m".to_owned();
     click(
         &ctx,

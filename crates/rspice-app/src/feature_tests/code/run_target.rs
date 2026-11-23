@@ -4,7 +4,7 @@
 //! what Check and netlist checks there.
 
 use crate::workbench::RSpiceApp;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_state::state::SimulationRunIntent;
 use rspice_app_state::workbench::preferences::FolderListPreference;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -185,7 +185,7 @@ fn a_deck_with_no_analysis_says_so_in_one_sentence() {
 /// called Validate.
 #[test]
 fn no_command_asks_for_a_validation_before_run() {
-    for command in CodeCommand::ALL {
+    for command in SourceCommand::ALL {
         let label = command.declared_spec().label;
         assert!(!label.contains("Validat"), "{label}");
     }
@@ -213,7 +213,7 @@ fn run_is_refused_while_a_run_is_going_on_the_netlist_workspace() {
 fn show_deck_brings_the_deck_that_runs_to_the_front() {
     let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
     assert_eq!(
-        app.command_availability(CodeCommand::ShowRunDeck.key()),
+        app.command_availability(SourceCommand::ShowRunDeck.key()),
         CommandAvailability::Available
     );
     rspice_app_code::workbench::documents::netlist_document::show_generated_deck(
@@ -222,7 +222,7 @@ fn show_deck_brings_the_deck_that_runs_to_the_front() {
         &mut app.state.workbench,
     );
     assert!(
-        !app.command_availability(CodeCommand::ShowRunDeck.key())
+        !app.command_availability(SourceCommand::ShowRunDeck.key())
             .is_available(),
         "with the plan as what runs, there is no deck to show"
     );

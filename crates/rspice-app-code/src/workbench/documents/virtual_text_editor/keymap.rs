@@ -292,7 +292,7 @@ mod tests {
     /// nor one its completion or zoom takes before a command could.
     #[test]
     fn no_editor_command_key_is_one_the_editor_keeps_for_itself() {
-        use crate::workbench::code::commands::CodeCommand;
+        use crate::workbench::code::commands::SourceCommand;
 
         let control = |os: OperatingSystem| {
             if os == OperatingSystem::Mac {
@@ -314,8 +314,8 @@ mod tests {
             ]
         };
         let mut clashes = Vec::new();
-        let commands = CodeCommand::ALL.into_iter().filter(|command| {
-            command.source_editor_only() || *command == CodeCommand::FindCodeDocument
+        let commands = SourceCommand::ALL.into_iter().filter(|command| {
+            command.source_editor_only() || *command == SourceCommand::FindCodeDocument
         });
         for command in commands {
             let spec = command.declared_spec();

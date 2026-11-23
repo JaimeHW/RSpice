@@ -270,7 +270,7 @@ impl ShellCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_code::workbench::code::commands::SourceCommand;
     use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_results::workbench::documents::result_document::ResultViewer;
     use rspice_app_results::workbench::results::commands::ResultsCommand;
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn rename_shortcut_is_unambiguous_and_desktop_browser_only() {
         let rename = DesignCommand::RenameSelection.declared_spec();
-        let rename_symbol = CodeCommand::RenameSymbol.declared_spec();
+        let rename_symbol = SourceCommand::RenameSymbol.declared_spec();
         for platform in [CommandPlatform::Desktop, CommandPlatform::Browser] {
             assert_eq!(
                 ordered_binding_owners(rename.bindings[0].chord, platform),
@@ -678,7 +678,7 @@ mod tests {
     /// context-menu row cannot be bound or automated.
     #[test]
     fn show_in_netlist_is_one_discoverable_command() {
-        let spec = CodeCommand::ShowInNetlist.declared_spec();
+        let spec = SourceCommand::ShowInNetlist.declared_spec();
         assert!(
             crate::workbench::commands::vocabulary::command_registry()
                 .order()
@@ -698,7 +698,7 @@ mod tests {
         let (mut app, load_id, _) = app_with_two_instances();
 
         assert_eq!(
-            app.command_availability(CodeCommand::ShowInNetlist.key()),
+            app.command_availability(SourceCommand::ShowInNetlist.key()),
             CommandAvailability::Disabled("select one instance or one net")
         );
 
@@ -718,7 +718,7 @@ mod tests {
             "the Netlist page never generated a deck"
         );
         assert_eq!(
-            app.command_availability(CodeCommand::ShowInNetlist.key()),
+            app.command_availability(SourceCommand::ShowInNetlist.key()),
             CommandAvailability::Available
         );
 
@@ -726,7 +726,7 @@ mod tests {
         // "select one instance" would send the engineer to the wrong place.
         app.state.workbench.workspace = Workspace::Results;
         assert_eq!(
-            app.command_availability(CodeCommand::ShowInNetlist.key()),
+            app.command_availability(SourceCommand::ShowInNetlist.key()),
             CommandAvailability::Disabled("open a schematic or testbench")
         );
     }
@@ -746,7 +746,7 @@ mod tests {
             .selection
             .select_only_component(load_id);
 
-        app.execute_command_key(CodeCommand::ShowInNetlist.key());
+        app.execute_command_key(SourceCommand::ShowInNetlist.key());
 
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
         assert_eq!(
@@ -799,7 +799,7 @@ mod tests {
             .selection
             .select_only_component(ground_id);
 
-        app.execute_command_key(CodeCommand::ShowInNetlist.key());
+        app.execute_command_key(SourceCommand::ShowInNetlist.key());
 
         assert_eq!(app.state.workbench.workspace, Workspace::Design);
         assert_eq!(

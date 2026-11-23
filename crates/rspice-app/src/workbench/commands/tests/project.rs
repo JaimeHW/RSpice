@@ -9,7 +9,7 @@
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
@@ -63,7 +63,7 @@ fn project_operation_gate_covers_every_mutating_project_command() {
             "ungated: {command:?}"
         );
     }
-    for command in [CodeCommand::OpenNetlist, CodeCommand::ImportVerilogA] {
+    for command in [SourceCommand::OpenNetlist, SourceCommand::ImportVerilogA] {
         assert!(
             command
                 .declared_spec()
@@ -150,10 +150,10 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         );
     }
     for command in [
-        CodeCommand::ImportVerilogA,
-        CodeCommand::ExportNetlist,
-        CodeCommand::GenerateNetlist,
-        CodeCommand::CompileVerilogA,
+        SourceCommand::ImportVerilogA,
+        SourceCommand::ExportNetlist,
+        SourceCommand::GenerateNetlist,
+        SourceCommand::CompileVerilogA,
     ] {
         assert!(
             command

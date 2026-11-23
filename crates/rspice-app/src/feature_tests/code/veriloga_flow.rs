@@ -13,7 +13,7 @@ use crate::workbench::app::veriloga_flow_tests::{
     CELL, MODULE, PORTS, User, assert_five_volts, compile, new_device, new_project, run_plan,
     run_plan_of_instance, wired_device,
 };
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -438,18 +438,18 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
         .find(|diagnostic| diagnostic.line == Some(26))
         .map(|diagnostic| diagnostic.message.to_string())
         .expect("the misspelt slew variable is an error");
-    let step = |user: &mut User, command: CodeCommand| {
+    let step = |user: &mut User, command: SourceCommand| {
         user.app.execute_command_key(command.key());
         user.settle();
         user.prompt()
     };
     assert_eq!(
-        step(&mut user, CodeCommand::NextProblem),
+        step(&mut user, SourceCommand::NextProblem),
         format!("Error 1 of {count}, line 21: {gbww}")
     );
     assert_eq!(user.caret(), (21, 29));
     assert_eq!(
-        step(&mut user, CodeCommand::ShowProblemAtCaret),
+        step(&mut user, SourceCommand::ShowProblemAtCaret),
         format!("Error {code} at line 21, column 29: {gbww}")
     );
 
@@ -458,12 +458,12 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     super::veriloga_interface_tests::edit_source(&mut user.app, &commented);
     user.settle();
     assert_eq!(
-        step(&mut user, CodeCommand::NextProblem),
+        step(&mut user, SourceCommand::NextProblem),
         format!("Error 1 of {count}, line 22: {gbww}")
     );
     assert_eq!(user.caret(), (22, 29));
     assert_eq!(
-        step(&mut user, CodeCommand::ShowProblemAtCaret),
+        step(&mut user, SourceCommand::ShowProblemAtCaret),
         format!("Error {code} at line 22, column 29, found before your latest edits: {gbww}")
     );
 
@@ -476,7 +476,7 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     super::veriloga_interface_tests::edit_source(&mut user.app, &deleted);
     user.settle();
     for _ in 0..count {
-        let said = step(&mut user, CodeCommand::NextProblem);
+        let said = step(&mut user, SourceCommand::NextProblem);
         assert!(said.contains(&format!(" of {}, ", count - 1)), "{said:?}");
         assert!(!said.contains(&vslw), "{said:?}");
     }
@@ -558,7 +558,8 @@ fn a_pause_in_writing_checks_a_long_module_and_finds_the_error_typed_into_it() {
                 .is_none(),
             "nothing was compiled"
         );
-        user.app.execute_command_key(CodeCommand::NextProblem.key());
+        user.app
+            .execute_command_key(SourceCommand::NextProblem.key());
         user.settle();
         user.prompt()
     };
@@ -604,7 +605,7 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         let folder = models.join(folder);
         let text = std::fs::read_to_string(folder.join(root)).expect("the root is readable");
         user.app
-            .execute_command_key(CodeCommand::ImportVerilogA.key());
+            .execute_command_key(SourceCommand::ImportVerilogA.key());
         code_workspace::complete_veriloga_files_pick(
             &mut user.app.code_workspace_parts(),
             &[(root, &text)],

@@ -7,7 +7,7 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{Replay, only};
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::netlist_document::editor_id_in;
 use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -116,7 +116,7 @@ fn plotting_before_the_deck_has_run_says_why() {
     assert_eq!(
         replay
             .app
-            .command_availability(CodeCommand::PlotNodeVoltage.key()),
+            .command_availability(SourceCommand::PlotNodeVoltage.key()),
         CommandAvailability::Disabled("the deck has not been run")
     );
 }
@@ -149,13 +149,13 @@ fn plotting_a_device_after_a_run_puts_its_current_on_the_plot() {
     assert_eq!(
         replay
             .app
-            .command_availability(CodeCommand::PlotDeviceCurrent.key()),
+            .command_availability(SourceCommand::PlotDeviceCurrent.key()),
         CommandAvailability::Available
     );
 
     replay
         .app
-        .execute_command_key(CodeCommand::PlotDeviceCurrent.key());
+        .execute_command_key(SourceCommand::PlotDeviceCurrent.key());
     replay.frames(Vec::new());
 
     assert_eq!(replay.app.state.workbench.workspace, Workspace::Results);

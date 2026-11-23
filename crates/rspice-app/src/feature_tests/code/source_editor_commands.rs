@@ -7,7 +7,7 @@ use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
 use crate::workbench::commands::vocabulary::ShellCommand;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_state::state::{Point, ProjectSourceId, Wire};
 use rspice_app_state::workbench::workspace::Workspace;
@@ -235,10 +235,10 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     );
 
     assert!(
-        app.command_availability(CodeCommand::ToggleLineComment.key())
+        app.command_availability(SourceCommand::ToggleLineComment.key())
             .is_available()
     );
-    app.execute_command_key(CodeCommand::ToggleLineComment.key());
+    app.execute_command_key(SourceCommand::ToggleLineComment.key());
     frame(&ctx, &mut app, DESKTOP);
     assert_eq!(
         root_text(&app, bundle_id),
@@ -260,7 +260,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     for _ in 0..3 {
         output = frame(&ctx, &mut app, DESKTOP);
     }
-    let find = CodeCommand::FindCodeDocument.declared_spec().label;
+    let find = SourceCommand::FindCodeDocument.declared_spec().label;
     assert_eq!(menu_shortcut(&output, find).as_deref(), Some("Ctrl+F"));
     assert!(menu_item(&output, "Find in design…").is_none());
     frame_with(
@@ -295,10 +295,10 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     app.state.workbench.activate(Workspace::Project);
     frame(&ctx, &mut app, DESKTOP);
     for command in [
-        CodeCommand::ToggleLineComment,
-        CodeCommand::DuplicateLine,
-        CodeCommand::GoToLine,
-        CodeCommand::FoldAll,
+        SourceCommand::ToggleLineComment,
+        SourceCommand::DuplicateLine,
+        SourceCommand::GoToLine,
+        SourceCommand::FoldAll,
     ] {
         assert_eq!(
             app.command_availability(command.key()),
@@ -394,7 +394,7 @@ fn a_verilog_a_editor_keeps_find_references_and_rename_with_their_keys() {
 
     let (ctx, mut app) = veriloga_caret_on_g();
     assert!(
-        app.command_availability(CodeCommand::FindReferences.key())
+        app.command_availability(SourceCommand::FindReferences.key())
             .is_available()
     );
     stroke(&ctx, &mut app, egui::Key::F12, egui::Modifiers::SHIFT);
@@ -670,10 +670,12 @@ fn every_source_editor_command_has_a_row_in_a_menu() {
         );
         keys(&rows, &mut shown);
     }
-    let missing: Vec<&str> = CodeCommand::ALL
+    let missing: Vec<&str> = SourceCommand::ALL
         .into_iter()
-        .filter(|command| command.source_editor_only() || *command == CodeCommand::FindCodeDocument)
-        .map(CodeCommand::key)
+        .filter(|command| {
+            command.source_editor_only() || *command == SourceCommand::FindCodeDocument
+        })
+        .map(SourceCommand::key)
         .chain(
             WorkbenchCommand::ALL
                 .into_iter()

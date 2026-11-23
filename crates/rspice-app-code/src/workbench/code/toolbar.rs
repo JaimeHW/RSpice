@@ -9,7 +9,7 @@
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::chrome::toolbar::{explicit_label_width, toolbar_icon_button_size};
 use crate::workbench::code::CodeFeature;
-use crate::workbench::code::commands::CodeCommand;
+use crate::workbench::code::commands::SourceCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use crate::workbench::documents::netlist_document::NetlistTab;
 use crate::workbench::framework::command_registry::ids;
@@ -69,7 +69,7 @@ const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
     ToolbarEntry::Only(
         no_compile_pending,
         &[labelled(
-            CodeCommand::CompileVerilogA.key(),
+            SourceCommand::CompileVerilogA.key(),
             WorkbenchIcon::Run,
             "Compile Verilog-A/AMS",
         )],
@@ -77,7 +77,7 @@ const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
     ToolbarEntry::Only(
         compile_pending,
         &[labelled(
-            CodeCommand::CancelVerilogACompile.key(),
+            SourceCommand::CancelVerilogACompile.key(),
             WorkbenchIcon::Stop,
             "Cancel Verilog-A/AMS compile",
         )],
@@ -92,12 +92,12 @@ const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
         run: show_generated_deck,
     }),
     labelled(
-        CodeCommand::VerilogAOpenSymbol.key(),
+        SourceCommand::VerilogAOpenSymbol.key(),
         WorkbenchIcon::Instance,
         "Open symbol",
     ),
     icon(
-        CodeCommand::VerilogABuildSettings.key(),
+        SourceCommand::VerilogABuildSettings.key(),
         WorkbenchIcon::Sliders,
     ),
     ToolbarEntry::Separator,
@@ -105,7 +105,7 @@ const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
         show: veriloga_format_tool,
         overflow: None,
     }),
-    icon(CodeCommand::FindCodeDocument.key(), WorkbenchIcon::Search),
+    icon(SourceCommand::FindCodeDocument.key(), WorkbenchIcon::Search),
 ];
 
 fn compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {
@@ -220,17 +220,17 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
         generated_netlist_in_front,
         &[
             labelled(
-                CodeCommand::SaveNetlistAsDeck.key(),
+                SourceCommand::SaveNetlistAsDeck.key(),
                 WorkbenchIcon::Save,
                 "Save as deck",
             ),
             labelled(
-                CodeCommand::ExportNetlist.key(),
+                SourceCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
                 "Export netlist",
             ),
             labelled(
-                CodeCommand::CompareGeneratedRevisions.key(),
+                SourceCommand::CompareGeneratedRevisions.key(),
                 WorkbenchIcon::Compare,
                 "Compare with earlier build",
             ),
@@ -243,13 +243,13 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
             ToolbarEntry::Only(
                 deck_file_in_front,
                 &[labelled(
-                    CodeCommand::SaveDeckAs.key(),
+                    SourceCommand::SaveDeckAs.key(),
                     WorkbenchIcon::Save,
                     "Save deck as",
                 )],
             ),
             labelled(
-                CodeCommand::ExportNetlist.key(),
+                SourceCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
                 "Export deck",
             ),
@@ -267,7 +267,7 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
                 overflow: None,
             }),
             labelled(
-                CodeCommand::ExportNetlist.key(),
+                SourceCommand::ExportNetlist.key(),
                 WorkbenchIcon::Export,
                 "Export deck",
             ),

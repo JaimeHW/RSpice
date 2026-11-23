@@ -12,7 +12,7 @@ use crate::workbench::app::veriloga_design_tests::{
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::features;
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::code_workspace::{
     VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,
 };
@@ -123,9 +123,9 @@ fn a_hand_drawn_symbol_keeps_its_artwork_through_a_recompile_and_update() {
 fn open_symbol_takes_a_compiled_module_to_its_symbol() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
-    assert!(app.command_key_enabled(CodeCommand::VerilogAOpenSymbol.key()));
+    assert!(app.command_key_enabled(SourceCommand::VerilogAOpenSymbol.key()));
 
-    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    app.execute_command_key(SourceCommand::VerilogAOpenSymbol.key());
 
     assert_eq!(
         app.state.model.workspace.content.active_view,
@@ -224,7 +224,7 @@ fn pressing_update_symbol_opens_the_symbol_with_exactly_its_new_pins_selected() 
 fn a_compiled_symbol_saves_and_keeps_its_rails_through_an_update() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
-    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    app.execute_command_key(SourceCommand::VerilogAOpenSymbol.key());
     app.state.run_active_symbol_pin_checks();
     assert_eq!(app.state.active_symbol_pin_finding_count(), Some(0));
 
@@ -250,7 +250,7 @@ fn the_editor_generates_what_the_compile_drew() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
     let drawn = symbol(&app, &reference);
-    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    app.execute_command_key(SourceCommand::VerilogAOpenSymbol.key());
 
     rspice_app_design::workbench::app::actions::workspace::symbol_document::generate_active_symbol_document(
         &mut app.state.design.symbol,
@@ -268,7 +268,7 @@ fn the_editor_generates_what_the_compile_drew() {
 fn the_first_drag_on_a_compiled_symbol_lands_the_pin_where_it_is_dropped() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
-    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    app.execute_command_key(SourceCommand::VerilogAOpenSymbol.key());
     let ctx = themed_context();
     ctx.enable_accesskit();
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
@@ -343,7 +343,7 @@ fn the_symbol_editor_answers_a_compiled_symbol_to_its_module() {
     hand_draw(&mut app, &reference);
     edit_source(&mut app, &amplifier(", en"));
     compile_and_publish(&mut app);
-    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    app.execute_command_key(SourceCommand::VerilogAOpenSymbol.key());
     let ctx = themed_context();
 
     let labels = frame_labels(&ctx, &mut app);
@@ -385,7 +385,7 @@ fn a_pin_the_module_dropped_is_named_against_the_module() {
     hand_draw(&mut app, &reference);
     edit_source(&mut app, &amplifier(""));
     compile_and_publish(&mut app);
-    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    app.execute_command_key(SourceCommand::VerilogAOpenSymbol.key());
     let ctx = themed_context();
 
     let labels = frame_labels(&ctx, &mut app);
@@ -462,7 +462,7 @@ fn a_compiled_symbol_undoes_saves_and_reverts_as_a_drawn_one() {
         uuid::Uuid::new_v4()
     ));
     assert!(app.state.save_project_to_path(&path), "the project saves");
-    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    app.execute_command_key(SourceCommand::VerilogAOpenSymbol.key());
     let symbol_view = || CellViewRef::new(LIBRARY, "ota", GENERATED_SYMBOL_VIEW);
     let compiled = symbol(&app, &reference);
     let revision = |app: &RSpiceApp| {

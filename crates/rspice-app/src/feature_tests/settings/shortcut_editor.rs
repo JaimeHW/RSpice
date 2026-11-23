@@ -9,7 +9,7 @@ use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
 use egui::Key;
 use egui::Modifiers;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::capture::*;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::*;
 use rspice_app_state::state::command_catalog::CommandPlatform;
@@ -89,7 +89,7 @@ fn search_matches_context_and_binding_text() {
     let os = egui::os::OperatingSystem::Windows;
     assert!(
         filtered_commands(&editor, os, command_registry())
-            .contains(&CodeCommand::GenerateNetlist.key())
+            .contains(&SourceCommand::GenerateNetlist.key())
     );
     editor.query = "verification".to_owned();
     assert!(

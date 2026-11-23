@@ -708,7 +708,7 @@ mod tests {
                 + rspice_app_simulate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + rspice_app_project::workbench::project::commands::ProjectCommand::ALL.len()
                 + rspice_app_design::workbench::design::commands::DesignCommand::ALL.len()
-                + rspice_app_code::workbench::code::commands::CodeCommand::ALL.len()
+                + rspice_app_code::workbench::code::commands::SourceCommand::ALL.len()
         );
     }
 
@@ -778,7 +778,7 @@ mod tests {
     #[test]
     fn a_command_a_feature_reads_runs_exactly_when_it_is_available() {
         use crate::workbench::commands::vocabulary::ShellCommand;
-        use rspice_app_code::workbench::code::commands::CodeCommand;
+        use rspice_app_code::workbench::code::commands::SourceCommand;
 
         for (slot, keys) in foreign_availability() {
             for key in keys {
@@ -789,7 +789,7 @@ mod tests {
                     );
                 }
                 assert!(
-                    !CodeCommand::from_key(*key).is_some_and(CodeCommand::source_editor_only),
+                    !SourceCommand::from_key(*key).is_some_and(SourceCommand::source_editor_only),
                     "{slot} reads {key:?}, whose answer refuses more than its run does"
                 );
             }

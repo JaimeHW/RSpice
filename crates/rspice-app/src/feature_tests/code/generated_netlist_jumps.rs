@@ -7,7 +7,7 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
 use crate::workbench::examples::hierarchy_reference;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::netlist_document::fixtures::{
     DECK_INCLUDE, seed_deck_with_include,
 };
@@ -135,21 +135,21 @@ fn assert_generated_in_front(app: &mut RSpiceApp, hidden: &str, from: &str) {
 #[test]
 fn open_generated_netlist_from_the_schematic_shows_it_before_the_page_was_ever_opened() {
     let mut app = design_app();
-    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    app.execute_command_key(SourceCommand::GenerateNetlist.key());
     assert_generated_in_front(&mut app, "engineer's deck", "from the schematic");
 }
 
 #[test]
 fn open_generated_netlist_replaces_the_editable_deck_in_front() {
     let mut app = deck_in_front_app();
-    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    app.execute_command_key(SourceCommand::GenerateNetlist.key());
     assert_generated_in_front(&mut app, "engineer's deck", "over the deck");
 }
 
 #[test]
 fn open_generated_netlist_replaces_an_include_tab_in_front() {
     let mut app = include_in_front_app();
-    app.execute_command_key(CodeCommand::GenerateNetlist.key());
+    app.execute_command_key(SourceCommand::GenerateNetlist.key());
     assert_generated_in_front(&mut app, ".param rmodel=1k", "over the include");
 }
 

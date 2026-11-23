@@ -13,7 +13,7 @@ use super::engine_recovery_path::author_deck;
 use crate::feature_tests::replay::{Control, PRIMARY, Replay, only};
 use crate::workbench::features;
 use rspice_app_code::workbench::code::CodeFeature;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::netlist_document::language::show_signature_help_at_cursor;
 use rspice_app_code::workbench::documents::netlist_document::{
     OwnedNetlistReplacement, editor_id_in, replace_deck_files,
@@ -569,7 +569,7 @@ fn the_decks_menu_and_keys_offer_find_references_and_rename() {
     press(&mut replay, Key::Escape);
     replay.frame(Vec::new());
     assert!(editor_has_the_keyboard(&replay));
-    for command in [CodeCommand::FindReferences, CodeCommand::RenameSymbol] {
+    for command in [SourceCommand::FindReferences, SourceCommand::RenameSymbol] {
         assert!(
             replay
                 .app

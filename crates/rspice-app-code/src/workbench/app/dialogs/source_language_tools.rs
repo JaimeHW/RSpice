@@ -26,7 +26,7 @@ use egui::{Context, Id};
 
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::code::commands::CodeCommand;
+use crate::workbench::code::commands::SourceCommand;
 use crate::workbench::documents::code_workspace::{
     self, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
 };
@@ -40,7 +40,7 @@ const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
 /// instead, which the shell asks.
 pub fn navigate_source_bundle(
     parts: &mut CodeWorkspaceParts<'_>,
-    command: CodeCommand,
+    command: SourceCommand,
 ) -> Result<(), String> {
     let messages = parts.wb.messages();
     let no_bundle = || messages.text(MessageId::SourceNoBundle);
@@ -74,7 +74,7 @@ pub fn navigate_source_bundle(
         .as_ref()
         .map(|tools| tools.query.clone())
         .unwrap_or_default();
-    if command == CodeCommand::RenameSymbol {
+    if command == SourceCommand::RenameSymbol {
         if caret_name.is_empty() {
             parts.code.language_tools = previous;
             return Err(messages.text(MessageId::SourcePlaceCaretToRename));
@@ -86,7 +86,7 @@ pub fn navigate_source_bundle(
     }
     let tools = std::mem::replace(&mut parts.code.language_tools, previous)
         .ok_or_else(|| messages.text(MessageId::SourceIndexUnavailable))?;
-    if command == CodeCommand::FindReferences {
+    if command == SourceCommand::FindReferences {
         if caret_name.is_empty() {
             return Err(messages.text(MessageId::SourcePlaceCaretToFindReferences));
         }

@@ -2,7 +2,7 @@
 //! back to the glyph of a command's scope.
 
 use crate::workbench::commands::vocabulary::ShellCommand;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
@@ -36,13 +36,13 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             _ => None,
         };
     }
-    if let Some(command) = CodeCommand::from_key(key) {
+    if let Some(command) = SourceCommand::from_key(key) {
         return match command {
-            CodeCommand::ImportVerilogA
-            | CodeCommand::ExportNetlist
-            | CodeCommand::ExportBillOfMaterials
-            | CodeCommand::ExportDeck
-            | CodeCommand::ExportDeckFiles => Some(Icon::File),
+            SourceCommand::ImportVerilogA
+            | SourceCommand::ExportNetlist
+            | SourceCommand::ExportBillOfMaterials
+            | SourceCommand::ExportDeck
+            | SourceCommand::ExportDeckFiles => Some(Icon::File),
             _ => None,
         };
     }

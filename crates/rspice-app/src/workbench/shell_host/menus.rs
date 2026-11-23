@@ -5,7 +5,7 @@
 
 use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::code::{SOURCE_EDIT_MENU, SOURCE_VIEW_ROWS};
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -85,7 +85,7 @@ const fn simulate(command: SimulateCommand) -> MenuEntry {
 }
 
 /// The code feature's command's row under the label it declares.
-const fn code(command: CodeCommand) -> MenuEntry {
+const fn code(command: SourceCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -135,8 +135,8 @@ const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::NewProject).access('N'),
     project(ProjectCommand::NewCell).access('W'),
     project(ProjectCommand::NewView).access('V'),
-    code(CodeCommand::NewVerilogADevice).access('G'),
-    code(CodeCommand::NewDeck),
+    code(SourceCommand::NewVerilogADevice).access('G'),
+    code(SourceCommand::NewDeck),
     Separator,
     // A schematic file is opened as a document of its own only on the start
     // screen; inside a project it is imported as a new cell view.
@@ -145,7 +145,7 @@ const FILE_MENU: &[MenuEntry] = &[
         &[project(ProjectCommand::OpenSchematic).access('M')],
     ),
     project(ProjectCommand::OpenProject).access('O'),
-    code(CodeCommand::OpenNetlist).access('K'),
+    code(SourceCommand::OpenNetlist).access('K'),
     MenuEntry::submenu("Open recent", OPEN_RECENT_MENU).access('R'),
     Separator,
     command(ShellCommand::CloseActiveDocument).access('C'),
@@ -157,11 +157,11 @@ const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::SaveAs).access('A'),
     project(ProjectCommand::SaveCopy),
     project(ProjectCommand::PackWithResults),
-    code(CodeCommand::SaveDeckAs),
-    code(CodeCommand::SaveNetlistAsDeck).access('T'),
+    code(SourceCommand::SaveDeckAs),
+    code(SourceCommand::SaveNetlistAsDeck).access('T'),
     MenuEntry::Only(
         MenuContext::DeckEditor,
-        &[code(CodeCommand::ManageSourceDocument).access('U')],
+        &[code(SourceCommand::ManageSourceDocument).access('U')],
     ),
     project(ProjectCommand::SaveAll),
     command(ShellCommand::RevertActiveDocument).access('D'),
@@ -194,14 +194,14 @@ const OPEN_RECENT_MENU: &[MenuEntry] = &[
 ];
 
 const IMPORT_MENU: &[MenuEntry] = &[
-    MenuEntry::command_as(CodeCommand::ImportVerilogA.key(), "Verilog-A\u{2026}").access('V'),
+    MenuEntry::command_as(SourceCommand::ImportVerilogA.key(), "Verilog-A\u{2026}").access('V'),
     MenuEntry::command_as(
-        CodeCommand::ImportLtspiceSchematic.key(),
+        SourceCommand::ImportLtspiceSchematic.key(),
         "LTspice schematic (.asc)\u{2026}",
     )
     .access('L'),
     MenuEntry::command_as(
-        CodeCommand::ImportQspiceSchematic.key(),
+        SourceCommand::ImportQspiceSchematic.key(),
         "QSPICE schematic (.qsch)\u{2026}",
     )
     .access('Q'),
@@ -226,20 +226,20 @@ const EXPORT_MENU: &[MenuEntry] = &[
         "Image or PDF\u{2026}",
     )
     .access('I'),
-    MenuEntry::command_as(CodeCommand::ExportNetlist.key(), "SPICE netlist\u{2026}").access('S'),
+    MenuEntry::command_as(SourceCommand::ExportNetlist.key(), "SPICE netlist\u{2026}").access('S'),
     MenuEntry::command_as(
         ResultsCommand::ExportWaveformsCsv.key(),
         "Result dataset\u{2026}",
     )
     .access('D'),
     MenuEntry::command_as(
-        CodeCommand::ExportBillOfMaterials.key(),
+        SourceCommand::ExportBillOfMaterials.key(),
         "Bill of materials (CSV)\u{2026}",
     )
     .access('B'),
-    MenuEntry::command_as(CodeCommand::ExportDeck.key(), "Deck\u{2026}").access('K'),
+    MenuEntry::command_as(SourceCommand::ExportDeck.key(), "Deck\u{2026}").access('K'),
     MenuEntry::command_as(
-        CodeCommand::ExportDeckFiles.key(),
+        SourceCommand::ExportDeckFiles.key(),
         "Deck and files (ZIP)\u{2026}",
     )
     .access('Z'),
@@ -468,9 +468,9 @@ const DESIGN_MENU: &[MenuEntry] = &[
         MenuContext::VerilogAView,
         &[
             Separator,
-            code(CodeCommand::CompileVerilogA).access('M'),
-            code(CodeCommand::CancelVerilogACompile).access('V'),
-            code(CodeCommand::VerilogABuildSettings).access('B'),
+            code(SourceCommand::CompileVerilogA).access('M'),
+            code(SourceCommand::CancelVerilogACompile).access('V'),
+            code(SourceCommand::VerilogABuildSettings).access('B'),
         ],
     ),
 ];
@@ -627,13 +627,13 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Preflight).access('C'),
     MenuEntry::command_as(SimulateCommand::Run.key(), "Run").access('R'),
     MenuEntry::command_as(SimulateCommand::Stop.key(), "Stop").access('S'),
-    code(CodeCommand::GenerateNetlist).access('G'),
+    code(SourceCommand::GenerateNetlist).access('G'),
     MenuEntry::Only(
         MenuContext::SourceEditor,
         &[
-            code(CodeCommand::ShowRunDeck).access('W'),
+            code(SourceCommand::ShowRunDeck).access('W'),
             MenuEntry::command_as(
-                CodeCommand::CompareGeneratedRevisions.key(),
+                SourceCommand::CompareGeneratedRevisions.key(),
                 "Compare netlist with earlier build\u{2026}",
             )
             .access('B'),
@@ -1042,16 +1042,16 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             _ => None,
         };
     }
-    if let Some(command) = CodeCommand::from_key(key) {
+    if let Some(command) = SourceCommand::from_key(key) {
         return match command {
-            CodeCommand::ManageSourceDocument => Some(WorkbenchIcon::Folder),
+            SourceCommand::ManageSourceDocument => Some(WorkbenchIcon::Folder),
             // The Models toolbar's button; the Verilog-A view's wears Run.
-            CodeCommand::CompileVerilogA => Some(WorkbenchIcon::Netlist),
-            CodeCommand::CancelVerilogACompile => Some(WorkbenchIcon::Stop),
-            CodeCommand::VerilogABuildSettings => Some(WorkbenchIcon::Sliders),
-            CodeCommand::FindCodeDocument => Some(WorkbenchIcon::Search),
-            CodeCommand::CompareGeneratedRevisions => Some(WorkbenchIcon::Compare),
-            CodeCommand::ExportNetlist => Some(WorkbenchIcon::Export),
+            SourceCommand::CompileVerilogA => Some(WorkbenchIcon::Netlist),
+            SourceCommand::CancelVerilogACompile => Some(WorkbenchIcon::Stop),
+            SourceCommand::VerilogABuildSettings => Some(WorkbenchIcon::Sliders),
+            SourceCommand::FindCodeDocument => Some(WorkbenchIcon::Search),
+            SourceCommand::CompareGeneratedRevisions => Some(WorkbenchIcon::Compare),
+            SourceCommand::ExportNetlist => Some(WorkbenchIcon::Export),
             _ => None,
         };
     }

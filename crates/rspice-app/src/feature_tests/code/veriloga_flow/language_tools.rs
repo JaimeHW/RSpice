@@ -279,7 +279,7 @@ fn find_references_is_a_list_the_keyboard_walks_and_enter_opens_at_the_column() 
 
     rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_source_bundle(
         &mut user.app.code_workspace_parts(),
-        CodeCommand::FindReferences,
+        SourceCommand::FindReferences,
     )
     .expect("the caret is on a name");
     user.settle();

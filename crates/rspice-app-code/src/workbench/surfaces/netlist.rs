@@ -27,7 +27,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
-use crate::workbench::code::commands::CodeRequest;
+use crate::workbench::code::commands::SourceRequest;
 use crate::workbench::design_system::{
     Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
 };
@@ -278,7 +278,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // A file dropped on the page opens as a deck once the page has drawn.
     let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
     if !dropped.is_empty() {
-        cx.wb.outbox.push(CodeRequest::OpenDroppedDeck(dropped));
+        cx.wb.outbox.push(SourceRequest::OpenDroppedDeck(dropped));
     }
     toolbar::code_toolbar(ui, cx);
     // The run's band states the run and reports what was clicked; routing
@@ -358,7 +358,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
         // was asked, in a frame no input began, so this frame asks for the
         // next at once to draw what formatting wrote.
         ui.ctx().request_repaint();
-        cx.wb.outbox.push(CodeRequest::FormatNetlistDocument);
+        cx.wb.outbox.push(SourceRequest::FormatNetlistDocument);
     }
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
@@ -376,7 +376,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             if cx.state.netlist.open_deck.is_none()
                 && cx.model.netlist_artifacts.generated_document.is_none()
             {
-                use crate::workbench::code::commands::CodeCommand;
+                use crate::workbench::code::commands::SourceCommand;
                 let mut pressed = None;
                 empty_state_with_actions(
                     ui,
@@ -385,10 +385,10 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                     &messages.text(MessageId::NetlistEmptyWorkspaceDescription),
                     |ui| {
                         if ui
-                            .button(CodeCommand::NewDeck.declared_spec().label)
+                            .button(SourceCommand::NewDeck.declared_spec().label)
                             .clicked()
                         {
-                            pressed = Some(CodeCommand::NewDeck);
+                            pressed = Some(SourceCommand::NewDeck);
                         }
                         // A deck file opens only where there are files.
                         if cfg!(not(target_arch = "wasm32"))
@@ -396,7 +396,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                                 .button(messages.text(MessageId::NetlistOpenDeck))
                                 .clicked()
                         {
-                            pressed = Some(CodeCommand::OpenNetlist);
+                            pressed = Some(SourceCommand::OpenNetlist);
                         }
                     },
                 );
@@ -494,7 +494,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
                     Some(cross_probe::CaretName::Element { head: true, .. })
                 )
             {
-                cx.execute(crate::workbench::code::commands::CodeCommand::ShowInSchematic.key());
+                cx.execute(crate::workbench::code::commands::SourceCommand::ShowInSchematic.key());
             }
         }
     });

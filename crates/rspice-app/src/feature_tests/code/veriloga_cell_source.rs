@@ -783,7 +783,7 @@ fn root_text(app: &RSpiceApp, reference: &CellViewRef) -> String {
 /// every byte, before the commit and after it.
 #[test]
 fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone() {
-    use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_code::workbench::code::commands::SourceCommand;
 
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
@@ -794,7 +794,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     let sources = app.state.model.workspace.content.project_sources.clone();
     let text = root_text(&app, &reference);
 
-    app.execute_command_key(CodeCommand::ImportVerilogA.key());
+    app.execute_command_key(SourceCommand::ImportVerilogA.key());
     assert!(app.state.code.code_workspace.veriloga.import_requested);
     code_workspace::complete_veriloga_file_pick(
         &mut app.code_workspace_parts(),

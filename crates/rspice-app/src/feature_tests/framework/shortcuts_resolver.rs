@@ -9,7 +9,7 @@ use std::time::Duration;
 use egui::{Event, Key, Modifiers};
 
 use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand};
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_state::state::ViewType;
@@ -1120,7 +1120,7 @@ fn ctrl_d_duplicates_the_line_in_a_focused_source_editor_and_the_selection_on_a_
         Duration::ZERO,
         |_| true,
     );
-    assert_eq!(in_editor.command, Some(CodeCommand::DuplicateLine.key()));
+    assert_eq!(in_editor.command, Some(SourceCommand::DuplicateLine.key()));
     let on_canvas = state.resolve(
         &snapshot(&[event(Key::D, primary(), false)], false),
         &profile,

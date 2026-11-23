@@ -8,7 +8,7 @@
 use egui::accesskit::Role;
 
 use crate::feature_tests::replay::{Control, Replay, only};
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::netlist_document::NetlistTab;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -26,7 +26,7 @@ fn deck_project_on_its_generated_netlist() -> (Replay, Vec<Control>) {
     );
     replay
         .app
-        .execute_command_key(CodeCommand::GenerateNetlist.key());
+        .execute_command_key(SourceCommand::GenerateNetlist.key());
     let shown = replay.frames(Vec::new());
     assert_eq!(
         replay.app.state.code.netlist.front,

@@ -20,7 +20,7 @@ use crate::workbench::framework::requests::OpenInDesign;
 use crate::workbench::state::Workspace;
 
 use super::CodeFeature;
-use super::commands::{CodeRequest, SourceDocumentRequest};
+use super::commands::{SourceDocumentRequest, SourceRequest};
 use super::netlist_first::{self, DeckFacts, deck_fact_rows, deck_facts};
 
 /// The navigator of the code document in front: the Netlist workspace's
@@ -66,7 +66,7 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
         cx.wb.prompt(text);
     }
     if let Some(rewrite) = asked.use_section {
-        cx.wb.outbox.push(CodeRequest::UseLibSection {
+        cx.wb.outbox.push(SourceRequest::UseLibSection {
             dependency: rewrite.dependency,
             original: rewrite.original,
             replacement: rewrite.replacement,
@@ -98,13 +98,13 @@ fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
             bundle_id,
             action,
             path,
-        }) => cx.wb.outbox.push(CodeRequest::SourceFileAction {
+        }) => cx.wb.outbox.push(SourceRequest::SourceFileAction {
             bundle_id,
             action,
             path,
         }),
         Some(RailAction::Document { action, path }) => {
-            cx.wb.outbox.push(CodeRequest::SourceDocument(
+            cx.wb.outbox.push(SourceRequest::SourceDocument(
                 SourceDocumentRequest::Document {
                     action,
                     logical_path: path,
@@ -112,7 +112,7 @@ fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
             ));
         }
         Some(RailAction::OpenInstance(usage)) => {
-            cx.wb.outbox.push(CodeRequest::OpenCellInstance(usage));
+            cx.wb.outbox.push(SourceRequest::OpenCellInstance(usage));
         }
     }
 }
@@ -178,7 +178,7 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
         Some(FindingPress::Fix(finding)) => {
             cx.wb
                 .outbox
-                .push(CodeRequest::ApplyNetlistFindingFix(finding));
+                .push(SourceRequest::ApplyNetlistFindingFix(finding));
         }
         None => {}
     }

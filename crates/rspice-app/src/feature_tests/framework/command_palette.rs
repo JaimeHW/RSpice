@@ -3,7 +3,7 @@
 use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
 
 use crate::workbench::RSpiceApp;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
@@ -38,7 +38,7 @@ fn project_spec(command: ProjectCommand) -> &'static CommandSpec {
 }
 
 /// What the registry declares about the code feature's `command`.
-fn code_spec(command: CodeCommand) -> &'static CommandSpec {
+fn code_spec(command: SourceCommand) -> &'static CommandSpec {
     command_registry()
         .spec(command.key())
         .expect("the registry declares the command")
@@ -77,7 +77,7 @@ fn palette_is_a_typed_registry_projection() {
     );
     assert!(
         palette_commands(&RSpiceApp::test_instance())
-            .any(|listed| listed.key() == CodeCommand::GenerateNetlist.key())
+            .any(|listed| listed.key() == SourceCommand::GenerateNetlist.key())
     );
     assert!(
         commands
@@ -225,7 +225,7 @@ fn fuzzy_matching_marks_display_characters_and_searches_registry_metadata() {
         match_spans("Open generated netlist", "ogn"),
         Some((4, vec![0, 5, 7]))
     );
-    let command = palette_entry_for(CodeCommand::GenerateNetlist.key());
+    let command = palette_entry_for(SourceCommand::GenerateNetlist.key());
     let (_, marks) = match_entry(&command, "generated netlist").expect("label terms match");
     assert!(!marks.is_empty());
     assert!(match_entry(&command, "simulate").is_some());
@@ -244,7 +244,7 @@ fn palette_names_are_canonical_labels_without_ellipsis() {
         "Save all"
     );
     assert_eq!(
-        command_name(code_spec(CodeCommand::GenerateNetlist)),
+        command_name(code_spec(SourceCommand::GenerateNetlist)),
         "Open generated netlist"
     );
 }
@@ -760,7 +760,7 @@ fn veriloga_build_settings_is_a_palette_command_that_opens_its_form() {
             egui::os::OperatingSystem::Windows,
         )
         .into_iter()
-        .find(|row| row.entry.command() == Some(CodeCommand::VerilogABuildSettings.key()))
+        .find(|row| row.entry.command() == Some(SourceCommand::VerilogABuildSettings.key()))
     };
     assert!(
         find(&app).is_none_or(|row| row.blocked.is_some()),

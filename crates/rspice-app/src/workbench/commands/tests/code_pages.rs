@@ -3,7 +3,7 @@
 //! than merely revealing the page that would report it.
 
 use super::*;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 
 /// The workbench's Find on the Netlist workspace asks the deck's editor for
 /// its find bar.
@@ -32,7 +32,7 @@ fn find_on_the_netlist_workspace_asks_for_the_deck_editors_find_bar() {
 fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     let mut app = RSpiceApp::test_instance();
     assert!(
-        !app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
+        !app.command_key_enabled(SourceCommand::CompileVerilogA.key()),
         "with no Verilog-A view open there is nothing to compile"
     );
     let reference = rspice_app_state::state::CellViewRef::new("behavioral", "gain", "veriloga");
@@ -65,10 +65,10 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     app.state.workbench.activate(Workspace::Models);
 
     assert!(
-        app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
+        app.command_key_enabled(SourceCommand::CompileVerilogA.key()),
         "the Models toolbar's Compile reaches the Verilog-A document in front"
     );
-    app.execute_command_key(CodeCommand::CompileVerilogA.key());
+    app.execute_command_key(SourceCommand::CompileVerilogA.key());
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(
@@ -145,7 +145,7 @@ fn view_word_wrap_switches_the_source_editors_wrap() {
             has_selection: false,
         },
     );
-    let key = CodeCommand::ToggleWordWrap.key();
+    let key = SourceCommand::ToggleWordWrap.key();
     let wraps = |app: &RSpiceApp| {
         app.state
             .model

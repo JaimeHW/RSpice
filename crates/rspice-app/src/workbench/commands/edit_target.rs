@@ -12,7 +12,7 @@
 
 use crate::workbench::RSpiceApp;
 use rspice_app_code::workbench::code::CodeFeature;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
 use rspice_app_design::workbench::design::DesignFeature;
 use rspice_app_results::workbench::results::ResultsFeature;
@@ -191,7 +191,7 @@ impl RSpiceApp {
                 if !self.route_command_key_to::<CodeFeature>(key)
                     && !self.route_command_key_to::<DesignFeature>(key)
                 {
-                    self.execute_command_key(CodeCommand::FindCodeDocument.key());
+                    self.execute_command_key(SourceCommand::FindCodeDocument.key());
                 }
             }
             WorkbenchCommand::Cancel => {

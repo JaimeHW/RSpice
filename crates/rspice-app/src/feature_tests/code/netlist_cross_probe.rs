@@ -8,7 +8,7 @@ use egui::{Key, Modifiers, PointerButton, Pos2};
 
 use crate::feature_tests::replay::{Replay, only};
 use crate::workbench::RSpiceApp;
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::netlist_document::editor_id_in;
 use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
 use rspice_app_state::state::{
@@ -114,7 +114,7 @@ fn two_amps() -> Replay {
     let mut replay = Replay::of(app);
     replay
         .app
-        .execute_command_key(CodeCommand::GenerateNetlist.key());
+        .execute_command_key(SourceCommand::GenerateNetlist.key());
     replay.frames(Vec::new());
     assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
@@ -300,7 +300,7 @@ fn a_line_no_schematic_wrote_offers_nothing_and_says_why() {
         assert_eq!(
             replay
                 .app
-                .command_availability(CodeCommand::ShowInSchematic.key()),
+                .command_availability(SourceCommand::ShowInSchematic.key()),
             CommandAvailability::Disabled("this line has no schematic source"),
             "line {line}"
         );
@@ -447,13 +447,13 @@ fn a_selected_wire_shows_the_first_card_of_its_net_and_marks_the_rest() {
     assert_eq!(
         replay
             .app
-            .command_availability(CodeCommand::ShowInNetlist.key()),
+            .command_availability(SourceCommand::ShowInNetlist.key()),
         CommandAvailability::Available
     );
 
     replay
         .app
-        .execute_command_key(CodeCommand::ShowInNetlist.key());
+        .execute_command_key(SourceCommand::ShowInNetlist.key());
     replay.frames(Vec::new());
 
     let state = &replay.app.state;
@@ -502,7 +502,7 @@ fn a_selected_net_label_shows_its_net_in_the_netlist() {
 
     replay
         .app
-        .execute_command_key(CodeCommand::ShowInNetlist.key());
+        .execute_command_key(SourceCommand::ShowInNetlist.key());
     replay.frames(Vec::new());
 
     assert_eq!(replay.app.state.workbench.workspace, Workspace::Netlist);

@@ -46,7 +46,7 @@ use crate::workbench::framework::feature::{
 };
 use crate::workbench::slots::CodeState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
-use commands::{CodeCommand, CodeRequest};
+use commands::{SourceCommand, SourceRequest};
 use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 use rspice_app_state::workbench::preferences::TogglePreference;
 
@@ -64,25 +64,25 @@ impl Feature for CodeFeature {
     /// The source editor's right-click menu offers these, each greyed while
     /// the dispatcher would not run it.
     const MENU_AVAILABILITY: &'static [CommandKey] = &[
-        CodeCommand::ShowValueAtCaret.key(),
-        CodeCommand::GoToDefinition.key(),
-        CodeCommand::FindReferences.key(),
-        CodeCommand::RenameSymbol.key(),
-        CodeCommand::FormatDocument.key(),
-        CodeCommand::ShowInSchematic.key(),
-        CodeCommand::PlotNodeVoltage.key(),
-        CodeCommand::PlotDeviceCurrent.key(),
+        SourceCommand::ShowValueAtCaret.key(),
+        SourceCommand::GoToDefinition.key(),
+        SourceCommand::FindReferences.key(),
+        SourceCommand::RenameSymbol.key(),
+        SourceCommand::FormatDocument.key(),
+        SourceCommand::ShowInSchematic.key(),
+        SourceCommand::PlotNodeVoltage.key(),
+        SourceCommand::PlotDeviceCurrent.key(),
         ids::UNDO,
         ids::REDO,
         ids::CUT,
         ids::COPY,
         ids::PASTE,
         ids::SELECT_ALL,
-        CodeCommand::ToggleLineComment.key(),
+        SourceCommand::ToggleLineComment.key(),
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
-        registry.commands::<CodeCommand>();
+        registry.commands::<SourceCommand>();
         registry.toolbars(toolbar::TOOLBARS);
         registry.dialogs(DIALOGS);
         registry.navigator(FeatureNavigator {
@@ -236,7 +236,7 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
 /// Why a command the feature cannot run here says no more than that.
 const UNAVAILABLE: &str = "command is unavailable in this context";
 
-impl CommandSet for CodeCommand {
+impl CommandSet for SourceCommand {
     type Feature = CodeFeature;
     const REGISTERED: &'static [Self] = &Self::ALL;
 
@@ -523,24 +523,24 @@ impl CommandSet for CodeCommand {
             // Each of these still reaches past the feature's own parts, so
             // the shell carries it out over the whole application as its
             // table did, straight after this call returns.
-            Self::OpenNetlist => cx.wb.outbox.push(CodeRequest::OpenNetlist),
-            Self::NewDeck => cx.wb.outbox.push(CodeRequest::NewDeck),
-            Self::SaveDeckAs => cx.wb.outbox.push(CodeRequest::SaveDeckAs),
-            Self::SaveNetlistAsDeck => cx.wb.outbox.push(CodeRequest::SaveNetlistAsDeck),
-            Self::ExportDeck => cx.wb.outbox.push(CodeRequest::ExportDeck),
-            Self::ExportDeckFiles => cx.wb.outbox.push(CodeRequest::ExportDeckFiles),
-            Self::ImportVerilogA => cx.wb.outbox.push(CodeRequest::ImportVerilogA),
+            Self::OpenNetlist => cx.wb.outbox.push(SourceRequest::OpenNetlist),
+            Self::NewDeck => cx.wb.outbox.push(SourceRequest::NewDeck),
+            Self::SaveDeckAs => cx.wb.outbox.push(SourceRequest::SaveDeckAs),
+            Self::SaveNetlistAsDeck => cx.wb.outbox.push(SourceRequest::SaveNetlistAsDeck),
+            Self::ExportDeck => cx.wb.outbox.push(SourceRequest::ExportDeck),
+            Self::ExportDeckFiles => cx.wb.outbox.push(SourceRequest::ExportDeckFiles),
+            Self::ImportVerilogA => cx.wb.outbox.push(SourceRequest::ImportVerilogA),
             Self::ImportLtspiceSchematic => {
-                cx.wb.outbox.push(CodeRequest::ImportLtspiceSchematic);
+                cx.wb.outbox.push(SourceRequest::ImportLtspiceSchematic);
             }
             Self::ImportQspiceSchematic => {
-                cx.wb.outbox.push(CodeRequest::ImportQspiceSchematic);
+                cx.wb.outbox.push(SourceRequest::ImportQspiceSchematic);
             }
             Self::ExportBillOfMaterials => {
-                cx.wb.outbox.push(CodeRequest::ExportBillOfMaterials);
+                cx.wb.outbox.push(SourceRequest::ExportBillOfMaterials);
             }
-            Self::GenerateNetlist => cx.wb.outbox.push(CodeRequest::GenerateNetlist),
-            Self::ShowInNetlist => cx.wb.outbox.push(CodeRequest::ShowInNetlist),
+            Self::GenerateNetlist => cx.wb.outbox.push(SourceRequest::GenerateNetlist),
+            Self::ShowInNetlist => cx.wb.outbox.push(SourceRequest::ShowInNetlist),
             Self::ShowInSchematic => show_in_schematic(cx),
             Self::PlotNodeVoltage | Self::PlotDeviceCurrent => {
                 if let Some(quantity) = plot_quantity(self) {
@@ -566,15 +566,15 @@ impl CommandSet for CodeCommand {
                     deck_files::show_missing_deck(cx.model, &mut cx.state.netlist, id);
                 }
             }
-            Self::ManageSourceDocument => cx.wb.outbox.push(CodeRequest::ManageSourceDocument),
-            Self::GoToDefinition => cx.wb.outbox.push(CodeRequest::GoToDefinition),
-            Self::FindReferences => cx.wb.outbox.push(CodeRequest::FindReferences),
-            Self::RenameSymbol => cx.wb.outbox.push(CodeRequest::RenameSymbol),
-            Self::CompileVerilogA => cx.wb.outbox.push(CodeRequest::CompileVerilogA),
+            Self::ManageSourceDocument => cx.wb.outbox.push(SourceRequest::ManageSourceDocument),
+            Self::GoToDefinition => cx.wb.outbox.push(SourceRequest::GoToDefinition),
+            Self::FindReferences => cx.wb.outbox.push(SourceRequest::FindReferences),
+            Self::RenameSymbol => cx.wb.outbox.push(SourceRequest::RenameSymbol),
+            Self::CompileVerilogA => cx.wb.outbox.push(SourceRequest::CompileVerilogA),
             Self::VerilogABuildSettings => {
-                cx.wb.outbox.push(CodeRequest::VerilogABuildSettings);
+                cx.wb.outbox.push(SourceRequest::VerilogABuildSettings);
             }
-            Self::VerilogAOpenSymbol => cx.wb.outbox.push(CodeRequest::VerilogAOpenSymbol),
+            Self::VerilogAOpenSymbol => cx.wb.outbox.push(SourceRequest::VerilogAOpenSymbol),
         }
     }
 }
@@ -582,7 +582,7 @@ impl CommandSet for CodeCommand {
 /// Whether the source editor on screen takes `command`: one is there, and it
 /// accepts the request, which a read-only editor refuses when the request
 /// would change its text.
-fn editor_takes(wb: &WorkbenchSession, command: CodeCommand) -> bool {
+fn editor_takes(wb: &WorkbenchSession, command: SourceCommand) -> bool {
     match (wb.active_source_editor, command.source_editor_request()) {
         (Some(editor), Some(request)) => editor.editable || !request.mutates_source(),
         _ => false,
@@ -600,12 +600,12 @@ pub(crate) fn show_in_schematic(cx: &mut Cx<'_, CodeFeature>) {
     let name = cross_probe::caret_name_now(cx.model, &mut cx.state.netlist);
     match cross_probe::schematic_target(cx.model, &cx.state.netlist, name.as_ref()) {
         Ok(cross_probe::SchematicTarget::Instance(usage)) => {
-            cx.wb.outbox.push(CodeRequest::OpenCellInstance(usage));
+            cx.wb.outbox.push(SourceRequest::OpenCellInstance(usage));
         }
         Ok(cross_probe::SchematicTarget::Net { schematic, net }) => {
             cx.wb
                 .outbox
-                .push(CodeRequest::ShowNetInSchematic { schematic, net });
+                .push(SourceRequest::ShowNetInSchematic { schematic, net });
         }
         Err(reason) => {
             let text = cx.wb.messages().format(
@@ -618,10 +618,10 @@ pub(crate) fn show_in_schematic(cx: &mut Cx<'_, CodeFeature>) {
 }
 
 /// The quantity a plot command asks the run for.
-const fn plot_quantity(command: CodeCommand) -> Option<cross_probe::PlotQuantity> {
+const fn plot_quantity(command: SourceCommand) -> Option<cross_probe::PlotQuantity> {
     match command {
-        CodeCommand::PlotNodeVoltage => Some(cross_probe::PlotQuantity::Voltage),
-        CodeCommand::PlotDeviceCurrent => Some(cross_probe::PlotQuantity::Current),
+        SourceCommand::PlotNodeVoltage => Some(cross_probe::PlotQuantity::Voltage),
+        SourceCommand::PlotDeviceCurrent => Some(cross_probe::PlotQuantity::Current),
         _ => None,
     }
 }
@@ -635,7 +635,7 @@ pub fn source_menu_label(
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
     messages: crate::workbench::MessageCatalog,
 ) -> Option<String> {
-    let quantity = plot_quantity(CodeCommand::from_key(key)?)?;
+    let quantity = plot_quantity(SourceCommand::from_key(key)?)?;
     let (name, _) = quantity.of(cross_probe::caret_name(model, netlist)?)?;
     Some(messages.format(
         MessageId::NetlistPlotVector,
@@ -717,7 +717,7 @@ fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
         dialog.open = true;
         dialog.error = None;
     } else {
-        cx.wb.outbox.push(CodeRequest::ExportNetlist);
+        cx.wb.outbox.push(SourceRequest::ExportNetlist);
     }
 }
 
@@ -821,7 +821,7 @@ impl CodeFeature {
             &messages,
             ctx,
         ) {
-            cx.wb.outbox.push(CodeRequest::CreateVerilogADevice);
+            cx.wb.outbox.push(SourceRequest::CreateVerilogADevice);
         }
     }
 
@@ -836,7 +836,7 @@ impl CodeFeature {
         ) {
             cx.wb
                 .outbox
-                .push(CodeRequest::SaveVerilogABuildSettings { compile });
+                .push(SourceRequest::SaveVerilogABuildSettings { compile });
         }
     }
 
@@ -849,7 +849,7 @@ impl CodeFeature {
             &messages,
             ctx,
         ) {
-            cx.wb.outbox.push(CodeRequest::ImportVerilogACells);
+            cx.wb.outbox.push(SourceRequest::ImportVerilogACells);
         }
     }
 
@@ -861,7 +861,7 @@ impl CodeFeature {
             &messages,
             ctx,
         ) {
-            cx.wb.outbox.push(CodeRequest::ReplaceVerilogASource);
+            cx.wb.outbox.push(SourceRequest::ReplaceVerilogASource);
         }
     }
 
@@ -877,7 +877,7 @@ impl CodeFeature {
             cx.platform,
             ctx,
         ) {
-            cx.wb.outbox.push(CodeRequest::SourceDocument(request));
+            cx.wb.outbox.push(SourceRequest::SourceDocument(request));
         }
     }
 
@@ -895,7 +895,7 @@ impl CodeFeature {
             ctx,
             cx.wb.messages(),
         ) {
-            cx.wb.outbox.push(CodeRequest::CommitSymbolRename);
+            cx.wb.outbox.push(SourceRequest::CommitSymbolRename);
         }
     }
 }

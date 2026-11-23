@@ -15,7 +15,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
-use crate::workbench::code::commands::CodeRequest;
+use crate::workbench::code::commands::SourceRequest;
 use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint_problem_mark};
 use crate::workbench::documents::netlist_document::NetlistRoot;
 use crate::workbench::framework::feature::Cx;
@@ -322,10 +322,10 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         Some(NetlistToolbarAction::FindReferences) => {
-            cx.execute(crate::workbench::code::commands::CodeCommand::FindReferences.key());
+            cx.execute(crate::workbench::code::commands::SourceCommand::FindReferences.key());
         }
         Some(NetlistToolbarAction::RenameSymbol) => {
-            cx.execute(crate::workbench::code::commands::CodeCommand::RenameSymbol.key());
+            cx.execute(crate::workbench::code::commands::SourceCommand::RenameSymbol.key());
         }
         Some(NetlistToolbarAction::SignatureHelp) => {
             match crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor(
@@ -372,7 +372,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLay
             );
         }
         Some(NetlistToolbarAction::ApplyQuickFix) => {
-            cx.wb.outbox.push(CodeRequest::ApplyNetlistQuickFix);
+            cx.wb.outbox.push(SourceRequest::ApplyNetlistQuickFix);
         }
         None => {}
     }

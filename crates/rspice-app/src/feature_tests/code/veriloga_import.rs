@@ -8,7 +8,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
-use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_state::state::workspace::ImportedInclude;
 use rspice_app_state::state::{CellViewRef, ProjectSourceOwner};
@@ -114,7 +114,7 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
     let ctx = themed_context();
     let sources = app.state.model.workspace.content.project_sources.clone();
 
-    app.execute_command_key(CodeCommand::ImportVerilogA.key());
+    app.execute_command_key(SourceCommand::ImportVerilogA.key());
     code_workspace::complete_veriloga_files_pick(
         &mut app.code_workspace_parts(),
         &[("gainer.va", ROOT)],
