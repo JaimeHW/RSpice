@@ -940,6 +940,17 @@ pub fn build_prepared_manual_deck<R, A>(
     inputs: &RunPreparationInputs<'_, R, A>,
     manual: ManualSourceInputs<'_>,
 ) -> Result<PreparedRunSnapshot, PreparationError> {
+    build_prepared_manual_deck_with_abort(inputs, manual, &rspice_core::NoAbort)
+}
+
+/// [`build_prepared_manual_deck`], stopped once `abort` is raised: between
+/// its stages, and within the parse, the flattening and the seal, which poll
+/// it. A deck's run prepared off the frame is stopped this way.
+pub fn build_prepared_manual_deck_with_abort<R, A>(
+    inputs: &RunPreparationInputs<'_, R, A>,
+    manual: ManualSourceInputs<'_>,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> Result<PreparedRunSnapshot, PreparationError> {
     let source = manual.source;
     let origin = manual.origin;
     let ExpandedManualDeck {
@@ -958,14 +969,14 @@ pub fn build_prepared_manual_deck<R, A>(
     // A sealed Verilog-A source is a dependency like an include: the run
     // refuses to dispatch once the host no longer gives the bytes it sealed.
     sealed_source_dependencies.extend(deck_hdl_dependencies);
+    PreparationError::check_abort(abort)?;
     // One parse and one flattening serve the model checks, the deck's own
     // warnings (a dropped control command, a shadowed definition), which the
     // run advises as a headless run of the same deck does, and the snapshot
     // that seals the run. Each warning is worded as the engine words the
     // parse warnings it also logs, "line 5: …", so a run can tell the engine
     // repeating one from news.
-    let parsed = match parse_executable(&expanded, inputs.execution_limits(), &rspice_core::NoAbort)
-    {
+    let parsed = match parse_executable(&expanded, inputs.execution_limits(), abort) {
         Ok(parsed) => parsed,
         Err(error) => {
             // A deck that included files is refused where the card that
@@ -991,7 +1002,7 @@ pub fn build_prepared_manual_deck<R, A>(
             line => format!("line {line}: {}", diagnostic.message),
         })
         .collect();
-    let hierarchy = inputs.flattened(parsed, &rspice_core::NoAbort)?;
+    let hierarchy = inputs.flattened(parsed, abort)?;
     let deck_outputs = super::DeckOutputs::of(&hierarchy.parsed);
     reject_unresolved_models_in(
         &hierarchy.parsed,
@@ -1041,7 +1052,7 @@ pub fn build_prepared_manual_deck<R, A>(
         &expanded,
         origin.and_then(Path::parent),
         rspice_core::ResourceLimits::default(),
-        &rspice_core::NoAbort,
+        abort,
     )?;
     let _data_files = manual_deck::has_pss_card(&expanded)
         .then(|| data_files.hold(inputs.execution_limits()))
@@ -1070,6 +1081,7 @@ pub fn build_prepared_manual_deck<R, A>(
             messages.collect::<Vec<_>>().join("; "),
         )
     })?;
+    PreparationError::check_abort(abort)?;
     let source_digest = manual_executable_source_digest(&expanded);
     let mut tasks = prepare_manual_tasks(
         source_digest,
@@ -1166,7 +1178,7 @@ pub fn build_prepared_manual_deck<R, A>(
             configuration: None,
         },
         hierarchy,
-        &rspice_core::NoAbort,
+        abort,
         &|_| {},
     )
     .map(|snapshot| {
