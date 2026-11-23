@@ -8,6 +8,7 @@ mod apply;
 mod comparison;
 mod edits;
 mod family;
+mod lookup;
 mod query;
 mod run_source;
 mod strips;
@@ -41,73 +42,29 @@ use rspice_vocabulary::product::{
     RevisionError, SimulationPlanId,
 };
 
-/// Maximum datasets one visualization document reads. A run reference holds
-/// no samples, so this bounds the runs one document compares, not their size.
-pub const MAX_VISUALIZATION_DATASETS: usize = 256;
-/// Maximum typed columns of one embedded table.
-pub const MAX_SOURCE_COLUMNS: usize = 4_096;
-/// Maximum rows of one embedded table. A run reference reads its samples from
-/// the run and is not bound by this.
-pub const MAX_SOURCE_ROWS: usize = 1_000_000;
-/// Maximum typed cells of one embedded table.
+// The bounds below hold against a hostile file, not a reader: each one
+// bounds what reading a file can cost beyond the bytes the file holds, and
+// a document reads its runs by reference, so none of them bounds a run. A
+// count of anything a reader makes (panes, traces, cursors, markers, runs
+// compared) has none: checking a document costs in proportion to what it
+// holds.
+
+/// The typed cells of one embedded table. An embedded table (an archived or
+/// imported one) is held whole in memory, each cell many times its size in
+/// the file (a two-byte number is a typed value of tens of bytes), so its
+/// cells are counted as the file is read.
 pub const MAX_SOURCE_CELLS_PER_DATASET: usize = 8_000_000;
-/// Maximum typed cells across the embedded tables of one document.
+/// The typed cells across the embedded tables of one document, for the same
+/// reason.
 pub const MAX_SOURCE_CELLS_TOTAL: usize = 8_000_000;
 /// Maximum UTF-8 bytes retained by text-valued cells in one source dataset.
 pub const MAX_SOURCE_TEXT_BYTES_PER_DATASET: usize = 64 * 1024 * 1024;
 /// Maximum UTF-8 bytes retained by text-valued cells across one document.
 pub const MAX_SOURCE_TEXT_BYTES_TOTAL: usize = 128 * 1024 * 1024;
-/// Maximum number of report-style pages in one visualization document.
-pub const MAX_VISUALIZATION_PAGES: usize = 64;
-/// Maximum number of panes in one visualization document.
-pub const MAX_VISUALIZATION_PANES: usize = 256;
-/// Maximum number of axes in one visualization document.
-pub const MAX_VISUALIZATION_AXES: usize = 512;
-/// Maximum exact source-row predicates carried by one trace.
-pub const MAX_TRACE_ROW_PREDICATES: usize = 16;
-/// Maximum number of cursors in one visualization document.
-pub const MAX_VISUALIZATION_CURSORS: usize = 4_096;
-/// Maximum number of markers in one visualization document.
-pub const MAX_VISUALIZATION_MARKERS: usize = 8_192;
-/// Maximum number of measurements in one visualization document.
-pub const MAX_VISUALIZATION_MEASUREMENTS: usize = 4_096;
-/// Maximum number of annotations in one visualization document.
-pub const MAX_VISUALIZATION_ANNOTATIONS: usize = 4_096;
-/// Maximum number of viewport/cursor link groups in one visualization document.
-pub const MAX_VISUALIZATION_LINK_GROUPS: usize = 1_024;
-/// Maximum number of immutable deletion records in one visualization document.
-pub const MAX_VISUALIZATION_TOMBSTONES: usize = 65_536;
-/// Maximum number of retained exact-comparison receipts.
-pub const MAX_VISUALIZATION_COMPARISONS: usize = 4_096;
-/// Maximum number of user-grouped buses in one visualization document.
-pub const MAX_VISUALIZATION_USER_BUSES: usize = 1_024;
-/// Maximum member lanes grouped into one user bus.
-pub const MAX_USER_BUS_MEMBERS: usize = 256;
-/// The most words one bus can name.
-pub const MAX_BUS_VALUE_NAMES: usize = 256;
-/// Maximum member references retained across all user buses in one document.
-pub const MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL: usize = 16_384;
-/// Maximum calculator-expression traces in one visualization document.
-pub const MAX_VISUALIZATION_EXPRESSION_TRACES: usize = 1_024;
-/// Maximum datasets one expression trace reads.
-pub const MAX_EXPRESSION_TRACE_DATASETS: usize = 16;
-/// Maximum plots of a unit axis against a chosen abscissa in one document.
-pub const MAX_VISUALIZATION_XY_PLOTS: usize = 1_024;
-/// Maximum readouts pinned across all panes and sheets of one document.
-pub const MAX_VISUALIZATION_READOUT_PINS: usize = 1_024;
-/// Maximum sheet settings in one document: one for each pane and each sheet
-/// that keeps settings of its own (the Smith chart, the network matrix, the
-/// Bode card and the pole-zero map).
-pub const MAX_VISUALIZATION_SHEET_SETTINGS: usize = 4 * MAX_VISUALIZATION_PANES;
-/// Maximum rows one pane's event-lane order names.
-pub const MAX_PANE_EVENT_LANES: usize = 4_096;
-/// Maximum event-lane rows ordered across all panes of one document.
-pub const MAX_VISUALIZATION_EVENT_LANES_TOTAL: usize = 16_384;
-/// Maximum members carried by one measurement or link group.
-pub const MAX_ENTITY_REFERENCES: usize = 4_096;
-/// Maximum signal records carried by one comparison receipt.
-pub const MAX_COMPARISON_SIGNALS: usize = 4_096;
-/// Maximum stable-key length in UTF-8 bytes.
+/// The length of a stable key in UTF-8 bytes. This and the string bounds
+/// below are checked as each string is read, so no one string holds a file's
+/// worth of text; each is hashed, compared or drawn whole wherever it is
+/// used.
 pub const MAX_VISUALIZATION_KEY_BYTES: usize = 256;
 /// Maximum ordinary title/label length in UTF-8 bytes.
 pub const MAX_VISUALIZATION_LABEL_BYTES: usize = 1_024;
@@ -129,12 +86,6 @@ pub const MAX_FAMILY_PREDICATE_CHILDREN: usize = 64;
 pub const MAX_FAMILY_PREDICATE_DEPTH: usize = 32;
 /// Maximum total nodes retained by one family predicate root.
 pub const MAX_FAMILY_PREDICATE_NODES: usize = 1_024;
-/// Maximum comparison-signal records retained across all receipts in one document.
-pub const MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL: usize = 16_384;
-/// Maximum trace references retained across all measurements in one document.
-pub const MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL: usize = 16_384;
-/// Maximum entity references retained across all link groups in one document.
-pub const MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL: usize = 16_384;
 
 struct BoundedVec<T, const MAX: usize>(Vec<T>);
 
@@ -190,88 +141,6 @@ where
         }
 
         deserializer.deserialize_seq(BoundedVecVisitor::<T, MAX>(PhantomData))
-    }
-}
-
-trait NestedResourceCount {
-    fn nested_resource_count(&self) -> usize;
-}
-
-struct AggregateBoundedVec<T, const MAX_ITEMS: usize, const MAX_NESTED: usize>(Vec<T>);
-
-impl<T, const MAX_ITEMS: usize, const MAX_NESTED: usize>
-    AggregateBoundedVec<T, MAX_ITEMS, MAX_NESTED>
-{
-    fn into_inner(self) -> Vec<T> {
-        self.0
-    }
-}
-
-impl<'de, T, const MAX_ITEMS: usize, const MAX_NESTED: usize> Deserialize<'de>
-    for AggregateBoundedVec<T, MAX_ITEMS, MAX_NESTED>
-where
-    T: Deserialize<'de> + NestedResourceCount,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct AggregateVisitor<T, const MAX_ITEMS: usize, const MAX_NESTED: usize>(PhantomData<T>);
-
-        impl<'de, T, const MAX_ITEMS: usize, const MAX_NESTED: usize> Visitor<'de>
-            for AggregateVisitor<T, MAX_ITEMS, MAX_NESTED>
-        where
-            T: Deserialize<'de> + NestedResourceCount,
-        {
-            type Value = AggregateBoundedVec<T, MAX_ITEMS, MAX_NESTED>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(
-                    formatter,
-                    "at most {MAX_ITEMS} entries containing {MAX_NESTED} aggregate nested resources"
-                )
-            }
-
-            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                if sequence.size_hint().is_some_and(|hint| hint > MAX_ITEMS) {
-                    return Err(serde::de::Error::custom(format!(
-                        "sequence exceeds the {MAX_ITEMS}-entry resource limit"
-                    )));
-                }
-                let mut values =
-                    Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(MAX_ITEMS));
-                let mut nested = 0_usize;
-                while values.len() < MAX_ITEMS {
-                    let Some(value) = sequence.next_element::<T>()? else {
-                        return Ok(AggregateBoundedVec(values));
-                    };
-                    nested = nested
-                        .checked_add(value.nested_resource_count())
-                        .ok_or_else(|| {
-                            <A::Error as serde::de::Error>::custom(
-                                "aggregate nested resource count overflowed",
-                            )
-                        })?;
-                    if nested > MAX_NESTED {
-                        return Err(serde::de::Error::custom(format!(
-                            "sequence exceeds the {MAX_NESTED}-entry aggregate nested resource limit"
-                        )));
-                    }
-                    values.push(value);
-                }
-                if sequence.next_element::<IgnoredAny>()?.is_some() {
-                    return Err(serde::de::Error::custom(format!(
-                        "sequence exceeds the {MAX_ITEMS}-entry resource limit"
-                    )));
-                }
-                Ok(AggregateBoundedVec(values))
-            }
-        }
-
-        deserializer.deserialize_seq(AggregateVisitor::<T, MAX_ITEMS, MAX_NESTED>(PhantomData))
     }
 }
 
@@ -386,29 +255,6 @@ where
     BoundedVec::<T, MAX>::deserialize(deserializer).map(BoundedVec::into_inner)
 }
 
-fn deserialize_measurement_trace_ids<'de, D>(deserializer: D) -> Result<Vec<TraceId>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_ENTITY_REFERENCES>(deserializer)
-}
-
-fn deserialize_link_members<'de, D>(deserializer: D) -> Result<Vec<EntityRef>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_ENTITY_REFERENCES>(deserializer)
-}
-
-fn deserialize_comparison_signals<'de, D>(
-    deserializer: D,
-) -> Result<Vec<SignalComparison>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_COMPARISON_SIGNALS>(deserializer)
-}
-
 fn deserialize_family_dimensions<'de, D>(deserializer: D) -> Result<Vec<FamilyDimension>, D::Error>
 where
     D: Deserializer<'de>,
@@ -447,7 +293,7 @@ fn deserialize_comparison_signal_keys<'de, D>(deserializer: D) -> Result<Vec<Str
 where
     D: Deserializer<'de>,
 {
-    deserialize_bounded_vec::<_, BoundedKey, MAX_COMPARISON_SIGNALS>(deserializer)
+    Vec::<BoundedKey>::deserialize(deserializer)
         .map(|keys| keys.into_iter().map(|key| key.0).collect())
 }
 
@@ -724,7 +570,7 @@ pub struct SourceRow {
 
 #[derive(Deserialize)]
 struct SourceRowWire {
-    values: BoundedVec<TypedValue, MAX_SOURCE_COLUMNS>,
+    values: BoundedVec<TypedValue, MAX_SOURCE_CELLS_PER_DATASET>,
 }
 
 impl<'de> Deserialize<'de> for SourceRow {
@@ -782,33 +628,24 @@ impl<'de> Deserialize<'de> for BoundedSourceRows {
             type Value = BoundedSourceRows;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(
-                    formatter,
-                    "at most {MAX_SOURCE_ROWS} rows and {MAX_SOURCE_CELLS_PER_DATASET} cells"
-                )
+                write!(formatter, "at most {MAX_SOURCE_CELLS_PER_DATASET} cells")
             }
 
             fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
             where
                 A: SeqAccess<'de>,
             {
-                if sequence
-                    .size_hint()
-                    .is_some_and(|hint| hint > MAX_SOURCE_ROWS)
-                {
-                    return Err(serde::de::Error::custom(format!(
-                        "source row sequence exceeds the {MAX_SOURCE_ROWS}-row resource limit"
-                    )));
-                }
-                let mut rows =
-                    Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(MAX_SOURCE_ROWS));
+                // Nothing is reserved for rows the file only claims: each row
+                // is counted as it is read, an empty one as a cell, since it
+                // is held all the same.
+                let mut rows = Vec::new();
                 let mut cells = 0_usize;
                 let mut text_bytes = 0_usize;
-                while rows.len() < MAX_SOURCE_ROWS {
+                loop {
                     let Some(row) = sequence.next_element::<SourceRow>()? else {
                         return Ok(BoundedSourceRows(rows));
                     };
-                    cells = cells.checked_add(row.values.len()).ok_or_else(|| {
+                    cells = cells.checked_add(row.values.len().max(1)).ok_or_else(|| {
                         <A::Error as serde::de::Error>::custom("source cell count overflowed")
                     })?;
                     if cells > MAX_SOURCE_CELLS_PER_DATASET {
@@ -828,12 +665,6 @@ impl<'de> Deserialize<'de> for BoundedSourceRows {
                     .map_err(|error| <A::Error as serde::de::Error>::custom(error.to_string()))?;
                     rows.push(row);
                 }
-                if sequence.next_element::<IgnoredAny>()?.is_some() {
-                    return Err(serde::de::Error::custom(format!(
-                        "source row sequence exceeds the {MAX_SOURCE_ROWS}-row resource limit"
-                    )));
-                }
-                Ok(BoundedSourceRows(rows))
             }
         }
 
@@ -878,7 +709,7 @@ impl Serialize for SourceDataset {
 struct SourceDatasetWire {
     binding: DatasetBinding,
     #[serde(default)]
-    columns: Option<BoundedVec<SourceColumn, MAX_SOURCE_COLUMNS>>,
+    columns: Option<Vec<SourceColumn>>,
     #[serde(default)]
     rows: Option<BoundedSourceRows>,
     #[serde(default)]
@@ -894,7 +725,7 @@ impl<'de> Deserialize<'de> for SourceDataset {
         let dataset = match (wire.columns, wire.rows, wire.run) {
             (Some(columns), Some(rows), None) => Self {
                 binding: wire.binding,
-                columns: columns.into_inner(),
+                columns,
                 rows: rows.0,
                 run: None,
             },
@@ -956,13 +787,12 @@ impl SourceDataset {
             }
             return run.validate();
         }
-        if self.columns.is_empty() || self.columns.len() > MAX_SOURCE_COLUMNS {
+        if self.columns.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "source-dataset.columns",
-                message: format!("a dataset requires 1 to {MAX_SOURCE_COLUMNS} typed columns"),
+                message: "a dataset requires at least one typed column".to_owned(),
             });
         }
-        ensure_maximum_len("source-dataset.rows", self.rows.len(), MAX_SOURCE_ROWS)?;
         let cell_count = self
             .rows
             .len()
@@ -1074,7 +904,7 @@ impl<'de> Deserialize<'de> for BoundedSourceDatasets {
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(
                     formatter,
-                    "at most {MAX_VISUALIZATION_DATASETS} datasets and {MAX_SOURCE_CELLS_TOTAL} cells"
+                    "datasets of at most {MAX_SOURCE_CELLS_TOTAL} embedded cells"
                 )
             }
 
@@ -1082,23 +912,10 @@ impl<'de> Deserialize<'de> for BoundedSourceDatasets {
             where
                 A: SeqAccess<'de>,
             {
-                if sequence
-                    .size_hint()
-                    .is_some_and(|hint| hint > MAX_VISUALIZATION_DATASETS)
-                {
-                    return Err(serde::de::Error::custom(format!(
-                        "dataset sequence exceeds the {MAX_VISUALIZATION_DATASETS}-dataset resource limit"
-                    )));
-                }
-                let mut datasets = Vec::with_capacity(
-                    sequence
-                        .size_hint()
-                        .unwrap_or(0)
-                        .min(MAX_VISUALIZATION_DATASETS),
-                );
+                let mut datasets = Vec::new();
                 let mut cells = 0_usize;
                 let mut text_bytes = 0_usize;
-                while datasets.len() < MAX_VISUALIZATION_DATASETS {
+                loop {
                     let Some(dataset) = sequence.next_element::<SourceDataset>()? else {
                         return Ok(BoundedSourceDatasets(datasets));
                     };
@@ -1131,12 +948,6 @@ impl<'de> Deserialize<'de> for BoundedSourceDatasets {
                     .map_err(|error| <A::Error as serde::de::Error>::custom(error.to_string()))?;
                     datasets.push(dataset);
                 }
-                if sequence.next_element::<IgnoredAny>()?.is_some() {
-                    return Err(serde::de::Error::custom(format!(
-                        "dataset sequence exceeds the {MAX_VISUALIZATION_DATASETS}-dataset resource limit"
-                    )));
-                }
-                Ok(BoundedSourceDatasets(datasets))
             }
         }
 
@@ -1488,7 +1299,6 @@ pub struct Trace {
     pub coordinate_key: String,
     /// Exact coordinate-column predicates selecting this trace's rows from a
     /// lossless long-form source dataset.
-    #[serde(deserialize_with = "deserialize_trace_row_predicates")]
     pub row_predicates: Vec<QueryCoordinate>,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
@@ -1676,25 +1486,17 @@ pub struct UserBus {
     /// The bus's name, unique within its pane.
     #[serde(deserialize_with = "deserialize_label_string")]
     pub name: String,
-    #[serde(default, deserialize_with = "deserialize_user_bus_members")]
+    #[serde(default)]
     pub members: Vec<TraceId>,
     /// Members the source has no column for, by their `D()` names, MSB first.
-    #[serde(
-        default,
-        skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "deserialize_user_bus_nets"
-    )]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nets: Vec<String>,
     #[serde(default)]
     pub radix: BusRadix,
     #[serde(default)]
     pub expanded: bool,
     /// Names the reader gave the bus's words, by unsigned value, ascending.
-    #[serde(
-        default,
-        skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "deserialize_bus_value_names"
-    )]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub value_names: Vec<BusValueName>,
 }
 
@@ -1716,33 +1518,6 @@ pub fn bus_value_name(names: &[BusValueName], value: u64) -> Option<&str> {
         .map(|index| names[index].name.as_str())
 }
 
-fn deserialize_bus_value_names<'de, D>(deserializer: D) -> Result<Vec<BusValueName>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_BUS_VALUE_NAMES>(deserializer)
-}
-
-impl NestedResourceCount for UserBus {
-    fn nested_resource_count(&self) -> usize {
-        self.members.len() + self.nets.len()
-    }
-}
-
-fn deserialize_user_bus_members<'de, D>(deserializer: D) -> Result<Vec<TraceId>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_USER_BUS_MEMBERS>(deserializer)
-}
-
-fn deserialize_user_bus_nets<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_USER_BUS_MEMBERS>(deserializer)
-}
-
 /// A calculator expression plotted on a pane.
 ///
 /// It is kept as the text the reader typed and the datasets it reads, never
@@ -1756,7 +1531,6 @@ pub struct ExpressionTrace {
     #[serde(deserialize_with = "deserialize_source_text_string")]
     pub text: String,
     /// The attached datasets the expression reads.
-    #[serde(deserialize_with = "deserialize_expression_datasets")]
     pub datasets: Vec<DatasetBinding>,
     /// The unit the reader declared, which replaces the one unit algebra
     /// infers from the expression.
@@ -1853,13 +1627,6 @@ where
     BoundedString::<MAX_UNIT_AXIS_BYTES>::deserialize(deserializer).map(|value| value.0)
 }
 
-fn deserialize_expression_datasets<'de, D>(deserializer: D) -> Result<Vec<DatasetBinding>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_EXPRESSION_TRACE_DATASETS>(deserializer)
-}
-
 /// One row of a pane's event-lane stack.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -1890,21 +1657,7 @@ pub enum EventLaneRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventLaneOrder {
     pub pane_id: PaneId,
-    #[serde(deserialize_with = "deserialize_event_lanes")]
     pub lanes: Vec<EventLaneRef>,
-}
-
-impl NestedResourceCount for EventLaneOrder {
-    fn nested_resource_count(&self) -> usize {
-        self.lanes.len()
-    }
-}
-
-fn deserialize_event_lanes<'de, D>(deserializer: D) -> Result<Vec<EventLaneRef>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_PANE_EVENT_LANES>(deserializer)
 }
 
 /// How the reader set a pane's spectrum sheet: the signal, the record, the
@@ -1949,10 +1702,7 @@ pub struct SheetSetting {
 #[serde(rename_all = "kebab-case")]
 pub enum SheetSettingValue {
     /// The Smith chart's markers, m1 first.
-    Smith {
-        #[serde(deserialize_with = "deserialize_smith_markers")]
-        markers: Vec<SmithMarker>,
-    },
+    Smith { markers: Vec<SmithMarker> },
     /// The network matrix's form and how each coefficient reads.
     NetworkMatrix {
         form: NetworkMatrixForm,
@@ -1970,17 +1720,13 @@ pub enum SheetSettingValue {
     /// of offsets it integrates (the whole sweep when `None`), and whether
     /// it draws slope guides.
     PhaseNoise {
-        #[serde(deserialize_with = "deserialize_spot_offsets")]
         spots: Vec<f64>,
         band: Option<[f64; 2]>,
         slopes: bool,
     },
     /// The noise contributors the reader pinned above the rest of the
     /// contributor table, first pinned first.
-    NoiseContributors {
-        #[serde(deserialize_with = "deserialize_pinned_contributors")]
-        pinned: Vec<PinnedContributor>,
-    },
+    NoiseContributors { pinned: Vec<PinnedContributor> },
     /// How the histogram reads one measurement of a population.
     Histogram(HistogramReading),
 }
@@ -2042,22 +1788,6 @@ impl SheetSettingValue {
     }
 }
 
-fn deserialize_pinned_contributors<'de, D>(
-    deserializer: D,
-) -> Result<Vec<PinnedContributor>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_MARKERS>(deserializer)
-}
-
-fn deserialize_spot_offsets<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_MARKERS>(deserializer)
-}
-
 /// A Smith marker: the locus it sits on, by name, and the frequency it sits
 /// at. A frequency rather than a sample, so a later run the view follows
 /// reads its own point at the same frequency.
@@ -2066,13 +1796,6 @@ pub struct SmithMarker {
     #[serde(deserialize_with = "deserialize_label_string")]
     pub trace: String,
     pub frequency: f64,
-}
-
-fn deserialize_smith_markers<'de, D>(deserializer: D) -> Result<Vec<SmithMarker>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_MARKERS>(deserializer)
 }
 
 /// The parameters a network matrix holds.
@@ -2249,11 +1972,7 @@ pub struct Measurement {
     pub pane_id: PaneId,
     /// The traces a measurement of a kind reads. An authored one (with an
     /// `expression`) names its signals there instead and keeps none.
-    #[serde(
-        default,
-        skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "deserialize_measurement_trace_ids"
-    )]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trace_ids: Vec<TraceId>,
     pub kind: MeasurementKind,
     #[serde(deserialize_with = "deserialize_label_string")]
@@ -2409,29 +2128,6 @@ impl FamilyMeasurementSummary {
     }
 }
 
-fn deserialize_xy_plots<'de, D>(deserializer: D) -> Result<Vec<XyPlot>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_XY_PLOTS>(deserializer)
-}
-
-fn deserialize_trace_row_predicates<'de, D>(
-    deserializer: D,
-) -> Result<Vec<QueryCoordinate>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_TRACE_ROW_PREDICATES>(deserializer)
-}
-
-fn deserialize_page_pane_ids<'de, D>(deserializer: D) -> Result<Vec<PaneId>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_VISUALIZATION_PANES>(deserializer)
-}
-
 fn deserialize_optional_source_text_string<'de, D>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error>
@@ -2440,12 +2136,6 @@ where
 {
     Option::<BoundedString<MAX_SOURCE_TEXT_BYTES>>::deserialize(deserializer)
         .map(|value| value.map(|value| value.0))
-}
-
-impl NestedResourceCount for Measurement {
-    fn nested_resource_count(&self) -> usize {
-        self.trace_ids.len()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2588,14 +2278,7 @@ pub struct LinkGroup {
     #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub kind: LinkKind,
-    #[serde(deserialize_with = "deserialize_link_members")]
     pub members: Vec<EntityRef>,
-}
-
-impl NestedResourceCount for LinkGroup {
-    fn nested_resource_count(&self) -> usize {
-        self.members.len()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2747,56 +2430,32 @@ struct VisualizationDocumentWire {
     working_view: Option<WorkingViewSource>,
     next_serial: u64,
     datasets: BoundedSourceDatasets,
-    pages: BoundedVec<Page, MAX_VISUALIZATION_PAGES>,
-    panes: BoundedVec<Pane, MAX_VISUALIZATION_PANES>,
-    axes: BoundedVec<Axis, MAX_VISUALIZATION_AXES>,
+    pages: Vec<Page>,
+    panes: Vec<Pane>,
+    axes: Vec<Axis>,
     traces: Vec<Trace>,
-    cursors: BoundedVec<Cursor, MAX_VISUALIZATION_CURSORS>,
-    markers: BoundedVec<Marker, MAX_VISUALIZATION_MARKERS>,
-    measurements: AggregateBoundedVec<
-        Measurement,
-        MAX_VISUALIZATION_MEASUREMENTS,
-        MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL,
-    >,
-    annotations: BoundedVec<Annotation, MAX_VISUALIZATION_ANNOTATIONS>,
-    link_groups: AggregateBoundedVec<
-        LinkGroup,
-        MAX_VISUALIZATION_LINK_GROUPS,
-        MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL,
-    >,
-    tombstones: BoundedVec<Tombstone, MAX_VISUALIZATION_TOMBSTONES>,
-    comparisons: AggregateBoundedVec<
-        ComparisonReceipt,
-        MAX_VISUALIZATION_COMPARISONS,
-        MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL,
-    >,
+    cursors: Vec<Cursor>,
+    markers: Vec<Marker>,
+    measurements: Vec<Measurement>,
+    annotations: Vec<Annotation>,
+    link_groups: Vec<LinkGroup>,
+    tombstones: Vec<Tombstone>,
+    comparisons: Vec<ComparisonReceipt>,
     #[serde(default)]
-    user_buses: Option<
-        AggregateBoundedVec<
-            UserBus,
-            MAX_VISUALIZATION_USER_BUSES,
-            MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL,
-        >,
-    >,
+    user_buses: Option<Vec<UserBus>>,
     #[serde(default)]
-    event_lane_orders: Option<
-        AggregateBoundedVec<
-            EventLaneOrder,
-            MAX_VISUALIZATION_PANES,
-            MAX_VISUALIZATION_EVENT_LANES_TOTAL,
-        >,
-    >,
+    event_lane_orders: Option<Vec<EventLaneOrder>>,
     #[serde(default)]
-    expression_traces: Option<BoundedVec<ExpressionTrace, MAX_VISUALIZATION_EXPRESSION_TRACES>>,
+    expression_traces: Option<Vec<ExpressionTrace>>,
     #[serde(default)]
-    xy_plots: Option<BoundedVec<XyPlot, MAX_VISUALIZATION_XY_PLOTS>>,
+    xy_plots: Option<Vec<XyPlot>>,
     #[serde(default)]
-    readout_pins: Option<BoundedVec<ReadoutPin, MAX_VISUALIZATION_READOUT_PINS>>,
+    readout_pins: Option<Vec<ReadoutPin>>,
     #[serde(default)]
-    sheet_settings: Option<BoundedVec<SheetSetting, MAX_VISUALIZATION_SHEET_SETTINGS>>,
-    spectrum_settings: Option<BoundedVec<PaneSpectrumSettings, MAX_VISUALIZATION_PANES>>,
+    sheet_settings: Option<Vec<SheetSetting>>,
+    spectrum_settings: Option<Vec<PaneSpectrumSettings>>,
     #[serde(default)]
-    coefficient_settings: Option<BoundedVec<PaneCoefficientSettings, MAX_VISUALIZATION_PANES>>,
+    coefficient_settings: Option<Vec<PaneCoefficientSettings>>,
 }
 
 impl<'de> Deserialize<'de> for VisualizationDocument {
@@ -2815,39 +2474,25 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             working_view: wire.working_view,
             next_serial: wire.next_serial,
             datasets: wire.datasets.0,
-            pages: wire.pages.into_inner(),
-            panes: wire.panes.into_inner(),
-            axes: wire.axes.into_inner(),
+            pages: wire.pages,
+            panes: wire.panes,
+            axes: wire.axes,
             traces: wire.traces,
-            cursors: wire.cursors.into_inner(),
-            markers: wire.markers.into_inner(),
-            measurements: wire.measurements.into_inner(),
-            annotations: wire.annotations.into_inner(),
-            link_groups: wire.link_groups.into_inner(),
-            tombstones: wire.tombstones.into_inner(),
-            comparisons: wire.comparisons.into_inner(),
-            user_buses: wire
-                .user_buses
-                .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
-            event_lane_orders: wire
-                .event_lane_orders
-                .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
-            expression_traces: wire
-                .expression_traces
-                .map_or_else(Vec::new, BoundedVec::into_inner),
-            xy_plots: wire.xy_plots.map_or_else(Vec::new, BoundedVec::into_inner),
-            readout_pins: wire
-                .readout_pins
-                .map_or_else(Vec::new, BoundedVec::into_inner),
-            sheet_settings: wire
-                .sheet_settings
-                .map_or_else(Vec::new, BoundedVec::into_inner),
-            spectrum_settings: wire
-                .spectrum_settings
-                .map_or_else(Vec::new, BoundedVec::into_inner),
-            coefficient_settings: wire
-                .coefficient_settings
-                .map_or_else(Vec::new, BoundedVec::into_inner),
+            cursors: wire.cursors,
+            markers: wire.markers,
+            measurements: wire.measurements,
+            annotations: wire.annotations,
+            link_groups: wire.link_groups,
+            tombstones: wire.tombstones,
+            comparisons: wire.comparisons,
+            user_buses: wire.user_buses.unwrap_or_default(),
+            event_lane_orders: wire.event_lane_orders.unwrap_or_default(),
+            expression_traces: wire.expression_traces.unwrap_or_default(),
+            xy_plots: wire.xy_plots.unwrap_or_default(),
+            readout_pins: wire.readout_pins.unwrap_or_default(),
+            sheet_settings: wire.sheet_settings.unwrap_or_default(),
+            spectrum_settings: wire.spectrum_settings.unwrap_or_default(),
+            coefficient_settings: wire.coefficient_settings.unwrap_or_default(),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
             return Err(serde::de::Error::custom(format!(
@@ -2949,7 +2594,7 @@ impl VisualizationDocument {
         pane: NewPagePane,
     ) -> Result<Self, VisualizationError> {
         let mut document = Self::new(title, datasets)?;
-        document.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
+        document.validate_pane_source(&document, pane.kind, &pane.viewer_id, pane.binding)?;
         validate_label("pane.title", &pane.title)?;
         let pane_id = document.panes[0].id;
         {

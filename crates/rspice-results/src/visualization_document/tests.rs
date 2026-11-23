@@ -354,7 +354,7 @@ fn latest_retarget_moves_the_document_onto_the_newer_run_and_drops_the_one_it_le
 #[test]
 fn a_latest_document_follows_three_hundred_reruns() {
     // Each re-run used to leave its predecessor attached, so the document
-    // refused to follow once it held MAX_VISUALIZATION_DATASETS of them.
+    // held one more run for every re-run it followed.
     let (mut document, mut previous) = document();
     let plan_id = SimulationPlanId::new();
     let pane_id = document.panes()[0].id;
@@ -1040,33 +1040,7 @@ fn source_dataset_rejects_shape_type_and_duplicate_coordinate_errors() {
 }
 
 #[test]
-fn source_dataset_limits_are_enforced_at_construction_and_deserialization() {
-    let source = binding(31);
-    let columns = (0..MAX_SOURCE_COLUMNS)
-        .map(|index| {
-            SourceColumn::new(
-                format!("c{index}"),
-                format!("Column {index}"),
-                ValueType::Real,
-                if index == 0 {
-                    ColumnRole::Coordinate
-                } else {
-                    ColumnRole::Signal
-                },
-                None,
-            )
-            .unwrap()
-        })
-        .collect::<Vec<_>>();
-    let at_limit = SourceDataset::new(source, columns, Vec::new()).unwrap();
-
-    let mut encoded = serde_json::to_value(&at_limit).unwrap();
-    let encoded_columns = encoded["columns"].as_array_mut().unwrap();
-    let extra_column = encoded_columns[0].clone();
-    encoded_columns.push(extra_column);
-    let error = serde_json::from_value::<SourceDataset>(encoded).unwrap_err();
-    assert!(error.to_string().contains("resource limit"));
-
+fn a_text_cell_longer_than_its_bound_is_refused_at_construction() {
     let oversized_text = SourceDataset::new(
         binding(32),
         vec![
@@ -1095,19 +1069,6 @@ fn source_dataset_limits_are_enforced_at_construction_and_deserialization() {
 }
 
 #[test]
-fn visualization_document_deserialization_rejects_oversized_entity_sequences() {
-    let (document, _) = document();
-    let mut encoded = serde_json::to_value(&document).unwrap();
-    let pages = encoded["pages"].as_array_mut().unwrap();
-    let page = pages[0].clone();
-    while pages.len() <= MAX_VISUALIZATION_PAGES {
-        pages.push(page.clone());
-    }
-    let error = serde_json::from_value::<VisualizationDocument>(encoded).unwrap_err();
-    assert!(error.to_string().contains("resource limit"));
-}
-
-#[test]
 fn a_transaction_holds_any_number_of_edits_but_not_none() {
     let (mut document, _) = document();
     let before = document.clone();
@@ -1132,7 +1093,7 @@ fn a_transaction_holds_any_number_of_edits_but_not_none() {
 }
 
 #[test]
-fn nested_sequences_and_source_strings_are_bounded_during_deserialization() {
+fn predicate_children_and_source_strings_are_bounded_during_deserialization() {
     let predicate = FamilyPredicate::All {
         predicates: vec![FamilyPredicate::Constant { value: true }],
     };
@@ -1144,25 +1105,6 @@ fn nested_sequences_and_source_strings_are_bounded_during_deserialization() {
     }
     let predicate_error = serde_json::from_value::<FamilyPredicate>(predicate_json).unwrap_err();
     assert!(predicate_error.to_string().contains("resource limit"));
-
-    let measurement = Measurement {
-        id: MeasurementId::allocate(1).unwrap(),
-        pane_id: PaneId::allocate(2).unwrap(),
-        trace_ids: vec![TraceId::allocate(3).unwrap()],
-        kind: MeasurementKind::Point,
-        label: "Point".to_owned(),
-        expression: None,
-        value: None,
-        family: None,
-    };
-    let mut measurement_json = serde_json::to_value(measurement).unwrap();
-    let trace = measurement_json["trace_ids"][0].clone();
-    let traces = measurement_json["trace_ids"].as_array_mut().unwrap();
-    while traces.len() <= MAX_ENTITY_REFERENCES {
-        traces.push(trace.clone());
-    }
-    let measurement_error = serde_json::from_value::<Measurement>(measurement_json).unwrap_err();
-    assert!(measurement_error.to_string().contains("resource limit"));
 
     let source = dataset(binding(33), 0.0);
     let mut source_json = serde_json::to_value(source).unwrap();
@@ -1209,52 +1151,6 @@ fn predicate_deserialization_enforces_shared_depth_and_total_node_budgets() {
     assert_eq!(
         restored_after_errors,
         FamilyPredicate::Constant { value: true }
-    );
-}
-
-#[test]
-fn document_aggregate_nested_resource_budgets_accept_boundaries_and_reject_overflow() {
-    for (field, maximum) in [
-        (
-            "visualization-document.comparison-signals",
-            MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL,
-        ),
-        (
-            "visualization-document.measurement-trace-references",
-            MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL,
-        ),
-        (
-            "visualization-document.link-member-references",
-            MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL,
-        ),
-    ] {
-        assert_eq!(
-            checked_bounded_sum(field, maximum - 1, 1, maximum).unwrap(),
-            maximum
-        );
-        assert!(matches!(
-            checked_bounded_sum(field, maximum, 1, maximum),
-            Err(VisualizationError::InvalidValue { .. })
-        ));
-    }
-
-    let measurement = Measurement {
-        id: MeasurementId::allocate(1).unwrap(),
-        pane_id: PaneId::allocate(2).unwrap(),
-        trace_ids: vec![TraceId::allocate(3).unwrap(); MAX_ENTITY_REFERENCES],
-        kind: MeasurementKind::Point,
-        label: "Aggregate boundary".to_owned(),
-        expression: None,
-        value: None,
-        family: None,
-    };
-    let mut encoded = serde_json::to_value(document().0).unwrap();
-    encoded["measurements"] = serde_json::to_value(vec![measurement; 5]).unwrap();
-    let error = serde_json::from_value::<VisualizationDocument>(encoded).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("aggregate nested resource limit")
     );
 }
 
@@ -1648,7 +1544,7 @@ fn comparison_rejects_mismatched_bindings_and_inconsistent_receipts() {
 }
 
 #[test]
-fn comparison_rejects_oversized_or_overlong_signal_keys_before_result_work() {
+fn comparison_rejects_overlong_signal_keys_before_result_work() {
     let baseline = binding(35);
     let candidate = binding(36);
     let baseline_data = dataset(baseline, 0.0);
@@ -1663,7 +1559,7 @@ fn comparison_rejects_oversized_or_overlong_signal_keys_before_result_work() {
         baseline,
         candidate,
         signal_keys: vec!["s".repeat(MAX_VISUALIZATION_KEY_BYTES + 1)],
-        policy: policy.clone(),
+        policy,
     };
     assert!(matches!(
         compare_source_datasets(&baseline_data, &candidate_data, &overlong),
@@ -1672,24 +1568,6 @@ fn comparison_rejects_oversized_or_overlong_signal_keys_before_result_work() {
             ..
         })
     ));
-
-    let oversized = ComparisonRequest {
-        baseline,
-        candidate,
-        signal_keys: vec!["v(out)".to_owned(); MAX_COMPARISON_SIGNALS + 1],
-        policy,
-    };
-    assert!(matches!(
-        compare_source_datasets(&baseline_data, &candidate_data, &oversized),
-        Err(VisualizationError::InvalidValue {
-            field: "comparison.signal-keys",
-            ..
-        })
-    ));
-    let wire_error =
-        serde_json::from_value::<ComparisonRequest>(serde_json::to_value(oversized).unwrap())
-            .unwrap_err();
-    assert!(wire_error.to_string().contains("resource limit"));
 }
 
 #[test]
@@ -2441,4 +2319,207 @@ fn a_family_measurement_value_is_the_statistic_it_names() {
     document
         .transact(revision, vec![add(2.5_f64.sqrt(), unjudged)])
         .unwrap();
+}
+
+/// The ids of the entities of `kind` a transaction created, in order.
+fn created<T>(
+    receipt: &VisualizationTransactionReceipt,
+    kind: fn(&EntityRef) -> Option<T>,
+) -> Vec<T> {
+    receipt.created.iter().filter_map(kind).collect()
+}
+
+#[test]
+fn a_document_holds_three_hundred_panes_and_ten_thousand_cursors() {
+    let (mut document, _) = document();
+    let receipt = document
+        .transact(
+            document.revision(),
+            (0..300)
+                .map(|index| DocumentEdit::AddPage {
+                    title: format!("Page {index}"),
+                })
+                .collect(),
+        )
+        .unwrap();
+    let pages = created(&receipt, |entity| match entity {
+        EntityRef::Page(id) => Some(*id),
+        _ => None,
+    });
+    let receipt = document
+        .transact(
+            document.revision(),
+            pages
+                .iter()
+                .map(|page_id| DocumentEdit::AddPane {
+                    page_id: *page_id,
+                    title: "Pane".to_owned(),
+                    kind: PaneKind::Cartesian,
+                })
+                .collect(),
+        )
+        .unwrap();
+    let pane = created(&receipt, |entity| match entity {
+        EntityRef::Pane(id) => Some(*id),
+        _ => None,
+    })[0];
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddAxis(NewAxis {
+                pane_id: pane,
+                label: "Time".to_owned(),
+                orientation: AxisOrientation::Horizontal,
+                scale: AxisScale::Linear,
+                unit: Some("s".to_owned()),
+                range: None,
+            })],
+        )
+        .unwrap();
+    let axis_id = created(&receipt, |entity| match entity {
+        EntityRef::Axis(id) => Some(*id),
+        _ => None,
+    })[0];
+    document
+        .transact(
+            document.revision(),
+            (0..10_000)
+                .map(|index| DocumentEdit::AddCursor {
+                    pane_id: pane,
+                    axis_id,
+                    position: TypedValue::Real(f64::from(index)),
+                    label: format!("C{index}"),
+                })
+                .collect(),
+        )
+        .unwrap();
+    assert_eq!(document.panes().len(), 301);
+    assert_eq!(document.cursors().len(), 10_000);
+    let restored: VisualizationDocument =
+        serde_json::from_value(serde_json::to_value(&document).unwrap()).unwrap();
+    assert_eq!(restored, document, "it reads back whole");
+}
+
+/// An iterator that holds nothing and claims to hold `0` items.
+struct Claims(usize);
+
+impl Iterator for Claims {
+    type Item = f64;
+
+    fn next(&mut self) -> Option<f64> {
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.0, Some(self.0))
+    }
+}
+
+#[test]
+fn a_hostile_view_file_is_refused_quickly_and_reserves_nothing_it_claims() {
+    use serde::de::value::{Error, MapDeserializer, SeqDeserializer};
+
+    // A row that claims more values than a table may hold is refused before
+    // one value is read or reserved.
+    let row = MapDeserializer::<_, Error>::new(std::iter::once((
+        "values",
+        SeqDeserializer::<_, Error>::new(Claims(usize::MAX)),
+    )));
+    let error = SourceRow::deserialize(row).unwrap_err();
+    assert!(error.to_string().contains("resource limit"), "{error}");
+    // A sequence of the document's own claims as much and reserves nothing.
+    let traces =
+        Vec::<Trace>::deserialize(SeqDeserializer::<_, Error>::new(Claims(usize::MAX))).unwrap();
+    assert!(traces.is_empty());
+
+    // A file of a hundred thousand traces and as many markers, the last
+    // naming a trace the file lacks, is checked in one pass and refused by
+    // the trace it names.
+    let (mut document, source) = document();
+    let pane = document.panes()[0].id;
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::AddAxis(NewAxis {
+                    pane_id: pane,
+                    label: "Time".to_owned(),
+                    orientation: AxisOrientation::Horizontal,
+                    scale: AxisScale::Linear,
+                    unit: Some("s".to_owned()),
+                    range: None,
+                }),
+                DocumentEdit::AddAxis(NewAxis {
+                    pane_id: pane,
+                    label: "Voltage".to_owned(),
+                    orientation: AxisOrientation::VerticalLeft,
+                    scale: AxisScale::Linear,
+                    unit: Some("V".to_owned()),
+                    range: None,
+                }),
+            ],
+        )
+        .unwrap();
+    let axes = created(&receipt, |entity| match entity {
+        EntityRef::Axis(id) => Some(*id),
+        _ => None,
+    });
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddTrace(NewTrace {
+                pane_id: pane,
+                binding: source,
+                signal_key: "v(out)".to_owned(),
+                coordinate_key: "time".to_owned(),
+                row_predicates: Vec::new(),
+                x_axis_id: axes[0],
+                y_axis_id: axes[1],
+                label: "V(out)".to_owned(),
+            })],
+        )
+        .unwrap();
+    let trace = created(&receipt, |entity| match entity {
+        EntityRef::Trace(id) => Some(*id),
+        _ => None,
+    })[0];
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddMarker {
+                pane_id: pane,
+                trace_id: trace,
+                coordinate: TypedValue::Real(1.0),
+                label: "M".to_owned(),
+            }],
+        )
+        .unwrap();
+    const COUNT: u64 = 100_000;
+    let mut encoded = serde_json::to_value(&document).unwrap();
+    let one_trace = encoded["traces"][0].clone();
+    let one_marker = encoded["markers"][0].clone();
+    let first = 1_000_000_u64;
+    encoded["traces"] = (0..COUNT)
+        .map(|index| {
+            let mut trace = one_trace.clone();
+            trace["id"] = serde_json::json!(first + index);
+            trace
+        })
+        .collect();
+    encoded["markers"] = (0..COUNT)
+        .map(|index| {
+            let mut marker = one_marker.clone();
+            marker["id"] = serde_json::json!(first + COUNT + index);
+            marker["trace_id"] = serde_json::json!(first + index + u64::from(index + 1 == COUNT));
+            marker
+        })
+        .collect();
+    encoded["next_serial"] = serde_json::json!(first + 2 * COUNT);
+    let started = std::time::Instant::now();
+    let error = serde_json::from_value::<VisualizationDocument>(encoded).unwrap_err();
+    assert!(
+        error.to_string().contains(&(first + COUNT).to_string()),
+        "refused by the trace it names: {error}"
+    );
+    println!("refused in {:?}", started.elapsed());
 }

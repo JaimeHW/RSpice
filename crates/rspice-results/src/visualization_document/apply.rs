@@ -6,6 +6,7 @@
 //! on the removed one and records a tombstone for each, which is why a page
 //! can never keep a pane, axis, or trace whose parent is gone.
 
+use super::lookup::{Entities, Lookup};
 use super::*;
 
 /// What moving a document's consumers from one run onto another asks of
@@ -31,6 +32,7 @@ impl VisualizationDocument {
 
     pub(super) fn validate_pane_source(
         &self,
+        entities: &dyn Entities,
         kind: PaneKind,
         viewer_id: &str,
         binding: Option<PaneDataBinding>,
@@ -51,33 +53,33 @@ impl VisualizationDocument {
             });
         }
         if let Some(binding) = binding {
-            self.dataset_for_binding(binding.dataset)?;
+            entities.dataset(binding.dataset)?;
         }
         Ok(())
     }
 
     fn validate_pane_family_policy(
         &self,
+        entities: &dyn Entities,
         pane_id: PaneId,
         policy: &FamilyPresentationPolicy,
     ) -> Result<(), VisualizationError> {
         policy.validate()?;
-        let pane = self
-            .panes
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
+        let pane = entities.pane(pane_id)?;
         let mut bindings = Vec::<DatasetBinding>::new();
-        if let Some(binding) = pane.binding.map(|binding| binding.dataset) {
-            bindings.push(binding);
-        }
-        for binding in self
-            .traces
-            .iter()
-            .filter(|trace| trace.pane_id == pane_id)
-            .map(|trace| trace.binding)
+        let mut held = HashSet::new();
+        for binding in pane
+            .binding
+            .map(|binding| binding.dataset)
+            .into_iter()
+            .chain(
+                entities
+                    .traces_in_pane(pane_id)
+                    .into_iter()
+                    .map(|trace| trace.binding),
+            )
         {
-            if !bindings.contains(&binding) {
+            if held.insert(binding) {
                 bindings.push(binding);
             }
         }
@@ -89,7 +91,7 @@ impl VisualizationDocument {
             });
         }
         for binding in bindings {
-            let dataset = self.dataset_for_binding(binding)?;
+            let dataset = entities.dataset(binding)?;
             for dimension in std::iter::once(&policy.x_dimension.dimension)
                 .chain(policy.family_dimensions.iter())
             {
@@ -181,7 +183,7 @@ impl VisualizationDocument {
 
     pub(super) fn create_pane(&mut self, pane: NewPane) -> Result<PaneId, VisualizationError> {
         validate_label("pane.title", &pane.title)?;
-        self.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
+        self.validate_pane_source(&*self, pane.kind, &pane.viewer_id, pane.binding)?;
         let order = self.placement_order(pane.page_id, pane.placement, None)?;
         for existing in &mut self.panes {
             if existing.page_id == pane.page_id && existing.order >= order {
@@ -421,14 +423,6 @@ impl VisualizationDocument {
                     && group.members.contains(&EntityRef::Axis(anchor_axis))
                     && !group.members.contains(&EntityRef::Axis(new_axis))
                 {
-                    if group.members.len() >= MAX_ENTITY_REFERENCES {
-                        return Err(VisualizationError::InvalidValue {
-                            field: "link-group.members",
-                            message: format!(
-                                "a link group supports at most {MAX_ENTITY_REFERENCES} members"
-                            ),
-                        });
-                    }
                     group.members.push(EntityRef::Axis(new_axis));
                 }
             }
@@ -730,7 +724,7 @@ impl VisualizationDocument {
                     .find(|pane| pane.id == pane_id)
                     .map(|pane| pane.kind)
                     .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
-                self.validate_pane_source(kind, &viewer_id, binding)?;
+                self.validate_pane_source(&*self, kind, &viewer_id, binding)?;
                 let pane = self.pane_mut(pane_id)?;
                 pane.viewer_id = viewer_id.clone();
                 pane.binding = binding;
@@ -741,7 +735,7 @@ impl VisualizationDocument {
             }
             DocumentEdit::SetPaneFamilyPresentation { pane_id, policy } => {
                 if let Some(policy) = &policy {
-                    self.validate_pane_family_policy(pane_id, policy)?;
+                    self.validate_pane_family_policy(&*self, pane_id, policy)?;
                 } else {
                     self.require_pane(pane_id)?;
                 }
@@ -903,7 +897,7 @@ impl VisualizationDocument {
                 validate_label("marker.label", &label)?;
                 coordinate.validate("marker.coordinate")?;
                 self.require_trace_in_pane(trace_id, pane_id)?;
-                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                if !trace_contains_exact_coordinate(&*self, trace_id, &coordinate)? {
                     return Err(VisualizationError::InterpolationRequired);
                 }
                 let id = MarkerId::allocate(self.allocate_serial()?)?;
@@ -935,7 +929,7 @@ impl VisualizationDocument {
                 }
                 coordinate.validate("marker.coordinate")?;
                 self.require_trace_in_pane(trace_id, pane_id)?;
-                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                if !trace_contains_exact_coordinate(&*self, trace_id, &coordinate)? {
                     return Err(VisualizationError::InterpolationRequired);
                 }
                 let id = MarkerId::allocate(self.allocate_serial()?)?;
@@ -959,12 +953,10 @@ impl VisualizationDocument {
                 label,
             } => {
                 validate_label("measurement.label", &label)?;
-                if trace_ids.is_empty() || trace_ids.len() > MAX_ENTITY_REFERENCES {
+                if trace_ids.is_empty() {
                     return Err(VisualizationError::InvalidValue {
                         field: "measurement.traces",
-                        message: format!(
-                            "a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"
-                        ),
+                        message: "a measurement reads at least one trace".to_owned(),
                     });
                 }
                 for trace_id in &trace_ids {
@@ -990,7 +982,7 @@ impl VisualizationDocument {
                 text,
             } => {
                 self.require_pane(pane_id)?;
-                validate_annotation(self, pane_id, &anchor, &text)?;
+                validate_annotation(&*self, pane_id, &anchor, &text)?;
                 let id = AnnotationId::allocate(self.allocate_serial()?)?;
                 self.annotations.push(Annotation {
                     id,
@@ -1007,7 +999,7 @@ impl VisualizationDocument {
                 members,
             } => {
                 validate_label("link-group.label", &label)?;
-                validate_link_members(self, kind, &members)?;
+                validate_link_members(&*self, kind, &members)?;
                 let id = LinkGroupId::allocate(self.allocate_serial()?)?;
                 self.link_groups.push(LinkGroup {
                     id,
@@ -1052,7 +1044,7 @@ impl VisualizationDocument {
                 Ok(())
             }
             DocumentEdit::DefineUserBus(bus) => {
-                self.validate_user_bus(&bus)?;
+                self.validate_user_bus(&*self, &bus)?;
                 match self
                     .user_buses
                     .iter_mut()
@@ -1080,7 +1072,7 @@ impl VisualizationDocument {
                 Ok(())
             }
             DocumentEdit::AddExpressionTrace(trace) => {
-                self.validate_expression_trace(&trace)?;
+                self.validate_expression_trace(&*self, &trace)?;
                 match self
                     .expression_traces
                     .iter_mut()
@@ -1088,11 +1080,6 @@ impl VisualizationDocument {
                 {
                     Some(held) => *held = trace,
                     None => {
-                        ensure_maximum_len(
-                            "visualization-document.expression-traces",
-                            self.expression_traces.len() + 1,
-                            MAX_VISUALIZATION_EXPRESSION_TRACES,
-                        )?;
                         self.expression_traces.push(trace);
                     }
                 }
@@ -1123,21 +1110,11 @@ impl VisualizationDocument {
                             ),
                         });
                     }
-                    self.validate_xy_plot(plot)?;
+                    self.validate_xy_plot(&*self, plot)?;
                     if plots[..index].iter().any(|held| held.same_plot(plot)) {
                         return Err(duplicate_xy_plot(plot));
                     }
                 }
-                let kept = self
-                    .xy_plots
-                    .iter()
-                    .filter(|held| held.pane_id != pane_id)
-                    .count();
-                ensure_maximum_len(
-                    "visualization-document.xy-plots",
-                    kept + plots.len(),
-                    MAX_VISUALIZATION_XY_PLOTS,
-                )?;
                 self.xy_plots.retain(|held| held.pane_id != pane_id);
                 self.xy_plots.extend(plots);
                 Ok(())
@@ -1149,11 +1126,6 @@ impl VisualizationDocument {
                 if let Some(x) = x {
                     let pin = ReadoutPin { pane_id, sheet, x };
                     validate_readout_pin(&pin)?;
-                    ensure_maximum_len(
-                        "visualization-document.readout-pins",
-                        self.readout_pins.len() + 1,
-                        MAX_VISUALIZATION_READOUT_PINS,
-                    )?;
                     self.readout_pins.push(pin);
                 }
                 Ok(())
@@ -1178,11 +1150,6 @@ impl VisualizationDocument {
                             ),
                         });
                     }
-                    ensure_maximum_len(
-                        "visualization-document.sheet-settings",
-                        self.sheet_settings.len() + 1,
-                        MAX_VISUALIZATION_SHEET_SETTINGS,
-                    )?;
                     self.sheet_settings.push(setting);
                 }
                 Ok(())
@@ -1210,7 +1177,7 @@ impl VisualizationDocument {
                 Ok(())
             }
             DocumentEdit::SetEventLaneOrder(order) => {
-                self.validate_event_lane_order(&order)?;
+                self.validate_event_lane_order(&*self, &order)?;
                 self.event_lane_orders
                     .retain(|held| held.pane_id != order.pane_id);
                 if !order.lanes.is_empty() {
@@ -1232,7 +1199,7 @@ impl VisualizationDocument {
             } => {
                 coordinate.validate("marker.coordinate")?;
                 let trace_id = self.marker_mut(marker_id)?.trace_id;
-                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                if !trace_contains_exact_coordinate(&*self, trace_id, &coordinate)? {
                     return Err(VisualizationError::InterpolationRequired);
                 }
                 self.marker_mut(marker_id)?.coordinate = coordinate;
@@ -1263,7 +1230,7 @@ impl VisualizationDocument {
                 }
                 coordinate.validate("marker.coordinate")?;
                 let trace_id = self.marker_mut(marker_id)?.trace_id;
-                if !trace_contains_exact_coordinate(self, trace_id, &coordinate)? {
+                if !trace_contains_exact_coordinate(&*self, trace_id, &coordinate)? {
                     return Err(VisualizationError::InterpolationRequired);
                 }
                 let marker = self.marker_mut(marker_id)?;
@@ -1287,7 +1254,7 @@ impl VisualizationDocument {
                     .ok_or(VisualizationError::EntityNotFound(EntityRef::Annotation(
                         annotation_id,
                     )))?;
-                validate_annotation(self, pane_id, &anchor, &text)?;
+                validate_annotation(&*self, pane_id, &anchor, &text)?;
                 let annotation = self.annotation_mut(annotation_id)?;
                 annotation.anchor = anchor;
                 annotation.text = text;
@@ -1305,7 +1272,7 @@ impl VisualizationDocument {
                     .ok_or(VisualizationError::EntityNotFound(EntityRef::LinkGroup(
                         link_group_id,
                     )))?;
-                validate_link_members(self, kind, &members)?;
+                validate_link_members(&*self, kind, &members)?;
                 self.link_group_mut(link_group_id)?.members = members;
                 Ok(())
             }
@@ -1326,7 +1293,7 @@ impl VisualizationDocument {
             }
             DocumentEdit::Remove(entity) => self.remove(entity, revision, tombstoned),
             DocumentEdit::RecordComparison(receipt) => {
-                self.validate_comparison_receipt(&receipt)?;
+                self.validate_comparison_receipt(&*self, &receipt)?;
                 self.comparisons.push(receipt);
                 Ok(())
             }
@@ -1957,10 +1924,11 @@ impl VisualizationDocument {
 
     fn validate_comparison_receipt(
         &self,
+        entities: &dyn Entities,
         receipt: &ComparisonReceipt,
     ) -> Result<(), VisualizationError> {
-        self.dataset_for_binding(receipt.baseline)?;
-        self.dataset_for_binding(receipt.candidate)?;
+        entities.dataset(receipt.baseline)?;
+        entities.dataset(receipt.candidate)?;
         receipt.validate_structure()
     }
 
@@ -1975,71 +1943,6 @@ impl VisualizationDocument {
         self.tracking.validate()?;
         self.presentation.validate()?;
         validate_dataset_set(&self.datasets)?;
-        ensure_maximum_len(
-            "visualization-document.pages",
-            self.pages.len(),
-            MAX_VISUALIZATION_PAGES,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.panes",
-            self.panes.len(),
-            MAX_VISUALIZATION_PANES,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.axes",
-            self.axes.len(),
-            MAX_VISUALIZATION_AXES,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.cursors",
-            self.cursors.len(),
-            MAX_VISUALIZATION_CURSORS,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.markers",
-            self.markers.len(),
-            MAX_VISUALIZATION_MARKERS,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.measurements",
-            self.measurements.len(),
-            MAX_VISUALIZATION_MEASUREMENTS,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.annotations",
-            self.annotations.len(),
-            MAX_VISUALIZATION_ANNOTATIONS,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.link-groups",
-            self.link_groups.len(),
-            MAX_VISUALIZATION_LINK_GROUPS,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.tombstones",
-            self.tombstones.len(),
-            MAX_VISUALIZATION_TOMBSTONES,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.comparisons",
-            self.comparisons.len(),
-            MAX_VISUALIZATION_COMPARISONS,
-        )?;
-        validate_aggregate_nested_resources(
-            "visualization-document.measurement-trace-references",
-            &self.measurements,
-            MAX_VISUALIZATION_MEASUREMENT_TRACE_REFERENCES_TOTAL,
-        )?;
-        validate_aggregate_nested_resources(
-            "visualization-document.link-member-references",
-            &self.link_groups,
-            MAX_VISUALIZATION_LINK_MEMBER_REFERENCES_TOTAL,
-        )?;
-        validate_aggregate_nested_resources(
-            "visualization-document.comparison-signals",
-            &self.comparisons,
-            MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL,
-        )?;
         if self.pages.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "visualization-document.pages",
@@ -2047,17 +1950,19 @@ impl VisualizationDocument {
             });
         }
         let mut identities = HashSet::new();
+        let lookup = Lookup::of(self);
+        let mut panes_by_page: HashMap<PageId, Vec<&Pane>> = HashMap::new();
+        for pane in &self.panes {
+            panes_by_page.entry(pane.page_id).or_default().push(pane);
+        }
         for page in &self.pages {
             validate_label("page.title", &page.title)?;
             page.layout.validate()?;
             validate_key("page.template-id", &page.template_id)?;
             if page.layout == PageLayout::SinglePane
-                && self
-                    .panes
-                    .iter()
-                    .filter(|pane| pane.page_id == page.id)
-                    .count()
-                    > 1
+                && panes_by_page
+                    .get(&page.id)
+                    .is_some_and(|panes| panes.len() > 1)
             {
                 return Err(VisualizationError::InvalidValue {
                     field: "page.layout",
@@ -2068,20 +1973,16 @@ impl VisualizationDocument {
         }
         for pane in &self.panes {
             validate_label("pane.title", &pane.title)?;
-            self.require_page(pane.page_id)?;
-            self.validate_pane_source(pane.kind, &pane.viewer_id, pane.binding)?;
+            lookup.require_page(pane.page_id)?;
+            self.validate_pane_source(&lookup, pane.kind, &pane.viewer_id, pane.binding)?;
             super::strips::validate_strips(&pane.strips)?;
             if let Some(policy) = &pane.family_policy {
-                self.validate_pane_family_policy(pane.id, policy)?;
+                self.validate_pane_family_policy(&lookup, pane.id, policy)?;
             }
             ensure_identity(&mut identities, EntityRef::Pane(pane.id))?;
         }
         for page in &self.pages {
-            let mut panes: Vec<_> = self
-                .panes
-                .iter()
-                .filter(|pane| pane.page_id == page.id)
-                .collect();
+            let mut panes = panes_by_page.remove(&page.id).unwrap_or_default();
             panes.sort_by_key(|pane| (pane.order, pane.id));
             let mut preceding = HashSet::new();
             for (expected_order, pane) in panes.into_iter().enumerate() {
@@ -2120,17 +2021,17 @@ impl VisualizationDocument {
         for axis in &self.axes {
             validate_label("axis.label", &axis.label)?;
             validate_optional_unit("axis.unit", axis.unit.as_deref())?;
-            self.require_pane(axis.pane_id)?;
+            lookup.require_pane(axis.pane_id)?;
             ensure_identity(&mut identities, EntityRef::Axis(axis.id))?;
         }
         for trace in &self.traces {
             validate_label("trace.label", &trace.label)?;
             validate_key("trace.signal-key", &trace.signal_key)?;
             validate_key("trace.coordinate-key", &trace.coordinate_key)?;
-            self.require_pane(trace.pane_id)?;
-            self.require_axis_in_pane(trace.x_axis_id, trace.pane_id)?;
-            self.require_axis_in_pane(trace.y_axis_id, trace.pane_id)?;
-            let dataset = self.dataset_for_binding(trace.binding)?;
+            lookup.require_pane(trace.pane_id)?;
+            lookup.require_axis_in_pane(trace.x_axis_id, trace.pane_id)?;
+            lookup.require_axis_in_pane(trace.y_axis_id, trace.pane_id)?;
+            let dataset = lookup.dataset(trace.binding)?;
             if !trace_columns_are_drawable(dataset, &trace.signal_key, &trace.coordinate_key)? {
                 return Err(VisualizationError::InvalidValue {
                     field: "trace.source-columns",
@@ -2145,7 +2046,7 @@ impl VisualizationDocument {
         for cursor in &self.cursors {
             validate_label("cursor.label", &cursor.label)?;
             cursor.position.validate("cursor.position")?;
-            self.require_axis_in_pane(cursor.axis_id, cursor.pane_id)?;
+            lookup.require_axis_in_pane(cursor.axis_id, cursor.pane_id)?;
             ensure_identity(&mut identities, EntityRef::Cursor(cursor.id))?;
         }
         for marker in &self.markers {
@@ -2154,8 +2055,8 @@ impl VisualizationDocument {
                 validate_label("marker.source-specification", source)?;
             }
             marker.coordinate.validate("marker.coordinate")?;
-            self.require_trace_in_pane(marker.trace_id, marker.pane_id)?;
-            if !trace_contains_exact_coordinate(self, marker.trace_id, &marker.coordinate)? {
+            lookup.require_trace_in_pane(marker.trace_id, marker.pane_id)?;
+            if !trace_contains_exact_coordinate(&lookup, marker.trace_id, &marker.coordinate)? {
                 return Err(VisualizationError::InterpolationRequired);
             }
             ensure_identity(&mut identities, EntityRef::Marker(marker.id))?;
@@ -2185,15 +2086,15 @@ impl VisualizationDocument {
                 measurement.trace_ids.len(),
                 measurement.expression.is_some(),
             )?;
-            self.require_pane(measurement.pane_id)?;
+            lookup.require_pane(measurement.pane_id)?;
             for trace in &measurement.trace_ids {
-                self.require_trace_in_pane(*trace, measurement.pane_id)?;
+                lookup.require_trace_in_pane(*trace, measurement.pane_id)?;
             }
             ensure_identity(&mut identities, EntityRef::Measurement(measurement.id))?;
         }
         for annotation in &self.annotations {
             validate_annotation(
-                self,
+                &lookup,
                 annotation.pane_id,
                 &annotation.anchor,
                 &annotation.text,
@@ -2202,7 +2103,7 @@ impl VisualizationDocument {
         }
         for group in &self.link_groups {
             validate_label("link-group.label", &group.label)?;
-            validate_link_members(self, group.kind, &group.members)?;
+            validate_link_members(&lookup, group.kind, &group.members)?;
             ensure_identity(&mut identities, EntityRef::LinkGroup(group.id))?;
         }
         let mut deleted = HashSet::new();
@@ -2216,31 +2117,11 @@ impl VisualizationDocument {
             }
         }
         for receipt in &self.comparisons {
-            self.validate_comparison_receipt(receipt)?;
+            self.validate_comparison_receipt(&lookup, receipt)?;
         }
-        ensure_maximum_len(
-            "visualization-document.user-buses",
-            self.user_buses.len(),
-            MAX_VISUALIZATION_USER_BUSES,
-        )?;
-        validate_aggregate_nested_resources(
-            "visualization-document.user-bus-members",
-            &self.user_buses,
-            MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.event-lane-orders",
-            self.event_lane_orders.len(),
-            MAX_VISUALIZATION_PANES,
-        )?;
-        validate_aggregate_nested_resources(
-            "visualization-document.event-lanes",
-            &self.event_lane_orders,
-            MAX_VISUALIZATION_EVENT_LANES_TOTAL,
-        )?;
         let mut ordered_panes = HashSet::new();
         for order in &self.event_lane_orders {
-            self.validate_event_lane_order(order)?;
+            self.validate_event_lane_order(&lookup, order)?;
             if order.lanes.is_empty() || !ordered_panes.insert(order.pane_id) {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.event-lane-orders",
@@ -2251,14 +2132,9 @@ impl VisualizationDocument {
                 });
             }
         }
-        ensure_maximum_len(
-            "visualization-document.expression-traces",
-            self.expression_traces.len(),
-            MAX_VISUALIZATION_EXPRESSION_TRACES,
-        )?;
         let mut expressions = HashSet::new();
         for trace in &self.expression_traces {
-            self.validate_expression_trace(trace)?;
+            self.validate_expression_trace(&lookup, trace)?;
             if !expressions.insert((trace.pane_id, trace.text.as_str())) {
                 return Err(VisualizationError::InvalidValue {
                     field: "expression-trace.text",
@@ -2270,32 +2146,18 @@ impl VisualizationDocument {
                 });
             }
         }
-        ensure_maximum_len(
-            "visualization-document.xy-plots",
-            self.xy_plots.len(),
-            MAX_VISUALIZATION_XY_PLOTS,
-        )?;
-        for (index, plot) in self.xy_plots.iter().enumerate() {
-            self.validate_xy_plot(plot)?;
-            if self.xy_plots[..index]
-                .iter()
-                .any(|held| held.same_plot(plot))
-            {
+        let mut plots = HashSet::new();
+        for plot in &self.xy_plots {
+            self.validate_xy_plot(&lookup, plot)?;
+            if !plots.insert((plot.pane_id, plot.unit.as_str(), &plot.abscissa)) {
                 return Err(duplicate_xy_plot(plot));
             }
         }
-        ensure_maximum_len(
-            "visualization-document.readout-pins",
-            self.readout_pins.len(),
-            MAX_VISUALIZATION_READOUT_PINS,
-        )?;
-        for (index, pin) in self.readout_pins.iter().enumerate() {
-            self.require_pane(pin.pane_id)?;
+        let mut pins = HashSet::new();
+        for pin in &self.readout_pins {
+            lookup.require_pane(pin.pane_id)?;
             validate_readout_pin(pin)?;
-            if self.readout_pins[..index]
-                .iter()
-                .any(|held| held.pane_id == pin.pane_id && held.sheet == pin.sheet)
-            {
+            if !pins.insert((pin.pane_id, pin.sheet)) {
                 return Err(VisualizationError::InvalidValue {
                     field: "readout-pin.sheet",
                     message: format!(
@@ -2306,17 +2168,11 @@ impl VisualizationDocument {
                 });
             }
         }
-        ensure_maximum_len(
-            "visualization-document.sheet-settings",
-            self.sheet_settings.len(),
-            MAX_VISUALIZATION_SHEET_SETTINGS,
-        )?;
-        for (index, setting) in self.sheet_settings.iter().enumerate() {
-            self.require_pane(setting.pane_id)?;
+        let mut settings = HashSet::new();
+        for setting in &self.sheet_settings {
+            lookup.require_pane(setting.pane_id)?;
             validate_sheet_setting(setting)?;
-            if self.sheet_settings[..index].iter().any(|held| {
-                held.pane_id == setting.pane_id && held.setting.sheet() == setting.setting.sheet()
-            }) {
+            if !settings.insert((setting.pane_id, setting.setting.sheet())) {
                 return Err(VisualizationError::InvalidValue {
                     field: "sheet-setting.sheet",
                     message: format!(
@@ -2327,13 +2183,11 @@ impl VisualizationDocument {
                 });
             }
         }
-        for (index, held) in self.spectrum_settings.iter().enumerate() {
-            self.require_pane(held.pane_id)?;
+        let mut spectra = HashSet::new();
+        for held in &self.spectrum_settings {
+            lookup.require_pane(held.pane_id)?;
             validate_spectrum_settings(&held.settings)?;
-            if self.spectrum_settings[..index]
-                .iter()
-                .any(|other| other.pane_id == held.pane_id)
-            {
+            if !spectra.insert(held.pane_id) {
                 return Err(VisualizationError::InvalidValue {
                     field: "spectrum-settings.pane-id",
                     message: format!(
@@ -2343,13 +2197,11 @@ impl VisualizationDocument {
                 });
             }
         }
-        for (index, held) in self.coefficient_settings.iter().enumerate() {
-            self.require_pane(held.pane_id)?;
+        let mut coefficients = HashSet::new();
+        for held in &self.coefficient_settings {
+            lookup.require_pane(held.pane_id)?;
             validate_coefficient_settings(&held.settings)?;
-            if self.coefficient_settings[..index]
-                .iter()
-                .any(|other| other.pane_id == held.pane_id)
-            {
+            if !coefficients.insert(held.pane_id) {
                 return Err(VisualizationError::InvalidValue {
                     field: "coefficient-settings.pane-id",
                     message: format!(
@@ -2361,7 +2213,7 @@ impl VisualizationDocument {
         }
         let mut bus_names = HashSet::new();
         for bus in &self.user_buses {
-            self.validate_user_bus(bus)?;
+            self.validate_user_bus(&lookup, bus)?;
             if !bus_names.insert((bus.pane_id, bus.name.as_str())) {
                 return Err(VisualizationError::InvalidValue {
                     field: "user-bus.name",
@@ -2389,24 +2241,17 @@ impl VisualizationDocument {
     /// One pane's event-lane order on its own: duplicate-free rows, each a
     /// logic trace of that pane or a named bus. A bus the run declared is no
     /// entity of the document, so a bus row is held to a valid name only.
-    fn validate_event_lane_order(&self, order: &EventLaneOrder) -> Result<(), VisualizationError> {
-        self.require_pane(order.pane_id)?;
-        ensure_maximum_len(
-            "event-lane-order.lanes",
-            order.lanes.len(),
-            MAX_PANE_EVENT_LANES,
-        )?;
+    fn validate_event_lane_order(
+        &self,
+        entities: &dyn Entities,
+        order: &EventLaneOrder,
+    ) -> Result<(), VisualizationError> {
+        entities.require_pane(order.pane_id)?;
         let mut seen = HashSet::new();
         for lane in &order.lanes {
             match lane {
                 EventLaneRef::Trace { trace_id } => {
-                    let trace = self
-                        .traces
-                        .iter()
-                        .find(|trace| trace.id == *trace_id)
-                        .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(
-                            *trace_id,
-                        )))?;
+                    let trace = entities.trace(*trace_id)?;
                     if trace.pane_id != order.pane_id || trace.lane.kind != TraceLaneKind::Logic {
                         return Err(VisualizationError::InvalidValue {
                             field: "event-lane-order.lanes",
@@ -2433,8 +2278,12 @@ impl VisualizationDocument {
 
     /// One expression trace on its own: non-blank text on a pane, reading
     /// attached datasets only, with a well-formed declared unit if any.
-    fn validate_expression_trace(&self, trace: &ExpressionTrace) -> Result<(), VisualizationError> {
-        self.require_pane(trace.pane_id)?;
+    fn validate_expression_trace(
+        &self,
+        entities: &dyn Entities,
+        trace: &ExpressionTrace,
+    ) -> Result<(), VisualizationError> {
+        entities.require_pane(trace.pane_id)?;
         if trace.text.trim().is_empty()
             || trace.text.len() > MAX_SOURCE_TEXT_BYTES
             || trace.text.chars().any(char::is_control)
@@ -2447,11 +2296,6 @@ impl VisualizationDocument {
             });
         }
         validate_optional_unit("expression-trace.unit", trace.unit.as_deref())?;
-        ensure_maximum_len(
-            "expression-trace.datasets",
-            trace.datasets.len(),
-            MAX_EXPRESSION_TRACE_DATASETS,
-        )?;
         if trace.datasets.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "expression-trace.datasets",
@@ -2459,7 +2303,7 @@ impl VisualizationDocument {
             });
         }
         for binding in &trace.datasets {
-            self.dataset_for_binding(*binding)?;
+            entities.dataset(*binding)?;
         }
         Ok(())
     }
@@ -2467,8 +2311,12 @@ impl VisualizationDocument {
     /// One plot on its own: a pane of the document, a unit axis named within
     /// the bound, a signal name or expression text a label or a calculator
     /// source can hold, and a sweep span that is an interval.
-    fn validate_xy_plot(&self, choice: &XyPlot) -> Result<(), VisualizationError> {
-        self.require_pane(choice.pane_id)?;
+    fn validate_xy_plot(
+        &self,
+        entities: &dyn Entities,
+        choice: &XyPlot,
+    ) -> Result<(), VisualizationError> {
+        entities.require_pane(choice.pane_id)?;
         if choice.unit.len() > MAX_UNIT_AXIS_BYTES || choice.unit.chars().any(char::is_control) {
             return Err(VisualizationError::InvalidValue {
                 field: "xy-plot.unit",
@@ -2507,32 +2355,31 @@ impl VisualizationDocument {
 
     /// One user bus on its own: a named, non-empty, duplicate-free word of
     /// logic lanes that all sit in the bus's pane.
-    fn validate_user_bus(&self, bus: &UserBus) -> Result<(), VisualizationError> {
+    fn validate_user_bus(
+        &self,
+        entities: &dyn Entities,
+        bus: &UserBus,
+    ) -> Result<(), VisualizationError> {
         validate_label("user-bus.name", &bus.name)?;
-        self.require_pane(bus.pane_id)?;
-        let count = bus.members.len() + bus.nets.len();
-        if count == 0
-            || count > MAX_USER_BUS_MEMBERS
+        entities.require_pane(bus.pane_id)?;
+        if (bus.members.is_empty() && bus.nets.is_empty())
             || (!bus.members.is_empty() && !bus.nets.is_empty())
         {
             return Err(VisualizationError::InvalidValue {
                 field: "user-bus.members",
-                message: format!(
-                    "a user bus groups 1 to {MAX_USER_BUS_MEMBERS} logic lanes, all traces or all \
-                     history-only nets"
-                ),
+                message: "a user bus groups logic lanes, all traces or all history-only nets"
+                    .to_owned(),
             });
         }
-        if bus.value_names.len() > MAX_BUS_VALUE_NAMES
-            || bus
-                .value_names
-                .windows(2)
-                .any(|pair| pair[0].value >= pair[1].value)
+        if bus
+            .value_names
+            .windows(2)
+            .any(|pair| pair[0].value >= pair[1].value)
         {
             return Err(VisualizationError::InvalidValue {
                 field: "user-bus.value-names",
                 message: format!(
-                    "bus {:?} names at most {MAX_BUS_VALUE_NAMES} distinct words, in ascending order",
+                    "bus {:?} names distinct words, in ascending order",
                     bus.name
                 ),
             });
@@ -2552,9 +2399,7 @@ impl VisualizationDocument {
         }
         let mut seen = HashSet::new();
         for member in &bus.members {
-            let trace = self.traces.iter().find(|trace| trace.id == *member).ok_or(
-                VisualizationError::EntityNotFound(EntityRef::Trace(*member)),
-            )?;
+            let trace = entities.trace(*member)?;
             if !seen.insert(*member)
                 || trace.pane_id != bus.pane_id
                 || trace.lane.kind != TraceLaneKind::Logic
@@ -2825,11 +2670,6 @@ fn validate_sheet_setting(setting: &SheetSetting) -> Result<(), VisualizationErr
             return validate_pinned_contributors(pinned);
         }
     };
-    ensure_maximum_len(
-        "sheet-setting.markers",
-        markers.len(),
-        MAX_VISUALIZATION_MARKERS,
-    )?;
     for marker in markers {
         validate_label("sheet-setting.marker.trace", &marker.trace)?;
         if !(marker.frequency.is_finite() && marker.frequency > 0.0) {
@@ -2885,11 +2725,6 @@ fn validate_histogram_reading(reading: &HistogramReading) -> Result<(), Visualiz
 fn validate_pinned_contributors(
     pinned: &[crate::visualization_document::PinnedContributor],
 ) -> Result<(), VisualizationError> {
-    ensure_maximum_len(
-        "sheet-setting.pinned",
-        pinned.len(),
-        MAX_VISUALIZATION_MARKERS,
-    )?;
     let mut seen = std::collections::HashSet::with_capacity(pinned.len());
     for contributor in pinned {
         validate_label("sheet-setting.pinned.device", &contributor.device)?;
@@ -2915,11 +2750,6 @@ fn validate_phase_noise_setting(
     spots: &[f64],
     band: Option<[f64; 2]>,
 ) -> Result<(), VisualizationError> {
-    ensure_maximum_len(
-        "sheet-setting.spots",
-        spots.len(),
-        MAX_VISUALIZATION_MARKERS,
-    )?;
     if let Some(spot) = spots
         .iter()
         .find(|spot| !(spot.is_finite() && **spot > 0.0))

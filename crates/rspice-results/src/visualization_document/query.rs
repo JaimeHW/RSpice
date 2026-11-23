@@ -6,6 +6,7 @@
 //! requested coordinates are not present it reports that interpolation would
 //! be required instead of inventing a point.
 
+use super::lookup::Entities;
 use super::*;
 
 pub(super) fn validate_key(field: &'static str, value: &str) -> Result<(), VisualizationError> {
@@ -43,8 +44,8 @@ pub(super) fn validate_label(field: &'static str, value: &str) -> Result<(), Vis
 /// How many traces a measurement may name. One the reader authored (an
 /// expression, single or over a family) names its signals in its expression,
 /// as `.MEASURE` does, and references no trace: it is bound to the result,
-/// never to what the pane plots. A measurement of a kind reads 1 to
-/// [`MAX_ENTITY_REFERENCES`] of its pane's traces.
+/// never to what the pane plots. A measurement of a kind reads at least one
+/// of its pane's traces.
 pub(super) fn validate_measurement_traces(
     count: usize,
     authored: bool,
@@ -56,10 +57,10 @@ pub(super) fn validate_measurement_traces(
                 .to_owned(),
         });
     }
-    if !authored && !(1..=MAX_ENTITY_REFERENCES).contains(&count) {
+    if !authored && count == 0 {
         return Err(VisualizationError::InvalidValue {
             field: "measurement.traces",
-            message: format!("a measurement requires 1 to {MAX_ENTITY_REFERENCES} traces"),
+            message: "a measurement reads at least one trace".to_owned(),
         });
     }
     Ok(())
@@ -115,24 +116,11 @@ pub(super) fn checked_bounded_sum(
     Ok(total)
 }
 
-pub(super) fn validate_aggregate_nested_resources<T: NestedResourceCount>(
-    field: &'static str,
-    values: &[T],
-    maximum: usize,
-) -> Result<(), VisualizationError> {
-    values.iter().try_fold(0_usize, |total, value| {
-        checked_bounded_sum(field, total, value.nested_resource_count(), maximum)
-    })?;
-    Ok(())
-}
-
 pub(super) fn validate_dataset_set(datasets: &[SourceDataset]) -> Result<(), VisualizationError> {
-    if datasets.is_empty() || datasets.len() > MAX_VISUALIZATION_DATASETS {
+    if datasets.is_empty() {
         return Err(VisualizationError::InvalidValue {
             field: "visualization-document.datasets",
-            message: format!(
-                "a visualization document requires 1 to {MAX_VISUALIZATION_DATASETS} datasets"
-            ),
+            message: "a visualization document reads at least one dataset".to_owned(),
         });
     }
     let mut bindings = HashMap::new();
@@ -239,7 +227,7 @@ pub(super) fn column_index(
 }
 
 pub(super) fn validate_annotation(
-    document: &VisualizationDocument,
+    document: &dyn Entities,
     pane_id: PaneId,
     anchor: &AnnotationAnchor,
     text: &str,
@@ -287,19 +275,13 @@ pub(super) fn validate_annotation(
 }
 
 pub(super) fn trace_contains_exact_coordinate(
-    document: &VisualizationDocument,
+    document: &dyn Entities,
     trace_id: TraceId,
     coordinate: &TypedValue,
 ) -> Result<bool, VisualizationError> {
     coordinate.validate("trace.coordinate")?;
-    let trace = document
-        .traces
-        .iter()
-        .find(|trace| trace.id == trace_id)
-        .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(
-            trace_id,
-        )))?;
-    let dataset = document.dataset_for_binding(trace.binding)?;
+    let trace = document.trace(trace_id)?;
+    let dataset = document.dataset(trace.binding)?;
     validate_trace_row_predicates(dataset, &trace.row_predicates)?;
     let coordinate_index = column_index(dataset, &trace.coordinate_key)?;
     if coordinate.value_type() != dataset.columns[coordinate_index].value_type {
@@ -339,14 +321,11 @@ pub(super) fn trace_contains_exact_coordinate(
 }
 
 pub(super) fn validate_link_members(
-    document: &VisualizationDocument,
+    document: &dyn Entities,
     kind: LinkKind,
     members: &[EntityRef],
 ) -> Result<(), VisualizationError> {
-    if members.len() < 2
-        || members.len() > MAX_ENTITY_REFERENCES
-        || members.iter().collect::<HashSet<_>>().len() != members.len()
-    {
+    if members.len() < 2 || members.iter().collect::<HashSet<_>>().len() != members.len() {
         return Err(VisualizationError::InvalidLinkMembers(kind));
     }
     for member in members {
@@ -369,14 +348,6 @@ pub(super) fn validate_trace_row_predicates(
     dataset: &SourceDataset,
     predicates: &[QueryCoordinate],
 ) -> Result<(), VisualizationError> {
-    if predicates.len() > MAX_TRACE_ROW_PREDICATES {
-        return Err(VisualizationError::InvalidValue {
-            field: "trace.row-predicates",
-            message: format!(
-                "a trace supports at most {MAX_TRACE_ROW_PREDICATES} exact row predicates"
-            ),
-        });
-    }
     let mut resolved = Vec::with_capacity(predicates.len());
     let mut seen = HashSet::with_capacity(predicates.len());
     for predicate in predicates {
@@ -460,12 +431,6 @@ pub fn compare_source_datasets(
     }
     if request.signal_keys.is_empty() {
         return Err(VisualizationError::EmptyComparison);
-    }
-    if request.signal_keys.len() > MAX_COMPARISON_SIGNALS {
-        return Err(VisualizationError::InvalidValue {
-            field: "comparison.signal-keys",
-            message: format!("a comparison supports at most {MAX_COMPARISON_SIGNALS} signal keys"),
-        });
     }
     let mut unique_signals = HashSet::with_capacity(request.signal_keys.len());
     for signal_key in &request.signal_keys {

@@ -275,15 +275,8 @@ pub struct ComparisonReceipt {
     pub candidate: DatasetBinding,
     pub policy: ComparisonPolicy,
     pub rows_compared: usize,
-    #[serde(deserialize_with = "deserialize_comparison_signals")]
     pub signals: Vec<SignalComparison>,
     pub disposition: ComparisonDisposition,
-}
-
-impl NestedResourceCount for ComparisonReceipt {
-    fn nested_resource_count(&self) -> usize {
-        self.signals.len()
-    }
 }
 
 impl ComparisonReceipt {
@@ -296,15 +289,10 @@ impl ComparisonReceipt {
                 message: "baseline and candidate must be distinct immutable datasets".to_owned(),
             });
         }
-        if self.rows_compared == 0
-            || self.signals.is_empty()
-            || self.signals.len() > MAX_COMPARISON_SIGNALS
-        {
+        if self.rows_compared == 0 || self.signals.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "comparison-receipt",
-                message: format!(
-                    "a receipt must contain compared rows and 1 to {MAX_COMPARISON_SIGNALS} signals"
-                ),
+                message: "a receipt must contain compared rows and at least one signal".to_owned(),
             });
         }
         let mut signal_keys = HashSet::new();

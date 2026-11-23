@@ -33,7 +33,7 @@ pub struct NewTrace {
     pub signal_key: String,
     #[serde(deserialize_with = "deserialize_key_string")]
     pub coordinate_key: String,
-    #[serde(default, deserialize_with = "deserialize_trace_row_predicates")]
+    #[serde(default)]
     pub row_predicates: Vec<QueryCoordinate>,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
@@ -206,7 +206,6 @@ pub enum DocumentEdit {
     /// Replace one page's complete pane order while retaining stable pane IDs.
     ReorderPagePanes {
         page_id: PageId,
-        #[serde(deserialize_with = "deserialize_page_pane_ids")]
         pane_ids: Vec<PaneId>,
     },
     AddAxis(NewAxis),
@@ -328,7 +327,6 @@ pub enum DocumentEdit {
     /// an empty list takes them all away.
     SetXyPlots {
         pane_id: PaneId,
-        #[serde(deserialize_with = "deserialize_xy_plots")]
         plots: Vec<XyPlot>,
     },
     /// Replace the order one pane draws its event lanes in. An empty order
