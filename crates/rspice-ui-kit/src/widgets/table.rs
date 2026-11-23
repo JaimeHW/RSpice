@@ -364,6 +364,12 @@ impl Cell {
         Self::with(text, true, Ink::Plain)
     }
 
+    /// Source text in mono, set on its column's edge as words are: a line
+    /// of a deck or a module, whose characters line up from row to row.
+    pub fn code(text: impl Into<String>) -> Self {
+        Self::with(text, true, Ink::Plain)
+    }
+
     /// A value the run does not hold: an em dash in the faint register.
     pub fn absent() -> Self {
         Self::with("\u{2014}", true, Ink::Faint)

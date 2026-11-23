@@ -2621,6 +2621,10 @@ pub fn measured_text_width(ui: &mut Ui, text: &str, font: egui::FontId) -> f32 {
 pub fn elide_at_words(ui: &Ui, text: &str, font: &egui::FontId, room: f32) -> String {
     const ELLIPSIS: char = '\u{2026}';
     let cut = elide_text(ui, text, font, room);
+    // Words that fit stay whole, an ellipsis of their own included.
+    if cut == text {
+        return cut;
+    }
     let Some(kept) = cut.strip_suffix(ELLIPSIS) else {
         return cut;
     };

@@ -5,8 +5,9 @@
 //! it lives in another file of the bundle. Find references lists every
 //! occurrence in the bottom dock's References page, one row each with its
 //! file, line, column and text, and states the count on the status bar.
-//! Rename symbol is a command form: the new name, how many occurrences in
-//! how many files it rewrites, and each line it changes, before and after.
+//! Rename symbol is a command form: the new name, and under it, edge to
+//! edge, how many occurrences in how many files it rewrites and each line it
+//! changes, before and after.
 //!
 //! These used to be views of a nine-tab "Source navigation and language
 //! tools" dialog (document symbols, completion, hover, signature help,
@@ -23,7 +24,7 @@
 
 use egui::{Context, Id};
 
-use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, TableColumn};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace::{
@@ -210,6 +211,9 @@ pub(in crate::workbench) fn render_rename_symbol_form(
     let Some(tools) = code.language_tools.as_mut() else {
         return false;
     };
+    // Taken before the plan, which holds the form's state while it is read.
+    let query = tools.query.clone();
+    let mut replacement = tools.replacement.clone();
     let current = model
         .workspace
         .content
@@ -246,49 +250,36 @@ pub(in crate::workbench) fn render_rename_symbol_form(
             )],
         )
     });
-    let room = preview_room(ctx.content_rect().width());
-    let table = plan.map(|plan| {
-        plan.rows
-            .iter()
-            .map(|row| {
-                let (before, after) = around_the_change(&row.before, &row.after, room);
-                vec![row.file.clone(), row.line.to_string(), before, after]
-            })
-            .collect::<Vec<_>>()
-    });
     let ready = plan.is_some();
     let title = messages.text(MessageId::SourceRenameTitle);
     let primary = messages.text(MessageId::SourceRenamePrimary);
     let symbol = messages.text(MessageId::SourceRenameSymbol);
     let new_name_label = messages.text(MessageId::SourceRenameNewName);
     let cancel = messages.text(MessageId::CommonCancel);
-    let headers = rename_columns(messages);
 
-    let mut replacement = tools.replacement.clone();
     let mut edited = false;
     let choice = CommandForm::new(&title, &primary)
-        .wide()
+        .transaction()
         .cancel_label(&cancel)
         .fit_labels(ctx, &[&symbol, &new_name_label])
         .primary_enabled(ready)
         .status(status)
-        .show(ctx, |rows| {
-            let field = Id::new(NEW_NAME_FIELD);
-            rows.value_mono(&symbol, &tools.query);
-            edited = rows
-                .text(&new_name_label, field, &mut replacement, "")
-                .changed();
-            if let (Some(extent), Some(table)) = (extent.as_deref(), table.as_deref()) {
-                rows.field_line(Some(field), FieldLine::Derived(extent));
-                rows.table(
-                    &headers
-                        .each_ref()
-                        .map(|header| TableColumn { header, mono: true }),
-                    table,
-                );
-            }
-            Some(field)
-        });
+        .show_over(
+            ctx,
+            |rows| {
+                let field = Id::new(NEW_NAME_FIELD);
+                rows.value_mono(&symbol, &query);
+                edited = rows
+                    .text(&new_name_label, field, &mut replacement, "")
+                    .changed();
+                Some(field)
+            },
+            |ui| {
+                if let (Some(plan), Some(extent)) = (plan, extent.as_deref()) {
+                    rename_preview(ui, messages, extent, &plan.rows);
+                }
+            },
+        );
     tools.replacement = replacement;
     if edited {
         tools.error = None;
@@ -317,55 +308,74 @@ fn rename_columns(messages: MessageCatalog) -> [String; 4] {
 
 const DECK_NEW_NAME_FIELD: &str = "workbench.rename-symbol.deck-new-name";
 
-/// The most characters of a changed line the rename preview shows: enough
-/// to read the name in its place on a long card.
-const PREVIEW_ROOM: usize = 20;
+/// The fewest characters a Before or After cell is cut to, however narrow
+/// the form: enough to read a name in its place.
+const LEAST_ROOM: usize = 8;
 
-/// The width of a wide form's body, what its File and Line columns and the
-/// gaps between the columns take of it, and one character of the table's
-/// code, in points: what decides how much of a line fits a Before or After
-/// cell on a narrow screen.
-const WIDE_FORM_BODY: f32 = 455.0;
-const FILE_AND_LINE: f32 = 150.0;
-const CODE_CHARACTER: f32 = 7.0;
+/// The least width of a Before or After column, in points: what the
+/// form's narrowest card leaves them.
+const LEAST_CODE_WIDTH: f32 = 96.0;
 
-/// How many characters of a changed line fit a Before or After cell of the
-/// preview on a screen `screen` points wide.
-fn preview_room(screen: f32) -> usize {
-    let body = (screen - 48.0).min(WIDE_FORM_BODY);
-    let room = ((body - FILE_AND_LINE) / 2.0 / CODE_CHARACTER).floor();
-    (room.max(8.0) as usize).min(PREVIEW_ROOM)
-}
+/// The most rows the preview shows before it scrolls inside the form.
+const PREVIEW_ROWS: usize = 12;
 
-/// A changed line, before and after, cut to the same window about its first
-/// change, starting on a word, so a long card still shows the name the
-/// rename changes; `…` stands for what is cut.
+/// A changed line, before and after, each whole when it fits `room`
+/// characters. When one does not, both are cut to a window that starts at
+/// the same character, so the changed names line up, and holds the changed
+/// name whole: only the end further from it is cut, and the near end too
+/// only when the name sits far into a line too long on both sides. `…`
+/// stands for what is cut.
 fn around_the_change(before: &str, after: &str, room: usize) -> (String, String) {
+    let room = room.max(LEAST_ROOM);
     let was = before.chars().collect::<Vec<_>>();
     let is = after.chars().collect::<Vec<_>>();
-    let first = was
+    if was.len() <= room && is.len() <= room {
+        return (before.to_owned(), after.to_owned());
+    }
+    let same_head = was
         .iter()
         .zip(&is)
         .take_while(|(was, is)| was == is)
         .count();
-    // A change near the start shows the line from its start; one further
-    // in, the words just before it. Both lines read the same up to the
-    // change, so one window start serves both.
-    let mut start = if first <= room / 2 {
-        0
-    } else {
-        (first - room / 3)
-            .min(was.len().saturating_sub(room))
-            .min(is.len().saturating_sub(room))
+    let same_tail = was
+        .iter()
+        .rev()
+        .zip(is.iter().rev())
+        .take_while(|(was, is)| was == is)
+        .count()
+        .min(was.len().min(is.len()) - same_head);
+    // The changed name, whole: the change reaches out to the ends of the
+    // name it is made in, which the two lines share.
+    let in_name = |ch: &&char| ch.is_alphanumeric() || **ch == '_';
+    let name_start = same_head - was[..same_head].iter().rev().take_while(in_name).count();
+    let name_end = |chars: &[char]| {
+        let changed_to = chars.len() - same_tail;
+        changed_to + chars[changed_to..].iter().take_while(in_name).count()
     };
-    while start > 0 && start < first && was[start - 1] != ' ' {
-        start += 1;
-    }
-    let cut = |chars: &[char]| {
+    // The first character a line shows: with a mark for a cut start, and
+    // one for a cut end, the name in view from the end it is nearer.
+    let start_for = |chars: &[char]| {
+        let end = name_end(chars);
         if chars.len() <= room {
-            return chars.iter().collect::<String>();
+            0
+        } else if name_start <= chars.len() - end {
+            if end < room {
+                0
+            } else {
+                (end + 2 - room).min(name_start)
+            }
+        } else {
+            (chars.len() + 1 - room).min(name_start)
         }
-        let end = (start + room).min(chars.len());
+    };
+    let start = start_for(&was).max(start_for(&is));
+    let cut = |chars: &[char]| {
+        let lead = usize::from(start > 0);
+        let end = if chars.len() - start + lead <= room {
+            chars.len()
+        } else {
+            start + room - lead - 1
+        };
         let mut shown = String::new();
         if start > 0 {
             shown.push('\u{2026}');
@@ -377,6 +387,107 @@ fn around_the_change(before: &str, after: &str, room: usize) -> (String, String)
         shown
     };
     (cut(&was), cut(&is))
+}
+
+/// Under a rename form's fields, edge to edge: a band saying how many
+/// places in how many files the rename rewrites, then each line it
+/// changes, by file and line, before and after. A Before or After line
+/// longer than its column is cut around the change, and its whole shows
+/// on hover.
+fn rename_preview(
+    ui: &mut egui::Ui,
+    messages: MessageCatalog,
+    extent: &str,
+    rows: &[crate::workbench::documents::netlist_document::references::RenameRow],
+) {
+    use crate::ui::theme::{self, FontWeight};
+    use crate::ui::tokens::{self, Tokens};
+    use crate::ui::widgets::band_header;
+    use crate::ui::widgets::table::{
+        CELL_PAD, Cell, Column, DataTable, LineHeights, TABLE_EDGE_INSET,
+    };
+
+    band_header(ui, extent, None);
+    let [file, line, before, after] = rename_columns(messages);
+    let painter = ui.painter().clone();
+    let width = |text: &str, font: egui::FontId| {
+        painter
+            .layout_no_wrap(text.to_owned(), font, egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    };
+    let words = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let head = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let code = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let file_width = rows
+        .iter()
+        .map(|row| width(&row.file, words.clone()))
+        .fold(width(&file, head.clone()), f32::max)
+        + TABLE_EDGE_INSET
+        + CELL_PAD
+        + 2.0;
+    let line_width = rows
+        .iter()
+        .map(|row| width(&row.line.to_string(), code.clone()))
+        .fold(width(&line, head.clone()), f32::max)
+        + 2.0 * CELL_PAD
+        + 2.0;
+    // Before and After share what File and Line leave of the width the
+    // table reads, and a line may take its cell less the padding, and less
+    // the table's edge inset in the last column.
+    let table_width = ui
+        .available_rect_before_wrap()
+        .intersect(ui.clip_rect())
+        .width();
+    let code_width = ((table_width - file_width - line_width) / 2.0).max(LEAST_CODE_WIDTH);
+    let span = code_width - CELL_PAD - TABLE_EDGE_INSET;
+    // Every character of the mono face advances alike: measured over a
+    // run, so the rounding of one glyph's box is not counted for each.
+    let advance = (width(&"0".repeat(32), code.clone()) / 32.0).max(1.0);
+    let room = (span / advance).floor() as usize;
+    let fits = |shown: &str| width(shown, code.clone()) <= span;
+    let columns = [
+        Column::words(file, file_width).unsortable(),
+        Column::number(line, line_width).unsortable(),
+        Column::name(before, LEAST_CODE_WIDTH).unsortable(),
+        Column::name(after, LEAST_CODE_WIDTH).unsortable(),
+    ];
+    let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
+    let height = lines.head + lines.row * rows.len().clamp(1, PREVIEW_ROWS) as f32;
+    // The table's own height, which the form grows to: laid out in what the
+    // form's body has left, it would scroll its rows in that instead.
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            let _ = DataTable::new("workbench.rename-symbol.preview", &columns, rows.len())
+                .max_height(height)
+                .show(ui, |index| {
+                    let row = &rows[index];
+                    let mut room = room;
+                    let (before, after) = loop {
+                        let (before, after) = around_the_change(&row.before, &row.after, room);
+                        if room <= LEAST_ROOM || (fits(&before) && fits(&after)) {
+                            break (before, after);
+                        }
+                        room -= 1;
+                    };
+                    let cell = |shown: String, whole: &str| {
+                        if shown == whole {
+                            Cell::code(shown)
+                        } else {
+                            Cell::code(shown).hint(whole)
+                        }
+                    };
+                    vec![
+                        Cell::text(row.file.clone()),
+                        Cell::number(row.line.to_string()),
+                        cell(before, &row.before),
+                        cell(after, &row.after),
+                    ]
+                });
+        },
+    );
 }
 
 /// Rename symbol over the deck: the name under the caret, the new name, and
@@ -421,48 +532,36 @@ pub(in crate::workbench) fn render_deck_rename_form(
             )],
         )
     });
-    let room = preview_room(ctx.content_rect().width());
-    let table = plan.as_ref().map(|plan| {
-        plan.rows
-            .iter()
-            .map(|row| {
-                let (before, after) = around_the_change(&row.before, &row.after, room);
-                vec![row.file.clone(), row.line.to_string(), before, after]
-            })
-            .collect::<Vec<_>>()
-    });
     let label = messages.text(rename.caret.kind_words().1);
     let title = messages.text(MessageId::SourceRenameTitle);
     let primary = messages.text(MessageId::SourceRenamePrimary);
     let new_name_label = messages.text(MessageId::SourceRenameNewName);
     let cancel = messages.text(MessageId::CommonCancel);
-    let headers = rename_columns(messages);
 
     let mut replacement = rename.replacement.clone();
     let mut edited = false;
     let choice = CommandForm::new(&title, &primary)
-        .wide()
+        .transaction()
         .cancel_label(&cancel)
         .fit_labels(ctx, &[&label, &new_name_label])
         .primary_enabled(plan.is_some())
         .status(status)
-        .show(ctx, |rows| {
-            let field = Id::new(DECK_NEW_NAME_FIELD);
-            rows.value_mono(&label, &rename.caret.written);
-            edited = rows
-                .text(&new_name_label, field, &mut replacement, "")
-                .changed();
-            if let (Some(extent), Some(table)) = (extent.as_deref(), table.as_deref()) {
-                rows.field_line(Some(field), FieldLine::Derived(extent));
-                rows.table(
-                    &headers
-                        .each_ref()
-                        .map(|header| TableColumn { header, mono: true }),
-                    table,
-                );
-            }
-            Some(field)
-        });
+        .show_over(
+            ctx,
+            |rows| {
+                let field = Id::new(DECK_NEW_NAME_FIELD);
+                rows.value_mono(&label, &rename.caret.written);
+                edited = rows
+                    .text(&new_name_label, field, &mut replacement, "")
+                    .changed();
+                Some(field)
+            },
+            |ui| {
+                if let (Some(plan), Some(extent)) = (plan.as_ref(), extent.as_deref()) {
+                    rename_preview(ui, messages, extent, &plan.rows);
+                }
+            },
+        );
     rename.replacement = replacement;
     if edited {
         rename.error = None;
@@ -479,5 +578,78 @@ pub(in crate::workbench) fn render_deck_rename_form(
         }
         DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {}
         DialogChoice::None => cx.state.deck_rename = Some(rename),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::around_the_change;
+
+    /// Where the changed name starts in a shown line.
+    fn at(shown: &str, name: &str) -> usize {
+        shown[..shown.find(name).expect("the name is shown")]
+            .chars()
+            .count()
+    }
+
+    /// A line that fits its cell is shown whole: the preview cut
+    /// `parameter ` off a 22-character line it had room for.
+    #[test]
+    fn a_line_that_fits_is_shown_whole() {
+        let (before, after) = around_the_change(
+            "parameter real g = 1m;",
+            "parameter real conductance = 1m;",
+            40,
+        );
+        assert_eq!(before, "parameter real g = 1m;");
+        assert_eq!(after, "parameter real conductance = 1m;");
+    }
+
+    /// A long line keeps its changed name in view and is cut at the end
+    /// further from it; before and after start at one character, so the
+    /// names line up.
+    #[test]
+    fn a_long_line_is_cut_at_the_end_far_from_the_change() {
+        let tail = " w=4u l=180n m=2 nf=4 sa=0.2u sb=0.2u sd=0.3u";
+        let (before, after) = around_the_change(
+            &format!("XDP in ref o1 o2 t diffpair{tail}"),
+            &format!("XDP in ref o1 o2 t pair_core{tail}"),
+            40,
+        );
+        assert!(before.starts_with("XDP in ref"), "{before}");
+        assert!(before.ends_with('\u{2026}') && after.ends_with('\u{2026}'));
+        assert!(before.chars().count() <= 40 && after.chars().count() <= 40);
+        assert_eq!(at(&before, "diffpair"), at(&after, "pair_core"));
+
+        // Near the line's end the start is cut instead, on a word.
+        let head = "XLONG in_with_a_long_node_name ref_with_a_long_node_name o1_long";
+        let (before, after) = around_the_change(
+            &format!("{head} diffpair w=4u"),
+            &format!("{head} pair_core w=4u"),
+            30,
+        );
+        assert!(before.starts_with('\u{2026}') && after.starts_with('\u{2026}'));
+        assert!(before.ends_with("diffpair w=4u"), "{before}");
+        assert!(after.ends_with("pair_core w=4u"), "{after}");
+        assert_eq!(at(&before, "diffpair"), at(&after, "pair_core"));
+        assert_eq!(after.chars().count(), 30, "the cut fills the room: {after}");
+    }
+
+    /// A change deep in a line too long on both sides keeps the changed
+    /// name whole in view, with both ends cut: `amplification` and `gain`
+    /// share their last letter, which is still shown.
+    #[test]
+    fn a_change_in_the_middle_of_a_long_line_stays_in_view() {
+        let side = "abcdefghij ".repeat(6);
+        let (before, after) = around_the_change(
+            &format!("{side}gain {side}"),
+            &format!("{side}amplification {side}"),
+            24,
+        );
+        assert!(before.contains("gain"), "{before}");
+        assert!(after.contains("amplification"), "{after}");
+        assert!(before.starts_with('\u{2026}') && before.ends_with('\u{2026}'));
+        assert!(after.chars().count() <= 24, "{after}");
+        assert_eq!(at(&before, "gain"), at(&after, "amplification"));
     }
 }

@@ -303,6 +303,33 @@ fn a_long_path_keeps_its_root_and_the_folder_it_names() {
     assert!(shortened[1].len() > shortened[2].len());
 }
 
+/// Words that fit their room are left whole, also when they end in an
+/// ellipsis of their own, which is no cut to move back to a word.
+#[test]
+fn words_that_fit_keep_their_own_ellipsis() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let text = ".subckt diffpair inp inn outp outn tail params\u{2026}";
+    let font = crate::theme::mono(tokens::FS_0, FontWeight::Regular);
+    let mut shown = Vec::new();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let full = ui
+                .painter()
+                .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
+                .size()
+                .x;
+            for width in [full + 1.0, full * 0.8] {
+                shown.push(elide_at_words(ui, text, &font, width));
+            }
+        });
+    });
+
+    assert_eq!(shown[0], text);
+    let kept = shown[1].strip_suffix('\u{2026}').expect("a cut");
+    assert!(text[kept.len()..].starts_with(' '), "{}", shown[1]);
+}
+
 /// Every text shape a pass painted, wherever it is nested.
 fn all_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::TextShape> {
     fn walk(shape: &Shape, out: &mut Vec<egui::epaint::TextShape>) {

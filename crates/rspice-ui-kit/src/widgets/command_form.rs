@@ -27,7 +27,9 @@ use crate::panels::{WorkbenchIcon, icon_button};
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
-use super::dialog::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
+use super::dialog::{
+    DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize,
+};
 use super::form;
 use super::searchable_select::{SelectGroup, searchable_select};
 use super::segmented::{SegmentedWidth, segmented};
@@ -1812,6 +1814,14 @@ impl<'a> CommandForm<'a> {
         self
     }
 
+    /// The 760-point card, for a form over a table of each change the
+    /// command makes ([`Self::show_over`]), whose lines the narrower cards
+    /// would cut to a few words.
+    pub fn transaction(mut self) -> Self {
+        self.size = DialogSize::Transaction;
+        self
+    }
+
     /// The 600-point reading column, for the properties of a whole object,
     /// whose values are paths and prose the narrower cards would elide.
     pub fn reading_column(mut self) -> Self {
@@ -1928,6 +1938,28 @@ impl<'a> CommandForm<'a> {
         ctx: &Context,
         body: impl FnOnce(&mut FormRows<'_>) -> Option<Id>,
     ) -> DialogChoice {
+        self.show_parts(ctx, body, None::<fn(&mut Ui)>)
+    }
+
+    /// The form over a part that runs edge to edge: its rows keep the
+    /// body's inset, as the title and the buttons do, and `below` draws
+    /// under them across the whole body, flush to its sides, as a dialog's
+    /// table under its band does.
+    pub fn show_over(
+        self,
+        ctx: &Context,
+        body: impl FnOnce(&mut FormRows<'_>) -> Option<Id>,
+        below: impl FnOnce(&mut Ui),
+    ) -> DialogChoice {
+        self.show_parts(ctx, body, Some(below))
+    }
+
+    fn show_parts(
+        self,
+        ctx: &Context,
+        body: impl FnOnce(&mut FormRows<'_>) -> Option<Id>,
+        below: Option<impl FnOnce(&mut Ui)>,
+    ) -> DialogChoice {
         let status = self.status;
         let fields_enabled = self.fields_enabled;
         let label_col = self.label_col;
@@ -1955,6 +1987,9 @@ impl<'a> CommandForm<'a> {
         if let Some(describe) = self.describe {
             dialog = dialog.description(describe);
         }
+        if below.is_some() {
+            dialog = dialog.flush_body();
+        }
         match (status, self.consequence) {
             (Err(refusal), _) => {
                 dialog = dialog.hint(refusal).hint_tone(DialogHintTone::Error);
@@ -1970,12 +2005,27 @@ impl<'a> CommandForm<'a> {
             // Every gap in this body is stated, so nothing is the sum of an
             // explicit space and egui's own inter-widget one.
             ui.spacing_mut().item_spacing.y = 0.0;
-            let requested = {
+            let rows = |ui: &mut Ui| {
                 if !fields_enabled {
                     ui.disable();
                 }
-                let mut rows = FormRows::new(&mut *ui, label_col);
+                let mut rows = FormRows::new(ui, label_col);
                 body(&mut rows)
+            };
+            let requested = match below {
+                None => rows(ui),
+                Some(below) => {
+                    // The flush body leaves the rows' inset to the form.
+                    let requested = egui::Frame::NONE
+                        .inner_margin(egui::Margin::same(DIALOG_BODY_INSET as i8))
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            rows(ui)
+                        })
+                        .inner;
+                    below(ui);
+                    requested
+                }
             };
             focused_field = requested;
             requested
