@@ -1942,10 +1942,24 @@ impl SimulationController {
     /// executed, by a line diff: inserting a line marks that line, not every
     /// line after it. Where lines were deleted, the line now standing in
     /// their place is marked, so a deletion still shows.
+    ///
+    /// An edit reaches a stretch of the deck. The whole lines before it and
+    /// after it, the same in both, are passed over as bytes, and only the
+    /// lines between are diffed, numbered from where they start. Among
+    /// repeated lines that leaves the mark on the line that was edited,
+    /// where a diff of every line may mark one of its twins.
     pub fn changed_lines_against_baseline(current: &str, baseline: &str) -> HashSet<usize> {
-        let current_lines = current.lines().collect::<Vec<_>>();
-        let baseline_lines = baseline.lines().collect::<Vec<_>>();
-        let last = current_lines.len().checked_sub(1);
+        let (head, tail) = same_lines_around(current.as_bytes(), baseline.as_bytes());
+        let head_lines = line_count(&current[..head]);
+        let current_lines = current[head..current.len() - tail]
+            .lines()
+            .collect::<Vec<_>>();
+        let baseline_lines = baseline[head..baseline.len() - tail]
+            .lines()
+            .collect::<Vec<_>>();
+        let last =
+            (head_lines + current_lines.len() + line_count(&current[current.len() - tail..]))
+                .checked_sub(1);
         let mut changed = HashSet::new();
         for op in
             similar::capture_diff_slices(similar::Algorithm::Myers, &baseline_lines, &current_lines)
@@ -1953,14 +1967,14 @@ impl SimulationController {
             match op {
                 similar::DiffOp::Equal { .. } => {}
                 similar::DiffOp::Delete { new_index, .. } => {
-                    changed.extend(last.map(|last| new_index.min(last)));
+                    changed.extend(last.map(|last| (head_lines + new_index).min(last)));
                 }
                 similar::DiffOp::Insert {
                     new_index, new_len, ..
                 }
                 | similar::DiffOp::Replace {
                     new_index, new_len, ..
-                } => changed.extend(new_index..new_index + new_len),
+                } => changed.extend(head_lines + new_index..head_lines + new_index + new_len),
             }
         }
         changed
@@ -2197,4 +2211,69 @@ fn reads_one_column(contract: &PreparedSavedOutput) -> bool {
         && !argument.is_empty()
         && !argument.contains(',')
         && argument != "0"
+}
+
+/// How many bytes of whole lines `current` and `baseline` share at their
+/// start and at their end: each a run of whole lines in both, the two never
+/// overlapping. Compared a block at a time, at memory speed.
+fn same_lines_around(current: &[u8], baseline: &[u8]) -> (usize, usize) {
+    const BLOCK: usize = 4096;
+    let shorter = current.len().min(baseline.len());
+    let mut same = 0;
+    while same + BLOCK <= shorter && current[same..same + BLOCK] == baseline[same..same + BLOCK] {
+        same += BLOCK;
+    }
+    same += current[same..shorter]
+        .iter()
+        .zip(&baseline[same..shorter])
+        .take_while(|(current, baseline)| current == baseline)
+        .count();
+    // Back to the start of the line the bytes part in, unless both end there.
+    let head = if same == current.len() && same == baseline.len() {
+        same
+    } else {
+        current[..same]
+            .iter()
+            .rposition(|&byte| byte == b'\n')
+            .map_or(0, |at| at + 1)
+    };
+    let room = shorter - head;
+    let mut same = 0;
+    while same + BLOCK <= room
+        && current[current.len() - same - BLOCK..current.len() - same]
+            == baseline[baseline.len() - same - BLOCK..baseline.len() - same]
+    {
+        same += BLOCK;
+    }
+    same += current[current.len() - room..current.len() - same]
+        .iter()
+        .rev()
+        .zip(
+            baseline[baseline.len() - room..baseline.len() - same]
+                .iter()
+                .rev(),
+        )
+        .take_while(|(current, baseline)| current == baseline)
+        .count();
+    // On to the start of a line in both: just after a line break the two
+    // share, or where the part after the head starts.
+    let starts_line = |text: &[u8], tail: usize| {
+        let at = text.len() - tail;
+        at == head || text[at - 1] == b'\n'
+    };
+    let mut tail = same;
+    while tail > 0 && !(starts_line(current, tail) && starts_line(baseline, tail)) {
+        let shared = &current[current.len() - tail..];
+        tail = shared
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map_or(0, |at| tail - at - 1);
+    }
+    (head, tail)
+}
+
+/// How many lines `text` holds, as `str::lines` counts them.
+fn line_count(text: &str) -> usize {
+    let breaks = text.bytes().filter(|&byte| byte == b'\n').count();
+    breaks + usize::from(!text.is_empty() && !text.ends_with('\n'))
 }
