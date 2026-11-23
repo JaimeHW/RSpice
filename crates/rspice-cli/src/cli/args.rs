@@ -182,6 +182,20 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
+    /// Keep the engine's shipped resource limits, as a service running decks
+    /// it did not write does
+    ///
+    /// By default the limits on a deck's size (its bytes and lines, the files
+    /// it includes and reads, its devices, nodes and results) are sized to
+    /// this machine's memory, as the desktop app sizes them, so a deck runs if
+    /// the machine can hold it. This flag, RSPICE_SHIPPED_LIMITS=1 or
+    /// `shipped_limits = true` under [resources] starts them from the
+    /// engine's shipped limits instead: a 64 MB deck, 250,000 devices.
+    /// Either way each [resources] key and RSPICE_MAX_<RESOURCE> variable
+    /// overrides its own limit.
+    #[arg(long, global = true)]
+    pub shipped_limits: bool,
+
     /// Set log level, overriding RUST_LOG and --verbose
     #[arg(
         long,

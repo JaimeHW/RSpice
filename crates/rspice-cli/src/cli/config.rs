@@ -9,6 +9,13 @@
 //!
 //! `--config <FILE>` replaces layers 2 and 3 with that single file.
 //!
+//! The resource limits start sized to this machine's memory, as the desktop
+//! app sizes them: a deck runs if the machine can hold it. Each layer still
+//! overrides any one of them. `--shipped-limits`, `RSPICE_SHIPPED_LIMITS=1`
+//! or `shipped_limits = true` under `[resources]` starts them from the
+//! engine's shipped limits instead, for a service running decks it did not
+//! write.
+//!
 //! Scalar keys override; the `[paths]` lists accumulate across layers, so a
 //! project file adds search directories rather than discarding the user's.
 
@@ -104,9 +111,16 @@ pub struct PathConfig {
 
 /// Resource ceilings shared by ingestion, parsing, construction, and analyses.
 /// Values are counts or bytes and can be lowered for service deployments.
+///
+/// [`Default`] is the engine's shipped limits; [`Config::load`] starts from
+/// [`Self::for_machine`] unless the shipped limits are asked for.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ResourceConfig {
+    /// Start from the engine's shipped limits rather than ones sized to this
+    /// machine's memory: what a service running decks it did not write
+    /// asks for. Read from the layers before any limit is.
+    pub shipped_limits: bool,
     pub max_netlist_bytes: usize,
     pub max_netlist_lines: usize,
     pub max_expanded_source_bytes: usize,
@@ -122,6 +136,10 @@ pub struct ResourceConfig {
     pub max_result_values: usize,
     pub max_parallel_workers: usize,
     pub max_batch_runs: usize,
+    /// The machine the limits were sized to, which sizes the limits no key
+    /// names, such as the delay lines' histories, too.
+    #[serde(skip)]
+    machine: Option<rspice_simulation::execution::run_memory::MachineMemory>,
 }
 
 /// The values one batch result held in memory may hold. A run here writes its
@@ -133,8 +151,21 @@ const BATCH_MAX_RESULT_VALUES: usize = 100_000_000;
 
 impl Default for ResourceConfig {
     fn default() -> Self {
-        let limits = rspice_core::ResourceLimits::default();
+        Self::for_machine(None)
+    }
+}
+
+impl ResourceConfig {
+    /// The limits sized to `machine`, as the desktop app sizes a run of the
+    /// reader's own deck; the engine's shipped limits with no machine.
+    #[must_use]
+    pub fn for_machine(
+        machine: Option<rspice_simulation::execution::run_memory::MachineMemory>,
+    ) -> Self {
+        let limits = rspice_simulation::execution::run_memory::deck_limits(machine);
         Self {
+            shipped_limits: machine.is_none(),
+            machine,
             max_netlist_bytes: limits.max_netlist_bytes,
             max_netlist_lines: limits.max_netlist_lines,
             max_expanded_source_bytes: limits.max_expanded_source_bytes,
@@ -152,11 +183,9 @@ impl Default for ResourceConfig {
             max_batch_runs: limits.max_batch_runs,
         }
     }
-}
 
-impl ResourceConfig {
     pub fn limits(&self) -> rspice_core::ResourceLimits {
-        let mut limits = rspice_core::ResourceLimits::default();
+        let mut limits = rspice_simulation::execution::run_memory::deck_limits(self.machine);
         limits.max_netlist_bytes = self.max_netlist_bytes;
         limits.max_netlist_lines = self.max_netlist_lines;
         limits.max_expanded_source_bytes = self.max_expanded_source_bytes;
@@ -247,6 +276,7 @@ struct OutputLayer {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ResourceLayer {
+    shipped_limits: Option<bool>,
     max_netlist_bytes: Option<usize>,
     max_netlist_lines: Option<usize>,
     max_expanded_source_bytes: Option<usize>,
@@ -301,29 +331,55 @@ impl Config {
     /// Load configuration from default locations
     ///
     /// Configuration is loaded in order of priority (lowest to highest):
-    /// 1. Default values
+    /// 1. Default values, the resource limits sized to this machine unless
+    ///    `shipped_limits` asks for the engine's (see [`Self::with_layers`])
     /// 2. User config (~/.config/rspice/config.toml or ~/.rspicerc)
     /// 3. Project config (./.rspicerc)
     /// 4. Environment variables
-    pub fn load() -> Result<Self, ConfigError> {
-        let mut config = Config::default();
-
-        if let Some(user_layer) = Self::load_user_layer()? {
-            config.apply_layer(user_layer);
-        }
-        if let Some(project_layer) = Self::load_project_layer()? {
-            config.apply_layer(project_layer);
-        }
-
-        config.apply_env()?;
-        config.validate()?;
-        Ok(config)
+    pub fn load(shipped_limits: bool) -> Result<Self, ConfigError> {
+        let layers = [Self::load_user_layer()?, Self::load_project_layer()?];
+        Self::with_layers(
+            layers.into_iter().flatten().collect(),
+            shipped_limits,
+            rspice_simulation::execution::run_memory::machine_memory(),
+        )
     }
 
     /// Load configuration from a specific file (applied over defaults)
-    pub fn load_file(path: &std::path::Path) -> Result<Self, ConfigError> {
-        let mut config = Config::default();
-        config.apply_layer(Self::load_layer(path)?);
+    pub fn load_file(path: &std::path::Path, shipped_limits: bool) -> Result<Self, ConfigError> {
+        Self::with_layers(
+            vec![Self::load_layer(path)?],
+            shipped_limits,
+            rspice_simulation::execution::run_memory::machine_memory(),
+        )
+    }
+
+    /// `layers` over the defaults, and the environment over them. The
+    /// resource limits start sized to `machine`, unless `--shipped-limits`
+    /// (`shipped_limits`), `RSPICE_SHIPPED_LIMITS` or the last layer that
+    /// says asks for the engine's shipped limits; each layer then overrides
+    /// the limits it names either way.
+    fn with_layers(
+        layers: Vec<ConfigLayer>,
+        shipped_limits: bool,
+        machine: Option<rspice_simulation::execution::run_memory::MachineMemory>,
+    ) -> Result<Self, ConfigError> {
+        let shipped = match parse_bool_env("RSPICE_SHIPPED_LIMITS")? {
+            _ if shipped_limits => true,
+            Some(shipped) => shipped,
+            None => layers
+                .iter()
+                .rev()
+                .find_map(|layer| layer.resources.shipped_limits)
+                .unwrap_or(false),
+        };
+        let mut config = Config {
+            resources: ResourceConfig::for_machine(machine.filter(|_| !shipped)),
+            ..Config::default()
+        };
+        for layer in layers {
+            config.apply_layer(layer);
+        }
         config.apply_env()?;
         config.validate()?;
         Ok(config)
@@ -633,6 +689,59 @@ mod tests {
     use super::*;
     use crate::cli::OutputFormat;
     use clap::ValueEnum;
+    use rspice_simulation::execution::run_memory::{MachineMemory, deck_limits};
+
+    /// On a workstation the limits start sized to its memory, as the app
+    /// sizes a run; the switch, from the command line or a layer, starts
+    /// them from the engine's shipped limits; and a key overrides its own
+    /// limit either way.
+    #[test]
+    fn a_workstation_sizes_the_limits_and_the_switch_keeps_the_shipped_ones() {
+        let gigabytes = 1024 * 1024 * 1024;
+        let machine = MachineMemory {
+            installed_bytes: 32 * gigabytes,
+            free_bytes: 8 * gigabytes,
+        };
+        let shipped = rspice_core::ResourceLimits::default();
+        let sized = Config::with_layers(Vec::new(), false, Some(machine)).unwrap();
+        let limits = sized.resources.limits();
+        assert_eq!(
+            limits,
+            deck_limits(Some(machine)).with(|limits| {
+                limits.max_result_values = BATCH_MAX_RESULT_VALUES.max(limits.max_result_values);
+            })
+        );
+        assert!(limits.max_netlist_bytes > 100 * 1024 * 1024, "{limits:?}");
+        assert!(limits.max_flattened_elements > 1_230_000, "{limits:?}");
+        assert!(!sized.resources.shipped_limits);
+
+        let switched = Config::with_layers(Vec::new(), true, Some(machine)).unwrap();
+        assert_eq!(
+            switched.resources.limits(),
+            Config::default().resources.limits()
+        );
+        assert_eq!(
+            switched.resources.limits().max_netlist_bytes,
+            shipped.max_netlist_bytes
+        );
+        assert!(switched.resources.shipped_limits);
+
+        let layer: ConfigLayer =
+            toml::from_str("[resources]\nshipped_limits = true\nmax_netlist_lines = 7\n").unwrap();
+        let config = Config::with_layers(vec![layer], false, Some(machine)).unwrap();
+        let limits = config.resources.limits();
+        assert_eq!(limits.max_netlist_bytes, shipped.max_netlist_bytes);
+        assert_eq!(limits.max_netlist_lines, 7);
+
+        let layer: ConfigLayer = toml::from_str("[resources]\nmax_netlist_lines = 7\n").unwrap();
+        let config = Config::with_layers(vec![layer], false, Some(machine)).unwrap();
+        let limits = config.resources.limits();
+        assert_eq!(limits.max_netlist_lines, 7);
+        assert_eq!(
+            limits.max_netlist_bytes,
+            deck_limits(Some(machine)).max_netlist_bytes
+        );
+    }
 
     #[test]
     fn windows_profile_directories_come_from_absolute_environment_values() {
@@ -738,6 +847,23 @@ mod tests {
                 spelling.get_name()
             );
         }
+    }
+}
+
+/// A switch in the environment: `1`, `true`, `yes` or `on` set it, `0`,
+/// `false`, `no` or `off` clear it, and anything else is refused.
+fn parse_bool_env(variable: &str) -> Result<Option<bool>, ConfigError> {
+    let Some(raw) = text_env(variable)? else {
+        return Ok(None);
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(Some(true)),
+        "0" | "false" | "no" | "off" | "" => Ok(Some(false)),
+        _ => Err(ConfigError::EnvironmentError {
+            variable: variable.to_owned(),
+            value: raw,
+            message: "must be 1 or 0, true or false".to_owned(),
+        }),
     }
 }
 

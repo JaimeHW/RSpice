@@ -953,6 +953,7 @@ library_paths = []                      # extra .include/.lib search dirs for ru
 veriloga_includes = []                  # extra include dirs for compile-va
 
 [resources]
+# shipped_limits = true                  # start from the engine's shipped limits
 max_netlist_bytes = 67108864             # 64 MiB root deck
 max_netlist_lines = 2000000
 max_expanded_source_bytes = 268435456    # includes and retained multi-run decks
@@ -980,8 +981,18 @@ derived corner and S-parameter decks, circuit construction and result
 retention; the worker ceiling also bounds `-j 0`. Retained measurement and
 report records count against `max_result_values` across every step, variant,
 corner and control dataset, and exceeding it exits 75 even with
-`--allow-failed-meas`. Lower the ceilings for a service with a fixed CPU or
-memory budget.
+`--allow-failed-meas`.
+
+On a workstation the limits on a deck's size start sized to the machine's
+memory, as the desktop app sizes them: its bytes and lines, the files it
+includes and the data files it reads, its devices, nodes and unknowns, and the
+values a result keeps, each at what one unit of it costs a run. A deck runs if
+the machine can hold it, as in Spectre, HSPICE or ngspice. The limits that are
+not about size (include and hierarchy depth, workers, batch runs) start as the
+engine ships them. The values above are the engine's shipped limits, which
+`--shipped-limits`, `RSPICE_SHIPPED_LIMITS=1` or `shipped_limits = true`
+restore: a service with a fixed CPU or memory budget starts from them and
+lowers the ceilings it needs to. Each key overrides its own limit either way.
 
 Environment variable overrides:
 
@@ -993,6 +1004,7 @@ Environment variable overrides:
 | `RSPICE_LIBRARY_PATH` | Model library paths, platform path separator |
 | `RSPICE_MODELS_DIR` | Model tree `rspice models` reads |
 | `RSPICE_MAX_<RESOURCE>` | Override any `[resources]` key in uppercase, for example `RSPICE_MAX_BATCH_RUNS` or `RSPICE_MAX_NETLIST_BYTES` |
+| `RSPICE_SHIPPED_LIMITS` | `1` starts the resource limits from the engine's shipped ones rather than this machine's memory, as `--shipped-limits` does |
 
 ## Exit Codes
 

@@ -224,7 +224,7 @@ fn main() -> ExitCode {
 
     // Load configuration
     let config = if let Some(ref config_path) = cli.config {
-        match Config::load_file(config_path) {
+        match Config::load_file(config_path, cli.shipped_limits) {
             Ok(c) => c,
             Err(e) => {
                 let err = cli::CliError::ConfigError {
@@ -235,7 +235,7 @@ fn main() -> ExitCode {
             }
         }
     } else {
-        match Config::load() {
+        match Config::load(cli.shipped_limits) {
             Ok(c) => c,
             Err(e) => {
                 let err = cli::CliError::ConfigError {
