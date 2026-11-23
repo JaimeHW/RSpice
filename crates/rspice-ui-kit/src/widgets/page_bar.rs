@@ -101,12 +101,14 @@ fn report_font() -> egui::FontId {
     theme::mono(tokens::FS_0, FontWeight::Regular)
 }
 
+/// What joins a report's facts.
+const JOIN: &str = " \u{b7} ";
+
 /// What of a report fits in `room`. A report is facts joined by " · ", the
 /// one that matters most last ("9 dependencies · 1 problem"): it gives way a
 /// whole fact at a time from the front, so no word is cut while a shorter
 /// report would fit, and only a last fact too wide alone is elided.
 fn fitted_report(ui: &Ui, text: &str, font: &egui::FontId, room: f32) -> String {
-    const JOIN: &str = " \u{b7} ";
     let width = |words: &str| {
         ui.painter()
             .layout_no_wrap(words.to_owned(), font.clone(), egui::Color32::WHITE)
@@ -125,8 +127,11 @@ fn fitted_report(ui: &Ui, text: &str, font: &egui::FontId, room: f32) -> String 
     }
 }
 
-/// The report, right-aligned on `line`: the mark, then the words, fitted to
-/// what is left with the whole text on hover.
+/// The report, right-aligned on `line`, fitted to what is left with the
+/// whole text on hover. A problem's mark stands before the last fact, the
+/// one that matters and the one a cut report keeps, not before the whole:
+/// "used for runs · ✕ 1 of 6 instances unbound" does not read as "not used
+/// for runs".
 fn paint_report(ui: &mut Ui, line: Rect, text: &str, problem: Option<Problem>) {
     let t = Tokens::get(ui.ctx());
     let font = report_font();
@@ -141,11 +146,16 @@ fn paint_report(ui: &mut Ui, line: Rect, text: &str, problem: Option<Problem>) {
         return;
     }
     let elided = words != text;
-    let galley = ui.painter().layout_no_wrap(words, font, t.color.text_dim);
-    let place = Rect::from_x_y_ranges(
-        (line.right() - mark - galley.size().x)..=line.right(),
-        line.y_range(),
-    );
+    let (before, last) = match words.rsplit_once(JOIN) {
+        Some((before, last)) => (format!("{before}{JOIN}"), last.to_owned()),
+        None => (String::new(), words),
+    };
+    let before = ui
+        .painter()
+        .layout_no_wrap(before, font.clone(), t.color.text_dim);
+    let last = ui.painter().layout_no_wrap(last, font, t.color.text_dim);
+    let width = before.size().x + mark + last.size().x;
+    let place = Rect::from_x_y_ranges((line.right() - width)..=line.right(), line.y_range());
     let response = ui.interact(place, ui.id().with("page-bar.report"), Sense::hover());
     let announcement = problem.map_or_else(|| text.to_owned(), |problem| problem.announce(text));
     response.widget_info(|| {
@@ -154,24 +164,22 @@ fn paint_report(ui: &mut Ui, line: Rect, text: &str, problem: Option<Problem>) {
     if elided {
         let _ = response.on_hover_text(text);
     }
+    let mark_left = place.left() + before.size().x;
     if let Some(problem) = problem {
         paint_problem_mark(
             ui.painter(),
             Rect::from_center_size(
-                pos2(place.left() + PROBLEM_MARK_SIDE * 0.5, place.center().y),
+                pos2(mark_left + PROBLEM_MARK_SIDE * 0.5, place.center().y),
                 vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
             ),
             problem,
         );
     }
-    ui.painter().galley(
-        pos2(
-            place.left() + mark,
-            place.center().y - galley.size().y * 0.5,
-        ),
-        galley,
-        t.color.text_dim,
-    );
+    let top = |galley: &egui::Galley| place.center().y - galley.size().y * 0.5;
+    let before_at = pos2(place.left(), top(&before));
+    let last_at = pos2(mark_left + mark, top(&last));
+    ui.painter().galley(before_at, before, t.color.text_dim);
+    ui.painter().galley(last_at, last, t.color.text_dim);
 }
 
 /// A page bar's filter: the field that keeps only the rows whose words hold
