@@ -58,7 +58,7 @@ pub use connectivity_contract::{
     GlobalAliasComparisonPolicy, GlobalNetPromotionPolicy,
 };
 pub use revised_text::{RevisedText, SameTextMemo};
-pub use text_snapshot::TextSnapshot;
+pub use text_snapshot::{TextSnapshot, preferred_newline};
 // Test-only aliases: the submodule is private, so this path is the only
 // way the tests can name these.
 #[cfg(any(test, feature = "test-support"))]

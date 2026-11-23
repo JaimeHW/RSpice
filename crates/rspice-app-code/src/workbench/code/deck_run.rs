@@ -59,6 +59,11 @@ enum DeckCheck {
 /// found its includes recorded. What it prepared is retained for the run
 /// that follows when `for_run`.
 fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
+    // A deck still being read is the deck Run runs once it is read.
+    if let Some(refusal) = land_deck_read(cx) {
+        cx.wb.prompt(refusal);
+        return DeckCheck::Held;
+    }
     if cx.wb.workspace != Workspace::Netlist && !bring_project_deck(cx) {
         return DeckCheck::Held;
     }
@@ -145,6 +150,9 @@ fn bring_project_deck(cx: &mut Cx<'_, SourceFeature>) -> bool {
         cx.runs,
         cx.wb.messages(),
     );
+    if let Some(refusal) = land_deck_read(cx) {
+        cx.wb.prompt(refusal);
+    }
     if cx.state.netlist.open_deck.is_some() {
         return true;
     }
@@ -180,6 +188,19 @@ fn bring_project_deck(cx: &mut Cx<'_, SourceFeature>) -> bool {
         cx.wb.prompt(notice);
     }
     false
+}
+
+/// Take the deck being read, waiting for its read: why it did not read,
+/// when it did not.
+fn land_deck_read(cx: &mut Cx<'_, SourceFeature>) -> Option<String> {
+    deck_files::land_deck_read(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.netlist_open_documents,
+        cx.runs,
+        true,
+        cx.wb.messages(),
+    )
 }
 
 /// Make Problems say what the text the check read holds, whichever

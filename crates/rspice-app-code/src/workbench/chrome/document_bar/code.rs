@@ -120,6 +120,20 @@ pub fn netlist_workspace_documents(reads: NetlistTabsReads<'_>) -> Vec<Workspace
             icon: WorkbenchIcon::Netlist,
             dirty: false,
         });
+    } else if let Some((id, name)) =
+        crate::workbench::documents::deck_files::deck_being_read(model, netlist)
+            .filter(|_| !netlist.deck_tab_closed)
+    {
+        // A deck being read has its tab at once, which says it is reading
+        // until its text is there.
+        documents.push(WorkspaceDocument {
+            id: WorkspaceDocumentId::NetlistOwned(
+                crate::workbench::documents::deck_files::deck_tab_id(id),
+            ),
+            label: name,
+            icon: WorkbenchIcon::Netlist,
+            dirty: false,
+        });
     }
 
     if let Some((left, right)) = netlist.comparison_sides {
@@ -258,6 +272,7 @@ fn nothing_generated_in_front(model: &Model, netlist: &NetlistDocumentState) -> 
         && netlist.front == NetlistTab::Generated
         && !netlist.deck_tab_closed
         && (netlist.open_deck.is_some()
+            || netlist.reading_deck.is_some()
             || crate::workbench::documents::deck_files::missing_deck(model, netlist).is_some())
 }
 
@@ -299,8 +314,13 @@ pub fn active_netlist_document_id(
             .filter(|deck| deck.id == id)
             .map(|deck| deck.tab_id())
             .or_else(|| {
-                (netlist.open_deck.is_none() && netlist.unreadable_deck == Some(id))
-                    .then(|| crate::workbench::documents::deck_files::deck_tab_id(id))
+                (netlist.open_deck.is_none()
+                    && (netlist.unreadable_deck == Some(id)
+                        || netlist
+                            .reading_deck
+                            .as_ref()
+                            .is_some_and(|reading| reading.id == id)))
+                .then(|| crate::workbench::documents::deck_files::deck_tab_id(id))
             })
     };
     Some(match &netlist.front {
@@ -360,6 +380,13 @@ pub fn activate_owned_netlist(
     use crate::workbench::documents::deck_files;
     if let Some(deck) = netlist.open_deck.as_ref() {
         return deck.tab_id() == *document_id && deck_files::show_deck(model, netlist);
+    }
+    if netlist
+        .reading_deck
+        .as_ref()
+        .is_some_and(|reading| deck_files::deck_tab_id(reading.id) == *document_id)
+    {
+        return deck_files::show_deck_being_read(netlist);
     }
     netlist
         .unreadable_deck
@@ -449,8 +476,9 @@ pub fn close_netlist_deck(
 ) {
     let Some(deck) = netlist.open_deck.as_ref() else {
         // The missing deck's tab closes as an open deck's does; the deck
-        // stays in the project, missing.
-        if netlist.unreadable_deck.is_some() {
+        // stays in the project, missing. A deck being read is read on, and
+        // opens with its tab closed.
+        if netlist.unreadable_deck.is_some() || netlist.reading_deck.is_some() {
             netlist.deck_tab_closed = true;
             netlist.run_the_plan();
             if matches!(netlist.front, NetlistTab::Deck(_))

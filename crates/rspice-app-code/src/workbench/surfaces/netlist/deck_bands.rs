@@ -26,8 +26,11 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
             cx.wb.prompt(notice);
         }
     }
-    // A deck whose file is missing says so in the page's body alone.
-    if deck_files::missing_deck_in_front(cx.model, &cx.state.netlist).is_some() {
+    // A deck whose file is missing, or one being read, says so in the
+    // page's body alone.
+    if deck_files::missing_deck_in_front(cx.model, &cx.state.netlist).is_some()
+        || deck_files::reading_deck_in_front(&cx.state.netlist)
+    {
         return;
     }
     if let Some(deck) = deck_files::desktop_deck(cx.model, &cx.state.netlist) {

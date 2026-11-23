@@ -290,6 +290,13 @@ impl RSpiceApp {
         // for the frame that draws it.
         let repaint = cc.egui_ctx.clone();
         rspice_app_state::state::run_reader::install_run_reader(move || repaint.request_repaint());
+        // Nor does the frame wait for a deck's file: a deck opened is read on
+        // a thread of its own, and the read's end asks for the frame that
+        // opens it.
+        let repaint = cc.egui_ctx.clone();
+        rspice_app_code::workbench::documents::deck_files::read_decks_away_from_frame(move || {
+            repaint.request_repaint();
+        });
         // Nor does the frame wait for the first check of a kept results store: its runs read
         // as being checked meanwhile, and the check's end asks for the frame that reads them.
         rspice_results::store_reader::never_wait_for_checks_here();

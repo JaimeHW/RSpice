@@ -232,9 +232,10 @@ pub fn prepare_workspace(cx: &mut Cx<'_, SourceFeature>) {
         &mut cx.state.netlist,
         cx.runs,
     );
-    // A deck whose file is missing has no text in front: no editor to find,
-    // undo or zoom in.
+    // A deck whose file is missing, or one being read, has no text in
+    // front: no editor to find, undo or zoom in.
     if !generated_primary_unavailable(cx.model, &cx.state.netlist)
+        && !crate::workbench::documents::deck_files::reading_deck_in_front(&cx.state.netlist)
         && crate::workbench::documents::deck_files::missing_deck_in_front(
             cx.model,
             &cx.state.netlist,
@@ -365,7 +366,15 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
-        if let Some(missing) = crate::workbench::documents::deck_files::missing_deck_in_front(
+        if crate::workbench::documents::deck_files::reading_deck_in_front(&cx.state.netlist) {
+            // The deck in front is being read: the page says so where its
+            // text will be, inset as the editor insets its text.
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    crate::workbench::code::netlist_first::reading_line(ui, cx.wb.messages());
+                });
+        } else if let Some(missing) = crate::workbench::documents::deck_files::missing_deck_in_front(
             cx.model,
             &cx.state.netlist,
         ) {

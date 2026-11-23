@@ -38,6 +38,9 @@ pub struct RevisedText {
 struct Body {
     rope: OnceLock<Rope>,
     string: OnceLock<String>,
+    /// The line break an edit inserts in the text, once it was made ready
+    /// for an editor ([`RevisedText::ready_for_editor`]).
+    newline: OnceLock<&'static str>,
 }
 
 impl Body {
@@ -45,6 +48,7 @@ impl Body {
         Self {
             rope: OnceLock::new(),
             string: OnceLock::from(text),
+            newline: OnceLock::new(),
         }
     }
 
@@ -52,6 +56,7 @@ impl Body {
         Self {
             rope: OnceLock::from(rope),
             string: OnceLock::new(),
+            newline: OnceLock::new(),
         }
     }
 
@@ -149,7 +154,22 @@ impl RevisedText {
     /// The text for an editor, at this revision: the rope it was given
     /// shared, or made once from the text in one piece.
     pub fn snapshot(&self) -> TextSnapshot {
-        TextSnapshot::from_rope(self.body.rope().clone(), self.revision)
+        TextSnapshot::prepared(
+            self.body.rope().clone(),
+            self.revision,
+            self.body.newline.get().copied(),
+        )
+    }
+
+    /// Make, on this thread, what an editor reads of the text when it first
+    /// shows it: its rope, and the line break an edit inserts in it. A text
+    /// read away from the frame is made ready there, so the frame that first
+    /// shows it reads nothing in proportion to it.
+    pub fn ready_for_editor(&self) {
+        let rope = self.body.rope();
+        self.body
+            .newline
+            .get_or_init(|| super::preferred_newline(rope));
     }
 
     /// Its length in bytes, read without putting the text in one piece.

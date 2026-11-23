@@ -10,7 +10,7 @@ use std::ops::Range;
 
 use ropey::Rope;
 
-use crate::state::TextSnapshot;
+use crate::state::{TextSnapshot, preferred_newline};
 
 /// The text an editor's undo history may keep alive. The oldest steps go
 /// once the history holds more, never the newest; typing is grouped, so a
@@ -204,7 +204,7 @@ impl TextDocumentModel {
                     + usize::from(encoding == TextEncoding::Utf8Bom) * 3,
             })?;
         let text = Rope::from_str(source);
-        let preferred_newline = detect_preferred_newline(&text);
+        let preferred_newline = preferred_newline(&text);
         Ok(Self {
             text,
             #[cfg(test)]
@@ -420,7 +420,7 @@ impl TextDocumentModel {
             }
         }
         self.open_step = None;
-        self.preferred_newline = detect_preferred_newline(source);
+        self.preferred_newline = snapshot.newline();
         self.selections =
             normalize_selections(std::mem::take(&mut self.selections), self.text.len_chars());
         self.revision = snapshot.revision();
@@ -1187,51 +1187,6 @@ fn normalize_selections(selections: Vec<TextSelection>, maximum: usize) -> Vec<T
         .collect()
 }
 
-/// The line break an edit inserts: the source's most common one, preferring
-/// CRLF then LF on a tie, and LF when the source has none.
-/// The line ending most of `source`'s lines end with. A text with no
-/// carriage return ends its lines with a line feed, told from one count of
-/// its bytes; only a text holding one has its pairs counted.
-fn detect_preferred_newline(source: &Rope) -> &'static str {
-    let count = |wanted: u8| -> usize {
-        source
-            .chunks()
-            .map(|chunk| {
-                chunk
-                    .as_bytes()
-                    .iter()
-                    .filter(|&&byte| byte == wanted)
-                    .count()
-            })
-            .sum()
-    };
-    let returns = count(b'\r');
-    if returns == 0 {
-        return "\n";
-    }
-    let mut crlf = 0_usize;
-    let mut return_ends_chunk = false;
-    for chunk in source.chunks() {
-        let bytes = chunk.as_bytes();
-        if return_ends_chunk && bytes.first() == Some(&b'\n') {
-            crlf += 1;
-        }
-        crlf += bytes.windows(2).filter(|pair| *pair == b"\r\n").count();
-        if let Some(&last) = bytes.last() {
-            return_ends_chunk = last == b'\r';
-        }
-    }
-    let lf = count(b'\n') - crlf;
-    let cr = returns - crlf;
-    if crlf >= lf && crlf >= cr && crlf > 0 {
-        "\r\n"
-    } else if cr > lf && cr > 0 {
-        "\r"
-    } else {
-        "\n"
-    }
-}
-
 fn trailing_line_break_chars(slice: ropey::RopeSlice<'_>) -> usize {
     let length = slice.len_chars();
     match length.checked_sub(1).map(|index| slice.char(index)) {
@@ -1374,7 +1329,7 @@ mod tests {
             ("one\rtwo\nthree\r\n", "\r\n"),
         ] {
             assert_eq!(
-                detect_preferred_newline(&Rope::from_str(text)),
+                preferred_newline(&Rope::from_str(text)),
                 newline,
                 "{text:?}"
             );

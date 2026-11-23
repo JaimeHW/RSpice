@@ -738,11 +738,24 @@ fn schematic_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
 /// What the feature settles each frame before any surface draws.
 impl SourceFeature {
     /// Settle, in this order: a project the last frame replaced starts the
-    /// source editing over, the Verilog-A import and compile that finished
+    /// source editing over, a deck read away from the frame opens, the
+    /// Verilog-A import and compile that finished
     /// are taken, the compile a request asked for starts, and where the open
     /// module's symbol stands is measured.
     pub fn poll(cx: &mut Cx<'_, Self>, ctx: &Context) {
         Self::reset_after_project_change(cx);
+        // A deck read away from the frame opens on the first frame after the
+        // read, whichever workspace is in front.
+        if let Some(refusal) = crate::workbench::documents::deck_files::land_deck_read(
+            cx.model,
+            &mut cx.state.netlist,
+            &mut cx.state.netlist_open_documents,
+            cx.runs,
+            false,
+            cx.wb.messages(),
+        ) {
+            cx.wb.prompt(refusal);
+        }
         // A source import records intent and completes from the frame loop.
         // It was driven from nowhere once, so a requested import stayed
         // pending forever and blocked every later one.

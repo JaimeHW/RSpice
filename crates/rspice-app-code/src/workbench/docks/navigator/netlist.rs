@@ -90,6 +90,10 @@ pub(in crate::workbench) fn netlist(
         netlist_diff(ui, parts);
         return asked;
     }
+    if crate::workbench::documents::deck_files::reading_deck_in_front(parts.netlist) {
+        crate::workbench::code::netlist_first::reading_line(ui, parts.messages);
+        return asked;
+    }
     if let Some(missing) =
         crate::workbench::documents::deck_files::missing_deck_in_front(parts.model, parts.netlist)
     {

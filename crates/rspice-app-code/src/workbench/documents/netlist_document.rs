@@ -734,6 +734,9 @@ pub struct NetlistDocumentState {
     /// The project deck whose file could not be read, so it is not tried
     /// again on every frame.
     pub unreadable_deck: Option<crate::state::DeckId>,
+    /// The project deck being read away from the frame, which a later frame
+    /// takes: its tab stands in front meanwhile, saying it is reading.
+    pub reading_deck: Option<super::deck_files::DeckRead>,
     /// Whether the reader closed the open deck's tab: the deck stays open,
     /// with any edit not yet saved, until it is shown again.
     pub deck_tab_closed: bool,
@@ -889,14 +892,19 @@ pub struct NetlistDocumentState {
 
 impl NetlistDocumentState {
     /// What Run runs: the deck it was last pointed at while that deck is the
-    /// open one, or while it is the deck whose file could not be read, which
-    /// Run names and cannot run; else the plan.
+    /// open one, or the one being read, which Run waits for, or the deck
+    /// whose file could not be read, which Run names and cannot run; else the
+    /// plan.
     #[must_use]
     pub fn run_target(&self) -> super::netlist_tabs::RunTarget {
         use super::netlist_tabs::RunTarget;
         match self.run_target {
             RunTarget::Deck(id)
                 if self.open_deck.as_ref().is_some_and(|deck| deck.id == id)
+                    || self
+                        .reading_deck
+                        .as_ref()
+                        .is_some_and(|reading| reading.id == id)
                     || self.unreadable_deck == Some(id) =>
             {
                 RunTarget::Deck(id)

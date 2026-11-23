@@ -81,7 +81,8 @@ impl NetlistSession {
                 .open_deck
                 .as_ref()
                 .map(|deck| deck.id)
-                .or(netlist.unreadable_deck),
+                .or(netlist.unreadable_deck)
+                .or_else(|| netlist.reading_deck.as_ref().map(|reading| reading.id)),
             deck_tab_closed: netlist.deck_tab_closed,
             deck_includes: includes_of(deck_root),
             generated_includes: includes_of(generated),
@@ -183,6 +184,8 @@ pub fn reopen(
     }
     let mut refusals = Vec::new();
     if let Some(deck) = session.deck {
+        // The last launch's includes reopen over the deck, so the deck is
+        // read before they are, on this frame.
         let opened = crate::workbench::documents::deck_files::open_deck_by_id(
             model,
             netlist,
@@ -190,7 +193,18 @@ pub fn reopen(
             runs,
             deck,
             messages,
-        );
+        )
+        .and_then(|()| {
+            crate::workbench::documents::deck_files::land_deck_read(
+                model,
+                netlist,
+                open_documents,
+                runs,
+                true,
+                messages,
+            )
+            .map_or(Ok(()), Err)
+        });
         if let Err(refusal) = opened {
             model.record(LogSeverity::Error, LogSource::Netlist, refusal);
         } else {

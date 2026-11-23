@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::Model;
@@ -1391,8 +1391,14 @@ pub fn remove_deck(
     let content = &mut *model.workspace.content;
     content.decks.retain(|deck| deck.id != id);
     content.decks_dirty = true;
-    if netlist.unreadable_deck == Some(id) {
-        netlist.unreadable_deck = None;
+    let reading = netlist
+        .reading_deck
+        .take_if(|reading| reading.id == id)
+        .is_some();
+    if reading || netlist.unreadable_deck == Some(id) {
+        netlist
+            .unreadable_deck
+            .take_if(|unreadable| *unreadable == id);
         netlist.run_the_plan();
         if netlist.front == NetlistTab::Deck(id)
             && !super::netlist_document::open_generated_primary_in(model, netlist)
@@ -1738,7 +1744,16 @@ pub fn open_deck(
             return Err(save_first(messages, unsaved));
         }
     }
-    let root = read_file(&path, messages)?;
+    // Away from the frame only whether the file opens is found here, so a
+    // file that is not there is refused before the project lists it; its
+    // text is read on a thread of its own.
+    let root = if reads_away() {
+        std::fs::File::open(&path)
+            .map_err(|error| unreadable(messages, &path.display().to_string(), &error))?;
+        None
+    } else {
+        Some(read_file(&path, messages)?)
+    };
     let folder = model
         .workspace
         .content
@@ -1761,6 +1776,32 @@ pub fn open_deck(
             content.decks_dirty = true;
             id
         }
+    };
+    let Some(root) = root else {
+        if netlist
+            .reading_deck
+            .as_ref()
+            .is_some_and(|reading| reading.id == id)
+        {
+            show_deck_being_read(netlist);
+            return Ok(());
+        }
+        return start_reading(
+            model,
+            netlist,
+            open_documents,
+            id,
+            true,
+            messages,
+            move || {
+                read_file(&path, messages).map(|root| OpenDeck {
+                    id,
+                    root,
+                    includes: Vec::new(),
+                    stored_files: None,
+                })
+            },
+        );
     };
     install_open_deck(
         model,
@@ -1823,6 +1864,15 @@ pub fn open_deck_by_id(
         show_deck(model, netlist);
         return Ok(());
     }
+    // The deck being read comes to the front, still reading.
+    if netlist
+        .reading_deck
+        .as_ref()
+        .is_some_and(|reading| reading.id == id)
+    {
+        show_deck_being_read(netlist);
+        return Ok(());
+    }
     if let Some(unsaved) = netlist.open_deck.as_ref().and_then(OpenDeck::unsaved) {
         return Err(save_first(messages, unsaved));
     }
@@ -1833,6 +1883,24 @@ pub fn open_deck_by_id(
         .iter()
         .find(|deck| deck.id == id)
         .ok_or_else(|| messages.text(MessageId::NetlistDeckNotInProject))?;
+    if reads_away() {
+        let deck = deck.clone();
+        let folder = model
+            .workspace
+            .content
+            .project
+            .data_root()
+            .map(Path::to_path_buf);
+        return start_reading(
+            model,
+            netlist,
+            open_documents,
+            id,
+            true,
+            messages,
+            move || read_project_deck(&deck, folder.as_deref(), messages),
+        );
+    }
     match read_project_deck(deck, model.workspace.content.project.data_root(), messages) {
         Ok(open) => {
             install_open_deck(model, netlist, open_documents, runs, open);
@@ -1857,7 +1925,7 @@ pub fn show_project_deck(
     runs: &mut RunsState,
     messages: MessageCatalog,
 ) {
-    if show_deck(model, netlist) {
+    if show_deck(model, netlist) || show_deck_being_read(netlist) {
         return;
     }
     if let Some(id) = netlist.unreadable_deck {
@@ -1911,7 +1979,7 @@ pub fn open_project_deck(
     runs: &mut RunsState,
     messages: MessageCatalog,
 ) {
-    if netlist.open_deck.is_some() {
+    if netlist.open_deck.is_some() || netlist.reading_deck.is_some() {
         return;
     }
     let Some(deck) = model.workspace.content.decks.first() else {
@@ -1921,6 +1989,32 @@ pub fn open_project_deck(
         return;
     }
     let id = deck.id;
+    if reads_away() {
+        let deck = deck.clone();
+        let folder = model
+            .workspace
+            .content
+            .project
+            .data_root()
+            .map(Path::to_path_buf);
+        if let Err(error) = start_reading(
+            model,
+            netlist,
+            open_documents,
+            id,
+            false,
+            messages,
+            move || read_project_deck(&deck, folder.as_deref(), messages),
+        ) {
+            netlist.unreadable_deck = Some(id);
+            model.record(
+                crate::diagnostics::LogSeverity::Error,
+                crate::diagnostics::LogSource::Netlist,
+                error,
+            );
+        }
+        return;
+    }
     match read_project_deck(deck, model.workspace.content.project.data_root(), messages) {
         Ok(open) => install_open_deck(model, netlist, open_documents, runs, open),
         Err(error) => {
@@ -1935,8 +2029,239 @@ pub fn open_project_deck(
     }
 }
 
+/// What asks for a frame once a deck read away from the frame is done. The
+/// application sets it as it starts, and decks are read away from the frame
+/// from then on; a process that sets none, a test or a command-line run,
+/// reads a deck on the frame that opens it.
+static DECK_READ_WAKER: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// Read the decks opened from now on away from the frame, `waker` asking
+/// for the frame that takes each read: what the application does as it
+/// starts. Where there are no threads, decks are read on the frame.
+pub fn read_decks_away_from_frame(waker: impl Fn() + Send + Sync + 'static) {
+    let _ = DECK_READ_WAKER.set(Box::new(waker));
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    /// Whether the decks this thread opens are read away from the frame.
+    static READS_AWAY_HERE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Read the decks this thread opens from now on away from the frame, as the
+/// application does, with no frame asked for: what a test of the frames
+/// meanwhile does.
+#[cfg(any(test, feature = "test-support"))]
+pub fn read_decks_away_here() {
+    READS_AWAY_HERE.set(true);
+}
+
+/// Whether a deck opened now is read away from the frame.
+fn reads_away() -> bool {
+    if cfg!(target_arch = "wasm32") {
+        return false;
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    if READS_AWAY_HERE.get() {
+        return true;
+    }
+    DECK_READ_WAKER.get().is_some()
+}
+
+/// A project deck being read away from the frame, which a later frame takes
+/// ([`land_deck_read`]).
+#[derive(Debug, Clone)]
+pub struct DeckRead {
+    /// The deck read.
+    pub id: DeckId,
+    /// Whether the page says why, should the deck not read, as it does for a
+    /// deck the reader opened; else the log does.
+    prompt: bool,
+    read: Arc<Mutex<mpsc::Receiver<Result<OpenDeck, String>>>>,
+}
+
+/// Where a deck's read stands.
+enum Landed {
+    Reading,
+    Read(Result<OpenDeck, String>),
+    /// The read ended with nothing to take.
+    Lost,
+}
+
+impl DeckRead {
+    /// Read a deck with `read` on a thread of its own, which also makes its
+    /// text ready for the editor, so the frame that shows it reads nothing
+    /// in proportion to it.
+    fn start(
+        id: DeckId,
+        prompt: bool,
+        read: impl FnOnce() -> Result<OpenDeck, String> + Send + 'static,
+    ) -> std::io::Result<Self> {
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("deck-read".to_owned())
+            .spawn(move || {
+                let read = read().inspect(|deck| deck.root.text.ready_for_editor());
+                if sender.send(read).is_ok()
+                    && let Some(wake) = DECK_READ_WAKER.get()
+                {
+                    wake();
+                }
+            })?;
+        Ok(Self {
+            id,
+            prompt,
+            read: Arc::new(Mutex::new(receiver)),
+        })
+    }
+
+    /// Where the read stands, waiting for it to end when `wait`.
+    fn landed(&self, wait: bool) -> Landed {
+        let Ok(receiver) = self.read.lock() else {
+            return Landed::Lost;
+        };
+        let received = if wait {
+            receiver
+                .recv()
+                .map_err(|_| mpsc::TryRecvError::Disconnected)
+        } else {
+            receiver.try_recv()
+        };
+        match received {
+            Ok(read) => Landed::Read(read),
+            Err(mpsc::TryRecvError::Empty) => Landed::Reading,
+            Err(mpsc::TryRecvError::Disconnected) => Landed::Lost,
+        }
+    }
+}
+
+/// Read the project's deck `id` away from the frame with `read`. The deck
+/// open before goes, as it does when a deck opens; the deck's tab comes to
+/// the front at once, saying it is reading, and the frame after the read
+/// takes it. Why it was not read, when no thread could read it.
+fn start_reading(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    id: DeckId,
+    prompt: bool,
+    messages: MessageCatalog,
+    read: impl FnOnce() -> Result<OpenDeck, String> + Send + 'static,
+) -> Result<(), String> {
+    let reading = DeckRead::start(id, prompt, read)
+        .map_err(|error| unreadable(messages, &deck_name(model, id), &error))?;
+    close_open_deck(model, netlist, open_documents);
+    netlist.unreadable_deck = None;
+    netlist.reading_deck = Some(reading);
+    show_deck_being_read(netlist);
+    Ok(())
+}
+
+/// The name of the project's deck `id`.
+fn deck_name(model: &Model, id: DeckId) -> String {
+    model
+        .workspace
+        .content
+        .decks
+        .iter()
+        .find(|deck| deck.id == id)
+        .map(crate::state::ProjectDeck::name)
+        .unwrap_or_default()
+}
+
+/// The deck being read away from the frame, by its id and its name: what
+/// its tab names.
+#[must_use]
+pub fn deck_being_read(model: &Model, netlist: &NetlistDocumentState) -> Option<(DeckId, String)> {
+    let id = netlist.reading_deck.as_ref()?.id;
+    Some((id, deck_name(model, id)))
+}
+
+/// Bring the deck being read to the front, on its tab, which says it is
+/// reading; whether there is one.
+pub fn show_deck_being_read(netlist: &mut NetlistDocumentState) -> bool {
+    let Some(id) = netlist.reading_deck.as_ref().map(|reading| reading.id) else {
+        return false;
+    };
+    netlist.front = NetlistTab::Deck(id);
+    netlist.run_target = super::netlist_tabs::RunTarget::Deck(id);
+    netlist.deck_tab_closed = false;
+    netlist.active_document_initialized = true;
+    true
+}
+
+/// Whether the deck in front is being read, so the page says so where its
+/// text will be.
+#[must_use]
+pub fn reading_deck_in_front(netlist: &NetlistDocumentState) -> bool {
+    netlist
+        .reading_deck
+        .as_ref()
+        .is_some_and(|reading| netlist.front == NetlistTab::Deck(reading.id))
+}
+
+/// Take the deck read away from the frame once its read is done, waiting
+/// for it when `wait`: it becomes the open deck, in front unless its tab
+/// was closed meanwhile. A deck that did not read is left unreadable, as
+/// one read on the frame is: why is returned for the page to say when the
+/// reader opened the deck, and the log says it otherwise.
+pub fn land_deck_read(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    wait: bool,
+    messages: MessageCatalog,
+) -> Option<String> {
+    let read = match netlist.reading_deck.as_ref()?.landed(wait) {
+        Landed::Reading => return None,
+        Landed::Read(read) => read,
+        Landed::Lost => {
+            let id = netlist.reading_deck.as_ref()?.id;
+            Err(unreadable(
+                messages,
+                &deck_name(model, id),
+                &std::io::Error::from(std::io::ErrorKind::Interrupted),
+            ))
+        }
+    };
+    let reading = netlist.reading_deck.take()?;
+    match read {
+        Ok(deck) if netlist.deck_tab_closed => {
+            // Its tab closed while it was read: the deck is open, as a deck
+            // whose tab was closed is, until it is shown again.
+            netlist.open_deck = Some(deck);
+            runs.manual_run.edited_lines.clear();
+            None
+        }
+        Ok(deck) => {
+            install_open_deck(model, netlist, open_documents, runs, deck);
+            None
+        }
+        Err(error) => {
+            let id = reading.id;
+            let in_front = netlist.front == NetlistTab::Deck(id);
+            netlist.unreadable_deck = Some(id);
+            netlist.run_the_plan();
+            if in_front && !show_missing_deck(model, netlist, id) {
+                netlist.front = NetlistTab::Generated;
+            }
+            if reading.prompt {
+                Some(error)
+            } else {
+                model.record(
+                    crate::diagnostics::LogSeverity::Error,
+                    crate::diagnostics::LogSource::Netlist,
+                    error,
+                );
+                None
+            }
+        }
+    }
+}
+
 /// Make `deck` the open deck and put it in front: the tabs of the deck it
-/// replaces close with it.
+/// replaces close with it, and a deck being read is let go.
 pub fn install_open_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -1953,6 +2278,7 @@ pub fn install_open_deck(
         });
     }
     netlist.unreadable_deck = None;
+    netlist.reading_deck = None;
     netlist.open_deck = Some(deck);
     show_deck(model, netlist);
     runs.manual_run.edited_lines.clear();
