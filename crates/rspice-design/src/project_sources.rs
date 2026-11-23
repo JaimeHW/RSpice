@@ -254,7 +254,7 @@ enum CanonicalProjectSourceOwnerKey {
 impl fmt::Display for CanonicalProjectSourceOwnerKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ProjectWide => formatter.write_str("code-workspace"),
+            Self::ProjectWide => formatter.write_str("project-wide"),
             Self::CellView(reference) => write!(formatter, "cell-view:{reference}"),
         }
     }

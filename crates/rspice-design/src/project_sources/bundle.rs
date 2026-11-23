@@ -442,7 +442,7 @@ impl ProjectSourceBundle {
         let mut hasher = Sha256::new();
         hash_frame(&mut hasher, CLOSURE_DIGEST_DOMAIN);
         match owner {
-            ProjectSourceOwner::ProjectWide => hash_frame(&mut hasher, b"code-workspace"),
+            ProjectSourceOwner::ProjectWide => hash_frame(&mut hasher, b"project-wide"),
             ProjectSourceOwner::CellView { reference } => {
                 hash_frame(&mut hasher, b"cell-view");
                 hash_frame(&mut hasher, reference.library.as_bytes());
