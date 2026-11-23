@@ -334,14 +334,20 @@ pub struct MemoryWarning {
 }
 
 impl MemoryWarning {
-    /// What the run needs and what the machine has, the numbers first so a
-    /// band too narrow for the whole sentence still shows them, and what
-    /// running it anyway does.
+    /// What the run needs and what the machine has, and what running it
+    /// anyway does.
     #[must_use]
     pub fn message(&self) -> String {
+        format!("{} Other programs slow while it runs.", self.numbers())
+    }
+
+    /// What the run needs and what the machine has: the sentence a band
+    /// beside its Run anyway has room for, whose hover says what running it
+    /// anyway does.
+    #[must_use]
+    pub fn numbers(&self) -> String {
         format!(
-            "This design's {} devices need about {} of memory; {} of {} is free. Other \
-             programs slow while it runs.",
+            "This design's {} devices need about {} of memory; {} of {} is free.",
             grouped(self.devices),
             bytes(self.needed_bytes),
             bytes(self.memory.free_bytes),

@@ -985,7 +985,7 @@ fn memory_band(
     messages: crate::workbench::MessageCatalog,
 ) -> Option<MemoryAnswer> {
     let warning = runs.memory_warning()?;
-    let words = warning.message();
+    let words = warning.numbers();
     let mut answer = None;
     advisory_band(ui, Some(Problem::Warning), |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1005,7 +1005,7 @@ fn memory_band(
                 // The mark keeps the gap from the words a run band's dot does.
                 ui.add_space(RUN_STRIP_DOT_GAP);
                 ui.add(egui::Label::new(&words).truncate())
-                    .on_hover_text(&words);
+                    .on_hover_text(warning.message());
             });
         });
     });

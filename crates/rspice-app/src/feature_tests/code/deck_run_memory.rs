@@ -120,7 +120,7 @@ fn a_run_needing_more_than_is_free_waits_for_run_anyway() {
         "the status line says {status:?}; said {:?}",
         said_with(&output, "free")
     );
-    assert!(says(&output, &hold.warning.message()), "the band says it");
+    assert!(says(&output, &hold.warning.numbers()), "the band says it");
     for _ in 0..3 {
         replay.frame(Vec::new());
     }
