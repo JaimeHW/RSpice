@@ -11,7 +11,7 @@ use super::{
     trace_key,
 };
 use crate::{
-    derived::{DerivedSeries, Extremes},
+    derived::{DerivedSeries, Extremes, FRAME_EXTENTS, StoredExtent},
     presentation::well_hint,
     session::{ExprEditor, ResultViewerState, XyStrip},
     strip::{LegendChip, StripHeader},
@@ -331,24 +331,32 @@ pub fn pane_trace_extremes(
             .is_some_and(|(low, high)| x0.min(x1) <= low && x0.max(x1) >= high)
     });
     let mut extremes = Extremes::default();
+    derived.keep_measured_extents();
+    let mut here = FRAME_EXTENTS;
     for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
         let window = if whole_record && trace.visible {
             None
         } else {
             window
         };
-        // A stored trace's extent comes from its tiles, never its whole column.
-        if trace.y.is_stored()
-            && let Some(extent) = derived.stored_extent_or(trace_key(model, trace), window, || {
-                trace.y.extent_over(&trace.x, window)
-            })
-        {
-            extremes.absorb(Extremes {
-                min: extent.min,
-                max: extent.max,
-                min_positive: extent.min_positive,
-            });
-            continue;
+        // A stored trace's extent comes from its tiles, never its whole
+        // column; past the frame's share, from tiles read away from it.
+        if trace.y.is_stored() {
+            let key = trace_key(model, trace);
+            match derived.stored_extent(key, window, (&trace.x, &trace.y), &mut here) {
+                StoredExtent::Measured(Some(extent)) | StoredExtent::Measuring(Some(extent)) => {
+                    extremes.absorb(Extremes {
+                        min: extent.min,
+                        max: extent.max,
+                        min_positive: extent.min_positive,
+                    });
+                    continue;
+                }
+                // Its extent arrives on a later frame; reading it whole
+                // meanwhile reads what the measurement does.
+                StoredExtent::Measuring(None) => continue,
+                StoredExtent::Measured(None) => {}
+            }
         }
         // Held in memory, or held once its read has arrived.
         let Some((x, y)) = trace.held() else {
@@ -360,6 +368,7 @@ pub fn pane_trace_extremes(
             None => index.whole(),
         });
     }
+    derived.measure_asked_extents();
     extremes
 }
 
@@ -1870,6 +1879,9 @@ fn show_unit_pane(
     // Over the whole record: whether the pane draws anything at all, and
     // whether anything it draws could stand on a logarithmic axis.
     let mut extrema_samples = 0;
+    host.session_mut()
+        .derived
+        .wake_on_measured_extents(ui.ctx());
     let mut whole = pane_trace_extremes(
         &mut host.session_mut().derived,
         model,

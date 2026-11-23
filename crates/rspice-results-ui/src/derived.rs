@@ -1,9 +1,10 @@
 //! Shared derived display columns and measurements for result viewers.
 //! The host supplies source keys and decides when source changes require reset.
 
-use rspice_results::waveform::SharedWaveformValues;
+use rspice_results::waveform::{SharedWaveformValues, ValueExtent};
 
 mod extrema;
+mod measuring;
 
 pub use extrema::{ExtremaIndex, Extremes};
 
@@ -62,6 +63,8 @@ pub struct DerivedSeries {
     /// window asked of it, per series key: a steady view reads no tile for its
     /// fit.
     stored_extents: std::collections::HashMap<u64, StoredExtentMemo>,
+    /// The stored extents a frame left to be measured away from it.
+    measuring: measuring::Measuring,
     /// The Measurements table's measurements, the last finished and the one
     /// under way, each with what it measures; kept across data versions, as
     /// what it measures names the build of the models it was taken of.
@@ -76,6 +79,27 @@ pub struct DerivedSeries {
 struct StoredExtentMemo {
     whole: Option<Option<rspice_results::waveform::ValueExtent>>,
     window: Option<((u64, u64), Option<rspice_results::waveform::ValueExtent>)>,
+}
+
+/// How many unmeasured stored series a frame measures itself: each reads a
+/// tile of its store, tens of microseconds, so about this many fill a
+/// sixtieth of a second. The rest are measured away from the frame; the page
+/// has one thread, and measures them all.
+pub const FRAME_EXTENTS: usize = if cfg!(target_arch = "wasm32") {
+    usize::MAX
+} else {
+    256
+};
+
+/// A stored series' extent as a frame has it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StoredExtent {
+    /// Measured: `None` when the series cannot tile.
+    Measured(Option<ValueExtent>),
+    /// Being measured away from the frame. Meanwhile, the extent last
+    /// measured of the series over another window, or its whole record's,
+    /// if either has been.
+    Measuring(Option<ValueExtent>),
 }
 
 /// What a strip's overview lane draws of its trace: the vertical fit and the
@@ -118,6 +142,7 @@ impl DerivedSeries {
             self.bus_lanes.clear();
             self.xy_curves.clear();
             self.stored_extents.clear();
+            self.measuring.forget();
             self.version = version;
         }
     }
@@ -244,6 +269,72 @@ impl DerivedSeries {
         let extent = build();
         memo.window = Some((bits, extent));
         extent
+    }
+
+    /// The extent of the stored series `key`, `y` against `x`, over `window`,
+    /// or over its whole record when there is none, kept as
+    /// [`Self::stored_extent_or`] keeps it. One not kept nor asked for is
+    /// measured here while `here` lasts, taking one from it, and asked for
+    /// away from the frame after; [`Self::measure_asked_extents`] sends what
+    /// was asked.
+    pub fn stored_extent(
+        &mut self,
+        key: u64,
+        window: Option<(f64, f64)>,
+        (x, y): (&SharedWaveformValues, &SharedWaveformValues),
+        here: &mut usize,
+    ) -> StoredExtent {
+        let memo = self.stored_extents.get(&key).copied().unwrap_or_default();
+        let kept = match measuring::bits(window) {
+            None => memo.whole,
+            Some(bits) => memo
+                .window
+                .filter(|(held, _)| *held == bits)
+                .map(|(_, extent)| extent),
+        };
+        if let Some(extent) = kept {
+            return StoredExtent::Measured(extent);
+        }
+        let asked = self.measuring.asked_for(key, window);
+        if !asked && *here > 0 {
+            *here -= 1;
+            return StoredExtent::Measured(
+                self.stored_extent_or(key, window, || y.extent_over(x, window)),
+            );
+        }
+        if !asked {
+            self.measuring.ask(key, window, (x, y));
+        }
+        StoredExtent::Measuring(match window {
+            None => None,
+            Some(_) => memo
+                .window
+                .and_then(|(_, extent)| extent)
+                .or(memo.whole.flatten()),
+        })
+    }
+
+    /// Keep the stored extents measured away from the frame that have
+    /// arrived.
+    pub fn keep_measured_extents(&mut self) {
+        for (key, bits, extent) in self.measuring.arrived() {
+            let memo = self.stored_extents.entry(key).or_default();
+            match bits {
+                None => memo.whole = Some(extent),
+                Some(bits) => memo.window = Some((bits, extent)),
+            }
+        }
+    }
+
+    /// Send the stored extents asked for to be measured away from the frame,
+    /// unless some already are.
+    pub fn measure_asked_extents(&mut self) {
+        self.measuring.send();
+    }
+
+    /// Wake `ctx` when stored extents measured away from the frame arrive.
+    pub fn wake_on_measured_extents(&mut self, ctx: &egui::Context) {
+        self.measuring.wake(ctx);
     }
 
     pub fn range_or(

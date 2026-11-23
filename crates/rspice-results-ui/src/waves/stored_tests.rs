@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::pane::{PanePlot, pane_auto_y, show_plot};
 use super::stack::pane_y_range;
 use super::*;
-use crate::derived::DerivedSeries;
+use crate::derived::{DerivedSeries, FRAME_EXTENTS};
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::executed_deck::ExecutedDeckArchive;
@@ -637,4 +637,83 @@ fn the_digital_submenu_starts_its_threshold_without_reading_a_stored_column() {
     let middle = super::header::trace_middle(&models[0].traces[0]).expect("the trace has a range");
     assert_eq!(rows_read(), before, "the threshold read the stored column");
     assert!(middle.abs() < 1.0e-6, "sin swings about zero: {middle}");
+}
+
+/// A pane of more stored curves than a frame measures itself fits those it measured at once and
+/// the rest once they have been measured away from the frame, reading no column for them.
+#[test]
+fn a_pane_of_more_stored_curves_than_a_frame_measures_fits_the_rest_once_they_arrive() {
+    const ROWS: usize = 2_000;
+    let x: Arc<Vec<f64>> = Arc::new((0..ROWS).map(|row| row as f64 * 1.0e-9).collect());
+    let column = |values: Vec<f64>, axis: bool| {
+        Arc::new(Tiled {
+            name: "V(n)",
+            x: Arc::clone(&x),
+            values,
+            axis,
+            rows_read: AtomicUsize::new(0),
+        })
+    };
+    let time = column(x.to_vec(), true);
+    // Every curve the frame measures stays within a volt; the one after them reaches ten.
+    let curves: Vec<_> = (0..=FRAME_EXTENTS)
+        .map(|curve| {
+            let peak = if curve == FRAME_EXTENTS { 10.0 } else { 1.0 };
+            column(
+                (0..ROWS).map(|row| peak * row as f64 / ROWS as f64).collect(),
+                false,
+            )
+        })
+        .collect();
+    let window = StoredWindow {
+        first: 0,
+        rows: ROWS as u64,
+        lead: WindowLead::None,
+    };
+    let stored = |column: &Arc<Tiled>| {
+        WaveformValues::stored(column.clone(), window).expect("the window fits the column")
+    };
+    let mut run = rspice_results::run::SimulationRun::new(
+        1,
+        0.0,
+        rspice_results::run::ExecutionTarget::LocalDesktop,
+    );
+    run.analyses.push(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran", 0.0).with_waveforms(
+            curves
+                .iter()
+                .enumerate()
+                .map(|(index, curve)| {
+                    RetainedTrace::new(format!("V(n{index:04})"), stored(&time), stored(curve), "#fff")
+                })
+                .collect(),
+        ),
+    );
+    let models = models(&run);
+    let model = &models[0];
+    let pane = model.unit_panes().into_iter().next().expect("the strip has a pane");
+    assert_eq!(pane.traces.len(), FRAME_EXTENTS + 1);
+
+    let mut derived = DerivedSeries::default();
+    let (_, high) =
+        pane_y_range(&mut derived, model, &pane.traces, |_| {}).expect("the measured curves fit");
+    assert!(high < 2.0, "the frame fits only the curves it measured: {high}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let (_, high) =
+            pane_y_range(&mut derived, model, &pane.traces, |_| {}).expect("the curves fit");
+        if high >= 10.0 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the last curve's extent never arrived"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let read: usize = curves
+        .iter()
+        .map(|curve| curve.rows_read.load(Ordering::SeqCst))
+        .sum();
+    assert_eq!(read, 0, "a curve's column was read rather than tiled");
 }
