@@ -146,6 +146,71 @@ fn a_running_transient_is_drawn_from_the_rows_its_segment_holds() {
     }
 }
 
+/// Remembers the segment the running transient writes.
+struct Named {
+    slot: crate::results_store::LiveSegmentSlot,
+    path: Mutex<Option<std::path::PathBuf>>,
+}
+
+impl AbortSignal for Named {
+    fn is_aborted(&self) -> bool {
+        false
+    }
+
+    fn observe_transient_sample(&self, _sample: TransientSample<'_>) {
+        let mut path = self.path.lock().unwrap();
+        if path.is_none() {
+            path.clone_from(&self.slot.lock().unwrap());
+        }
+    }
+}
+
+/// An opening that cannot read the last chunk it found asks whether the writer replaced it: a
+/// segment that still ends where the opening found it is damaged, one that ends elsewhere moved
+/// on under the read.
+#[test]
+fn a_last_chunk_is_replaced_only_when_the_segment_no_longer_ends_in_it() {
+    let slot = crate::results_store::LiveSegmentSlot::default();
+    let _installed = crate::results_store::install_live_segment(Arc::clone(&slot));
+    let named = Named {
+        slot: Arc::clone(&slot),
+        path: Mutex::new(None),
+    };
+    let config = AnalysisConfig::Transient(TransientAnalysisConfig {
+        stop_time: 5e-3,
+        step_time: 0.5e-6,
+        start_time: 0.0,
+        max_timestep: Some(0.5e-6),
+        uic: false,
+    });
+    // The result holds its segment on disk until it is dropped.
+    let _result = super::super::super::EngineBridge::new()
+        .run_with_abort(&config, DECK, &named)
+        .unwrap();
+    let written = named
+        .path
+        .into_inner()
+        .unwrap()
+        .expect("the run named its segment");
+    let dir = std::env::temp_dir().join(format!("rspice-live-tail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (whole, cut) = (dir.join("whole.rsr"), dir.join("cut.rsr"));
+    std::fs::copy(&written, &whole).unwrap();
+    let bytes = std::fs::read(&whole).unwrap();
+    std::fs::write(&cut, &bytes[..bytes.len() / 2]).unwrap();
+    let reader = SegmentReader::open(Box::new(FileIo::open(&whole).unwrap()) as SegmentBytes)
+        .expect("the finished segment opens");
+    let (rows, tail) = (reader.rows(), reader.chunk_spans().last().unwrap());
+    drop(reader);
+    assert!(rows > 0 && tail.1 > 0);
+    assert!(!tail_replaced(&whole, rows, tail), "it still ends there");
+    assert!(
+        tail_replaced(&cut, rows, tail),
+        "half of it ends in an earlier chunk"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The same low-pass solved in steps of 0.5 ns for 1 ms: two million points.
 const LONG_DECK: &str = "live segment of two million points
 V1 in 0 PULSE(0 1 0 1n 1n 1 2)

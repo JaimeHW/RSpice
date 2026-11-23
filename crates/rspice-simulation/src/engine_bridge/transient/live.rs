@@ -6,6 +6,9 @@
 //! store's summaries as a finished run's are. The last chunk may be the writer's provisional
 //! frame, which its next real frame overwrites in place, so its rows are read once as the segment
 //! is opened and kept beside the columns: a later read never meets bytes the writer replaced.
+//! Reading every column of it can take long enough for the writer to replace it under that one
+//! read, at a million columns; such an opening finds nothing, and the next one reads the rows the
+//! writer moved on to.
 
 use std::ops::Range;
 use std::path::Path;
@@ -36,14 +39,24 @@ pub struct LiveRows {
 }
 
 /// The rows the run writing the segment at `path` has written so far; `None` while it holds no
-/// row.
+/// row, or while the writer replaced its last chunk under the read.
 pub fn open_live_rows(path: &Path) -> Result<Option<LiveRows>, String> {
     let failed = |error: rspice_results_store::StoreError| format!("{}: {error}", path.display());
     let io = FileIo::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let mut reader = SegmentReader::open(Box::new(io) as SegmentBytes).map_err(failed)?;
     let rows = reader.rows();
-    let Some((last_chunk, (tail_first, _))) = reader.chunk_spans().enumerate().last() else {
+    let Some((last_chunk, tail)) = reader.chunk_spans().enumerate().last() else {
         return Ok(None);
+    };
+    let tail_first = tail.0;
+    // A last chunk that fails its check because the writer replaced it since the opening found
+    // it is no damage: its rows are read at the next opening.
+    let unread = |error| {
+        if tail_replaced(path, rows, tail) {
+            Ok(None)
+        } else {
+            Err(failed(error))
+        }
     };
     if rows == 0 {
         return Ok(None);
@@ -51,9 +64,9 @@ pub fn open_live_rows(path: &Path) -> Result<Option<LiveRows>, String> {
     let shell = transient_shell(reader.schema())?;
     let targets = slot_targets(&reader, &shell)?;
     let mut tail_x = Vec::new();
-    reader
-        .read_chunk_x(last_chunk, &mut tail_x)
-        .map_err(failed)?;
+    if let Err(error) = reader.read_chunk_x(last_chunk, &mut tail_x) {
+        return unread(error);
+    }
     let mut columns = Vec::new();
     for (slot, &target) in targets.iter().enumerate() {
         let (name, unit) = match target {
@@ -68,9 +81,9 @@ pub fn open_live_rows(path: &Path) -> Result<Option<LiveRows>, String> {
             _ => continue,
         };
         let mut values = Vec::new();
-        reader
-            .read_chunk_slot(last_chunk, slot, &mut values)
-            .map_err(failed)?;
+        if let Err(error) = reader.read_chunk_slot(last_chunk, slot, &mut values) {
+            return unread(error);
+        }
         columns.push((slot, name, unit, values));
     }
     let last_time = tail_x.last().copied().unwrap_or(f64::NAN);
@@ -118,6 +131,16 @@ pub fn open_live_rows(path: &Path) -> Result<Option<LiveRows>, String> {
         rows,
         last_time,
     }))
+}
+
+/// Whether the segment at `path` no longer holds `rows` rows ending in the chunk `tail` (its first
+/// row and its rows), as an opening found it: the writer wrote on and replaced that chunk since.
+fn tail_replaced(path: &Path, rows: u64, tail: (u64, usize)) -> bool {
+    let Ok(io) = FileIo::open(path) else {
+        return false;
+    };
+    SegmentReader::open(Box::new(io) as SegmentBytes)
+        .is_ok_and(|reader| reader.rows() != rows || reader.chunk_spans().last() != Some(tail))
 }
 
 /// One column of a running transient's segment: its rows before the last chunk read from the
