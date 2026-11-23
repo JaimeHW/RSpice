@@ -394,6 +394,20 @@ pub fn sized_refusal(
     refusal: &ResourceLimitError,
     memory: Option<MachineMemory>,
 ) -> Option<String> {
+    said_where(
+        refusal,
+        memory,
+        memory.is_none() && cfg!(target_arch = "wasm32"),
+    )
+}
+
+/// [`sized_refusal`] where the deck runs on `memory`, or in a browser when
+/// `browser`.
+fn said_where(
+    refusal: &ResourceLimitError,
+    memory: Option<MachineMemory>,
+    browser: bool,
+) -> Option<String> {
     let policy = POLICY
         .iter()
         .find(|(kind, _)| *kind == refusal.resource)
@@ -401,9 +415,13 @@ pub fn sized_refusal(
     if policy == FieldPolicy::Kept {
         return None;
     }
-    let sized = value(deck_limits(memory), refusal.resource)?;
+    let limits = if browser {
+        sized_to(ResourceLimits::default(), BROWSER_MEMORY_BYTES)
+    } else {
+        deck_limits(memory)
+    };
+    let sized = value(limits, refusal.resource)?;
     let shipped = value(ResourceLimits::default(), refusal.resource)?;
-    let browser = memory.is_none() && cfg!(target_arch = "wasm32");
     // A limit the deck's place left as shipped, or one a caller set itself,
     // is a fixed cap, which its catalogue sentence says.
     if refusal.limit != sized || (!browser && sized == shipped) {
@@ -731,5 +749,34 @@ mod tests {
         assert_eq!(sized_refusal(&depth, Some(memory)), None);
         #[cfg(not(target_arch = "wasm32"))]
         assert_eq!(sized_refusal(&past(shipped), None), None);
+    }
+
+    /// A deck past the browser's sized limit is too large for the browser,
+    /// and the desktop app runs it; past a limit the browser keeps fixed, it
+    /// keeps the catalogue sentence.
+    #[test]
+    fn a_deck_too_large_for_the_browser_is_sent_to_the_desktop_app() {
+        let browser = sized_to(ResourceLimits::default(), BROWSER_MEMORY_BYTES);
+        let past = ResourceLimitError {
+            resource: ResourceKind::NetlistBytes,
+            requested: browser.max_netlist_bytes + 100 * 1024 * 1024,
+            limit: browser.max_netlist_bytes,
+        };
+        let words = said_where(&past, None, true).expect("a sized limit");
+        assert!(
+            words.starts_with("This deck is ")
+                && words.ends_with(&format!(
+                    ", too large for the browser, which can take at most {}. The desktop app \
+                     runs it.",
+                    bytes(browser.max_netlist_bytes as u64)
+                )),
+            "{words}"
+        );
+        let depth = ResourceLimitError {
+            resource: ResourceKind::IncludeDepth,
+            requested: 65,
+            limit: 64,
+        };
+        assert_eq!(said_where(&depth, None, true), None);
     }
 }
