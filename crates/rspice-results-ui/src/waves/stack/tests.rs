@@ -23,6 +23,13 @@ fn a_fit_reads_rounding_on_a_held_node_as_one_level() {
 
 /// A transient whose columns, all volts, are `names`, in that order.
 fn volts(names: &[&str]) -> StripModel {
+    let columns: Vec<(&str, &str)> = names.iter().map(|name| (*name, "V")).collect();
+    transient(&columns)
+}
+
+/// A transient whose columns are `columns`, each its name and its unit, in
+/// that order.
+fn transient(columns: &[(&str, &str)]) -> StripModel {
     let grid = vec![0.0, 1.0e-3];
     let mut run = rspice_results::run::SimulationRun::new(
         1,
@@ -37,16 +44,16 @@ fn volts(names: &[&str]) -> StripModel {
             0.0,
         )
         .with_waveforms(
-            names
+            columns
                 .iter()
-                .map(|name| {
+                .map(|(name, unit)| {
                     rspice_results::waveform::RetainedTrace::new(
                         *name,
                         grid.clone(),
                         vec![0.0, 1.0],
                         "#fff",
                     )
-                    .with_unit("V")
+                    .with_unit(*unit)
                 })
                 .collect(),
         ),
@@ -84,4 +91,25 @@ fn a_pane_is_named_by_its_first_curve_and_how_many_more_it_draws() {
         name(&["V(a)", "V(b)", "V(a)", "V(c)"]).as_deref(),
         Some("V(a) +2")
     );
+}
+
+/// What a pane can be drawn against: each signal of its strip once, however
+/// many curves draw it, the signals of the pane's own unit first, each in
+/// the order the run holds them.
+#[test]
+fn a_pane_is_offered_each_signal_once_its_own_units_first() {
+    let model = transient(&[
+        ("V(a)", "V"),
+        ("I(r1)", "A"),
+        ("V(b)", "V"),
+        ("V(a)", "V"),
+        ("I(r2)", "A"),
+    ]);
+    let pane = model
+        .unit_panes()
+        .into_iter()
+        .find(|pane| pane.quantity_unit() == "V")
+        .expect("a volts pane");
+    let menu = abscissa_menu(&ResultViewerState::default(), &model, &pane, None);
+    assert_eq!(menu.signals, ["V(a)", "V(b)", "I(r1)", "I(r2)"]);
 }

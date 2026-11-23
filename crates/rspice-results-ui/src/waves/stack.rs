@@ -2422,12 +2422,15 @@ pub(crate) fn abscissa_menu(
 ) -> pane_header::AbscissaMenu {
     let mut own = Vec::new();
     let mut others = Vec::new();
+    // Each signal once, by its source name. A strip can hold a million
+    // signals and this is built on every frame, so a name is not found by
+    // searching the others.
+    let mut seen = std::collections::HashSet::new();
     for trace in model.traces.iter().take(model.signal_trace_count) {
         if !matches!(
             trace.kind,
             super::TraceKind::Value | super::TraceKind::Real | super::TraceKind::Imaginary
-        ) || own.contains(&trace.source_waveform_name)
-            || others.contains(&trace.source_waveform_name)
+        ) || !seen.insert(trace.source_waveform_name.as_str())
         {
             continue;
         }
