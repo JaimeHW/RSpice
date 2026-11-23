@@ -470,13 +470,17 @@ pub fn active_pane<'a>(
 /// curves, or its first curve and how many more it draws, as the legend's
 /// trace list counts them; its unit when it draws no signal.
 pub fn pane_name(model: &StripModel, pane: &UnitPane) -> Option<String> {
+    // Each name once, in the order its first curve comes. A strip can draw a
+    // million curves and this is read every frame, so a name is not found
+    // by searching the others.
     let mut names: Vec<&str> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for trace in pane
         .all_traces()
         .filter(|index| *index < model.signal_trace_count)
         .filter_map(|index| model.traces.get(index))
     {
-        if !names.contains(&trace.name.as_str()) {
+        if seen.insert(trace.name.as_str()) {
             names.push(&trace.name);
         }
     }
