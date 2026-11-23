@@ -13,7 +13,7 @@ pub mod library;
 pub mod library_publication;
 pub mod overview;
 mod page;
-pub mod recovery;
+pub(crate) mod recovery;
 mod technology;
 
 pub use technology::{AttachableTechnology, attachable_binding, attachable_technologies};

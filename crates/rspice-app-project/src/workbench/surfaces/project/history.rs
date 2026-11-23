@@ -922,7 +922,7 @@ fn menu_item(ui: &mut Ui, label: &str, key: Option<&str>, refusal: Option<&str>)
 
 /// What a row is: a checkpoint, a damaged one, or a record of the journal.
 enum Subject {
-    Checkpoint(ProjectCheckpointSummary),
+    Checkpoint(Box<ProjectCheckpointSummary>),
     SetAside(ProjectCheckpointQuarantine),
     Journal(ProjectAuditRow),
 }
@@ -934,7 +934,7 @@ fn subject(cx: &Cx<'_, ProjectFeature>, key: &str) -> Option<Subject> {
         .iter()
         .find(|checkpoint| checkpoint.checkpoint_id().to_string() == key)
     {
-        return Some(Subject::Checkpoint(checkpoint.clone()));
+        return Some(Subject::Checkpoint(Box::new(checkpoint.clone())));
     }
     if let Some(artifact) = recovery
         .quarantined
@@ -980,18 +980,20 @@ fn run(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, asked: Asked) {
         return;
     };
     let intent = match (asked, subject) {
-        (Asked::Compare(_), Subject::Checkpoint(checkpoint)) => RecoveryIntent::Compare(checkpoint),
+        (Asked::Compare(_), Subject::Checkpoint(checkpoint)) => {
+            RecoveryIntent::Compare(*checkpoint)
+        }
         (Asked::Compare(_), Subject::Journal(record)) => return compare_revision(cx, &record),
         (Asked::Restore(_), Subject::Checkpoint(checkpoint)) => {
-            RecoveryIntent::AskRestore(checkpoint)
+            RecoveryIntent::AskRestore(*checkpoint)
         }
         (Asked::Restore(_), Subject::Journal(record)) => {
             return ask_revision_restore(&mut cx.state.history, cx.model, record.key);
         }
         (Asked::Pin(_, pinned), Subject::Checkpoint(checkpoint)) => {
-            RecoveryIntent::Pin(checkpoint, pinned)
+            RecoveryIntent::Pin(*checkpoint, pinned)
         }
-        (Asked::Note(_), Subject::Checkpoint(checkpoint)) => RecoveryIntent::WriteNote(checkpoint),
+        (Asked::Note(_), Subject::Checkpoint(checkpoint)) => RecoveryIntent::WriteNote(*checkpoint),
         (Asked::Delete(_), Subject::Checkpoint(checkpoint)) => {
             RecoveryIntent::AskDelete(CheckpointDeletion::Checkpoint(checkpoint.checkpoint_id()))
         }
@@ -999,7 +1001,7 @@ fn run(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, asked: Asked) {
             RecoveryIntent::AskDelete(CheckpointDeletion::SetAside(artifact.label().to_owned()))
         }
         (Asked::SaveAsNewProject(_), Subject::Checkpoint(checkpoint)) => {
-            RecoveryIntent::SaveAsNewProject(checkpoint)
+            RecoveryIntent::SaveAsNewProject(*checkpoint)
         }
         _ => return,
     };
@@ -1037,7 +1039,7 @@ pub(crate) fn keep_note(
     };
     cx.state.project_checkpoint_recovery.note_draft =
         Some((checkpoint.checkpoint_id(), note.to_owned()));
-    RecoveryIntent::KeepNote(checkpoint).execute(ctx, cx);
+    RecoveryIntent::KeepNote(*checkpoint).execute(ctx, cx);
 }
 
 /// The inspector's title beside the History page while a row is selected:

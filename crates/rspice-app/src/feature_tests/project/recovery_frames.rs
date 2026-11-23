@@ -179,7 +179,7 @@ pub(super) fn offered(output: &egui::FullOutput, label: &str) -> bool {
         .expect("the frame publishes its tree")
         .nodes
         .iter()
-        .find(|(_, node)| node.label().as_deref() == Some(label))
+        .find(|(_, node)| node.label() == Some(label))
         .map(|(_, node)| !node.is_disabled())
         .unwrap_or_else(|| panic!("the frame announces `{label}`"))
 }
