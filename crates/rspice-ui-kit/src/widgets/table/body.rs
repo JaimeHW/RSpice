@@ -152,6 +152,10 @@ impl DataTable<'_> {
                     if cell.unsaved {
                         words.push_str(", unsaved changes");
                     }
+                    if let Some(icon) = cell.trailing {
+                        words.push_str(", ");
+                        words.push_str(icon.accessible_label());
+                    }
                     if self.kind == Kind::Grid {
                         format!("{}: {words}", column.head)
                     } else {
@@ -292,6 +296,17 @@ impl DataTable<'_> {
             let words_start = span.min;
             if cell.unsaved {
                 span.max = (span.max - UNSAVED_ROOM).max(span.min);
+            }
+            if let Some(icon) = cell.trailing {
+                icon.paint(
+                    &ui.painter().with_clip_rect(clip),
+                    Rect::from_center_size(
+                        pos2(span.max - LEAD_ICON_SIDE * 0.5, cell_rect.center().y),
+                        egui::Vec2::splat(LEAD_ICON_SIDE),
+                    ),
+                    t.color.text_dim,
+                );
+                span.max = (span.max - LEAD_ICON_SIDE - LEAD_ICON_GAP).max(span.min);
             }
             if let Some(open) = self.lead_in(ui, index, cell, cell_rect, clip, &mut span) {
                 answered.twist = Some(open);

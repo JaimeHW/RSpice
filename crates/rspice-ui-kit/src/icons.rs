@@ -93,6 +93,8 @@ pub enum Icon {
     ChevronRight,
     /// Close (×).
     Close,
+    /// Read-only: a padlock.
+    Lock,
     /// Application brand mark (the RSpice forward waveform).
     Brand,
 }
@@ -134,6 +136,7 @@ impl Icon {
             Self::ChevronLeft => "Previous",
             Self::ChevronRight => "Next",
             Self::Close => "Close",
+            Self::Lock => "Read-only",
             Self::Brand => "RSpice",
         }
     }
@@ -301,6 +304,13 @@ impl Icon {
             Icon::Close => &[
                 Line(&[[6.0, 6.0], [18.0, 18.0]]),
                 Line(&[[18.0, 6.0], [6.0, 18.0]]),
+            ],
+            // A body under a shackle that closes over its top.
+            Icon::Lock => &[
+                Poly(&[[6.0, 11.0], [18.0, 11.0], [18.0, 20.0], [6.0, 20.0]]),
+                Line(&[[8.5, 11.0], [8.5, 8.0]]),
+                Arc([12.0, 8.0], 3.5, 180.0, 180.0),
+                Line(&[[15.5, 8.0], [15.5, 11.0]]),
             ],
             Icon::Brand => &[Line(&[[7.0, 8.0], [17.0, 12.0], [7.0, 16.0]])],
         }

@@ -315,6 +315,8 @@ pub struct Cell {
     sort: Option<SortKey>,
     /// A mark before the words, after any twist.
     icon: Option<Icon>,
+    /// A mark at the cell's right end, after the words.
+    trailing: Option<Icon>,
     /// How many levels of a tree the words step in.
     indent: u8,
     twist: Twist,
@@ -347,6 +349,7 @@ impl Cell {
             hint: None,
             sort: None,
             icon: None,
+            trailing: None,
             indent: 0,
             twist: Twist::None,
             unsaved: false,
@@ -390,6 +393,13 @@ impl Cell {
     /// Neutral words behind a problem's mark.
     pub fn problem(text: impl Into<String>, problem: Problem) -> Self {
         Self::with(text, false, Ink::Problem(problem))
+    }
+
+    /// The same words with `icon` at the cell's right end: a state of what
+    /// the row names, such as a read-only library's lock.
+    pub fn trailing(mut self, icon: Icon) -> Self {
+        self.trailing = Some(icon);
+        self
     }
 
     /// The same words, opened for entry by a click.
