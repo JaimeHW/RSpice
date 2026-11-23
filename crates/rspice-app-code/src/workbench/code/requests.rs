@@ -164,8 +164,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             action,
             path,
         } => {
-            // The transaction's own form opens; Files and includes is
-            // not behind it.
+            // The transaction's own form opens.
             let opened = code_workspace::open_source_file_dialog_in_bundle(
                 &mut CodeFeature::workspace_parts(cx),
                 bundle_id,
@@ -271,25 +270,18 @@ pub fn void_veriloga_evidence(cx: &mut Cx<'_, CodeFeature>) {
     cx.state.code_workspace.veriloga.void_evidence();
 }
 
-/// Carry out what a source document dialog handed over: a lifecycle choice
-/// on the Verilog-A document it manages, then the close the same frame
-/// asked for.
+/// Carry out what a file form, the revision history or the Files rail
+/// handed over: a choice on a Verilog-A document.
 fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentRequest) {
     match request {
         SourceDocumentRequest::Document {
             action,
             logical_path,
-            close,
-        } => {
-            source_document::apply_lifecycle_action(
-                &mut CodeFeature::workspace_parts(cx),
-                action,
-                &logical_path,
-            );
-            if close {
-                source_document::close_document_lifecycle(&mut cx.state.code_workspace);
-            }
-        }
+        } => source_document::apply_lifecycle_action(
+            &mut CodeFeature::workspace_parts(cx),
+            action,
+            &logical_path,
+        ),
     }
 }
 

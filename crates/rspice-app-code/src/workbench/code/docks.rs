@@ -20,7 +20,7 @@ use crate::workbench::framework::requests::OpenInDesign;
 use crate::workbench::state::Workspace;
 
 use super::CodeFeature;
-use super::commands::CodeRequest;
+use super::commands::{CodeRequest, SourceDocumentRequest};
 use super::netlist_first::{self, DeckFacts, deck_fact_rows, deck_facts};
 
 /// The navigator of the code document in front: the Netlist workspace's
@@ -103,6 +103,14 @@ fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
             action,
             path,
         }),
+        Some(RailAction::Document { action, path }) => {
+            cx.wb.outbox.push(CodeRequest::SourceDocument(
+                SourceDocumentRequest::Document {
+                    action,
+                    logical_path: path,
+                },
+            ));
+        }
         Some(RailAction::OpenInstance(usage)) => {
             cx.wb.outbox.push(CodeRequest::OpenCellInstance(usage));
         }

@@ -160,7 +160,7 @@ const FILE_MENU: &[MenuEntry] = &[
     code(CodeCommand::SaveDeckAs),
     code(CodeCommand::SaveNetlistAsDeck).access('T'),
     MenuEntry::Only(
-        MenuContext::SourceEditor,
+        MenuContext::DeckEditor,
         &[code(CodeCommand::ManageSourceDocument).access('U')],
     ),
     project(ProjectCommand::SaveAll),

@@ -880,32 +880,19 @@ fn a_file_dropped_on_the_veriloga_editor_opens_the_import_form() {
 
 const REPLACEMENT: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n) / 2k;\nendmodule\n";
 
-/// "Replace from file…" in the Files and includes dialog for the open
-/// `model.va`, through the picker, to the confirmation it opens.
-fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
-    app.execute_command_key(
-        rspice_app_code::workbench::code::commands::CodeCommand::ManageSourceDocument.key(),
-    );
-    let mut output = frame(ctx, app, DESKTOP);
-    for _ in 0..12 {
-        output = frame(ctx, app, DESKTOP);
-    }
-    let replace = node_center(&output, "Replace from file…")
-        .expect("Files and includes offers Replace from file");
-    click(ctx, app, replace);
+/// Replace from file… for the open `model.va`, as its row's menu on the
+/// Files rail asks for it, then the picked file handed straight to the
+/// confirmation it opens. No frame runs between the two, so the native
+/// picker the request asks for never opens.
+fn pick_replacement(app: &mut RSpiceApp) {
+    let mut parts = app.code_workspace_parts();
+    code_workspace::request_veriloga_source_replacement(&mut parts, "model.va")
+        .expect("model.va can be replaced");
     assert!(
-        app.state.code.code_workspace.veriloga.import_requested,
+        parts.code.veriloga.import_requested,
         "Replace from file asks for a file"
     );
-    assert!(
-        !app.state.code.code_workspace.source_document_dialog,
-        "the picker and the confirmation take over from the dialog"
-    );
-    code_workspace::complete_veriloga_file_pick(
-        &mut app.code_workspace_parts(),
-        "replacement.va",
-        REPLACEMENT,
-    );
+    code_workspace::complete_veriloga_file_pick(&mut parts, "replacement.va", REPLACEMENT);
     assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
 }
 
@@ -930,7 +917,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     frame(&ctx, &mut app, DESKTOP);
     let original = root_text(&app, &reference);
 
-    pick_replacement(&ctx, &mut app);
+    pick_replacement(&mut app);
     assert_eq!(
         root_text(&app, &reference),
         original,
@@ -975,7 +962,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
         "Cancel replaced nothing"
     );
 
-    pick_replacement(&ctx, &mut app);
+    pick_replacement(&mut app);
     let bundle = |app: &RSpiceApp| {
         app.state
             .model

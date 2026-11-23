@@ -9,9 +9,11 @@
 //! and only a role other than ordinary source: a label every row wears tells
 //! the reader nothing.
 //!
-//! Below the files, the Verilog-A rail states what the file in front of the
-//! reader includes and where each include resolved, what it declares, and
-//! where the cell is placed.
+//! Every operation on a file is its row's: its menu holds them all, and F2
+//! and Delete do the two a list's keys always do. Below the files, the
+//! Verilog-A rail states what the file in front of the reader includes and
+//! where each include resolved, which files include it, what it declares,
+//! and where the cell is placed.
 
 use super::rail;
 use super::*;
@@ -21,11 +23,12 @@ use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use crate::state::ProjectSourceId;
+use crate::state::{ProjectSourceBundle, ProjectSourceId};
 use crate::workbench::app::dialogs::source_document::leaf_name;
 use crate::workbench::app::dialogs::source_file_form::delete_refusal;
 use crate::workbench::app_state::PlatformState;
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
+use crate::workbench::code::commands::LifecycleAction;
 use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceFileAction, CodeWorkspaceRuntimeState, SourceIncludeTarget, SourceNavigation,
@@ -54,6 +57,12 @@ pub(crate) enum RailAction {
         action: CodeSourceFileAction,
         path: String,
     },
+    /// Ask the shell for `action` on the file at `path`: its revision
+    /// history, or replacing it from a picked file.
+    Document {
+        action: LifecycleAction,
+        path: String,
+    },
     /// Open the schematic an instance of the cell is placed in.
     OpenInstance(CellInstanceUse),
 }
@@ -70,14 +79,18 @@ pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAc
                 delete_refusal(bundle, path, messages).map(|reason| (path.to_owned(), reason))
             })
             .collect(),
-        writable: !parts.model.active_view_read_only()
-            && code_workspace::source_file_mutation_block_reason_in(
-                parts.model,
-                parts.code_workspace,
-                parts.platform,
-                messages,
-            )
-            .is_none(),
+        held: code_workspace::source_file_mutation_block_reason_in(
+            parts.model,
+            parts.code_workspace,
+            parts.platform,
+            messages,
+        )
+        .or_else(|| {
+            parts
+                .model
+                .active_view_read_only()
+                .then(|| messages.text(MessageId::CodeSourceReadOnlyDocumentDetail))
+        }),
     });
     let rail = Rail {
         id_salt: "workbench.veriloga.navigator",
@@ -107,27 +120,36 @@ struct Rail {
     used_in: Option<Vec<CellInstanceUse>>,
 }
 
-/// New, rename and delete for a bundle's files, offered by the rail that
-/// lists them.
+/// The operations on a bundle's files, offered by the rail that lists them:
+/// New, Rename and Delete in its header, and every operation on a file in
+/// its row's menu.
 ///
-/// Each opens its own form, the same one Files and includes opens:
-/// rewriting a bundle's file graph is confirmed and committed, never applied
-/// by a single click in a list. The controls are neutral; danger is the
-/// form's to state.
+/// Each opens its own form or dialog: rewriting a bundle's file graph is
+/// confirmed and committed, never applied by a single click in a list. The
+/// controls are neutral; danger is the form's to state.
 struct FileActions {
     bundle_id: ProjectSourceId,
     /// The files the bundle refuses to delete, and why.
     delete_refusals: Vec<(String, String)>,
-    writable: bool,
+    /// Why no file can change now, when none can: what holds every file
+    /// operation, or a cell that is read-only.
+    held: Option<String>,
 }
 
 impl FileActions {
-    /// Why `action` cannot apply to `path`, when it cannot. The bundle
+    /// Why `operation` cannot apply to `path`, when it cannot. Reading the
+    /// history changes nothing, so only what writes is held. The bundle
     /// refuses to delete its main file, a file a role binds and a file that
     /// still includes another, so the control says so before the click
     /// rather than after it.
-    fn refusal(&self, action: CodeSourceFileAction, path: &str) -> Option<String> {
-        if action != CodeSourceFileAction::Delete {
+    fn refusal(&self, operation: FileOperation, path: &str) -> Option<String> {
+        if operation == FileOperation::History {
+            return None;
+        }
+        if let Some(held) = &self.held {
+            return Some(held.clone());
+        }
+        if operation != FileOperation::File(CodeSourceFileAction::Delete) {
             return None;
         }
         self.delete_refusals
@@ -136,6 +158,71 @@ impl FileActions {
             .map(|(_, reason)| reason.clone())
     }
 }
+
+/// One operation on a file of the rail.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FileOperation {
+    /// A transaction with a form of its own.
+    File(CodeSourceFileAction),
+    /// The revision history of the file's cell.
+    History,
+    /// Replace the file's text from a picked file.
+    ReplaceFromFile,
+}
+
+impl FileOperation {
+    /// What a press on the operation asks the rail for, on `path`.
+    fn request(self, path: &str) -> RailRequest {
+        let path = path.to_owned();
+        match self {
+            Self::File(action) => RailRequest::FileAction(action, path),
+            Self::History => RailRequest::Document(LifecycleAction::OpenHistory, path),
+            Self::ReplaceFromFile => RailRequest::Document(LifecycleAction::ReplaceFromFile, path),
+        }
+    }
+}
+
+/// A file row's menu, top to bottom: New file, which is included from the
+/// row's file; the operations that give the file another name, place or
+/// copy; its history and its text; and Delete last, past a separator. Each
+/// names the key that does it from the row, when one does.
+const FILE_MENU: [(MessageId, FileOperation, Option<MessageId>); 7] = [
+    (
+        MessageId::CodeSourceNewFile,
+        FileOperation::File(CodeSourceFileAction::New),
+        None,
+    ),
+    (
+        MessageId::CodeSourceRename,
+        FileOperation::File(CodeSourceFileAction::Rename),
+        Some(MessageId::CodeSourceRenameKey),
+    ),
+    (
+        MessageId::CodeSourceMove,
+        FileOperation::File(CodeSourceFileAction::Move),
+        None,
+    ),
+    (
+        MessageId::CodeSourceDuplicate,
+        FileOperation::File(CodeSourceFileAction::Duplicate),
+        None,
+    ),
+    (
+        MessageId::CodeSourceRevisionHistory,
+        FileOperation::History,
+        None,
+    ),
+    (
+        MessageId::CodeSourceReplaceFromFile,
+        FileOperation::ReplaceFromFile,
+        None,
+    ),
+    (
+        MessageId::CodeSourceDelete,
+        FileOperation::File(CodeSourceFileAction::Delete),
+        Some(MessageId::CodeSourceDeleteKey),
+    ),
+];
 
 /// The height at which the controls are sized for a finger.
 const TOUCH_CONTROL_HEIGHT: f32 = 44.0;
@@ -189,9 +276,9 @@ fn header_file_actions(
     let mut requested = None;
     for (label, action, icon) in FILE_ACTIONS.into_iter().rev() {
         let label = messages.text(label);
-        let refusal = actions.refusal(action, active);
+        let refusal = actions.refusal(FileOperation::File(action), active);
         let response = strip
-            .add_enabled_ui(actions.writable && refusal.is_none(), |ui| {
+            .add_enabled_ui(refusal.is_none(), |ui| {
                 crate::workbench::design_system::icon_button(
                     ui,
                     icon,
@@ -210,7 +297,7 @@ fn header_file_actions(
         }
     }
     let add = strip
-        .add_enabled_ui(actions.writable, |ui| {
+        .add_enabled_ui(actions.held.is_none(), |ui| {
             crate::workbench::design_system::icon_button(
                 ui,
                 WorkbenchIcon::Folder,
@@ -220,35 +307,43 @@ fn header_file_actions(
             )
         })
         .inner;
+    let add = match &actions.held {
+        Some(reason) => add.on_disabled_hover_text(reason),
+        None => add,
+    };
     if add.clicked() {
         requested = Some(RailRequest::AddFiles(active.to_owned()));
     }
     requested
 }
 
-/// New, rename and delete for one row, from its context menu. A new file is
-/// included from the row's.
-fn row_file_actions(
+/// Every operation on one file, from its row's menu. A refused one is held,
+/// and its hover says why.
+fn row_file_menu(
     response: &Response,
     actions: &FileActions,
     path: &str,
     messages: MessageCatalog,
-) -> Option<CodeSourceFileAction> {
+) -> Option<RailRequest> {
     let mut requested = None;
     let (popup, _) = row_context_menu(response);
     popup.show(|ui| {
-        for (label, action, _) in FILE_ACTIONS {
-            let refusal = actions.refusal(action, path);
-            let item = ui.add_enabled(
-                actions.writable && refusal.is_none(),
-                egui::Button::new(messages.text(label)),
-            );
+        for (label, operation, key) in FILE_MENU {
+            if operation == FileOperation::File(CodeSourceFileAction::Delete) {
+                ui.separator();
+            }
+            let refusal = actions.refusal(operation, path);
+            let mut item = egui::Button::new(messages.text(label));
+            if let Some(key) = key {
+                item = item.shortcut_text(messages.text(key));
+            }
+            let item = ui.add_enabled(refusal.is_none(), item);
             let item = match refusal {
                 Some(reason) => item.on_disabled_hover_text(reason),
                 None => item,
             };
             if item.clicked() {
-                requested = Some(action);
+                requested = Some(operation.request(path));
                 ui.close();
             }
         }
@@ -307,6 +402,8 @@ fn select(model: &Model, code: &mut CodeWorkspaceRuntimeState, logical_path: &st
 enum RailRequest {
     Select(String),
     FileAction(CodeSourceFileAction, String),
+    /// Ask the shell for a choice on the file at the path.
+    Document(LifecycleAction, String),
     /// Say why a key's file operation is refused.
     Refused(String),
     /// Add files from disk to the bundle, beside `path`.
@@ -334,6 +431,10 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
         ),
         _ => SourceNavigation::default(),
     };
+    let importers = match (rail.active.as_deref(), bundle) {
+        (Some(path), Some(bundle)) => importers(bundle, path),
+        _ => Vec::new(),
+    };
     let header = bundle_id
         .zip(rail.active.as_deref())
         .and_then(|(bundle_id, path)| {
@@ -357,7 +458,7 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
                 let Some(active) = rail.active.as_deref() else {
                     break 'rows;
                 };
-                includes_section(ui, &navigation, header, messages, &mut request);
+                includes_section(ui, &navigation, &importers, header, messages, &mut request);
                 outline_section(ui, &navigation, active, messages, &mut request);
                 if let Some(used_in) = &rail.used_in {
                     used_in_section(ui, used_in, messages, &mut request);
@@ -382,6 +483,9 @@ fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<Rail
                     path,
                 });
             }
+        }
+        Some(RailRequest::Document(action, path)) => {
+            return Some(RailAction::Document { action, path });
         }
         Some(RailRequest::AddFiles(path)) => {
             if let Some(file_actions) = rail.actions.as_ref() {
@@ -481,10 +585,10 @@ fn files_section(
             *request = Some(RailRequest::Select(row.logical_path.clone()));
         }
         if let Some(file_actions) = rail.actions.as_ref() {
-            if let Some(action) =
-                row_file_actions(&response, file_actions, &row.logical_path, messages)
+            if let Some(chosen) =
+                row_file_menu(&response, file_actions, &row.logical_path, messages)
             {
-                *request = Some(RailRequest::FileAction(action, row.logical_path.clone()));
+                *request = Some(chosen);
             }
             if let Some(keyed) = row_file_keys(ui, &response, file_actions, &row.logical_path) {
                 *request = Some(keyed);
@@ -494,37 +598,54 @@ fn files_section(
 }
 
 /// F2 renames the file row holding the keyboard and Delete deletes it, as in
-/// every file list. A refused delete says why rather than doing nothing.
+/// every file list. A refused one says why rather than doing nothing.
 fn row_file_keys(
     ui: &Ui,
     response: &Response,
     actions: &FileActions,
     path: &str,
 ) -> Option<RailRequest> {
-    if !actions.writable || !response.has_focus() {
+    if !response.has_focus() {
         return None;
     }
-    if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F2)) {
-        return Some(RailRequest::FileAction(
-            CodeSourceFileAction::Rename,
-            path.to_owned(),
-        ));
-    }
-    if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Delete)) {
-        return Some(match actions.refusal(CodeSourceFileAction::Delete, path) {
-            Some(reason) => RailRequest::Refused(reason),
-            None => RailRequest::FileAction(CodeSourceFileAction::Delete, path.to_owned()),
-        });
-    }
-    None
+    let action = if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F2)) {
+        CodeSourceFileAction::Rename
+    } else if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Delete)) {
+        CodeSourceFileAction::Delete
+    } else {
+        return None;
+    };
+    Some(match actions.refusal(FileOperation::File(action), path) {
+        Some(reason) => RailRequest::Refused(reason),
+        None => RailRequest::FileAction(action, path.to_owned()),
+    })
 }
 
-/// Every include the file pulls in and where it resolved. A project file
-/// opens for editing, a built-in header opens read-only in the same well, and
-/// a name nothing holds is marked and takes the reader to its directive.
+/// The files of `bundle` that include `logical_path`, as the bundle records
+/// them: persisted dependency records, never a re-parse of the text, so the
+/// rail cannot claim an edge the project does not hold.
+fn importers(bundle: &ProjectSourceBundle, logical_path: &str) -> Vec<String> {
+    let mut importers: Vec<String> = bundle
+        .dependencies()
+        .iter()
+        .filter(|dependency| {
+            crate::state::project_source_paths_equal(dependency.imported(), logical_path)
+        })
+        .map(|dependency| dependency.importer().to_owned())
+        .collect();
+    importers.sort();
+    importers.dedup();
+    importers
+}
+
+/// Every include the file pulls in and where it resolved, then the files
+/// that include it. A project file opens for editing, a built-in header
+/// opens read-only in the same well, and a name nothing holds is marked and
+/// takes the reader to its directive.
 fn includes_section(
     ui: &mut Ui,
     navigation: &SourceNavigation,
+    importers: &[String],
     header: Option<&'static str>,
     messages: MessageCatalog,
     request: &mut Option<RailRequest>,
@@ -532,7 +653,7 @@ fn includes_section(
     section_header(
         ui,
         &messages.text(MessageId::CodeNavigatorIncludes),
-        Some(&navigation.includes.len().to_string()),
+        Some(&(navigation.includes.len() + importers.len()).to_string()),
     );
     for include in &navigation.includes {
         match &include.target {
@@ -589,6 +710,23 @@ fn includes_section(
                     });
                 }
             }
+        }
+    }
+    if importers.is_empty() {
+        return;
+    }
+    group_caption(ui, &messages.text(MessageId::CodeNavigatorIncludedBy));
+    for importer in importers {
+        let response = nav_row_response(
+            ui,
+            source_row_icon(false),
+            &leaf_name(importer),
+            false,
+            None,
+        )
+        .on_hover_text(importer);
+        if response.clicked() {
+            *request = Some(RailRequest::Select(importer.clone()));
         }
     }
 }

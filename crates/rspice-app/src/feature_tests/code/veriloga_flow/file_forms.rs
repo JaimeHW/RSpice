@@ -1,6 +1,6 @@
-//! New, Rename and Delete from the Verilog-A Files rail, through whole
-//! frames: each opens its own compact form, never Files and includes; and
-//! Files and includes, which leaves making a file to the rail.
+//! Every operation on a Verilog-A file from its row on the Files rail,
+//! through whole frames: the header's New file, the row's keys, and its
+//! menu, whose forms and revision history each open on their own.
 
 use egui::Key;
 
@@ -9,7 +9,6 @@ use super::*;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_workbench::workbench::localization::MessageId;
 
-const MANAGE: &str = "Files and includes";
 const NEW_FORM: &str = "New Verilog-A file";
 
 /// The bundle of the view in front.
@@ -66,7 +65,6 @@ fn new_file_on_the_rail_is_a_compact_form_and_enter_creates_the_file() {
     let main = main_file(&user);
     new_file(&mut user, "stage");
     user.expect(NEW_FORM);
-    assert!(user.find(MANAGE).is_none(), "Files and includes stays shut");
     user.expect(&format!("Adds an `include at the top of {main}"));
 
     user.key(Key::Enter, NONE);
@@ -88,7 +86,6 @@ fn f2_on_a_file_row_renames_it_with_the_stem_selected() {
     user.key(Key::F2, NONE);
     user.settle();
     user.expect("Rename file");
-    assert!(user.find(MANAGE).is_none());
 
     type_text(&mut user, "amp");
     user.key(Key::Enter, NONE);
@@ -174,40 +171,182 @@ fn the_main_file_cannot_be_deleted_and_says_why() {
     assert!(bundle(&user).contains_file(&main));
 }
 
-/// Files and includes acts on the document in front: its six operations are
-/// there, and a new file is not one of them. The Files rail makes one, so
-/// opening the dialog adds no second New file… to the screen.
-#[test]
-fn files_and_includes_offers_the_documents_operations_and_no_new_file() {
-    let mut user = op_amp();
-    let messages = user.app.state.workbench.messages();
-    let new_file = messages.text(MessageId::CodeSourceNewFile);
-    let shown = |user: &User| {
-        user.named
-            .iter()
-            .filter(|(name, _)| *name == new_file)
-            .count()
-    };
-    let on_the_rail = shown(&user);
-    assert!(on_the_rail > 0, "the rail offers New file…");
+/// Where the rail drew the row of `path`: the navigator's, left of the
+/// editor's tab of the same name.
+fn row(user: &User, path: &str) -> egui::Rect {
+    user.named
+        .iter()
+        .filter(|(name, _)| name == path)
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap_or_else(|| panic!("no row named {path:?}"))
+}
 
-    user.app
-        .execute_command_key(CodeCommand::ManageSourceDocument.key());
+/// Open the menu of `path`'s row, as a right-click does.
+fn open_row_menu(user: &mut User, path: &str) -> egui::Rect {
+    let at = row(user, path);
+    user.press(at.center(), egui::PointerButton::Secondary);
     user.settle();
-    user.expect(MANAGE);
-    for operation in [
+    at
+}
+
+/// Where the menu open under `at` drew `name`, which an item that names
+/// its key says before the key: the header's icons of the same names are
+/// above the rows, so the nearest below the row is the menu's.
+fn menu_item(user: &User, at: egui::Rect, name: &str) -> Option<egui::Rect> {
+    let keyed = format!("{name} ");
+    user.named
+        .iter()
+        .filter(|(candidate, rect)| {
+            (candidate == name || candidate.starts_with(&keyed)) && rect.top() >= at.top()
+        })
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+}
+
+/// Press `name` on the menu open under `at`.
+fn press_menu_item(user: &mut User, at: egui::Rect, name: &str) {
+    let item = menu_item(user, at, name).unwrap_or_else(|| panic!("the menu offers {name:?}"));
+    user.press(item.center(), egui::PointerButton::Primary);
+    user.settle();
+}
+
+/// A file row's menu holds every operation on the file, New file first and
+/// Delete last. The main file cannot be deleted, so its Delete is held and
+/// opens nothing; the others open their forms.
+#[test]
+fn a_file_rows_menu_offers_every_operation_and_holds_a_refused_one() {
+    let mut user = op_amp();
+    let main = main_file(&user);
+    let messages = user.app.state.workbench.messages();
+    let at = open_row_menu(&mut user, &main);
+    let items = [
+        MessageId::CodeSourceNewFile,
         MessageId::CodeSourceRename,
         MessageId::CodeSourceMove,
         MessageId::CodeSourceDuplicate,
         MessageId::CodeSourceRevisionHistory,
         MessageId::CodeSourceReplaceFromFile,
         MessageId::CodeSourceDelete,
-    ] {
-        user.expect(&messages.text(operation));
-    }
-    assert_eq!(
-        shown(&user),
-        on_the_rail,
-        "the dialog adds no New file… of its own"
+    ]
+    .map(|item| {
+        menu_item(&user, at, &messages.text(item))
+            .unwrap_or_else(|| panic!("the menu offers {item:?}"))
+    });
+    assert!(
+        items.windows(2).all(|pair| pair[0].top() < pair[1].top()),
+        "the menu lists them in order: {items:?}"
     );
+
+    press_menu_item(&mut user, at, &messages.text(MessageId::CodeSourceDelete));
+    assert!(
+        user.find("Delete file").is_none(),
+        "the held Delete opens nothing"
+    );
+    assert!(bundle(&user).contains_file(&main));
+    user.key(Key::Escape, NONE);
+    user.settle();
+
+    let at = open_row_menu(&mut user, &main);
+    press_menu_item(
+        &mut user,
+        at,
+        &messages.text(MessageId::CodeSourceDuplicate),
+    );
+    user.expect("Duplicate file");
+}
+
+/// Rename from the row's menu runs the whole transaction: the form opens on
+/// the row's file, and committing it renames the file the bundle holds.
+#[test]
+fn rename_from_a_file_rows_menu_renames_the_file() {
+    let mut user = op_amp();
+    let main = main_file(&user);
+    let messages = user.app.state.workbench.messages();
+    let at = open_row_menu(&mut user, &main);
+    press_menu_item(&mut user, at, &messages.text(MessageId::CodeSourceRename));
+    user.expect("Rename file");
+
+    type_text(&mut user, "amp");
+    user.key(Key::Enter, NONE);
+    user.settle();
+    assert_eq!(main_file(&user), "amp.va");
+}
+
+/// Revision history opens from the row's menu as a dialog of its own,
+/// named for the file, and restores the revision chosen in it as a new one:
+/// the file made since is gone again, and the dialog closes.
+#[test]
+fn revision_history_from_a_file_rows_menu_restores_the_revision_chosen() {
+    let mut user = op_amp();
+    let main = main_file(&user);
+    new_file(&mut user, "stage");
+    user.key(Key::Enter, NONE);
+    user.settle();
+    assert!(bundle(&user).contains_file("stage.va"));
+
+    let messages = user.app.state.workbench.messages();
+    let at = open_row_menu(&mut user, &main);
+    press_menu_item(
+        &mut user,
+        at,
+        &messages.text(MessageId::CodeSourceRevisionHistory),
+    );
+    user.expect(&format!("Revision history \u{b7} {main}"));
+
+    // Every revision's row announces itself; the earlier one, before the
+    // new file, is the one not current.
+    let earlier = user
+        .named
+        .iter()
+        .find(|(name, _)| name.starts_with("Revision ") && name.ends_with("1 file."))
+        .map(|(_, rect)| *rect)
+        .expect("the revision before the new file is listed");
+    user.press(earlier.center(), egui::PointerButton::Primary);
+    user.settle();
+    user.click(&messages.text(MessageId::CodeSourceRestoreAsNewRevision));
+    assert!(
+        !bundle(&user).contains_file("stage.va"),
+        "the revision restored has no stage.va"
+    );
+    assert!(
+        user.app.state.code.code_workspace.source_history.is_none(),
+        "a restore closes the history"
+    );
+}
+
+/// The rail's Includes lists both directions: what the file in front
+/// includes, and the files that include it.
+#[test]
+fn the_rail_lists_the_files_that_include_the_one_in_front() {
+    let mut user = op_amp();
+    let main = main_file(&user);
+    new_file(&mut user, "stage");
+    user.key(Key::Enter, NONE);
+    user.settle();
+    assert_eq!(selected(&user), "stage.va");
+
+    let included_by = user
+        .app
+        .state
+        .workbench
+        .messages()
+        .text(MessageId::CodeNavigatorIncludedBy);
+    let caption = user.expect(&included_by);
+    assert!(
+        user.named
+            .iter()
+            .any(|(name, rect)| *name == main && rect.top() > caption.top()),
+        "{main} is listed under {included_by}"
+    );
+}
+
+/// The inspector states the file in front's line endings and where the
+/// source stands with the compiler, as facts beside its module.
+#[test]
+fn the_inspector_states_the_line_endings_and_the_compile() {
+    let user = op_amp();
+    let messages = user.app.state.workbench.messages();
+    user.expect(&messages.text(MessageId::CodeSourceLineEndings));
+    user.expect(&messages.text(MessageId::CodeSourceCompile));
 }

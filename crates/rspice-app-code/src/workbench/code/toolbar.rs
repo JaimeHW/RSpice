@@ -106,10 +106,6 @@ const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
         overflow: None,
     }),
     icon(CodeCommand::FindCodeDocument.key(), WorkbenchIcon::Search),
-    icon(
-        CodeCommand::ManageSourceDocument.key(),
-        WorkbenchIcon::Folder,
-    ),
 ];
 
 fn compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {

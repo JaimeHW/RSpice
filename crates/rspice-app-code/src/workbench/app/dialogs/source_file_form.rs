@@ -1,9 +1,9 @@
 //! New, Rename, Move, Duplicate and Delete for one file of a Verilog-A
 //! bundle, each its own compact command form.
 //!
-//! The Files rail and Files and includes both open these. A form states
-//! the file it acts on, the name it is given, and what else the change
-//! rewrites — the `include a new file adds, the includes a rename updates or
+//! A file row of the Files rail opens these, from its menu or its keys, and
+//! the rail's header opens New file. A form states the file it acts on, the
+//! name it is given, and what else the change rewrites — the `include a new file adds, the includes a rename updates or
 //! a delete removes — and refuses before the click rather than after it: a
 //! name the bundle would reject is said under the field in plain words, and
 //! a file that cannot be deleted says why in the footer.
@@ -185,7 +185,6 @@ pub(in crate::workbench) fn render(
         DialogChoice::Primary if ready => Some(SourceDocumentRequest::Document {
             action: LifecycleAction::Commit,
             logical_path: draft.source_path,
-            close: false,
         }),
         DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
             code.source_file_dialog = None;
@@ -228,8 +227,8 @@ fn titles(draft: &CodeSourceFileDialogState, messages: MessageCatalog) -> (Strin
 /// main file, a file a role binds, or a file that still includes another.
 ///
 /// These are the bundle's own refusals, said before the click. The rail's
-/// Delete, the Files and includes dialog and this form's footer all read them
-/// from here, so the three can never disagree.
+/// header, its row menu and this form's footer all read them from here, so
+/// they can never disagree.
 pub(in crate::workbench) fn delete_refusal(
     bundle: &ProjectSourceBundle,
     logical_path: &str,

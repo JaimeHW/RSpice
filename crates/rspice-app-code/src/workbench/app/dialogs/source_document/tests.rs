@@ -1,7 +1,6 @@
-//! Source document dialog tests: include search roots, role labels, the lifecycle
-//! transactions, and the creation form a project with no deck opens.
+//! Deck and include folders tests: where the include folders resolve, the
+//! engine entry point the chain decides, and the deck's line endings.
 
-use super::fixtures::english;
 use super::*;
 use crate::state::ProjectDescriptor;
 use rspice_simulation::netlist_preparation::IncludeSearchChain;
@@ -99,14 +98,16 @@ fn the_chain_decides_which_engine_entry_point_a_host_parse_takes() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-/// Line endings are reported from the retained bytes. A whole-file rewrite
-/// normalizes a mixed document, so the dialog has to be able to say so.
+/// Line endings are reported from the bytes a file was read with. A
+/// whole-file rewrite normalizes a mixed file, so the dialog has to be
+/// able to say so.
 #[test]
 fn line_endings_are_measured_rather_than_assumed() {
-    let english = english();
-    let summary = |content| english.text(line_ending_summary(content));
+    let english = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
+    let summary = |content| LineEnding::detect(content).label(english);
     assert_eq!(summary("a\nb\n"), "LF");
     assert_eq!(summary("a\r\nb\r\n"), "CRLF");
-    assert_eq!(summary("a\r\nb\n"), "mixed LF and CRLF");
+    assert_eq!(summary("a\rb\r"), "CR");
+    assert_eq!(summary("a\r\nb\n"), "mixed");
     assert_eq!(summary("single"), "none \u{00b7} single line");
 }

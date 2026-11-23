@@ -68,6 +68,8 @@ pub enum CodeCommand {
     ReplaceInCodeDocument,
     /// The deck Run runs on the Netlist workspace, brought to the front.
     ShowRunDeck,
+    /// Deck and include folders: where the deck in front is and the
+    /// folders its includes are searched in.
     ManageSourceDocument,
     /// The source editor's line, navigation and folding commands. Each acts
     /// on the source editor the page on screen shows as its document, and
@@ -284,31 +286,29 @@ impl Request for VerilogAStripRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// What a choice in the source document dialogs still needs of the whole
-/// application, which the shell carries out as the dialog's step returns.
+/// What a choice in the source document dialogs, or on a Verilog-A file's
+/// row of the Files rail, still needs of the whole application, which the
+/// shell carries out as the step that asked returns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceDocumentRequest {
-    /// A lifecycle choice on the Verilog-A document at `logical_path`, then
-    /// the dialog's close when the same frame closed it.
+    /// A choice on the Verilog-A document at `logical_path`.
     Document {
         action: LifecycleAction,
         logical_path: String,
-        close: bool,
     },
 }
 
-/// What the source document dialog's body asked for of a Verilog-A
-/// document, applied after rendering so a transaction never mutates the
-/// project while its own rows are still on screen.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What was asked of a Verilog-A document, applied after rendering so a
+/// transaction never mutates the project while its own rows are still on
+/// screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LifecycleAction {
-    None,
-    Begin(CodeSourceFileAction),
+    /// Commit the open file form.
     Commit,
+    /// Open the document's revision history.
     OpenHistory,
-    SelectRevision(u64),
+    /// Restore the revision the history has selected, as a new revision.
     Restore,
-    CloseHistory,
     /// Replace this Verilog-A file's content from a picked file, through the
     /// import transaction's own confirmation. File > Import never does it.
     ReplaceFromFile,
@@ -749,7 +749,7 @@ impl CodeCommand {
             Self::FindCodeDocument => ("Find in document\u{2026}", "Netlist", palette),
             Self::ReplaceInCodeDocument => ("Replace in document\u{2026}", "Netlist", palette),
             Self::ShowRunDeck => ("Show deck", "Simulate", navigates),
-            Self::ManageSourceDocument => ("Files and includes\u{2026}", "Netlist", palette),
+            Self::ManageSourceDocument => ("Deck and include folders\u{2026}", "Netlist", palette),
             Self::ToggleLineComment => ("Toggle line comment", "Edit", palette),
             Self::IndentLines => ("Indent lines", "Edit", palette),
             Self::OutdentLines => ("Outdent lines", "Edit", palette),

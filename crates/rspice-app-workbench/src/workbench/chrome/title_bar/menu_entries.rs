@@ -70,6 +70,8 @@ enum MenuLabel {
 pub enum MenuContext {
     /// A source editor is the document on screen.
     SourceEditor,
+    /// The Netlist workspace is in front with its source editor: a deck.
+    DeckEditor,
     /// A source editor whose language service answers go to definition,
     /// find references and rename is the document on screen.
     NavigableSourceEditor,
@@ -119,6 +121,10 @@ impl MenuContext {
         let view_is = |view_type| design_view_is(workbench, model, view_type);
         match self {
             Self::SourceEditor => editor.is_some(),
+            Self::DeckEditor => {
+                editor.is_some()
+                    && workbench.workspace == crate::workbench::state::Workspace::Netlist
+            }
             Self::NavigableSourceEditor => editor.is_some_and(|editor| editor.navigable),
             Self::Drawing => editor.is_none(),
             Self::DesktopApplication => file_menu_shows_exit(platform),

@@ -35,7 +35,7 @@ use crate::workbench::commands::code_context::{
 };
 use crate::workbench::documents::code_workspace::{
     CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
-    design_hosts_veriloga, poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
+    poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
 use crate::workbench::documents::netlist_document::cross_probe;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
@@ -202,6 +202,7 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
         is_open: |code| {
             code.code_workspace.source_document_dialog
                 || code.code_workspace.source_file_dialog.is_some()
+                || code.code_workspace.source_history.is_some()
         },
         render: CodeFeature::render_source_document_dialog,
     },
@@ -377,17 +378,15 @@ impl CommandSet for CodeCommand {
                 }
             }
             Self::ShowRunDeck => (runs_a_deck(reads), "Run runs the plan, not a deck"),
-            // Unlike its neighbours this one belongs to the source documents,
-            // a Verilog-A cell view, not the deck: it manages a project source
-            // bundle, which the deck is not.
+            // A Verilog-A file's operations are its row's on the Files rail;
+            // only a deck has this dialog.
             Self::ManageSourceDocument => (
-                code_document_on_screen(reads)
-                    && source_document_dialog_is_available(
-                        reads.wb.workspace,
-                        model,
-                        &reads.state.netlist,
-                        reads.platform,
-                    ),
+                source_document_dialog_is_available(
+                    reads.wb.workspace,
+                    model,
+                    &reads.state.netlist,
+                    reads.platform,
+                ),
                 UNAVAILABLE,
             ),
             Self::GoToDefinition | Self::FindReferences => (
@@ -726,13 +725,6 @@ fn netlist_page_on_screen(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.wb.workspace == Workspace::Netlist
 }
 
-/// Whether a code document is the thing on screen: the Netlist workspace's
-/// deck, or a Verilog-A cell view the Design workspace shows.
-fn code_document_on_screen(reads: &Reads<'_, CodeFeature>) -> bool {
-    reads.wb.workspace == Workspace::Netlist
-        || design_hosts_veriloga(reads.wb.workspace, &reads.model.workspace)
-}
-
 /// Whether the Design workspace is showing a schematic or a testbench.
 fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
     reads.wb.workspace == Workspace::Design
@@ -873,7 +865,7 @@ impl CodeFeature {
     }
 
     /// The source document dialogs: the open file transaction's form, else
-    /// the lifecycle of the document on the page in front.
+    /// an open revision history, else Deck and include folders.
     fn render_source_document_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let code = &mut *cx.state;
         if let Some(request) = source_document::render_source_document_dialog(

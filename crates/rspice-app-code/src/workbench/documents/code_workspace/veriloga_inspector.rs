@@ -16,8 +16,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{StatusMark, paint_status_mark};
 use crate::workbench::design_system::{
-    Problem, code_inspector_section, paint_problem_mark, panel_bleed, panel_inset, problem_line,
-    property_row, property_row_height, property_row_problem,
+    Fact, Problem, code_inspector_section, fact_rows, paint_problem_mark, panel_bleed, panel_inset,
+    problem_line, property_row_height,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -25,7 +25,6 @@ use rspice_app_state::workbench::app_state::model::compiled_parameters;
 use rspice_design::library::metadata::{CellParameter, ParameterValueType};
 
 use super::page::VerilogAWorkbenchState;
-use super::veriloga_interface::VerilogACellSymbol;
 use super::{CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
@@ -179,9 +178,9 @@ pub enum VerilogAInspectorAction {
     },
 }
 
-/// The inspector body: the module and where its ports stand, what the
-/// compiler found in it, and the parameters an instance of it takes. Where
-/// the source stands with the compiler is the editor strip's to say.
+/// The inspector body: the module, where it stands with the compiler and the
+/// line endings of the file in front, what the compiler found in it, and the
+/// parameters an instance of it takes.
 pub fn show_veriloga_inspector(
     ui: &mut Ui,
     state: &VerilogAWorkbenchState,
@@ -192,7 +191,7 @@ pub fn show_veriloga_inspector(
     let t = Tokens::get(ui.ctx());
     ui.set_width(ui.available_width());
     let receipt = veriloga_receipt(state, project_id, selected);
-    module_section(ui, state, selected, receipt, messages);
+    module_section(ui, state, project_id, selected, receipt, messages);
     let mut action = None;
     // Diagnostics exist only for a source the compiler has read. With neither
     // a receipt nor a refusal for this exact revision there is nothing to
@@ -477,6 +476,7 @@ fn parameter_table(
 fn module_section(
     ui: &mut Ui,
     state: &VerilogAWorkbenchState,
+    project_id: ProjectId,
     selected: &SelectedVerilogASource,
     receipt: Option<&VerilogACompileReceipt>,
     messages: MessageCatalog,
@@ -488,13 +488,38 @@ fn module_section(
         .map(|receipt| receipt.compilation.report().abi.module_name.to_string())
         .or_else(|| selected.selected_module().map(str::to_owned))
         .unwrap_or_else(|| messages.text(MessageId::VerilogAModuleAuto));
+    // Where the source stands with the compiler, in the editor strip's
+    // words; a clean compile whose time is not known still says it compiled.
+    // Ports that differ from the schematic are a failure of the compile, so
+    // this row is where they are stated.
+    let compile = veriloga_compile_status(state, project_id, selected, messages)
+        .or_else(|| receipt.map(|_| (messages.text(MessageId::VerilogAStatusCompiled), None)));
+    let line_endings = crate::workbench::documents::deck_files::LineEnding::detect(
+        selected
+            .bundle()
+            .file_content(shown_file(state, selected))
+            .unwrap_or_default(),
+    )
+    .label(messages);
     code_inspector_section(
         ui,
         &messages.text(MessageId::VerilogAModuleSection),
         None,
         None,
         |ui| {
-            property_row(ui, &messages.text(MessageId::VerilogAModuleRow), &module);
+            let module_label = messages.text(MessageId::VerilogAModuleRow);
+            let compile_label = messages.text(MessageId::CodeSourceCompile);
+            let line_endings_label = messages.text(MessageId::CodeSourceLineEndings);
+            let mut facts = vec![Fact::new(&module_label, &module)];
+            if let Some((status, problem)) = &compile {
+                let fact = Fact::new(&compile_label, status);
+                facts.push(match problem {
+                    Some(problem) => fact.problem(*problem),
+                    None => fact,
+                });
+            }
+            facts.push(Fact::new(&line_endings_label, &line_endings));
+            fact_rows(ui, &facts);
             // A compile that produced no bytecode leaves nothing a run can
             // execute; every other build target is the engine's concern.
             if receipt.is_some_and(|receipt| !receipt.bytecode_available) {
@@ -504,39 +529,26 @@ fn module_section(
                     &messages.text(MessageId::VerilogANoBytecode),
                 );
             }
-            interface_rows(ui, state, receipt, selected.view(), messages);
         },
     );
 }
 
-/// A row when the module's ports disagree with the schematic that defines
-/// them. What the symbol needs is the editor strip's to say, beside the action
-/// that answers it.
-fn interface_rows(
-    ui: &mut Ui,
-    state: &VerilogAWorkbenchState,
-    receipt: Option<&VerilogACompileReceipt>,
-    reference: &crate::state::CellViewRef,
-    messages: MessageCatalog,
-) {
-    let schematic_defined = matches!(
-        state.symbol_standing.of(reference),
-        Some(VerilogACellSymbol::SchematicDefined)
-    );
-    let differs = receipt.is_some_and(|receipt| {
-        matches!(
-            receipt.interface,
-            Some(VerilogAInterfaceOutcome::SchematicMismatch { .. })
-        )
-    });
-    if schematic_defined && differs {
-        property_row_problem(
-            ui,
-            &messages.text(MessageId::VerilogAPortsRow),
-            &messages.text(MessageId::VerilogAPortsDifferFromSchematic),
-            Some(Problem::Failure),
-        );
-    }
+/// The file of the bundle the editor shows: the one chosen on the Files
+/// rail, else the main file.
+fn shown_file<'a>(
+    state: &'a VerilogAWorkbenchState,
+    selected: &'a SelectedVerilogASource,
+) -> &'a str {
+    let bundle = selected.bundle();
+    state
+        .selected_file
+        .as_ref()
+        .filter(|chosen| {
+            chosen.bundle_id == bundle.id() && bundle.contains_file(&chosen.logical_path)
+        })
+        .map_or(bundle.root().logical_path(), |chosen| {
+            chosen.logical_path.as_str()
+        })
 }
 
 /// What the last compile of this source found. A clean compile has nothing to

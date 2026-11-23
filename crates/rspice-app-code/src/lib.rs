@@ -53,7 +53,7 @@ pub mod workbench {
     pub(crate) use rspice_app_workbench::workbench::{framework, layout, localization};
     pub(crate) use rspice_ui_kit::panels as design_system;
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     pub(crate) use localization::UiTextLocale;
     pub(crate) use localization::{MessageCatalog, MessageId};
     #[cfg(test)]
@@ -72,6 +72,7 @@ pub mod workbench {
             }
             pub mod source_document;
             pub(crate) mod source_file_form;
+            pub(crate) mod source_history;
             pub mod source_language_tools;
             pub mod veriloga_build_settings;
         }
