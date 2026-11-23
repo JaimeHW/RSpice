@@ -683,6 +683,7 @@ pub mod ids {
         OPEN_CONSOLE = "open-console";
         OPEN_NETLIST = "open-netlist";
         OPEN_NOTIFICATIONS = "open-notifications";
+        OPEN_PROBLEMS = "open-problems";
         OPEN_RUN_IN_RESULTS = "open-run-in-results";
         PASTE = "paste-selection";
         PDK_SETTINGS = "pdk-settings";
