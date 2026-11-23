@@ -4,7 +4,7 @@ use crate::workbench::RSpiceApp;
 use egui::vec2;
 use rspice_app_code::workbench::documents::netlist_document::NetlistTab;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::retain_generated;
-use rspice_app_code::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, code_toolbar};
+use rspice_app_code::workbench::surfaces::netlist::toolbar::{NetlistToolbarLayout, code_toolbar};
 
 /// A netlist-first project: a deck and no generated netlist.
 fn netlist_first_app() -> RSpiceApp {
@@ -34,7 +34,7 @@ fn schematic_first_app() -> RSpiceApp {
 /// Build one application, paint the toolbar over it, and read the layout
 /// back. The application is built and dropped here so a caller never holds
 /// two of them at once.
-fn toolbar_layout(build: fn() -> RSpiceApp, width: f32) -> CodeToolbarLayout {
+fn toolbar_layout(build: fn() -> RSpiceApp, width: f32) -> NetlistToolbarLayout {
     let mut app = build();
     let mut captured = None;
     rspice_app_workbench::ui::raster::render(vec2(width, 120.0), |ui, background| {

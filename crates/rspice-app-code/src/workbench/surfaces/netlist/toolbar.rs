@@ -53,7 +53,7 @@ const CODE_STATUS_PRESS_PADDING: f32 = 4.0;
 /// rows cannot drift apart. The other two are the layout contract this file
 /// used to get wrong: an action group wider than its reservation printed over
 /// the status chips, and no constant could be trusted to notice.
-pub struct CodeToolbarLayout {
+pub struct NetlistToolbarLayout {
     pub content: egui::Rect,
     /// Exact rect the status chips were painted into.
     #[cfg(any(test, feature = "test-support"))]
@@ -82,7 +82,7 @@ struct LanguageTools {
 /// in place for what the context holds, and raised for what the application
 /// carries out once the page has drawn: Find references, Rename symbol and
 /// the quick fix. It returns where it drew.
-pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) -> CodeToolbarLayout {
+pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) -> NetlistToolbarLayout {
     let messages = cx.wb.messages();
     let t = Tokens::get(ui.ctx());
     // A child UI can retain the pre-dock available width while its painter is
@@ -377,7 +377,7 @@ pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) -> CodeToolbarL
         None => {}
     }
 
-    CodeToolbarLayout {
+    NetlistToolbarLayout {
         content,
         #[cfg(any(test, feature = "test-support"))]
         status: status_rect,
