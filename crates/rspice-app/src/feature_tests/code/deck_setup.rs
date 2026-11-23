@@ -67,9 +67,11 @@ fn the_simulate_page_of_a_deck_project_is_one_table_of_its_setup_and_offers_no_p
     app.state.workbench.inspector_visible = true;
 
     let text = painted_application(&mut app);
-    // The table's heads and rows, the toolbar's two actions, and the deck's
-    // facts in the inspector.
+    // The page's bar, the table's heads and rows, the toolbar's two
+    // actions, and the deck's facts in the inspector.
     for expected in [
+        "Deck setup",
+        "2 analyses · 0 settings",
         "Line",
         "Statement",
         "Arguments",
@@ -142,6 +144,8 @@ fn a_deck_that_states_no_analysis_says_so_and_opens_in_netlist() {
     app.state.workbench.activate(Workspace::Simulate);
     let text = painted_application(&mut app);
     for expected in [
+        "Deck setup",
+        "0 analyses · 1 setting",
         "No analysis",
         "bare.sp states no analysis. Add one in Netlist to run it.",
     ] {

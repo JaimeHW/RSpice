@@ -1,25 +1,29 @@
 //! Simulate for a project whose simulation is its deck.
 //!
 //! A deck runs as written, so Simulate has no plan to edit for it. In the
-//! plan editor's place the page is one dense table of the deck's own setup,
-//! as a simulation environment lists a setup: its analysis, option,
-//! temperature and parameter statements in the order the deck states them,
-//! each at its line, read-only and as the deck writes them. A row opens the
-//! Netlist workspace at its line, where the deck is changed. The toolbar
-//! carries Open in Netlist and Run deck; the inspector, with nothing
-//! selected, the deck's facts.
+//! plan editor's place the page is a bar, "Deck setup" and how many
+//! analyses and settings the deck states, over one dense table of the
+//! deck's own setup, as a simulation environment lists a setup: its
+//! analysis, option, temperature and parameter statements in the order the
+//! deck states them, each at its line, read-only and as the deck writes
+//! them. A row opens the Netlist workspace at its line, where the deck is
+//! changed. The toolbar carries Open in Netlist and Run deck; the
+//! inspector, with nothing selected, the deck's facts.
 
-use egui::Ui;
+use egui::{Align2, Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use crate::state::{NetlistSourceIndex, OutlineEntryKind};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::ui::widgets::table::{Cell, Column, DataTable, TableState};
-use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::netlist_first::{self, NetlistFirstAction, deck_name};
-use crate::workbench::design_system::{WorkbenchIcon, empty_state_with_actions};
+use crate::workbench::design_system::{PANEL_INSET, WorkbenchIcon, empty_state_with_actions};
 use crate::workbench::documents::netlist_document::root_deck_source_index;
 use crate::workbench::framework::feature::Cx;
+use crate::workbench::layout::document_bar_height;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// The line column's width, and the statement column's; the arguments take
 /// what is left.
@@ -118,12 +122,20 @@ fn printable_card(card: &str) -> String {
         .replace('\t', "    ")
 }
 
-/// The page, in the code feature's context: the setup's table, or, for a
-/// deck that states no analysis, the empty state that says so.
+/// The page, in the code feature's context: its bar, then the setup's
+/// table, or, for a deck that states no analysis, the empty state that says
+/// so.
 pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
     let messages = cx.wb.messages();
     let index = root_deck_source_index(ui.ctx(), cx.model, &mut cx.state.netlist);
     let cards = setup_cards(&index);
+    let viewport = ui.ctx().content_rect().size();
+    page_bar(
+        ui,
+        &cards,
+        messages,
+        document_bar_height(viewport.x, viewport.y, cx.wb.coarse_pointer),
+    );
     let mut action = None;
     if cards
         .iter()
@@ -193,4 +205,86 @@ pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
     if let Some(action) = action {
         netlist_first::carry_out(cx, action);
     }
+}
+
+/// The page's bar, where other pages stand their document bar and as tall
+/// as it, so the bands across the top end on one line: the page's name on
+/// the left, and on the right, neutral, how many analyses and settings the
+/// table lists.
+fn page_bar(ui: &mut Ui, cards: &[SetupCard], messages: MessageCatalog, height: f32) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    let title = messages.text(MessageId::DeckSetupTitle);
+    let summary = setup_summary(cards, messages);
+    response.widget_info(|| {
+        WidgetInfo::labeled(
+            WidgetType::Label,
+            ui.is_enabled(),
+            format!("{title}, {summary}"),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(title.as_str());
+        node.set_description(summary.as_str());
+        node.set_level(2);
+    });
+    ui.painter().text(
+        pos2(rect.left() + PANEL_INSET, rect.center().y),
+        Align2::LEFT_CENTER,
+        &title,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+    );
+    ui.painter().text(
+        pos2(rect.right() - PANEL_INSET, rect.center().y),
+        Align2::RIGHT_CENTER,
+        &summary,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+}
+
+/// "2 analyses · 3 settings": the setup's analyses, and its option,
+/// temperature and parameter statements.
+pub fn setup_summary(cards: &[SetupCard], messages: MessageCatalog) -> String {
+    let analyses = cards
+        .iter()
+        .filter(|card| card.section == SetupSection::Analyses)
+        .count();
+    let settings = cards.len() - analyses;
+    let counted = |count: usize, one: MessageId, many: MessageId| {
+        messages.format(
+            if count == 1 { one } else { many },
+            &[("count", &count.to_string())],
+        )
+    };
+    messages.format(
+        MessageId::DeckSetupSummary,
+        &[
+            (
+                "analyses",
+                &counted(
+                    analyses,
+                    MessageId::DeckSetupAnalysisCountSingular,
+                    MessageId::DeckSetupAnalysisCount,
+                ),
+            ),
+            (
+                "settings",
+                &counted(
+                    settings,
+                    MessageId::DeckSetupSettingCountSingular,
+                    MessageId::DeckSetupSettingCount,
+                ),
+            ),
+        ],
+    )
 }
