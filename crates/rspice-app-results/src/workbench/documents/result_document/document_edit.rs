@@ -355,11 +355,12 @@ fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), St
     let viewer_id = viewer.viewer_document_id();
     let definition = viewer_document(viewer_id)
         .ok_or_else(|| "The selected sheet is not a registered viewer.".to_owned())?;
-    let source = super::create_document::source_reference(run, analysis)
+    let digest = super::retained_dataset_digest(state.results_reads(), run);
+    let source = super::create_document::source_reference(run, analysis, digest)
         .map_err(|error| error.to_string())?;
     let binding = PaneDataBinding {
         analysis_id: super::create_document::source_analysis_identity(run, analysis),
-        dataset: DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
+        dataset: source.binding(),
     };
     let document = project_document(state.results_reads(), document_id)?;
     let page = document

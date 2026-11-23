@@ -141,7 +141,8 @@ pub fn visualization_source_dataset(
     run: &crate::state::SimulationRun,
     analysis: &crate::state::AnalysisResult,
 ) -> Result<crate::results::visualization_document::SourceDataset, String> {
-    create_document::source_reference(run, analysis).map_err(|error| error.to_string())
+    create_document::source_reference(run, analysis, run.dataset_content_digest())
+        .map_err(|error| error.to_string())
 }
 
 pub mod waves;

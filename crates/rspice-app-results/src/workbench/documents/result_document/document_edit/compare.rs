@@ -572,6 +572,7 @@ fn finish(
                     let source = super::super::create_document::source_reference(
                         source_run,
                         source_analysis,
+                        super::super::retained_dataset_digest(reads, source_run),
                     )
                     .map_err(|error| error.to_string())?;
                     let attached = document

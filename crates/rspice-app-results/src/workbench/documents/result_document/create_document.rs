@@ -12,7 +12,9 @@ use rspice_results_ui::create_document::{
 };
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
+use crate::product::{
+    AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, ResultDocumentId,
+};
 use crate::results::viewer_catalog::{
     VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
     ViewerReleaseClass, viewer_compatibility, viewer_document,
@@ -526,13 +528,17 @@ pub(super) fn reference_run_label(run: &SimulationRun) -> String {
 /// The dataset a document reads one analysis of a retained run through: the
 /// run by identity and content digest, and the analysis. The samples and the
 /// list of signals stay in the run, so a document is no larger for a larger
-/// run.
+/// run. `digest` is the run's content digest as
+/// [`super::retained_dataset_digest`] keeps it: digesting a run reads every
+/// sample it holds, so a document or pane made over it never digests it
+/// again.
 pub(super) fn source_reference(
     run: &SimulationRun,
     analysis: &AnalysisResult,
+    digest: ContentDigest,
 ) -> Result<SourceDataset, VisualizationError> {
     SourceDataset::run_reference(
-        DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
+        DatasetBinding::new(run.dataset_id, digest),
         reference_run_label(run),
         vec![run_source_analysis(run, analysis)],
     )
@@ -591,9 +597,10 @@ pub(super) fn pane_kind(art: ViewerArt) -> PaneKind {
 
 fn build_document(
     resolved: ResolvedDraft<'_>,
+    digest: ContentDigest,
     tracking: ResultDocumentTracking,
 ) -> Result<VisualizationDocument, VisualizationError> {
-    let source = source_reference(resolved.run, resolved.analysis)?;
+    let source = source_reference(resolved.run, resolved.analysis, digest)?;
     let binding = PaneDataBinding {
         analysis_id: source_analysis_identity(resolved.run, resolved.analysis),
         dataset: source.binding(),
@@ -863,7 +870,8 @@ fn insert(
         .filter(|strip| strip.analysis == analysis_key)
         .cloned()
         .collect();
-    let mut document = build_document(resolved, tracking)?;
+    let digest = super::retained_dataset_digest(state.results_reads(), resolved.run);
+    let mut document = build_document(resolved, digest, tracking)?;
     let bound: Vec<_> = document
         .panes()
         .iter()

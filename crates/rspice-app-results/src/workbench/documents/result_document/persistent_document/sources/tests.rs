@@ -129,7 +129,12 @@ fn compare_with(state: &mut ResultsTestHost, baseline: &SimulationRun) {
 fn refresh_onto(state: &mut ResultsTestHost, document_id: ResultDocumentId, newer: &SimulationRun) {
     let document = document(state, document_id);
     let previous = pane_binding(&document);
-    let next = create_document::source_reference(newer, &newer.analyses[0]).expect("reference");
+    let next = create_document::source_reference(
+        newer,
+        &newer.analyses[0],
+        newer.dataset_content_digest(),
+    )
+    .expect("reference");
     let analysis_id = create_document::source_analysis_identity(newer, &newer.analyses[0]);
     let tracking = ResultDocumentTracking::for_plan(
         ResultDocumentTrackingMode::Latest,

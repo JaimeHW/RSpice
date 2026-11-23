@@ -501,7 +501,7 @@ pub fn refresh_latest_binding(
         .and_then(|run| {
             latest_successful_authored_analysis(run, authored_analysis_id).map(|analysis| {
                 (
-                    super::create_document::source_reference(run, analysis),
+                    super::create_document::source_reference(run, analysis, candidate_digest),
                     analysis_identity(run, analysis),
                 )
             })
