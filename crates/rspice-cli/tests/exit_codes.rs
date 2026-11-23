@@ -591,6 +591,12 @@ fn resource_policy_applies_to_run_check_and_info_ingestion() {
             String::from_utf8_lossy(&output.stderr).contains("netlist_bytes limit exceeded"),
             "{subcommand} must preserve typed resource diagnostics"
         );
+        // Said first as the desktop app says it.
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("; a deck can be at most 8 bytes."),
+            "{subcommand} says the refusal in the app's words: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let _ = std::fs::remove_dir_all(&dir);

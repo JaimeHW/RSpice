@@ -9,6 +9,7 @@ pub mod args;
 pub mod config;
 pub mod error;
 mod numeric_bound;
+mod refusal;
 pub(crate) use numeric_bound::NumericBound;
 /// Proves the README's published exit-code table is exactly what
 /// [`error::exit_code_for`] produces, so automation branching on the

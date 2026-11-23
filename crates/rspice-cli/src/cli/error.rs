@@ -327,11 +327,12 @@ pub enum CliError {
     },
 
     #[error(
-        "Simulation failed{context}: {source}",
+        "Simulation failed{context}: {said}",
         context = analysis
             .as_ref()
             .map(|analysis| format!(" during {analysis}"))
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        said = super::refusal::simulation_words(source)
     )]
     CoreSimulationError {
         #[source]
@@ -396,7 +397,10 @@ pub enum CliError {
     #[error("Format conversion failed: {message}")]
     ConversionError { message: String },
 
-    #[error("Resource limit exceeded while reading {path}: {source}")]
+    #[error(
+        "Resource limit exceeded while reading {path}: {said}",
+        said = super::refusal::said(source)
+    )]
     ResourceLimit {
         path: PathBuf,
         #[source]
