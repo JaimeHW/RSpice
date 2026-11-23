@@ -196,6 +196,32 @@ fn ctrl_d_in_a_focused_source_editor_duplicates_the_caret_line_once() {
     );
 }
 
+/// Ctrl+Alt+[ folds every region of the focused source and Ctrl+Alt+]
+/// unfolds them all: Fold all and Unfold all had no key.
+#[test]
+fn ctrl_alt_brackets_fold_and_unfold_the_whole_focused_source() {
+    use rspice_app_code::workbench::documents::virtual_text_editor::shown_line_count;
+
+    let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
+    let editor = code_workspace::source_editor_id(bundle_id, "model.va");
+    let lines = shown_line_count(&ctx, editor).expect("the editor is drawn");
+    let ctrl_alt = egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::ALT;
+
+    stroke(&ctx, &mut app, egui::Key::OpenBracket, ctrl_alt);
+    let folded = shown_line_count(&ctx, editor).expect("the editor is drawn");
+    assert!(
+        folded < lines,
+        "Ctrl+Alt+[ folded the module: {folded} of {lines} lines"
+    );
+
+    stroke(&ctx, &mut app, egui::Key::CloseBracket, ctrl_alt);
+    assert_eq!(
+        shown_line_count(&ctx, editor),
+        Some(lines),
+        "Ctrl+Alt+] unfolded every line"
+    );
+}
+
 #[test]
 fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewhere() {
     let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();

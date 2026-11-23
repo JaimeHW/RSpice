@@ -398,6 +398,18 @@ const UNFOLD_AT_CARET: &[ShortcutBinding] = &[primary(
     chord(Key::CloseBracket, true, false, true, "Ctrl+Shift+]"),
     ALL,
 )];
+// The whole document folds on the brackets that fold one region, with Alt.
+// A shipped key is one chord, and Ctrl+K, the prefix other editors fold
+// everything behind, is the Command Palette: as a prefix it would hold the
+// palette back in every source editor until the chord timed out.
+const FOLD_ALL: &[ShortcutBinding] = &[primary(
+    chord(Key::OpenBracket, true, true, false, "Ctrl+Alt+["),
+    ALL,
+)];
+const UNFOLD_ALL: &[ShortcutBinding] = &[primary(
+    chord(Key::CloseBracket, true, true, false, "Ctrl+Alt+]"),
+    ALL,
+)];
 const TOGGLE_WORD_WRAP: &[ShortcutBinding] =
     &[primary(chord(Key::Z, false, true, false, "Alt+Z"), ALL)];
 // F12 opens a browser's developer tools, so definition and references are
@@ -679,6 +691,8 @@ impl CodeCommand {
             Self::ShowValueAtCaret => SHOW_VALUE_AT_CARET,
             Self::FoldSelection => FOLD_SELECTION,
             Self::UnfoldAtCaret => UNFOLD_AT_CARET,
+            Self::FoldAll => FOLD_ALL,
+            Self::UnfoldAll => UNFOLD_ALL,
             Self::ToggleWordWrap => TOGGLE_WORD_WRAP,
             Self::GoToDefinition => GO_TO_DEFINITION,
             Self::FindReferences => FIND_REFERENCES,

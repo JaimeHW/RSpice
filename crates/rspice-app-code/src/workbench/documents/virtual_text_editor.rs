@@ -354,6 +354,16 @@ pub fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> 
     })
 }
 
+/// How many lines the editor `editor_id` showed when it was last drawn,
+/// folded lines not counted.
+#[cfg(any(test, feature = "test-support"))]
+pub fn shown_line_count(ctx: &egui::Context, editor_id: egui::Id) -> Option<usize> {
+    ctx.data(|data| {
+        data.get_temp::<VirtualEditorSession>(editor_id.with("virtual-session"))
+            .map(|session| session.model.visible_line_count())
+    })
+}
+
 /// Drop what the editor `editor_id` keeps between frames: its text, its
 /// history, its caret and its view. The next time it is drawn it starts
 /// again from the text its owner hands it.
