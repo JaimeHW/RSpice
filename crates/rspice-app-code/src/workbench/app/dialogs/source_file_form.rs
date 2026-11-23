@@ -24,7 +24,7 @@ use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::{LifecycleAction, SourceDocumentRequest};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, CodeSourceFileDialogState, CodeWorkspaceRuntimeState,
+    self, CodeSourceFileAction, CodeSourceFileDialogState, SourceEditingState,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -38,7 +38,7 @@ const INCLUDED_FROM: &str = "workbench.source-file.included-from";
 /// Draw the open file transaction as its command form. Returns the commit
 /// for the shell to carry out; Cancel and Esc close the draft here.
 pub(in crate::workbench) fn render(
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     model: &Model,
     platform: &PlatformState,
     messages: MessageCatalog,

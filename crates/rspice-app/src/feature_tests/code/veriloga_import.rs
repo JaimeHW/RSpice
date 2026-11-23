@@ -116,7 +116,7 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
 
     app.execute_command_key(SourceCommand::ImportVerilogA.key());
     code_workspace::complete_veriloga_files_pick(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         &[("gainer.va", ROOT)],
         Some(&folder),
     );
@@ -157,7 +157,7 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
     assert!(app.state.code.code_workspace.veriloga.import_requested);
     assert_eq!(form(&app).locating.as_deref(), Some("body.inc"));
     code_workspace::complete_veriloga_file_pick(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         "body_from_elsewhere.inc",
         BODY,
     );
@@ -236,7 +236,7 @@ fn add_files_on_the_files_rail_adds_the_picked_files_beside_the_open_file() {
     click(&ctx, &mut app, "Add files…");
     assert!(app.state.code.code_workspace.veriloga.import_requested);
     code_workspace::complete_veriloga_files_pick(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         &[("a.inc", "// a\n"), ("b.vh", "// b\n")],
         None,
     );

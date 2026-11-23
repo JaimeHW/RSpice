@@ -36,7 +36,7 @@ use crate::workbench::app_state::{
 };
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::{
-    self, CodeWorkspaceRuntimeState, SelectedVerilogASource,
+    self, SelectedVerilogASource, SourceEditingState,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -317,7 +317,7 @@ pub fn open_veriloga_build_settings(
 /// refuses, and for a source that moved since the form opened.
 pub fn save_veriloga_build_settings(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     form: &mut Option<VerilogABuildSettingsDraft>,
     messages: MessageCatalog,
 ) -> Result<bool, String> {

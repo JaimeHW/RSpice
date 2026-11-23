@@ -14,7 +14,7 @@ use crate::state::{ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, Proj
 use crate::workbench::MessageId;
 use rspice_app_workbench::workbench::state::WorkbenchSession;
 
-use crate::workbench::documents::code_workspace::CodeWorkspaceParts;
+use crate::workbench::documents::code_workspace::SourceEditingParts;
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_state::workbench::app_state::model::{
     apply_compiled_interface, diagnostic_capacity_failure, receipt_from_report,
@@ -23,7 +23,7 @@ use rspice_app_state::workbench::app_state::model::{
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
-    CodeEditorDiagnostic, CodeEditorSeverity, CodeWorkspaceRuntimeState, PendingVerilogACompile,
+    CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile, SourceEditingState,
     VerilogACompileOutcome,
 };
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
@@ -154,7 +154,7 @@ fn view_names_no_module(model: &Model, reference: &crate::state::CellViewRef) ->
 /// from the model and the Code workspace's runtime state alone.
 pub fn selected_veriloga_editor_snapshot_in(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
 ) -> Result<SelectedVerilogAEditorSnapshot, String> {
     let selected = selected_veriloga_source_in(model)?;
     let explicit = code.veriloga.selected_file.as_ref();
@@ -190,7 +190,7 @@ pub use import::{
 pub use import::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 
 pub fn active_veriloga_file_path(
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     selected: &SelectedVerilogASource,
 ) -> String {
     code.veriloga
@@ -232,7 +232,7 @@ pub fn viewed_veriloga_header(
 /// so publishing the bundle publishes the view and the registry marks it
 /// clean.
 pub fn invalidate_veriloga_evidence(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     bundle_id: ProjectSourceId,
 ) {
     invalidate_veriloga_evidence_in(parts.model, parts.code, bundle_id);
@@ -242,7 +242,7 @@ pub fn invalidate_veriloga_evidence(
 /// editor's state.
 pub(crate) fn invalidate_veriloga_evidence_in(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     bundle_id: ProjectSourceId,
 ) {
     mark_bundle_unsaved(model, bundle_id);
@@ -273,7 +273,7 @@ fn mark_bundle_unsaved(model: &mut Model, bundle_id: ProjectSourceId) {
 /// increments the bundle revision, invalidates validation evidence, and
 /// commits only after the complete closure remains valid.
 pub fn replace_selected_veriloga_file(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     expected: &SelectedVerilogASource,
     logical_path: &str,
     contents: String,
@@ -285,7 +285,7 @@ pub fn replace_selected_veriloga_file(
 /// workspace's runtime state alone.
 pub(crate) fn replace_selected_veriloga_file_in(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     expected: &SelectedVerilogASource,
     logical_path: &str,
     contents: String,
@@ -315,7 +315,7 @@ pub(crate) fn replace_selected_veriloga_file_in(
 /// the click, and the frame loop starts exactly that on its next pass. A
 /// source on the compiler's built-in defaults stays on them: a build profile
 /// document is written when its settings are changed, never by compiling.
-pub fn request_veriloga_compile(parts: &mut CodeWorkspaceParts<'_>) -> Result<(), String> {
+pub fn request_veriloga_compile(parts: &mut SourceEditingParts<'_>) -> Result<(), String> {
     if parts.code.veriloga.pending.is_some() {
         return Err("A Verilog-A compile is already running.".to_owned());
     }
@@ -340,7 +340,7 @@ pub fn request_veriloga_compile(parts: &mut CodeWorkspaceParts<'_>) -> Result<()
 /// when it holds none yet. Returns whether anything changed.
 pub fn write_veriloga_build_profile(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     expected: &SelectedVerilogASource,
     profile: &super::veriloga_profile::VerilogABuildProfile,
 ) -> Result<bool, String> {
@@ -368,7 +368,7 @@ pub fn write_veriloga_build_profile(
 /// first free path under `.rspice/`. Returns the path it was written at.
 fn add_build_profile_document(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     selected: &SelectedVerilogASource,
     profile: &super::veriloga_profile::VerilogABuildProfile,
 ) -> Result<String, String> {
@@ -404,7 +404,7 @@ fn add_build_profile_document(
 /// egui's event/rendering thread.
 fn start_veriloga_compile(
     model: &Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     deck: Option<rspice_app_runs::simulation::ManualDeck<'_>>,
     selected: SelectedVerilogASource,
     repaint: &egui::Context,
@@ -483,7 +483,7 @@ fn start_veriloga_compile(
 
 /// Stop the running compile at the reader's request. The source keeps the
 /// standing it had: what the last finished compile proved is still proved.
-pub fn cancel_veriloga_compile(code: &mut CodeWorkspaceRuntimeState, wb: &mut WorkbenchSession) {
+pub fn cancel_veriloga_compile(code: &mut SourceEditingState, wb: &mut WorkbenchSession) {
     let Some(pending) = code.veriloga.pending.take() else {
         return;
     };
@@ -514,7 +514,7 @@ pub(crate) fn compile_time_text(elapsed: Duration, tenths: bool) -> String {
 /// answers. Its result lands wherever the reader is by then.
 pub fn consume_veriloga_compile_request(
     model: &Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     deck: Option<rspice_app_runs::simulation::ManualDeck<'_>>,
     repaint: &egui::Context,
 ) {
@@ -530,7 +530,7 @@ pub fn consume_veriloga_compile_request(
 /// not an editor host is on screen when it lands.
 pub fn poll_veriloga_compile(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     wb: &mut WorkbenchSession,
 ) {
     if std::mem::take(&mut code.veriloga.compile_discard_unannounced) {

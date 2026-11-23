@@ -14,10 +14,10 @@ use crate::state::{
     LibraryManager, MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle, ProjectSourceFile,
     ProjectSourceId,
 };
-use crate::workbench::documents::code_workspace::CodeWorkspaceParts;
+use crate::workbench::documents::code_workspace::SourceEditingParts;
 use rspice_app_state::workbench::app_state::model::Model;
 
-use super::super::CodeWorkspaceRuntimeState;
+use super::super::SourceEditingState;
 use super::super::page::{VerilogAImportTarget, VerilogAWorkbenchState};
 use super::super::{
     VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
@@ -59,7 +59,7 @@ pub struct PickedSource {
 /// project-source transaction.
 pub fn poll_veriloga_import(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     wb: &mut WorkbenchSession,
 ) {
     #[cfg(target_arch = "wasm32")]
@@ -184,7 +184,7 @@ fn read_picked_source(path: &Path) -> Result<PickedSource, String> {
 #[cfg(target_arch = "wasm32")]
 fn poll_browser_import_completion(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     wb: &mut WorkbenchSession,
 ) {
     let Some(completion) = BROWSER_IMPORT_COMPLETION.with(|slot| slot.borrow_mut().take()) else {
@@ -220,7 +220,7 @@ fn poll_browser_import_completion(
 /// replacement, a Locate on the import form, or else File > Import.
 fn apply_import(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     wb: &mut WorkbenchSession,
     picked: Vec<PickedSource>,
 ) {
@@ -377,7 +377,7 @@ pub fn request_veriloga_import_locate(veriloga: &mut VerilogAWorkbenchState, pat
 /// open a native picker.
 #[cfg(any(test, feature = "test-support"))]
 pub fn complete_veriloga_file_pick(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     file_name: &str,
     contents: &str,
 ) {
@@ -387,7 +387,7 @@ pub fn complete_veriloga_file_pick(
 /// What the picker delivers when files are chosen from `folder`.
 #[cfg(any(test, feature = "test-support"))]
 pub fn complete_veriloga_files_pick(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     files: &[(&str, &str)],
     folder: Option<&Path>,
 ) {
@@ -524,7 +524,7 @@ fn replacement_keeps_previous_text(
 /// Opens the picker bound to that exact file; the replacement itself waits
 /// for the confirmation the picked file opens.
 pub fn request_veriloga_source_replacement(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     logical_path: &str,
 ) -> Result<(), String> {
     if let Some(reason) = super::super::source_file_mutation_block_reason(parts) {
@@ -559,7 +559,7 @@ pub fn request_veriloga_source_replacement(
 /// Replace the file a confirmed review names with the picked file, when that
 /// file is still exactly what the editor showed.
 pub fn commit_veriloga_source_replacement(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
 ) -> Result<(), String> {
     let review = parts
         .code
@@ -749,7 +749,7 @@ fn suggested_import_path(importer_path: &str, file_name: &str) -> String {
 
 pub(super) fn add_bundle_file(
     model: &mut Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     bundle_id: ProjectSourceId,
     importer_path: &str,
     logical_path: String,

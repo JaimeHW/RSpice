@@ -81,7 +81,7 @@ fn rename_form(replacement: &str) -> RSpiceApp {
         .chars()
         .count();
     code_workspace::open_language_tools_in_bundle(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         bundle_id,
         "gain.va",
         caret,

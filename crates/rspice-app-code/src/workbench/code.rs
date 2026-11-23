@@ -34,7 +34,7 @@ use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
 use crate::workbench::documents::code_workspace::{
-    CodeWorkspaceParts, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
+    ProblemStep, SourceEditingParts, cancel_veriloga_compile, consume_veriloga_compile_request,
     poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
 use crate::workbench::documents::netlist_document::cross_probe;
@@ -794,8 +794,8 @@ impl SourceFeature {
     /// The code workspace's parts, lent from `cx` for one call.
     pub(in crate::workbench) fn workspace_parts<'c>(
         cx: &'c mut Cx<'_, Self>,
-    ) -> CodeWorkspaceParts<'c> {
-        CodeWorkspaceParts {
+    ) -> SourceEditingParts<'c> {
+        SourceEditingParts {
             code: &mut cx.state.code_workspace,
             netlist: &mut cx.state.netlist,
             model: &mut *cx.model,

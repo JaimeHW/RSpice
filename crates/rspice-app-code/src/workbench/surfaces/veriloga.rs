@@ -27,7 +27,7 @@ use crate::workbench::app::actions::veriloga_placement::{
 use crate::workbench::app::actions::veriloga_symbol::update_active_veriloga_symbol_in;
 use crate::workbench::code::commands::VerilogAStripRequest;
 use crate::workbench::documents::code_workspace::{
-    CodeEditorLanguage, CodeWorkspaceRuntimeState, EditorFindings, show_veriloga_document_versioned,
+    CodeEditorLanguage, EditorFindings, SourceEditingState, show_veriloga_document_versioned,
 };
 
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
@@ -99,7 +99,7 @@ fn editor_language(
 /// act on it. `editable` is false for a built-in header.
 fn page_editor(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     platform: &PlatformState,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     shown_path: &str,

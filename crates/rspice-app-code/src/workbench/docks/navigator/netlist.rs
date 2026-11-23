@@ -23,7 +23,7 @@ use crate::state::{OutlineSection, OutlineSectionKind};
 use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
+use crate::workbench::documents::code_workspace::SourceEditingState;
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -49,7 +49,7 @@ const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
 pub(crate) struct NetlistNavigator<'a> {
     pub(crate) model: &'a mut Model,
     pub(crate) netlist: &'a mut NetlistDocumentState,
-    pub(crate) code_workspace: &'a mut CodeWorkspaceRuntimeState,
+    pub(crate) code_workspace: &'a mut SourceEditingState,
     pub(crate) outline_collapsed: &'a mut BTreeSet<OutlineSectionKind>,
     pub(crate) open_documents:
         &'a mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
@@ -1132,7 +1132,7 @@ fn section_catalog_text(
 pub(super) fn retained_include_facts(
     model: &Model,
     netlist: &NetlistDocumentState,
-    code_workspace: &CodeWorkspaceRuntimeState,
+    code_workspace: &SourceEditingState,
     messages: MessageCatalog,
 ) -> Vec<IncludeRowFacts> {
     let project_paths = model.workspace.content.project.include_search_paths().len();

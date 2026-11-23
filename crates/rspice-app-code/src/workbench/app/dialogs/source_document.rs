@@ -25,9 +25,7 @@ use crate::workbench::design_system::inspector::muted_inspector_copy;
 use crate::workbench::design_system::{
     Fact, PANEL_INSET, fact_rows, panel_body, property_row_height, section_block_gap,
 };
-use crate::workbench::documents::code_workspace::{
-    self, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
-};
+use crate::workbench::documents::code_workspace::{self, SourceEditingParts, SourceEditingState};
 use crate::workbench::documents::deck_files::LineEnding;
 use crate::workbench::documents::netlist_document::{self, NetlistDocumentState};
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -44,7 +42,7 @@ const CONTROL_GAP: f32 = 6.0;
 pub fn open_source_document_dialog_in(
     workspace: Workspace,
     model: &Model,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     netlist: &NetlistDocumentState,
     platform: &PlatformState,
     messages: MessageCatalog,
@@ -163,7 +161,7 @@ pub(super) fn role_label(messages: MessageCatalog, build_profile: bool) -> Strin
 }
 
 /// Close the netlist lifecycle dialog.
-pub fn close_netlist_lifecycle(code: &mut CodeWorkspaceRuntimeState) {
+pub fn close_netlist_lifecycle(code: &mut SourceEditingState) {
     code.source_document_dialog = false;
 }
 
@@ -173,7 +171,7 @@ pub fn close_netlist_lifecycle(code: &mut CodeWorkspaceRuntimeState) {
 /// Deck and include folders. What a choice still needs of the whole
 /// application is returned for the shell to carry out.
 pub(in crate::workbench) fn render_source_document_dialog(
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     netlist: &mut NetlistDocumentState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -195,7 +193,7 @@ pub(in crate::workbench) fn render_source_document_dialog(
 /// Carry out a choice on the Verilog-A document at `logical_path` that a
 /// form, the revision history or the Files rail handed the shell.
 pub fn apply_lifecycle_action(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     action: LifecycleAction,
     logical_path: &str,
 ) {
@@ -249,7 +247,7 @@ pub fn apply_lifecycle_action(
 }
 
 fn render_netlist_source_document_dialog(
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     netlist: &NetlistDocumentState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -342,7 +340,7 @@ pub(super) fn dialog_inset(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
 /// now read it, when one of them changed it.
 fn netlist_lifecycle_body(
     ui: &mut Ui,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     model: &Model,
     facts: &NetlistLifecycleFacts,
     messages: MessageCatalog,
@@ -392,7 +390,7 @@ enum FolderAction {
 /// visible.
 fn include_search_paths(
     ui: &mut Ui,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     model: &Model,
     messages: MessageCatalog,
 ) -> Option<Vec<std::path::PathBuf>> {
@@ -606,7 +604,7 @@ fn include_folder_row(
 /// Browse… and Add at the field's height. Returns the folder it adds.
 fn include_folder_field(
     ui: &mut Ui,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     messages: MessageCatalog,
 ) -> Option<std::path::PathBuf> {
     let height = control_height(ui);

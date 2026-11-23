@@ -177,10 +177,10 @@ impl RSpiceApp {
     /// The parts of the application the code workspace's operations read
     /// and change, lent for the one call.
     #[cfg(test)]
-    pub(crate) fn code_workspace_parts(
+    pub(crate) fn source_editing_parts(
         &mut self,
-    ) -> rspice_app_code::workbench::documents::code_workspace::CodeWorkspaceParts<'_> {
-        rspice_app_code::workbench::documents::code_workspace::CodeWorkspaceParts {
+    ) -> rspice_app_code::workbench::documents::code_workspace::SourceEditingParts<'_> {
+        rspice_app_code::workbench::documents::code_workspace::SourceEditingParts {
             code: &mut self.state.code.code_workspace,
             netlist: &mut self.state.code.netlist,
             model: &mut self.state.model,

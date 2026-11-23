@@ -3,19 +3,19 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use super::CodeWorkspaceParts;
+use super::SourceEditingParts;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ProjectSourceBundle, ProjectSourceFile};
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
-use super::CodeWorkspaceRuntimeState;
+use super::SourceEditingState;
 use super::{
     CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
 };
 
-pub fn source_file_mutation_block_reason(parts: &CodeWorkspaceParts<'_>) -> Option<String> {
+pub fn source_file_mutation_block_reason(parts: &SourceEditingParts<'_>) -> Option<String> {
     source_file_mutation_block_reason_in(
         parts.model,
         parts.code,
@@ -28,7 +28,7 @@ pub fn source_file_mutation_block_reason(parts: &CodeWorkspaceParts<'_>) -> Opti
 /// workspace's runtime state and the platform's.
 pub fn source_file_mutation_block_reason_in(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     platform: &PlatformState,
     messages: MessageCatalog,
 ) -> Option<String> {
@@ -38,7 +38,7 @@ pub fn source_file_mutation_block_reason_in(
 /// Why no source file can change now, if one cannot.
 fn block_reason(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     platform: &PlatformState,
 ) -> Option<MessageId> {
     if !platform.project_lifecycle.is_open() {
@@ -57,7 +57,7 @@ fn block_reason(
 /// roles. File extensions and demonstration filenames are never authority.
 pub fn source_document_is_editable(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     platform: &PlatformState,
     logical_path: &str,
 ) -> bool {
@@ -76,7 +76,7 @@ pub fn source_document_is_editable(
 /// belongs to its cell view.
 pub fn source_bundle_document_is_editable_in(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     platform: &PlatformState,
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
@@ -92,7 +92,7 @@ pub fn source_bundle_document_is_editable_in(
 /// part of this predicate so find, navigation, and language inspection remain
 /// available in safe mode.
 pub fn source_bundle_contains_document(
-    parts: &CodeWorkspaceParts<'_>,
+    parts: &SourceEditingParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
@@ -119,7 +119,7 @@ pub(crate) fn source_bundle_contains_document_in(
 }
 
 pub fn open_source_file_dialog(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     action: CodeSourceFileAction,
     source_path: &str,
     importer_path: &str,
@@ -134,7 +134,7 @@ pub fn open_source_file_dialog(
 }
 
 pub fn open_source_file_dialog_in_bundle(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     action: CodeSourceFileAction,
     source_path: &str,
@@ -207,7 +207,7 @@ pub fn open_source_file_dialog_in_bundle(
     Ok(())
 }
 
-pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<String, String> {
     let messages = parts.wb.messages();
     let draft = parts
         .code
@@ -329,7 +329,7 @@ pub fn commit_source_file_dialog(parts: &mut CodeWorkspaceParts<'_>) -> Result<S
 }
 
 pub fn open_source_history(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     source_path: &str,
 ) -> Result<(), String> {
     let bundle_id = parts
@@ -342,7 +342,7 @@ pub fn open_source_history(
 }
 
 pub(crate) fn open_source_history_in_bundle(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     source_path: &str,
 ) -> Result<(), String> {
@@ -375,7 +375,7 @@ pub(crate) fn open_source_history_in_bundle(
     Ok(())
 }
 
-pub fn commit_source_history_restore(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+pub fn commit_source_history_restore(parts: &mut SourceEditingParts<'_>) -> Result<String, String> {
     let messages = parts.wb.messages();
     let draft = parts
         .code

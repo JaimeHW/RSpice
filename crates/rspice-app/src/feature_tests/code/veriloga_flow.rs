@@ -607,7 +607,7 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         user.app
             .execute_command_key(SourceCommand::ImportVerilogA.key());
         code_workspace::complete_veriloga_files_pick(
-            &mut user.app.code_workspace_parts(),
+            &mut user.app.source_editing_parts(),
             &[(root, &text)],
             Some(&folder),
         );

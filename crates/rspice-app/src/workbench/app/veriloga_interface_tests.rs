@@ -13,7 +13,7 @@ pub(crate) fn edit_source(app: &mut RSpiceApp, source: &str) {
     let path = selected.document().logical_path().to_owned();
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app.code_workspace_parts(),
+            &mut app.source_editing_parts(),
             &selected,
             &path,
             source.to_owned()

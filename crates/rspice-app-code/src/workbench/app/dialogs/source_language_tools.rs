@@ -27,9 +27,7 @@ use egui::{Context, Id};
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::SourceCommand;
-use crate::workbench::documents::code_workspace::{
-    self, CodeWorkspaceParts, CodeWorkspaceRuntimeState,
-};
+use crate::workbench::documents::code_workspace::{self, SourceEditingParts, SourceEditingState};
 use crate::workbench::{MessageCatalog, MessageId};
 
 const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
@@ -39,7 +37,7 @@ const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
 /// project source index. A netlist answers through its own language service
 /// instead, which the shell asks.
 pub fn navigate_source_bundle(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     command: SourceCommand,
 ) -> Result<(), String> {
     let messages = parts.wb.messages();
@@ -117,7 +115,7 @@ pub fn navigate_source_bundle(
 /// Find references: one row per occurrence on the References page of the
 /// bottom dock, the page brought forward, and the count on the status bar.
 fn list_references(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     index: &code_workspace::LanguageServiceIndex,
     logical_path: &str,
     caret: usize,
@@ -186,7 +184,7 @@ fn list_references(
 /// the platform's state. Enter renames; Esc and Cancel close. Returns
 /// whether the reader asked for the rename.
 pub(in crate::workbench) fn render_rename_symbol_form(
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     model: &Model,
     platform: &PlatformState,
     ctx: &Context,

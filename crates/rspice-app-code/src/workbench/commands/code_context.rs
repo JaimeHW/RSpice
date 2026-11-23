@@ -7,7 +7,7 @@
 
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::code_workspace::{
-    CodeWorkspaceRuntimeState, selected_veriloga_editor_snapshot_in,
+    SourceEditingState, selected_veriloga_editor_snapshot_in,
 };
 
 /// Whether Compile has something to compile, wherever it is offered from.
@@ -19,7 +19,7 @@ use crate::workbench::documents::code_workspace::{
 #[must_use]
 pub(crate) fn resolve_veriloga_compile(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     platform: &PlatformState,
 ) -> bool {
     if model.safe_mode.project_read_only()
@@ -51,7 +51,7 @@ pub(crate) fn resolve_veriloga_compile(
 /// been refused.
 pub(crate) fn veriloga_compile_refusal(
     model: &Model,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
     platform: &PlatformState,
 ) -> &'static str {
     if model.safe_mode.project_read_only() {

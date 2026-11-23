@@ -4,7 +4,7 @@
 //! collapsed; and what code shows other features.
 
 use crate::workbench::app::dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
-use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
+use crate::workbench::documents::code_workspace::SourceEditingState;
 use crate::workbench::documents::netlist_document::session::NetlistSession;
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
 use crate::workbench::framework::feature::{CodePort, NetlistDocumentKey};
@@ -22,7 +22,7 @@ pub struct SourceState {
     /// Netlist editor state (diagnostics, diff pips).
     pub netlist: crate::workbench::documents::netlist_document::NetlistDocumentState,
     /// The Verilog-A editor's revision-bound operation receipts.
-    pub code_workspace: crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState,
+    pub code_workspace: crate::workbench::documents::code_workspace::SourceEditingState,
     /// Netlist secondary documents explicitly opened by the user. Resolved
     /// include closures can contain thousands of files, so availability alone
     /// must never materialize every include as a tab.
@@ -132,7 +132,7 @@ pub fn manual_deck_in(netlist: &NetlistDocumentState) -> Option<ManualDeck<'_>> 
 /// The receipt of the project's current Verilog-A compilation, as the
 /// Verilog-A editor's state holds it.
 pub fn veriloga_compilation_in(
-    code_workspace: &CodeWorkspaceRuntimeState,
+    code_workspace: &SourceEditingState,
 ) -> Option<&ProjectCompileReceipt> {
     code_workspace
         .veriloga

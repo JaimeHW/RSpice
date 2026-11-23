@@ -271,7 +271,7 @@ pub(crate) struct VerilogAHeaderView {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct CodeWorkspaceRuntimeState {
+pub struct SourceEditingState {
     /// Whether the source-document lifecycle dialog is showing. The
     /// transactions below stay independent of it: a file operation opened from
     /// the navigator brings the dialog up around its own review section, and

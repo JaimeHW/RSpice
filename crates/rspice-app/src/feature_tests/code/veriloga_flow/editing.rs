@@ -66,7 +66,7 @@ fn rename_is_one_undo_across_the_module() {
     let path = selected.document().logical_path().to_owned();
     let caret = original.find("vslew").expect("the name");
     code_workspace::open_language_tools_in_bundle(
-        &mut user.app.code_workspace_parts(),
+        &mut user.app.source_editing_parts(),
         selected.bundle().id(),
         &path,
         original[..caret].chars().count(),
@@ -82,7 +82,7 @@ fn rename_is_one_undo_across_the_module() {
         .expect("the form is open");
     tools.query = "vslew".to_owned();
     tools.replacement = "limited".to_owned();
-    code_workspace::commit_language_rename(&mut user.app.code_workspace_parts())
+    code_workspace::commit_language_rename(&mut user.app.source_editing_parts())
         .expect("the rename applies");
     user.settle();
     let renamed = source(&user);
@@ -105,16 +105,16 @@ fn replace_source_from_file_is_one_undo() {
         .to_owned();
     let replacement = original.replace("vslew", "limited");
     code_workspace::request_veriloga_source_replacement(
-        &mut user.app.code_workspace_parts(),
+        &mut user.app.source_editing_parts(),
         &path,
     )
     .expect("the source can be replaced");
     code_workspace::complete_veriloga_file_pick(
-        &mut user.app.code_workspace_parts(),
+        &mut user.app.source_editing_parts(),
         "next.va",
         &replacement,
     );
-    code_workspace::commit_veriloga_source_replacement(&mut user.app.code_workspace_parts())
+    code_workspace::commit_veriloga_source_replacement(&mut user.app.source_editing_parts())
         .expect("the file replaces it");
     user.settle();
     assert_eq!(source(&user), replacement);

@@ -40,9 +40,9 @@ pub use language_services::{
 };
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{
-    CodeSourceFileDialogState, CodeSourceHistoryState, CodeWorkspaceRuntimeState,
-    PendingVerilogACompile, VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState,
-    VerilogAReplaceReview, VerilogAReplaceTarget, VerilogAWorkbenchState,
+    CodeSourceFileDialogState, CodeSourceHistoryState, PendingVerilogACompile, SourceEditingState,
+    VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
+    VerilogAReplaceTarget, VerilogAWorkbenchState,
 };
 pub use source_files::{
     commit_source_file_dialog, commit_source_history_restore, open_source_file_dialog,
@@ -96,8 +96,8 @@ pub struct SourceHandles {
 /// call: the source documents' state, the deck's, the model, the session,
 /// the platform's state, and the run tier with its controller and the
 /// export IO.
-pub struct CodeWorkspaceParts<'a> {
-    pub code: &'a mut CodeWorkspaceRuntimeState,
+pub struct SourceEditingParts<'a> {
+    pub code: &'a mut SourceEditingState,
     pub netlist: &'a mut crate::workbench::documents::netlist_document::NetlistDocumentState,
     pub model: &'a mut rspice_app_state::workbench::app_state::model::Model,
     pub wb: &'a mut rspice_app_workbench::workbench::state::WorkbenchSession,
@@ -149,7 +149,7 @@ pub(crate) fn design_hosts_veriloga(
 /// is never read as the selection of another that happens to share the path.
 pub(crate) fn active_bundle_path(
     workspace: &crate::state::ProjectWorkspace,
-    code: &CodeWorkspaceRuntimeState,
+    code: &SourceEditingState,
 ) -> Option<String> {
     let bundle = workspace.active_source_bundle();
     let explicit = code
@@ -183,7 +183,7 @@ pub fn source_editor_id(bundle_id: crate::state::ProjectSourceId, logical_path: 
 /// `language`, which is the honest answer when a finding outlived its source.
 pub fn select_source_document(
     workspace: &crate::state::ProjectWorkspace,
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     logical_path: &str,
 ) -> Option<crate::state::ProjectSourceId> {
     let bundle_id = workspace

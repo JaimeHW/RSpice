@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use super::CodeWorkspaceParts;
+use super::SourceEditingParts;
 use crate::product::{ContentDigest, ProjectId};
 use crate::state::{ProjectSourceBundle, ProjectSourceId};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -155,7 +155,7 @@ impl CodeLanguageToolsState {
 }
 
 pub fn open_language_tools_in_bundle(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     active_path: &str,
     caret_char_index: usize,
@@ -194,7 +194,7 @@ pub fn open_language_tools_in_bundle(
     Ok(())
 }
 
-pub fn commit_language_rename(parts: &mut CodeWorkspaceParts<'_>) -> Result<String, String> {
+pub fn commit_language_rename(parts: &mut SourceEditingParts<'_>) -> Result<String, String> {
     let messages = parts.wb.messages();
     let state = current_language_transaction(parts)?;
     let replacements = state.index.rename_preview_at(
@@ -271,7 +271,7 @@ pub fn extent_words(messages: MessageCatalog, occurrences: usize, files: usize) 
 }
 
 fn current_language_transaction(
-    parts: &CodeWorkspaceParts<'_>,
+    parts: &SourceEditingParts<'_>,
 ) -> Result<CodeLanguageToolsState, String> {
     let messages = parts.wb.messages();
     let state = parts
@@ -318,7 +318,7 @@ fn current_language_transaction(
 /// there. A read-only source, or one the formatter refuses to touch because
 /// it does not parse, says why instead of changing anything.
 pub fn format_language_document(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     bundle_id: ProjectSourceId,
     logical_path: &str,
 ) -> Result<String, String> {
@@ -382,7 +382,7 @@ pub(super) fn formatted_verilog_a(logical_path: &str, source: &str) -> Result<St
 }
 
 fn write_language_document(
-    parts: &mut CodeWorkspaceParts<'_>,
+    parts: &mut SourceEditingParts<'_>,
     bundle_id: ProjectSourceId,
     logical_path: &str,
     replacement: String,

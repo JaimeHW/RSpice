@@ -675,7 +675,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     let edited = TWO_TOP_MODULES.replace("/ 1k", "/ 2k");
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app.code_workspace_parts(),
+            &mut app.source_editing_parts(),
             &selected,
             "pair.va",
             edited.clone()
@@ -797,7 +797,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     app.execute_command_key(SourceCommand::ImportVerilogA.key());
     assert!(app.state.code.code_workspace.veriloga.import_requested);
     code_workspace::complete_veriloga_file_pick(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         "pair.va",
         TWO_TOP_MODULES,
     );
@@ -885,7 +885,7 @@ const REPLACEMENT: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;
 /// confirmation it opens. No frame runs between the two, so the native
 /// picker the request asks for never opens.
 fn pick_replacement(app: &mut RSpiceApp) {
-    let mut parts = app.code_workspace_parts();
+    let mut parts = app.source_editing_parts();
     code_workspace::request_veriloga_source_replacement(&mut parts, "model.va")
         .expect("model.va can be replaced");
     assert!(

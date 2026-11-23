@@ -31,7 +31,7 @@ use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::code::commands::LifecycleAction;
 use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, CodeWorkspaceRuntimeState, SourceIncludeTarget, SourceNavigation,
+    self, CodeSourceFileAction, SourceEditingState, SourceIncludeTarget, SourceNavigation,
     SourceOutlineGroup, VerilogAHeaderView, document_navigation,
 };
 use crate::workbench::{MessageCatalog, MessageId};
@@ -41,7 +41,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 /// Verilog-A editor's state, the platform's and the message catalogue.
 pub(crate) struct SourceRail<'a> {
     pub(crate) model: &'a Model,
-    pub(crate) code_workspace: &'a mut CodeWorkspaceRuntimeState,
+    pub(crate) code_workspace: &'a mut SourceEditingState,
     pub(crate) platform: &'a PlatformState,
     pub(crate) messages: MessageCatalog,
 }
@@ -390,11 +390,11 @@ fn active_bundle(model: &Model) -> Option<&crate::state::ProjectSourceBundle> {
     model.workspace.active_source_bundle()
 }
 
-fn active_path(model: &Model, code: &CodeWorkspaceRuntimeState) -> Option<String> {
+fn active_path(model: &Model, code: &SourceEditingState) -> Option<String> {
     code_workspace::active_bundle_path(&model.workspace, code)
 }
 
-fn select(model: &Model, code: &mut CodeWorkspaceRuntimeState, logical_path: &str) {
+fn select(model: &Model, code: &mut SourceEditingState, logical_path: &str) {
     code_workspace::select_source_document(&model.workspace, code, logical_path);
 }
 

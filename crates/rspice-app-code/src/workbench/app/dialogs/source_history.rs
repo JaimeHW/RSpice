@@ -20,7 +20,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::{LifecycleAction, SourceDocumentRequest};
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{Fact, fact_rows, property_row_height, section_block_gap};
-use crate::workbench::documents::code_workspace::{self, CodeWorkspaceRuntimeState};
+use crate::workbench::documents::code_workspace::{self, SourceEditingState};
 use crate::workbench::{MessageCatalog, MessageId};
 
 use super::source_document::{dialog_inset, leaf_name, sections};
@@ -67,7 +67,7 @@ fn revision_rows(bundle: &ProjectSourceBundle) -> Vec<RevisionRow> {
 /// over the model and the platform's state. Returns the restore it asked
 /// for, which the shell carries out.
 pub(super) fn render(
-    code: &mut CodeWorkspaceRuntimeState,
+    code: &mut SourceEditingState,
     model: &Model,
     platform: &PlatformState,
     messages: MessageCatalog,

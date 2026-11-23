@@ -9,7 +9,7 @@ use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 
 use crate::workbench::MessageCatalog;
 use crate::workbench::documents::code_workspace::{
-    self, CodeWorkspaceRuntimeState, VerilogAInspectorAction,
+    self, SourceEditingState, VerilogAInspectorAction,
 };
 use rspice_app_state::workbench::app_state::model::Model;
 
@@ -18,7 +18,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 pub(in crate::workbench) fn show(
     ui: &mut Ui,
     model: &Model,
-    code_workspace: &CodeWorkspaceRuntimeState,
+    code_workspace: &SourceEditingState,
     messages: MessageCatalog,
 ) -> Option<VerilogAInspectorAction> {
     match code_workspace::selected_veriloga_source_in(model) {

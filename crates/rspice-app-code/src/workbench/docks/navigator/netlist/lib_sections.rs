@@ -15,7 +15,7 @@
 
 use rspice_core::library::LibSectionSummary;
 
-use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
+use crate::workbench::documents::code_workspace::SourceEditingState;
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, active_netlist_source_is_editable_in,
 };
@@ -30,7 +30,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 pub(super) fn refresh(
     model: &Model,
     netlist: &NetlistDocumentState,
-    code_workspace: &mut CodeWorkspaceRuntimeState,
+    code_workspace: &mut SourceEditingState,
 ) {
     let Some(document) = super::active_canonical_netlist_document(model, netlist) else {
         code_workspace.include_lib_sections.clear();
@@ -70,7 +70,7 @@ pub(super) fn refresh(
 /// order. A locator with no retained bytes, or one whose library declares
 /// none, offers nothing.
 pub(super) fn declared(
-    code_workspace: &CodeWorkspaceRuntimeState,
+    code_workspace: &SourceEditingState,
     locator: &str,
 ) -> Vec<LibSectionSummary> {
     code_workspace

@@ -144,7 +144,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_source_bundle(&mut app.code_workspace_parts(), SourceCommand::RenameSymbol)
+    super::navigate_source_bundle(&mut app.source_editing_parts(), SourceCommand::RenameSymbol)
         .expect("the caret is on g");
     let form = app
         .state
@@ -209,7 +209,7 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
     );
 
     super::navigate_source_bundle(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         SourceCommand::FindReferences,
     )
     .expect("the caret is on g");
@@ -464,7 +464,7 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app.code_workspace_parts(),
+            &mut app.source_editing_parts(),
             &selected,
             "top.va",
             "module top(p, n);\n  inout p, n;\n  electrical p, n;\n  half xu(p, n);\nendmodule\n"
@@ -576,7 +576,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app.code_workspace_parts(),
+            &mut app.source_editing_parts(),
             &selected,
             "model.va",
             module_source("gain", "  real unused;\n"),
@@ -635,7 +635,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     let ctx = themed_context();
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     code_workspace::replace_selected_veriloga_file(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         &selected,
         "model.va",
         module_source("gain", "  real broken = ;\n"),
@@ -708,7 +708,7 @@ fn a_source_edit_marks_its_tab_dirty_and_saving_clears_it() {
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert!(
         code_workspace::replace_selected_veriloga_file(
-            &mut app.code_workspace_parts(),
+            &mut app.source_editing_parts(),
             &selected,
             "model.va",
             module_source("gain", "  real unused;\n"),

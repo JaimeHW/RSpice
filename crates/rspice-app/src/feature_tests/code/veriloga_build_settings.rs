@@ -52,7 +52,7 @@ fn veriloga_view_holding(source: &str) -> RSpiceApp {
     open_in_design(&mut app.state, &reference);
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     code_workspace::replace_selected_veriloga_file(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         &selected,
         "model.va",
         source.to_owned(),
@@ -275,7 +275,7 @@ fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
     open_in_design(&mut app.state, &reference);
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     code_workspace::replace_selected_veriloga_file(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         &selected,
         "model.va",
         TWO_MODULES.to_owned(),
@@ -333,7 +333,7 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
     let saved = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     let edited = format!("{TWO_MODULES}// edited after the save\n");
     code_workspace::replace_selected_veriloga_file(
-        &mut app.code_workspace_parts(),
+        &mut app.source_editing_parts(),
         &saved,
         "model.va",
         edited,

@@ -42,7 +42,7 @@ pub use rspice_vocabulary::diagnostics::{
 };
 
 #[derive(Debug, Clone)]
-pub struct CodeDocumentInteraction {
+pub struct SourceDocumentInteraction {
     pub changed: bool,
     pub cursor_char_index: usize,
     pub selected_char_range: Option<(usize, usize)>,
@@ -76,7 +76,7 @@ pub fn show_code_document_interaction_versioned(
     diagnostic_path: Option<&str>,
     editable: bool,
     messages: crate::workbench::MessageCatalog,
-) -> CodeDocumentInteraction {
+) -> SourceDocumentInteraction {
     show_code_document_impl(
         ui,
         egui::Id::new(id),
@@ -104,7 +104,7 @@ pub fn show_veriloga_document_versioned(
     editable: bool,
     messages: crate::workbench::MessageCatalog,
     include_files: &[String],
-) -> CodeDocumentInteraction {
+) -> SourceDocumentInteraction {
     show_code_document_impl(
         ui,
         egui::Id::new(id),
@@ -394,7 +394,7 @@ fn show_code_document_impl(
     editable: bool,
     messages: crate::workbench::MessageCatalog,
     include_files: &[String],
-) -> CodeDocumentInteraction {
+) -> SourceDocumentInteraction {
     // The findings shown are the last check's, kept through the edits made
     // since it ran.
     let held_id = editor_id.with("held-findings");
@@ -561,7 +561,7 @@ fn show_code_document_impl(
             data.insert_temp(highlighter_id, highlighter);
         }
     });
-    CodeDocumentInteraction {
+    SourceDocumentInteraction {
         changed: output.changed,
         cursor_char_index: output.cursor_char_index,
         selected_char_range: output.selected_char_range,
