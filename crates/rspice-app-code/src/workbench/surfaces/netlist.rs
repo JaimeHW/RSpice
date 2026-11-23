@@ -1613,9 +1613,14 @@ mod tests {
         let harness = harness();
         let source = "R1 1 0 1k\n.end\n".to_owned();
 
-        let dependencies =
-            generation::generated_project_source_dependencies(&harness.model, &source)
-                .expect("unreferenced source does not create a dependency");
+        let dependencies = generation::generated_project_source_dependencies(
+            &harness.model,
+            &source,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        )
+        .expect("unreferenced source does not create a dependency");
         assert!(dependencies.is_empty());
     }
 
@@ -1624,9 +1629,14 @@ mod tests {
         let (harness, source_key) = configured_veriloga_state();
         let source = format!("configured deck\n.veriloga \"{source_key}\" sealed_gain\n.end\n");
 
-        let dependencies =
-            generation::generated_project_source_dependencies(&harness.model, &source)
-                .expect("retain exact project source closure");
+        let dependencies = generation::generated_project_source_dependencies(
+            &harness.model,
+            &source,
+            crate::workbench::MessageCatalog::new(
+                crate::workbench::UiTextLocale::EnglishUnitedStates,
+            ),
+        )
+        .expect("retain exact project source closure");
 
         assert_eq!(dependencies.len(), 2);
         assert!(dependencies.iter().all(|dependency| {

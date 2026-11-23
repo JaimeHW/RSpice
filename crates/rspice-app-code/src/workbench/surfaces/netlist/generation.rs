@@ -267,7 +267,7 @@ pub(super) fn publish_generated_document(
     )
     .map_err(|error| error.to_string())?;
     let source_map = generated_source_map(model, &source, line_map)?;
-    let dependencies = generated_project_source_dependencies(model, &source)?;
+    let dependencies = generated_project_source_dependencies(model, &source, messages)?;
     let artifact =
         GeneratedArtifact::try_from_utf8(provenance, source.into_bytes(), dependencies, source_map)
             .map_err(|error| error.to_string())?;
@@ -291,6 +291,7 @@ pub(super) fn publish_generated_document(
 pub(super) fn generated_project_source_dependencies(
     model: &Model,
     source: &str,
+    messages: MessageCatalog,
 ) -> Result<Vec<crate::state::DependencyMetadata>, String> {
     let include_directives = crate::state::parse_include_directives(source);
     let mut dependencies = Vec::new();
@@ -317,25 +318,24 @@ pub(super) fn generated_project_source_dependencies(
             .project_sources
             .get_bundle(binding.source_bundle_id())
             .ok_or_else(|| {
-                format!(
-                    "The Verilog-A instance at {} names a source that no longer exists ({})",
-                    execution.instance_path(),
-                    binding.source_bundle_id()
+                messages.format(
+                    MessageId::NetlistGenerationSourceGone,
+                    &[("instance", &execution.instance_path().to_string())],
                 )
             })?;
         if bundle.closure_digest() != binding.source_closure_digest() {
-            return Err(format!(
-                "Verilog-A source {} changed after the hierarchy was resolved",
-                bundle.id()
+            return Err(messages.format(
+                MessageId::NetlistGenerationSourceChanged,
+                &[("file", bundle.root().logical_path())],
             ));
         }
         let include_index = include_directives
             .iter()
             .position(|directive| directive.locator() == binding.source_key())
             .ok_or_else(|| {
-                format!(
-                    "Generated source is missing the Verilog-A binding for {}",
-                    execution.instance_path()
+                messages.format(
+                    MessageId::NetlistGenerationIncludeMissing,
+                    &[("instance", &execution.instance_path().to_string())],
                 )
             })?;
         let root_locator = crate::state::SourceLocator::try_new(
@@ -349,9 +349,12 @@ pub(super) fn generated_project_source_dependencies(
                 binding.selected_module(),
             )
             .map_err(|failure| {
-                format!(
-                    "Could not read the Verilog-A files used by {}: {failure}",
-                    execution.instance_path()
+                messages.format(
+                    MessageId::NetlistGenerationSourceUnreadable,
+                    &[
+                        ("instance", &execution.instance_path().to_string()),
+                        ("error", &failure.to_string()),
+                    ],
                 )
             })?;
         let read_root = closure
@@ -363,9 +366,12 @@ pub(super) fn generated_project_source_dependencies(
                     .eq_ignore_ascii_case(bundle.root().logical_path())
             })
             .ok_or_else(|| {
-                format!(
-                    "The Verilog-A files read for {} do not include the source's root file",
-                    execution.instance_path()
+                messages.format(
+                    MessageId::NetlistGenerationMainFileUnread,
+                    &[
+                        ("instance", &execution.instance_path().to_string()),
+                        ("file", bundle.root().logical_path()),
+                    ],
                 )
             })?;
         dependencies.push(
@@ -388,9 +394,12 @@ pub(super) fn generated_project_source_dependencies(
                         .eq_ignore_ascii_case(&edge.including_path)
                 })
                 .ok_or_else(|| {
-                    format!(
-                        "Verilog-A include parent '{}' is missing from the files read",
-                        edge.including_path
+                    messages.format(
+                        MessageId::NetlistGenerationIncludingFileUnread,
+                        &[
+                            ("file", &edge.including_path),
+                            ("included", &edge.included_path),
+                        ],
                     )
                 })?;
             let child = closure
@@ -402,9 +411,12 @@ pub(super) fn generated_project_source_dependencies(
                         .eq_ignore_ascii_case(&edge.included_path)
                 })
                 .ok_or_else(|| {
-                    format!(
-                        "Verilog-A include target '{}' is missing from the files read",
-                        edge.included_path
+                    messages.format(
+                        MessageId::NetlistGenerationIncludedFileUnread,
+                        &[
+                            ("file", &edge.included_path),
+                            ("including", &edge.including_path),
+                        ],
                     )
                 })?;
             let parent_locator = compiler_dependency_locator(
@@ -412,12 +424,14 @@ pub(super) fn generated_project_source_dependencies(
                 bundle.root().logical_path(),
                 parent,
                 &root_locator,
+                messages,
             )?;
             let child_locator = compiler_dependency_locator(
                 binding.source_key(),
                 bundle.root().logical_path(),
                 child,
                 &root_locator,
+                messages,
             )?;
             dependencies.push(
                 crate::state::DependencyMetadata::unresolved_transitive_to(
@@ -448,6 +462,7 @@ fn compiler_dependency_locator(
     root_path: &str,
     dependency: &rspice_veriloga::VirtualSourceDependency,
     root_locator: &crate::state::SourceLocator,
+    messages: MessageCatalog,
 ) -> Result<crate::state::SourceLocator, String> {
     if dependency.logical_path.eq_ignore_ascii_case(root_path) {
         return Ok(root_locator.clone());
@@ -458,7 +473,12 @@ fn compiler_dependency_locator(
             .rsplit('/')
             .next()
             .filter(|name| !name.is_empty())
-            .ok_or_else(|| "Compiler returned a built-in dependency without a name".to_owned())?;
+            .ok_or_else(|| {
+                messages.format(
+                    MessageId::NetlistGenerationBuiltInUnnamed,
+                    &[("path", &dependency.logical_path)],
+                )
+            })?;
         return crate::state::SourceLocator::try_new(
             format!("__rspice_builtin__/veriloga/{name}"),
             dependency.logical_path.clone(),

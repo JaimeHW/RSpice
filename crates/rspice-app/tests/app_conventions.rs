@@ -2156,6 +2156,7 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         "rspice-app-code/src/workbench/workflows/netlist_workflow/platform.rs",
         "rspice-app-code/src/workbench/menu_bar/netlist_actions.rs",
         "rspice-app-code/src/workbench/menu_bar/netlist_export.rs",
+        "rspice-app-code/src/workbench/surfaces/netlist/generation.rs",
         "rspice-app/src/workbench/session/deck_transactions.rs",
     ];
     // A literal on a line that names an id, a panic, an assertion or a debug
