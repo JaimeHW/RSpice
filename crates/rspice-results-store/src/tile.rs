@@ -259,18 +259,14 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// The analog signal `signal` as a tile draws it.
     fn drawn_column(&self, signal: usize) -> Result<Column, StoreError> {
-        let slot = self.schema().slot_of(signal).ok_or_else(|| {
+        let index = self.analog_index(signal).ok_or_else(|| {
             StoreError::OutOfRange(format!("signal {signal} is not an analog signal"))
         })?;
-        let index = self
-            .analog()
-            .iter()
-            .position(|column| column.slot == slot)
-            .unwrap_or_default();
+        let column = self.analog()[index];
         Ok(Column {
             index,
-            slot,
-            complex: self.analog()[index].complex,
+            slot: column.slot,
+            complex: column.complex,
         })
     }
 

@@ -205,6 +205,10 @@ pub struct SegmentReader<I: SegmentIo> {
     meta: RunMeta,
     slots: usize,
     analog: Vec<AnalogColumn>,
+    /// Each signal's position in `analog`, by signal id; none for an event signal. A view of
+    /// one signal finds its column here rather than by counting the signals before it, which
+    /// for a segment of a million signals is a million views each walking the schema.
+    analog_of: Vec<Option<u32>>,
     /// Event signals in id order: (signal id, kind).
     event_signals: Vec<(u32, EventKind)>,
     catalogue: Catalogue,
@@ -260,6 +264,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             meta: RunMeta::default(),
             slots: 0,
             analog: Vec::new(),
+            analog_of: Vec::new(),
             event_signals: Vec::new(),
             catalogue: Catalogue::default(),
             state: SegmentState::Recovered,
@@ -291,10 +296,15 @@ impl<I: SegmentIo> SegmentReader<I> {
         for signal in &reader.schema.signals {
             let slots = signal.kind.slots();
             if slots > 0 {
+                reader
+                    .analog_of
+                    .push(u32::try_from(reader.analog.len()).ok());
                 reader.analog.push(AnalogColumn {
                     slot,
                     complex: slots == 2,
                 });
+            } else {
+                reader.analog_of.push(None);
             }
             slot += slots;
         }
@@ -881,6 +891,12 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     pub(crate) fn analog(&self) -> &[AnalogColumn] {
         &self.analog
+    }
+
+    /// Signal `signal`'s position in [`Self::analog`], when it is an analog signal.
+    pub(crate) fn analog_index(&self, signal: usize) -> Option<usize> {
+        let index = (*self.analog_of.get(signal)?)?;
+        usize::try_from(index).ok()
     }
 
     /// The level-1 summary region of `chunk`.

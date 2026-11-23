@@ -382,3 +382,48 @@ fn the_rows_around_a_cursor_are_two_at_or_before_it_and_two_after() {
             .is_err()
     );
 }
+
+/// Event signals hold no column, so an analog signal after them is not at its own id among
+/// the columns: each analog signal's tile is still its own values, and an event signal has no
+/// tile.
+#[test]
+fn a_signal_after_event_signals_tiles_its_own_column() {
+    use crate::{Axis, Schema, Signal, SignalKind};
+    let schema = Schema {
+        x: Axis {
+            name: "time".into(),
+            unit: "s".into(),
+        },
+        signals: vec![
+            Signal::new("clk", "", SignalKind::Logic),
+            Signal::new("v(a)", "V", SignalKind::Real),
+            Signal::new("e", "", SignalKind::RealEvent),
+            Signal::new("v(ac)", "V", SignalKind::Complex),
+            Signal::new("v(b)", "V", SignalKind::Real),
+        ],
+    };
+    let mut writer = SegmentWriter::create(MemoryIo::new(), &schema, &meta()).unwrap();
+    for row in 0..10 {
+        let t = f64::from(row);
+        writer.push_row(t, &[t, 3.0, 4.0 + t, 100.0 + t]).unwrap();
+    }
+    let (_, io) = writer.finish(RunStatus::Completed).unwrap();
+    let mut reader = SegmentReader::open(io).unwrap();
+    let mut drawn = |signal| match reader.tile(signal, 0.0, 9.0, 100).unwrap() {
+        Tile::Samples { y, .. } => y,
+        other => panic!("ten rows over a hundred pixels are drawn as rows, not {other:?}"),
+    };
+    let rows = || (0..10).map(f64::from);
+    assert_eq!(drawn(1), rows().collect::<Vec<_>>());
+    assert_eq!(
+        drawn(3),
+        rows().map(|t| magnitude(3.0, 4.0 + t)).collect::<Vec<_>>()
+    );
+    assert_eq!(drawn(4), rows().map(|t| 100.0 + t).collect::<Vec<_>>());
+    for event in [0, 2] {
+        assert!(
+            reader.tile(event, 0.0, 9.0, 100).is_err(),
+            "event signal {event} has no tile"
+        );
+    }
+}
