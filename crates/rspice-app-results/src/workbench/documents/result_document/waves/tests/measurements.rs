@@ -283,8 +283,10 @@ fn a_measurement_row_names_its_trace_as_drawn() {
     state.model.simulation.complete_run();
     let ctx = egui::Context::default();
     rspice_ui_kit::Theme::default().apply(&ctx);
+    // The Measurements plan is made off the frame: its rows show on a frame
+    // after it arrives.
     let mut painted = Vec::new();
-    for _ in 0..2 {
+    let shown = (0..3_000).any(|_| {
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 readout::right_panel(ui, &mut state.results_parts());
@@ -298,11 +300,13 @@ fn a_measurement_row_names_its_trace_as_drawn() {
                 _ => None,
             })
             .collect::<Vec<_>>();
-    }
-    assert!(
-        painted.iter().any(|text| text == "V(Out) min"),
-        "{painted:?}"
-    );
+        let shown = painted.iter().any(|text| text == "V(Out) min");
+        if !shown {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        shown
+    });
+    assert!(shown, "{painted:?}");
     assert!(
         !painted.iter().any(|text| text.contains("OUT")),
         "{painted:?}"
