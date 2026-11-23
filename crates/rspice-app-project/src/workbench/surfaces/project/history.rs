@@ -29,8 +29,7 @@ use crate::ui::widgets::{CommandForm, FormRows, TableColumn};
 use crate::workbench::app::dialogs::project::{CheckpointDeletion, ProjectCheckpointRecoveryState};
 use crate::workbench::lifecycle::project_checkpoint::{
     CheckpointDamage, ProjectCheckpointQuarantine, ProjectCheckpointReason,
-    ProjectCheckpointSummary, TechnologyRestore, budget_bytes, budget_label, budget_use,
-    normalized_note, technology_restore,
+    ProjectCheckpointSummary, TechnologyRestore, normalized_note, technology_restore,
 };
 use crate::workbench::project::revision_history::{
     HistoryKind, HistoryList, HistoryListSource, HistoryRow, ProjectAuditRow, ask_revision_restore,
@@ -174,10 +173,18 @@ fn build_list(
         .iter()
         .map(checkpoint_row)
         .chain(recovery.quarantined.iter().map(set_aside_row))
-        .chain(journal.iter().map(journal_row))
+        // A journal record that keeps no time is no change: it is what the
+        // plan or a library binding was when the project began, which their
+        // own pages say, and a history lists only what happened, and when.
+        .chain(
+            journal
+                .iter()
+                .filter(|row| row.made_unix_ms.is_some())
+                .map(journal_row),
+        )
         .collect::<Vec<_>>();
-    // A record that keeps no time follows every one that does, in the order
-    // it was listed in.
+    // A checkpoint whose record keeps no time follows every row that does,
+    // in the order it was listed in.
     rows.sort_by(|left, right| right.made_unix_ms.cmp(&left.made_unix_ms));
     let kinds = HistoryKind::ALL
         .into_iter()
@@ -459,10 +466,14 @@ fn bar_report(cx: &Cx<'_, ProjectFeature>, work: CheckpointWork) -> (String, Opt
         1 => "1 checkpoint".to_owned(),
         count => format!("{count} checkpoints"),
     };
-    let space = format!(
-        "{} of {}",
-        format_bytes(budget_use(&recovery.checkpoints)),
-        budget_label(budget_bytes(cx.model))
+    // The space every checkpoint takes, as the inspector's Space used says;
+    // the automatic space is a choice the inspector holds.
+    let space = format_bytes(
+        recovery
+            .checkpoints
+            .iter()
+            .map(ProjectCheckpointSummary::snapshot_byte_len)
+            .sum(),
     );
     match recovery.quarantined.len() {
         0 => (format!("{count} \u{b7} {space}"), None),

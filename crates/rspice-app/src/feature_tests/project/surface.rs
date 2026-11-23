@@ -619,17 +619,16 @@ fn the_history_page_lists_checkpoints_newest_first() {
     assert!(at.is_sorted(), "{made:?} are not newest first:\n{text}");
 }
 
-/// A project with no checkpoint counts none and still lists its journal; a
-/// damaged checkpoint is a row of its own that says in a few words what is
-/// wrong; and a store that cannot be read says so and offers Try again
-/// rather than counting no checkpoints.
+/// An empty history says so once; a damaged checkpoint is a row of its own
+/// that says in a few words what is wrong; and a store that cannot be read
+/// says so and offers Try again instead of an empty list.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn the_history_page_states_empty_damaged_and_unreadable_catalogs() {
     let size = egui::vec2(1440.0, 900.0);
     let mut empty = recovery_project_app(0, false, false);
     let text = painted_project_page(size, |ui| show(ui, &mut empty));
-    for expected in ["0 checkpoints \u{b7} ", "Default plan"] {
+    for expected in ["0 checkpoints \u{b7} ", "No checkpoints or revisions yet."] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
 
