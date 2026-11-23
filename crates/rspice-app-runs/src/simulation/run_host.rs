@@ -64,6 +64,14 @@ pub trait RunHost: ViewerHost {
     /// Check `subject` as Check Design does, unless a current check of it
     /// already describes it.
     fn ensure_design_check(&mut self, subject: CellViewRef) -> Result<(), String>;
+    /// A run's refusal for going past one of the engine's limits, in the
+    /// reader's words; `device` names the device that went past it, where
+    /// one did.
+    fn resource_refusal(
+        &self,
+        refusal: &rspice_core::ResourceLimitError,
+        device: Option<&str>,
+    ) -> String;
 }
 
 /// A deck a manual run reads: its name, its text as the editor holds it,

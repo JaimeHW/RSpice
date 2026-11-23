@@ -289,16 +289,27 @@ fn refuse(
             MessageId::NetlistDeckCannotRun,
         ),
     };
+    // A deck past one of the engine's limits is said to be, in the words
+    // its finding says it in.
+    let refusal = error
+        .resource_limit()
+        .map(|refusal| messages.resource_refusal(refusal));
     let notice = match failure_line(error, text) {
         Some(line) => messages.format(
             at_line,
             &[
                 ("name", name),
                 ("line", &line.to_string()),
-                ("error", error.finding()),
+                ("error", refusal.as_deref().unwrap_or(error.finding())),
             ],
         ),
-        None => messages.format(without_line, &[("name", name), ("error", error.message())]),
+        None => messages.format(
+            without_line,
+            &[
+                ("name", name),
+                ("error", refusal.as_deref().unwrap_or(error.message())),
+            ],
+        ),
     };
     cx.model
         .record(LogSeverity::Error, LogSource::Netlist, notice.clone());

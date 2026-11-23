@@ -406,8 +406,11 @@ impl SimulationController {
                             .map(|config| self.analysis_name(config).to_owned())
                     })
                     .unwrap_or_else(|| "Analysis".to_owned());
+                // A limit the run went past is said in the reader's words,
+                // never the engine's.
+                let why = Self::limit_refusal(state, &e).unwrap_or_else(|| e.to_string());
                 let console_line = Self::refusal_console_line(&failed_label, &e)
-                    .unwrap_or_else(|| format!("{failed_label} failed: {e}"));
+                    .unwrap_or_else(|| format!("{failed_label} failed: {why}"));
                 Self::report_failed_analysis(
                     state,
                     &failed_label,
@@ -440,12 +443,8 @@ impl SimulationController {
                     .unwrap_or(AnalysisType::DcOp);
                 let target_run_id = self.target_run_id();
                 let failed_analysis = if let Some(provenance) = self.current_provenance.take() {
-                    let mut analysis = self.partial_failure_analysis(
-                        failed_type,
-                        &failed_label,
-                        e.to_string(),
-                        provenance,
-                    );
+                    let mut analysis =
+                        self.partial_failure_analysis(failed_type, &failed_label, why, provenance);
                     analysis.failure_attribution = attribution;
                     analysis.failure_capability = match &e {
                         SimulationError::UnsupportedCapability { capability, .. } => {
@@ -483,6 +482,33 @@ impl SimulationController {
                 }
             }
         }
+    }
+
+    /// What `error` says, in `state`'s words, when the run went past one of
+    /// the engine's limits; `None` for every other failure.
+    pub(super) fn limit_refusal(state: &impl RunHost, error: &SimulationError) -> Option<String> {
+        let (device, resource, requested, limit) = match error {
+            SimulationError::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            } => (None, resource, *requested, *limit),
+            SimulationError::ResourceFailure(
+                rspice_simulation_contract::resource_failure::ResourceFailure::DeviceLimit {
+                    instance,
+                    resource,
+                    requested,
+                    limit,
+                },
+            ) => (Some(instance.as_str()), resource, *requested, *limit),
+            _ => return None,
+        };
+        let refusal = rspice_core::ResourceLimitError {
+            resource: rspice_core::ResourceKind::from_name(resource)?,
+            requested,
+            limit,
+        };
+        Some(state.resource_refusal(&refusal, device))
     }
 
     /// The console line for a deliberate refusal: the analysis the author

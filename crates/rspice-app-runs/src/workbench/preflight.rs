@@ -214,7 +214,7 @@ pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, qu
                 });
                 return;
             }
-            Err(error) => report.blockers.push(preparation_issue(&error)),
+            Err(error) => report.blockers.push(preparation_issue(state, &error)),
         }
     }
     conclude(state, controller, report, Vec::new(), None, queue);
@@ -241,11 +241,15 @@ fn checks_the_design_as_it_stands(
         )
 }
 
-/// The blocker a preparation failure stands as.
-pub(crate) fn preparation_issue(error: &PreparationError) -> PreflightIssue {
+/// The blocker a preparation failure stands as: a limit the run would go
+/// past said in `state`'s words, never the engine's.
+pub(crate) fn preparation_issue(state: &impl RunHost, error: &PreparationError) -> PreflightIssue {
     PreflightIssue {
         check: preparation_check_label(error.stage()).to_owned(),
-        observed: error.message().to_owned(),
+        observed: error.resource_limit().map_or_else(
+            || error.message().to_owned(),
+            |refusal| state.resource_refusal(refusal, None),
+        ),
         required: preparation_requirement(error.stage()).to_owned(),
         remediation: match error.directive_note() {
             // A card a SPICE directive note wrote is repaired on the note.
@@ -336,7 +340,9 @@ pub fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
     };
     let mut converters = Vec::new();
     match verdict {
-        PreflightVerdict::NotPrepared(error) => report.blockers.push(preparation_issue(&error)),
+        PreflightVerdict::NotPrepared(error) => {
+            report.blockers.push(preparation_issue(state, &error));
+        }
         PreflightVerdict::Checked {
             mut metadata,
             refusals,

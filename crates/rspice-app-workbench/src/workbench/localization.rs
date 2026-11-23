@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 
+mod resource_refusal;
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default,
 )]
@@ -1142,6 +1144,33 @@ define_messages! {
     NetlistLibSectionNone => "none",
     NetlistLibSectionSelect => "Section of {name}: {section}",
     EditorPasteRefused => "The browser did not let RSpice read the clipboard. Press {key} to paste.",
+    // A check or a run that went past one of the engine's limits: what is too
+    // large, how large it is and how large it can be. {requested} and
+    // {limit} come in the units below.
+    ResourceNetlistBytes => "This deck is {requested}; a deck can be at most {limit}.",
+    ResourceNetlistLines => "This deck has {requested} lines; a deck can have at most {limit}.",
+    ResourceExpandedSourceBytes => "This deck comes to {requested} with the files it includes read in; it can come to at most {limit}.",
+    ResourceDependencySourceBytes => "The files this deck includes come to {requested}; they can come to at most {limit}.",
+    ResourceExternalDataBytes => "A data file a source reads is {requested}; a data file can be at most {limit}.",
+    ResourceExternalDataValues => "A data file a source reads holds {requested} values; a data file can hold at most {limit}.",
+    ResourceSharedCacheBytes => "The compiled devices kept between runs come to {requested}; they can come to at most {limit}.",
+    ResourceIncludeDepth => "This deck's includes nest {requested} deep; they can nest at most {limit} deep.",
+    ResourceHierarchyDepth => "This circuit's subcircuits nest {requested} deep; they can nest at most {limit} deep.",
+    ResourceFlattenedElements => "This circuit has {requested} devices with its subcircuits expanded; a circuit can have at most {limit}.",
+    ResourceCircuitNodes => "This circuit has {requested} nodes; a circuit can have at most {limit}.",
+    ResourceMatrixUnknowns => "This circuit has {requested} unknowns to solve for; a circuit can have at most {limit}.",
+    ResourceResultValues => "This result would hold {requested} values; a result can hold at most {limit}.",
+    ResourceTransportHistoryBytes => "The delay lines' histories need {requested}; they can take at most {limit}.",
+    ResourceTransportHistoryRecords => "A delay line's history holds {requested} points; it can hold at most {limit}.",
+    ResourceMixedIntervalEvents => "One step of the mixed-signal run has {requested} events; a step can have at most {limit}.",
+    ResourceParallelWorkers => "This run asks for {requested} threads; a run can use at most {limit}.",
+    ResourceBatchRuns => "This analysis asks for {requested} runs; an analysis can make at most {limit}.",
+    ResourceMoreThan => "more than {amount}",
+    ResourceBytes => "{amount} bytes",
+    ResourceKilobytes => "{amount} KB",
+    ResourceMegabytes => "{amount} MB",
+    ResourceGigabytes => "{amount} GB",
+    ResourceOfDevice => "{device}: {refusal}",
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

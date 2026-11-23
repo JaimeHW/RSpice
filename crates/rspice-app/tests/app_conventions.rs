@@ -2111,10 +2111,11 @@ fn every_submenu_row_draws_the_workbench_chevron() {
 
 /// The source editor's own words, its completion list over a deck, the
 /// words of Rename, Find references and Format document over a deck or a
-/// Verilog-A source, a deck import's refusals, and why a deck or one of its
-/// files was not read, saved, exported or removed come from the message
-/// catalogue: a reader in another language, or in the pseudo-locale that
-/// stands for one, sees none of them in English.
+/// Verilog-A source, a deck import's refusals, why a deck or one of its
+/// files was not read, saved, exported or removed, and what a check or a run
+/// went past of the engine's limits come from the message catalogue: a
+/// reader in another language, or in the pseudo-locale that stands for one,
+/// sees none of them in English.
 ///
 /// A string literal in these files' production code that reads as words (a
 /// capitalised word, or two words) is a sentence the catalogue does not
@@ -2158,6 +2159,7 @@ fn the_source_editor_and_the_netlist_page_write_their_words_from_the_catalogue()
         "rspice-app-code/src/workbench/menu_bar/netlist_export.rs",
         "rspice-app-code/src/workbench/surfaces/netlist/generation.rs",
         "rspice-app/src/workbench/session/deck_transactions.rs",
+        "rspice-app-workbench/src/workbench/localization/resource_refusal.rs",
     ];
     // A literal on a line that names an id, a panic, an assertion or a debug
     // dump is never shown to a reader.

@@ -133,6 +133,19 @@ impl ViewerHost for RunTestHost {
 impl RunHost for RunTestHost {
     type Frozen = RunTestHost;
 
+    /// The words are the workbench's: a test of them runs against the
+    /// catalogue. The engine's own stand in for them here.
+    fn resource_refusal(
+        &self,
+        refusal: &rspice_core::ResourceLimitError,
+        device: Option<&str>,
+    ) -> String {
+        match device {
+            Some(device) => format!("{device}: {refusal}"),
+            None => refusal.to_string(),
+        }
+    }
+
     fn freeze(&self) -> RunTestHost {
         self.clone()
     }

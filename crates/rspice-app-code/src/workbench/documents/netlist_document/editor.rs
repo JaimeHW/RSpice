@@ -1991,6 +1991,9 @@ fn parse_error_diagnostic_at(
             let origin = device_initial_condition_diagnostic_origin(&error);
             Diagnostic::error(error.to_string()).with_source_location(origin, editor_source_path)
         }
+        ParseError::ResourceLimit(refusal) => {
+            Diagnostic::error(messages.resource_refusal(&refusal))
+        }
         other => Diagnostic::error(other.to_string()),
     }
 }

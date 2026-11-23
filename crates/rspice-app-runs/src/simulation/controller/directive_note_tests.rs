@@ -199,7 +199,7 @@ fn refusal_route(state: &mut RunTestHost) -> crate::state::PreflightRemediation 
     let error = SimulationController::new()
         .preflight_run_set(state)
         .expect_err("the run is refused");
-    let issue = crate::workbench::preflight::preparation_issue(&error);
+    let issue = crate::workbench::preflight::preparation_issue(state, &error);
     assert!(issue.observed.contains("SPICE directive on"), "{error:?}");
     issue.remediation
 }

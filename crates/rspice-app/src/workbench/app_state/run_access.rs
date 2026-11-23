@@ -35,6 +35,18 @@ impl ViewerHost for AppState {
 impl RunHost for AppState {
     type Frozen = AppState;
 
+    fn resource_refusal(
+        &self,
+        refusal: &rspice_core::ResourceLimitError,
+        device: Option<&str>,
+    ) -> String {
+        let messages = self.workbench.messages();
+        match device {
+            Some(device) => messages.device_resource_refusal(device, refusal),
+            None => messages.resource_refusal(refusal),
+        }
+    }
+
     /// The whole state, as a campaign has always frozen it.
     fn freeze(&self) -> AppState {
         self.clone()

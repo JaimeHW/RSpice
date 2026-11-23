@@ -106,6 +106,18 @@ impl ViewerHost for RunView<'_, '_> {
 impl RunHost for RunView<'_, '_> {
     type Frozen = FrozenRun;
 
+    fn resource_refusal(
+        &self,
+        refusal: &rspice_core::ResourceLimitError,
+        device: Option<&str>,
+    ) -> String {
+        let messages = self.wb.messages();
+        match device {
+            Some(device) => messages.device_resource_refusal(device, refusal),
+            None => messages.resource_refusal(refusal),
+        }
+    }
+
     fn freeze(&self) -> FrozenRun {
         FrozenRun {
             model: self.model.clone(),
@@ -227,6 +239,18 @@ impl ViewerHost for FrozenRun {
 
 impl RunHost for FrozenRun {
     type Frozen = FrozenRun;
+
+    fn resource_refusal(
+        &self,
+        refusal: &rspice_core::ResourceLimitError,
+        device: Option<&str>,
+    ) -> String {
+        let messages = self.wb.messages();
+        match device {
+            Some(device) => messages.device_resource_refusal(device, refusal),
+            None => messages.resource_refusal(refusal),
+        }
+    }
 
     fn freeze(&self) -> FrozenRun {
         FrozenRun {
