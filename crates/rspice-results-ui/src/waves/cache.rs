@@ -249,19 +249,11 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
         let Some(analysis) = run.analyses.get(model.analysis_index).map(AsRef::as_ref) else {
             continue;
         };
+        // The model holds the curves of the signals on the plot alone, so a
+        // curve is drawn unless the reader hid its member of a family.
         let mut source_visible = Vec::with_capacity(model.traces.len());
         for trace in &mut model.traces {
-            let Some(waveform) = analysis.waveforms.get(trace.waveform_index) else {
-                trace.visible = false;
-                source_visible.push(false);
-                continue;
-            };
-            let key = SourceWaveformPresentationKey::new(
-                model.analysis_key,
-                trace.source_waveform_name.clone(),
-            );
-            let chosen = overrides.get(&key).copied();
-            let shown = chosen.unwrap_or(waveform.visible);
+            let shown = analysis.waveforms.get(trace.waveform_index).is_some();
             source_visible.push(shown);
             let family_shown = trace
                 .family_visibility_key
@@ -444,18 +436,23 @@ fn rank_palette_slots(
             }
         }
     }
-    let plotted = sources.iter().filter(|(_, dataset, _)| *dataset).count();
+    // The curves the dataset plots keep the places they were counted to as
+    // the model was built, the ones the reader took off the plot among them.
+    let plotted = model.dataset_plotted;
     let added = sources
         .iter()
-        .filter(|(_, dataset, shown)| !dataset && *shown)
+        .filter(|(key, dataset, shown)| {
+            !(*dataset && model.dataset_ranks.contains_key(key)) && *shown
+        })
         .count();
-    let (mut plotted_rank, mut added_rank, mut spare_rank) = (0, plotted, plotted + added);
+    let (mut added_rank, mut spare_rank) = (plotted, plotted + added);
     let slots: HashMap<(usize, TraceKind), usize> = sources
         .iter()
         .map(|(key, dataset, shown)| {
-            let counter = if *dataset {
-                &mut plotted_rank
-            } else if *shown {
+            if *dataset && let Some(&rank) = model.dataset_ranks.get(key) {
+                return (*key, rank);
+            }
+            let counter = if *shown {
                 &mut added_rank
             } else {
                 &mut spare_rank

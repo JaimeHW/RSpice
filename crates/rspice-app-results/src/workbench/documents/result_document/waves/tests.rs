@@ -456,9 +456,8 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
         !models[0]
             .traces
             .iter()
-            .find(|trace| !trace.overlay && trace.waveform_index == 0)
-            .expect("the retained source has a projected trace")
-            .visible
+            .any(|trace| !trace.overlay && trace.waveform_index == 0 && trace.visible),
+        "the hidden source is drawn"
     );
 
     toggle_visibility(&mut state.results_parts(), 0, 0);

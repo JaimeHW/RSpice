@@ -765,15 +765,18 @@ pub(crate) fn copy_cursor_text(
     let waveform_colors = parts.results.session.waveform_colors.clone();
     let phase_continuous = parts.results.session.presented_phase_continuous();
     let ac = parts.results.session.ac_display;
-    let mut models = build_models(
+    let mut models = super::build_shown_models(
         &parts.model.simulation,
         &mut parts.results.session.derived,
         &Tokens::default(),
-        phase_continuous,
-        presentation.complex_number_display(),
-        ac,
-        sample_selection.as_ref(),
-        &hidden_family_traces,
+        rspice_results_ui::waves::ProjectionOptions {
+            phase_continuous,
+            complex_display: presentation.complex_number_display(),
+            ac,
+            selection: sample_selection.as_ref(),
+            hidden_family_traces: &hidden_family_traces,
+            waveform_visibility: &waveform_visibility,
+        },
     );
     apply_waveform_visibility(
         &mut models,

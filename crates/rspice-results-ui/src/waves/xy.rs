@@ -741,8 +741,15 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     let significant_digits =
         usize::from(frame.options.readout.displayed_significant_digits().get());
     let resolved = match abscissa {
-        Abscissa::Signal { name } => signal_abscissa(model, name)
-            .ok_or_else(|| format!("{name} is not a signal of this analysis")),
+        // A signal off the plot is not in the strip's model, which holds what
+        // is plotted: it is read from the analysis as an expression naming it.
+        Abscissa::Signal { name } => signal_abscissa(model, name).map_or_else(
+            || {
+                host.resolve_abscissa_expression(model, name)
+                    .map_err(|_| format!("{name} is not a signal of this analysis"))
+            },
+            Ok,
+        ),
         Abscissa::Expression { text } => host.resolve_abscissa_expression(model, text),
     };
     let resolved = match resolved {
@@ -787,6 +794,28 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         .iter()
         .find(|trace| !trace.overlay)
         .map_or(0, |trace| trace.run_id);
+    // A nested sweep names each member's columns with its point,
+    // `I(VD) [VG=2; point 2]`: that curve reads against the abscissa's column
+    // of the same point, read from the analysis when it is not plotted.
+    let mut siblings: std::collections::HashMap<String, Option<ResolvedAbscissa>> =
+        std::collections::HashMap::new();
+    if let Abscissa::Signal { name } = abscissa {
+        for trace in pane
+            .traces
+            .iter()
+            .filter_map(|&index| model.traces.get(index))
+        {
+            let Some(sibling) = member_abscissa_name(&trace.source_waveform_name, name) else {
+                continue;
+            };
+            if siblings.contains_key(&sibling) {
+                continue;
+            }
+            let resolved = signal_abscissa(model, &sibling)
+                .or_else(|| host.resolve_abscissa_expression(model, &sibling).ok());
+            siblings.insert(sibling, resolved);
+        }
+    }
     let derived = &mut host.session_mut().derived;
     let mut pair = |name: &str,
                     key: u64,
@@ -840,19 +869,16 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         {
             continue;
         }
-        // A nested sweep names each member's columns with its point,
-        // `I(VD) [VG=2; point 2]`: that curve reads against the abscissa's
-        // column of the same point.
         let sibling = match abscissa {
             Abscissa::Signal { name } => member_abscissa_name(&trace.source_waveform_name, name)
-                .and_then(|name| signal_abscissa(model, &name)),
+                .and_then(|name| siblings.get(&name))
+                .and_then(Option::as_ref),
             Abscissa::Expression { .. } => None,
         };
         let Some((data, cache_key)) = pair(
             &trace.name,
             trace_key(model, trace),
             sibling
-                .as_ref()
                 .and_then(|sibling| sibling.series.first())
                 .or_else(|| operand(MemberKey::of(trace))),
             (&trace.x, &trace.y),

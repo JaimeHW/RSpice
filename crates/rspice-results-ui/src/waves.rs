@@ -253,7 +253,17 @@ pub struct StripModel {
     /// after is overlay. The legend lists only this prefix (signal owns
     /// hue — one chip per signal, all runs).
     pub signal_trace_count: usize,
+    /// The curves on the plot: the signals the reader ticked, or that the
+    /// dataset plots and the reader left, and nothing else of the analysis.
+    /// Every walk of a frame is bounded by them, never by the analysis.
     pub traces: Vec<StripTrace>,
+    /// The place in the palette's cycle of each curve its dataset plots, by
+    /// column and form, counted in column order whether the reader shows it
+    /// or not, so taking one off the plot recolours none of the others.
+    pub dataset_ranks: std::collections::HashMap<(usize, TraceKind), usize>,
+    /// How many curves the dataset plots: the first place a curve the reader
+    /// adds can take.
+    pub dataset_plotted: usize,
     /// The analysis' complex signals, which a strip may show in any
     /// projection.
     pub complex_sources: Vec<ComplexSource>,
@@ -512,9 +522,9 @@ impl StripModel {
         )
     }
 
-    /// The strip's panes: retained signal identities grouped by unit, in the
-    /// order the units first appear so a strip's layout is stable across
-    /// visibility changes. A pane draws something or is not there: one whose
+    /// The strip's panes: the plotted signals grouped by unit, in the order
+    /// their units first appear among the analysis' columns, so a pane keeps
+    /// its place while curves of its unit come and go. A pane draws something or is not there: one whose
     /// signals and expressions are all hidden takes no row, as a waveform
     /// viewer shows no strip for a signal until it is plotted. Its signals
     /// wait in the data browser, whose tick brings the pane back, and its

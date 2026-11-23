@@ -82,9 +82,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
         !after[0]
             .traces
             .iter()
-            .find(|trace| !trace.overlay && trace.waveform_index == 1)
-            .expect("the overridden source still has a projected trace")
-            .visible,
+            .any(|trace| !trace.overlay && trace.waveform_index == 1 && trace.visible),
         "the override did not reach the projected trace at all"
     );
     assert_eq!(

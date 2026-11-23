@@ -47,6 +47,7 @@ fn models(
             ac: Default::default(),
             selection: None,
             hidden_family_traces: hidden,
+            waveform_visibility: &Default::default(),
         },
         |_| None,
     )

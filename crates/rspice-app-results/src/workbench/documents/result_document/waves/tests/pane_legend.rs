@@ -71,6 +71,15 @@ fn text(output: &FullOutput, wanted: &str) -> Option<egui::Rect> {
         .map(|(_, rect)| rect)
 }
 
+/// The volts pane's header row: the topmost place its first signal is named.
+fn volts_row(output: &FullOutput) -> Option<egui::Rect> {
+    texts(&output.shapes)
+        .into_iter()
+        .filter(|(text, _)| text.starts_with("VIN"))
+        .map(|(_, rect)| rect)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+}
+
 /// Where the last run of text that reads `wanted` exactly was painted.
 fn exact(output: &FullOutput, wanted: &str) -> Option<egui::Rect> {
     texts(&output.shapes)
@@ -136,8 +145,7 @@ fn an_expression_hides_and_shows_from_its_pane_legend() {
     let output = settled(&ctx, &mut state);
     assert!(
         text(&output, DOUBLE).is_some_and(|entry| {
-            text(&output, "45 hidden")
-                .is_some_and(|row| (entry.center().y - row.center().y).abs() < 4.0)
+            volts_row(&output).is_some_and(|row| (entry.center().y - row.center().y).abs() < 4.0)
         }),
         "the volts expression is named on the volts pane's row"
     );
@@ -152,7 +160,7 @@ fn an_expression_hides_and_shows_from_its_pane_legend() {
         |state: &ResultsTestHost| state.results.results.session.analysis_exprs[&key][0].visible;
     assert!(!visible(&state), "the swatch hides the expression");
     let output = settled(&ctx, &mut state);
-    let hidden = text(&output, "46 hidden").expect("the pane counts the hidden expression");
+    let hidden = text(&output, "1 hidden").expect("the pane counts the hidden expression");
     click(
         &ctx,
         &mut state,
@@ -342,7 +350,7 @@ fn the_hover_readout_reads_an_expression_in_its_panes_unit() {
     add_expression(&mut state, key, DOUBLE);
     let ctx = theme_context();
     let output = settled(&ctx, &mut state);
-    let row = text(&output, "45 hidden").expect("the volts pane's header row");
+    let row = volts_row(&output).expect("the volts pane's header row");
     let at = egui::pos2(600.0, row.bottom() + 150.0);
     run(&ctx, &mut state, vec![egui::Event::PointerMoved(at)]);
     run(&ctx, &mut state, Vec::new());
@@ -413,7 +421,7 @@ fn an_event_instant_reads_the_value_after_the_event() {
     let ctx = theme_context();
     let output = settled(&ctx, &mut state);
     let painted = texts(&output.shapes);
-    let volts = text(&output, "45 hidden").expect("the volts pane's header row");
+    let volts = volts_row(&output).expect("the volts pane's header row");
     // The texts of the last row that names `name` (below the volts pane's
     // header for a pane entry), from its name rightwards.
     let row = |name: &str, in_pane: bool| {

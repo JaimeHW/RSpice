@@ -78,19 +78,18 @@ fn click(ctx: &egui::Context, state: &mut ResultsTestHost, at: egui::Pos2) {
 /// The review's first current: its analysis and column, its name and its
 /// strip's identity.
 fn first_current(state: &mut ResultsTestHost) -> (usize, usize, String, AnalysisPresentationKey) {
-    let models = strip(state);
-    let model = &models[0];
-    let trace = model
-        .traces
+    let (analysis, key) = {
+        let models = strip(state);
+        (models[0].analysis_index(), models[0].analysis_key)
+    };
+    let (waveform, name) = state.model.simulation.retained.runs[0].analyses[analysis]
+        .waveforms
         .iter()
-        .find(|trace| trace.source_waveform_name.starts_with("I("))
+        .enumerate()
+        .find(|(_, waveform)| waveform.name.starts_with("I("))
+        .map(|(index, waveform)| (index, waveform.name.clone()))
         .expect("the review keeps its currents");
-    (
-        model.analysis_index(),
-        trace.waveform_index,
-        trace.source_waveform_name.clone(),
-        model.analysis_key,
-    )
+    (analysis, waveform, name, key)
 }
 
 /// The units of the panes the review strip draws, in order.
@@ -119,7 +118,10 @@ fn a_pane_only_the_default_hides_is_not_drawn() {
         .into_iter()
         .filter(|(text, _)| text.ends_with(" hidden"))
         .count();
-    assert_eq!(offered, 1, "only the voltage pane offers hidden signals");
+    assert_eq!(
+        offered, 0,
+        "a pane offers no signal nobody plotted: the data browser holds them"
+    );
 
     let (analysis, waveform, name, strip_key) = first_current(&mut state);
     let key = SourceWaveformPresentationKey::new(strip_key, name);
@@ -167,32 +169,6 @@ fn a_pane_only_the_default_hides_is_not_drawn() {
             .into_iter()
             .map(|(text, _)| text)
             .collect::<Vec<_>>()
-    );
-}
-
-/// The legend lists what is plotted; the hidden traces wait behind one
-/// control that counts them, and ticking one there plots it again.
-#[test]
-fn hidden_traces_are_collected_and_can_be_shown_again() {
-    let ctx = themed_context(crate::ui::Theme::default());
-    let mut state = review_strip(true);
-    let output = settled(&ctx, &mut state);
-    assert!(
-        text_rect(&output, "B4").is_none(),
-        "a hidden trace is not a legend chip"
-    );
-    let control = text_rect(&output, "3 hidden").expect("the hidden traces are counted");
-    click(&ctx, &mut state, control.center());
-    let menu = settled(&ctx, &mut state);
-    let entry = text_rect(&menu, "B4").expect("the control lists the hidden traces");
-    click(&ctx, &mut state, entry.center());
-    let models = strip(&mut state);
-    assert!(
-        models[0]
-            .traces
-            .iter()
-            .any(|trace| trace.name == "B4" && trace.visible),
-        "ticking a hidden trace plots it"
     );
 }
 

@@ -86,6 +86,7 @@ use rspice_results_ui::waves::stack::{
 mod stack_host;
 
 /// Project the host-selected retained sources into the shared waveform model.
+#[cfg(test)]
 pub(super) fn build_models(
     simulation: &SimulationState,
     derived: &mut DerivedSeries,
@@ -96,10 +97,8 @@ pub(super) fn build_models(
     selection: Option<&SourceSampleSelection>,
     hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
 ) -> Vec<StripModel> {
-    let display_runs = simulation.display_runs();
-    rspice_results_ui::waves::build_models(
-        &display_runs,
-        &simulation.retained.executed_decks,
+    build_shown_models(
+        simulation,
         derived,
         tokens,
         rspice_results_ui::waves::ProjectionOptions {
@@ -108,7 +107,26 @@ pub(super) fn build_models(
             ac,
             selection,
             hidden_family_traces,
+            waveform_visibility: &std::collections::HashMap::new(),
         },
+    )
+}
+
+/// [`build_models`] of the signals `options` puts on the plot: the reader's
+/// ticks over the dataset's own choice.
+pub(super) fn build_shown_models(
+    simulation: &SimulationState,
+    derived: &mut DerivedSeries,
+    tokens: &Tokens,
+    options: rspice_results_ui::waves::ProjectionOptions<'_>,
+) -> Vec<StripModel> {
+    let display_runs = simulation.display_runs();
+    rspice_results_ui::waves::build_models(
+        &display_runs,
+        &simulation.retained.executed_decks,
+        derived,
+        tokens,
+        options,
         |index| super::incomplete_evidence_reason(&display_runs[0].analyses[index]),
     )
 }

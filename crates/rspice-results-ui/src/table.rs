@@ -1144,6 +1144,7 @@ mod tests {
                 ac: Default::default(),
                 selection: None,
                 hidden_family_traces: &Default::default(),
+                waveform_visibility: &Default::default(),
             },
             |_| None,
         )

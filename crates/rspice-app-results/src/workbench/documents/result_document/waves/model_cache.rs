@@ -1,7 +1,5 @@
 //! Retained-history invalidation and source selection for waveform projections.
-use super::{
-    ComplexNumberDisplay, ResultsState, SimulationState, StripModel, Tokens, build_models,
-};
+use super::{ComplexNumberDisplay, ResultsState, SimulationState, StripModel, Tokens};
 use rspice_results_ui::waves::ProjectionOptions;
 use rspice_results_ui::waves::cache::{ModelCacheInput, apply_waveform_visibility};
 use std::sync::Arc;
@@ -68,6 +66,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 ac: session.ac_display,
                 selection: session.sample_selection.as_ref(),
                 hidden_family_traces: &session.hidden_family_traces,
+                waveform_visibility: &session.waveform_visibility,
             },
             waveform_visibility: &session.waveform_visibility,
             waveform_colors: &session.waveform_colors,
@@ -80,16 +79,8 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
         t,
         &mut results.plans.envelopes,
         |projection, visibility| {
-            let mut built = build_models(
-                simulation,
-                &mut session.derived,
-                t,
-                projection.phase_continuous,
-                projection.complex_display,
-                projection.ac,
-                projection.selection,
-                projection.hidden_family_traces,
-            );
+            let mut built =
+                super::build_shown_models(simulation, &mut session.derived, t, projection);
             // The forms the reader's strips show a complex signal in.
             if let Some(run) = simulation.display_runs().first() {
                 rspice_results_ui::waves::project_strips(&mut built, run, strips);

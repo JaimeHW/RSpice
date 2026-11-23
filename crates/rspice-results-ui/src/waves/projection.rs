@@ -18,11 +18,12 @@ use rspice_results::executed_deck::ExecutedDeckArchive;
 use rspice_results::family_projection::{
     FamilyRenderGroup, FamilyRenderPlan, SourceSampleSelection,
 };
+use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results::run::SimulationRun;
 use rspice_results::visualization_document::AccessibleColorPalette;
 use rspice_results::waveform::RetainedTrace;
 use rspice_ui_kit::tokens::Tokens;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 pub(crate) use strip_projection::projection_menu;
 pub use strip_projection::{
@@ -30,6 +31,8 @@ pub use strip_projection::{
 };
 
 mod member_family;
+#[cfg(test)]
+mod ticked_tests;
 
 fn unique_analysis<'a>(
     mut candidates: impl Iterator<Item = &'a AnalysisResult<RetainedTrace>>,
@@ -389,6 +392,11 @@ pub struct ProjectionOptions<'a> {
     pub ac: AcDisplay,
     pub selection: Option<&'a SourceSampleSelection>,
     pub hidden_family_traces: &'a HashSet<FamilyTraceVisibilityKey>,
+    /// The reader's ticks: a signal named here is on the plot or off it
+    /// whatever the dataset chose; one not named is where its dataset put it.
+    /// A strip model holds the curves of the signals on the plot and no
+    /// others: the data browser is the catalogue of every signal.
+    pub waveform_visibility: &'a HashMap<SourceWaveformPresentationKey, bool>,
 }
 
 /// Build strip models for every plottable analysis of the active run.
@@ -411,6 +419,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         ac,
         selection,
         hidden_family_traces,
+        waveform_visibility,
     } = options;
     let frequency_scale = if ac.linear_frequency {
         XScale::Linear
@@ -534,6 +543,18 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             hidden_family_traces,
             phase_continuous,
         };
+        // The reader's ticks of this analysis, by name. A signal they do not
+        // name is on the plot when its dataset plots it.
+        let ticks: HashMap<&str, bool> = waveform_visibility
+            .iter()
+            .filter(|(key, _)| key.analysis() == analysis_key)
+            .map(|(key, shown)| (key.source_name(), *shown))
+            .collect();
+        // Each curve the dataset plots keeps its place in the palette's cycle
+        // whatever the reader takes off the plot: the places of the curves it
+        // plots, counted in column order whether shown or not.
+        let mut dataset_rank = 0;
+        let mut dataset_ranks = HashMap::new();
         for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
             // STB's optional complex contour feeds the dedicated Nyquist
             // viewer. Its Bode sheet is the retained loop-gain pair only;
@@ -549,6 +570,17 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 lane_trace(lanes, waveform, waveform_index, color)
             }) {
                 lane_traces.push(lane);
+                continue;
+            }
+            let shown = if ticks.is_empty() {
+                waveform.visible
+            } else {
+                ticks
+                    .get(waveform.name.as_str())
+                    .copied()
+                    .unwrap_or(waveform.visible)
+            };
+            if !shown && !waveform.visible {
                 continue;
             }
             let slot = if waveform.visible {
@@ -580,6 +612,15 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 });
             if displays_cartesian_complex {
                 if let Some(complex) = &waveform.complex {
+                    if waveform.visible {
+                        dataset_ranks.insert((waveform_index, TraceKind::Real), dataset_rank);
+                        dataset_ranks
+                            .insert((waveform_index, TraceKind::Imaginary), dataset_rank + 1);
+                        dataset_rank += 2;
+                    }
+                    if !shown {
+                        continue;
+                    }
                     for (kind, name, signal_color, slot, y) in [
                         (
                             TraceKind::Real,
@@ -610,7 +651,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                                 kind,
                                 source_x: &waveform.x,
                                 source_y: y,
-                                visible: waveform.visible,
+                                visible: shown,
                             },
                         );
                     }
@@ -659,6 +700,13 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             } else {
                 TraceKind::Value
             };
+            if waveform.visible {
+                dataset_ranks.insert((waveform_index, kind), dataset_rank);
+                dataset_rank += 1;
+            }
+            if !shown {
+                continue;
+            }
             append_projected_traces(
                 &mut traces,
                 derived,
@@ -676,7 +724,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     kind,
                     source_x: &waveform.x,
                     source_y: &waveform.y,
-                    visible: waveform.visible,
+                    visible: shown,
                 },
             );
         }
@@ -922,6 +970,8 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             phase_continuous,
             signal_trace_count,
             traces,
+            dataset_ranks,
+            dataset_plotted: dataset_rank,
             complex_sources: strip_projection::complex_sources(analysis),
             grid_ascending: false,
             x_range: None,
