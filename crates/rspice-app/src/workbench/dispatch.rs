@@ -40,7 +40,7 @@ use crate::workbench::commands::{
 use crate::workbench::diagnostic_routes::open_in_verify;
 use crate::workbench::features;
 use crate::workbench::menu_bar::FileMenuAction;
-use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::code::SourceFeature;
 use rspice_app_code::workbench::code::commands::{
     NetlistEditorRequest, SourceCommand, SourceRequest, VerilogAStripRequest,
 };
@@ -321,7 +321,7 @@ impl RSpiceApp {
     /// copy-cell dialog), which the surface once did in place, so every
     /// later answer reads those workspaces as the surface left them; then
     /// what the Verilog-A page's interface strip asked of design once its
-    /// press had done the code feature's part (the updated symbol to open,
+    /// press had done the source feature's part (the updated symbol to open,
     /// the offered device to arm), which the shell once did as the page
     /// returned; then the commands it ran next and what it said once they
     /// had run, the print workflow it asked for, the snap that follows a new schematic grid, the
@@ -601,7 +601,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ShowProjectDeck| {
-                CodeFeature::show_project_deck(&mut features::cx(app));
+                SourceFeature::show_project_deck(&mut features::cx(app));
                 app.execute_command_key(ids::NETLIST_WORKSPACE);
             },
         );
@@ -742,25 +742,25 @@ fn ask_new_sheet_format(state: &mut crate::workbench::AppState) {
     }
 }
 
-/// Have the code feature carry out what the netlist page's editor raised,
+/// Have the source feature carry out what the netlist page's editor raised,
 /// in its context.
 fn answer_netlist_editor_request(app: &mut RSpiceApp, request: NetlistEditorRequest) {
     code_requests::answer_netlist_editor(&mut features::cx(app), request);
 }
 
-/// Have the code feature drop what the last Verilog-A compile proved, in its
+/// Have the source feature drop what the last Verilog-A compile proved, in its
 /// context.
 fn answer_void_veriloga_evidence(app: &mut RSpiceApp) {
     code_requests::void_veriloga_evidence(&mut features::cx(app));
 }
 
-/// Have the code feature answer what it raised, in its context, holding
+/// Have the source feature answer what it raised, in its context, holding
 /// whether an application-modal dialog is open, taken as the answer starts.
 /// What reaches past the feature the shell carries out straight after.
 fn answer_code_request(app: &mut RSpiceApp, request: SourceRequest) {
     let modal_open = app.state.application_modal_open();
     let hand_off = code_requests::answer(
-        &mut features::cx::<CodeFeature>(app).with_application_modal(modal_open),
+        &mut features::cx::<SourceFeature>(app).with_application_modal(modal_open),
         request,
     );
     if let Some(hand_off) = hand_off {
@@ -772,7 +772,7 @@ impl RSpiceApp {
     /// Carry out what a design dialog handed over, as the dialog once did in
     /// place: in design's context, except reopening the component editor,
     /// which the shell's property form opens, and the source map, which
-    /// opens the code feature's netlist page.
+    /// opens the source feature's netlist page.
     pub(crate) fn answer_design_request(&mut self, request: DesignRequest) {
         match request {
             DesignRequest::Descend(choice) => {
@@ -786,7 +786,7 @@ impl RSpiceApp {
             }
             DesignRequest::OpenSourceMap(net) => {
                 rspice_app_code::workbench::surfaces::netlist::generation::show_generated_netlist(
-                    &mut features::cx::<CodeFeature>(self),
+                    &mut features::cx::<SourceFeature>(self),
                 );
                 open_connectivity_source_map(&mut self.state, &net);
             }
@@ -799,7 +799,7 @@ impl RSpiceApp {
         }
     }
 
-    /// Have the code feature take the netlist page's own history step
+    /// Have the source feature take the netlist page's own history step
     /// `direction`, in its context.
     pub(in crate::workbench) fn take_netlist_history_step(
         &mut self,

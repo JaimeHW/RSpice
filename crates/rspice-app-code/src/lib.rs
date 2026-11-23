@@ -1,4 +1,4 @@
-//! The RSpice application's code feature: the netlist and Verilog-A source
+//! The RSpice application's source feature: the netlist and Verilog-A source
 //! editors, their documents and workflows, and the source dialogs.
 //!
 //! The feature's files keep the paths they had inside `rspice-app`. This root
@@ -161,7 +161,7 @@ pub mod workbench {
     pub mod slots {
         pub(crate) use rspice_app_services::workbench::slots::platform;
 
-        pub(crate) use code::{CodeState, manual_deck_in, veriloga_compilation_in};
+        pub(crate) use code::{SourceState, manual_deck_in, veriloga_compilation_in};
         pub(crate) use platform::PlatformState;
 
         pub mod code;

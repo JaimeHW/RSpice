@@ -192,7 +192,7 @@ fn no_command_asks_for_a_validation_before_run() {
 }
 
 /// While a run is going, Run on the Netlist workspace is refused in Simulate's
-/// words, through the part the code feature takes in Run.
+/// words, through the part the source feature takes in Run.
 #[test]
 fn run_is_refused_while_a_run_is_going_on_the_netlist_workspace() {
     let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");
@@ -568,7 +568,7 @@ fn every_missing_file_is_a_problem_at_its_own_line() {
 }
 
 /// With the generated netlist in front the plan is what runs, and Check and
-/// netlist is Simulate's check of it: the code feature leaves it alone.
+/// netlist is Simulate's check of it: the source feature leaves it alone.
 #[test]
 fn with_the_generated_netlist_in_front_check_and_netlist_is_the_plans() {
     let mut app = netlist_session_with_deck(DECK, "amp_tb.cir");

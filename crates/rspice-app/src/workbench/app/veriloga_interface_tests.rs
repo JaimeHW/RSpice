@@ -1,7 +1,7 @@
 //! The source edit the Verilog-A interface tests share with the shell's
 //! frame driver (veriloga_flow_tests): the text of the Verilog-A source in
 //! front replaced as a reader's edit. The interface tests themselves are the
-//! code feature's, in feature_tests/code/veriloga_interface.
+//! source feature's, in feature_tests/code/veriloga_interface.
 
 use super::*;
 use rspice_app_code::workbench::documents::code_workspace;

@@ -5,7 +5,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{frame, themed_context};
 use crate::workbench::features::{self, Registered};
 use egui::{Rect, Ui, Vec2, vec2};
-use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::code::SourceFeature;
 use rspice_app_code::workbench::code::netlist_first::*;
 use rspice_app_code::workbench::documents::netlist_document::root_deck_source_index_now;
 use rspice_app_design::workbench::chrome::document_bar::design::design_documents;
@@ -35,13 +35,16 @@ pub(super) fn netlist_first_app() -> RSpiceApp {
     app
 }
 
-/// One pass of the landing the code feature registers, drawn over `app` in
+/// One pass of the landing the source feature registers, drawn over `app` in
 /// the context the shell lends it.
 fn landing(app: &mut RSpiceApp, ui: &mut Ui) {
-    let surface = CodeFeature::registry()
+    let surface = SourceFeature::registry()
         .surface_section()
-        .expect("the code feature registers the netlist-first landing");
-    (surface.show)(&mut features::surface_cx::<CodeFeature>(app, |_| false), ui);
+        .expect("the source feature registers the netlist-first landing");
+    (surface.show)(
+        &mut features::surface_cx::<SourceFeature>(app, |_| false),
+        ui,
+    );
 }
 
 #[test]

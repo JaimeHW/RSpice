@@ -24,7 +24,7 @@
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::MessageId;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::documents::deck_files;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
@@ -58,7 +58,7 @@ enum DeckCheck {
 /// and saved first, so the check reads what their tabs show; where the check
 /// found its includes recorded. What it prepared is retained for the run
 /// that follows when `for_run`.
-fn check_deck_run(cx: &mut Cx<'_, CodeFeature>, for_run: bool) -> DeckCheck {
+fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
     if cx.wb.workspace != Workspace::Netlist && !bring_project_deck(cx) {
         return DeckCheck::Held;
     }
@@ -137,7 +137,7 @@ fn check_deck_run(cx: &mut Cx<'_, CodeFeature>, for_run: bool) -> DeckCheck {
 /// workspace runs it: opened as the Netlist workspace opens it and brought
 /// to the front there. Whether it is open; a deck whose file cannot be read
 /// is not, and the notice says why, in the words Run's own reason uses.
-fn bring_project_deck(cx: &mut Cx<'_, CodeFeature>) -> bool {
+fn bring_project_deck(cx: &mut Cx<'_, SourceFeature>) -> bool {
     deck_files::show_project_deck(
         cx.model,
         &mut cx.state.netlist,
@@ -184,7 +184,7 @@ fn bring_project_deck(cx: &mut Cx<'_, CodeFeature>) -> bool {
 
 /// Make Problems say what the text the check read holds, whichever
 /// workspace the press leaves in front.
-fn bring_findings_current(cx: &mut Cx<'_, CodeFeature>) {
+fn bring_findings_current(cx: &mut Cx<'_, SourceFeature>) {
     crate::workbench::documents::netlist_document::bring_findings_current(
         cx.model,
         &mut cx.state.netlist,
@@ -194,7 +194,7 @@ fn bring_findings_current(cx: &mut Cx<'_, CodeFeature>) {
 }
 
 /// Check the deck Run runs and run it, or say why it did not run.
-pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
+pub fn request_deck_run(cx: &mut Cx<'_, SourceFeature>) {
     cx.runs.waiting.deck_run = false;
     if waiting::compiling() {
         cx.runs.waiting.deck_run = true;
@@ -221,7 +221,7 @@ pub fn request_deck_run(cx: &mut Cx<'_, CodeFeature>) {
 /// Check and netlist while a deck is what Run runs: check the deck as Run
 /// would and start nothing. The notice says the deck has nothing that stops
 /// it running, or names the line and why, with the deck in front.
-pub fn check_deck(cx: &mut Cx<'_, CodeFeature>) {
+pub fn check_deck(cx: &mut Cx<'_, SourceFeature>) {
     let messages = cx.wb.messages();
     let CheckedDeck { name, text, result } = match check_deck_run(cx, false) {
         DeckCheck::Held => return,
@@ -271,7 +271,7 @@ enum Verdict {
 /// `text` and why: once the line is named, why is what the line's finding
 /// says, as its Problems row says it.
 fn refuse(
-    cx: &mut Cx<'_, CodeFeature>,
+    cx: &mut Cx<'_, SourceFeature>,
     name: &str,
     verdict: Verdict,
     text: &str,
@@ -323,7 +323,7 @@ fn failure_line(error: &PreparationError, text: &str) -> Option<usize> {
 
 /// Run the deck whose run waits, once no source its check reads is
 /// compiling. Called once per frame; does nothing while the compile runs.
-pub fn poll_waiting_deck_run(cx: &mut Cx<'_, CodeFeature>) {
+pub fn poll_waiting_deck_run(cx: &mut Cx<'_, SourceFeature>) {
     if cx.runs.waiting.deck_run && !waiting::compiling() {
         request_deck_run(cx);
     }

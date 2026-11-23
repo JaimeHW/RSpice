@@ -199,7 +199,7 @@ pub struct CloudHandles {
 
 /// What the engine reads and writes of the application in one phase of its
 /// pump: the model, the session, and what a project snapshot reads beside
-/// the model, with what the design and code features show. The shell lends
+/// the model, with what the design and source features show. The shell lends
 /// them for the one call.
 pub struct LiveHost<'a> {
     pub model: &'a mut Model,

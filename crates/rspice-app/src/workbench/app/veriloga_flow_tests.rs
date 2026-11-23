@@ -2,7 +2,7 @@
 //! whole-frame tests, and the device they build: someone at the
 //! application driving whole frames, a new project and a Verilog-A device
 //! created from its canvas, compiled, placed, wired and run. The flow tests
-//! themselves are the code feature's, in feature_tests/code/veriloga_flow.
+//! themselves are the source feature's, in feature_tests/code/veriloga_flow.
 
 use std::time::{Duration, Instant};
 

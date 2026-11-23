@@ -625,7 +625,7 @@ fn on_a_read_only_source_the_menu_disables_cut_and_paste() {
     assert!(enabled("Go to definition"));
 }
 
-/// Every command the source editor answers, the code feature's and the
+/// Every command the source editor answers, the source feature's and the
 /// workbench's edit commands alike, has a row in a menu the editor shows:
 /// Edit, View's Folding or the editor's right-click menu. The two command
 /// tables are walked, so a command added to either without a row fails.

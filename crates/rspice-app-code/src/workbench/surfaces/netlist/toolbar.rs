@@ -14,7 +14,7 @@ use egui::{Align, Layout, Ui, vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::MessageId;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::code::commands::SourceRequest;
 use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint_problem_mark};
 use crate::workbench::documents::netlist_document::NetlistRoot;
@@ -78,11 +78,11 @@ struct LanguageTools {
     renamable: bool,
 }
 
-/// Draw the toolbar in the code feature's context and do what was pressed:
+/// Draw the toolbar in the source feature's context and do what was pressed:
 /// in place for what the context holds, and raised for what the application
 /// carries out once the page has drawn: Find references, Rename symbol and
 /// the quick fix. It returns where it drew.
-pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLayout {
+pub fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) -> CodeToolbarLayout {
     let messages = cx.wb.messages();
     let t = Tokens::get(ui.ctx());
     // A child UI can retain the pre-dock available width while its painter is

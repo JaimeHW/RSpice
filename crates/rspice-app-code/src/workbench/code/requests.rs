@@ -1,4 +1,4 @@
-//! What the code feature carries out for the requests its commands, dialogs,
+//! What the source feature carries out for the requests its commands, dialogs,
 //! navigators and pages raise, each in its own context, and what it hands
 //! the shell because it reaches past that context: the file workflow, the
 //! LTspice and QSPICE import, a Design document, or a transaction over the
@@ -9,7 +9,7 @@
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::dialogs::source_document;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::code::commands::{
     CodeHandOff, NetlistEditorRequest, SourceCommand, SourceDocumentRequest, SourceRequest,
 };
@@ -18,14 +18,14 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::StandardCommand;
 use crate::workbench::state::Workspace;
 
-/// Carry out what the code feature raised, in its context `cx`: export the
+/// Carry out what the source feature raised, in its context `cx`: export the
 /// deck from outside the netlist page, export the bill of materials, open
 /// the generated deck, open the Code workspace's find, validation and
 /// document tools, language navigation from the caret, the Verilog-A
 /// compile and its build settings, and what the feature's dialogs,
 /// navigators and pages committed. What reaches past the context comes back,
 /// for the shell to carry out.
-pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: SourceRequest) -> Option<CodeHandOff> {
+pub fn answer(cx: &mut Cx<'_, SourceFeature>, request: SourceRequest) -> Option<CodeHandOff> {
     match request {
         SourceRequest::OpenNetlist => return Some(CodeHandOff::OpenNetlist),
         SourceRequest::NewDeck => return Some(CodeHandOff::NewDeck),
@@ -82,7 +82,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: SourceRequest) -> Option<Co
             // The closure is taken now, at the click; the frame loop
             // starts the compile on its next pass. Nothing is asked.
             if let Err(error) =
-                code_workspace::request_veriloga_compile(&mut CodeFeature::workspace_parts(cx))
+                code_workspace::request_veriloga_compile(&mut SourceFeature::workspace_parts(cx))
             {
                 cx.wb.prompt(error);
             }
@@ -110,7 +110,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: SourceRequest) -> Option<Co
             ) {
                 Ok(_) if compile => {
                     if let Err(error) = code_workspace::request_veriloga_compile(
-                        &mut CodeFeature::workspace_parts(cx),
+                        &mut SourceFeature::workspace_parts(cx),
                     ) {
                         cx.wb.prompt(error);
                     }
@@ -125,7 +125,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: SourceRequest) -> Option<Co
         }
         SourceRequest::ReplaceVerilogASource => {
             if let Err(error) = code_workspace::commit_veriloga_source_replacement(
-                &mut CodeFeature::workspace_parts(cx),
+                &mut SourceFeature::workspace_parts(cx),
             ) {
                 cx.model.record(LogSeverity::Error, LogSource::Studio, error);
             }
@@ -133,7 +133,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: SourceRequest) -> Option<Co
         SourceRequest::SourceDocument(request) => answer_source_document(cx, request),
         SourceRequest::CommitSymbolRename => {
             if let Err(error) =
-                code_workspace::commit_language_rename(&mut CodeFeature::workspace_parts(cx))
+                code_workspace::commit_language_rename(&mut SourceFeature::workspace_parts(cx))
                 && let Some(open) = cx.state.code_workspace.language_tools.as_mut()
             {
                 open.error = Some(error);
@@ -166,7 +166,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: SourceRequest) -> Option<Co
         } => {
             // The transaction's own form opens.
             let opened = code_workspace::open_source_file_dialog_in_bundle(
-                &mut CodeFeature::workspace_parts(cx),
+                &mut SourceFeature::workspace_parts(cx),
                 bundle_id,
                 action,
                 &path,
@@ -232,7 +232,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: SourceRequest) -> Option<Co
 /// Carry out what the netlist page's editor raised in its frame, as the
 /// editor did in place: commit the text it showed, or take the undo or redo
 /// step past its own history, saying why when the deck refuses it.
-pub fn answer_netlist_editor(cx: &mut Cx<'_, CodeFeature>, request: NetlistEditorRequest) {
+pub fn answer_netlist_editor(cx: &mut Cx<'_, SourceFeature>, request: NetlistEditorRequest) {
     match request {
         NetlistEditorRequest::Commit {
             front,
@@ -256,7 +256,7 @@ pub fn answer_netlist_editor(cx: &mut Cx<'_, CodeFeature>, request: NetlistEdito
 
 /// Take the netlist page's own history step: Undo's where `undo`, otherwise
 /// Redo's. `Ok(None)` when that history holds no step that way.
-pub fn step_history(cx: &mut Cx<'_, CodeFeature>, undo: bool) -> Result<Option<String>, String> {
+pub fn step_history(cx: &mut Cx<'_, SourceFeature>, undo: bool) -> Result<Option<String>, String> {
     if undo {
         netlist_document::undo_netlist_edit(cx.model, &mut cx.state.netlist, cx.wb.messages())
     } else {
@@ -266,19 +266,19 @@ pub fn step_history(cx: &mut Cx<'_, CodeFeature>, undo: bool) -> Result<Option<S
 
 /// Drop what the last Verilog-A compile proved, and stop a compile still
 /// running, as a history step that put back another source asks.
-pub fn void_veriloga_evidence(cx: &mut Cx<'_, CodeFeature>) {
+pub fn void_veriloga_evidence(cx: &mut Cx<'_, SourceFeature>) {
     cx.state.code_workspace.veriloga.void_evidence();
 }
 
 /// Carry out what a file form, the revision history or the Files rail
 /// handed over: a choice on a Verilog-A document.
-fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentRequest) {
+fn answer_source_document(cx: &mut Cx<'_, SourceFeature>, request: SourceDocumentRequest) {
     match request {
         SourceDocumentRequest::Document {
             action,
             logical_path,
         } => source_document::apply_lifecycle_action(
-            &mut CodeFeature::workspace_parts(cx),
+            &mut SourceFeature::workspace_parts(cx),
             action,
             &logical_path,
         ),
@@ -289,10 +289,10 @@ fn answer_source_document(cx: &mut Cx<'_, CodeFeature>, request: SourceDocumentR
 /// source editor on screen, saying why not when it cannot. Verilog-A
 /// answers through the project source index, over the code workspace's
 /// parts; a netlist answers through its own language service.
-fn navigate_active_source(cx: &mut Cx<'_, CodeFeature>, command: SourceCommand) {
+fn navigate_active_source(cx: &mut Cx<'_, SourceFeature>, command: SourceCommand) {
     let result = if code_workspace::design_hosts_veriloga(cx.wb.workspace, &cx.model.workspace) {
         crate::workbench::app::dialogs::source_language_tools::navigate_source_bundle(
-            &mut CodeFeature::workspace_parts(cx),
+            &mut SourceFeature::workspace_parts(cx),
             command,
         )
     } else {
@@ -306,7 +306,7 @@ fn navigate_active_source(cx: &mut Cx<'_, CodeFeature>, command: SourceCommand) 
 /// Go to definition, Find references and Rename symbol from the caret of
 /// the netlist editor, through the engine's index of the deck and its
 /// includes.
-fn navigate_netlist(cx: &mut Cx<'_, CodeFeature>, command: SourceCommand) -> Result<(), String> {
+fn navigate_netlist(cx: &mut Cx<'_, SourceFeature>, command: SourceCommand) -> Result<(), String> {
     use crate::workbench::documents::netlist_document::language as netlist;
     use crate::workbench::documents::netlist_document::references;
 

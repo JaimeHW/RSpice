@@ -5,10 +5,10 @@
 
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::MessageId;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::framework::feature::Cx;
 
-pub(super) fn comparison_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+pub(super) fn comparison_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, SourceFeature>) {
     if !cx.state.netlist.comparison_dialog.open {
         return;
     }

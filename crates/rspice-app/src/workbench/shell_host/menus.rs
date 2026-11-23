@@ -1,6 +1,6 @@
 //! What each application menu holds, written down as entries the menu
 //! renderer draws and a test can read. The source editor's rows, of Edit,
-//! View's Folding and its right-click menu, are the code feature's
+//! View's Folding and its right-click menu, are the source feature's
 //! (`code::SOURCE_EDIT_MENU` and its neighbours).
 
 use crate::workbench::commands::vocabulary::ShellCommand;
@@ -84,7 +84,7 @@ const fn simulate(command: SimulateCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
-/// The code feature's command's row under the label it declares.
+/// The source feature's command's row under the label it declares.
 const fn code(command: SourceCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }

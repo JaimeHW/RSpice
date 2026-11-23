@@ -12,7 +12,7 @@ use egui::{CentralPanel, Context, Frame};
 
 use crate::workbench::session::project_transactions::{open_confirmed, request_example};
 use rspice_app_cloud::workbench::cloud::CloudFeature;
-use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::code::SourceFeature;
 #[cfg(target_arch = "wasm32")]
 use rspice_app_models::workbench::models::ModelsFeature;
 use rspice_app_results::workbench::results::ResultsFeature;
@@ -46,7 +46,7 @@ pub(in crate::workbench) mod dialog_order;
 fn poll_waiting_preparations(app: &mut RSpiceApp) {
     if app.state.runs.waiting.deck_run {
         rspice_app_code::workbench::code::deck_run::poll_waiting_deck_run(&mut features::cx::<
-            rspice_app_code::workbench::code::CodeFeature,
+            rspice_app_code::workbench::code::SourceFeature,
         >(app));
     }
     if app.state.runs.waiting.campaign.is_some() {
@@ -323,16 +323,16 @@ impl RSpiceApp {
         CloudFeature::poll_account(&mut features::cx(self), ctx);
     }
 
-    /// Have the code feature settle what its compiles finished since the
+    /// Have the source feature settle what its compiles finished since the
     /// last frame, in its context.
     pub(in crate::workbench) fn poll_code(&mut self, ctx: &Context) {
-        CodeFeature::poll(&mut features::cx(self), ctx);
+        SourceFeature::poll(&mut features::cx(self), ctx);
     }
 
-    /// Have the code feature start its workspace over for a project that
+    /// Have the source feature start its workspace over for a project that
     /// replaced the one it answered for, in its context.
     pub(in crate::workbench) fn reset_code_after_project_change(&mut self) {
-        CodeFeature::reset_after_project_change(&mut features::cx(self));
+        SourceFeature::reset_after_project_change(&mut features::cx(self));
     }
 
     /// Have the cloud feature take the publish executor's receipt, in its

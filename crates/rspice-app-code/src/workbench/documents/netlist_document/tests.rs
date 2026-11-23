@@ -13,19 +13,19 @@ use super::*;
 use crate::product::ObjectRevision;
 use crate::state::netlist_diagnostics::Diagnostic;
 use crate::state::{NetlistDocumentId, NetlistValidationReceipt};
-use crate::workbench::code::tests::{CodeHarness, harness};
+use crate::workbench::code::tests::{SourceHarness, harness};
 
 const EDITED_INCLUDE: &str = ".param rmodel=2.2k\n";
 
 /// The deck-with-include fixture over code's harness.
-fn deck_state() -> CodeHarness {
+fn deck_state() -> SourceHarness {
     let mut harness = harness();
     seed_deck_with_include(&mut harness.model, &mut harness.state.netlist);
     harness
 }
 
 /// The open deck's text and its include's, as the session holds them.
-fn deck_texts(harness: &CodeHarness) -> (String, String) {
+fn deck_texts(harness: &SourceHarness) -> (String, String) {
     let deck = harness.state.netlist.open_deck.as_ref().unwrap();
     (
         deck.root.text.clone(),
@@ -34,7 +34,7 @@ fn deck_texts(harness: &CodeHarness) -> (String, String) {
 }
 
 /// Bring the deck's include to the front.
-fn show_deck_include(harness: &mut CodeHarness) {
+fn show_deck_include(harness: &mut SourceHarness) {
     open_netlist_dependency_in(
         &mut harness.model,
         &mut harness.state.netlist,
@@ -547,7 +547,7 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
             deck,
         }
     };
-    let seal = |harness: &mut CodeHarness, source: &str| {
+    let seal = |harness: &mut SourceHarness, source: &str| {
         let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
             source_domain: AnalysisResultSourceDomain::SimulationPlan,
             simulation_plan_id: Some(crate::product::SimulationPlanId::new()),

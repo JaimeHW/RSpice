@@ -648,7 +648,9 @@ mod tests {
             symbol_library: None,
             simulation_controller:
                 rspice_app_runs::simulation::controller::SimulationController::new(),
-            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
+            code: rspice_app_code::workbench::documents::code_workspace::SourceHandles {
+                project_id,
+            },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account:
                     rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),

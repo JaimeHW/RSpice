@@ -1023,15 +1023,15 @@ mod tests {
     use crate::state::ViewType;
     use crate::state::{Cell, CellViewRef, Library, ProjectSourceDocument, View};
     use crate::workbench::code::{
-        CodeFeature,
-        tests::{CodeHarness, harness},
+        SourceFeature,
+        tests::{SourceHarness, harness},
     };
     use rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt;
 
     /// A `behavioral/<cell>/veriloga` view binding `module`, owning a
     /// one-file bundle at `root` that holds `source`.
     fn add_module_view(
-        harness: &mut CodeHarness,
+        harness: &mut SourceHarness,
         cell_name: &str,
         root: &str,
         module: &str,
@@ -1082,7 +1082,7 @@ mod tests {
 
     /// A test app whose open Verilog-A view binds `module` over exactly
     /// `source`.
-    fn module_source_with(module: &str, source: &str) -> CodeHarness {
+    fn module_source_with(module: &str, source: &str) -> SourceHarness {
         let mut harness = harness();
         harness.open_project_session();
         let reference = add_module_view(&mut harness, "legacy", "legacy.va", module, source);
@@ -1093,7 +1093,7 @@ mod tests {
         harness
     }
 
-    fn portless_module() -> CodeHarness {
+    fn portless_module() -> SourceHarness {
         module_source_with("legacy", "module legacy; endmodule\n")
     }
 
@@ -1108,7 +1108,7 @@ mod tests {
             .bundle()
             .revision();
 
-        request_veriloga_compile(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        request_veriloga_compile(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
 
         let request = harness
             .state
@@ -1127,7 +1127,7 @@ mod tests {
     #[test]
     fn a_build_profile_is_written_over_the_document_the_bundle_holds() {
         let mut harness = portless_module();
-        request_veriloga_compile(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        request_veriloga_compile(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
         harness.state.code_workspace.veriloga.compile_request = None;
         let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let revision = selected.bundle().revision();
@@ -1169,7 +1169,7 @@ mod tests {
     #[test]
     fn qualification_history_is_append_only_without_changing_source_identity() {
         let mut harness = portless_module();
-        request_veriloga_compile(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        request_veriloga_compile(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
         let selected = selected_veriloga_source_in(&harness.model).unwrap();
         let token = selected.token(harness.model.workspace.content.project.id());
         let revision = selected.bundle().revision();
@@ -1215,7 +1215,7 @@ mod tests {
         bundle.validate().unwrap();
     }
 
-    fn add_cell_bundle(harness: &mut CodeHarness, cell_name: &str) -> CellViewRef {
+    fn add_cell_bundle(harness: &mut SourceHarness, cell_name: &str) -> CellViewRef {
         add_module_view(
             harness,
             cell_name,
@@ -1312,13 +1312,13 @@ mod tests {
         let replacement = "module legacy(p, n); inout p, n; electrical p, n; endmodule\n";
 
         request_veriloga_source_replacement(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             &root,
         )
         .unwrap();
         assert!(harness.state.code_workspace.veriloga.import_requested);
         complete_veriloga_file_pick(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             "next.va",
             replacement,
         );
@@ -1332,7 +1332,7 @@ mod tests {
             .expect("the picked file waits for confirmation");
         assert_eq!(review.target.logical_path, root);
         assert!(review.restorable);
-        let content = |harness: &CodeHarness| {
+        let content = |harness: &SourceHarness| {
             harness
                 .model
                 .workspace
@@ -1351,7 +1351,7 @@ mod tests {
         );
         assert!(harness.state.code_workspace.veriloga.import_form.is_none());
 
-        commit_veriloga_source_replacement(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+        commit_veriloga_source_replacement(&mut SourceFeature::workspace_parts(&mut harness.cx()))
             .unwrap();
 
         assert_eq!(content(&harness), replacement);
@@ -1401,7 +1401,7 @@ mod tests {
 
         harness.state.code_workspace.veriloga.import_requested = true;
         complete_veriloga_file_pick(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             "behavioral/presentation_name.va",
             source,
         );
@@ -1436,7 +1436,7 @@ mod tests {
         let root = selected.document().logical_path().to_owned();
 
         request_veriloga_source_replacement(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             &root,
         )
         .unwrap();
@@ -1451,7 +1451,7 @@ mod tests {
             )
             .unwrap();
         complete_veriloga_file_pick(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             "stale_picker_result.va",
             "module stale_picker_result; endmodule\n",
         );
@@ -1513,7 +1513,7 @@ mod tests {
 
         assert!(
             replace_selected_veriloga_file(
-                &mut CodeFeature::workspace_parts(&mut harness.cx()),
+                &mut SourceFeature::workspace_parts(&mut harness.cx()),
                 &selected,
                 "shared.va",
                 "module shared_model(p, n); inout p, n; electrical p, n; real changed; endmodule\n"

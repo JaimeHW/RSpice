@@ -2,13 +2,13 @@
 //! Netlist workspace's, and the way from a deck project's Simulate page to
 //! its deck.
 //!
-//! They are the code feature's toolbars, drawn in its context. Each group
+//! They are the source feature's toolbars, drawn in its context. Each group
 //! asks what the code workspace shows at the point it draws, after any tool
 //! to its left has run.
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::chrome::toolbar::{explicit_label_width, toolbar_icon_button_size};
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::code::commands::SourceCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use crate::workbench::documents::netlist_document::NetlistTab;
@@ -25,8 +25,8 @@ pub const NETLIST_TOOLBAR: ToolbarId = ToolbarId::new("code.netlist");
 /// The toolbar of a deck project's Simulate page.
 pub const DECK_SETUP_TOOLBAR: ToolbarId = ToolbarId::new("code.deck-setup");
 
-/// Every toolbar the code feature registers.
-pub const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<CodeFeature>])] = &[
+/// Every toolbar the source feature registers.
+pub const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<SourceFeature>])] = &[
     (VERILOGA_TOOLBAR, VERILOGA),
     (NETLIST_TOOLBAR, NETLIST),
     (DECK_SETUP_TOOLBAR, DECK_SETUP),
@@ -37,13 +37,13 @@ const fn labelled(
     key: CommandKey,
     icon: WorkbenchIcon,
     label: &'static str,
-) -> ToolbarEntry<CodeFeature> {
+) -> ToolbarEntry<SourceFeature> {
     ToolbarEntry::Tool(ToolbarTool { key, icon, label })
 }
 
 /// A command drawn as an icon, named by its own label and pressed as its
 /// own check mark says.
-const fn icon(key: CommandKey, icon: WorkbenchIcon) -> ToolbarEntry<CodeFeature> {
+const fn icon(key: CommandKey, icon: WorkbenchIcon) -> ToolbarEntry<SourceFeature> {
     ToolbarEntry::Icon(ToolbarIcon {
         key,
         icon,
@@ -62,7 +62,7 @@ const fn icon(key: CommandKey, icon: WorkbenchIcon) -> ToolbarEntry<CodeFeature>
 /// and every source tool are in the command palette as well, and Format in the
 /// editor's own menu. A schematic's placement and transform tools have nothing
 /// to act on here.
-const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
+const VERILOGA: &[ToolbarEntry<SourceFeature>] = &[
     // The control is Cancel until the compile finishes, as Run is Stop.
     // Compile is asked first: Cancel ends the compile as it is pressed, and
     // asked first it would leave Compile to draw beside it for that frame.
@@ -108,22 +108,22 @@ const VERILOGA: &[ToolbarEntry<CodeFeature>] = &[
     icon(SourceCommand::FindCodeDocument.key(), WorkbenchIcon::Search),
 ];
 
-fn compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {
+fn compile_pending(reads: &Reads<'_, SourceFeature>) -> bool {
     reads.state.code_workspace.veriloga.pending.is_some()
 }
 
-fn no_compile_pending(reads: &Reads<'_, CodeFeature>) -> bool {
+fn no_compile_pending(reads: &Reads<'_, SourceFeature>) -> bool {
     !compile_pending(reads)
 }
 
 /// Take the reader to the generated deck: the Netlist workspace, with the
 /// generated primary in front.
-fn show_generated_deck(cx: &mut Cx<'_, CodeFeature>) {
+fn show_generated_deck(cx: &mut Cx<'_, SourceFeature>) {
     crate::workbench::surfaces::netlist::generation::show_generated_netlist(cx);
 }
 
 /// The generated deck's button, in the slot the toolbar took for it.
-fn generated_netlist_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+fn generated_netlist_tool(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     let label = cx
         .wb
         .messages()
@@ -157,7 +157,7 @@ fn generated_netlist_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layou
 /// as a reviewable document action — so the tool hands the request to the
 /// visible editor rather than rewriting text itself. Offered only when that
 /// file may be edited.
-fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+fn veriloga_format_tool(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     use crate::workbench::documents::code_workspace;
 
     let code = &cx.state.code_workspace;
@@ -209,13 +209,13 @@ fn veriloga_format_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout:
 /// Toolbar of a deck project's Simulate page: the deck, in front of the
 /// Netlist workspace, where it is changed. Running it is the run control's,
 /// which reads Run deck there.
-const DECK_SETUP: &[ToolbarEntry<CodeFeature>] = &[labelled(
+const DECK_SETUP: &[ToolbarEntry<SourceFeature>] = &[labelled(
     ids::SHOW_RUN_DECK,
     WorkbenchIcon::Netlist,
     "Open in Netlist",
 )];
 
-const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
+const NETLIST: &[ToolbarEntry<SourceFeature>] = &[
     ToolbarEntry::Only(
         generated_netlist_in_front,
         &[
@@ -279,12 +279,12 @@ const NETLIST: &[ToolbarEntry<CodeFeature>] = &[
     ),
 ];
 
-fn generated_netlist_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+fn generated_netlist_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
     reads.state.netlist.front.shows_generated()
 }
 
 /// The open deck is in front.
-fn deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+fn deck_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
     let netlist = &reads.state.netlist;
     matches!(netlist.front, NetlistTab::Deck(id)
         if netlist.open_deck.as_ref().is_some_and(|deck| deck.id == id))
@@ -292,14 +292,14 @@ fn deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
 
 /// A deck that is not open is in front: its file is missing, and the page
 /// stands in its missing state.
-pub(super) fn missing_deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+pub(super) fn missing_deck_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
     matches!(reads.state.netlist.front, NetlistTab::Deck(_)) && !deck_in_front(reads)
 }
 
 /// Save deck, drawn as its tool is and unavailable, saying on hover that the
 /// deck's file is not where the project says. Save is the project's command,
 /// which would save the project here: the deck in front has nothing to save.
-fn missing_deck_save(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+fn missing_deck_save(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     use crate::workbench::MessageId;
 
     let (icon, label) = (
@@ -337,7 +337,7 @@ fn missing_deck_save(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: La
 /// A deck that is a file is in front: Save deck as writes it elsewhere. A
 /// deck the project keeps as text, as every deck in the browser is, has no
 /// file to write elsewhere.
-fn deck_file_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+fn deck_file_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
     cfg!(not(target_arch = "wasm32"))
         && reads
             .state
@@ -347,7 +347,7 @@ fn deck_file_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
             .is_some_and(|deck| !deck.is_stored())
 }
 
-fn include_of_deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+fn include_of_deck_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
     matches!(
         reads.state.netlist.front,
         NetlistTab::Include { deck: Some(_), .. }
@@ -358,7 +358,7 @@ fn include_of_deck_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
 /// its file on disk, the last run's input and the generated netlist, each
 /// disabled with the reason when there is nothing to compare it with. The
 /// comparison opens on a tab of its own.
-fn compare_deck_menu(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
+fn compare_deck_menu(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
     use crate::workbench::MessageId;
     use crate::workbench::documents::netlist_document::{self, CompareSide};
 
@@ -466,13 +466,13 @@ mod tests {
     use super::*;
     use crate::workbench::framework::feature::FeatureRegistry;
 
-    /// The code feature registers each toolbar once, and both toolbars the
+    /// The source feature registers each toolbar once, and both toolbars the
     /// shell's lane chooses (an open Verilog-A cell view's and the Netlist
     /// workspace's) are ones it registered.
     #[test]
     fn every_code_toolbar_the_shell_chooses_is_registered_once() {
         assert_eq!(
-            FeatureRegistry::<CodeFeature>::build()
+            FeatureRegistry::<SourceFeature>::build()
                 .validate_toolbars([VERILOGA_TOOLBAR, NETLIST_TOOLBAR]),
             Ok(())
         );

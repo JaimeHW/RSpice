@@ -10,7 +10,7 @@
 //! workbench brings the document the step restores to the front first, and
 //! takes up the schematic the record put back before the model finishes the
 //! step, so each happens where it did when the step was one operation. What
-//! the record asks of the models and code features, a selected model whose
+//! the record asks of the models and source features, a selected model whose
 //! library is gone and a Verilog-A compile of a source no longer there, it
 //! raises as requests, answered as the command that took the step returns.
 

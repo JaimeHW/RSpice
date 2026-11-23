@@ -26,7 +26,7 @@ use egui::Ui;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::MessageId;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::code::commands::SourceRequest;
 use crate::workbench::design_system::{
     Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
@@ -192,13 +192,13 @@ pub fn reveal_in_netlist(
     netlist.requested_line = Some(line);
 }
 
-/// Before the page draws, in the code feature's context: rebuild the
+/// Before the page draws, in the source feature's context: rebuild the
 /// generated deck, show the document the page is on, and pick up a re-run
 /// queued behind the last run. The deck page's editor is put in front here,
 /// before the shell takes the dispatcher's answers the page's context holds,
 /// so they are the answers the editor gets; the page publishes it again as
 /// it draws it.
-pub fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
+pub fn prepare_workspace(cx: &mut Cx<'_, SourceFeature>) {
     use crate::workbench::documents::netlist_document::{
         active_netlist_source_is_editable_in, can_redo_netlist_edit, can_undo_netlist_edit,
         editor_id_in, session,
@@ -270,11 +270,11 @@ pub fn source_menu_open(
     )
 }
 
-/// Draw the deck page in the code feature's context, once it has
+/// Draw the deck page in the source feature's context, once it has
 /// prepared. The context holds the dispatcher's answers for the commands
 /// the feature reads, and its menu's while [`source_menu_open`] says the
 /// source editor's menu is open or opening.
-pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
+pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     // A file dropped on the page opens as a deck once the page has drawn.
     let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
     if !dropped.is_empty() {
@@ -510,7 +510,7 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
             false,
         );
     }
-    // The dialogs draw in the code feature's context. What one raises is
+    // The dialogs draw in the source feature's context. What one raises is
     // answered once the page has drawn.
     revision::comparison_dialog_window(ui.ctx(), cx);
     transfer::export_generated_dialog_window(ui.ctx(), cx);
@@ -1102,10 +1102,10 @@ pub mod fixtures;
 mod tests {
     use super::fixtures::{retain_generated, seal_manual_run};
     use super::*;
-    use crate::workbench::code::tests::{CodeHarness, harness};
+    use crate::workbench::code::tests::{SourceHarness, harness};
     use crate::workbench::documents::netlist_document::NetlistTab;
 
-    fn configured_veriloga_state() -> (CodeHarness, String) {
+    fn configured_veriloga_state() -> (SourceHarness, String) {
         let mut harness = harness();
         let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
         let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
@@ -1203,7 +1203,7 @@ mod tests {
     }
 
     /// Open `text` as the deck at `C:/p/amp.cir`, in front.
-    fn open_test_deck(harness: &mut CodeHarness, text: &str) {
+    fn open_test_deck(harness: &mut SourceHarness, text: &str) {
         harness.state.netlist.open_deck = Some(
             crate::workbench::documents::deck_files::OpenDeck::in_memory("C:/p/amp.cir", text),
         );
@@ -1214,7 +1214,7 @@ mod tests {
     }
 
     /// The open deck's text, as the session holds it.
-    fn deck_text(harness: &CodeHarness) -> &str {
+    fn deck_text(harness: &SourceHarness) -> &str {
         &harness.state.netlist.open_deck.as_ref().unwrap().root.text
     }
 
@@ -1400,7 +1400,7 @@ mod tests {
         );
     }
 
-    fn ran_owned_deck(deck: &str) -> CodeHarness {
+    fn ran_owned_deck(deck: &str) -> SourceHarness {
         let mut harness = harness();
         open_test_deck(&mut harness, deck);
         harness.runs.manual_run.last_run_buffer = Some(deck.to_owned());

@@ -62,7 +62,7 @@ pub enum DesignSurfaceRequest {
     ShowOperatingPoint { device: String },
     /// Open Verify's Specifications view, for a requirement link.
     OpenSpecifications,
-    /// Open the code feature's New Verilog-A device form, for the canvas
+    /// Open the source feature's New Verilog-A device form, for the canvas
     /// menu's New Verilog-A device.
     NewVerilogADevice,
     /// Open the generated deck at the selected instance's card, for the

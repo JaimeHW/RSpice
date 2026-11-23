@@ -13,7 +13,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::documents::text_editor_commands::ActiveSourceEditor;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::{MessageId, WorkbenchSession};
@@ -33,11 +33,11 @@ use crate::workbench::documents::code_workspace::{
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
 const EDITOR_SCROLLBAR_INSET: f32 = 14.0;
 
-/// Before the page draws, in the code feature's context: put the page's
+/// Before the page draws, in the source feature's context: put the page's
 /// editor in front, before the shell takes the dispatcher's answers the
 /// page's context holds, so they are the answers the editor gets. The page
 /// publishes it again as it draws it.
-pub fn prepare(cx: &mut Cx<'_, CodeFeature>) {
+pub fn prepare(cx: &mut Cx<'_, SourceFeature>) {
     use crate::workbench::documents::code_workspace::{
         active_veriloga_file_path, selected_veriloga_source_in, viewed_veriloga_header,
     };
@@ -132,9 +132,9 @@ fn page_editor(
     }
 }
 
-/// Draw a Verilog-A cell view in the code feature's context, and carry out
+/// Draw a Verilog-A cell view in the source feature's context, and carry out
 /// what the reader pressed on the interface strip once it has drawn.
-pub fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
+pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     // Import and compile results are consumed by the frame loop, so a result
     // that lands while the editor is off screen is still published. Only what
     // needs this surface's pointer and context stays here.
@@ -214,7 +214,7 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
 /// Update symbol: bring the open view's hand-edited symbol into step with
 /// its module and say what happened, then ask design to take its author
 /// to it with the pins it gained selected, ready to be placed.
-pub fn update_symbol(cx: &mut Cx<'_, CodeFeature>) {
+pub fn update_symbol(cx: &mut Cx<'_, SourceFeature>) {
     if let Some((symbol, pins)) = update_active_veriloga_symbol_in(cx.model, cx.wb) {
         cx.wb
             .outbox
@@ -226,7 +226,7 @@ pub fn update_symbol(cx: &mut Cx<'_, CodeFeature>) {
 /// then ask design to switch to its schematic and arm the device there,
 /// as the shelf arms a cell, with the canvas in `ctx` taking the keyboard.
 pub fn place_offered_device(
-    cx: &mut Cx<'_, CodeFeature>,
+    cx: &mut Cx<'_, SourceFeature>,
     ctx: &egui::Context,
 ) -> Result<(), String> {
     let (target, binding) =
@@ -239,7 +239,7 @@ pub fn place_offered_device(
     Ok(())
 }
 
-fn handle_veriloga_file_drop(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+fn handle_veriloga_file_drop(ctx: &egui::Context, cx: &mut Cx<'_, SourceFeature>) {
     if cx.application_modal_open() {
         return;
     }
@@ -323,7 +323,7 @@ fn dropped_source(
 /// interface strip.
 fn source_editor(
     ui: &mut Ui,
-    cx: &mut Cx<'_, CodeFeature>,
+    cx: &mut Cx<'_, SourceFeature>,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     active_path: &str,
     source: &mut String,
@@ -493,7 +493,7 @@ fn source_editor(
             );
             if editable && interaction.changed {
                 match crate::workbench::documents::code_workspace::replace_selected_veriloga_file(
-                    &mut CodeFeature::workspace_parts(cx),
+                    &mut SourceFeature::workspace_parts(cx),
                     selected,
                     active_path,
                     source.clone(),
@@ -548,7 +548,7 @@ fn source_editor(
             cx.wb.messages(),
         ) {
             Ok(true) => crate::workbench::documents::code_workspace::invalidate_veriloga_evidence(
-                &mut CodeFeature::workspace_parts(cx),
+                &mut SourceFeature::workspace_parts(cx),
                 bundle_id,
             ),
             Ok(false) => {}
@@ -596,7 +596,7 @@ fn source_editor(
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
     ) && let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
-        &mut CodeFeature::workspace_parts(cx),
+        &mut SourceFeature::workspace_parts(cx),
         bundle_id,
         active_path,
     ) {
@@ -612,7 +612,7 @@ fn source_editor(
 /// all. It says what the reader pressed.
 fn interface_strip(
     ui: &mut Ui,
-    cx: &Cx<'_, CodeFeature>,
+    cx: &Cx<'_, SourceFeature>,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) -> Option<InterfaceAction> {
     use crate::workbench::app_state::model::interface_mismatch_detail;
@@ -763,7 +763,7 @@ enum StripAction {
 }
 
 fn current_diagnostics(
-    cx: &Cx<'_, CodeFeature>,
+    cx: &Cx<'_, SourceFeature>,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) -> Option<std::sync::Arc<CodeDiagnosticCollection>> {
     crate::workbench::documents::code_workspace::veriloga_current_diagnostics(
@@ -778,7 +778,7 @@ fn current_diagnostics(
 /// A Verilog-A cell view without its bundle is a defect of that view, and the
 /// resolver's error names it exactly. Nothing here offers a remedy that is not
 /// one: there is no project-wide source to fall back to.
-fn missing_source(ui: &mut Ui, cx: &Cx<'_, CodeFeature>, error: &str) {
+fn missing_source(ui: &mut Ui, cx: &Cx<'_, SourceFeature>, error: &str) {
     super::super::design_system::empty_state(
         ui,
         super::super::design_system::WorkbenchIcon::VerilogA,

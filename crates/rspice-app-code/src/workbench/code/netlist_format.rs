@@ -1,13 +1,13 @@
 //! Formatting the deck or include the netlist editor shows, answered for the
-//! code feature's request.
+//! source feature's request.
 
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::workflows::netlist_workflow::formatted_deck_text;
 
 /// Whether the file the netlist editor shows is a Spectre file, which a `+`
 /// does not continue.
-fn shows_spectre(cx: &Cx<'_, CodeFeature>) -> bool {
+fn shows_spectre(cx: &Cx<'_, SourceFeature>) -> bool {
     crate::workbench::documents::netlist_document::dialect::shown_source_in(
         cx.model,
         &cx.state.netlist,
@@ -23,7 +23,7 @@ fn shows_spectre(cx: &Cx<'_, CodeFeature>) -> bool {
 /// Format the deck or the include the netlist editor shows, when it is
 /// editable and its check finds no error: trailing blanks come off every
 /// card but the title, and the text ends with a line end.
-pub fn format_owned_netlist(cx: &mut Cx<'_, CodeFeature>) {
+pub fn format_owned_netlist(cx: &mut Cx<'_, SourceFeature>) {
     if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
         cx.model,
         &cx.state.netlist,

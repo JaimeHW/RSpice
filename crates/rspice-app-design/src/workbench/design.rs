@@ -1606,8 +1606,8 @@ pub(crate) fn own_modal_dialog_open(design: &DesignState, dialog_gate: bool) -> 
     })
 }
 
-/// What the code feature's Verilog-A page asks of design once its
-/// interface strip's press has done the code feature's part.
+/// What the source feature's Verilog-A page asks of design once its
+/// interface strip's press has done the source feature's part.
 impl DesignFeature {
     /// Open the symbol Update symbol updated in the symbol editor, where it
     /// is finished by hand, with the pins it gained selected, ready to be

@@ -4,8 +4,8 @@
 use super::*;
 use crate::state::{ProjectSourceOwner, project_sources::ProjectSourceError};
 use crate::workbench::code::{
-    CodeFeature,
-    tests::{CodeHarness, harness},
+    SourceFeature,
+    tests::{SourceHarness, harness},
 };
 
 fn english() -> MessageCatalog {
@@ -18,7 +18,7 @@ fn reference() -> crate::state::CellViewRef {
 
 /// The Verilog-A view `behavioral/gain/veriloga` open, its bundle the main
 /// file `gain.va` and `stage.va`, which the main file includes.
-pub(crate) fn two_files() -> CodeHarness {
+pub(crate) fn two_files() -> SourceHarness {
     let mut harness = harness();
     let reference = reference();
     let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
@@ -62,7 +62,7 @@ pub(crate) fn two_files() -> CodeHarness {
     harness
 }
 
-fn bundle(harness: &CodeHarness) -> &ProjectSourceBundle {
+fn bundle(harness: &SourceHarness) -> &ProjectSourceBundle {
     harness
         .model
         .workspace
@@ -72,10 +72,10 @@ fn bundle(harness: &CodeHarness) -> &ProjectSourceBundle {
         .expect("the view's bundle")
 }
 
-fn open(harness: &mut CodeHarness, action: CodeSourceFileAction, path: &str) {
+fn open(harness: &mut SourceHarness, action: CodeSourceFileAction, path: &str) {
     let id = bundle(harness).id();
     code_workspace::open_source_file_dialog_in_bundle(
-        &mut CodeFeature::workspace_parts(&mut harness.cx()),
+        &mut SourceFeature::workspace_parts(&mut harness.cx()),
         id,
         action,
         path,
@@ -85,7 +85,7 @@ fn open(harness: &mut CodeHarness, action: CodeSourceFileAction, path: &str) {
 }
 
 /// What the open draft's name, set to `name`, is judged as.
-fn judged(harness: &mut CodeHarness, name: &str) -> NameCheck {
+fn judged(harness: &mut SourceHarness, name: &str) -> NameCheck {
     let draft = harness
         .state
         .code_workspace

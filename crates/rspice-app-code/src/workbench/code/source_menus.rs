@@ -3,7 +3,7 @@
 //! selection, finding and going to a place, the lines under the caret, the
 //! document's language and the problems it finds. The Edit menu and the
 //! editor's right-click menu are both made of these groups, and a test walks
-//! the code feature's command table to find a row for every command the
+//! the source feature's command table to find a row for every command the
 //! editor answers.
 
 use super::commands::SourceCommand;

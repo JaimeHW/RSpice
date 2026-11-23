@@ -3,11 +3,11 @@
 //! maps back onto the authored lines.
 
 use super::*;
-use crate::workbench::code::tests::{CodeHarness, harness};
+use crate::workbench::code::tests::{SourceHarness, harness};
 use rspice_core::abort_signal::NoAbort;
 
 /// The editor drawn over the parts of `state` it reads.
-fn show_state(ui: &mut Ui, harness: &mut CodeHarness) -> egui::Response {
+fn show_state(ui: &mut Ui, harness: &mut SourceHarness) -> egui::Response {
     show(
         ui,
         &mut harness.model,
@@ -19,7 +19,7 @@ fn show_state(ui: &mut Ui, harness: &mut CodeHarness) -> egui::Response {
 }
 
 /// Open `text` as the deck at `path`, in front of the editor.
-fn open_deck(harness: &mut CodeHarness, path: impl Into<PathBuf>, text: impl Into<String>) {
+fn open_deck(harness: &mut SourceHarness, path: impl Into<PathBuf>, text: impl Into<String>) {
     harness.state.netlist.open_deck =
         Some(crate::workbench::documents::deck_files::OpenDeck::in_memory(path, text));
     assert!(crate::workbench::documents::deck_files::show_deck(
@@ -579,7 +579,7 @@ fn live_lint_uses_abort_aware_parser_contract() {
 }
 
 /// A deck in the editor, validated the way the editor validates it.
-fn validated(deck: &str) -> CodeHarness {
+fn validated(deck: &str) -> SourceHarness {
     let mut harness = harness();
     harness.model.simulation.source.netlist_content = deck.to_owned();
     let revision = harness.state.netlist.revision;
@@ -595,7 +595,7 @@ fn validated(deck: &str) -> CodeHarness {
 
 /// The value hover at the `offset`th byte of the first `needle` in `deck`.
 fn hover_on(
-    harness: &mut CodeHarness,
+    harness: &mut SourceHarness,
     deck: &str,
     needle: &str,
     offset: usize,
@@ -1354,7 +1354,7 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
     crate::ui::Theme::default().apply(&context);
     context.set_os(egui::os::OperatingSystem::Windows);
     let mut time = 0.0;
-    let mut frame = |harness: &mut CodeHarness, events: Vec<egui::Event>| {
+    let mut frame = |harness: &mut SourceHarness, events: Vec<egui::Event>| {
         time += 1.0 / 60.0;
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -1422,7 +1422,7 @@ fn drawn_deck(
     source: &str,
     frames: usize,
     mut each: impl FnMut(usize, &egui::Context, egui::Id),
-) -> CodeHarness {
+) -> SourceHarness {
     let mut harness = harness();
     open_deck(&mut harness, path, source.to_owned());
     let context = egui::Context::default();
@@ -1652,7 +1652,7 @@ fn closing_an_include_tab_lets_go_of_its_editor() {
         )),
         ..Default::default()
     };
-    let frame = |harness: &mut CodeHarness| {
+    let frame = |harness: &mut SourceHarness| {
         let _ = context.clone().run_ui(input.clone(), |ui| {
             release_closed_editors(
                 ui.ctx(),

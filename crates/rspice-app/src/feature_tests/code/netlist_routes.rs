@@ -25,7 +25,7 @@ use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 use rspice_app_workbench::workbench::framework::host::Host;
 
-/// The code feature's commands that act only away from the Netlist
+/// The source feature's commands that act only away from the Netlist
 /// workspace, where their own menus and keys carry them: the Verilog-A cell
 /// view's compile, its build settings and its symbol, and the schematic's
 /// jump into the generated netlist. Every other command of the feature acts

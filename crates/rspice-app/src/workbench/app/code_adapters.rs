@@ -1,6 +1,6 @@
-//! What the code feature's work asks of the session past the code feature:
+//! What the source feature's work asks of the session past the source feature:
 //! opening its Verilog-A cell's symbol in the symbol editor. This reaches
-//! design's navigation, so it stays in the shell when the code feature
+//! design's navigation, so it stays in the shell when the source feature
 //! moves into a crate of its own.
 
 use crate::workbench::app_state::AppState;

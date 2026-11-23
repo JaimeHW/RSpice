@@ -37,7 +37,7 @@ fn project_spec(command: ProjectCommand) -> &'static CommandSpec {
         .expect("the registry declares the command")
 }
 
-/// What the registry declares about the code feature's `command`.
+/// What the registry declares about the source feature's `command`.
 fn code_spec(command: SourceCommand) -> &'static CommandSpec {
     command_registry()
         .spec(command.key())
@@ -261,7 +261,7 @@ fn test_app() -> RSpiceApp {
         last_window_title: String::new(),
         symbol_library: None,
         simulation_controller: rspice_app_runs::simulation::controller::SimulationController::new(),
-        code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
+        code: rspice_app_code::workbench::documents::code_workspace::SourceHandles { project_id },
         cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
             account: rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(),

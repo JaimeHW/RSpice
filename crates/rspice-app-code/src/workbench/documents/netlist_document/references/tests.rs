@@ -3,11 +3,11 @@
 
 use super::super::fixtures::{DECK_INCLUDE, seed_deck};
 use super::*;
-use crate::workbench::code::tests::{CodeHarness, harness};
+use crate::workbench::code::tests::{SourceHarness, harness};
 
 /// A deck reading `root`, which includes the fixture's include reading
 /// `include`, open beside it. The editor shows the deck.
-fn deck(root: &str, include: &str) -> CodeHarness {
+fn deck(root: &str, include: &str) -> SourceHarness {
     let mut harness = harness();
     seed_deck(
         &mut harness.model,
@@ -19,7 +19,7 @@ fn deck(root: &str, include: &str) -> CodeHarness {
 }
 
 /// The text of the open deck's file `include`, the deck itself for `None`.
-fn file_text(harness: &CodeHarness, include: Option<&str>) -> String {
+fn file_text(harness: &SourceHarness, include: Option<&str>) -> String {
     harness
         .state
         .netlist
@@ -31,7 +31,7 @@ fn file_text(harness: &CodeHarness, include: Option<&str>) -> String {
 }
 
 /// Put the caret on the start of `word` in the shown text, after `after`.
-fn caret_on(harness: &mut CodeHarness, after: &str, word: &str) {
+fn caret_on(harness: &mut SourceHarness, after: &str, word: &str) {
     let text = &harness.model.simulation.source.netlist_content;
     let from = text.find(after).expect("the text holds the anchor");
     let byte = from
@@ -42,7 +42,7 @@ fn caret_on(harness: &mut CodeHarness, after: &str, word: &str) {
 }
 
 /// The file, line and text of each row the References page lists.
-fn listed(harness: &CodeHarness) -> Vec<(String, Option<String>, usize, String)> {
+fn listed(harness: &SourceHarness) -> Vec<(String, Option<String>, usize, String)> {
     harness
         .wb
         .source_references
@@ -151,7 +151,7 @@ fn renaming_a_subcircuit_lists_each_line_in_both_files_and_undoes_a_file_at_a_ti
     );
 
     // One Undo takes back one file; the next, the other.
-    let undo = |harness: &mut CodeHarness| {
+    let undo = |harness: &mut SourceHarness| {
         super::super::undo_netlist_edit(
             &mut harness.model,
             &mut harness.state.netlist,

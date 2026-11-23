@@ -1,6 +1,6 @@
 //! What the netlist document's cases seed: a generated deck that includes
 //! one dependency, and an open deck of the same text with its include open
-//! beside it. The document's own cases and the code feature's
+//! beside it. The document's own cases and the source feature's
 //! whole-application tests share it.
 
 // Test-only code compiled under test-support, outside the parent's cfg(test) exemption.

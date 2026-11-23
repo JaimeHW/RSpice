@@ -1,9 +1,9 @@
 //! The source editor's menu through the whole application: the commands the
-//! code feature reads, and the rows a page's context reads once it has drawn.
+//! source feature reads, and the rows a page's context reads once it has drawn.
 
 use crate::workbench::{RSpiceApp, features};
 use egui::os::OperatingSystem;
-use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::code::SourceFeature;
 use rspice_app_code::workbench::documents::netlist_document::open_run_deck_snapshot_in;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
@@ -17,14 +17,14 @@ use rspice_app_workbench::workbench::framework::command_registry::CommandAvailab
 use rspice_app_workbench::workbench::framework::feature::Feature;
 use rspice_app_workbench::workbench::framework::host::Host;
 
-/// The commands the code feature declares its menus read are the source
+/// The commands the source feature declares its menus read are the source
 /// editor menu's, in its order.
 #[test]
-fn the_code_feature_reads_the_source_editor_menus_commands() {
+fn the_source_feature_reads_the_source_editor_menus_commands() {
     let app = RSpiceApp::test_instance();
     let mut keys = Vec::new();
     menu_keys(app.source_editor_menu(), &mut keys);
-    assert_eq!(keys, CodeFeature::MENU_AVAILABILITY);
+    assert_eq!(keys, SourceFeature::MENU_AVAILABILITY);
 }
 
 /// What the deck page shows, and so the editor it puts in front.
@@ -86,10 +86,10 @@ fn draw(app: &mut RSpiceApp) {
     });
 }
 
-/// The dispatcher's answers for the commands the code feature reads on
+/// The dispatcher's answers for the commands the source feature reads on
 /// every frame: the toolbar's.
 fn toolbar_answers(app: &RSpiceApp) -> Vec<CommandAvailability> {
-    CodeFeature::FOREIGN_AVAILABILITY
+    SourceFeature::FOREIGN_AVAILABILITY
         .iter()
         .map(|key| app.command_availability(*key))
         .collect()
@@ -129,7 +129,7 @@ fn the_pages_context_reads_the_rows_the_host_reads_once_the_page_has_drawn() {
             let lent: Vec<String> = places
                 .iter()
                 .map(|&(platform, os)| {
-                    let cx = features::cx_with_menu_answers::<CodeFeature>(&mut app, |_| true);
+                    let cx = features::cx_with_menu_answers::<SourceFeature>(&mut app, |_| true);
                     let rows = resolve_menu_rows(entries, &SourceMenuLookup(&cx), platform, os);
                     format!("{rows:?}")
                 })

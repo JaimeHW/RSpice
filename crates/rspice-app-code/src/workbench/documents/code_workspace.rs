@@ -85,10 +85,10 @@ pub use veriloga_library::{
 };
 pub(crate) use veriloga_live_check::drive_veriloga_live_check;
 
-/// What the code feature holds beside its state: the project its state
+/// What the source feature holds beside its state: the project its state
 /// was built for, so a project replaced under it is noticed.
 #[derive(Debug, Default)]
-pub struct CodeHandles {
+pub struct SourceHandles {
     pub project_id: crate::product::ProjectId,
 }
 

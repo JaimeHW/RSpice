@@ -5,10 +5,10 @@
 
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::MessageId;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::framework::feature::Cx;
 
-pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+pub fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, SourceFeature>) {
     if !cx.state.netlist.export_dialog.open {
         return;
     }

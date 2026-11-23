@@ -497,7 +497,7 @@ fn rename_preview(
 /// naming the file and line. Enter renames, as one change Undo takes back a
 /// file at a time; Esc and Cancel close.
 pub(in crate::workbench) fn render_deck_rename_form(
-    cx: &mut crate::workbench::framework::feature::Cx<'_, crate::workbench::code::CodeFeature>,
+    cx: &mut crate::workbench::framework::feature::Cx<'_, crate::workbench::code::SourceFeature>,
     ctx: &Context,
 ) {
     use crate::workbench::documents::netlist_document::references;

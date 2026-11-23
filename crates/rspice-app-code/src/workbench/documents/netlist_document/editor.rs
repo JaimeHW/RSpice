@@ -2078,12 +2078,12 @@ mod library_folder_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod include_shadow_tests {
     use super::*;
-    use crate::workbench::code::tests::{CodeHarness, harness};
+    use crate::workbench::code::tests::{SourceHarness, harness};
 
     /// Two directories on the chain hold the same relative name. The winner
     /// and the shadow both come from the engine's own walk, so the warning
     /// cannot disagree with the deck that would run.
-    fn shadowed_fixture(label: &str) -> (std::path::PathBuf, CodeHarness) {
+    fn shadowed_fixture(label: &str) -> (std::path::PathBuf, SourceHarness) {
         let root = crate::fixture_root::canonical_temp_dir().join(format!(
             "rspice-include-shadow-{label}-{}-{}",
             std::process::id(),

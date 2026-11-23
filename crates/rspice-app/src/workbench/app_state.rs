@@ -34,7 +34,7 @@ mod transaction;
 
 use crate::workbench::slots::ShellState;
 use rspice_app_cloud::workbench::slots::cloud::CloudState;
-use rspice_app_code::workbench::slots::code::CodeState;
+use rspice_app_code::workbench::slots::code::SourceState;
 use rspice_app_design::workbench::slots::design::DesignState;
 use rspice_app_hardcopy::workbench::slots::hardcopy::HardcopyState;
 use rspice_app_models::workbench::slots::models::ModelsState;
@@ -73,7 +73,7 @@ pub struct AppState {
     /// drafts they edit. Boxed, so a moved state carries a pointer per
     /// feature rather than every feature's dialogs.
     pub(crate) design: Box<DesignState>,
-    pub(crate) code: Box<CodeState>,
+    pub(crate) code: Box<SourceState>,
     pub(crate) simulate: Box<SimulateState>,
     pub(crate) project: Box<ProjectState>,
     pub(crate) results: Box<ResultsState>,

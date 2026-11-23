@@ -1,4 +1,4 @@
-//! The code feature's behaviour, observed through a whole application.
+//! The source feature's behaviour, observed through a whole application.
 
 // The moved tests' bodies name these as `super::...`, as they did beside
 // them under app/ or in the module they tested: the interface tests'

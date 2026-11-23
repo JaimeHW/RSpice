@@ -22,7 +22,7 @@ use crate::workbench::app_state::model::Model;
 /// The source editors' findings, as the store reads them where the editors
 /// keep them: the netlist editor's, and the Verilog-A compiler's.
 ///
-/// Taken from the code feature's state by whoever holds it, since the model
+/// Taken from the source feature's state by whoever holds it, since the model
 /// does not reach up into a feature for them.
 pub struct SourceCollections<'a> {
     /// The netlist editor's findings.

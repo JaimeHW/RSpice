@@ -12,7 +12,7 @@ use egui::{Key, Modifiers, PointerButton, Pos2};
 use super::engine_recovery_path::author_deck;
 use crate::feature_tests::replay::{Control, PRIMARY, Replay, only};
 use crate::workbench::features;
-use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::code::SourceFeature;
 use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_code::workbench::documents::netlist_document::language::show_signature_help_at_cursor;
 use rspice_app_code::workbench::documents::netlist_document::{
@@ -165,7 +165,7 @@ fn menu_may_show(replay: &Replay) -> bool {
 
 /// The deck page's context as the shell lends it: with the menu's answers
 /// while the menu may show.
-fn page_context(replay: &mut Replay) -> Cx<'_, CodeFeature> {
+fn page_context(replay: &mut Replay) -> Cx<'_, SourceFeature> {
     let ctx = replay.ctx().clone();
     features::cx_with_menu_answers(&mut replay.app, |app| {
         context_menu_may_show(
@@ -178,14 +178,14 @@ fn page_context(replay: &mut Replay) -> Cx<'_, CodeFeature> {
 /// The page's context holds an answer for every row of the menu, each the
 /// one the dispatcher gives.
 fn holds_the_menus_answers(replay: &mut Replay) {
-    let expected: Vec<_> = CodeFeature::MENU_AVAILABILITY
+    let expected: Vec<_> = SourceFeature::MENU_AVAILABILITY
         .iter()
         .map(|key| (*key, replay.app.command_availability(*key)))
         .collect();
     let cx = page_context(replay);
     assert_eq!(
         cx.foreign_answers_taken(),
-        CodeFeature::FOREIGN_AVAILABILITY.len() + expected.len(),
+        SourceFeature::FOREIGN_AVAILABILITY.len() + expected.len(),
         "the page's context holds the menu's answers"
     );
     for (key, answer) in expected {
@@ -228,7 +228,7 @@ fn the_page_holds_the_menus_answers_while_the_menu_is_open_and_no_longer() {
     );
     assert_eq!(
         page_context(&mut replay).foreign_answers_taken(),
-        CodeFeature::FOREIGN_AVAILABILITY.len(),
+        SourceFeature::FOREIGN_AVAILABILITY.len(),
         "the page's context holds the three answers it reads every frame"
     );
 }

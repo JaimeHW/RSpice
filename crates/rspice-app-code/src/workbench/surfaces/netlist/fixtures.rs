@@ -1,6 +1,6 @@
 //! What the netlist surface's cases seed: a generated primary retained in
 //! the model, and a manual-deck run sealed into history. The surface's own
-//! cases and the code feature's whole-application tests share them.
+//! cases and the source feature's whole-application tests share them.
 
 // Test-only code compiled under test-support, outside the parent's cfg(test) exemption.
 #![allow(

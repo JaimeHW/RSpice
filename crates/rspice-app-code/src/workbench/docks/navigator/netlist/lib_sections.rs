@@ -176,7 +176,7 @@ mod tests {
         DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
         NetlistDocument, NetlistDocumentId, SourceLocator,
     };
-    use crate::workbench::code::tests::{CodeHarness, harness};
+    use crate::workbench::code::tests::{SourceHarness, harness};
     use crate::workbench::documents::deck_files::{OpenDeck, show_deck};
     use crate::workbench::documents::netlist_document::{
         NetlistTab, OwnedNetlistReplacement, replace_deck_files, undo_netlist_edit,
@@ -184,7 +184,7 @@ mod tests {
 
     /// Choosing `section` for the card at `line`, as the shell commits it.
     fn use_section(
-        harness: &mut CodeHarness,
+        harness: &mut SourceHarness,
         line: usize,
         section: &str,
     ) -> Result<String, String> {
@@ -218,7 +218,7 @@ mod tests {
     }
 
     /// The open deck's text, as the session holds it.
-    fn deck_text(harness: &CodeHarness) -> &str {
+    fn deck_text(harness: &SourceHarness) -> &str {
         &harness.state.netlist.open_deck.as_ref().unwrap().root.text
     }
 
@@ -233,7 +233,7 @@ mod tests {
          .endl ff\n";
     const LOCATOR: &str = "corners.lib";
 
-    fn corner_deck_state(root: &str) -> CodeHarness {
+    fn corner_deck_state(root: &str) -> SourceHarness {
         let locator = SourceLocator::try_new(LOCATOR, "corners.lib").unwrap();
         let dependency = DependencyMetadata::unresolved_direct_to(0, LOCATOR, locator)
             .unwrap()

@@ -1,4 +1,4 @@
-//! The code feature: the Netlist workspace, the Verilog-A views the Design
+//! The source feature: the Netlist workspace, the Verilog-A views the Design
 //! workspace opens, the landing Design shows for a project its deck owns,
 //! and the source editors they share.
 
@@ -44,23 +44,23 @@ use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
     FeatureSurface, Reads, RoutedCommand,
 };
-use crate::workbench::slots::CodeState;
+use crate::workbench::slots::SourceState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use commands::{SourceCommand, SourceRequest};
 use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 use rspice_app_state::workbench::preferences::TogglePreference;
 
-/// The code feature.
-pub struct CodeFeature;
+/// The source feature.
+pub struct SourceFeature;
 
 pub use source_menus::{
     SOURCE_EDIT_MENU, SOURCE_EDITOR_MENU, SOURCE_FOLDING_MENU, SOURCE_VIEW_ROWS,
 };
 
-impl Feature for CodeFeature {
-    type State = CodeState;
+impl Feature for SourceFeature {
+    type State = SourceState;
     type Session = WorkbenchSession;
-    type Handles = crate::workbench::documents::code_workspace::CodeHandles;
+    type Handles = crate::workbench::documents::code_workspace::SourceHandles;
     /// The source editor's right-click menu offers these, each greyed while
     /// the dispatcher would not run it.
     const MENU_AVAILABILITY: &'static [CommandKey] = &[
@@ -102,7 +102,7 @@ impl Feature for CodeFeature {
     }
 }
 
-/// The workbench commands the code feature takes a part in: Find on the
+/// The workbench commands the source feature takes a part in: Find on the
 /// Netlist workspace opens the deck's own find bar, and View > Zoom over a
 /// source editor sizes the editors' text, as the editor's own Ctrl+= and
 /// Ctrl+- do. The shell asks it before the design feature, which would take
@@ -113,7 +113,7 @@ impl Feature for CodeFeature {
 /// opened from a deck with no design. Check and netlist checks the same deck
 /// as Run would. With the plan as the target, Simulate's Run and check take
 /// them.
-const ROUTED: &[RoutedCommand<CodeFeature>] = &[
+const ROUTED: &[RoutedCommand<SourceFeature>] = &[
     RoutedCommand {
         key: ids::FIND_IN_DESIGN,
         takes: |reads| reads.wb.workspace == Workspace::Netlist,
@@ -162,14 +162,14 @@ const ROUTED: &[RoutedCommand<CodeFeature>] = &[
 ];
 
 /// Whether a source editor is in front, so a view command is its text's.
-fn source_editor_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+fn source_editor_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
     reads.wb.active_source_editor.is_some()
 }
 
 /// Whether Run runs a deck rather than the plan: on the Netlist workspace,
 /// while a deck is the tab Run runs; on every other, while the project's
 /// simulation is its deck.
-fn runs_a_deck(reads: &Reads<'_, CodeFeature>) -> bool {
+fn runs_a_deck(reads: &Reads<'_, SourceFeature>) -> bool {
     if reads.wb.workspace == Workspace::Netlist {
         matches!(
             reads.state.netlist.run_target(),
@@ -184,7 +184,7 @@ fn runs_a_deck(reads: &Reads<'_, CodeFeature>) -> bool {
 /// Whether the deck Run runs can be read: on the Netlist workspace, while
 /// it is open; on every other, until its file is found missing, as Run
 /// opens a deck that is not open yet.
-fn run_deck_readable(reads: &Reads<'_, CodeFeature>) -> bool {
+fn run_deck_readable(reads: &Reads<'_, SourceFeature>) -> bool {
     if reads.wb.workspace == Workspace::Netlist {
         reads.state.netlist.open_deck.is_some()
     } else {
@@ -196,7 +196,7 @@ fn run_deck_readable(reads: &Reads<'_, CodeFeature>) -> bool {
 /// The dialog steps the feature draws, under the keys the shell's dialog
 /// order lists them by: the source document dialogs, Rename symbol, New Verilog-A device, Import Verilog/Verilog-A/AMS, Replace
 /// source from file and Build settings. Each is open while its form is.
-const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
+const DIALOGS: &[FeatureDialog<SourceFeature>] = &[
     FeatureDialog {
         key: DialogKey("code.source_document"),
         is_open: |code| {
@@ -204,32 +204,32 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
                 || code.code_workspace.source_file_dialog.is_some()
                 || code.code_workspace.source_history.is_some()
         },
-        render: CodeFeature::render_source_document_dialog,
+        render: SourceFeature::render_source_document_dialog,
     },
     FeatureDialog {
         key: DialogKey("code.rename_symbol"),
         is_open: |code| code.code_workspace.language_tools.is_some() || code.deck_rename.is_some(),
-        render: CodeFeature::render_rename_symbol_form,
+        render: SourceFeature::render_rename_symbol_form,
     },
     FeatureDialog {
         key: DialogKey("code.new_veriloga_device"),
         is_open: |code| code.new_veriloga_device.open,
-        render: CodeFeature::render_new_veriloga_device_form,
+        render: SourceFeature::render_new_veriloga_device_form,
     },
     FeatureDialog {
         key: DialogKey("code.veriloga_import"),
         is_open: |code| code.code_workspace.veriloga.import_form.is_some(),
-        render: CodeFeature::render_veriloga_import_dialog,
+        render: SourceFeature::render_veriloga_import_dialog,
     },
     FeatureDialog {
         key: DialogKey("code.veriloga_replace"),
         is_open: |code| code.code_workspace.veriloga.replace_review.is_some(),
-        render: CodeFeature::render_veriloga_replace_dialog,
+        render: SourceFeature::render_veriloga_replace_dialog,
     },
     FeatureDialog {
         key: DialogKey("code.veriloga_build_settings"),
         is_open: |code| code.veriloga_build_settings.is_some(),
-        render: CodeFeature::render_veriloga_build_settings,
+        render: SourceFeature::render_veriloga_build_settings,
     },
 ];
 
@@ -237,7 +237,7 @@ const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
 const UNAVAILABLE: &str = "command is unavailable in this context";
 
 impl CommandSet for SourceCommand {
-    type Feature = CodeFeature;
+    type Feature = SourceFeature;
     const REGISTERED: &'static [Self] = &Self::ALL;
 
     fn spec(self) -> CommandSpec {
@@ -249,7 +249,7 @@ impl CommandSet for SourceCommand {
     /// the document's language service answers it. Elsewhere they are hidden
     /// rather than offered disabled. A deck answers all three through the
     /// engine's index of it and its includes.
-    fn offered(self, reads: &Reads<'_, CodeFeature>) -> bool {
+    fn offered(self, reads: &Reads<'_, SourceFeature>) -> bool {
         if !self.source_editor_only() {
             return true;
         }
@@ -283,7 +283,7 @@ impl CommandSet for SourceCommand {
             .is_some_and(|editor| !self.navigates_source_language() || editor.navigable)
     }
 
-    fn checked(self, reads: &Reads<'_, CodeFeature>) -> Option<bool> {
+    fn checked(self, reads: &Reads<'_, SourceFeature>) -> Option<bool> {
         (self == Self::ToggleWordWrap).then(|| {
             reads
                 .model
@@ -296,7 +296,7 @@ impl CommandSet for SourceCommand {
     /// would change a read-only document's text. Each window the deck draws
     /// is offered only on the Netlist workspace. Find and Manage act on every
     /// code document: the deck and a Verilog-A cell view in Design.
-    fn availability(self, reads: &Reads<'_, CodeFeature>) -> CommandAvailability {
+    fn availability(self, reads: &Reads<'_, SourceFeature>) -> CommandAvailability {
         let model = reads.model;
         let code = &reads.state.code_workspace;
         let execution_active = model.simulation.execution.has_active_execution();
@@ -463,7 +463,7 @@ impl CommandSet for SourceCommand {
         }
     }
 
-    fn execute(self, cx: &mut Cx<'_, CodeFeature>) {
+    fn execute(self, cx: &mut Cx<'_, SourceFeature>) {
         match self {
             Self::NewVerilogADevice => {
                 open_new_veriloga_device_form_in(cx.model, &mut cx.state.new_veriloga_device);
@@ -593,7 +593,7 @@ fn editor_takes(wb: &WorkbenchSession, command: SourceCommand) -> bool {
 /// at the net under the caret when the line connects it, else at the
 /// instance the line is the card of. The name is read from the text as it
 /// stands, not from the frame before.
-pub(crate) fn show_in_schematic(cx: &mut Cx<'_, CodeFeature>) {
+pub(crate) fn show_in_schematic(cx: &mut Cx<'_, SourceFeature>) {
     if !cross_probe::generated_netlist_in_front(&cx.state.netlist) {
         return;
     }
@@ -646,7 +646,7 @@ pub fn source_menu_label(
 /// Put the quantity of the name under the caret on the waveform viewer's
 /// plot, from the run of the document in front. The name is read from the
 /// text as it stands.
-fn plot_from_source(cx: &mut Cx<'_, CodeFeature>, quantity: cross_probe::PlotQuantity) {
+fn plot_from_source(cx: &mut Cx<'_, SourceFeature>, quantity: cross_probe::PlotQuantity) {
     use crate::workbench::framework::requests::ShowWaveforms;
     use rspice_results::result_presentation::{
         AnalysisPresentationKey, SourceWaveformPresentationKey,
@@ -701,7 +701,7 @@ fn plot_from_source(cx: &mut Cx<'_, CodeFeature>, quantity: cross_probe::PlotQua
 /// includes, exports the deck as it is in the editor; otherwise the export
 /// dialog opens over the page, and anywhere else the design's netlist is
 /// exported straight away.
-fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
+fn open_export_dialog(cx: &mut Cx<'_, SourceFeature>) {
     if cx.wb.workspace == Workspace::Netlist
         && cx.state.netlist.front.shows_deck()
         && let Some(deck) = cx.state.netlist.open_deck.as_ref()
@@ -722,12 +722,12 @@ fn open_export_dialog(cx: &mut Cx<'_, CodeFeature>) {
 }
 
 /// Whether the deck is the thing on screen.
-fn netlist_page_on_screen(reads: &Reads<'_, CodeFeature>) -> bool {
+fn netlist_page_on_screen(reads: &Reads<'_, SourceFeature>) -> bool {
     reads.wb.workspace == Workspace::Netlist
 }
 
 /// Whether the Design workspace is showing a schematic or a testbench.
-fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
+fn schematic_in_front(reads: &Reads<'_, SourceFeature>) -> bool {
     reads.wb.workspace == Workspace::Design
         && matches!(
             reads.model.workspace.content.active_view_type(),
@@ -736,7 +736,7 @@ fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
 }
 
 /// What the feature settles each frame before any surface draws.
-impl CodeFeature {
+impl SourceFeature {
     /// Settle, in this order: a project the last frame replaced starts the
     /// code workspace over, the Verilog-A import and compile that finished
     /// are taken, the compile a request asked for starts, and where the open
@@ -790,7 +790,7 @@ impl CodeFeature {
 
 /// What the code workspace's operations take, lent from the feature's
 /// context.
-impl CodeFeature {
+impl SourceFeature {
     /// The code workspace's parts, lent from `cx` for one call.
     pub(in crate::workbench) fn workspace_parts<'c>(
         cx: &'c mut Cx<'_, Self>,
@@ -811,7 +811,7 @@ impl CodeFeature {
 /// The feature's dialog steps, each over the parts of the code slot it
 /// owns. What a dialog's choice still needs of the whole application it
 /// hands the shell, which the step answers as it returns.
-impl CodeFeature {
+impl SourceFeature {
     /// New Verilog-A device….
     fn render_new_veriloga_device_form(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();

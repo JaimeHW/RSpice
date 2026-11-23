@@ -7,7 +7,7 @@ use egui::{Align, Layout, Rect, Ui};
 use crate::ui::theme;
 use crate::ui::tokens::Tokens;
 use crate::workbench::MessageId;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in;
 use crate::workbench::framework::feature::Cx;
 
@@ -21,7 +21,7 @@ pub(super) fn show_word(
     ui: &mut Ui,
     language_rect: Rect,
     chip_width: Option<f32>,
-    cx: &Cx<'_, CodeFeature>,
+    cx: &Cx<'_, SourceFeature>,
 ) {
     let Some(chip_width) = chip_width else {
         return;
@@ -62,19 +62,19 @@ pub(super) fn show_word(
 mod tests {
     use std::path::PathBuf;
 
-    use crate::workbench::code::tests::{CodeHarness, harness};
+    use crate::workbench::code::tests::{SourceHarness, harness};
     use crate::workbench::documents::netlist_document::NetlistTab;
     use crate::workbench::framework::command_registry::CommandAvailability;
     use crate::workbench::framework::feature::{Feature, ForeignAvailability};
 
     /// The texts one frame of the page painted in its header.
-    fn header(harness: &mut CodeHarness) -> Vec<String> {
+    fn header(harness: &mut SourceHarness) -> Vec<String> {
         let context = egui::Context::default();
         crate::ui::Theme::default().apply(&context);
         let mut texts = Vec::new();
         for _ in 0..2 {
             let answers = ForeignAvailability::take(
-                <crate::workbench::code::CodeFeature as Feature>::FOREIGN_AVAILABILITY,
+                <crate::workbench::code::SourceFeature as Feature>::FOREIGN_AVAILABILITY,
                 |_| CommandAvailability::Available,
             );
             let output = context.run_ui(

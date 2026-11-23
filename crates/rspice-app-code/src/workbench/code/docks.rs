@@ -1,11 +1,11 @@
-//! The code feature's navigator and inspector, over what the feature lends
+//! The source feature's navigator and inspector, over what the feature lends
 //! the docks that draw them.
 
 use crate::workbench::MessageId;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::design_system::inspector::muted_inspector_copy;
 use crate::workbench::docks::inspector::code_workspace::{
-    CodeInspector, FindingPress, code_workspace_inspector,
+    FindingPress, SourceInspector, code_workspace_inspector,
 };
 use crate::workbench::docks::inspector::veriloga;
 use crate::workbench::docks::navigator::netlist::{NetlistNavigator, netlist as netlist_navigator};
@@ -19,7 +19,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::OpenInDesign;
 use crate::workbench::state::Workspace;
 
-use super::CodeFeature;
+use super::SourceFeature;
 use super::commands::{SourceDocumentRequest, SourceRequest};
 use super::netlist_first::{self, DeckFacts, deck_fact_rows, deck_facts};
 
@@ -28,7 +28,7 @@ use super::netlist_first::{self, DeckFacts, deck_fact_rows, deck_facts};
 /// What the navigator changes of the feature's own state it changes in
 /// place; what it asks of the whole application is raised for the shell,
 /// which answers it once the navigator has drawn.
-pub(super) fn show_navigator(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
+pub(super) fn show_navigator(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) {
     // A deck project's Design page has no schematic, so nothing of one to
     // list: every group would be empty, and its one occurrence the empty top
     // cell. Its Simulate page has no plan, whose setup is what Simulate's
@@ -79,7 +79,7 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
 }
 
 /// What a source bundle rail reads, lent from the feature's context.
-fn source_rail<'a>(cx: &'a mut Cx<'_, CodeFeature>) -> SourceRail<'a> {
+fn source_rail<'a>(cx: &'a mut Cx<'_, SourceFeature>) -> SourceRail<'a> {
     SourceRail {
         model: cx.model,
         code_workspace: &mut cx.state.code_workspace,
@@ -90,7 +90,7 @@ fn source_rail<'a>(cx: &'a mut Cx<'_, CodeFeature>) -> SourceRail<'a> {
 
 /// Carry out what a rail asked: say why its choice failed, or raise the
 /// file action or the placed instance for the shell to open.
-fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
+fn answer_rail(cx: &mut Cx<'_, SourceFeature>, asked: Option<RailAction>) {
     match asked {
         None => {}
         Some(RailAction::Prompt(text)) => cx.wb.prompt(text),
@@ -120,7 +120,7 @@ fn answer_rail(cx: &mut Cx<'_, CodeFeature>, asked: Option<RailAction>) {
 /// The inspector of the code document in front: the Netlist workspace's
 /// deck, or the Verilog-A view the Design workspace shows.
 /// Revealing a Verilog-A finding routes the diagnostics in place.
-pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
+pub(super) fn show_inspector(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) {
     // A deck project's Design and Simulate pages inspect the deck: the facts
     // the Netlist workspace lists beside it.
     if deck_page(cx) {
@@ -161,7 +161,7 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
     let facts = deck_in_front.then(|| root_deck_facts(cx, ui.ctx()));
     let pressed = code_workspace_inspector(
         ui,
-        &CodeInspector {
+        &SourceInspector {
             model: cx.model,
             netlist: &cx.state.netlist,
             deck_facts: facts.as_ref(),
@@ -186,13 +186,13 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui) {
 
 /// Whether the docks are the Design or Simulate page's of a project whose
 /// simulation is its deck and which has no schematic.
-fn deck_page(cx: &Cx<'_, CodeFeature>) -> bool {
+fn deck_page(cx: &Cx<'_, SourceFeature>) -> bool {
     matches!(cx.wb.workspace, Workspace::Design | Workspace::Simulate)
         && cx.model.is_netlist_first_without_schematic()
 }
 
 /// The project's deck's facts, counted from its root file.
-fn root_deck_facts(cx: &mut Cx<'_, CodeFeature>, ctx: &egui::Context) -> DeckFacts {
+fn root_deck_facts(cx: &mut Cx<'_, SourceFeature>, ctx: &egui::Context) -> DeckFacts {
     let index = root_deck_source_index(ctx, cx.model, &mut cx.state.netlist);
     deck_facts(cx.model, &cx.state.netlist, &index, cx.wb.messages())
 }

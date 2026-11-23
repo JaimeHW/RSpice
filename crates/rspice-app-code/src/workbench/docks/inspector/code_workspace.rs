@@ -20,7 +20,7 @@ use super::super::super::design_system::{
 /// What the Netlist workspace's inspector reads: the model, the netlist
 /// editor's state and the message catalogue.
 #[derive(Clone, Copy)]
-pub(crate) struct CodeInspector<'a> {
+pub(crate) struct SourceInspector<'a> {
     pub(crate) model: &'a Model,
     pub(crate) netlist: &'a NetlistDocumentState,
     /// The deck's facts while the deck's own file is in front.
@@ -42,7 +42,7 @@ pub(in crate::workbench) enum FindingPress {
 /// fix it offers.
 pub(in crate::workbench) fn code_workspace_inspector(
     ui: &mut Ui,
-    reads: &CodeInspector<'_>,
+    reads: &SourceInspector<'_>,
 ) -> Option<FindingPress> {
     use crate::workbench::documents::netlist_document::NetlistRoot;
 
@@ -286,7 +286,7 @@ fn generated_provenance(ui: &mut Ui, model: &Model, messages: MessageCatalog) {
 
 /// A run's input: the run, the point of it when it read several, whether
 /// it ran a deck or the plan, and when it finished.
-fn run_input_facts(ui: &mut Ui, reads: &CodeInspector<'_>, run: u64, point: Option<usize>) {
+fn run_input_facts(ui: &mut Ui, reads: &SourceInspector<'_>, run: u64, point: Option<usize>) {
     use crate::workbench::MessageId;
     let messages = reads.messages;
     let simulation = &reads.model.simulation;
@@ -391,7 +391,7 @@ fn local_time(unix_seconds: f64) -> Option<String> {
 
 /// A comparison: the two texts it compares, by name, and how many lines
 /// the second adds to the first and takes from it.
-fn comparison_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
+fn comparison_facts(ui: &mut Ui, reads: &SourceInspector<'_>) {
     use crate::workbench::MessageId;
     let Some((left, right)) = reads.netlist.comparison_sides else {
         return;
@@ -447,7 +447,7 @@ fn comparison_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
 
 /// The Added lines: the design they belong to, and the plan they run with,
 /// by its name.
-fn added_lines_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
+fn added_lines_facts(ui: &mut Ui, reads: &SourceInspector<'_>) {
     use crate::workbench::MessageId;
     let messages = reads.messages;
     section_header(
@@ -473,7 +473,7 @@ fn added_lines_facts(ui: &mut Ui, reads: &CodeInspector<'_>) {
 
 /// The file in front, the deck or one of its includes: where it is, and the
 /// encoding and line endings Save writes it back in.
-fn deck_file_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
+fn deck_file_provenance(ui: &mut Ui, reads: &SourceInspector<'_>) {
     let messages = reads.messages;
     let Some(file) = active_deck_file_in(reads.netlist) else {
         // A deck whose file is missing: the path it was last at, and that
@@ -516,7 +516,7 @@ fn deck_file_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
     fact_rows(ui, &rows);
 }
 
-fn dependency_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
+fn dependency_provenance(ui: &mut Ui, reads: &SourceInspector<'_>) {
     let Some(dependency) = active_dependency_in(reads.model, reads.netlist) else {
         return;
     };

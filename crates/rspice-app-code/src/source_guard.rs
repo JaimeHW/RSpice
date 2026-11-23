@@ -1,9 +1,9 @@
 //! Finding the production half of a source file that inspects itself.
 //!
-//! Several of the code feature's modules assert that their own shipped code
+//! Several of the source feature's modules assert that their own shipped code
 //! contains no panic shortcuts, by reading themselves back through
 //! `include_str!` and scanning everything that precedes their test module.
-//! This is the code feature's own copy of `rspice-app`'s rule, as the run
+//! This is the source feature's own copy of `rspice-app`'s rule, as the run
 //! tier keeps one: a crate cannot reach another's test-only code.
 
 /// Everything in `source` that precedes its `#[cfg(test)] mod tests` block.

@@ -17,7 +17,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::ui::widgets::table::{Cell, Column, DataTable, TableState};
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::code::netlist_first::{self, NetlistFirstAction, deck_name};
 use crate::workbench::design_system::{PANEL_INSET, WorkbenchIcon, empty_state_with_actions};
 use crate::workbench::documents::netlist_document::root_deck_source_index;
@@ -122,10 +122,10 @@ fn printable_card(card: &str) -> String {
         .replace('\t', "    ")
 }
 
-/// The page, in the code feature's context: its bar, then the setup's
+/// The page, in the source feature's context: its bar, then the setup's
 /// table, or, for a deck that states no analysis, the empty state that says
 /// so.
-pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
+pub(crate) fn show(cx: &mut Cx<'_, SourceFeature>, ui: &mut Ui) {
     let messages = cx.wb.messages();
     let index = root_deck_source_index(ui.ctx(), cx.model, &mut cx.state.netlist);
     let cards = setup_cards(&index);

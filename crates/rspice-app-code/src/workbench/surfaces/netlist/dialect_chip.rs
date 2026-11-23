@@ -419,7 +419,7 @@ mod tests {
     mod page {
         use std::path::PathBuf;
 
-        use crate::workbench::code::tests::{CodeHarness, harness};
+        use crate::workbench::code::tests::{SourceHarness, harness};
         use crate::workbench::documents::netlist_document::{
             NetlistRoot, NetlistTab, editor_id_in,
         };
@@ -440,7 +440,7 @@ mod tests {
         }
 
         /// The deck `source` open on the page as its file `path`.
-        fn deck(path: &str, source: &str) -> CodeHarness {
+        fn deck(path: &str, source: &str) -> SourceHarness {
             let mut harness = harness();
             let deck = crate::workbench::documents::deck_files::OpenDeck::in_memory(path, source);
             harness.model.workspace.content.decks = vec![crate::state::ProjectDeck {
@@ -463,7 +463,7 @@ mod tests {
         /// Every text one frame of the page painted, and where.
         fn frame(
             context: &egui::Context,
-            harness: &mut CodeHarness,
+            harness: &mut SourceHarness,
             events: Vec<egui::Event>,
         ) -> Vec<(String, egui::Rect)> {
             fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
@@ -482,7 +482,7 @@ mod tests {
             // The shell lends the page with the dispatcher's answer for each
             // command it reads, Run among them.
             let answers = ForeignAvailability::take(
-                <crate::workbench::code::CodeFeature as Feature>::FOREIGN_AVAILABILITY,
+                <crate::workbench::code::SourceFeature as Feature>::FOREIGN_AVAILABILITY,
                 |_| CommandAvailability::Available,
             );
             let output = context.run_ui(input(events), |ui| {
@@ -508,7 +508,7 @@ mod tests {
         /// frame after the press.
         fn press(
             context: &egui::Context,
-            harness: &mut CodeHarness,
+            harness: &mut SourceHarness,
             label: &str,
         ) -> Vec<(String, egui::Rect)> {
             let shown = frame(context, harness, Vec::new());

@@ -11,7 +11,7 @@
 //! back.
 
 use crate::workbench::RSpiceApp;
-use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::code::SourceFeature;
 use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
 use rspice_app_design::workbench::design::DesignFeature;
@@ -188,7 +188,7 @@ impl RSpiceApp {
             // A Verilog-A cell view has no instances or nets to find, so
             // Find searches its source bundle there.
             WorkbenchCommand::FindInDesign => {
-                if !self.route_command_key_to::<CodeFeature>(key)
+                if !self.route_command_key_to::<SourceFeature>(key)
                     && !self.route_command_key_to::<DesignFeature>(key)
                 {
                     self.execute_command_key(SourceCommand::FindCodeDocument.key());

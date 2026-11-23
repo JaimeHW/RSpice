@@ -15,7 +15,7 @@ use crate::state::{
     NetlistDocument, NetlistDocumentId,
 };
 use crate::workbench::app_state::Model;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, NetlistRoot, NetlistTab,
 };
@@ -26,7 +26,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 /// input changes. Generation happens into a temporary string; a failed build
 /// retains the prior valid artifact and marks it stale instead of publishing
 /// partial bytes.
-pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
+pub(super) fn reconcile_documents(cx: &mut Cx<'_, SourceFeature>) {
     if !cx.state.netlist.active_document_initialized {
         // A deck the session opens with is in front, and Run runs it.
         match cx.state.netlist.open_deck.as_ref().map(|deck| deck.id) {
@@ -110,7 +110,7 @@ pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
 /// The netlist is generated first. Only the Netlist page generates it while it
 /// is drawn, so a jump from elsewhere would otherwise arrive at nothing when
 /// the page was never opened, or at a netlist older than the design.
-pub fn show_generated_netlist(cx: &mut Cx<'_, CodeFeature>) {
+pub fn show_generated_netlist(cx: &mut Cx<'_, SourceFeature>) {
     refresh_generated_artifact(cx);
     crate::workbench::documents::netlist_document::show_generated_deck(
         cx.model,
@@ -119,7 +119,7 @@ pub fn show_generated_netlist(cx: &mut Cx<'_, CodeFeature>) {
     );
 }
 
-pub fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
+pub fn refresh_generated_artifact(cx: &mut Cx<'_, SourceFeature>) {
     let input_digest =
         match crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(
             &crate::workbench::lifecycle::project_lifecycle::LifecycleView {

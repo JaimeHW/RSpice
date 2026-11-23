@@ -7,7 +7,7 @@
 //! here. Simulate has no plan to edit for it, and lists the deck's own setup
 //! instead (see [`super::deck_setup`]). The deck's facts are the
 //! inspector's, the same rows the Netlist workspace lists beside the deck.
-//! These are the code feature's surface, drawn in that feature's context
+//! These are the source feature's surface, drawn in that feature's context
 //! while the deck is the project's simulation.
 
 use egui::Ui;
@@ -15,7 +15,7 @@ use egui::Ui;
 use crate::state::{NetlistSourceIndex, OutlineEntryKind};
 use crate::ui::widgets::Button;
 use crate::workbench::app_state::Model;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::design_system::{Fact, WorkbenchIcon, empty_state_with_actions, fact_rows};
 use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use crate::workbench::framework::command_registry::ids;
@@ -45,9 +45,9 @@ pub fn raise_netlist_first_action(wb: &mut WorkbenchSession, action: NetlistFirs
     }
 }
 
-/// The surface the code feature registers, in its context: on Design the
+/// The surface the source feature registers, in its context: on Design the
 /// empty canvas, on Simulate the deck's own setup.
-pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
+pub(crate) fn show(cx: &mut Cx<'_, SourceFeature>, ui: &mut Ui) {
     open_deck(cx);
     if cx.wb.workspace == Workspace::Simulate {
         super::deck_setup::show(cx, ui);
@@ -79,7 +79,7 @@ pub(crate) fn show(cx: &mut Cx<'_, CodeFeature>, ui: &mut Ui) {
 
 /// [`raise_netlist_first_action`], with the caret put on the line an
 /// [`NetlistFirstAction::OpenAtLine`] names once the deck is in front.
-pub(super) fn carry_out(cx: &mut Cx<'_, CodeFeature>, action: NetlistFirstAction) {
+pub(super) fn carry_out(cx: &mut Cx<'_, SourceFeature>, action: NetlistFirstAction) {
     if let NetlistFirstAction::OpenAtLine(line) = action {
         #[cfg(not(target_arch = "wasm32"))]
         crate::workbench::documents::deck_files::show_project_deck(
@@ -97,7 +97,7 @@ pub(super) fn carry_out(cx: &mut Cx<'_, CodeFeature>, action: NetlistFirstAction
 
 /// Open the project's deck as the Netlist page does: a restored session has
 /// the deck's entry, not its text, and a deck page names and counts it.
-pub(super) fn open_deck(cx: &mut Cx<'_, CodeFeature>) {
+pub(super) fn open_deck(cx: &mut Cx<'_, SourceFeature>) {
     #[cfg(not(target_arch = "wasm32"))]
     crate::workbench::documents::deck_files::open_project_deck(
         cx.model,

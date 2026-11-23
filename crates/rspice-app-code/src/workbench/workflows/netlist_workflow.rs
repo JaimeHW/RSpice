@@ -2,7 +2,7 @@
 //!
 //! The parts Run and Format share on the Netlist workspace: where a run's
 //! check found the deck's includes, and the deck text Format writes. The
-//! code feature's deck run and format answer their commands over these
+//! source feature's deck run and format answer their commands over these
 //! parts.
 
 mod platform;

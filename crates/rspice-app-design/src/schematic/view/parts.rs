@@ -6,7 +6,7 @@
 //! (a probe's trace, the operating-point hop, a requirement link, and the
 //! menu's Verilog-A device form, model-bound symbol and netlist card) waits
 //! in the session's outbox until the shell answers it, once the surface has
-//! drawn. What the code feature shows, such as whether New Verilog-A device
+//! drawn. What the source feature shows, such as whether New Verilog-A device
 //! can make anything, the canvas reads through code's port. Whether a modal
 //! dialog was open is lent as it stood when the parts were taken. A dialog
 //! the surface asked for counts as open from the moment it asked, though the
@@ -66,7 +66,7 @@ pub struct CanvasParts<'a> {
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) runs: &'a mut RunsState,
     pub(crate) results: &'a dyn ResultsPort,
-    /// What the code feature shows, which the menu's Verilog-A device row
+    /// What the source feature shows, which the menu's Verilog-A device row
     /// reads.
     pub(crate) code: &'a dyn CodePort,
     /// The application's commands, which shortcut labels read.
@@ -160,7 +160,7 @@ pub struct CanvasFrame<'a> {
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) runs: &'a mut RunsState,
     pub(crate) results: &'a dyn ResultsPort,
-    /// What the code feature shows, which the menu's Verilog-A device row
+    /// What the source feature shows, which the menu's Verilog-A device row
     /// reads.
     pub(crate) code: &'a dyn CodePort,
     /// The application's commands, which shortcut labels read.
@@ -295,7 +295,7 @@ pub struct CanvasFacts<'a> {
     pub(crate) model: &'a Model,
     pub(crate) runs: &'a RunsState,
     pub(crate) results: &'a dyn ResultsPort,
-    /// What the code feature shows, which the menu's Verilog-A device row
+    /// What the source feature shows, which the menu's Verilog-A device row
     /// reads.
     pub(crate) code: &'a dyn CodePort,
     /// The application's commands, which shortcut labels read.

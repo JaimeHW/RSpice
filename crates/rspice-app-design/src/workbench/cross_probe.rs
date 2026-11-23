@@ -95,7 +95,7 @@ pub struct CrossProbeProjection {
 /// one device-local synchronization boundary and avoids order-dependent
 /// behavior among the three surfaces.
 ///
-/// `shown_netlist_document` is the code feature's key for the netlist
+/// `shown_netlist_document` is the source feature's key for the netlist
 /// document its editor shows; a switch between documents makes the
 /// projection stale.
 ///

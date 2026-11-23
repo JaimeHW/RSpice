@@ -1,4 +1,4 @@
-//! The commands the code feature declares, as the registry lists them:
+//! The commands the source feature declares, as the registry lists them:
 //! opening, importing, exporting and generating a netlist, importing an
 //! LTspice or QSPICE schematic, exporting the bill of materials, a new
 //! Verilog-A device, where an instance sits in the generated deck, the Code
@@ -22,7 +22,7 @@ use crate::workbench::framework::requests::{
 };
 use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
-/// One command of the code feature.
+/// One command of the source feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceCommand {
     /// A cell whose Verilog-A module the reader writes next, with the symbol
@@ -111,7 +111,7 @@ pub enum SourceCommand {
     VerilogAOpenSymbol,
 }
 
-/// What the code feature hands the shell, which carries it out over the
+/// What the source feature hands the shell, which carries it out over the
 /// whole application as the shell's table once did in place: opening and
 /// importing a netlist or a Verilog-A file through the file workflow,
 /// importing an LTspice or QSPICE schematic, exporting the deck from outside
@@ -205,7 +205,7 @@ impl Request for SourceRequest {
 }
 
 /// What answering a [`SourceRequest`] leaves to the shell, because it reaches
-/// past the code feature's context: opening or importing a netlist or a
+/// past the source feature's context: opening or importing a netlist or a
 /// Verilog-A file through the file workflow, importing an LTspice or QSPICE
 /// schematic, showing design's selected instance in the generated deck,
 /// opening the compiled module's symbol, creating the drafted device or the
@@ -262,7 +262,7 @@ impl Request for NetlistEditorRequest {
 }
 
 /// What the Verilog-A page's interface strip asks of design once its
-/// press has done the code feature's part. Raised by the press, and
+/// press has done the source feature's part. Raised by the press, and
 /// answered by design straight after the call that raised it.
 #[derive(Clone, Debug)]
 pub enum VerilogAStripRequest {

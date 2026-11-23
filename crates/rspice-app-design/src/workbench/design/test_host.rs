@@ -182,7 +182,7 @@ impl DesignTestHost {
 /// whole application. The host holds no other feature's slot, so no foreign
 /// dialog is open: both modal facts are lent as closed, and a dialog of the
 /// design feature's own or one the surface asked for still counts. The
-/// results workspace and the code feature answer as a fresh session's do.
+/// results workspace and the source feature answer as a fresh session's do.
 pub(crate) fn canvas_parts(host: &mut DesignTestHost) -> CanvasParts<'_> {
     canvas_parts_lent(
         &mut host.design,
@@ -198,7 +198,7 @@ pub(crate) fn canvas_parts(host: &mut DesignTestHost) -> CanvasParts<'_> {
 }
 
 /// The canvas's facts from the host, as `canvas_facts` reads them from the
-/// whole application, with the results workspace and the code feature
+/// whole application, with the results workspace and the source feature
 /// answering as a fresh session's do.
 #[cfg(test)]
 pub(crate) fn canvas_facts(host: &DesignTestHost) -> CanvasFacts<'_> {

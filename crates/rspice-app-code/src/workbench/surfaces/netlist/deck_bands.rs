@@ -12,14 +12,14 @@
 use egui::Ui;
 
 use crate::ui::widgets::Button;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::SourceFeature;
 use crate::workbench::documents::deck_files;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// The bands over the deck the page shows, after looking at the disk when
 /// this frame is one of the moments to.
-pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     let messages = cx.wb.messages();
     if disk_moment(ui) {
         for notice in deck_files::check_disk(cx.model, &mut cx.state.netlist, messages) {
@@ -122,7 +122,7 @@ enum DiskAnswer {
 /// the question, with Remove and Cancel.
 pub(super) fn missing_body(
     ui: &mut Ui,
-    cx: &mut Cx<'_, CodeFeature>,
+    cx: &mut Cx<'_, SourceFeature>,
     missing: &deck_files::MissingDeck,
     messages: MessageCatalog,
 ) {
@@ -190,7 +190,7 @@ pub(super) fn missing_body(
 /// Carry out what the missing deck's body answered.
 fn answer_missing(
     ui: &Ui,
-    cx: &mut Cx<'_, CodeFeature>,
+    cx: &mut Cx<'_, SourceFeature>,
     missing: &deck_files::MissingDeck,
     answer: MissingAnswer,
 ) {

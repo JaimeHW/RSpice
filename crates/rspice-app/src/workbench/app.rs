@@ -122,9 +122,9 @@ pub struct RSpiceApp {
     pub(crate) symbol_library: Option<rspice_app_design::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
     pub(crate) simulation_controller: rspice_app_runs::simulation::controller::SimulationController,
-    /// What the code feature keeps between frames: the project its workspace
+    /// What the source feature keeps between frames: the project its workspace
     /// answers for.
-    pub(crate) code: rspice_app_code::workbench::documents::code_workspace::CodeHandles,
+    pub(crate) code: rspice_app_code::workbench::documents::code_workspace::SourceHandles,
     /// What the cloud feature runs: the account session boundary and the
     /// live-session engine that drains it.
     pub(crate) cloud: rspice_app_cloud::workbench::live_session::CloudHandles,
@@ -253,7 +253,9 @@ impl RSpiceApp {
             symbol_library: None,
             simulation_controller:
                 rspice_app_runs::simulation::controller::SimulationController::new(),
-            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
+            code: rspice_app_code::workbench::documents::code_workspace::SourceHandles {
+                project_id,
+            },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account:
                     rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
@@ -432,7 +434,7 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller,
-            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles { project_id },
+            code: rspice_app_code::workbench::documents::code_workspace::SourceHandles { project_id },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account: rspice_app_cloud::services::cloud_account::CloudAccountService::new(Some(
                     cc.egui_ctx.clone(),

@@ -1,5 +1,5 @@
 //! The shell's answers to what the design surface asks of another
-//! feature's workspace: the results workspace, the code feature's form and
+//! feature's workspace: the results workspace, the source feature's form and
 //! netlist, the models feature's selection and the project's copy-cell
 //! dialog. The surface raises each request where it once wrote in place,
 //! and the shell answers it once the surface has drawn, in the same frame,
@@ -32,7 +32,7 @@ pub(in crate::workbench) fn answer_surface_request(
             open_new_veriloga_device_form_in(&state.model, &mut state.code.new_veriloga_device);
         }
         // The command's own route, which generates the netlist before it
-        // locates; the code feature answers it straight after this.
+        // locates; the source feature answers it straight after this.
         DesignSurfaceRequest::ShowInNetlist => state
             .workbench
             .outbox

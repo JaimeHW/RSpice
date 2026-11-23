@@ -2,7 +2,7 @@
 //! authenticated source closure.
 
 use super::*;
-use crate::workbench::code::tests::{CodeHarness, harness};
+use crate::workbench::code::tests::{SourceHarness, harness};
 use crate::workbench::documents::netlist_document::NetlistTab;
 
 #[test]
@@ -437,7 +437,7 @@ fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
 /// The signature help shown with the caret at the first `needle` of `deck`,
 /// plus `offset` characters: its title and detail, or the refusal.
 fn signature_at(
-    harness: &mut CodeHarness,
+    harness: &mut SourceHarness,
     deck: &str,
     needle: &str,
     offset: usize,
@@ -531,19 +531,19 @@ fn signature_help_shows_the_subcircuit_the_callers_scope_binds() {
     );
 }
 
-fn hover_state() -> CodeHarness {
+fn hover_state() -> SourceHarness {
     let mut harness = harness();
     harness.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
     harness
 }
 
 /// [`value_hover_at_in`] over the parts of `state` it reads.
-fn value_hover_at(harness: &mut CodeHarness, deck: &str, at: usize) -> Option<NetlistValueHover> {
+fn value_hover_at(harness: &mut SourceHarness, deck: &str, at: usize) -> Option<NetlistValueHover> {
     let netlist = &mut harness.state.netlist;
     value_hover_at_in(netlist, harness.wb.messages(), deck, at)
 }
 
-fn hover_at(harness: &mut CodeHarness, needle: &str, offset: usize) -> Option<NetlistValueHover> {
+fn hover_at(harness: &mut SourceHarness, needle: &str, offset: usize) -> Option<NetlistValueHover> {
     let index = HOVER_DECK.find(needle).expect("deck contains the token") + offset;
     value_hover_at(harness, HOVER_DECK, index)
 }
@@ -709,7 +709,7 @@ const FIX_DECK: &str = "quick fix\nV1 out 0 1\nR1 out 0 1kk\n.op\n.end\n";
 /// The open deck, validated as the editor validates it: one finding on
 /// `1kk` whose fix is bound to this exact revision and buffer. Returns the
 /// finding's identity.
-fn validated_fix_state() -> (CodeHarness, uuid::Uuid) {
+fn validated_fix_state() -> (SourceHarness, uuid::Uuid) {
     let mut harness = harness();
     harness.state.netlist.open_deck =
         Some(crate::workbench::documents::deck_files::OpenDeck::in_memory("C:/p/fix.sp", FIX_DECK));

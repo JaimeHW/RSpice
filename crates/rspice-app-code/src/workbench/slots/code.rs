@@ -1,4 +1,4 @@
-//! The code feature's dialogs, creating a Verilog-A device and editing the
+//! The source feature's dialogs, creating a Verilog-A device and editing the
 //! open Verilog-A view's build settings, and its netlist and Verilog-A
 //! editors' session, with the netlist documents opened and the outline groups
 //! collapsed; and what code shows other features.
@@ -11,9 +11,9 @@ use crate::workbench::framework::feature::{CodePort, NetlistDocumentKey};
 use rspice_app_runs::simulation::{DeckOrigin, ManualDeck};
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
-/// What the code feature keeps open between frames.
+/// What the source feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
-pub struct CodeState {
+pub struct SourceState {
     /// New Verilog-A device: a cell whose module the reader writes next.
     pub new_veriloga_device:
         crate::workbench::app::dialogs::library::new_veriloga_device::NewVerilogADeviceFormState,
@@ -38,7 +38,7 @@ pub struct CodeState {
         Option<crate::workbench::documents::netlist_document::references::DeckRename>,
 }
 
-impl CodeState {
+impl SourceState {
     /// The netlist and code editors' findings, as the diagnostics store
     /// reads them where the editors keep them.
     pub fn diagnostic_sources(
@@ -141,9 +141,9 @@ pub fn veriloga_compilation_in(
         .map(|receipt| &receipt.compilation)
 }
 
-impl CodePort for CodeState {
+impl CodePort for SourceState {
     fn manual_deck(&self) -> Option<ManualDeck<'_>> {
-        CodeState::manual_deck(self)
+        SourceState::manual_deck(self)
     }
 
     fn unreadable_run_deck(&self) -> Option<crate::state::DeckId> {
@@ -169,7 +169,7 @@ impl CodePort for CodeState {
     }
 
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
-        CodeState::veriloga_compilation(self)
+        SourceState::veriloga_compilation(self)
     }
 
     fn interface_check_finding(
@@ -257,7 +257,7 @@ mod tests {
             },
             NetlistTab::AddedLines,
         ];
-        let mut code = CodeState::default();
+        let mut code = SourceState::default();
         let keys = documents.map(|document| {
             code.netlist.front = document;
             code.shown_netlist_document_key()

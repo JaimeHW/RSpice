@@ -263,7 +263,7 @@ pub(in crate::workbench) fn run_project_file_action(
     );
 }
 
-/// Carry out what the code feature handed back from a request because it
+/// Carry out what the source feature handed back from a request because it
 /// reaches past the feature's context, as the shell's table did in place:
 /// open a deck or import a Verilog-A file through the file workflow,
 /// import an LTspice or QSPICE schematic, show the selected instance in the

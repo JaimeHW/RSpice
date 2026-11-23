@@ -118,7 +118,7 @@ pub trait DesignPort {
 pub struct NetlistDocumentKey(u8);
 
 impl NetlistDocumentKey {
-    /// The key `id` names. The code feature gives each document its own.
+    /// The key `id` names. The source feature gives each document its own.
     pub const fn new(id: u8) -> Self {
         Self(id)
     }
@@ -176,7 +176,7 @@ pub trait CodePort {
         let _ = model;
         false
     }
-    /// A Verilog-A source, read-only, in the editor well the code feature
+    /// A Verilog-A source, read-only, in the editor well the source feature
     /// draws: how another feature's page shows a source file it does not
     /// edit, such as a built-in model's on the Library page. `id` names the
     /// well in egui's memory. A port with no editor draws nothing.

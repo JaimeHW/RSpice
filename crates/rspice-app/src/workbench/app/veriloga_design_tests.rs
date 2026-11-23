@@ -1,7 +1,7 @@
 //! The helpers the Verilog-A design tests share with the shell's own
 //! whole-frame tests: a project application, a Verilog-A cell added to it
 //! and opened in the Design workspace, and the themed frames that draw it.
-//! The design tests themselves are the code feature's, in
+//! The design tests themselves are the source feature's, in
 //! feature_tests/code/veriloga_design.
 
 use super::*;

@@ -3,10 +3,10 @@
 
 use super::*;
 use crate::workbench::FolderListPreference;
-use crate::workbench::code::tests::{CodeHarness, harness};
+use crate::workbench::code::tests::{SourceHarness, harness};
 
 /// The errors the editor last published.
-fn errors(harness: &CodeHarness) -> Vec<String> {
+fn errors(harness: &SourceHarness) -> Vec<String> {
     harness
         .state
         .netlist

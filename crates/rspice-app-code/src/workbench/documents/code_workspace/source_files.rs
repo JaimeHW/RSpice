@@ -561,8 +561,8 @@ mod tests {
     use super::*;
     use crate::state::ProjectSourceOwner;
     use crate::workbench::code::{
-        CodeFeature,
-        tests::{CodeHarness, harness},
+        SourceFeature,
+        tests::{SourceHarness, harness},
     };
 
     #[test]
@@ -582,7 +582,7 @@ mod tests {
 
     /// A test app with the Verilog-A view `behavioral/gain/veriloga` open
     /// over a one-file bundle.
-    fn veriloga_view_app() -> CodeHarness {
+    fn veriloga_view_app() -> SourceHarness {
         let mut harness = harness();
         let reference = veriloga_reference();
         let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
@@ -615,7 +615,7 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn verilog_a_bundle(harness: &CodeHarness) -> &crate::state::ProjectSourceBundle {
+    fn verilog_a_bundle(harness: &SourceHarness) -> &crate::state::ProjectSourceBundle {
         harness
             .model
             .workspace
@@ -656,7 +656,7 @@ mod tests {
             .unwrap();
 
         open_source_file_dialog_in_bundle(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             bundle_id,
             CodeSourceFileAction::Duplicate,
             "cell/gain.va",
@@ -670,7 +670,7 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "cell/gain_copy.va".to_owned();
-        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
 
         let exact = harness
             .model
@@ -691,7 +691,7 @@ mod tests {
             Some(bundle_id)
         );
         open_source_history_in_bundle(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             bundle_id,
             "cell/gain.va",
         )
@@ -721,7 +721,7 @@ mod tests {
             .root()
             .logical_path()
             .to_owned();
-        let editable = |harness: &CodeHarness, path: &str| {
+        let editable = |harness: &SourceHarness, path: &str| {
             source_document_is_editable(
                 &harness.model,
                 &harness.state.code_workspace,
@@ -755,7 +755,7 @@ mod tests {
         let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
 
         open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             CodeSourceFileAction::New,
             &root,
             &root,
@@ -768,12 +768,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "models/helper.va".to_owned();
-        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert!(verilog_a_bundle(&harness).contains_file("models/helper.va"));
         assert!(harness.model.workspace.content.project_sources_dirty);
 
         open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             CodeSourceFileAction::Rename,
             "models/helper.va",
             &root,
@@ -786,12 +786,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "models/renamed.va".to_owned();
-        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert!(!verilog_a_bundle(&harness).contains_file("models/helper.va"));
         assert!(verilog_a_bundle(&harness).contains_file("models/renamed.va"));
 
         open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             CodeSourceFileAction::Move,
             "models/renamed.va",
             &root,
@@ -804,12 +804,12 @@ mod tests {
             .as_mut()
             .unwrap()
             .proposed_path = "library/renamed.va".to_owned();
-        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert!(!verilog_a_bundle(&harness).contains_file("models/renamed.va"));
         assert!(verilog_a_bundle(&harness).contains_file("library/renamed.va"));
 
         open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             CodeSourceFileAction::Duplicate,
             "library/renamed.va",
             &root,
@@ -823,17 +823,17 @@ mod tests {
             .unwrap()
             .proposed_path
             .clone();
-        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert!(verilog_a_bundle(&harness).contains_file(&duplicate));
 
         open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             CodeSourceFileAction::Delete,
             &duplicate,
             &root,
         )
         .unwrap();
-        commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx())).unwrap();
+        commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx())).unwrap();
         assert!(!verilog_a_bundle(&harness).contains_file(&duplicate));
     }
 
@@ -845,9 +845,9 @@ mod tests {
     fn new_source_in_a_cell_bundle_rejects_unicode_case_alias_paths() {
         let mut harness = veriloga_view_app();
         let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
-        let create = |harness: &mut CodeHarness, path: &str| {
+        let create = |harness: &mut SourceHarness, path: &str| {
             open_source_file_dialog(
-                &mut CodeFeature::workspace_parts(&mut harness.cx()),
+                &mut SourceFeature::workspace_parts(&mut harness.cx()),
                 CodeSourceFileAction::New,
                 &root,
                 &root,
@@ -861,7 +861,7 @@ mod tests {
                 .unwrap()
                 .proposed_path = path.to_owned();
             let result =
-                commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()));
+                commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx()));
             harness.state.code_workspace.source_file_dialog = None;
             result
         };
@@ -887,7 +887,7 @@ mod tests {
         let bundle_id = verilog_a_bundle(&harness).id();
         let before = verilog_a_bundle(&harness).closure_digest();
         open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             CodeSourceFileAction::New,
             &root,
             &root,
@@ -904,8 +904,9 @@ mod tests {
             )
             .unwrap();
 
-        let error = commit_source_file_dialog(&mut CodeFeature::workspace_parts(&mut harness.cx()))
-            .unwrap_err();
+        let error =
+            commit_source_file_dialog(&mut SourceFeature::workspace_parts(&mut harness.cx()))
+                .unwrap_err();
         assert!(error.contains("changed while this was open"), "{error}");
         assert_ne!(verilog_a_bundle(&harness).closure_digest(), before);
         assert!(!verilog_a_bundle(&harness).contains_file("untitled.va"));
@@ -930,8 +931,12 @@ mod tests {
             .unwrap();
         let edited_revision = verilog_a_bundle(&harness).revision();
 
-        open_source_history(&mut CodeFeature::workspace_parts(&mut harness.cx()), &root).unwrap();
-        commit_source_history_restore(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+        open_source_history(
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
+            &root,
+        )
+        .unwrap();
+        commit_source_history_restore(&mut SourceFeature::workspace_parts(&mut harness.cx()))
             .unwrap();
 
         assert_eq!(verilog_a_bundle(&harness).root().content(), original);
@@ -956,7 +961,11 @@ mod tests {
                 "module first; endmodule\n".to_owned(),
             )
             .unwrap();
-        open_source_history(&mut CodeFeature::workspace_parts(&mut harness.cx()), &root).unwrap();
+        open_source_history(
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
+            &root,
+        )
+        .unwrap();
         harness
             .model
             .workspace
@@ -969,7 +978,7 @@ mod tests {
             .unwrap();
 
         let error =
-            commit_source_history_restore(&mut CodeFeature::workspace_parts(&mut harness.cx()))
+            commit_source_history_restore(&mut SourceFeature::workspace_parts(&mut harness.cx()))
                 .unwrap_err();
         assert!(error.contains("changed while history was open"));
         assert_eq!(
@@ -984,7 +993,7 @@ mod tests {
         let mut harness = veriloga_view_app();
         let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
         let error = open_source_file_dialog(
-            &mut CodeFeature::workspace_parts(&mut harness.cx()),
+            &mut SourceFeature::workspace_parts(&mut harness.cx()),
             CodeSourceFileAction::Delete,
             &root,
             &root,

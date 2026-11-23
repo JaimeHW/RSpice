@@ -1,12 +1,12 @@
-//! Committing the code feature's two Verilog-A forms, answered for its
+//! Committing the source feature's two Verilog-A forms, answered for its
 //! requests: File > Import Verilog-A/AMS and New Verilog-A device….
 //!
-//! The code feature makes the cells over the model and its own state
+//! The source feature makes the cells over the model and its own state
 //! (app/dialogs/library). What it made is a cell view, which is a Design
-//! document, so opening it reaches past the code feature. The shell does that
+//! document, so opening it reaches past the source feature. The shell does that
 //! part here, in this order: it opens the view, brings Design forward, puts a
 //! new device's starter receipt in front, and records what was made. The two
-//! stay methods on the app so that the code feature's tests reach them the
+//! stay methods on the app so that the source feature's tests reach them the
 //! way the shell's arms do.
 
 use crate::workbench::RSpiceApp;

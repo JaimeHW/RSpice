@@ -23,7 +23,7 @@ use crate::workbench::features;
 use crate::workbench::{AppState, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
 use rspice_app_cloud::workbench::cloud::CloudFeature;
-use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
+use rspice_app_code::workbench::code::{SOURCE_EDITOR_MENU, SourceFeature};
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_models::workbench::models::ModelsFeature;
 use rspice_app_project::workbench::project::ProjectFeature;
@@ -167,14 +167,14 @@ impl Host for RSpiceApp {
                     }
                     // While a deck owns the project and no schematic is
                     // drawn yet, its landing stands in for the document,
-                    // drawn by the code feature in its context.
+                    // drawn by the source feature in its context.
                     Workspace::Design if app.state.is_netlist_first_without_schematic() => {
-                        features::show_surface::<CodeFeature>(app, ui);
+                        features::show_surface::<SourceFeature>(app, ui);
                     }
                     // The design feature draws the document in its context.
                     // Code's Verilog-A tab draws a Verilog-A view's source
                     // under the feature's banners and tool options, in the
-                    // code feature's context: the page puts its editor in
+                    // source feature's context: the page puts its editor in
                     // front, then draws holding the source menu's answers
                     // while the menu is open or opening, and whether an
                     // application-modal dialog is open. What its interface
@@ -221,9 +221,9 @@ impl Host for RSpiceApp {
                         }
                     }
                     // A deck runs as written: its own setup cards stand in for
-                    // the plan editor, drawn by the code feature.
+                    // the plan editor, drawn by the source feature.
                     Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
-                        features::show_surface::<CodeFeature>(app, ui);
+                        features::show_surface::<SourceFeature>(app, ui);
                     }
                     // The surface's carried-over transactions land before
                     // the shell takes the answers it reads.
@@ -277,13 +277,13 @@ impl Host for RSpiceApp {
                     // What the reader asked of the code navigator is
                     // answered once it has drawn.
                     Workspace::Netlist => {
-                        features::show_navigator::<CodeFeature>(app, ui);
+                        features::show_navigator::<SourceFeature>(app, ui);
                         app.after_contribution();
                     }
                     // A deck project's Design and Simulate pages, a Verilog-A
-                    // module's: the code feature's navigator.
+                    // module's: the source feature's navigator.
                     Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
-                        features::show_navigator::<CodeFeature>(app, ui);
+                        features::show_navigator::<SourceFeature>(app, ui);
                         app.after_contribution();
                     }
                     Workspace::Design
@@ -295,7 +295,7 @@ impl Host for RSpiceApp {
                                 .content
                                 .active_view_is_hdl_source() =>
                     {
-                        features::show_navigator::<CodeFeature>(app, ui);
+                        features::show_navigator::<SourceFeature>(app, ui);
                         app.after_contribution();
                     }
                     // The design feature draws a schematic's navigator or a
@@ -356,7 +356,7 @@ impl Host for RSpiceApp {
                                 .content
                                 .active_view_is_hdl_source() =>
                     {
-                        features::show_inspector::<CodeFeature>(app, ui);
+                        features::show_inspector::<SourceFeature>(app, ui);
                     }
                     // The design feature draws a schematic's inspector or a
                     // symbol's. The inline edit the selection moved off is
@@ -379,7 +379,7 @@ impl Host for RSpiceApp {
                     }
                     // A deck project's Simulate page inspects its deck.
                     Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
-                        features::show_inspector::<CodeFeature>(app, ui);
+                        features::show_inspector::<SourceFeature>(app, ui);
                     }
                     Workspace::Simulate => {
                         features::show_inspector::<SimulateFeature>(app, ui);
@@ -397,7 +397,7 @@ impl Host for RSpiceApp {
                     }
                     Workspace::Verify => features::show_inspector::<SimulateFeature>(app, ui),
                     Workspace::Models => features::show_inspector::<ModelsFeature>(app, ui),
-                    Workspace::Netlist => features::show_inspector::<CodeFeature>(app, ui),
+                    Workspace::Netlist => features::show_inspector::<SourceFeature>(app, ui),
                 }
             }
             // The section that inspects a workspace's document itself: the
@@ -471,7 +471,7 @@ impl Host for RSpiceApp {
                                 .content
                                 .active_view_is_hdl_source() =>
                         {
-                            features::show_toolbar::<CodeFeature>(
+                            features::show_toolbar::<SourceFeature>(
                                 app,
                                 ui,
                                 VERILOGA_TOOLBAR,
@@ -490,7 +490,7 @@ impl Host for RSpiceApp {
                         // A deck runs as written: no plan to validate, preflight
                         // or set options for, only the deck to open.
                         Workspace::Simulate if app.state.is_netlist_first_without_schematic() => {
-                            features::show_toolbar::<CodeFeature>(
+                            features::show_toolbar::<SourceFeature>(
                                 app,
                                 ui,
                                 DECK_SETUP_TOOLBAR,
@@ -524,7 +524,12 @@ impl Host for RSpiceApp {
                         Workspace::Verify => verification_tools(ui, app, layout),
                         Workspace::Models => models_tools(ui, app, layout),
                         Workspace::Netlist => {
-                            features::show_toolbar::<CodeFeature>(app, ui, NETLIST_TOOLBAR, layout);
+                            features::show_toolbar::<SourceFeature>(
+                                app,
+                                ui,
+                                NETLIST_TOOLBAR,
+                                layout,
+                            );
                         }
                     },
                 }

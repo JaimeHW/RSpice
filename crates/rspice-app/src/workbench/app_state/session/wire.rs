@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::workbench::app_state::AppState;
 use rspice_app_code::workbench::documents::netlist_document::NetlistSession;
-use rspice_app_code::workbench::slots::code::CodeState;
+use rspice_app_code::workbench::slots::code::SourceState;
 use rspice_app_design::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
 use rspice_app_hardcopy::workbench::slots::hardcopy::HardcopyState;
@@ -520,7 +520,7 @@ impl<'a> WorkbenchWireRef<'a> {
     fn capture_parts(
         workbench: &'a WorkbenchSession,
         design: &'a DesignState,
-        code: &'a CodeState,
+        code: &'a SourceState,
         project: &'a ProjectState,
         simulate: &'a SimulateState,
         models: &'a ModelsState,
@@ -740,7 +740,7 @@ impl Default for WorkbenchWire {
         WorkbenchWireRef::capture_parts(
             &Box::<WorkbenchSession>::default(),
             &Box::<DesignState>::default(),
-            &Box::<CodeState>::default(),
+            &Box::<SourceState>::default(),
             &Box::<ProjectState>::default(),
             &Box::<SimulateState>::default(),
             &Box::<ModelsState>::default(),
