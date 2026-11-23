@@ -465,18 +465,19 @@ fn provisioned_trace_document(
     (document, source, analysis_id)
 }
 
-/// Putting an earlier view back restores what it held as the next revision,
-/// over the datasets the document reads now. An identity the undone edit
-/// created is never handed out again, and a stale revision or another
-/// document's view is refused without touching the document.
+/// Taking an undo step puts back what the step changed as the next revision,
+/// over the datasets the document reads now, and gives the step that redoes
+/// it. An identity the undone edit created is never handed out again, and a
+/// stale revision or another document's step is refused without touching
+/// the document.
 #[test]
-fn restoring_a_view_puts_back_what_it_held_as_a_new_revision() {
+fn an_undo_step_puts_back_what_the_edit_changed_as_a_new_revision() {
     let (mut document, _, _) = provisioned_trace_document("V(out)");
     let pane_id = document.panes()[0].id;
     let trace_id = document.traces()[0].id;
-    let before = document.view_snapshot();
-    let receipt = document
-        .transact(
+    let before = document.clone();
+    let (receipt, undo) = document
+        .transact_with_undo(
             document.revision(),
             vec![
                 DocumentEdit::SetTraceVisibility {
@@ -494,13 +495,27 @@ fn restoring_a_view_puts_back_what_it_held_as_a_new_revision() {
         .unwrap();
     let undone_marker = receipt.created[0];
     let edited = document.revision();
+    let after = document.clone();
 
-    let restored = document.restore_view(edited, &before).unwrap();
+    let (restored, redo) = document.take_step(edited, undo.clone()).unwrap();
     assert!(document.traces()[0].visible, "the hidden trace shows again");
     assert!(document.markers().is_empty(), "the placed marker is gone");
     assert_eq!(restored.previous_revision, edited);
     assert_eq!(restored.committed_revision, document.revision());
     assert_ne!(document.revision(), edited);
+    assert_eq!(
+        view_of(&document),
+        view_of(&before),
+        "the view is as it was"
+    );
+
+    let (_, undo_again) = document.take_step(document.revision(), redo).unwrap();
+    assert_eq!(
+        view_of(&document),
+        view_of(&after),
+        "redo puts the edit back"
+    );
+    document.take_step(document.revision(), undo_again).unwrap();
 
     let again = document
         .transact(
@@ -517,28 +532,170 @@ fn restoring_a_view_puts_back_what_it_held_as_a_new_revision() {
 
     let unchanged = document.clone();
     assert!(matches!(
-        document.restore_view(edited, &before),
+        document.take_step(edited, undo),
         Err(VisualizationError::RevisionConflict { .. })
     ));
-    let (other, _, _) = provisioned_trace_document("V(out)");
-    assert!(
-        document
-            .restore_view(document.revision(), &other.view_snapshot())
-            .is_err()
-    );
+    let (mut other, _, _) = provisioned_trace_document("V(out)");
+    let other_trace = other.traces()[0].id;
+    let (_, others) = other
+        .transact_with_undo(
+            other.revision(),
+            vec![DocumentEdit::SetTraceVisibility {
+                trace_id: other_trace,
+                visible: false,
+            }],
+        )
+        .unwrap();
+    assert!(document.take_step(document.revision(), others).is_err());
     assert_eq!(document, unchanged);
+}
+
+/// What a view shows apart from its revision and the serials it hands out:
+/// what undo and redo must put back exactly.
+fn view_of(document: &VisualizationDocument) -> serde_json::Value {
+    let mut view = serde_json::to_value(document).unwrap();
+    let fields = view.as_object_mut().unwrap();
+    fields.remove("revision");
+    fields.remove("next_serial");
+    view
+}
+
+/// A long history of mixed edits on a view of many traces steps back to
+/// where it began and forward to where it ended, exactly, each step on the
+/// way, and the steps hold only what their edits changed: no more traces in
+/// all than the edits touched, not a view each.
+#[test]
+fn a_long_mixed_history_steps_back_and_forward_exactly() {
+    let analysis = AnalysisInstanceId::new();
+    let names: Vec<String> = (0..1_000).map(|index| format!("V(n{index})")).collect();
+    let source = SourceDataset::run_reference(
+        binding(61),
+        "Run",
+        vec![RunSourceAnalysis::new(
+            analysis,
+            crate::analysis_type::AnalysisType::Transient,
+        )],
+    )
+    .unwrap();
+    let mut document = VisualizationDocument::new_working_view(
+        WorkingViewSource::Plan {
+            plan_id: SimulationPlanId::new(),
+        },
+        source,
+        ResultDocumentTracking::pinned(),
+        vec![WorkingPane {
+            title: "Transient".to_owned(),
+            kind: PaneKind::Cartesian,
+            viewer_id: "viewer-waveform".to_owned(),
+            analysis_id: analysis,
+            plotted: names.clone(),
+        }],
+    )
+    .unwrap();
+    let pane_id = document.panes()[0].id;
+    let axis_id = document.axes()[0].id;
+    let start = view_of(&document);
+
+    let mut undo = Vec::new();
+    let mut views = vec![start.clone()];
+    let mut touched = 0;
+    for step in 0..120_usize {
+        let traces = document.traces();
+        let trace = &traces[(step * 37) % traces.len()];
+        let edits = match step % 8 {
+            0 => vec![DocumentEdit::SetTraceColor {
+                trace_id: trace.id,
+                color: Some(TraceColor::from_rgb(step as u8, 1, 2)),
+            }],
+            1 => vec![DocumentEdit::SetTraceVisibility {
+                trace_id: trace.id,
+                visible: !trace.visible,
+            }],
+            2 => vec![DocumentEdit::Rename {
+                entity: EntityRef::Trace(trace.id),
+                value: format!("Signal {step}"),
+            }],
+            3 => vec![DocumentEdit::AddCursor {
+                pane_id,
+                axis_id,
+                position: TypedValue::Real(step as f64),
+                label: format!("C{step}"),
+            }],
+            4 => match document.cursors().first() {
+                Some(cursor) => vec![DocumentEdit::Remove(EntityRef::Cursor(cursor.id))],
+                None => vec![DocumentEdit::SetTraceStyle {
+                    trace_id: trace.id,
+                    style: TraceStyle::default(),
+                }],
+            },
+            5 => vec![DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: names[step..step + 40].to_vec(),
+                plotted: false,
+            }],
+            6 => vec![
+                DocumentEdit::SetSignalsPlotted {
+                    pane_id,
+                    signals: names[step - 1..step + 39].to_vec(),
+                    plotted: true,
+                },
+                DocumentEdit::Rename {
+                    entity: EntityRef::Pane(pane_id),
+                    value: format!("Pane {step}"),
+                },
+            ],
+            _ => vec![
+                DocumentEdit::SetTraceColor {
+                    trace_id: traces[0].id,
+                    color: None,
+                },
+                DocumentEdit::SetTraceColor {
+                    trace_id: traces[traces.len() - 1].id,
+                    color: Some(TraceColor::from_rgb(9, 9, 9)),
+                },
+            ],
+        };
+        touched += [1, 1, 1, 0, 1, 40, 40, 2][step % 8];
+        let (_, step) = document
+            .transact_with_undo(document.revision(), edits)
+            .unwrap();
+        undo.push(step);
+        views.push(view_of(&document));
+    }
+    let held: usize = undo.iter().map(ViewStep::traces_held).sum();
+    assert!(
+        held <= touched,
+        "the steps hold {held} traces; the edits touched {touched}"
+    );
+
+    let mut redo = Vec::new();
+    while let Some(step) = undo.pop() {
+        let (_, reverse) = document.take_step(document.revision(), step).unwrap();
+        redo.push(reverse);
+        assert_eq!(view_of(&document), views[undo.len()]);
+    }
+    assert_eq!(view_of(&document), start, "undo steps back to the start");
+    while let Some(step) = redo.pop() {
+        let (_, reverse) = document.take_step(document.revision(), step).unwrap();
+        undo.push(reverse);
+        assert_eq!(view_of(&document), views[undo.len()]);
+    }
+    assert_eq!(
+        &view_of(&document),
+        views.last().unwrap(),
+        "redo steps forward to the end"
+    );
 }
 
 /// An earlier view put back after the document followed a newer run is
 /// restored on the run now shown: the step addresses the view, not the run
 /// it read when the step was taken.
 #[test]
-fn an_earlier_view_restores_onto_the_run_the_document_follows_now() {
+fn an_undo_step_puts_back_onto_the_run_the_document_follows_now() {
     let (mut document, source, _) = provisioned_trace_document("V(out)");
     let trace_id = document.traces()[0].id;
-    let shown = document.view_snapshot();
-    document
-        .transact(
+    let (_, undo) = document
+        .transact_with_undo(
             document.revision(),
             vec![DocumentEdit::SetTraceVisibility {
                 trace_id,
@@ -561,7 +718,7 @@ fn an_earlier_view_restores_onto_the_run_the_document_follows_now() {
     assert_eq!(document.datasets().len(), 1, "the earlier run is let go");
 
     document
-        .restore_view(document.revision(), &shown)
+        .take_step(document.revision(), undo)
         .expect("the step survives the view following the newer run");
     let trace = &document.traces()[0];
     assert!(trace.visible, "the hidden trace shows again");

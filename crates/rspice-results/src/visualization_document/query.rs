@@ -6,8 +6,99 @@
 //! requested coordinates are not present it reports that interpolation would
 //! be required instead of inventing a point.
 
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::sync::{Mutex, PoisonError};
+
 use super::lookup::Entities;
 use super::*;
+
+/// The rows of a document's embedded tables by the exact values of the
+/// columns a check names. Each table is read once for each set of columns a
+/// check asks of it, the first time one asks, so a marker or a trace on a
+/// table of a hundred thousand rows is checked by one look-up rather than a
+/// scan of the rows, and a transaction that places many costs in proportion
+/// to what it places. It is dropped when the document's own check ends: it
+/// is never part of what a document holds, saves or compares.
+#[derive(Default)]
+pub(super) struct RowIndex(Mutex<RowTables>);
+
+/// A table's rows by the hash of the values in some of its columns. A table
+/// is keyed by its binding and its row count: the rows of one immutable
+/// binding are never rewritten, only joined by another analysis' rows.
+#[derive(Default)]
+struct RowTables {
+    hashing: RandomState,
+    tables: HashMap<(DatasetBinding, usize, Vec<usize>), HashMap<u64, Vec<usize>>>,
+}
+
+impl RowTables {
+    fn hash<'a>(&self, values: impl Iterator<Item = &'a TypedValue>) -> u64 {
+        let mut hasher = self.hashing.build_hasher();
+        for value in values {
+            ExactCoordinateValue::from(value).hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+}
+
+impl RowIndex {
+    /// Whether a row of `dataset`, an embedded table, holds exactly each
+    /// value of `wanted` in the column it names.
+    pub(super) fn holds(&self, dataset: &SourceDataset, wanted: &[(usize, &TypedValue)]) -> bool {
+        if wanted.is_empty() {
+            return !dataset.rows.is_empty();
+        }
+        let mut tables = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let columns: Vec<usize> = wanted.iter().map(|(column, _)| *column).collect();
+        let key = tables.hash(wanted.iter().map(|(_, value)| *value));
+        let table = (dataset.binding, dataset.rows.len(), columns);
+        if !tables.tables.contains_key(&table) {
+            let mut rows: HashMap<u64, Vec<usize>> = HashMap::new();
+            for (index, row) in dataset.rows.iter().enumerate() {
+                let hash = tables.hash(table.2.iter().map(|column| &row.values[*column]));
+                rows.entry(hash).or_default().push(index);
+            }
+            tables.tables.insert(table.clone(), rows);
+        }
+        tables.tables[&table].get(&key).is_some_and(|rows| {
+            rows.iter().any(|&index| {
+                wanted
+                    .iter()
+                    .all(|(column, value)| dataset.rows[index].values[*column].exact_eq(value))
+            })
+        })
+    }
+
+    /// Drop every table read: the check that read them has ended.
+    pub(super) fn clear(&self) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .tables
+            .clear();
+    }
+}
+
+impl Clone for RowIndex {
+    /// A copy of a document starts with no table read.
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for RowIndex {
+    /// What a check read is not part of a document.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl fmt::Debug for RowIndex {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RowIndex")
+    }
+}
 
 pub(super) fn validate_key(field: &'static str, value: &str) -> Result<(), VisualizationError> {
     if value.is_empty()
@@ -282,7 +373,7 @@ pub(super) fn trace_contains_exact_coordinate(
     coordinate.validate("trace.coordinate")?;
     let trace = document.trace(trace_id)?;
     let dataset = document.dataset(trace.binding)?;
-    validate_trace_row_predicates(dataset, &trace.row_predicates)?;
+    validate_trace_row_predicates(dataset, &trace.row_predicates, document.rows())?;
     let coordinate_index = column_index(dataset, &trace.coordinate_key)?;
     if coordinate.value_type() != dataset.columns[coordinate_index].value_type {
         return Err(VisualizationError::ColumnTypeMismatch {
@@ -305,19 +396,11 @@ pub(super) fn trace_contains_exact_coordinate(
             _ => true,
         });
     }
-    let predicates = trace
-        .row_predicates
-        .iter()
-        .map(|predicate| {
-            column_index(dataset, &predicate.column).map(|index| (index, &predicate.value))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(dataset.rows.iter().any(|row| {
-        row.values[coordinate_index].exact_eq(coordinate)
-            && predicates
-                .iter()
-                .all(|(index, expected)| row.values[*index].exact_eq(expected))
-    }))
+    let mut wanted = vec![(coordinate_index, coordinate)];
+    for predicate in &trace.row_predicates {
+        wanted.push((column_index(dataset, &predicate.column)?, &predicate.value));
+    }
+    Ok(document.rows().holds(dataset, &wanted))
 }
 
 pub(super) fn validate_link_members(
@@ -347,6 +430,7 @@ pub(super) fn validate_link_members(
 pub(super) fn validate_trace_row_predicates(
     dataset: &SourceDataset,
     predicates: &[QueryCoordinate],
+    rows: &RowIndex,
 ) -> Result<(), VisualizationError> {
     let mut resolved = Vec::with_capacity(predicates.len());
     let mut seen = HashSet::with_capacity(predicates.len());
@@ -374,11 +458,7 @@ pub(super) fn validate_trace_row_predicates(
         run.select_one(predicates)?;
         return Ok(());
     }
-    if !dataset.rows.iter().any(|row| {
-        resolved
-            .iter()
-            .all(|(index, expected)| row.values[*index].exact_eq(expected))
-    }) {
+    if !rows.holds(dataset, &resolved) {
         return Err(VisualizationError::InvalidValue {
             field: "trace.row-predicates",
             message: "trace row predicates select no exact source rows".to_owned(),

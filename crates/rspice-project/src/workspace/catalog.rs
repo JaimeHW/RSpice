@@ -443,6 +443,36 @@ impl ProjectWorkspace {
         Ok(receipt)
     }
 
+    /// [`Self::transact_visualization_document`], returning with the receipt
+    /// the step that undoes the transaction.
+    pub fn transact_visualization_document_with_undo(
+        &mut self,
+        document_id: ResultDocumentId,
+        expected_revision: rspice_vocabulary::product::ObjectRevision,
+        edits: Vec<rspice_results::visualization_document::DocumentEdit>,
+    ) -> Result<
+        (
+            rspice_results::visualization_document::VisualizationTransactionReceipt,
+            rspice_results::visualization_document::ViewStep,
+        ),
+        VisualizationDocumentPersistenceError,
+    > {
+        let document = self
+            .visualization_documents
+            .iter_mut()
+            .find(|document| document.id() == document_id)
+            .ok_or(VisualizationDocumentPersistenceError::NotFound { document_id })?;
+        let committed = document
+            .transact_with_undo(expected_revision, edits)
+            .map_err(|error| VisualizationDocumentPersistenceError::Transaction {
+                document_id,
+                message: error.to_string(),
+            })?;
+        self.visualization_documents_dirty = true;
+        self.visualization_documents_modified.insert(document_id);
+        Ok(committed)
+    }
+
     /// Drop one result document from the project: a run's working view once
     /// nothing can draw it again. Whether there was one to drop.
     pub fn remove_visualization_document(&mut self, document_id: ResultDocumentId) -> bool {
@@ -457,15 +487,19 @@ impl ProjectWorkspace {
         removed
     }
 
-    /// Put back one result document's view as `snapshot` held it, as a
-    /// revision-checked step like [`Self::transact_visualization_document`].
-    pub fn restore_visualization_document_view(
+    /// Take one undo or redo step of a result document's view, as a
+    /// revision-checked step like [`Self::transact_visualization_document`],
+    /// returning the step that reverses it.
+    pub fn take_visualization_document_step(
         &mut self,
         document_id: ResultDocumentId,
         expected_revision: rspice_vocabulary::product::ObjectRevision,
-        snapshot: &rspice_results::visualization_document::ViewSnapshot,
+        step: rspice_results::visualization_document::ViewStep,
     ) -> Result<
-        rspice_results::visualization_document::VisualizationTransactionReceipt,
+        (
+            rspice_results::visualization_document::VisualizationTransactionReceipt,
+            rspice_results::visualization_document::ViewStep,
+        ),
         VisualizationDocumentPersistenceError,
     > {
         let document = self
@@ -473,15 +507,15 @@ impl ProjectWorkspace {
             .iter_mut()
             .find(|document| document.id() == document_id)
             .ok_or(VisualizationDocumentPersistenceError::NotFound { document_id })?;
-        let receipt = document
-            .restore_view(expected_revision, snapshot)
+        let taken = document
+            .take_step(expected_revision, step)
             .map_err(|error| VisualizationDocumentPersistenceError::Transaction {
                 document_id,
                 message: error.to_string(),
             })?;
         self.visualization_documents_dirty = true;
         self.visualization_documents_modified.insert(document_id);
-        Ok(receipt)
+        Ok(taken)
     }
 
     /// Validate the persisted simulation configuration without requiring any

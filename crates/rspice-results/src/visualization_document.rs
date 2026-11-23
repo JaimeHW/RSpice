@@ -13,6 +13,7 @@ mod query;
 mod run_source;
 mod strips;
 mod trace_style;
+mod undo;
 mod working_view;
 
 pub use comparison::*;
@@ -22,6 +23,7 @@ pub use query::*;
 pub use run_source::*;
 pub use strips::*;
 pub use trace_style::*;
+pub use undo::ViewStep;
 pub use working_view::*;
 
 use std::cell::RefCell;
@@ -958,28 +960,27 @@ impl<'de> Deserialize<'de> for BoundedSourceDatasets {
     }
 }
 
+// A document lists each kind of entity in the order its entities were made,
+// by ascending identity (its own check holds it to that), so an entity is
+// found by identity in a binary search: an edit that touches one entity of a
+// view of a hundred thousand reads a few of them, not all.
 impl VisualizationDocument {
     fn require_page(&self, id: PageId) -> Result<(), VisualizationError> {
-        self.pages
-            .iter()
-            .any(|x| x.id == id)
-            .then_some(())
+        lookup::position(&self.pages, id.get())
+            .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Page(id)))
     }
 
     fn require_pane(&self, id: PaneId) -> Result<(), VisualizationError> {
-        self.panes
-            .iter()
-            .any(|x| x.id == id)
-            .then_some(())
+        lookup::position(&self.panes, id.get())
+            .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(id)))
     }
 
     fn require_axis_in_pane(&self, id: AxisId, pane_id: PaneId) -> Result<(), VisualizationError> {
-        self.axes
-            .iter()
-            .any(|x| x.id == id && x.pane_id == pane_id)
-            .then_some(())
+        lookup::position(&self.axes, id.get())
+            .filter(|&index| self.axes[index].pane_id == pane_id)
+            .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Axis(id)))
     }
 
@@ -988,24 +989,23 @@ impl VisualizationDocument {
         id: TraceId,
         pane_id: PaneId,
     ) -> Result<(), VisualizationError> {
-        self.traces
-            .iter()
-            .any(|x| x.id == id && x.pane_id == pane_id)
-            .then_some(())
+        lookup::position(&self.traces, id.get())
+            .filter(|&index| self.traces[index].pane_id == pane_id)
+            .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(id)))
     }
 
     fn require_entity(&self, entity: EntityRef) -> Result<(), VisualizationError> {
         let exists = match entity {
-            EntityRef::Page(id) => self.pages.iter().any(|x| x.id == id),
-            EntityRef::Pane(id) => self.panes.iter().any(|x| x.id == id),
-            EntityRef::Trace(id) => self.traces.iter().any(|x| x.id == id),
-            EntityRef::Axis(id) => self.axes.iter().any(|x| x.id == id),
-            EntityRef::Cursor(id) => self.cursors.iter().any(|x| x.id == id),
-            EntityRef::Marker(id) => self.markers.iter().any(|x| x.id == id),
-            EntityRef::Measurement(id) => self.measurements.iter().any(|x| x.id == id),
-            EntityRef::Annotation(id) => self.annotations.iter().any(|x| x.id == id),
-            EntityRef::LinkGroup(id) => self.link_groups.iter().any(|x| x.id == id),
+            EntityRef::Page(id) => lookup::position(&self.pages, id.get()).is_some(),
+            EntityRef::Pane(id) => lookup::position(&self.panes, id.get()).is_some(),
+            EntityRef::Trace(id) => lookup::position(&self.traces, id.get()).is_some(),
+            EntityRef::Axis(id) => lookup::position(&self.axes, id.get()).is_some(),
+            EntityRef::Cursor(id) => lookup::position(&self.cursors, id.get()).is_some(),
+            EntityRef::Marker(id) => lookup::position(&self.markers, id.get()).is_some(),
+            EntityRef::Measurement(id) => lookup::position(&self.measurements, id.get()).is_some(),
+            EntityRef::Annotation(id) => lookup::position(&self.annotations, id.get()).is_some(),
+            EntityRef::LinkGroup(id) => lookup::position(&self.link_groups, id.get()).is_some(),
         };
         exists
             .then_some(())
@@ -1013,44 +1013,38 @@ impl VisualizationDocument {
     }
 
     fn page_mut(&mut self, id: PageId) -> Result<&mut Page, VisualizationError> {
-        self.pages
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.pages, id.get())
+            .map(|index| &mut self.pages[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Page(id)))
     }
 
     fn pane_mut(&mut self, id: PaneId) -> Result<&mut Pane, VisualizationError> {
-        self.panes
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.panes, id.get())
+            .map(|index| &mut self.panes[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(id)))
     }
 
     fn trace_mut(&mut self, id: TraceId) -> Result<&mut Trace, VisualizationError> {
-        self.traces
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.traces, id.get())
+            .map(|index| &mut self.traces[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(id)))
     }
 
     fn axis_mut(&mut self, id: AxisId) -> Result<&mut Axis, VisualizationError> {
-        self.axes
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.axes, id.get())
+            .map(|index| &mut self.axes[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Axis(id)))
     }
 
     fn cursor_mut(&mut self, id: CursorId) -> Result<&mut Cursor, VisualizationError> {
-        self.cursors
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.cursors, id.get())
+            .map(|index| &mut self.cursors[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Cursor(id)))
     }
 
     fn marker_mut(&mut self, id: MarkerId) -> Result<&mut Marker, VisualizationError> {
-        self.markers
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.markers, id.get())
+            .map(|index| &mut self.markers[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Marker(id)))
     }
 
@@ -1058,27 +1052,24 @@ impl VisualizationDocument {
         &mut self,
         id: MeasurementId,
     ) -> Result<&mut Measurement, VisualizationError> {
-        self.measurements
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.measurements, id.get())
+            .map(|index| &mut self.measurements[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Measurement(
                 id,
             )))
     }
 
     fn annotation_mut(&mut self, id: AnnotationId) -> Result<&mut Annotation, VisualizationError> {
-        self.annotations
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.annotations, id.get())
+            .map(|index| &mut self.annotations[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Annotation(
                 id,
             )))
     }
 
     fn link_group_mut(&mut self, id: LinkGroupId) -> Result<&mut LinkGroup, VisualizationError> {
-        self.link_groups
-            .iter_mut()
-            .find(|x| x.id == id)
+        lookup::position(&self.link_groups, id.get())
+            .map(|index| &mut self.link_groups[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::LinkGroup(id)))
     }
 }
@@ -2366,19 +2357,6 @@ pub enum VisualizationError {
     Revision(#[from] RevisionError),
 }
 
-/// A view as it stood at one revision, without the datasets it read; see
-/// [`VisualizationDocument::view_snapshot`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct ViewSnapshot(Box<VisualizationDocument>);
-
-impl ViewSnapshot {
-    /// The revision the view stood at.
-    #[must_use]
-    pub const fn revision(&self) -> ObjectRevision {
-        self.0.revision
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct VisualizationDocument {
     schema_version: u16,
@@ -2418,6 +2396,9 @@ pub struct VisualizationDocument {
     spectrum_settings: Vec<PaneSpectrumSettings>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     coefficient_settings: Vec<PaneCoefficientSettings>,
+    /// The rows of embedded tables a check is reading, while it reads them.
+    #[serde(skip)]
+    row_index: query::RowIndex,
 }
 
 #[derive(Deserialize)]
@@ -2496,6 +2477,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             sheet_settings: wire.sheet_settings.unwrap_or_default(),
             spectrum_settings: wire.spectrum_settings.unwrap_or_default(),
             coefficient_settings: wire.coefficient_settings.unwrap_or_default(),
+            row_index: query::RowIndex::default(),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
             return Err(serde::de::Error::custom(format!(
@@ -2579,6 +2561,7 @@ impl VisualizationDocument {
             sheet_settings: Vec::new(),
             spectrum_settings: Vec::new(),
             coefficient_settings: Vec::new(),
+            row_index: query::RowIndex::default(),
         };
         document.validate()?;
         Ok(document)
@@ -2855,6 +2838,27 @@ impl VisualizationDocument {
         expected_revision: ObjectRevision,
         edits: Vec<DocumentEdit>,
     ) -> Result<VisualizationTransactionReceipt, VisualizationError> {
+        self.commit_edits(expected_revision, edits, false)
+            .map(|(receipt, _)| receipt)
+    }
+
+    /// [`Self::transact`], returning with the receipt the step that undoes
+    /// the transaction: what it changed, as it stood before.
+    pub fn transact_with_undo(
+        &mut self,
+        expected_revision: ObjectRevision,
+        edits: Vec<DocumentEdit>,
+    ) -> Result<(VisualizationTransactionReceipt, ViewStep), VisualizationError> {
+        self.commit_edits(expected_revision, edits, true)
+            .map(|(receipt, step)| (receipt, step.expect("a step is kept when asked for")))
+    }
+
+    fn commit_edits(
+        &mut self,
+        expected_revision: ObjectRevision,
+        edits: Vec<DocumentEdit>,
+        undo: bool,
+    ) -> Result<(VisualizationTransactionReceipt, Option<ViewStep>), VisualizationError> {
         if expected_revision != self.revision {
             return Err(VisualizationError::RevisionConflict {
                 expected: expected_revision,
@@ -2869,105 +2873,74 @@ impl VisualizationDocument {
         }
         let previous_revision = self.revision;
         let committed_revision = previous_revision.next()?;
+        let edit_count = edits.len();
         let mut candidate = self.clone();
         let mut created = Vec::new();
         let mut tombstoned = Vec::new();
-        for edit in edits.iter().cloned() {
+        for edit in edits {
             candidate.apply_edit(edit, committed_revision, &mut created, &mut tombstoned)?;
         }
         candidate.revision = committed_revision;
         candidate.validate()?;
+        let step = undo.then(|| ViewStep::back_to(self, &candidate));
         *self = candidate;
-        Ok(VisualizationTransactionReceipt {
-            document_id: self.id,
-            previous_revision,
-            committed_revision,
-            created,
-            tombstoned,
-            edit_count: edits.len(),
-        })
+        Ok((
+            VisualizationTransactionReceipt {
+                document_id: self.id,
+                previous_revision,
+                committed_revision,
+                created,
+                tombstoned,
+                edit_count,
+            },
+            step,
+        ))
     }
 
-    /// What the view holds apart from the datasets it reads: the state an
-    /// undo step puts back. The edits a reader makes never change the
-    /// datasets, and a document can carry whole archived runs, so a step
-    /// keeps only the view.
-    #[must_use]
-    pub fn view_snapshot(&self) -> ViewSnapshot {
-        ViewSnapshot(Box::new(Self {
-            schema_version: self.schema_version,
-            id: self.id,
-            revision: self.revision,
-            title: self.title.clone(),
-            tracking: self.tracking,
-            presentation: self.presentation,
-            working_view: self.working_view,
-            next_serial: self.next_serial,
-            datasets: Vec::new(),
-            pages: self.pages.clone(),
-            panes: self.panes.clone(),
-            axes: self.axes.clone(),
-            traces: self.traces.clone(),
-            cursors: self.cursors.clone(),
-            markers: self.markers.clone(),
-            measurements: self.measurements.clone(),
-            annotations: self.annotations.clone(),
-            link_groups: self.link_groups.clone(),
-            tombstones: self.tombstones.clone(),
-            comparisons: self.comparisons.clone(),
-            user_buses: self.user_buses.clone(),
-            event_lane_orders: self.event_lane_orders.clone(),
-            expression_traces: self.expression_traces.clone(),
-            xy_plots: self.xy_plots.clone(),
-            readout_pins: self.readout_pins.clone(),
-            sheet_settings: self.sheet_settings.clone(),
-            spectrum_settings: self.spectrum_settings.clone(),
-            coefficient_settings: self.coefficient_settings.clone(),
-        }))
-    }
-
-    /// Put back the view `snapshot` held, over the datasets this document
-    /// reads now, as the next revision. Identities are never reused: serials
-    /// continue from the higher of the two. A snapshot of another document,
-    /// or one naming a dataset this document no longer reads, is refused and
+    /// Put back what `step` holds, over the datasets this document reads
+    /// now, as the next revision, and return the step that reverses it: an
+    /// undo step gives the redo step and the other way round. The title is
+    /// the project's name for the document, not its view, and identities are
+    /// never reused, so neither steps back. A step of another document, or
+    /// one that leaves the view naming what it cannot read, is refused and
     /// leaves `self` unchanged.
-    pub fn restore_view(
+    pub fn take_step(
         &mut self,
         expected_revision: ObjectRevision,
-        snapshot: &ViewSnapshot,
-    ) -> Result<VisualizationTransactionReceipt, VisualizationError> {
+        step: ViewStep,
+    ) -> Result<(VisualizationTransactionReceipt, ViewStep), VisualizationError> {
         if expected_revision != self.revision {
             return Err(VisualizationError::RevisionConflict {
                 expected: expected_revision,
                 actual: self.revision,
             });
         }
-        if snapshot.0.id != self.id {
+        if step.document_id() != self.id {
             return Err(VisualizationError::InvalidValue {
-                field: "visualization-document.restore",
-                message: "the snapshot belongs to another document".to_owned(),
+                field: "visualization-document.step",
+                message: "the step belongs to another document".to_owned(),
             });
         }
         let previous_revision = self.revision;
         let committed_revision = previous_revision.next()?;
-        let mut candidate = (*snapshot.0).clone();
-        candidate.datasets = self.datasets.clone();
-        // The title is the project's name for the document, not its view:
-        // stepping the view back keeps the name it has now.
-        candidate.title = self.title.clone();
-        candidate.next_serial = candidate.next_serial.max(self.next_serial);
+        let mut candidate = self.clone();
+        step.put_back(&mut candidate);
         candidate.revision = committed_revision;
         self.follow_into(&mut candidate)?;
         candidate.validate()?;
+        let reverse = ViewStep::back_to(self, &candidate);
         *self = candidate;
-        Ok(VisualizationTransactionReceipt {
-            document_id: self.id,
-            previous_revision,
-            committed_revision,
-            created: Vec::new(),
-            tombstoned: Vec::new(),
-            edit_count: 0,
-        })
+        Ok((
+            VisualizationTransactionReceipt {
+                document_id: self.id,
+                previous_revision,
+                committed_revision,
+                created: Vec::new(),
+                tombstoned: Vec::new(),
+                edit_count: 0,
+            },
+            reverse,
+        ))
     }
 
     /// Move what `candidate`, an earlier view of this document, read from a

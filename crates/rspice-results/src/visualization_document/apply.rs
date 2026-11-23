@@ -6,7 +6,7 @@
 //! on the removed one and records a tombstone for each, which is why a page
 //! can never keep a pane, axis, or trace whose parent is gone.
 
-use super::lookup::{Entities, Lookup};
+use super::lookup::{Entities, Lookup, require_made_in_order};
 use super::*;
 
 /// What moving a document's consumers from one run onto another asks of
@@ -1685,7 +1685,7 @@ impl VisualizationDocument {
                     .to_owned(),
             });
         }
-        validate_trace_row_predicates(dataset, &trace.row_predicates)?;
+        validate_trace_row_predicates(dataset, &trace.row_predicates, &self.row_index)?;
         let id = TraceId::allocate(self.allocate_serial()?)?;
         self.traces.push(Trace {
             id,
@@ -1932,7 +1932,15 @@ impl VisualizationDocument {
         receipt.validate_structure()
     }
 
+    /// Check the whole document. The rows a check reads of its embedded
+    /// tables are let go once it ends, whatever it finds.
     pub(super) fn validate(&self) -> Result<(), VisualizationError> {
+        let checked = self.check_whole();
+        self.row_index.clear();
+        checked
+    }
+
+    fn check_whole(&self) -> Result<(), VisualizationError> {
         if self.schema_version != Self::SCHEMA_VERSION {
             return Err(VisualizationError::InvalidValue {
                 field: "visualization-document.schema-version",
@@ -1949,6 +1957,28 @@ impl VisualizationDocument {
                 message: "at least one page is required".to_owned(),
             });
         }
+        let next = self.next_serial;
+        require_made_in_order("visualization-document.pages", &self.pages, next)?;
+        require_made_in_order("visualization-document.panes", &self.panes, next)?;
+        require_made_in_order("visualization-document.axes", &self.axes, next)?;
+        require_made_in_order("visualization-document.traces", &self.traces, next)?;
+        require_made_in_order("visualization-document.cursors", &self.cursors, next)?;
+        require_made_in_order("visualization-document.markers", &self.markers, next)?;
+        require_made_in_order(
+            "visualization-document.measurements",
+            &self.measurements,
+            next,
+        )?;
+        require_made_in_order(
+            "visualization-document.annotations",
+            &self.annotations,
+            next,
+        )?;
+        require_made_in_order(
+            "visualization-document.link-groups",
+            &self.link_groups,
+            next,
+        )?;
         let mut identities = HashSet::new();
         let lookup = Lookup::of(self);
         let mut panes_by_page: HashMap<PageId, Vec<&Pane>> = HashMap::new();
@@ -2039,7 +2069,7 @@ impl VisualizationDocument {
                 });
             }
             if !trace.missing {
-                validate_trace_row_predicates(dataset, &trace.row_predicates)?;
+                validate_trace_row_predicates(dataset, &trace.row_predicates, lookup.rows())?;
             }
             ensure_identity(&mut identities, EntityRef::Trace(trace.id))?;
         }

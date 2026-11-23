@@ -9,7 +9,9 @@
 //! Each view keeps its own undo and redo. A step is a transaction that holds
 //! at least one edit the reader made; moving the viewport or a cursor is
 //! navigation, which zoom's own back and forward covers, and following a new
-//! run is not the reader's edit, so neither is a step.
+//! run is not the reader's edit, so neither is a step. A step holds only
+//! what its edit changed, so undo grows with the edits made, not with the
+//! size of the view times the steps.
 //!
 //! Renaming, duplicating and deleting a saved document are steps too, kept
 //! beside the views' own. Undo and Redo take whichever is latest: the shown
@@ -19,7 +21,7 @@ use std::collections::HashMap;
 
 use crate::product::{ObjectRevision, ResultDocumentId};
 use crate::results::visualization_document::{
-    DocumentEdit, ViewSnapshot, VisualizationDocument, VisualizationTransactionReceipt,
+    DocumentEdit, ViewStep, VisualizationDocument, VisualizationTransactionReceipt,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
@@ -80,7 +82,7 @@ impl<T> History<T> {
     }
 }
 
-type ViewHistory = History<ViewSnapshot>;
+type ViewHistory = History<ViewStep>;
 
 /// What taking a document step does: each step taken leaves the step that
 /// reverses it on the other stack.
@@ -169,34 +171,27 @@ pub(crate) fn apply(
     revision: ObjectRevision,
     edits: Vec<DocumentEdit>,
 ) -> Result<VisualizationTransactionReceipt, VisualizationDocumentPersistenceError> {
-    let before = edits
-        .iter()
-        .any(is_reader_edit)
-        .then(|| {
-            state
-                .model
-                .workspace
-                .content
-                .visualization_document(document_id)
-                .map(VisualizationDocument::view_snapshot)
-        })
-        .flatten();
-    let receipt = state
+    if !edits.iter().any(is_reader_edit) {
+        return state
+            .model
+            .workspace
+            .content
+            .transact_visualization_document(document_id, revision, edits);
+    }
+    let (receipt, undo) = state
         .model
         .workspace
         .content
-        .transact_visualization_document(document_id, revision, edits)?;
-    if let Some(before) = before {
-        let stamp = state.results.view_edits.tick();
-        let history = state
-            .results
-            .view_edits
-            .views
-            .entry(document_id)
-            .or_default();
-        history.undo.push((stamp, before));
-        history.redo.clear();
-    }
+        .transact_visualization_document_with_undo(document_id, revision, edits)?;
+    let stamp = state.results.view_edits.tick();
+    let history = state
+        .results
+        .view_edits
+        .views
+        .entry(document_id)
+        .or_default();
+    history.undo.push((stamp, undo));
+    history.redo.clear();
     Ok(receipt)
 }
 
@@ -224,12 +219,12 @@ pub(crate) fn step(
     document_id: ResultDocumentId,
     direction: Step,
 ) -> Result<(), String> {
-    let Some(current) = state
+    let Some(revision) = state
         .model
         .workspace
         .content
         .visualization_document(document_id)
-        .map(|document| (document.revision(), document.view_snapshot()))
+        .map(VisualizationDocument::revision)
     else {
         state.results.view_edits.views.remove(&document_id);
         return Err("The result view is no longer in the project.".to_owned());
@@ -240,18 +235,20 @@ pub(crate) fn step(
     let Some((_, target)) = history.stack_mut(direction).pop() else {
         return Ok(());
     };
-    let (revision, snapshot) = current;
-    if let Err(error) = state
+    let reverse = match state
         .model
         .workspace
         .content
-        .restore_visualization_document_view(document_id, revision, &target)
+        .take_visualization_document_step(document_id, revision, target)
     {
-        return Err(match direction {
-            Step::Undo => format!("This step can no longer be undone: {error}"),
-            Step::Redo => format!("This step can no longer be redone: {error}"),
-        });
-    }
+        Ok((_, reverse)) => reverse,
+        Err(error) => {
+            return Err(match direction {
+                Step::Undo => format!("This step can no longer be undone: {error}"),
+                Step::Redo => format!("This step can no longer be redone: {error}"),
+            });
+        }
+    };
     let stamp = state.results.view_edits.tick();
     state
         .results
@@ -260,7 +257,7 @@ pub(crate) fn step(
         .entry(document_id)
         .or_default()
         .stack_mut(direction.other())
-        .push((stamp, snapshot));
+        .push((stamp, reverse));
     Ok(())
 }
 

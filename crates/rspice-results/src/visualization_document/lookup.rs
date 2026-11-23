@@ -1,11 +1,45 @@
 //! What a check of one entity reads of the rest of its document: the other
-//! entities, by identity. An edit checks the few entities it touches against
-//! the document's lists; a whole document is checked through a [`Lookup`],
-//! which indexes every entity once, so checking a document costs in
-//! proportion to what it holds and no count of anything needs a ceiling to
-//! keep it quick.
+//! entities, by identity. A document lists each kind of entity in the order
+//! its entities were made, so an edit finds the few entities it touches by a
+//! binary search of the document's lists; a whole document is checked
+//! through a [`Lookup`], which indexes every entity once. Either way a check
+//! costs in proportion to what it reads, and no count of anything needs a
+//! ceiling to keep it quick.
 
+use super::query::RowIndex;
+use super::undo::Identified;
 use super::*;
+
+/// Where the entity `identity` stands in `list`, a list in ascending
+/// identity.
+pub(super) fn position<T: Identified>(list: &[T], identity: u64) -> Option<usize> {
+    list.binary_search_by_key(&identity, Identified::identity)
+        .ok()
+}
+
+/// Refuse a list of `kind` not in the order its entities were made:
+/// ascending identities, each below `next_serial`, the identity the document
+/// makes next.
+pub(super) fn require_made_in_order<T: Identified>(
+    kind: &'static str,
+    list: &[T],
+    next_serial: u64,
+) -> Result<(), VisualizationError> {
+    let mut previous = 0;
+    for identity in list.iter().map(Identified::identity) {
+        if identity <= previous || identity >= next_serial {
+            return Err(VisualizationError::InvalidValue {
+                field: kind,
+                message: format!(
+                    "the document lists {} out of the order they were made",
+                    kind.rsplit('.').next().unwrap_or(kind)
+                ),
+            });
+        }
+        previous = identity;
+    }
+    Ok(())
+}
 
 /// The entities a check reads, by identity.
 pub(super) trait Entities {
@@ -17,6 +51,8 @@ pub(super) trait Entities {
     fn dataset(&self, binding: DatasetBinding) -> Result<&SourceDataset, VisualizationError>;
     /// The traces drawn on `pane_id`, in the document's order.
     fn traces_in_pane(&self, pane_id: PaneId) -> Vec<&Trace>;
+    /// The rows of the embedded tables read so far by this check.
+    fn rows(&self) -> &RowIndex;
 
     fn require_pane(&self, id: PaneId) -> Result<(), VisualizationError> {
         self.pane(id).map(|_| ())
@@ -36,16 +72,14 @@ pub(super) trait Entities {
 
 impl Entities for VisualizationDocument {
     fn pane(&self, id: PaneId) -> Result<&Pane, VisualizationError> {
-        self.panes
-            .iter()
-            .find(|pane| pane.id == id)
+        position(&self.panes, id.get())
+            .map(|index| &self.panes[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(id)))
     }
 
     fn trace(&self, id: TraceId) -> Result<&Trace, VisualizationError> {
-        self.traces
-            .iter()
-            .find(|trace| trace.id == id)
+        position(&self.traces, id.get())
+            .map(|index| &self.traces[index])
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(id)))
     }
 
@@ -71,6 +105,10 @@ impl Entities for VisualizationDocument {
             .filter(|trace| trace.pane_id == pane_id)
             .collect()
     }
+
+    fn rows(&self) -> &RowIndex {
+        &self.row_index
+    }
 }
 
 /// Every entity of one document by identity, read once.
@@ -82,6 +120,7 @@ pub(super) struct Lookup<'a> {
     traces_by_pane: HashMap<PaneId, Vec<&'a Trace>>,
     others: HashSet<EntityRef>,
     datasets: HashMap<DatasetId, &'a SourceDataset>,
+    rows: &'a RowIndex,
 }
 
 impl<'a> Lookup<'a> {
@@ -147,6 +186,7 @@ impl<'a> Lookup<'a> {
             traces_by_pane,
             others,
             datasets,
+            rows: &document.row_index,
         }
     }
 }
@@ -217,5 +257,9 @@ impl Entities for Lookup<'_> {
             .get(&pane_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    fn rows(&self) -> &RowIndex {
+        self.rows
     }
 }
