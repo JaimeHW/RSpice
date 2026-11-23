@@ -407,7 +407,32 @@ C1 out 0 10n
         );
     }
 
-    // The reopened run draws: its strip carries every trace with every sample.
+    // The reopened run draws: with every signal ticked, its strip carries
+    // every trace with every sample.
+    let ticks: std::collections::HashMap<_, _> = reopened
+        .display_runs()
+        .first()
+        .map(|run| {
+            let analysis = &run.analyses[0];
+            let key = rspice_results::result_presentation::AnalysisPresentationKey::new(
+                run.dataset_id,
+                analysis,
+            );
+            analysis
+                .waveforms
+                .iter()
+                .map(|waveform| {
+                    (
+                        rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+                            key,
+                            waveform.name.clone(),
+                        ),
+                        true,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let models = rspice_results_ui::waves::build_models(
         &reopened.display_runs(),
         &reopened.retained.executed_decks,
@@ -419,7 +444,8 @@ C1 out 0 10n
             ac: Default::default(),
             selection: None,
             hidden_family_traces: &Default::default(),
-            waveform_visibility: &Default::default(),
+            waveform_visibility: &ticks,
+            signals: None,
         },
         |_| None,
     );
