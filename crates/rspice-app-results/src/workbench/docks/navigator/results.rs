@@ -68,9 +68,23 @@ pub(in crate::workbench) fn results(
     // An event net's or a bus's row is ticked while its lane is on the plot,
     // as a curve's row is while the curve is.
     ticked.extend(plotted_event_rows(state));
-    // What a set saves: the ticked quantities in the order the runs hold them.
-    let ticked_ordered =
-        ordered_checked_result_keys(&ticked, &state.model.simulation.retained.runs);
+    // What a set saves and the band's actions act on: the ticked quantities in
+    // the order the runs hold them, each resolved once.
+    let (ticked_ordered, ticked_facts) = {
+        let selection =
+            crate::workbench::documents::result_document::resolve_result_browser_selection(
+                &ticked,
+                &state.model.simulation.retained.runs,
+            );
+        let facts = TickedFacts::of(&selection, state);
+        (
+            selection
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<Vec<_>>(),
+            facts,
+        )
+    };
     let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/layout read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
@@ -588,48 +602,19 @@ pub(in crate::workbench) fn results(
     if tab == ResultsBrowserTab::Signals && !ticked.is_empty() {
         let t = Tokens::get(ui.ctx());
         let checked = &ticked;
-        let checked_ordered =
-            ordered_checked_result_keys(checked, &state.model.simulation.retained.runs);
-        let exact_validation_error = checked_ordered.iter().find_map(|key| {
-            crate::workbench::documents::result_document::result_browser_selection_evidence(
-                key,
-                state.results,
-                state.model,
-            )
-            .err()
-        });
+        let checked_ordered = &ticked_ordered;
+        let TickedFacts {
+            exact_validation_error,
+            clipboard_sample_count,
+            datasets,
+            names,
+        } = ticked_facts;
         let exact_evidence_available = exact_validation_error.is_none();
-        let clipboard_sample_count = checked_ordered
-            .iter()
-            .filter_map(ResultBrowserSelectionKey::waveform)
-            .filter_map(|key| {
-                key.resolve(&state.model.simulation.retained.runs)
-                    .map(|(.., waveform)| waveform.x.len())
-            })
-            .sum::<usize>();
         let clipboard_exact_available = exact_evidence_available
             && !checked_ordered.is_empty()
             && clipboard_sample_count <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
-        let compare_selection_compatible = exact_evidence_available
-            && checked_ordered.len() >= 2
-            && checked_ordered
-                .iter()
-                .map(ResultBrowserSelectionKey::dataset_id)
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                >= 2
-            && checked_ordered
-                .iter()
-                .filter_map(|key| {
-                    crate::workbench::documents::result_document::result_browser_selection_canonical_name(
-                        key,
-                        &state.model.simulation.retained.runs,
-                    )
-                    .ok()
-                })
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                == 1;
+        let compare_selection_compatible =
+            exact_evidence_available && checked_ordered.len() >= 2 && datasets >= 2 && names == 1;
         egui::Panel::bottom("workbench.results.selection-bar")
             .resizable(false)
             .show_separator_line(false)
@@ -669,7 +654,7 @@ pub(in crate::workbench) fn results(
                             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear ticks")
                         });
                         if clear.clicked() {
-                        for key in &checked_ordered {
+                        for key in checked_ordered {
                             set_result_quantity_ticked(state, key, false);
                         }
                         state.results.session.clear_checked_signals();
@@ -731,7 +716,7 @@ pub(in crate::workbench) fn results(
                 }
                 if copy_exact.clicked() {
                     match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
-                        &checked_ordered,
+                        checked_ordered,
                         &state.model.simulation.retained.runs,
                     ) {
                         Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
@@ -781,7 +766,7 @@ pub(in crate::workbench) fn results(
                 }
                 ui.separator();
                 rspice_ui_kit::widgets::menu_button(ui, "Save ticked as set\u{2026}", |ui| {
-                    save_ticked_as_set(ui, state, &checked_ordered);
+                    save_ticked_as_set(ui, state, checked_ordered);
                 });
                             });
                         });
@@ -1027,25 +1012,61 @@ pub(in crate::workbench) fn results(
         });
 }
 
-fn ordered_checked_result_keys(
-    checked: &std::collections::HashSet<ResultBrowserSelectionKey>,
-    runs: &[crate::state::SimulationRun],
-) -> Vec<ResultBrowserSelectionKey> {
-    let mut keys = checked.iter().cloned().collect::<Vec<_>>();
-    keys.sort_by(|left, right| {
-        let left =
-            crate::workbench::documents::result_document::result_browser_selection_stable_path(
-                left, runs,
+/// What the band of batch actions needs to know of the ticked quantities.
+struct TickedFacts {
+    /// Why the first quantity that gives no exact values gives none.
+    exact_validation_error: Option<String>,
+    /// The samples copying the quantities would put on the clipboard.
+    clipboard_sample_count: usize,
+    /// The runs the quantities come from.
+    datasets: usize,
+    /// The distinct names the quantities have.
+    names: usize,
+}
+
+impl TickedFacts {
+    fn of(
+        selection: &[(
+            ResultBrowserSelectionKey,
+            Option<crate::workbench::documents::result_document::ResolvedSignal<'_>>,
+        )],
+        state: &ResultsParts<'_>,
+    ) -> Self {
+        let exact_validation_error = selection.iter().find_map(|(key, signal)| {
+            crate::workbench::documents::result_document::resolved_selection_evidence(
+                key,
+                *signal,
+                state.results,
+                state.model,
             )
-            .unwrap_or_default();
-        let right =
-            crate::workbench::documents::result_document::result_browser_selection_stable_path(
-                right, runs,
-            )
-            .unwrap_or_default();
-        left.cmp(&right)
-    });
-    keys
+            .err()
+        });
+        let clipboard_sample_count = selection
+            .iter()
+            .filter_map(|(_, signal)| signal.map(|(.., waveform)| waveform.x.len()))
+            .sum::<usize>();
+        let datasets = selection
+            .iter()
+            .map(|(key, _)| key.dataset_id())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        let names = selection
+            .iter()
+            .filter_map(|(key, signal)| match key {
+                ResultBrowserSelectionKey::Waveform(_) => {
+                    signal.map(|(.., waveform)| waveform.name.as_str())
+                }
+                ResultBrowserSelectionKey::Artifact(artifact) => Some(artifact.canonical_name()),
+            })
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        Self {
+            exact_validation_error,
+            clipboard_sample_count,
+            datasets,
+            names,
+        }
+    }
 }
 
 /// Which content the results data browser shows. Stored in egui memory like

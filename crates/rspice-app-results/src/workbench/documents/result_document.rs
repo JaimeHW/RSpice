@@ -285,14 +285,87 @@ pub(crate) fn result_signal_stable_path(
     runs: &[SimulationRun],
 ) -> Result<String, String> {
     let (run, analysis, waveform) = resolved_result_signal(key, runs)?;
+    Ok(signal_stable_path(run, analysis, waveform))
+}
+
+fn signal_stable_path(
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    waveform: &RetainedTrace,
+) -> String {
     let analysis_id = analysis.provenance().map_or_else(
         || format!("legacy-{}", analysis.id),
         |provenance| provenance.source_instance_id().to_string(),
     );
-    Ok(format!(
+    format!(
         "dataset/{}/analysis/{analysis_id}/quantity/{}",
         run.dataset_id, waveform.name
-    ))
+    )
+}
+
+/// A browser selection's signal, as its run holds it.
+pub(crate) type ResolvedSignal<'a> = (&'a SimulationRun, &'a AnalysisResult, &'a RetainedTrace);
+
+/// The browser selection `keys` in the order of their stable paths, each with its signal where
+/// it resolves to one, as [`result_browser_selection_stable_path`] and the key's own resolution
+/// answer them. A key resolved on its own searches its whole analysis, so ordering a run's
+/// every column by comparing keys in pairs cost the square of its columns: here each analysis
+/// the selection names is indexed once.
+pub(crate) fn resolve_result_browser_selection<'a>(
+    keys: &std::collections::HashSet<ResultBrowserSelectionKey>,
+    runs: &'a [SimulationRun],
+) -> Vec<(ResultBrowserSelectionKey, Option<ResolvedSignal<'a>>)> {
+    type ResolvedRun<'a> = (&'a SimulationRun, &'a AnalysisResult);
+    /// An analysis's signals by name; a name two signals share finds neither.
+    type NameIndex<'a> = (
+        &'a SimulationRun,
+        &'a AnalysisResult,
+        std::collections::HashMap<&'a str, Option<usize>>,
+    );
+    let mut analyses =
+        std::collections::HashMap::<AnalysisPresentationKey, Option<NameIndex<'a>>>::new();
+    let mut resolved = keys
+        .iter()
+        .map(|key| {
+            let signal = key.waveform().and_then(|signal| {
+                let &(run, analysis, ref names) = analyses
+                    .entry(signal.analysis())
+                    .or_insert_with(|| {
+                        let run = runs
+                            .iter()
+                            .find(|run| run.dataset_id == signal.analysis().dataset_id())?;
+                        let (_, analysis) = signal.analysis().resolve(&run.data)?;
+                        let mut names = std::collections::HashMap::new();
+                        for (index, waveform) in analysis.waveforms.iter().enumerate() {
+                            names
+                                .entry(waveform.name.as_str())
+                                .and_modify(|found: &mut Option<usize>| *found = None)
+                                .or_insert(Some(index));
+                        }
+                        Some((run, analysis, names))
+                    })
+                    .as_ref()?;
+                let (run, analysis): ResolvedRun<'a> = (run, analysis);
+                let index = (*names.get(signal.source_name())?)?;
+                Some((run, analysis, &analysis.waveforms[index]))
+            });
+            let path = match (key, signal) {
+                (ResultBrowserSelectionKey::Waveform(_), Some((run, analysis, waveform))) => {
+                    signal_stable_path(run, analysis, waveform)
+                }
+                (ResultBrowserSelectionKey::Waveform(_), None) => String::new(),
+                (ResultBrowserSelectionKey::Artifact(artifact), _) => {
+                    result_artifact_stable_path(artifact, runs).unwrap_or_default()
+                }
+            };
+            (path, key.clone(), signal)
+        })
+        .collect::<Vec<_>>();
+    resolved.sort_by(|left, right| left.0.cmp(&right.0));
+    resolved
+        .into_iter()
+        .map(|(_, key, signal)| (key, signal))
+        .collect()
 }
 
 /// A signal's last retained sample as "Copy value" puts it on the clipboard:
@@ -387,6 +460,32 @@ fn exact_evidence_refusal(error: &str) -> String {
     format!(
         "The selected analysis's saved results failed validation, so its values cannot be copied or exported: {error}"
     )
+}
+
+/// [`result_browser_selection_evidence`] for a key `signal` already resolves, when it is a
+/// signal's.
+pub(crate) fn resolved_selection_evidence(
+    key: &ResultBrowserSelectionKey,
+    signal: Option<ResolvedSignal<'_>>,
+    results: &ResultsState,
+    model: &Model,
+) -> Result<(), String> {
+    match (key, signal) {
+        (ResultBrowserSelectionKey::Waveform(_), Some((run, analysis, _))) => {
+            retained_evidence_verdict_over(
+                results,
+                model,
+                AnalysisPresentationKey::new(run.dataset_id, analysis),
+            )
+            .map_err(|error| exact_evidence_refusal(&error))
+        }
+        (ResultBrowserSelectionKey::Waveform(_), None) => {
+            Err("The selected signal is missing from its run or is no longer unique.".to_owned())
+        }
+        (ResultBrowserSelectionKey::Artifact(_), _) => {
+            result_browser_selection_evidence(key, results, model)
+        }
+    }
 }
 
 /// Whether the browser selection `key` gives exact values, and why not,
