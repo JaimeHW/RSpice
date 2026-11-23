@@ -1022,7 +1022,7 @@ fn refresh_diff_pips_from_baseline_in(
     netlist: &mut NetlistDocumentState,
     runs: &mut RunsState,
 ) {
-    let Some(baseline) = runs.manual_run.last_run_buffer.as_deref() else {
+    let Some(baseline) = runs.manual_run.last_run_buffer.as_ref() else {
         return;
     };
     if netlist.waits_for_indexes() {
