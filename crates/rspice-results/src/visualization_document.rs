@@ -79,18 +79,13 @@ pub const MAX_VISUALIZATION_UNIT_BYTES: usize = 64;
 pub const MAX_SOURCE_TEXT_BYTES: usize = MAX_VISUALIZATION_LABEL_BYTES;
 /// Maximum retained annotation length in UTF-8 bytes.
 pub const MAX_ANNOTATION_TEXT_BYTES: usize = 16_384;
-/// Maximum declared family dimensions in one presentation policy.
-pub const MAX_FAMILY_DIMENSIONS: usize = 32;
-/// Maximum visual encoding maps in one family presentation policy.
-pub const MAX_FAMILY_ENCODINGS: usize = 16;
-/// Maximum exact members in one family set-membership predicate.
-pub const MAX_FAMILY_PREDICATE_VALUES: usize = 256;
-/// Maximum direct children in one family logical predicate node.
-pub const MAX_FAMILY_PREDICATE_CHILDREN: usize = 64;
-/// Maximum nesting depth of one family predicate root, including `Not` nodes.
+/// How deeply one family predicate may nest, `Not` nodes included. Reading,
+/// checking and evaluating a predicate each recurse once per level, so this
+/// is what keeps a hostile document from overflowing the stack; a filter a
+/// person writes nests a handful of levels. How many dimensions, members,
+/// children or encodings a policy holds is bounded only by the document that
+/// holds it: a pick of every run of a large Monte Carlo is one member each.
 pub const MAX_FAMILY_PREDICATE_DEPTH: usize = 32;
-/// Maximum total nodes retained by one family predicate root.
-pub const MAX_FAMILY_PREDICATE_NODES: usize = 1_024;
 
 struct BoundedVec<T, const MAX: usize>(Vec<T>);
 
@@ -238,56 +233,11 @@ where
     BoundedString::<MAX_SOURCE_TEXT_BYTES>::deserialize(deserializer).map(|value| value.0)
 }
 
-fn deserialize_filter_source_string<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    BoundedString::<4_096>::deserialize(deserializer).map(|value| value.0)
-}
-
 fn deserialize_label_prefix<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
     Option::<BoundedString<64>>::deserialize(deserializer).map(|value| value.map(|value| value.0))
-}
-
-fn deserialize_bounded_vec<'de, D, T, const MAX: usize>(deserializer: D) -> Result<Vec<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    BoundedVec::<T, MAX>::deserialize(deserializer).map(BoundedVec::into_inner)
-}
-
-fn deserialize_family_dimensions<'de, D>(deserializer: D) -> Result<Vec<FamilyDimension>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_FAMILY_DIMENSIONS>(deserializer)
-}
-
-fn deserialize_family_encodings<'de, D>(deserializer: D) -> Result<Vec<FamilyEncodingMap>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_FAMILY_ENCODINGS>(deserializer)
-}
-
-fn deserialize_family_predicate_values<'de, D>(deserializer: D) -> Result<Vec<TypedValue>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_FAMILY_PREDICATE_VALUES>(deserializer)
-}
-
-fn deserialize_family_predicate_children<'de, D>(
-    deserializer: D,
-) -> Result<Vec<FamilyPredicate>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserialize_bounded_vec::<_, _, MAX_FAMILY_PREDICATE_CHILDREN>(deserializer)
 }
 
 #[derive(Deserialize)]

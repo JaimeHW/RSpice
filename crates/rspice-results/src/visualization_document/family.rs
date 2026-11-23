@@ -68,7 +68,6 @@ pub enum FamilyAggregationMethod {
 pub struct FamilyAggregationPolicy {
     pub method: FamilyAggregationMethod,
     /// Family dimensions eliminated by the aggregation.
-    #[serde(deserialize_with = "deserialize_family_dimensions")]
     pub over_dimensions: Vec<FamilyDimension>,
 }
 
@@ -135,7 +134,6 @@ pub(super) enum FamilyPredicateWire {
     },
     In {
         dimension: FamilyDimension,
-        #[serde(deserialize_with = "deserialize_family_predicate_values")]
         values: Vec<TypedValue>,
     },
     Between {
@@ -146,11 +144,9 @@ pub(super) enum FamilyPredicateWire {
         include_upper: bool,
     },
     All {
-        #[serde(deserialize_with = "deserialize_family_predicate_children")]
         predicates: Vec<FamilyPredicate>,
     },
     Any {
-        #[serde(deserialize_with = "deserialize_family_predicate_children")]
         predicates: Vec<FamilyPredicate>,
     },
     Not {
@@ -161,7 +157,6 @@ pub(super) enum FamilyPredicateWire {
 #[derive(Default)]
 pub(super) struct PredicateDecodeBudget {
     depth: usize,
-    nodes: usize,
 }
 
 std::thread_local! {
@@ -183,13 +178,7 @@ impl PredicateDecodeGuard {
                     "family predicate exceeds the {MAX_FAMILY_PREDICATE_DEPTH}-level decode depth limit"
                 ));
             }
-            if budget.nodes >= MAX_FAMILY_PREDICATE_NODES {
-                return Err(format!(
-                    "family predicate exceeds the {MAX_FAMILY_PREDICATE_NODES}-node decode limit"
-                ));
-            }
             budget.depth += 1;
-            budget.nodes += 1;
             Ok(Self { root })
         })
     }
@@ -249,7 +238,6 @@ impl<'de> Deserialize<'de> for FamilyPredicate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FamilyFilterExpression {
     /// User-authored expression preserved exactly for display and audit.
-    #[serde(deserialize_with = "deserialize_filter_source_string")]
     pub source: String,
     /// Parsed, typed predicate used for evaluation.
     pub predicate: FamilyPredicate,
@@ -353,13 +341,11 @@ impl FamilyEncodingMap {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FamilyPresentationPolicy {
     pub x_dimension: FamilyXDimension,
-    #[serde(deserialize_with = "deserialize_family_dimensions")]
     pub family_dimensions: Vec<FamilyDimension>,
     pub facet_layout: Option<FamilyFacetLayout>,
     pub aggregation: FamilyAggregationPolicy,
     pub filter: Option<FamilyFilterExpression>,
     pub missing_points: MissingPointPolicy,
-    #[serde(deserialize_with = "deserialize_family_encodings")]
     pub encodings: Vec<FamilyEncodingMap>,
 }
 
@@ -388,13 +374,10 @@ impl FamilyPresentationPolicy {
                 message: "the X dimension must be real or integer valued".to_owned(),
             });
         }
-        if self.family_dimensions.is_empty() || self.family_dimensions.len() > MAX_FAMILY_DIMENSIONS
-        {
+        if self.family_dimensions.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "family.dimensions",
-                message: format!(
-                    "a family policy requires between 1 and {MAX_FAMILY_DIMENSIONS} dimensions"
-                ),
+                message: "a family policy requires at least one dimension".to_owned(),
             });
         }
         let mut dimension_keys = HashSet::with_capacity(self.family_dimensions.len());
@@ -422,11 +405,6 @@ impl FamilyPresentationPolicy {
     }
 
     fn validate_aggregation(&self) -> Result<HashSet<&str>, VisualizationError> {
-        ensure_maximum_len(
-            "family.aggregation.dimensions",
-            self.aggregation.over_dimensions.len(),
-            MAX_FAMILY_DIMENSIONS,
-        )?;
         let is_none = self.aggregation.method == FamilyAggregationMethod::None;
         if is_none != self.aggregation.over_dimensions.is_empty() {
             return Err(VisualizationError::InvalidValue {
@@ -459,45 +437,26 @@ impl FamilyPresentationPolicy {
     }
 
     fn validate_filter(&self, filter: &FamilyFilterExpression) -> Result<(), VisualizationError> {
-        if filter.source.trim().is_empty()
-            || filter.source.chars().any(char::is_control)
-            || filter.source.len() > 4096
-        {
+        if filter.source.trim().is_empty() || filter.source.chars().any(char::is_control) {
             return Err(VisualizationError::InvalidValue {
                 field: "family.filter.source",
-                message: "filter source must be non-blank, contain no control characters, and be at most 4096 bytes"
+                message: "filter source must be non-blank and contain no control characters"
                     .to_owned(),
             });
         }
-        let mut nodes = 0_u16;
-        self.validate_predicate(&filter.predicate, 0, &mut nodes)
+        self.validate_predicate(&filter.predicate, 0)
     }
 
     fn validate_predicate(
         &self,
         predicate: &FamilyPredicate,
-        depth: u8,
-        nodes: &mut u16,
+        depth: usize,
     ) -> Result<(), VisualizationError> {
-        if usize::from(depth) >= MAX_FAMILY_PREDICATE_DEPTH {
+        if depth >= MAX_FAMILY_PREDICATE_DEPTH {
             return Err(VisualizationError::InvalidValue {
                 field: "family.filter.predicate",
                 message: format!(
                     "filter predicate nesting cannot exceed {MAX_FAMILY_PREDICATE_DEPTH} levels"
-                ),
-            });
-        }
-        *nodes = nodes
-            .checked_add(1)
-            .ok_or_else(|| VisualizationError::InvalidValue {
-                field: "family.filter.predicate",
-                message: "filter predicate is too large".to_owned(),
-            })?;
-        if usize::from(*nodes) > MAX_FAMILY_PREDICATE_NODES {
-            return Err(VisualizationError::InvalidValue {
-                field: "family.filter.predicate",
-                message: format!(
-                    "filter predicate cannot exceed {MAX_FAMILY_PREDICATE_NODES} nodes"
                 ),
             });
         }
@@ -536,17 +495,16 @@ impl FamilyPresentationPolicy {
             }
             FamilyPredicate::In { dimension, values } => {
                 self.require_declared_dimension(dimension, "family.filter.dimension")?;
-                if values.is_empty() || values.len() > MAX_FAMILY_PREDICATE_VALUES {
+                if values.is_empty() {
                     return Err(VisualizationError::InvalidValue {
                         field: "family.filter.values",
-                        message: format!(
-                            "set membership requires between 1 and {MAX_FAMILY_PREDICATE_VALUES} values"
-                        ),
+                        message: "set membership requires at least one value".to_owned(),
                     });
                 }
-                for (index, value) in values.iter().enumerate() {
+                let mut members = HashSet::with_capacity(values.len());
+                for value in values {
                     validate_filter_value(dimension, value)?;
-                    if values[..index].iter().any(|prior| prior.exact_eq(value)) {
+                    if !members.insert(ExactCoordinateValue::from(value)) {
                         return Err(VisualizationError::InvalidValue {
                             field: "family.filter.values",
                             message: "set membership values must be exact and unique".to_owned(),
@@ -582,34 +540,22 @@ impl FamilyPresentationPolicy {
                 }
             }
             FamilyPredicate::All { predicates } | FamilyPredicate::Any { predicates } => {
-                if predicates.is_empty() || predicates.len() > MAX_FAMILY_PREDICATE_CHILDREN {
+                if predicates.is_empty() {
                     return Err(VisualizationError::InvalidValue {
                         field: "family.filter.predicate",
-                        message: format!(
-                            "logical groups require between 1 and {MAX_FAMILY_PREDICATE_CHILDREN} predicates"
-                        ),
+                        message: "logical groups require at least one predicate".to_owned(),
                     });
                 }
                 for child in predicates {
-                    self.validate_predicate(child, depth + 1, nodes)?;
+                    self.validate_predicate(child, depth + 1)?;
                 }
                 Ok(())
             }
-            FamilyPredicate::Not { predicate } => {
-                self.validate_predicate(predicate, depth + 1, nodes)
-            }
+            FamilyPredicate::Not { predicate } => self.validate_predicate(predicate, depth + 1),
         }
     }
 
     fn validate_encodings(&self, aggregated: &HashSet<&str>) -> Result<(), VisualizationError> {
-        if self.encodings.len() > MAX_FAMILY_ENCODINGS {
-            return Err(VisualizationError::InvalidValue {
-                field: "family.encodings",
-                message: format!(
-                    "a family policy supports at most {MAX_FAMILY_ENCODINGS} encoding maps"
-                ),
-            });
-        }
         let mut slots = HashSet::with_capacity(self.encodings.len());
         for encoding in &self.encodings {
             let dimension = encoding.dimension();

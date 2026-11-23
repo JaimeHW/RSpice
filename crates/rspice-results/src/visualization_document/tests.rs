@@ -1249,19 +1249,21 @@ fn a_transaction_holds_any_number_of_edits_but_not_none() {
     assert_eq!(document.pages()[0].title, "Step 9999");
 }
 
+/// A logical group of any breadth reads back: how many children a filter
+/// holds is bounded only by the document holding it. A text cell longer
+/// than its bound is still refused while it is read.
 #[test]
-fn predicate_children_and_source_strings_are_bounded_during_deserialization() {
-    let predicate = FamilyPredicate::All {
-        predicates: vec![FamilyPredicate::Constant { value: true }],
+fn a_predicate_of_any_breadth_reads_back_but_an_oversized_text_cell_does_not() {
+    let leaf = FamilyPredicate::Constant { value: true };
+    let branch = FamilyPredicate::All {
+        predicates: vec![leaf; 100],
     };
-    let mut predicate_json = serde_json::to_value(predicate).unwrap();
-    let child = predicate_json["predicates"][0].clone();
-    let children = predicate_json["predicates"].as_array_mut().unwrap();
-    while children.len() <= MAX_FAMILY_PREDICATE_CHILDREN {
-        children.push(child.clone());
-    }
-    let predicate_error = serde_json::from_value::<FamilyPredicate>(predicate_json).unwrap_err();
-    assert!(predicate_error.to_string().contains("resource limit"));
+    let broad = FamilyPredicate::Any {
+        predicates: vec![branch; 100],
+    };
+    let restored: FamilyPredicate =
+        serde_json::from_value(serde_json::to_value(&broad).unwrap()).unwrap();
+    assert_eq!(restored, broad);
 
     let source = dataset(binding(33), 0.0);
     let mut source_json = serde_json::to_value(source).unwrap();
@@ -1273,20 +1275,12 @@ fn predicate_children_and_source_strings_are_bounded_during_deserialization() {
     assert!(text_error.to_string().contains("resource limit"));
 }
 
+/// Reading a predicate bounds only how deeply it nests, which keeps a
+/// hostile document from overflowing the stack, and a refused read leaves
+/// the next read unaffected.
 #[test]
-fn predicate_deserialization_enforces_shared_depth_and_total_node_budgets() {
+fn reading_a_predicate_bounds_how_deeply_it_nests() {
     let leaf = FamilyPredicate::Constant { value: true };
-    let branch = FamilyPredicate::All {
-        predicates: vec![leaf.clone(); MAX_FAMILY_PREDICATE_CHILDREN],
-    };
-    let broad = FamilyPredicate::All {
-        predicates: vec![branch; 16],
-    };
-    let broad_error =
-        serde_json::from_value::<FamilyPredicate>(serde_json::to_value(broad).unwrap())
-            .unwrap_err();
-    assert!(broad_error.to_string().contains("1024-node"));
-
     let nested_not = |levels: usize| {
         (1..levels).fold(leaf.clone(), |predicate, _| FamilyPredicate::Not {
             predicate: Box::new(predicate),
@@ -1309,6 +1303,72 @@ fn predicate_deserialization_enforces_shared_depth_and_total_node_budgets() {
         restored_after_errors,
         FamilyPredicate::Constant { value: true }
     );
+}
+
+/// A filter picking every run of a ten-thousand-run Monte Carlo by its
+/// sample number, typed out in full, is a policy a pane keeps and reads
+/// back; a pick naming one run twice is refused.
+#[test]
+fn a_filter_picking_every_run_of_a_large_monte_carlo_is_kept() {
+    const RUNS: i64 = 10_000;
+    let source = binding(43);
+    let mut document =
+        VisualizationDocument::new("Monte Carlo", vec![family_dataset(source)]).unwrap();
+    let pane_id = document.panes()[0].id;
+    let sample = dimension("sample", ValueType::Integer);
+    let picks: Vec<_> = (1..=RUNS).map(TypedValue::Integer).collect();
+    let typed = (1..=RUNS)
+        .map(|run| run.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut policy = family_policy();
+    policy.filter = Some(FamilyFilterExpression {
+        source: format!("sample in {{{typed}}}"),
+        predicate: FamilyPredicate::In {
+            dimension: sample.clone(),
+            values: picks.clone(),
+        },
+    });
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::SetPaneSource {
+                    pane_id,
+                    viewer_id: "viewer-waveform".to_owned(),
+                    binding: Some(PaneDataBinding {
+                        analysis_id: AnalysisInstanceId::new(),
+                        dataset: source,
+                    }),
+                },
+                DocumentEdit::SetPaneFamilyPresentation {
+                    pane_id,
+                    policy: Some(policy.clone()),
+                },
+            ],
+        )
+        .expect("every run is picked");
+    assert_eq!(document.panes()[0].family_policy.as_ref(), Some(&policy));
+    let restored: VisualizationDocument =
+        serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+    assert_eq!(restored, document);
+
+    let mut twice = picks;
+    twice.push(TypedValue::Integer(RUNS));
+    policy.filter = Some(FamilyFilterExpression {
+        source: format!("sample in {{{typed}, {RUNS}}}"),
+        predicate: FamilyPredicate::In {
+            dimension: sample,
+            values: twice,
+        },
+    });
+    assert!(matches!(
+        policy.validate(),
+        Err(VisualizationError::InvalidValue {
+            field: "family.filter.values",
+            ..
+        })
+    ));
 }
 
 #[test]
