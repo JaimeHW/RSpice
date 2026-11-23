@@ -432,3 +432,41 @@ fn a_window_whose_rows_are_on_their_way_reads_them_once_they_arrive() {
             .any(|failure| failure.column.starts_with("arriving"))
     );
 }
+
+/// Each column a saved result names is named for the signal whose first value slot it reads:
+/// past an event signal, which takes no slot, and never for a complex signal's second slot.
+#[test]
+fn a_segments_columns_are_named_by_the_signal_each_slot_starts() {
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![
+            Signal::new("a", "V", SignalKind::Real),
+            Signal::new("d", "", SignalKind::Logic),
+            Signal::new("z", "V", SignalKind::Complex),
+            Signal::new("b", "A", SignalKind::Real),
+        ],
+    };
+    let mut writer = SegmentWriter::create(MemoryIo::new(), &schema, &RunMeta::default()).unwrap();
+    writer.push_rows(&[0.0, 1.0], &[0.0; 8]).unwrap();
+    let (_, io) = writer.finish(RunStatus::Completed).unwrap();
+    let segment = Segment::kept(
+        StoreReader::open(Box::new(io)).unwrap(),
+        std::path::PathBuf::new(),
+    );
+    let names = (0..5)
+        .map(|slot| segment.slot_name(slot))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            Some("a".to_owned()),
+            Some("z".to_owned()),
+            None,
+            Some("b".to_owned()),
+            None
+        ]
+    );
+}

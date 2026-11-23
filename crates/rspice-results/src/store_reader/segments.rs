@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use rspice_results_store::{Digest, EventSpan, SegmentReader, StoreError};
 
@@ -25,6 +25,9 @@ pub struct Segment {
     /// Whether the last reader deletes the file: a run's own segment, which nothing reads once
     /// its process ends.
     temporary: bool,
+    /// Each analog signal's first value slot and its id, in slot order: built once, on the
+    /// first column named, so naming every column of a wide segment reads its schema once.
+    slot_signals: OnceLock<Vec<(usize, usize)>>,
 }
 
 impl Segment {
@@ -34,6 +37,7 @@ impl Segment {
             reader,
             path,
             temporary: true,
+            slot_signals: OnceLock::new(),
         }
     }
 
@@ -43,6 +47,7 @@ impl Segment {
             reader,
             path,
             temporary: false,
+            slot_signals: OnceLock::new(),
         }
     }
 
@@ -80,6 +85,37 @@ impl Segment {
         read: impl FnOnce(&mut SegmentReader<SegmentBytes>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
         self.reader.with_reader(read)
+    }
+
+    /// The name of the signal whose first value slot is `slot`, or `None` when no analog
+    /// signal starts there or the schema cannot be read.
+    pub fn slot_name(&self, slot: usize) -> Option<String> {
+        let index = match self.slot_signals.get() {
+            Some(index) => index,
+            None => {
+                let built = self
+                    .with_reader(|reader| {
+                        let mut first = 0;
+                        let mut index = Vec::new();
+                        for (id, signal) in reader.schema().signals.iter().enumerate() {
+                            if !signal.kind.is_event() {
+                                index.push((first, id));
+                            }
+                            first += signal.kind.slots();
+                        }
+                        Ok(index)
+                    })
+                    .ok()?;
+                self.slot_signals.get_or_init(|| built)
+            }
+        };
+        let at = index
+            .binary_search_by_key(&slot, |&(first, _)| first)
+            .ok()?;
+        let id = index[at].1;
+        self.with_reader(|reader| Ok(reader.schema().signals.get(id).map(|s| s.name.clone())))
+            .ok()
+            .flatten()
     }
 
     /// Rows `first .. first + out.len()` of the x axis (`slot` `None`) or a value slot.

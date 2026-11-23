@@ -192,27 +192,22 @@ pub(super) fn segment_events(
 ) -> Result<Arc<dyn EventHistorySource>, String> {
     let signal = usize::try_from(signal).map_err(|_| format!("signal {signal} is out of range"))?;
     let name = segment
-        .reader()
-        .schema()
+        .with_reader(|reader| Ok(reader.schema().signals.get(signal).map(|s| s.name.clone())))
         .ok()
-        .and_then(|schema| schema.signals.get(signal).map(|s| s.name.clone()))
+        .flatten()
         .unwrap_or_else(|| format!("signal {signal}"));
     Ok(SegmentEvents::new(segment, signal, name))
 }
 
+/// The name of the column at `slot`, read from the segment's slot index: a result naming
+/// every column of a wide segment once looked each one up by summing the slots of every
+/// signal before it, for every signal, from a fresh copy of the schema.
 fn column_name(segment: &Segment, slot: Option<usize>) -> String {
     let Some(slot) = slot else {
         return "x axis".to_owned();
     };
     segment
-        .reader()
-        .schema()
-        .ok()
-        .and_then(|schema| {
-            (0..schema.signals.len())
-                .find(|&signal| schema.slot_of(signal) == Some(slot))
-                .map(|signal| schema.signals[signal].name.clone())
-        })
+        .slot_name(slot)
         .unwrap_or_else(|| format!("slot {slot}"))
 }
 
