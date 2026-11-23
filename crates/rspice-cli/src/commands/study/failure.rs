@@ -108,13 +108,51 @@ pub(super) fn execution(error: SimulationError, task: &str, timeout: Option<f64>
         _ => {}
     }
     CliError::Reported {
-        message: error.to_string(),
+        message: said(&error),
         category,
         details: Box::new(details),
     }
 }
 
+/// What `error` says, a limit the run went past said as the desktop app
+/// says it, then in the engine's words.
+fn said(error: &SimulationError) -> String {
+    let refusal = |resource: &str, requested: usize, limit: usize| {
+        resource_kind(resource).map(|resource| {
+            crate::cli::refusal::said(&rspice_core::ResourceLimitError {
+                resource,
+                requested,
+                limit,
+            })
+        })
+    };
+    match error {
+        SimulationError::ResourceLimit {
+            resource,
+            requested,
+            limit,
+        } => refusal(resource, *requested, *limit),
+        SimulationError::ResourceFailure(
+            rspice_simulation::error::ResourceFailure::DeviceLimit {
+                instance,
+                resource,
+                requested,
+                limit,
+            },
+        ) => {
+            refusal(resource, *requested, *limit).map(|said| format!("Device '{instance}': {said}"))
+        }
+        _ => None,
+    }
+    .unwrap_or_else(|| error.to_string())
+}
+
 fn resource_name(name: &str) -> Option<&'static str> {
+    resource_kind(name).map(rspice_core::ResourceKind::as_str)
+}
+
+/// The resource the engine names `name`.
+fn resource_kind(name: &str) -> Option<rspice_core::ResourceKind> {
     use rspice_core::ResourceKind::*;
     [
         NetlistBytes,
@@ -137,8 +175,7 @@ fn resource_name(name: &str) -> Option<&'static str> {
         BatchRuns,
     ]
     .into_iter()
-    .map(|kind| kind.as_str())
-    .find(|known| *known == name)
+    .find(|kind| kind.as_str() == name)
 }
 
 #[cfg(test)]
@@ -165,5 +202,33 @@ mod tests {
         assert_eq!(details.instance_name.as_deref(), Some("XAMP:delay"));
         assert_eq!(details.analysis_id.as_deref(), Some("waveform"));
         assert_eq!((details.requested, details.limit), (Some(5000), Some(4000)));
+        assert!(
+            error.to_string().starts_with(
+                "Device 'XAMP:delay': The delay lines' histories need 4.9 KB; they can take at \
+                 most 3.9 KB. (transport_history_bytes limit exceeded"
+            ),
+            "{error}"
+        );
+    }
+
+    /// A run past a limit says it as the desktop app does, then in the
+    /// engine's words.
+    #[test]
+    fn a_resource_limit_reads_as_the_app_says_it() {
+        let error = execution(
+            SimulationError::ResourceLimit {
+                resource: "flattened_elements".into(),
+                requested: 250_001,
+                limit: 250_000,
+            },
+            "op",
+            None,
+        );
+        assert_eq!(
+            error.to_string(),
+            "This circuit has more than 250,000 devices with its subcircuits expanded; a circuit \
+             can have at most 250,000. (flattened_elements limit exceeded: requested 250001, \
+             limit 250000)"
+        );
     }
 }
