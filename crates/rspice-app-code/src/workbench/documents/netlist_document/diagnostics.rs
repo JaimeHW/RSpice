@@ -64,10 +64,16 @@ pub(super) fn problem_marks(
     buffer: &str,
     revision: u64,
 ) -> Vec<ProblemMark> {
-    let line_starts = std::iter::once(0)
-        .chain(buffer.match_indices('\n').map(|(at, _)| at + 1))
-        .collect::<Vec<_>>();
+    // Where the lines start is read only once a current finding names one:
+    // the findings of a text the editor has moved past name none of its
+    // lines, and a deck's every keystroke moves past them.
+    let line_starts = std::cell::OnceCell::new();
     let line_text = |line: usize| {
+        let line_starts = line_starts.get_or_init(|| {
+            std::iter::once(0)
+                .chain(buffer.match_indices('\n').map(|(at, _)| at + 1))
+                .collect::<Vec<_>>()
+        });
         let start = *line_starts.get(line)?;
         let end = line_starts
             .get(line + 1)

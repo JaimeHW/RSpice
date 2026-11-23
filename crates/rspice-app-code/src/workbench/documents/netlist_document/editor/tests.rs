@@ -1575,6 +1575,36 @@ fn a_problem_is_marked_under_exactly_the_word_it_names() {
     );
 }
 
+/// The findings of the text before are marked stale once while the next
+/// check runs: asked again on the next frame, the collection is the one
+/// already marked, so what was read from it, such as the editor's marks,
+/// is not read again every frame.
+#[test]
+fn findings_already_marked_stale_are_kept_while_the_next_check_runs() {
+    let source = "amp\nR1 a 0 1k\n.end\n";
+    let mut finding = Diagnostic::current(
+        "lint",
+        "CARD",
+        DiagnosticSeverity::Warning,
+        "about the card",
+    )
+    .with_line(Some(1));
+    finding.bind_validation(7, "check");
+    let mut diagnostics = Arc::new(
+        NetlistDiagnosticCollection::try_new(vec![finding], source)
+            .expect("the fixture collection is well formed"),
+    );
+
+    mark_findings_stale(&mut diagnostics);
+    assert!(diagnostics.iter().all(|finding| !finding.is_current()));
+    let read = Arc::clone(&diagnostics);
+    mark_findings_stale(&mut diagnostics);
+    assert!(
+        Arc::ptr_eq(&read, &diagnostics),
+        "findings already marked stale are not written again"
+    );
+}
+
 /// A Spectre deck is checked by the Spectre front end under the name it goes
 /// by: as a file, as text with no file, and in the browser. Its check finds
 /// nothing in a good deck, where SPICE's reading of Spectre syntax found

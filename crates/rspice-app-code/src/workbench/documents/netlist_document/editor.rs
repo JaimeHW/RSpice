@@ -639,6 +639,21 @@ fn diagnostic_problem(severity: DiagnosticSeverity) -> Option<Problem> {
     }
 }
 
+/// Keep the findings of the text before for Problems and history, but mark
+/// them stale so they never decorate newer bytes. Findings already marked
+/// are left as they are: every frame until the next check reports asks, and
+/// a collection written again is a new one to whatever was read from it,
+/// such as the editor's marks.
+fn mark_findings_stale(diagnostics: &mut Arc<NetlistDiagnosticCollection>) {
+    let unmarked = diagnostics.iter().any(|diagnostic| {
+        diagnostic.canonical.currentness
+            != rspice_vocabulary::diagnostics::DiagnosticCurrentness::StaleSource
+    });
+    if unmarked {
+        Arc::make_mut(diagnostics).mark_all_stale();
+    }
+}
+
 /// Debounced check of the shown source: the squiggles, pips, and strip all
 /// derive from its one result. Once typing pauses, the text as it stands is
 /// checked away from the editor's thread. Until that check reports, the
@@ -661,10 +676,8 @@ fn refresh_diagnostics(
         return;
     }
     netlist.live_check.stop_unless(revision, folders);
-    if netlist.diag_revision.is_some() && !netlist.diagnostics.is_empty() {
-        // Retain the prior records for Problems/history, but never decorate
-        // newer bytes with stale source ranges.
-        Arc::make_mut(&mut netlist.diagnostics).mark_all_stale();
+    if netlist.diag_revision.is_some() {
+        mark_findings_stale(&mut netlist.diagnostics);
     }
     if netlist.live_check.is_checking(revision, folders) {
         return;

@@ -1189,29 +1189,40 @@ fn normalize_selections(selections: Vec<TextSelection>, maximum: usize) -> Vec<T
 
 /// The line break an edit inserts: the source's most common one, preferring
 /// CRLF then LF on a tie, and LF when the source has none.
+/// The line ending most of `source`'s lines end with. A text with no
+/// carriage return ends its lines with a line feed, told from one count of
+/// its bytes; only a text holding one has its pairs counted.
 fn detect_preferred_newline(source: &Rope) -> &'static str {
-    let mut lf = 0_usize;
+    let count = |wanted: u8| -> usize {
+        source
+            .chunks()
+            .map(|chunk| {
+                chunk
+                    .as_bytes()
+                    .iter()
+                    .filter(|&&byte| byte == wanted)
+                    .count()
+            })
+            .sum()
+    };
+    let returns = count(b'\r');
+    if returns == 0 {
+        return "\n";
+    }
     let mut crlf = 0_usize;
-    let mut cr = 0_usize;
-    let mut pending_cr = false;
+    let mut return_ends_chunk = false;
     for chunk in source.chunks() {
-        for &byte in chunk.as_bytes() {
-            if pending_cr {
-                pending_cr = false;
-                if byte == b'\n' {
-                    crlf += 1;
-                    continue;
-                }
-                cr += 1;
-            }
-            match byte {
-                b'\r' => pending_cr = true,
-                b'\n' => lf += 1,
-                _ => {}
-            }
+        let bytes = chunk.as_bytes();
+        if return_ends_chunk && bytes.first() == Some(&b'\n') {
+            crlf += 1;
+        }
+        crlf += bytes.windows(2).filter(|pair| *pair == b"\r\n").count();
+        if let Some(&last) = bytes.last() {
+            return_ends_chunk = last == b'\r';
         }
     }
-    cr += usize::from(pending_cr);
+    let lf = count(b'\n') - crlf;
+    let cr = returns - crlf;
     if crlf >= lf && crlf >= cr && crlf > 0 {
         "\r\n"
     } else if cr > lf && cr > 0 {
@@ -1347,6 +1358,27 @@ mod tests {
             1,
             "a step larger than the budget is still kept"
         );
+    }
+
+    /// The line ending a new line is written with is the one most lines end
+    /// with; ties go to the pair, then to the line feed.
+    #[test]
+    fn a_new_line_ends_the_way_most_lines_already_do() {
+        for (text, newline) in [
+            ("one\ntwo\n", "\n"),
+            ("one", "\n"),
+            ("one\r\ntwo\r\nthree\n", "\r\n"),
+            ("one\r\ntwo\nthree\n", "\n"),
+            ("one\r\ntwo\n", "\r\n"),
+            ("one\rtwo\rthree\n", "\r"),
+            ("one\rtwo\nthree\r\n", "\r\n"),
+        ] {
+            assert_eq!(
+                detect_preferred_newline(&Rope::from_str(text)),
+                newline,
+                "{text:?}"
+            );
+        }
     }
 
     #[test]
