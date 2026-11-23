@@ -568,6 +568,26 @@ pub(super) fn painted_texts(
     texts
 }
 
+/// [`painted_texts`] once the Measurements table holds what it measured: it
+/// measures off the frame, so the frames before that say it is measuring.
+pub(super) fn painted_texts_once_measured(
+    state: &mut ResultsTestHost,
+    sheet: fn(&mut Ui, &mut ResultsParts<'_>),
+) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let texts = painted_texts(state, sheet);
+        if !texts.iter().any(|text| text.starts_with("Measuring")) {
+            return texts;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Measurements table never finished measuring"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
 fn collect_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
     fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
         match shape {
