@@ -641,7 +641,8 @@ fn importers(bundle: &ProjectSourceBundle, logical_path: &str) -> Vec<String> {
 /// Every include the file pulls in and where it resolved, then the files
 /// that include it. A project file opens for editing, a built-in header
 /// opens read-only in the same well, and a name nothing holds is marked and
-/// takes the reader to its directive.
+/// takes the reader to its directive. The header counts the files included;
+/// the files that include this one are listed under their own caption.
 fn includes_section(
     ui: &mut Ui,
     navigation: &SourceNavigation,
@@ -653,7 +654,7 @@ fn includes_section(
     section_header(
         ui,
         &messages.text(MessageId::CodeNavigatorIncludes),
-        Some(&(navigation.includes.len() + importers.len()).to_string()),
+        Some(&navigation.includes.len().to_string()),
     );
     for include in &navigation.includes {
         match &include.target {

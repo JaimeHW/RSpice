@@ -316,7 +316,7 @@ fn revision_history_from_a_file_rows_menu_restores_the_revision_chosen() {
 }
 
 /// The rail's Includes lists both directions: what the file in front
-/// includes, and the files that include it.
+/// includes, and the files that include it. Its count is the files included.
 #[test]
 fn the_rail_lists_the_files_that_include_the_one_in_front() {
     let mut user = op_amp();
@@ -326,12 +326,18 @@ fn the_rail_lists_the_files_that_include_the_one_in_front() {
     user.settle();
     assert_eq!(selected(&user), "stage.va");
 
-    let included_by = user
-        .app
-        .state
-        .workbench
-        .messages()
-        .text(MessageId::CodeNavigatorIncludedBy);
+    let messages = user.app.state.workbench.messages();
+    let included = bundle(&user)
+        .file_content("stage.va")
+        .expect("the file")
+        .lines()
+        .filter(|line| line.trim_start().starts_with("`include"))
+        .count();
+    user.expect(&format!(
+        "{}, {included}",
+        messages.text(MessageId::CodeNavigatorIncludes)
+    ));
+    let included_by = messages.text(MessageId::CodeNavigatorIncludedBy);
     let caption = user.expect(&included_by);
     assert!(
         user.named
