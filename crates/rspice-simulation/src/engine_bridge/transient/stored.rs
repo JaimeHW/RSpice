@@ -164,7 +164,9 @@ impl EngineBridge {
                 stop @ (SinkStop::DiskFull { .. } | SinkStop::StorageBudget { .. }),
             )) if refused.is_none() => (None, None, Some(stop), Vec::new()),
             Err(source) => {
-                if matches!(source, rspice_core::SimulationError::Aborted) {
+                // A run stopped as its segment closed ends as stopped too, whatever the close
+                // answered.
+                if matches!(source, rspice_core::SimulationError::Aborted) || abort.is_aborted() {
                     discard_segment(inner, path);
                     return Err(SimulationError::Aborted);
                 }
@@ -730,16 +732,35 @@ fn discard_segment<W: Send + 'static>(writer: W, path: std::path::PathBuf) {
 }
 
 /// The run's sink as the engine writes it, except that a run stopped by the reader is not
-/// closed: its segment is deleted as the run returns, and closing it first would write `END`,
-/// a digest of every column, which on a million-device run is seconds of work thrown away.
-struct UnclosedOnStop<'a, S: rspice_core::result_sink::ResultSink> {
+/// closed, nor waited for while it closes: its segment is deleted as the run returns, and
+/// closing it writes `END`, a digest of every column, which on a million-device run is seconds
+/// of work thrown away.
+struct UnclosedOnStop<'a, S: ClosesUnlessStopped> {
     sink: &'a mut S,
     abort: &'a dyn AbortSignal,
 }
 
-impl<S: rspice_core::result_sink::ResultSink> rspice_core::result_sink::ResultSink
-    for UnclosedOnStop<'_, S>
-{
+/// A sink whose close a stopped run need not wait for.
+trait ClosesUnlessStopped: rspice_core::result_sink::ResultSink {
+    /// End the run with `status`, unless `stopped` says it was stopped before the close is done.
+    fn end_unless(
+        &mut self,
+        status: rspice_core::result_sink::RunStatus,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<rspice_core::result_sink::SinkReceipt, SinkStop>;
+}
+
+impl<I: rspice_results_store::RunIo> ClosesUnlessStopped for WatchedSink<I> {
+    fn end_unless(
+        &mut self,
+        status: rspice_core::result_sink::RunStatus,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<rspice_core::result_sink::SinkReceipt, SinkStop> {
+        WatchedSink::end_unless(self, status, stopped)
+    }
+}
+
+impl<S: ClosesUnlessStopped> rspice_core::result_sink::ResultSink for UnclosedOnStop<'_, S> {
     fn begin(
         &mut self,
         schema: &rspice_core::result_sink::ResultSchema,
@@ -778,7 +799,8 @@ impl<S: rspice_core::result_sink::ResultSink> rspice_core::result_sink::ResultSi
                 "the run was stopped before it closed".to_owned(),
             ));
         }
-        self.sink.end(status)
+        let abort = self.abort;
+        self.sink.end_unless(status, &|| abort.is_aborted())
     }
 
     fn annotate(&mut self, key: &str, bytes: &[u8]) -> Result<(), SinkStop> {

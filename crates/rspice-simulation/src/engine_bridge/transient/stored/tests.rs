@@ -421,9 +421,21 @@ fn stop_pressed_as_the_solve_ends_stops_the_run_before_it_is_read_back() {
     assert!(!segment.exists(), "{} is left behind", segment.display());
 }
 
-/// A sink that keeps how each run it was given ended.
+/// A sink that keeps how each run it was given ended, and whether its close was told the run
+/// had been stopped.
 #[derive(Default)]
-struct Endings(Vec<rspice_core::result_sink::RunStatus>);
+struct Endings(Vec<(rspice_core::result_sink::RunStatus, bool)>);
+
+impl ClosesUnlessStopped for Endings {
+    fn end_unless(
+        &mut self,
+        status: rspice_core::result_sink::RunStatus,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<rspice_core::result_sink::SinkReceipt, SinkStop> {
+        self.0.push((status, stopped()));
+        Ok(rspice_core::result_sink::SinkReceipt::default())
+    }
+}
 
 impl rspice_core::result_sink::ResultSink for Endings {
     fn begin(
@@ -453,13 +465,12 @@ impl rspice_core::result_sink::ResultSink for Endings {
         &mut self,
         status: rspice_core::result_sink::RunStatus,
     ) -> Result<rspice_core::result_sink::SinkReceipt, SinkStop> {
-        self.0.push(status);
-        Ok(rspice_core::result_sink::SinkReceipt::default())
+        self.end_unless(status, &|| false)
     }
 }
 
 #[test]
-fn a_run_the_reader_stopped_is_never_closed_and_every_other_ending_is() {
+fn a_stopped_run_is_neither_closed_nor_waited_for_and_every_other_ending_closes() {
     use rspice_core::abort_signal::ImmediateAbort;
     use rspice_core::result_sink::{ResultSink, RunStatus as Ending, StopReason};
     let cancelled = Ending::Stopped(StopReason::Cancelled);
@@ -473,8 +484,9 @@ fn a_run_the_reader_stopped_is_never_closed_and_every_other_ending_is() {
         refused.is_err(),
         "a stopped run's segment is deleted, not closed"
     );
-    // A run that completed as Stop was pressed keeps its results; a run cancelled with no
-    // Stop pending (its engine's own stop) closes as before.
+    // A run that completed as Stop was pressed starts its close, told the run was stopped so
+    // nothing waits for it; a run cancelled with no Stop pending (its engine's own stop)
+    // closes as before.
     UnclosedOnStop {
         sink: &mut endings,
         abort: &ImmediateAbort,
@@ -487,5 +499,9 @@ fn a_run_the_reader_stopped_is_never_closed_and_every_other_ending_is() {
     }
     .end(cancelled.clone())
     .expect("a run nobody stopped closes");
-    assert_eq!(endings.0, vec![Ending::Completed, cancelled]);
+    // The close of the run that completed is told Stop was pressed, so it is not waited for.
+    assert_eq!(
+        endings.0,
+        vec![(Ending::Completed, true), (cancelled, false)]
+    );
 }
