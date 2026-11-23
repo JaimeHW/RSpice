@@ -58,17 +58,21 @@ pub struct DerivedSeries {
     /// identity: merging two grids is a pass over both, and the pane is drawn
     /// every frame.
     xy_curves: std::collections::HashMap<u64, XyCurveMemo>,
-    /// The extent of a stored series over the last window asked of it, per
-    /// series key: a steady view reads no tile for its fit.
+    /// The extent of a stored series over its whole record and over the last
+    /// window asked of it, per series key: a steady view reads no tile for its
+    /// fit.
     stored_extents: std::collections::HashMap<u64, StoredExtentMemo>,
 }
 
-/// A window (`None`: the whole series, else its bounds' bits) and the extent
-/// read over it.
-type StoredExtentMemo = (
-    Option<(u64, u64)>,
-    Option<rspice_results::waveform::ValueExtent>,
-);
+/// A stored series' extent over its whole record, and over the last window
+/// asked of it by its bounds' bits. A pane asks both on every frame, whether
+/// it draws anything over the whole record and its fit over the window it
+/// shows, so each is kept beside the other rather than in its place.
+#[derive(Debug, Clone, Copy, Default)]
+struct StoredExtentMemo {
+    whole: Option<Option<rspice_results::waveform::ValueExtent>>,
+    window: Option<((u64, u64), Option<rspice_results::waveform::ValueExtent>)>,
+}
 
 /// What a strip's overview lane draws of its trace: the vertical fit and the
 /// gap-separated segments of the miniature.
@@ -208,22 +212,28 @@ impl DerivedSeries {
     }
 
     /// Fetch or compute the cached finite (min, max) of a series.
-    /// The extent of the stored series under `key` over `window`, built
-    /// when the window differs from the one last asked of the key.
+    /// The extent of the stored series under `key` over `window`, or over its
+    /// whole record when there is none: the whole record's built once per
+    /// data version, a window's when it differs from the last window asked of
+    /// the key.
     pub fn stored_extent_or(
         &mut self,
         key: u64,
         window: Option<(f64, f64)>,
         build: impl FnOnce() -> Option<rspice_results::waveform::ValueExtent>,
     ) -> Option<rspice_results::waveform::ValueExtent> {
-        let bits = window.map(|(x0, x1)| (x0.to_bits(), x1.to_bits()));
-        if let Some((held, extent)) = self.stored_extents.get(&key)
-            && *held == bits
+        let memo = self.stored_extents.entry(key).or_default();
+        let Some((x0, x1)) = window else {
+            return *memo.whole.get_or_insert_with(build);
+        };
+        let bits = (x0.to_bits(), x1.to_bits());
+        if let Some((held, extent)) = memo.window
+            && held == bits
         {
-            return *extent;
+            return extent;
         }
         let extent = build();
-        self.stored_extents.insert(key, (bits, extent));
+        memo.window = Some((bits, extent));
         extent
     }
 
@@ -384,6 +394,55 @@ mod tests {
         assert_eq!(&phase.in_memory().unwrap()[..2], &[170.0, 190.0]);
         assert!(phase.in_memory().unwrap()[2].is_nan());
         assert_eq!(&phase.in_memory().unwrap()[3..], &[-170.0, -190.0]);
+    }
+}
+
+#[cfg(test)]
+mod stored_extent_tests {
+    use super::DerivedSeries;
+    use rspice_results::waveform::ValueExtent;
+
+    /// A pane asks a stored curve's extent over its whole record and over the
+    /// window it shows on every frame: neither answer is read again while the
+    /// view stands, and a new window is read once.
+    #[test]
+    fn a_curves_whole_and_windowed_extents_are_each_read_once_while_the_view_stands() {
+        let mut derived = DerivedSeries::default();
+        let reads = std::cell::Cell::new(0);
+        let extent = |min: f64| ValueExtent {
+            min,
+            max: min + 1.0,
+            min_positive: min + 1.0,
+        };
+        let read = |min: f64| {
+            reads.set(reads.get() + 1);
+            Some(extent(min))
+        };
+        for _frame in 0..5 {
+            assert_eq!(
+                derived.stored_extent_or(7, None, || read(0.0)),
+                Some(extent(0.0))
+            );
+            assert_eq!(
+                derived.stored_extent_or(7, Some((1.0, 2.0)), || read(5.0)),
+                Some(extent(5.0))
+            );
+        }
+        assert_eq!(
+            reads.get(),
+            2,
+            "one read each for the whole record and the window"
+        );
+        assert_eq!(
+            derived.stored_extent_or(7, Some((1.0, 3.0)), || read(6.0)),
+            Some(extent(6.0))
+        );
+        assert_eq!(
+            derived.stored_extent_or(7, None, || read(9.0)),
+            Some(extent(0.0)),
+            "the whole record's extent outlives a change of window"
+        );
+        assert_eq!(reads.get(), 3);
     }
 }
 
