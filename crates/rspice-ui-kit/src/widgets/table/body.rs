@@ -156,6 +156,12 @@ impl DataTable<'_> {
                         words.push_str(", ");
                         words.push_str(icon.accessible_label());
                     }
+                    if cell.says_hint
+                        && let Some(hint) = &cell.hint
+                    {
+                        words.push_str(", ");
+                        words.push_str(&hint.replace('\n', " "));
+                    }
                     if self.kind == Kind::Grid {
                         format!("{}: {words}", column.head)
                     } else {

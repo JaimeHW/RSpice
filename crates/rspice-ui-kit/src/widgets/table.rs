@@ -317,6 +317,9 @@ pub struct Cell {
     icon: Option<Icon>,
     /// A mark at the cell's right end, after the words.
     trailing: Option<Icon>,
+    /// The row reads the hint out after the words: the words are a problem
+    /// and the hint says what it is.
+    says_hint: bool,
     /// How many levels of a tree the words step in.
     indent: u8,
     twist: Twist,
@@ -350,6 +353,7 @@ impl Cell {
             sort: None,
             icon: None,
             trailing: None,
+            says_hint: false,
             indent: 0,
             twist: Twist::None,
             unsaved: false,
@@ -373,6 +377,12 @@ impl Cell {
         Self::with(text, true, Ink::Plain)
     }
 
+    /// Words in sans in the faint register: what a row inherits rather
+    /// than holds, such as a view list it takes from above.
+    pub fn faint(text: impl Into<String>) -> Self {
+        Self::with(text, false, Ink::Faint)
+    }
+
     /// A value the run does not hold: an em dash in the faint register.
     pub fn absent() -> Self {
         Self::with("\u{2014}", true, Ink::Faint)
@@ -393,6 +403,16 @@ impl Cell {
     /// Neutral words behind a problem's mark.
     pub fn problem(text: impl Into<String>, problem: Problem) -> Self {
         Self::with(text, false, Ink::Problem(problem))
+    }
+
+    /// The same words behind a problem's mark, in the face they were set in:
+    /// a name that is itself the problem, such as an instance that is not
+    /// bound. The cell's hint says what the problem is, under the pointer
+    /// and read out with the row.
+    pub fn marked(mut self, problem: Problem) -> Self {
+        self.ink = Ink::Problem(problem);
+        self.says_hint = true;
+        self
     }
 
     /// The same words with `icon` at the cell's right end: a state of what
