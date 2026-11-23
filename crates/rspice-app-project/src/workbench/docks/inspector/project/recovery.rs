@@ -85,7 +85,7 @@ fn checkpoint_record(
         ui,
         "Note",
         checkpoint.note().unwrap_or_default(),
-        busy,
+        (busy, false),
         |text| normalized_note(text).err().map(|error| sentence(&error)),
     );
     property_row_path(ui, "Where kept", location(inspector));
