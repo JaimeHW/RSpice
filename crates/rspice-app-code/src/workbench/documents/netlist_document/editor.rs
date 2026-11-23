@@ -780,6 +780,7 @@ fn publish_check(netlist: &mut super::NetlistDocumentState, checked: CheckedSour
     if let Some(unread) = checked.unread {
         netlist.unread_source = unread.map(|unread| (checked.revision, unread.into()));
     }
+    netlist.dialect_hint = checked.dialect_hint;
     netlist.diag_revision = Some(checked.revision);
 }
 
@@ -947,6 +948,9 @@ struct CheckedSource {
     /// the file it found; absent when the check did not read the buffer as
     /// its own deck.
     includes: Option<Vec<CheckedInclude>>,
+    /// What the buffer, read as a root deck, says of the program that wrote
+    /// it; absent for the Added lines and a dependency.
+    dialect_hint: Option<super::dialect::DialectHint>,
 }
 
 /// What a check of the shown source reads, taken from the model at one
@@ -1108,8 +1112,14 @@ impl SourceCheck {
                 unread: None,
                 reading: None,
                 includes: None,
+                dialect_hint: None,
             };
         }
+        // The hint reads the whole text, so it is read here, away from the
+        // frame, rather than by the band that shows it.
+        let dialect_hint = (!is_dependency)
+            .then(|| super::dialect::hint(&buffer))
+            .flatten();
         // A narrow override is parsed as the deck it executes as: the
         // generated base with the override spliced in. Every position the
         // parse reports is a position in that deck, and has to be carried
@@ -1158,6 +1168,7 @@ impl SourceCheck {
                     unread: None,
                     reading: None,
                     includes: None,
+                    dialect_hint,
                 };
             }
         };
@@ -1233,6 +1244,7 @@ impl SourceCheck {
             unread: Some(unread),
             reading,
             includes,
+            dialect_hint,
         }
     }
 }

@@ -9,8 +9,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Button;
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::netlist_document::dialect::{
-    DeckReading, Dialect, DialectHint, declare, dialect_name, hint_once_per_check, reading_detail,
-    reading_name, shown_source_in,
+    DeckReading, Dialect, DialectHint, declare, dialect_name, reading_detail, reading_name,
+    shown_source_in,
 };
 use crate::workbench::documents::netlist_document::{
     NetlistDocumentState, active_netlist_source_is_editable_in, editor_id_in,
@@ -144,14 +144,10 @@ pub(crate) fn deck_hint_band(
 ) {
     let editable_deck = shown_source_in(model, netlist).is_some_and(|source| source.root)
         && active_netlist_source_is_editable_in(model, netlist);
-    let Some(checked) = netlist.validated_revision().filter(|_| editable_deck) else {
+    let Some(hint) = netlist.dialect_hint().filter(|_| editable_deck) else {
         return;
     };
     let editor_id = editor_id_in(model, netlist);
-    let deck = &model.simulation.source.netlist_content;
-    let Some(hint) = hint_once_per_check(ui.ctx(), editor_id, checked, deck) else {
-        return;
-    };
     if let Some(dialect) = dialect_hint_band(ui, hint, editor_id, messages) {
         read_deck_as(ui.ctx(), model, netlist, dialect);
     }

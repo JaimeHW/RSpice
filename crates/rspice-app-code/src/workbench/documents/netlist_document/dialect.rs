@@ -373,27 +373,6 @@ const MARKERS: [(&str, Dialect); 2] = [
     (".control", Dialect::Ngspice),
 ];
 
-/// [`hint`] for the root deck `deck` the editor `editor_id` shows, read once
-/// per check of the deck, `checked` naming the check, rather than once per
-/// frame or keystroke.
-pub(crate) fn hint_once_per_check(
-    context: &egui::Context,
-    editor_id: egui::Id,
-    checked: u64,
-    deck: &str,
-) -> Option<DialectHint> {
-    let id = editor_id.with("dialect-hint");
-    if let Some((held, hinted)) =
-        context.data(|data| data.get_temp::<(u64, Option<DialectHint>)>(id))
-        && held == checked
-    {
-        return hinted;
-    }
-    let hinted = hint(deck);
-    context.data_mut(|data| data.insert_temp(id, (checked, hinted)));
-    hinted
-}
-
 /// The first marker card in the root deck `deck`, when it declares no
 /// dialect.
 pub(crate) fn hint(deck: &str) -> Option<DialectHint> {

@@ -777,6 +777,9 @@ pub struct NetlistDocumentState {
     pub revision: u64,
     /// Revision the diagnostics were parsed for.
     diag_revision: Option<u64>,
+    /// What the root deck the last check read says of the program that
+    /// wrote it, found by the check beside its findings.
+    dialect_hint: Option<dialect::DialectHint>,
     /// Library folders the diagnostics resolved includes through; a change
     /// in Preferences stales them as an edit does.
     diag_library_folders: Vec<std::path::PathBuf>,
@@ -933,6 +936,12 @@ impl NetlistDocumentState {
             return None;
         }
         self.diag_revision
+    }
+
+    /// What the root deck the findings were validated against says of the
+    /// program that wrote it, when it declares no dialect.
+    pub(crate) fn dialect_hint(&self) -> Option<dialect::DialectHint> {
+        self.validated_revision().and(self.dialect_hint)
     }
 
     /// Record a settled parse of `revision`, as the editor does once it has
