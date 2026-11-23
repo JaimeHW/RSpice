@@ -44,12 +44,95 @@ pub struct CompletionAnchor {
 }
 
 /// One row offered by the popover.
+#[derive(Clone)]
 struct Candidate {
     kind: String,
     label: String,
     detail: String,
     doc: String,
     insert: String,
+}
+
+/// What the popover offers, row by row: the rows before the deck's nodes
+/// and after them, and the nodes, read from the deck's index as each row
+/// shows, so a deck of a million nodes offers every one at the cost of the
+/// rows in view.
+#[derive(Default)]
+struct Offered {
+    /// A subcircuit's ports, on a pin.
+    before: Vec<Candidate>,
+    nodes: Option<NodeRows>,
+    after: Vec<Candidate>,
+}
+
+/// The nodes offered on a pin: the names the caret's scope sees that start
+/// with the token, less the token itself and the ports offered before them.
+struct NodeRows {
+    project: std::sync::Arc<super::language::NetlistProjectIndex>,
+    scope: usize,
+    /// The names' positions in the scope's, as the index orders them.
+    starting: std::ops::Range<usize>,
+    /// The positions among them not offered, in order.
+    skipped: Vec<usize>,
+    kind: String,
+    detail: String,
+    doc: String,
+}
+
+impl NodeRows {
+    fn len(&self) -> usize {
+        self.starting.len() - self.skipped.len()
+    }
+
+    fn row(&self, row: usize) -> Option<Candidate> {
+        let mut position = self.starting.start + row;
+        for skipped in &self.skipped {
+            if *skipped <= position {
+                position += 1;
+            }
+        }
+        if position >= self.starting.end {
+            return None;
+        }
+        let name = self.project.node_at(self.scope, position)?;
+        Some(Candidate {
+            kind: self.kind.clone(),
+            label: name.to_owned(),
+            detail: self.detail.clone(),
+            doc: self.doc.clone(),
+            insert: name.to_owned(),
+        })
+    }
+}
+
+impl Offered {
+    fn rows(rows: Vec<Candidate>) -> Self {
+        Self {
+            after: rows,
+            ..Self::default()
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.before.len() + self.nodes.as_ref().map_or(0, NodeRows::len) + self.after.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The row at `row`, made for a node.
+    fn row(&self, row: usize) -> Option<std::borrow::Cow<'_, Candidate>> {
+        if let Some(candidate) = self.before.get(row) {
+            return Some(std::borrow::Cow::Borrowed(candidate));
+        }
+        let row = row - self.before.len();
+        let nodes = self.nodes.as_ref().map_or(0, NodeRows::len);
+        if row < nodes {
+            return self.nodes.as_ref()?.row(row).map(std::borrow::Cow::Owned);
+        }
+        self.after.get(row - nodes).map(std::borrow::Cow::Borrowed)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -279,8 +362,8 @@ pub fn show(
         before != Some(shown)
     });
 
-    state.completion_index =
-        (state.completion_index as i32 + move_delta).rem_euclid(candidates.len() as i32) as usize;
+    state.completion_index = (state.completion_index as i64 + i64::from(move_delta))
+        .rem_euclid(candidates.len() as i64) as usize;
     let selected = state.completion_index.min(candidates.len() - 1);
 
     let clicked = draw_popover(
@@ -294,8 +377,7 @@ pub fn show(
     );
     let take = if accept { Some(selected) } else { clicked };
 
-    if let Some(index) = take {
-        let chosen = &candidates[index];
+    if let Some(chosen) = take.and_then(|index| candidates.row(index)) {
         // A token is ASCII, a byte to a character.
         let placed_caret = anchor.caret_char_index - token.len() + chosen.insert.chars().count();
         state.completion_open = false;
@@ -911,15 +993,17 @@ fn collect_candidates(
     pins: Option<PinHelp>,
     parameters: Option<ParameterSite>,
     messages: MessageCatalog,
-) -> Vec<Candidate> {
-    let mut out = Vec::new();
+) -> Offered {
     let lower = token.to_ascii_lowercase();
     if let Some(site) = parameters.filter(|site| !token.is_empty() || site.offers_unprompted()) {
-        let offered = parameter_candidates(&site, token, messages);
-        if !offered.is_empty() {
-            return offered;
+        let rows = parameter_candidates(&site, token, messages);
+        if !rows.is_empty() {
+            return Offered::rows(rows);
         }
     }
+    let mut before = Vec::new();
+    let mut nodes = None;
+    let mut out = Vec::new();
 
     // On a pin: the subcircuit's port name, then the nodes the scope has,
     // each saying which pin it would connect.
@@ -939,7 +1023,7 @@ fn collect_candidates(
             if port.to_ascii_lowercase().starts_with(&lower)
                 && seen.insert(port.to_ascii_lowercase())
             {
-                out.push(Candidate {
+                before.push(Candidate {
                     kind: messages.text(MessageId::NetlistCompletionPin),
                     label: port.clone(),
                     detail: messages.format(
@@ -955,35 +1039,45 @@ fn collect_candidates(
                 });
             }
         }
-        let project = state.project_index.last_built();
-        let scope = project.as_ref().map_or(0, |project| {
-            project.scope_at(state.front.include(), state.cursor_line + 1)
-        });
-        let nodes = project
-            .as_ref()
-            .map(|project| project.nodes_in(scope))
-            .unwrap_or_default();
-        for node in nodes {
-            let node_lower = node.to_ascii_lowercase();
-            if node_lower.starts_with(&lower) && node_lower != lower && seen.insert(node_lower) {
-                out.push(Candidate {
-                    kind: messages.text(MessageId::NetlistCompletionNode),
-                    label: node.to_owned(),
-                    detail: messages
-                        .format(MessageId::NetlistCompletionAsPin, &[("pin", &pins.pin)]),
-                    doc: doc.clone(),
-                    insert: node.to_owned(),
-                });
+        // The nodes the token starts, found by a search of the index's
+        // names: not the token itself, nor a port offered above.
+        nodes = state.project_index.last_built().map(|project| {
+            let scope = project.scope_at(state.front.include(), state.cursor_line + 1);
+            let starting = project.nodes_starting(scope, &lower);
+            let mut skipped = seen
+                .iter()
+                .chain(std::iter::once(&lower))
+                .filter_map(|name| project.node_named(scope, name))
+                .filter(|position| starting.contains(position))
+                .collect::<Vec<_>>();
+            skipped.sort_unstable();
+            skipped.dedup();
+            NodeRows {
+                project,
+                scope,
+                starting,
+                skipped,
+                kind: messages.text(MessageId::NetlistCompletionNode),
+                detail: messages.format(MessageId::NetlistCompletionAsPin, &[("pin", &pins.pin)]),
+                doc,
             }
-        }
+        });
         if token.is_empty() {
-            return out;
+            return Offered {
+                before,
+                nodes,
+                after: out,
+            };
         }
     }
 
     if token.starts_with('.') {
         if !at_line_start {
-            return out;
+            return Offered {
+                before,
+                nodes,
+                after: out,
+            };
         }
         // An analysis is offered by the spelling being typed, the usual one
         // when the typing starts it.
@@ -1015,12 +1109,20 @@ fn collect_candidates(
                 });
             }
         }
-        return out;
+        return Offered {
+            before,
+            nodes,
+            after: out,
+        };
     }
 
     // Deck symbols (models, subckts) for bare identifiers of 2+ chars.
     if token.len() < 2 {
-        return out;
+        return Offered {
+            before,
+            nodes,
+            after: out,
+        };
     }
     let project = state.project_index.last_built();
     // The models, subcircuits and functions the caret's scope sees; the
@@ -1073,7 +1175,11 @@ fn collect_candidates(
             });
         }
     }
-    out
+    Offered {
+        before,
+        nodes,
+        after: out,
+    }
 }
 
 fn completion_popover_geometry(
@@ -1123,7 +1229,7 @@ const KINDS: [MessageId; 7] = [
 fn draw_popover(
     ui: &Ui,
     anchor: egui::Pos2,
-    candidates: &[Candidate],
+    candidates: &Offered,
     selected: usize,
     reveal: bool,
     takes_keys: bool,
@@ -1190,7 +1296,9 @@ fn draw_popover(
                     }
                     rows.show_rows(ui, ROW_HEIGHT, candidates.len(), |ui, shown| {
                         for idx in shown {
-                            let candidate = &candidates[idx];
+                            let Some(candidate) = candidates.row(idx) else {
+                                continue;
+                            };
                             let (rect, response) = ui.allocate_exact_size(
                                 egui::vec2(ui.available_width(), ROW_HEIGHT),
                                 egui::Sense::click(),
@@ -1256,16 +1364,19 @@ fn draw_popover(
                     });
 
                     // Doc footer for the selected item.
-                    let doc = &candidates[selected].doc;
+                    let doc = candidates
+                        .row(selected)
+                        .map(|candidate| candidate.doc.clone())
+                        .unwrap_or_default();
                     if !doc.is_empty() {
                         let galley = ui.painter().layout(
                             // Non-breaking blanks keep the key's words
                             // together, and off the start of a line.
                             if takes_keys {
                                 messages
-                                    .format(MessageId::NetlistCompletionAccept, &[("note", doc)])
+                                    .format(MessageId::NetlistCompletionAccept, &[("note", &doc)])
                             } else {
-                                doc.clone()
+                                doc
                             },
                             theme::sans(tokens::FS_0, FontWeight::Regular),
                             c.text_dim,
@@ -1355,7 +1466,21 @@ mod tests {
     ) -> Vec<Candidate> {
         let pins = pin_help(state, deck, caret, english());
         let parameters = parameter_site(state, deck, caret);
-        collect_candidates(state, token, false, pins, parameters, english())
+        every_row(&collect_candidates(
+            state,
+            token,
+            false,
+            pins,
+            parameters,
+            english(),
+        ))
+    }
+
+    /// Every row `offered` offers, in order.
+    fn every_row(offered: &Offered) -> Vec<Candidate> {
+        (0..offered.len())
+            .filter_map(|row| offered.row(row).map(std::borrow::Cow::into_owned))
+            .collect()
     }
 
     /// What `token`, typed at the end of `deck`, would insert, row by row.
@@ -1452,6 +1577,84 @@ mod tests {
         assert_eq!(rows.len(), 12, "{rows:?}");
     }
 
+    /// The nodes a pin offers, found by a search of the index's names, are
+    /// those a reading of every node of the deck finds: written in the
+    /// caret's scope, global or ground, starting with the token in any case,
+    /// each once as first written and never the token itself, in the order
+    /// of their names.
+    #[test]
+    fn the_nodes_a_pin_offers_are_those_a_reading_of_every_node_finds() {
+        const TOP: &str = ".global VDD\n.subckt amp in out\nR1 in Mid 1k\nR2 mid out 1k\n\
+            .ends amp\nV1 Net_A 0 1\nR3 net_a net_b 1k\nR4 NET_B nb2 1k\nR5 n1 vdd 1k\n";
+        const INSIDE: &str = ".global VDD\n.subckt amp in out\nR1 in Mid 1k\nR2 mid out 1k\n";
+        let cases = [
+            (TOP, ""),
+            (TOP, "n"),
+            (TOP, "N"),
+            (TOP, "net_"),
+            (TOP, "NET_A"),
+            (TOP, "net_b"),
+            (TOP, "nb2"),
+            (TOP, "vd"),
+            (TOP, "0"),
+            (TOP, "x"),
+            (INSIDE, ""),
+            (INSIDE, "m"),
+            (INSIDE, "i"),
+        ];
+        for (nodes, token) in cases {
+            let deck = format!("{HEAD}{nodes}R9 {token}");
+            let mut harness = crate::workbench::code::tests::harness();
+            super::super::fixtures::seed_deck(
+                &mut harness.model,
+                &mut harness.state.netlist,
+                &deck,
+                "* models\n",
+            );
+            let state = &mut harness.state.netlist;
+            let project = super::super::language::project_index_now(&harness.model, state)
+                .expect("the deck's index");
+            state.cursor_line = deck.matches('\n').count();
+            let offered = rows_offered(state, &deck, deck.len() - token.len(), token)
+                .into_iter()
+                .filter(|row| row.kind == "node")
+                .map(|row| row.label)
+                .collect::<Vec<_>>();
+
+            let scope = project.scope_at(None, state.cursor_line + 1);
+            let lower = token.to_ascii_lowercase();
+            let mut seen = std::collections::HashSet::new();
+            let index = project.deck();
+            let mut read = index
+                .nodes()
+                .iter()
+                .filter(|node| {
+                    node.scope == scope
+                        || index.cards()[node.card].kind
+                            == rspice_core::netlist::DeckCardKind::Global
+                        || node.name == "0"
+                })
+                .filter(|node| seen.insert(node.name.to_ascii_lowercase()))
+                .map(|node| node.name.clone())
+                .filter(|name| {
+                    let name = name.to_ascii_lowercase();
+                    name.starts_with(&lower) && name != lower
+                })
+                .collect::<Vec<_>>();
+            read.sort_by_key(|name| name.to_ascii_lowercase());
+            assert_eq!(offered, read, "{token:?} after {nodes:?}");
+        }
+        // A name written in two cases is offered once, as first written.
+        let deck = format!("{HEAD}{TOP}R9 net_");
+        let (rows, _) = offered(&deck, "net_");
+        let labels = rows
+            .iter()
+            .filter(|(kind, _, _)| kind == "node")
+            .map(|(_, label, _)| label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(labels, ["Net_A", "net_b"]);
+    }
+
     #[test]
     fn a_key_scrolls_the_list_just_far_enough_to_show_the_selected_row() {
         let row = ROW_HEIGHT;
@@ -1539,14 +1742,14 @@ mod tests {
             token_at(buffer, caret).unwrap_or((caret, String::new(), usize::MAX));
         let pins = pin_help(state, buffer, token_start, english());
         let parameters = parameter_site(state, buffer, token_start);
-        collect_candidates(
+        every_row(&collect_candidates(
             state,
             &token,
             token_start == line_start,
             pins,
             parameters,
             english(),
-        )
+        ))
     }
 
     #[test]

@@ -101,6 +101,11 @@ pub(crate) struct NetlistProjectIndex {
     /// The files indexed, in the order the index numbers them: the root,
     /// then its SPICE includes.
     files: Vec<IndexedFile>,
+    /// The node names each scope sees, by the scope: the positions in the
+    /// deck's nodes of the first written of each name, in the order of the
+    /// names ignoring case, so the names a prefix starts are found by a
+    /// search.
+    nodes_by_name: Vec<Vec<usize>>,
 }
 
 /// The index of a large deck is millions of small allocations: whoever lets
@@ -308,6 +313,7 @@ impl NetlistProjectIndex {
         index.references = references;
         index.raw_hierarchy = raw_hierarchy;
         index.source_count = files.len();
+        index.nodes_by_name = nodes_by_name(&deck);
         index.deck = deck;
         index.files = files;
         index.expand_hierarchy();
@@ -743,22 +749,40 @@ impl NetlistProjectIndex {
         }
     }
 
-    /// The node names written in `scope`, and the deck's global ones, each
-    /// once as first written.
-    pub(crate) fn nodes_in(&self, scope: usize) -> Vec<&str> {
-        let mut seen = HashSet::new();
-        self.deck
-            .nodes()
-            .iter()
-            .filter(|node| {
-                node.scope == scope
-                    || self.deck.cards().get(node.card).map(|card| card.kind)
-                        == Some(rspice_core::netlist::DeckCardKind::Global)
-                    || node.name == "0"
-            })
-            .filter(|node| seen.insert(node.name.to_ascii_lowercase()))
-            .map(|node| node.name.as_str())
-            .collect()
+    /// The node name at `position` of those a reader in `scope` sees: the
+    /// names written in the scope, the deck's global ones and ground, each
+    /// once as first written, in the order of the names ignoring case.
+    pub(crate) fn node_at(&self, scope: usize, position: usize) -> Option<&str> {
+        let node = *self.nodes_by_name.get(scope)?.get(position)?;
+        self.deck.nodes().get(node).map(|node| node.name.as_str())
+    }
+
+    /// The positions, as [`Self::node_at`] reads them, of the node names a
+    /// reader in `scope` sees that start with `prefix`, ignoring case.
+    pub(crate) fn nodes_starting(&self, scope: usize, prefix: &str) -> std::ops::Range<usize> {
+        let Some(names) = self.nodes_by_name.get(scope) else {
+            return 0..0;
+        };
+        let nodes = self.deck.nodes();
+        let start = names.partition_point(|&node| by_name(&nodes[node].name, prefix).is_lt());
+        let starting = names[start..].partition_point(|&node| {
+            nodes[node]
+                .name
+                .as_bytes()
+                .get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+        });
+        start..start + starting
+    }
+
+    /// The position, as [`Self::node_at`] reads it, of the node `name` a
+    /// reader in `scope` sees, ignoring case.
+    pub(crate) fn node_named(&self, scope: usize, name: &str) -> Option<usize> {
+        let nodes = self.deck.nodes();
+        self.nodes_by_name
+            .get(scope)?
+            .binary_search_by(|&node| by_name(&nodes[node].name, name))
+            .ok()
     }
 
     /// The ports of the subcircuit `symbol`, in order.
@@ -806,6 +830,55 @@ impl NetlistProjectIndex {
         })
         .collect()
     }
+}
+
+/// `left` against `right`, ignoring ASCII case.
+fn by_name(left: &str, right: &str) -> std::cmp::Ordering {
+    left.bytes()
+        .map(|byte| byte.to_ascii_lowercase())
+        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+}
+
+/// The node names each scope of `deck` sees, as
+/// [`NetlistProjectIndex::node_at`] reads them: those written in the scope,
+/// the global ones and ground, the first written of each name standing for
+/// it.
+fn nodes_by_name(deck: &DeckIndex) -> Vec<Vec<usize>> {
+    let nodes = deck.nodes();
+    let mut by_scope = vec![Vec::new(); deck.scopes().len().max(1)];
+    let mut everywhere = Vec::new();
+    for (position, node) in nodes.iter().enumerate() {
+        if node.name == "0"
+            || deck.cards().get(node.card).map(|card| card.kind)
+                == Some(rspice_core::netlist::DeckCardKind::Global)
+        {
+            everywhere.push(position);
+        } else if let Some(names) = by_scope.get_mut(node.scope) {
+            names.push(position);
+        }
+    }
+    for names in &mut by_scope {
+        // Sorted by each name in lower case, made only for a name written
+        // with capitals, and then by where it is written, so the first
+        // written of a name is the one kept.
+        let mut folded = names
+            .iter()
+            .chain(&everywhere)
+            .map(|&position| {
+                let name = nodes[position].name.as_str();
+                let folded = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                    std::borrow::Cow::Owned(name.to_ascii_lowercase())
+                } else {
+                    std::borrow::Cow::Borrowed(name)
+                };
+                (folded, position)
+            })
+            .collect::<Vec<_>>();
+        folded.sort_unstable();
+        folded.dedup_by(|later, kept| later.0 == kept.0);
+        *names = folded.into_iter().map(|(_, position)| position).collect();
+    }
+    by_scope
 }
 
 /// Where `location` is, as the editor opens it.
