@@ -21,7 +21,7 @@ use rspice_simulation_contract::plan_model::AnalysisInstance;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
-use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::design_system::{WorkbenchIcon, elide_middle, elide_text};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH;
 
@@ -218,27 +218,27 @@ pub(in crate::workbench) fn run_config_selector(
             t.color.text_faint
         },
     );
-    let copy_clip = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 31.0, rect.top()),
-        egui::pos2(rect.right() - 22.0, rect.bottom()),
-    );
-    let copy_painter = ui.painter().with_clip_rect(copy_clip);
-    copy_painter.text(
+    // At its cap the chip shortens its lines with an ellipsis rather than
+    // cutting a glyph at the chevron's gutter.
+    let room = rect.width() - 31.0 - 22.0;
+    let title_font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let summary_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    ui.painter().text(
         egui::Pos2::new(rect.left() + 31.0, rect.center().y - 6.5),
         egui::Align2::LEFT_CENTER,
-        &copy.title,
-        theme::sans(tokens::FS_0, FontWeight::Medium),
+        elide_text(ui, &copy.title, &title_font, room),
+        title_font,
         if enabled {
             t.color.text
         } else {
             t.color.text_faint
         },
     );
-    copy_painter.text(
+    ui.painter().text(
         egui::Pos2::new(rect.left() + 31.0, rect.center().y + 7.0),
         egui::Align2::LEFT_CENTER,
-        &copy.summary,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        elide_text(ui, &copy.summary, &summary_font, room),
+        summary_font,
         t.color.text_faint,
     );
     WorkbenchIcon::ChevronDown.paint(
@@ -509,18 +509,18 @@ pub(in crate::workbench) fn deck_chip(
         ),
         t.color.text_dim,
     );
-    let copy_painter = ui.painter().with_clip_rect(egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 31.0, rect.top()),
-        egui::pos2(rect.right() - 8.0, rect.bottom()),
-    ));
-    copy_painter.text(
+    // A long file name keeps its start and its extension, shortened in the
+    // middle, and leaves the right inset the chip's width allowed for; hover
+    // names it whole.
+    let name_font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    ui.painter().text(
         egui::Pos2::new(rect.left() + 31.0, rect.center().y - 6.5),
         egui::Align2::LEFT_CENTER,
-        deck,
-        theme::sans(tokens::FS_0, FontWeight::Medium),
+        elide_middle(ui, deck, &name_font, rect.width() - 31.0 - 22.0),
+        name_font,
         t.color.text,
     );
-    copy_painter.text(
+    ui.painter().text(
         egui::Pos2::new(rect.left() + 31.0, rect.center().y + 7.0),
         egui::Align2::LEFT_CENTER,
         summary,
