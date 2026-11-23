@@ -91,7 +91,7 @@ pub(in crate::workbench) fn netlist(
         return asked;
     }
     if crate::workbench::documents::deck_files::reading_deck_in_front(parts.netlist) {
-        crate::workbench::code::netlist_first::reading_line(ui, parts.messages);
+        reading_outline(ui, parts, &mut asked);
         return asked;
     }
     if let Some(missing) =

@@ -181,6 +181,9 @@ pub(crate) fn kept_deck_facts(
 /// facts or rows will be.
 pub(crate) fn reading_line(ui: &mut Ui, messages: MessageCatalog) {
     ui.horizontal(|ui| {
+        // The theme's gap between the mark and its words, kept where the
+        // page lays its own rows tight, as the editor's page does.
+        ui.spacing_mut().item_spacing.x = crate::ui::tokens::SP_4;
         crate::ui::widgets::busy_mark(ui, 14.0);
         ui.label(messages.text(MessageId::NetlistReadingText));
     });
