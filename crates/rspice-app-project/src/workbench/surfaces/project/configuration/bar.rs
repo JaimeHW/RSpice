@@ -1,9 +1,10 @@
 //! The Configuration page's one bar. On the left, the configuration in front
-//! of the reader and what is done to it: the picker, the unsaved dot while
-//! it has edits not applied, Apply, Revert and More; then the table the page
-//! shows, the table's filter and, on Instances, Add pattern binding. On the
-//! right, how much of the design the configuration binds, and whether runs
-//! use it.
+//! of the reader and what is done to it: the picker, Apply, Revert and More;
+//! then the table the page shows, the table's filter and, on Instances, Add
+//! pattern binding. On the right, how much of the design the configuration
+//! binds, and whether runs use it. Edits not applied are the Configuration
+//! tab's unsaved mark and Apply and Revert offered; the bar adds no mark of
+//! its own.
 
 use super::*;
 use crate::ui::accessibility::{counted, grouped};
@@ -27,23 +28,17 @@ pub(super) enum BarIntent {
     Table(TableAction),
 }
 
-/// What the dot beside the picker says, and the hover over it.
-pub(super) const EDITS_NOT_APPLIED: &str = "Edits not applied";
 const READ_ONLY: &str = "The project is open read-only.";
 const CHECKING: &str = "The edits are being checked.";
 /// The widest the picker shows a configuration's name; a longer one is
 /// shortened, whole on hover and in the list.
 const PICKER_NAME_WIDTH: f32 = 220.0;
-/// The unsaved dot: the table's, so an unapplied edit reads alike wherever
-/// it is marked.
-const UNSAVED_RADIUS: f32 = 3.0;
 
 /// One configuration the picker lists.
 struct Choice {
     selection: ConfigurationSelection,
     name: String,
     used_for_runs: bool,
-    unsaved: bool,
 }
 
 /// What the bar states and offers this frame.
@@ -123,10 +118,6 @@ pub(super) fn configuration_bar(
         adds: editable && page.tab == ConfigurationTab::Instances,
         tab: page.tab,
     };
-    let edited = page
-        .is_dirty(catalog)
-        .then(|| page.draft().map(|draft| draft.id))
-        .flatten();
     let choices = std::iter::once((ConfigurationSelection::Default, "Default".to_owned()))
         .chain(catalog.configurations().iter().map(|configuration| {
             (
@@ -138,16 +129,12 @@ pub(super) fn configuration_bar(
             selection: target,
             name,
             used_for_runs: used_for_runs(catalog, target),
-            unsaved: edited.is_some_and(|id| target == ConfigurationSelection::Configuration(id)),
         })
         .collect::<Vec<_>>();
     let (report, problem) = report(&state, resolution);
     let page = &mut cx.state.configuration;
     PageBar::new().report(report, problem).show(ui, |ui| {
         let mut asked = picker(ui, &state, &choices).map(BarIntent::Select);
-        if state.dirty {
-            unsaved_dot(ui);
-        }
         if state.custom() {
             if bar_button(ui, "Apply", state.apply_refusal()) {
                 asked = Some(BarIntent::Apply);
@@ -194,10 +181,10 @@ pub(super) fn configuration_bar(
 }
 
 /// The configuration in front, as a button that lists every configuration:
-/// Default first, the one runs use saying so, one with edits not applied
-/// carrying the unsaved dot. Returns the configuration picked.
+/// Default first, the one runs use saying so. Edits not applied are only
+/// ever the configuration in front's, which the tab marks, so the list
+/// marks none. Returns the configuration picked.
 fn picker(ui: &mut Ui, state: &BarState, choices: &[Choice]) -> Option<ConfigurationSelection> {
-    let t = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let shown = elide_text(ui, &state.name, &font, PICKER_NAME_WIDTH);
     let spoken = format!("Configuration: {}", state.name);
@@ -214,34 +201,12 @@ fn picker(ui: &mut Ui, state: &BarState, choices: &[Choice]) -> Option<Configura
     egui::Popup::menu(&button).show(|ui| {
         ui.set_min_width(button.rect.width().max(200.0));
         for choice in choices {
-            let selected = choice.selection == state.selection;
-            // The dot is a slot of the item's own layout after the name, so
-            // it stands clear of the name's last letter in any face.
-            let dot = ui.id().with(("unsaved", choice.name.as_str()));
-            let mut item = if choice.unsaved {
-                egui::Button::selectable(
-                    selected,
-                    (
-                        &*choice.name,
-                        egui::Atom::custom(dot, egui::Vec2::splat(2.0 * UNSAVED_RADIUS)),
-                    ),
-                )
-            } else {
-                egui::Button::selectable(selected, &*choice.name)
-            };
+            let mut item =
+                egui::Button::selectable(choice.selection == state.selection, &*choice.name);
             if choice.used_for_runs {
                 item = item.shortcut_text("used for runs");
             }
-            let response = item.atom_ui(ui);
-            if choice.unsaved {
-                if let Some(slot) = response.rect(dot) {
-                    ui.painter()
-                        .circle_filled(slot.center(), UNSAVED_RADIUS, t.color.text_dim);
-                }
-                let spoken = format!("{}, unsaved changes", choice.name);
-                ui.ctx()
-                    .accesskit_node_builder(response.id, |node| node.set_label(spoken));
-            }
+            let response = ui.add(item);
             if response.clicked() {
                 picked = Some(choice.selection);
                 ui.close();
@@ -249,19 +214,6 @@ fn picker(ui: &mut Ui, state: &BarState, choices: &[Choice]) -> Option<Configura
         }
     });
     picked
-}
-
-/// The unsaved dot beside the picker: the configuration in front has edits
-/// that are not applied.
-fn unsaved_dot(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(2.0 * UNSAVED_RADIUS, t.metrics.ctl_h), Sense::hover());
-    response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), EDITS_NOT_APPLIED));
-    ui.painter()
-        .circle_filled(rect.center(), UNSAVED_RADIUS, t.color.text_dim);
-    let _ = response.on_hover_text(EDITS_NOT_APPLIED);
 }
 
 /// More: New…, and for a configuration of the project's own Copy…, Rename…

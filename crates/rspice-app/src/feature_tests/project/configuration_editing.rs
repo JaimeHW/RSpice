@@ -198,6 +198,14 @@ pub(super) fn disabled(output: &egui::FullOutput, name: &str) -> bool {
         .any(|node| node.role == Role::Button && node.label == name && node.disabled)
 }
 
+/// Whether the bar offers Apply: the configuration in front has edits that
+/// are not applied, and nothing holds them back.
+pub(super) fn apply_offered(output: &egui::FullOutput) -> bool {
+    nodes(output)
+        .iter()
+        .any(|node| node.role == Role::Button && node.label == "Apply" && !node.disabled)
+}
+
 /// A right-click at `at`: the press that asks for a row's menu.
 pub(super) fn secondary_press(at: Pos2) -> Vec<egui::Event> {
     let edge = |pressed| egui::Event::PointerButton {
@@ -476,8 +484,9 @@ fn the_inspector_states_the_name_and_rename_is_the_one_way_to_change_it() {
     assert!(says(&menu, "Rename\u{2026}"));
 }
 
-/// The bar marks edits that are not applied, and More > Use for runs on a
-/// configuration with edits uses what the tables show: it applies them.
+/// The bar offers Apply over edits that are not applied, and More > Use for
+/// runs on a configuration with edits uses what the tables show: it applies
+/// them.
 #[test]
 fn use_for_runs_applies_the_edits_it_was_pressed_over() {
     let ctx = offscreen();
@@ -498,7 +507,7 @@ fn use_for_runs_applies_the_edits_it_was_pressed_over() {
             })
     );
     let output = settle(&ctx, &mut app, Vec::new());
-    assert!(says(&output, "Edits not applied"));
+    assert!(apply_offered(&output));
 
     from_more(&ctx, &mut app, &output, "Use for runs");
     let output = paint_until_checked(&ctx, &mut app);
@@ -511,7 +520,7 @@ fn use_for_runs_applies_the_edits_it_was_pressed_over() {
         "the edits were applied first"
     );
     assert!(reports(&output, "used for runs"));
-    assert!(!says(&output, "Edits not applied"));
+    assert!(!apply_offered(&output));
 }
 
 /// While Apply is checked the bar says so and offers neither Apply nor Use
@@ -549,7 +558,7 @@ fn apply_is_checked_off_the_frame_and_an_edit_stops_the_check() {
         !reports(&output, "checking\u{2026}"),
         "the edit stopped the check"
     );
-    assert!(says(&output, "Edits not applied"));
+    assert!(apply_offered(&output));
     hold.release();
     settle(&ctx, &mut app, Vec::new());
     assert_eq!(
@@ -567,7 +576,7 @@ fn apply_is_checked_off_the_frame_and_an_edit_stops_the_check() {
     let applied = catalog.find(id).unwrap();
     assert_eq!(applied.executable_view_policy(), ["schematic", "spice"]);
     assert_eq!(applied.definition().dut_path, "/X2");
-    assert!(!says(&output, "Edits not applied"));
+    assert!(!apply_offered(&output));
 }
 
 /// Revert asks before it drops the edits: Keep editing keeps them.
@@ -769,7 +778,7 @@ fn edits_follow_a_rename_of_the_design_they_were_made_to() {
         .rename_cell("user", "top", "top_b")
         .expect("the top cell renames");
     let output = settle(&ctx, &mut app, Vec::new());
-    assert!(says(&output, "Edits not applied"), "the edits stay");
+    assert!(apply_offered(&output), "the edits stay");
     assert!(!reports(&output, OUT_OF_DATE));
     let edited = shown(&app);
     assert_eq!(edited.root.cell, "top_b", "the edits took the rename");
@@ -784,7 +793,7 @@ fn edits_follow_a_rename_of_the_design_they_were_made_to() {
     let applied = catalog.find(id).unwrap();
     assert_eq!(applied.definition().root.cell, "top_b");
     assert_eq!(applied.executable_view_policy(), ["schematic", "spice"]);
-    assert!(!says(&output, "Edits not applied"), "Apply landed them");
+    assert!(!apply_offered(&output), "Apply landed them");
 }
 
 /// The bar's report as a screen reader has it while the edits are out of
