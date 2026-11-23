@@ -113,13 +113,16 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
         parsed: rspice_core::Netlist,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<ExecutableHierarchy, PreparationError> {
-        let hierarchy = ExecutableHierarchy::of_parsed(parsed, self.execution_limits(), abort);
+        let hierarchy = ExecutableHierarchy::of_parsed(parsed, self.execution_limits(), abort)
+            .map_err(|error| run_memory::too_big_for(error, self.machine_memory))?;
         let Some(memory) = self.machine_memory else {
-            return hierarchy;
+            return Ok(hierarchy);
         };
-        let hierarchy = hierarchy.map_err(|error| run_memory::too_big_for(error, memory))?;
-        run_memory::check_fits(hierarchy.devices(), memory)?;
-        Ok(hierarchy)
+        match run_memory::check_fits(hierarchy.devices(), memory) {
+            run_memory::MemoryFit::Fits => Ok(hierarchy),
+            run_memory::MemoryFit::Warn(warning) => Ok(hierarchy.needing(warning)),
+            run_memory::MemoryFit::Refuse(refusal) => Err(refusal),
+        }
     }
 
     /// The chain this run's includes resolve through.
@@ -160,29 +163,28 @@ pub struct StoredDeckInputs<'a> {
     pub files: &'a [rspice_design::deck::StoredDeckFile],
 }
 
-/// The reviewed shipped ceilings, with the counts a run materializes sized
-/// to `machine_memory` and the worker ceiling the reader chose applied.
+/// The limits the reader's own deck is checked and run under where it is,
+/// [`run_memory::deck_limits`], with the worker ceiling the reader chose
+/// applied.
 ///
-/// The shipped counts guard a service against input it did not write. A run
+/// The shipped limits guard a service against input it did not write. A run
 /// of the reader's own design on their own machine is bounded by that
-/// machine instead, never below what ships. With neither a machine nor a
-/// ceiling the limits are exactly as this build ships them.
+/// machine instead, never below what ships, and the Netlist page's check of
+/// the deck reads the same limits. With neither a machine nor a ceiling the
+/// limits are exactly as this build ships them.
 ///
 /// A free function so the arithmetic can be read and tested without
-/// assembling a run's worth of borrowed catalogs. What a run reads from
-/// files and how deep its hierarchy nests stay at the shipped values.
+/// assembling a run's worth of borrowed catalogs. How deep includes and the
+/// hierarchy nest stay at the shipped values.
 fn execution_limits_for(
     max_parallel_workers: Option<usize>,
     machine_memory: Option<MachineMemory>,
 ) -> rspice_core::ResourceLimits {
-    let mut limits = rspice_core::ResourceLimits::default();
+    let mut limits = run_memory::deck_limits(machine_memory);
     if let Some(workers) = max_parallel_workers {
         limits.max_parallel_workers = workers;
     }
-    match machine_memory {
-        Some(memory) => run_memory::sized_to(limits, memory.installed_bytes),
-        None => limits,
-    }
+    limits
 }
 
 pub fn build_analysis_plan(
@@ -546,7 +548,7 @@ where
     let data_files = crate::data_files::PreparedDataFiles::capture(
         &netlist,
         root_schematic.current_file().and_then(Path::parent),
-        rspice_core::ResourceLimits::default(),
+        inputs.execution_limits(),
         abort,
     )?;
     validate_prepared_periodic_sources(
@@ -907,6 +909,7 @@ fn expand_manual_deck<R, A>(
         &inputs.include_search(),
         &sealed_models,
         &|location| sealed_hdl.included_line(location),
+        inputs.execution_limits(),
     )?;
     PreparationError::check_abort(abort)?;
     let source_lines = source_lines.map(|lines| (lines, expanded.clone()));
@@ -1058,7 +1061,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
     let data_files = crate::data_files::PreparedDataFiles::capture(
         &expanded,
         origin.and_then(Path::parent),
-        rspice_core::ResourceLimits::default(),
+        inputs.execution_limits(),
         abort,
     )?;
     let _data_files = manual_deck::has_pss_card(&expanded)
@@ -1508,7 +1511,7 @@ mod tests {
         let shipped = rspice_core::ResourceLimits::default();
         assert_eq!(limits.max_parallel_workers, 3);
         assert!(limits.max_flattened_elements > 4 * shipped.max_flattened_elements);
-        assert_eq!(limits.max_netlist_bytes, shipped.max_netlist_bytes);
+        assert!(limits.max_netlist_bytes > 4 * shipped.max_netlist_bytes);
         assert_eq!(limits.max_hierarchy_depth, shipped.max_hierarchy_depth);
     }
 
@@ -1703,9 +1706,10 @@ mod tests {
 
     /// A run of the reader's own design is bounded by their machine, not by
     /// the count the engine ships for input it did not write: a design past
-    /// that count prepares on a machine with memory for it, and a design
-    /// the machine has no memory free for is refused before it runs, saying
-    /// what it needs and what there is.
+    /// that count prepares on a machine with memory for it; one that needs
+    /// more than is free and fits what is installed prepares saying so,
+    /// for the reader to start; and one the machine has not the memory for
+    /// is refused before it runs, saying what it needs and what there is.
     #[test]
     fn a_design_is_bounded_by_the_machine_it_runs_on() {
         let gigabytes = 1024 * 1024 * 1024;
@@ -1723,21 +1727,46 @@ mod tests {
         let snapshot = build_prepared_manual_deck(&roomy, manual(&deck, &path))
             .unwrap_or_else(|error| panic!("the machine holds the design: {error}"));
         assert!(snapshot.execution_limits().max_flattened_elements > shipped);
+        assert_eq!(snapshot.memory_warning(), None);
 
-        let busy = RunPreparationInputs {
+        let busy = MachineMemory {
+            installed_bytes: 16 * gigabytes,
+            free_bytes: gigabytes / 2,
+        };
+        let busy_inputs = RunPreparationInputs {
+            machine_memory: Some(busy),
+            ..fixture.inputs()
+        };
+        let waiting = build_prepared_manual_deck(&busy_inputs, manual(&deck, &path))
+            .unwrap_or_else(|error| panic!("the machine installs enough: {error}"));
+        let warning = waiting
+            .memory_warning()
+            .expect("half a gigabyte free does not hold the design");
+        assert_eq!(warning.memory, busy);
+        assert_eq!(waiting.metadata().memory_warning, Some(warning));
+        assert_eq!(
+            warning.message(),
+            "This design has 262,145 devices. Running it needs about 1.3 GB of memory, and this \
+             computer has 512 MB free of 16.0 GB. It can run, but other programs slow while it \
+             does."
+        );
+
+        // A machine too small to lift the shipped count, and a design
+        // within that count that needs more than the machine has.
+        let (deck_within, path_within) = nested_deck("machine-small", 60, 3);
+        let small = RunPreparationInputs {
             machine_memory: Some(MachineMemory {
-                installed_bytes: 16 * gigabytes,
+                installed_bytes: 3 * gigabytes / 4,
                 free_bytes: gigabytes / 2,
             }),
             ..fixture.inputs()
         };
-        let refused = build_prepared_manual_deck(&busy, manual(&deck, &path))
-            .expect_err("half a gigabyte does not hold the design");
+        let refused = build_prepared_manual_deck(&small, manual(&deck_within, &path_within))
+            .expect_err("768 MB does not hold the design");
         assert_eq!(
             refused.message(),
-            "This design has 262,145 devices. Running it needs about 1.3 GB of memory, and this \
-             computer has 512 MB free. Close other programs to free memory, or run it on a \
-             computer with more."
+            "This design has 216,001 devices. Running it needs about 1.0 GB of memory, more than \
+             the 768 MB this computer has. Run it on a computer with more memory."
         );
 
         // Without a machine to size them by, the shipped count still holds.

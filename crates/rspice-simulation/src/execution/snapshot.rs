@@ -635,6 +635,9 @@ pub struct PreparedRunMetadata {
     /// The host files the run's code models read (`d_source`, `d_vcd`, the
     /// tables), read once while preparing it.
     pub sealed_data_files: Vec<std::path::PathBuf>,
+    /// What the run needs beyond the memory free, when it needs more than is
+    /// free and fits what is installed: it is the reader's to start.
+    pub memory_warning: Option<super::run_memory::MemoryWarning>,
 }
 
 /// Whole-run dispatch object that can only be created with a successfully
@@ -1072,6 +1075,10 @@ pub struct PreparedRunSnapshot {
     /// it expanded included files; what every task's reported location is
     /// read back through.
     source_lines: Option<Arc<rspice_core::netlist::ExpandedLineMap>>,
+    /// What the run needs beyond the memory free, when its flattened deck
+    /// needs more than is free and fits what is installed. Not sealed: it
+    /// says what the machine had as the run was prepared, not what runs.
+    memory_warning: Option<super::run_memory::MemoryWarning>,
 }
 
 impl std::fmt::Debug for PreparedRunSnapshot {
@@ -1652,6 +1659,9 @@ impl PreparedRunSnapshot {
                 )
             })?;
         PreparationError::check_abort(abort)?;
+        let memory_warning = hierarchy
+            .as_ref()
+            .and_then(crate::netlist_preparation::ExecutableHierarchy::memory_warning);
         let (parsed_netlist, flattened) = match hierarchy {
             Some(hierarchy) => {
                 let (parsed, flattened) = hierarchy.into_parts();
@@ -1859,6 +1869,7 @@ impl PreparedRunSnapshot {
             sealed_source_dependencies: parts.sealed_source_dependencies,
             configuration: parts.configuration,
             source_lines: None,
+            memory_warning,
         };
 
         // Preflight/dispatch parity, enforced where every caller passes.
@@ -1935,7 +1946,15 @@ impl PreparedRunSnapshot {
             advisories: self.advisories.clone(),
             sealed_source_dependencies: self.sealed_source_dependencies.clone(),
             sealed_data_files: self.data_files.host_paths(),
+            memory_warning: self.memory_warning,
         }
+    }
+
+    /// What the run needs beyond the memory free, when it needs more than is
+    /// free and fits what is installed: nothing dispatches it until the
+    /// reader says to run it anyway.
+    pub const fn memory_warning(&self) -> Option<super::run_memory::MemoryWarning> {
+        self.memory_warning
     }
 
     /// Convert canonical inputs into runner-visible task objects only after a

@@ -46,6 +46,14 @@ toml.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 
+# The memory installed and free, which the reader's own deck is checked and
+# run against.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 serde-wasm-bindgen = "0.6"

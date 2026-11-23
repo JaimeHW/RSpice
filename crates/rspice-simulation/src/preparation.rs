@@ -60,6 +60,9 @@ pub struct PreparationRefusal {
 enum PreparationInterruption {
     Aborted,
     ResourceLimit(rspice_core::ResourceLimitError),
+    /// A limit sized to the machine the deck runs on, which the message
+    /// says in the reader's words rather than the engine's.
+    SizedLimit(rspice_core::ResourceLimitError),
 }
 
 impl PreparationError {
@@ -162,9 +165,31 @@ impl PreparationError {
 
     pub fn resource_limit(&self) -> Option<&rspice_core::ResourceLimitError> {
         match &self.interruption {
+            Some(
+                PreparationInterruption::ResourceLimit(error)
+                | PreparationInterruption::SizedLimit(error),
+            ) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The limit this failure went past when a host says it in its own
+    /// catalogue's words. `None` for one sized to the machine the deck runs
+    /// on, which the [`message`](Self::message) already says: that the
+    /// machine has not the memory for the deck.
+    pub fn catalogued_limit(&self) -> Option<&rspice_core::ResourceLimitError> {
+        match &self.interruption {
             Some(PreparationInterruption::ResourceLimit(error)) => Some(error),
             _ => None,
         }
+    }
+
+    /// The same failure past a limit sized to the machine, said as `words`.
+    pub(crate) fn sized_as(mut self, words: impl Into<String>) -> Self {
+        if let Some(PreparationInterruption::ResourceLimit(limit)) = self.interruption {
+            self.interruption = Some(PreparationInterruption::SizedLimit(limit));
+        }
+        self.said_as(words)
     }
 
     pub(crate) fn check_abort(

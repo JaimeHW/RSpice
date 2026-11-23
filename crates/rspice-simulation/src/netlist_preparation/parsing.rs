@@ -173,6 +173,9 @@ pub struct ExecutableHierarchy {
     pub(crate) parsed: rspice_core::Netlist,
     pub(crate) flattened: rspice_core::netlist::FlattenedNetlist,
     limits: rspice_core::ResourceLimits,
+    /// What its run needs beyond the memory free, when it needs more than
+    /// is free and fits what is installed: the run waits for the reader.
+    memory_warning: Option<crate::execution::run_memory::MemoryWarning>,
 }
 
 impl ExecutableHierarchy {
@@ -191,7 +194,22 @@ impl ExecutableHierarchy {
             parsed,
             flattened,
             limits,
+            memory_warning: None,
         })
+    }
+
+    /// The same, its run needing more memory than is free, as `warning`
+    /// says.
+    pub(crate) fn needing(mut self, warning: crate::execution::run_memory::MemoryWarning) -> Self {
+        self.memory_warning = Some(warning);
+        self
+    }
+
+    /// What its run needs beyond the memory free, when it does.
+    pub(crate) const fn memory_warning(
+        &self,
+    ) -> Option<crate::execution::run_memory::MemoryWarning> {
+        self.memory_warning
     }
 
     /// The limits the deck was parsed and flattened under.

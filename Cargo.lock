@@ -5441,7 +5441,6 @@ dependencies = [
 name = "rspice-app-runs"
 version = "0.1.0"
 dependencies = [
- "libc",
  "log",
  "num-complex",
  "ron",
@@ -5466,7 +5465,6 @@ dependencies = [
  "similar",
  "uuid",
  "web-sys",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6191,6 +6189,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "js-sys",
+ "libc",
  "log",
  "num-complex",
  "ron",
@@ -6217,6 +6216,7 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "web-time",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

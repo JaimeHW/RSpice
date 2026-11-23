@@ -248,9 +248,10 @@ pub fn expand_manual_dependencies(
     include_search: &IncludeSearchChain,
     sealed_sources: &SealedModelExecutionSources,
     rewrite: &dyn Fn(&rspice_core::netlist::NetlistSourceLocation) -> Option<String>,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<ExpandedManualDependencies, PreparationError> {
     if let Some(stored) = stored {
-        return expand_stored_deck(source, stored, sealed_sources, rewrite);
+        return expand_stored_deck(source, stored, sealed_sources, rewrite, limits);
     }
     let Some(origin) = origin else {
         return Ok(ExpandedManualDependencies {
@@ -267,7 +268,7 @@ pub fn expand_manual_dependencies(
         // The browser resolves only through the authenticated bundle, which
         // carries its own edges; a host directory chain has nothing to add,
         // and nothing read from the host was sealed to rewrite.
-        let _ = (include_search, rewrite);
+        let _ = (include_search, rewrite, limits);
         let (expanded, lines, dependencies) = sealed_sources
             .expand_root_dependencies_with_line_map(
                 &absolute_origin,
@@ -286,7 +287,7 @@ pub fn expand_manual_dependencies(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = sealed_sources;
-        let mut processor = IncludeProcessor::new(&absolute_origin);
+        let mut processor = IncludeProcessor::new(&absolute_origin).with_resource_limits(limits);
         include_search.apply_to(&mut processor);
         let (expanded, lines) = processor
             .expand_content_rewriting_with_line_map_and_abort(
@@ -371,12 +372,14 @@ fn expand_stored_deck(
     stored: crate::execution::preparation::StoredDeckInputs<'_>,
     sealed_sources: &SealedModelExecutionSources,
     rewrite: &dyn Fn(&rspice_core::netlist::NetlistSourceLocation) -> Option<String>,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<ExpandedManualDependencies, PreparationError> {
     let (root, files) = rspice_design::deck::stored_deck_sources(stored.name, source, stored.files);
     let bundle = sealed_sources
         .relative_bundle_with(files)
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
-    let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(&root, bundle);
+    let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(&root, bundle)
+        .with_resource_limits(limits);
     let (expanded, lines) = processor
         .expand_content_rewriting_with_line_map_and_abort(
             source,
