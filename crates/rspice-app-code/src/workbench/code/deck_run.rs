@@ -6,12 +6,12 @@
 //! as the Netlist workspace does and makes it what Run runs there; a deck
 //! whose file cannot be read holds the press, and the notice says why.
 //!
-//! Either press saves the deck's files holding edits, takes the deck as it
-//! stands, its text shared rather than copied, and has it prepared away from
-//! the frame as a run reads it: includes read where they are, the deck
-//! parsed, flattened and sealed. The status bar says it is preparing
-//! meanwhile, Stop drops it, and an edit made meanwhile is not what is
-//! prepared.
+//! Either press takes the deck as it stands, its text shared rather than
+//! copied, and has it prepared away from the frame as a run reads it: its
+//! files holding edits saved, includes read where they are, the deck parsed,
+//! flattened and sealed. The status bar says it is preparing meanwhile, Stop
+//! drops it, and an edit made meanwhile is not what is prepared. A save that
+//! fails holds the press, and the notice says why.
 //!
 //! Run starts the run once it is prepared. A deck its preparation stops does
 //! not run: the deck comes to the front, where the editor marks its errors,
@@ -52,11 +52,12 @@ use rspice_app_runs::workbench::waiting;
 use rspice_simulation::execution::run_memory::MemoryWarning;
 use rspice_simulation::preparation::PreparationError;
 
-/// Take the deck Run runs as it stands: its files looked at on disk and
-/// saved first, so what is taken is what their tabs show. `None` when there
-/// is no deck to take, or its files held the press, which the notices have
-/// said; an empty deck is not taken either, and the notice says it is empty.
-fn take_deck(cx: &mut Cx<'_, SourceFeature>) -> Option<ManualDeckCopy> {
+/// Take the deck Run runs as it stands: its files looked at on disk, and
+/// those holding edits as the press took them, to be saved before the deck
+/// is prepared. `None` when there is no deck to take, or its files held the
+/// press, which the notices have said; an empty deck is not taken either,
+/// and the notice says it is empty.
+fn take_deck(cx: &mut Cx<'_, SourceFeature>) -> Option<(ManualDeckCopy, Vec<deck_files::EditedFile>)> {
     // A deck still being read is the deck Run runs once it is read.
     if let Some(refusal) = land_deck_read(cx) {
         cx.wb.prompt(refusal);
@@ -67,17 +68,18 @@ fn take_deck(cx: &mut Cx<'_, SourceFeature>) -> Option<ManualDeckCopy> {
     }
     // A file changed on disk under edits holds the press until the reader
     // answers for it.
-    match deck_files::sync_before_run(cx.model, &mut cx.state.netlist, cx.wb.messages()) {
-        Ok(notices) => {
+    let edited = match deck_files::sync_before_run(cx.model, &mut cx.state.netlist, cx.wb.messages()) {
+        Ok(deck_files::BeforeRun { notices, edited }) => {
             for notice in notices {
                 cx.wb.prompt(notice);
             }
+            edited
         }
         Err(why) => {
             cx.wb.prompt(why);
             return None;
         }
-    }
+    };
     // The deck's text is shared with the deck, not copied.
     let deck = manual_deck_in(&cx.state.netlist).map(ManualDeckCopy::of)?;
     // An empty deck has nothing to read: it comes to the front and the
@@ -94,7 +96,7 @@ fn take_deck(cx: &mut Cx<'_, SourceFeature>) -> Option<ManualDeckCopy> {
         bring_findings_current(cx);
         return None;
     }
-    Some(deck)
+    Some((deck, edited))
 }
 
 /// Whether `text` holds nothing but blanks, read a line at a time from its
@@ -194,15 +196,57 @@ fn bring_findings_current(cx: &mut Cx<'_, SourceFeature>) {
     );
 }
 
+/// What the worker does before it prepares the deck: save `edited`, the
+/// deck's files a press took with edits, whose save the frame loop takes in
+/// ([`land_deck_saves`]) whether or not the preparation goes on. The
+/// preparation goes on once every file is written.
+fn save_before_preparing(
+    cx: &mut Cx<'_, SourceFeature>,
+    edited: Vec<deck_files::EditedFile>,
+) -> BeforePreparing {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (cx, edited);
+        Box::new(|| true)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let messages = cx.wb.messages();
+        let (sender, saves) = std::sync::mpsc::channel();
+        if !edited.is_empty() {
+            cx.state.deck_saves.push(saves);
+        }
+        // A deck with no edits still waits for a save in flight, so it reads
+        // its files once they are written.
+        Box::new(move || {
+            let saved = deck_files::save_edited_files(edited, messages);
+            let written = saved.refusal().is_none();
+            let _ = sender.send(saved);
+            written
+        })
+    }
+}
+
+/// Take in what the saves of decks' files made before their preparation
+/// came to: the files are held to what was written, and a save that failed
+/// says why, as a save does.
+fn land_deck_saves(cx: &mut Cx<'_, SourceFeature>) {
+    for saved in cx.state.deck_saves.take_landed() {
+        if let Some(why) = deck_files::land_saved_before_run(&mut cx.state.netlist, saved) {
+            cx.wb.prompt(why);
+        }
+    }
+}
+
 /// The press of Run or of Check and netlist: take the deck Run runs and have
 /// it prepared for `action` away from the frame; [`poll_deck_run`] acts on
 /// how its preparation ends. Where the deck is prepared in the press, that
 /// is now.
 fn press(cx: &mut Cx<'_, SourceFeature>, action: DeckAction) {
-    let Some(deck) = take_deck(cx) else {
+    let Some((deck, edited)) = take_deck(cx) else {
         return;
     };
-    let before: BeforePreparing = Box::new(|| true);
+    let before = save_before_preparing(cx, edited);
     {
         let code = RunCodeFacts {
             veriloga_compilation: veriloga_compilation_in(&cx.state.source_editing),
@@ -256,9 +300,11 @@ pub fn check_deck(cx: &mut Cx<'_, SourceFeature>) {
 /// Take how the deck's preparation ended, once it has: Run's run starts,
 /// Check says what it found, or the deck comes to the front and the notice
 /// says why it cannot run, as when the press prepared it. Called once per
-/// frame; does nothing while nothing is prepared or the preparation goes on,
-/// and while a run prepared waits for the reader to run it anyway.
+/// frame; takes in the saves made before preparations, and does nothing more
+/// while nothing is prepared or the preparation goes on, or while a run
+/// prepared waits for the reader to run it anyway.
 pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
+    land_deck_saves(cx);
     if cx
         .runs
         .preparing_deck
@@ -285,6 +331,7 @@ pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
         return;
     };
     match verdict {
+        // A save that held the preparation said why as it was taken in.
         None | Some(DeckRunVerdict::Held) => return,
         Some(DeckRunVerdict::Compiling) => {
             match action {

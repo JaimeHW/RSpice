@@ -672,16 +672,31 @@ pub fn save_file(file: &mut OpenFile, messages: MessageCatalog) -> Result<(), St
     if file.disk_change.is_some() {
         return Err(messages.format(MessageId::NetlistSaveChangedOnDisk, &[("name", &name)]));
     }
-    let temporary = file.path.with_file_name(format!(".{name}.saving"));
-    std::fs::write(&temporary, &bytes)
-        .and_then(|()| std::fs::rename(&temporary, &file.path))
-        .map_err(|error| {
-            let _ = std::fs::remove_file(&temporary);
-            not_saved(messages, &name, &error)
-        })?;
+    {
+        let _files = hold_deck_files();
+        write_through_temporary(&file.path, &name, &bytes, messages)?;
+    }
     file.disk = Some(disk_stamp(&file.path, &file.text));
     file.dirty = false;
     Ok(())
+}
+
+/// Write `bytes` to the file `name` at `path` whole: into a temporary file
+/// beside it, renamed over it.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_through_temporary(
+    path: &Path,
+    name: &str,
+    bytes: &[u8],
+    messages: MessageCatalog,
+) -> Result<(), String> {
+    let temporary = path.with_file_name(format!(".{name}.saving"));
+    std::fs::write(&temporary, bytes)
+        .and_then(|()| std::fs::rename(&temporary, path))
+        .map_err(|error| {
+            let _ = std::fs::remove_file(&temporary);
+            not_saved(messages, name, &error)
+        })
 }
 
 /// Save As: write the open deck to `path`, in its own encoding and line
@@ -1208,18 +1223,21 @@ pub fn deck_from_generated(source: &str, design: &str, when: &str) -> String {
     deck
 }
 
-/// Before a run of the open deck: look at the disk, then save each of its
-/// files that holds edits, so the run reads what its tabs show. The notices
-/// to show, or why the run waits.
+/// Before a run of the open deck: look at the disk, and take each of its
+/// files that holds edits as it stands, to be saved before the deck is
+/// prepared ([`save_edited_files`]), so the run reads what its tabs show.
+/// Until that save is taken in ([`land_saved_before_run`]) a file being
+/// saved is not looked at on disk. What the look found, or why the run
+/// waits.
 pub fn sync_before_run(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     messages: crate::workbench::MessageCatalog,
-) -> Result<Vec<String>, String> {
+) -> Result<BeforeRun, String> {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (model, netlist, messages);
-        Ok(Vec::new())
+        Ok(BeforeRun::default())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1234,7 +1252,10 @@ pub fn sync_before_run(
         }
         let notices = check_disk(model, netlist, messages);
         let Some(deck) = netlist.open_deck.as_mut().filter(|deck| !deck.is_stored()) else {
-            return Ok(notices);
+            return Ok(BeforeRun {
+                notices,
+                edited: Vec::new(),
+            });
         };
         if let Some(changed) = std::iter::once(&deck.root)
             .chain(&deck.includes)
@@ -1245,12 +1266,197 @@ pub fn sync_before_run(
                 &[("name", &changed.name())],
             ));
         }
-        for file in std::iter::once(&mut deck.root).chain(deck.includes.iter_mut()) {
-            if file.dirty {
-                save_file(file, messages)?;
+        let edited = std::iter::once((None, &mut deck.root))
+            .chain(
+                deck.includes
+                    .iter_mut()
+                    .map(|file| (Some(file.key()), file)),
+            )
+            .filter(|(_, file)| file.dirty)
+            .map(|(include, file)| EditedFile {
+                include,
+                path: file.path.clone(),
+                text: file.text.clone(),
+                encoding: file.encoding,
+                line_ending: file.line_ending,
+                disk: file.disk.take(),
+            })
+            .collect();
+        Ok(BeforeRun { notices, edited })
+    }
+}
+
+/// What a run or check of the open deck finds before it starts: the notices
+/// looking at the disk gave, and the files holding edits, as the press took
+/// them, which are saved before the deck is prepared.
+#[derive(Debug, Default)]
+pub struct BeforeRun {
+    pub notices: Vec<String>,
+    pub edited: Vec<EditedFile>,
+}
+
+/// A file of the open deck holding edits, as a press took it: what saving it
+/// before its deck is prepared writes, away from the frame.
+#[derive(Debug, Clone)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub struct EditedFile {
+    /// The include it is, or `None` for the deck.
+    include: Option<String>,
+    path: PathBuf,
+    text: RevisedText,
+    encoding: TextEncoding,
+    line_ending: LineEnding,
+    /// What was last read from or written to disk before the press: the
+    /// file's stamp again should the save not write it.
+    disk: Option<DiskStamp>,
+}
+
+/// What saving a deck's edited files came to: each file, written or not,
+/// and why the save stopped, when it did. A failed write stops the save
+/// there, as it stops a run.
+#[derive(Debug, Default)]
+pub struct SavedBeforeRun {
+    files: Vec<(EditedFile, Option<(DiskStamp, LineEnding)>)>,
+    refusal: Option<String>,
+}
+
+impl SavedBeforeRun {
+    /// Why the save stopped, when it did.
+    #[must_use]
+    pub fn refusal(&self) -> Option<&str> {
+        self.refusal.as_deref()
+    }
+}
+
+/// One save of a deck's files at a time, and none while a run's preparation
+/// reads them: a deck's files written away from the frame are written whole
+/// before anything else writes or reads them.
+#[cfg(not(target_arch = "wasm32"))]
+static DECK_FILE_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Hold the deck's files for writing, or for reading as a run reads them,
+/// until the guard drops.
+#[cfg(not(target_arch = "wasm32"))]
+fn hold_deck_files() -> std::sync::MutexGuard<'static, ()> {
+    DECK_FILE_WRITES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Save `edited`, the files of a deck a press took with edits, in order,
+/// away from the frame; the first that does not write stops the save. Holds
+/// the deck's files while it writes, so a run pressed again meanwhile reads
+/// them once they are written.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_edited_files(edited: Vec<EditedFile>, messages: MessageCatalog) -> SavedBeforeRun {
+    let _files = hold_deck_files();
+    let mut saved = SavedBeforeRun::default();
+    for file in edited {
+        let written = if saved.refusal.is_none() {
+            match write_edited_file(&file, messages) {
+                Ok(written) => Some(written),
+                Err(why) => {
+                    saved.refusal = Some(why);
+                    None
+                }
             }
+        } else {
+            None
+        };
+        saved.files.push((file, written));
+    }
+    saved
+}
+
+/// Write `file` as [`save_file`] writes a file: its stamp and the line
+/// ending it was written with.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_edited_file(
+    file: &EditedFile,
+    messages: MessageCatalog,
+) -> Result<(DiskStamp, LineEnding), String> {
+    let name = file_name(&file.path);
+    // A file that had one line and no separator takes the editor's.
+    let line_ending = match file.line_ending {
+        LineEnding::None => LineEnding::detect(&file.text),
+        line_ending => line_ending,
+    };
+    let bytes = file
+        .encoding
+        .encode(&line_ending.write(&file.text))
+        .map_err(|error| not_saved(messages, &name, &error))?;
+    write_through_temporary(&file.path, &name, &bytes, messages)?;
+    Ok((disk_stamp(&file.path, &file.text), line_ending))
+}
+
+/// Take what saving the deck's edited files came to into the open deck:
+/// each file written is held to what was written, and holds no edits unless
+/// it was edited since the press; a file not written is as it was. Why the
+/// save stopped, when it did.
+pub fn land_saved_before_run(
+    netlist: &mut NetlistDocumentState,
+    saved: SavedBeforeRun,
+) -> Option<String> {
+    let SavedBeforeRun { files, refusal } = saved;
+    let Some(deck) = netlist.open_deck.as_mut() else {
+        return refusal;
+    };
+    for (edited, written) in files {
+        let Some(file) = deck
+            .file_mut(edited.include.as_deref())
+            .filter(|file| file.path == edited.path)
+        else {
+            continue;
+        };
+        // A save the reader made meanwhile holds the file to what it wrote.
+        if file.disk.is_some() {
+            continue;
         }
-        Ok(notices)
+        match written {
+            Some((stamp, line_ending)) => {
+                file.disk = Some(stamp);
+                if file.line_ending == LineEnding::None {
+                    file.line_ending = line_ending;
+                }
+                if file.text.revision() == edited.text.revision() {
+                    file.dirty = false;
+                }
+            }
+            None => file.disk = edited.disk,
+        }
+    }
+    refusal
+}
+
+/// The saves of decks' files made before their preparation, in flight; the
+/// frame loop takes each in once it is made, whether or not the preparation
+/// went on.
+#[derive(Debug, Clone, Default)]
+pub struct DeckSaves(Vec<Arc<Mutex<mpsc::Receiver<SavedBeforeRun>>>>);
+
+impl DeckSaves {
+    /// Wait for the save `save` will say it made.
+    pub fn push(&mut self, save: mpsc::Receiver<SavedBeforeRun>) {
+        self.0.push(Arc::new(Mutex::new(save)));
+    }
+
+    /// The saves made since the last call, in the order they were asked for.
+    pub fn take_landed(&mut self) -> Vec<SavedBeforeRun> {
+        let mut landed = Vec::new();
+        self.0.retain(|save| {
+            let Ok(save) = save.lock() else {
+                return false;
+            };
+            match save.try_recv() {
+                Ok(saved) => {
+                    landed.push(saved);
+                    false
+                }
+                Err(mpsc::TryRecvError::Empty) => true,
+                Err(mpsc::TryRecvError::Disconnected) => false,
+            }
+        });
+        landed
     }
 }
 

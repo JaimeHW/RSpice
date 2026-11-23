@@ -36,6 +36,9 @@ pub struct SourceState {
     /// to it does.
     pub(crate) deck_rename:
         Option<crate::workbench::documents::netlist_document::references::DeckRename>,
+    /// The saves of the deck's files a run or a check made before preparing
+    /// it, until the frame loop takes each in.
+    pub deck_saves: crate::workbench::documents::deck_files::DeckSaves,
 }
 
 impl SourceState {
