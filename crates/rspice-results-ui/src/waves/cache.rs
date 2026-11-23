@@ -259,6 +259,7 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 .is_none_or(|key| !hidden_family_traces.contains(&key));
             trace.visible = shown && family_shown;
         }
+        model.forget_trace_panes();
         let first_lane_slot = rank_palette_slots(model, analysis, &source_visible, colors, palette);
         for lane in &mut model.lane_traces {
             let key = SourceWaveformPresentationKey::new(

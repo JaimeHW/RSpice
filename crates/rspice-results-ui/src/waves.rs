@@ -230,6 +230,15 @@ pub type MarkerPositions = std::sync::Mutex<
     )>,
 >;
 
+/// The traces of one unit on a strip: the first of them, which names the
+/// unit, those visible, and whether any is.
+#[derive(Debug, Clone)]
+pub(crate) struct TracePane {
+    opener: usize,
+    traces: Vec<usize>,
+    drawn: bool,
+}
+
 /// One strip (== one analysis of the active run).
 pub struct StripModel {
     pub analysis_index: usize,
@@ -313,6 +322,11 @@ pub struct StripModel {
     /// states for each, hidden ones with where they would be. Left empty by [`build_models`] and filled in
     /// by the host, which owns the expressions.
     pub expression_panes: Vec<ExpressionPane>,
+    /// The panes its traces open, grouped once: every control that draws on
+    /// the strip asks for its panes on every frame, and grouping a hundred
+    /// thousand curves by unit each time cost a frame tens of milliseconds a
+    /// question. Forgotten when the traces' visibility changes.
+    pub(crate) trace_panes: std::sync::OnceLock<Vec<TracePane>>,
     /// The strips the reader arranged the analysis into, top to bottom;
     /// empty, each unit has a strip of its own. Filled in by the host from
     /// the view it draws.
@@ -514,6 +528,37 @@ impl StripModel {
             .iter()
             .find(|pane| pane.unit == identity)
             .map_or_else(|| identity.to_owned(), |pane| pane.axis_unit().to_owned())
+    }
+
+    /// The strip's traces grouped by unit, a group for each unit in the order
+    /// its first trace comes.
+    fn group_traces(&self) -> Vec<TracePane> {
+        let mut groups: Vec<TracePane> = Vec::new();
+        let mut units: Vec<&str> = Vec::new();
+        for (index, trace) in self.traces.iter().enumerate() {
+            let unit = self.trace_unit(trace);
+            let ordinal = units.iter().position(|known| *known == unit).unwrap_or_else(|| {
+                units.push(unit);
+                groups.push(TracePane {
+                    opener: index,
+                    traces: Vec::new(),
+                    drawn: false,
+                });
+                groups.len() - 1
+            });
+            let group = &mut groups[ordinal];
+            if trace.visible {
+                group.traces.push(index);
+            }
+            group.drawn |= trace.visible;
+        }
+        groups
+    }
+
+    /// Forget how the traces group into panes, as when their visibility
+    /// changes.
+    pub(crate) fn forget_trace_panes(&mut self) {
+        self.trace_panes = std::sync::OnceLock::new();
     }
 
     /// The unit one trace is measured in.
@@ -776,28 +821,20 @@ impl StripModel {
     /// Every unit's pane, in the order the units first appear, and whether
     /// each draws anything.
     fn default_panes(&self) -> (Vec<UnitPane<'_>>, Vec<bool>) {
-        let mut panes: Vec<UnitPane<'_>> = Vec::new();
+        let groups = self.trace_panes.get_or_init(|| self.group_traces());
+        let mut panes: Vec<UnitPane<'_>> = groups
+            .iter()
+            .map(|group| {
+                let unit = self.trace_unit(&self.traces[group.opener]);
+                UnitPane {
+                    traces: group.traces.clone(),
+                    ..UnitPane::of(unit, unit)
+                }
+            })
+            .collect();
         // Whether each pane draws anything: one that draws nothing is
         // dropped at the end, once its hidden expressions have found it.
-        let mut drawn: Vec<bool> = Vec::new();
-        for (index, trace) in self.traces.iter().enumerate() {
-            let unit = self.trace_unit(trace);
-            match panes.iter().position(|pane| pane.unit == unit) {
-                Some(ordinal) => {
-                    if trace.visible {
-                        panes[ordinal].traces.push(index);
-                    }
-                    drawn[ordinal] |= trace.visible;
-                }
-                None => {
-                    panes.push(UnitPane {
-                        traces: trace.visible.then_some(index).into_iter().collect(),
-                        ..UnitPane::of(unit, unit)
-                    });
-                    drawn.push(trace.visible);
-                }
-            }
-        }
+        let mut drawn: Vec<bool> = groups.iter().map(|group| group.drawn).collect();
         // A real lane is drawn in the pane of its unit, which it opens when
         // no value trace does.
         for lane in self

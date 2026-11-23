@@ -1033,6 +1033,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 .map(Arc::new),
             expression_panes: Vec::new(),
             arrangement: Vec::new(),
+            trace_panes: std::sync::OnceLock::new(),
         };
         model.grid_ascending = super::grid_is_ascending(&model);
         models.push(model);

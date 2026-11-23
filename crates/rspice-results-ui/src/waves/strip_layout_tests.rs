@@ -11,6 +11,13 @@ use std::collections::HashSet;
 
 /// A transient over 1 ms whose columns are `columns`, each a name, a unit
 /// and the values it holds over three samples.
+/// Show or hide the trace at `index`, as the model cache does when the
+/// reader plots or removes its curve.
+fn show(model: &mut StripModel, index: usize, visible: bool) {
+    model.traces[index].visible = visible;
+    model.forget_trace_panes();
+}
+
 fn model(columns: &[(&str, &str, [f64; 3])]) -> StripModel {
     let grid = vec![0.0, 0.5e-3, 1.0e-3];
     let mut run = rspice_results::run::SimulationRun::new(
@@ -191,7 +198,7 @@ fn a_pinned_range_stays_with_its_strip_when_a_strip_above_it_goes() {
         .iter()
         .position(|trace| trace.name == "V(b)")
         .expect("V(b)");
-    model.traces[b].visible = false;
+    show(&mut model, b, false);
 
     let panes = model.unit_panes();
     assert_eq!(panes.len(), 2, "a strip with nothing to draw takes no room");
@@ -240,9 +247,9 @@ fn a_removed_curve_leaves_every_strip_and_comes_back_to_its_units() {
     let Curve::Trace(index) = ripple else {
         unreachable!()
     };
-    model.traces[index].visible = false;
+    show(&mut model, index, false);
     assert_eq!(drawn(&model), [[["V(rail)"]]]);
-    model.traces[index].visible = true;
+    show(&mut model, index, true);
     assert_eq!(drawn(&model), [[["V(rail)", "V(ripple)"]]]);
 }
 
@@ -258,11 +265,11 @@ fn a_hidden_curve_comes_back_to_the_strip_that_listed_it() {
     let Curve::Trace(index) = c else {
         unreachable!()
     };
-    model.traces[index].visible = false;
+    show(&mut model, index, false);
     // Another edit while V(c) is hidden writes the strips down again.
     let a = trace(&model, "V(a)");
     model.arrangement = move_to_new_strip(&model, a).expect("V(a) apart");
-    model.traces[index].visible = true;
+    show(&mut model, index, true);
     assert_eq!(drawn(&model), [[["V(b)"]], [["V(a)"]], [["V(c)"]]]);
 }
 
