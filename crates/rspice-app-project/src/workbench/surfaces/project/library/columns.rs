@@ -21,7 +21,7 @@ use crate::ui::widgets::table::{
     Selection, TableResponse, TableState,
 };
 use crate::workbench::project::dependency_status::{
-    RowException, cell_exception, library_exceptions, status_column_width, view_exception,
+    RowException, cell_exception, library_exceptions, view_exception,
 };
 
 /// One of the page's three columns.
@@ -541,27 +541,23 @@ fn read_only_reason(manager: &LibraryManager, library: &LibraryRow) -> Option<&'
     })
 }
 
-/// A row's exception, or nothing when it has none.
-fn exception(found: Option<&RowException>) -> Entry {
-    found.map_or_else(Entry::empty, RowException::entry)
-}
-
-/// The width a status column takes in a list `width` wide: its widest
-/// exception whole, up to half the list.
-fn status_width<'a>(
-    ui: &Ui,
-    least: f32,
-    width: f32,
-    exceptions: impl IntoIterator<Item = &'a RowException>,
-) -> f32 {
-    status_column_width(
-        ui,
-        least,
-        width * 0.5,
-        exceptions
-            .into_iter()
-            .map(|found| (found.label.as_str(), found.mark.problem().is_some())),
-    )
+/// `name` with a row's exception, when it has one, as the state at the
+/// name's right end, and `hint` with the exception's detail after it under
+/// the pointer. A list is one column: what a row is in stands on its name.
+fn with_exception(name: Entry, hint: Option<String>, found: Option<&RowException>) -> Entry {
+    let detail = found.and_then(|found| found.detail.clone());
+    let hint = match (hint, detail) {
+        (Some(hint), Some(detail)) => Some(format!("{hint}\n{detail}")),
+        (hint, detail) => hint.or(detail),
+    };
+    let name = match found {
+        Some(found) => name.state(found.label.as_str(), found.mark.problem()),
+        None => name,
+    };
+    match hint {
+        Some(hint) => name.hint(hint),
+        None => name,
+    }
 }
 
 pub(super) fn library_column(
@@ -588,34 +584,22 @@ pub(super) fn library_column(
     follow_lead(&mut browser.libraries, &libraries.keys, lead);
     let count = libraries.keys.len();
     let nothing_found = find.nothing_found();
-    // Read-only is the lock at the right of a library's name; the status
-    // column is there only while a library has something else to say.
+    // Read-only is the lock at the right of a library's name; any other
+    // exception is the state beside it.
     let status_of = |name: &str| {
         exceptions
             .get(name)
             .filter(|found| found.label != READ_ONLY)
     };
-    let statuses = libraries
-        .rows
-        .iter()
-        .filter_map(|library| status_of(&library.name))
-        .collect::<Vec<_>>();
-    // A list column has no heads, so each column says what it holds: the
-    // find's matches while a find runs, a status in words. Where a library
-    // is kept is its icon: the project's own, or a folder of its own, whose
-    // stored path the name's hint gives.
+    // A list column has no heads, so a second column says what it holds:
+    // the find's matches while a find runs. Where a library is kept is its
+    // icon: the project's own, or a folder of its own, whose stored path
+    // the name's hint gives.
     let finding = !find.is_everything();
     let mut columns = vec![Column::name("Library", 60.0)];
     if finding {
         columns.push(Column::words("Matches", 88.0));
     }
-    if !statuses.is_empty() {
-        columns.push(Column::words(
-            "Status",
-            status_width(ui, 72.0, width, statuses.iter().copied()),
-        ));
-    }
-    let with_status = !statuses.is_empty();
     let host = rspice_design::library::folder::HostPlatform::current();
     let focus = browser.focusing == Some(BrowserColumn::Library);
     let response = list_column(
@@ -662,16 +646,9 @@ pub(super) fn library_column(
                         Some(_) => name.trailing(Icon::Lock),
                         None => name,
                     };
-                    let name = match hint {
-                        Some(hint) => name.hint(hint),
-                        None => name,
-                    };
-                    let mut entries = vec![name];
+                    let mut entries = vec![with_exception(name, hint, status_of(&library.name))];
                     if finding {
                         entries.push(Entry::text(library.matches.as_str()));
-                    }
-                    if with_status {
-                        entries.push(exception(status_of(&library.name)));
                     }
                     entries
                 })
@@ -736,8 +713,8 @@ pub(super) fn cell_column(
         total,
         empty: if total == 0 { "No cells" } else { &no_match },
     };
-    // A library kept in a folder of its own gives its cells a status
-    // column; an embedded one's cells have no exception to print.
+    // A library kept in a folder of its own gives its cells a state; an
+    // embedded one's cells have no exception to print.
     let shown_library = manager
         .selected_library
         .as_deref()
@@ -749,22 +726,11 @@ pub(super) fn cell_column(
             .map(|cell| cell_exception(cx.model, library, &cell.name))
             .collect()
     });
-    // The View column's head counts the selected cell's views; a bare
-    // number here, with no head over it, said nothing.
-    let columns = [
-        Column::name("Cell", 60.0),
-        Column::words(
-            "Status",
-            status_width(ui, 72.0, width, exceptions.iter().flatten()),
-        ),
-    ];
-    // A status column no row fills is a dead column beside the names: it
-    // is there only while a cell has something to say.
-    let statuses = shown_library.is_some() && exceptions.iter().any(Option::is_some);
-    let columns = &columns[..if statuses { 2 } else { 1 }];
+    // One column: a cell's exception is the state at its name's right end.
+    let columns = [Column::name("Cell", 60.0)];
     let focus = browser.focusing == Some(BrowserColumn::Cell);
     let response = list_column(ui, "Cell", count, width, height, |ui, body| {
-        DataTable::new(CELLS_TABLE, columns, cells.rows.len())
+        DataTable::new(CELLS_TABLE, &columns, cells.rows.len())
             .list()
             .state(&mut browser.cells)
             .keys(&cells.keys)
@@ -774,16 +740,12 @@ pub(super) fn cell_column(
             .max_height(body)
             .show(ui, |row| {
                 let cell = &cells.rows[row];
-                let name = Entry::text(cell.name.as_str());
-                let mut entries = vec![if cell.description.trim().is_empty() {
-                    name
-                } else {
-                    name.hint(cell.description.as_str())
-                }];
-                if statuses {
-                    entries.push(exception(exceptions[row].as_ref()));
-                }
-                entries
+                let hint = (!cell.description.trim().is_empty()).then(|| cell.description.clone());
+                vec![with_exception(
+                    Entry::text(cell.name.as_str()),
+                    hint,
+                    exceptions.get(row).and_then(Option::as_ref),
+                )]
             })
     });
     answer_moves(browser, BrowserColumn::Cell, &response);
@@ -860,26 +822,9 @@ pub(super) fn view_column(
                 .and_then(|((library, cell), found)| view_exception(cx.model, library, cell, found))
         })
         .collect::<Vec<_>>();
-    // The type and the state are columns only while a row fills them: a
-    // view named for its type says it already, and an unchanged view has no
-    // state to state.
-    let types = views.rows.iter().any(|view| !named_for_its_type(view));
-    let states = views.rows.iter().zip(&exceptions).any(|(view, found)| {
-        found.is_some()
-            || shown_cell
-                .and_then(|cell| cell.get_view(&view.name))
-                .is_some_and(|view| view.modified)
-    });
-    let mut columns = vec![Column::name("View", 60.0)];
-    if types {
-        columns.push(Column::words("Type", 92.0));
-    }
-    if states {
-        columns.push(Column::words(
-            "State",
-            status_width(ui, 68.0, width, exceptions.iter().flatten()),
-        ));
-    }
+    // One column: a view's type follows its name, faint, where the name
+    // does not say it, and its state stands at the name's right end.
+    let columns = [Column::name("View", 60.0)];
     let focus = browser.focusing == Some(BrowserColumn::View);
     let response = list_column(ui, "View", count, width, height, |ui, body| {
         DataTable::new(
@@ -898,27 +843,18 @@ pub(super) fn view_column(
             let found = shown_cell.and_then(|cell| cell.get_view(&view.name));
             let file_exception = exceptions[row].as_ref();
             let name = Entry::text(view.name.as_str());
-            let mut entries = vec![match &view.path {
-                Some(path) => name.hint(path.as_str()),
-                None => name,
-            }];
-            if types {
-                entries.push(if named_for_its_type(view) {
-                    Entry::empty()
-                } else {
-                    Entry::text(view.view_type.caption())
-                });
-            }
-            if states {
-                entries.push(if file_exception.is_some() {
-                    exception(file_exception)
-                } else if found.is_some_and(|view| view.modified) {
-                    Entry::text("modified")
-                } else {
-                    Entry::empty()
-                });
-            }
-            entries
+            let name = if named_for_its_type(view) {
+                name
+            } else {
+                name.suffix(view.view_type.caption())
+            };
+            // A change on disk outranks the edits made here.
+            let name = if file_exception.is_none() && found.is_some_and(|view| view.modified) {
+                name.state("modified", None)
+            } else {
+                name
+            };
+            vec![with_exception(name, view.path.clone(), file_exception)]
         })
     });
     answer_moves(browser, BrowserColumn::View, &response);
@@ -982,7 +918,7 @@ fn builtin_cell_column(
         total: BUILTIN_VERILOGA_MODELS.len(),
         empty: &no_match,
     };
-    let columns = [Column::name("Cell", 60.0), Column::words("Version", 64.0)];
+    let columns = [Column::name("Cell", 60.0)];
     let focus = browser.focusing == Some(BrowserColumn::Cell);
     let response = list_column(ui, "Cell", count, width, height, |ui, body| {
         DataTable::new(MODELS_TABLE, &columns, shown.len())
@@ -997,8 +933,8 @@ fn builtin_cell_column(
                 let model = shown[row];
                 vec![
                     Entry::text(model.name)
+                        .suffix(model.version)
                         .hint(format!("{} (module {})", model.summary, model.module)),
-                    Entry::text(model.version),
                 ]
             })
     });
@@ -1040,7 +976,7 @@ fn builtin_view_column(
         total: builtin.files.len(),
         empty: "No cell selected",
     };
-    let columns = [Column::name("View", 60.0), Column::words("Type", 92.0)];
+    let columns = [Column::name("View", 60.0)];
     let focus = browser.focusing == Some(BrowserColumn::View);
     let response = list_column(ui, "View", count, width, height, |ui, body| {
         DataTable::new("workbench.project.library.files", &columns, keys.len())
@@ -1051,8 +987,11 @@ fn builtin_view_column(
             .max_height(body)
             .show(ui, |row| {
                 vec![
-                    Entry::text(builtin.files[row].as_str()),
-                    Entry::text(if row == 0 { "Verilog-A" } else { "Include" }),
+                    Entry::text(builtin.files[row].as_str()).suffix(if row == 0 {
+                        "Verilog-A"
+                    } else {
+                        "Include"
+                    }),
                 ]
             })
     });

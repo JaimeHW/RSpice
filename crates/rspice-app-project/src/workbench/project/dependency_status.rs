@@ -224,19 +224,6 @@ impl RowException {
             )),
         )
     }
-
-    /// The exception as a table cell: its words behind its mark, and its
-    /// detail when the pointer rests on them.
-    pub fn entry(&self) -> crate::ui::widgets::table::Cell {
-        let entry = match self.mark.problem() {
-            Some(problem) => crate::ui::widgets::table::Cell::problem(self.label.as_str(), problem),
-            None => crate::ui::widgets::table::Cell::text(self.label.as_str()),
-        };
-        match &self.detail {
-            Some(detail) => entry.hint(detail.as_str()),
-            None => entry,
-        }
-    }
 }
 
 /// The width a column of statuses takes: its widest words whole, a mark
