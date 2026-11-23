@@ -537,15 +537,18 @@ impl StripModel {
         let mut units: Vec<&str> = Vec::new();
         for (index, trace) in self.traces.iter().enumerate() {
             let unit = self.trace_unit(trace);
-            let ordinal = units.iter().position(|known| *known == unit).unwrap_or_else(|| {
-                units.push(unit);
-                groups.push(TracePane {
-                    opener: index,
-                    traces: Vec::new(),
-                    drawn: false,
+            let ordinal = units
+                .iter()
+                .position(|known| *known == unit)
+                .unwrap_or_else(|| {
+                    units.push(unit);
+                    groups.push(TracePane {
+                        opener: index,
+                        traces: Vec::new(),
+                        drawn: false,
+                    });
+                    groups.len() - 1
                 });
-                groups.len() - 1
-            });
             let group = &mut groups[ordinal];
             if trace.visible {
                 group.traces.push(index);

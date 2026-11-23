@@ -788,12 +788,18 @@ fn a_completed_result_is_converted_away_from_the_frame_that_receives_it() {
         run(&state).analyses.is_empty(),
         "the frame that received the result converted it"
     );
-    assert!(controller.is_running(), "the run ended before its result was kept");
+    assert!(
+        controller.is_running(),
+        "the run ended before its result was kept"
+    );
     assert!(state.model.simulation.execution.has_active_execution());
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     while controller.is_running() {
-        assert!(std::time::Instant::now() < deadline, "the result was never kept");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the result was never kept"
+        );
         controller.poll_completion(&mut state, &export_io);
         std::thread::sleep(std::time::Duration::from_millis(1));
     }

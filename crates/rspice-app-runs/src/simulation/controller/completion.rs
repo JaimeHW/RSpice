@@ -549,11 +549,7 @@ impl SimulationController {
                             .insert(completed_instance, artifact);
                     }
                     if let Some(prepared) = prepared_touchstone_export.take() {
-                        self.commit_touchstone_export(
-                            state.model_mut(),
-                            export_io,
-                            prepared,
-                        );
+                        self.commit_touchstone_export(state.model_mut(), export_io, prepared);
                     }
                 }
                 // The artifact failure has its own line above.
@@ -576,8 +572,7 @@ impl SimulationController {
                         LogSeverity::Error,
                         format!("{current_label}: the result was not kept: {error}"),
                     );
-                    let errors =
-                        self.seal_failed_run(state.model_mut(), target_run_id, None, None);
+                    let errors = self.seal_failed_run(state.model_mut(), target_run_id, None, None);
                     self.report_seal_errors(state.model_mut(), errors);
                     self.pending_analyses.clear();
                 }
@@ -607,10 +602,9 @@ impl SimulationController {
                         .analyses
                         .iter()
                         .rposition(|analysis| {
-                            analysis
-                                .provenance
-                                .as_ref()
-                                .is_some_and(|provenance| provenance.source_instance_id() == instance)
+                            analysis.provenance.as_ref().is_some_and(|provenance| {
+                                provenance.source_instance_id() == instance
+                            })
                         })
                 });
                 match (index, shown) {
@@ -821,7 +815,9 @@ impl Finishing {
 /// progress ask the thread for it. Without a thread, the conversion comes
 /// back unconverted.
 #[cfg(not(target_arch = "wasm32"))]
-fn convert_off_frame(conversion: Conversion) -> Result<std::thread::JoinHandle<Converted>, Conversion> {
+fn convert_off_frame(
+    conversion: Conversion,
+) -> Result<std::thread::JoinHandle<Converted>, Conversion> {
     // The thread takes the conversion from here, so a thread that could not
     // start leaves it to be handed back.
     let job = Arc::new(std::sync::Mutex::new(Some(conversion)));
@@ -846,7 +842,9 @@ fn convert_off_frame(conversion: Conversion) -> Result<std::thread::JoinHandle<C
 
 /// The page has one thread: a result is converted on the frame.
 #[cfg(target_arch = "wasm32")]
-fn convert_off_frame(conversion: Conversion) -> Result<std::thread::JoinHandle<Converted>, Conversion> {
+fn convert_off_frame(
+    conversion: Conversion,
+) -> Result<std::thread::JoinHandle<Converted>, Conversion> {
     Err(conversion)
 }
 

@@ -91,7 +91,10 @@ pub fn wait_until_settled(controller: &SimulationController) {
     };
     let deadline = Instant::now() + Duration::from_secs(60);
     while !finishing.is_converted() {
-        assert!(Instant::now() < deadline, "the result's conversion timed out");
+        assert!(
+            Instant::now() < deadline,
+            "the result's conversion timed out"
+        );
         std::thread::sleep(Duration::from_millis(1));
     }
 }

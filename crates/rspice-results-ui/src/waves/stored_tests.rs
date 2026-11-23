@@ -660,7 +660,9 @@ fn a_pane_of_more_stored_curves_than_a_frame_measures_fits_the_rest_once_they_ar
         .map(|curve| {
             let peak = if curve == FRAME_EXTENTS { 10.0 } else { 1.0 };
             column(
-                (0..ROWS).map(|row| peak * row as f64 / ROWS as f64).collect(),
+                (0..ROWS)
+                    .map(|row| peak * row as f64 / ROWS as f64)
+                    .collect(),
                 false,
             )
         })
@@ -684,20 +686,32 @@ fn a_pane_of_more_stored_curves_than_a_frame_measures_fits_the_rest_once_they_ar
                 .iter()
                 .enumerate()
                 .map(|(index, curve)| {
-                    RetainedTrace::new(format!("V(n{index:04})"), stored(&time), stored(curve), "#fff")
+                    RetainedTrace::new(
+                        format!("V(n{index:04})"),
+                        stored(&time),
+                        stored(curve),
+                        "#fff",
+                    )
                 })
                 .collect(),
         ),
     );
     let models = models(&run);
     let model = &models[0];
-    let pane = model.unit_panes().into_iter().next().expect("the strip has a pane");
+    let pane = model
+        .unit_panes()
+        .into_iter()
+        .next()
+        .expect("the strip has a pane");
     assert_eq!(pane.traces.len(), FRAME_EXTENTS + 1);
 
     let mut derived = DerivedSeries::default();
     let (_, high) =
         pane_y_range(&mut derived, model, &pane.traces, |_| {}).expect("the measured curves fit");
-    assert!(high < 2.0, "the frame fits only the curves it measured: {high}");
+    assert!(
+        high < 2.0,
+        "the frame fits only the curves it measured: {high}"
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let (_, high) =

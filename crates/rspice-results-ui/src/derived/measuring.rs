@@ -167,7 +167,13 @@ impl Measuring {
 
 /// Measure `asks`, shared among the machine's threads.
 fn measure(asks: &[(u64, Ask)]) -> Vec<Measured> {
-    let one = |(key, ask): &(u64, Ask)| (*key, bits(ask.window), ask.y.extent_over(&ask.x, ask.window));
+    let one = |(key, ask): &(u64, Ask)| {
+        (
+            *key,
+            bits(ask.window),
+            ask.y.extent_over(&ask.x, ask.window),
+        )
+    };
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     let share = asks.len().div_ceil(threads).max(1);
     std::thread::scope(|scope| {
