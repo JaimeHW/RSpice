@@ -1,7 +1,8 @@
 //! The global bindings: the top cell, the DUT instance, what an unresolved
-//! cell does, the view list and the stop list, as one band of five fields in
-//! equal columns. On Default the same band states the built-in lists and
-//! edits nothing.
+//! cell does, the view list and the stop list, as one band of five fields on
+//! one grid of equal columns, every control on the edge the widest label
+//! leaves in its column. On Default the same band states the built-in lists
+//! and edits nothing.
 
 use super::*;
 
@@ -85,16 +86,26 @@ impl<'a> Field<'a> {
         self
     }
 
-    /// The least width the field is given in a row: its label and its
-    /// control on one line, and never less than a field's least.
-    fn least(&self, ui: &Ui) -> f32 {
-        let label = ui
-            .painter()
-            .layout_no_wrap(self.label.to_owned(), label_font(), egui::Color32::WHITE)
-            .size()
-            .x;
-        (2.0 * PANEL_INSET + label + LABEL_GAP + self.needs).max(FIELD_MIN_WIDTH)
+    /// The least width the field is given in a row: the band's label column
+    /// and its control on one line, and never less than a field's least.
+    fn least(&self, label_width: f32) -> f32 {
+        (2.0 * PANEL_INSET + label_width + LABEL_GAP + self.needs).max(FIELD_MIN_WIDTH)
     }
+}
+
+/// How wide the band's label column is: its widest label, so every
+/// control starts on one edge in its column, row under row.
+fn label_width(ui: &Ui, fields: &[Field<'_>]) -> f32 {
+    fields
+        .iter()
+        .map(|field| {
+            ui.painter()
+                .layout_no_wrap(field.label.to_owned(), label_font(), egui::Color32::WHITE)
+                .size()
+                .x
+                .ceil()
+        })
+        .fold(0.0, f32::max)
 }
 
 fn label_font() -> egui::FontId {
@@ -150,37 +161,61 @@ fn apply(definition: &mut ConfigurationSetDefinition, edit: GridEdit) {
     }
 }
 
-/// The band: `fields` in equal columns, all five on one row where each fits
-/// its share on one line, else the three choices on one row and the two
-/// lists on the next, else one under another. Every row is as tall as its
-/// tallest field, and no cell of the band is left empty.
+/// The band: `fields` on one grid of equal columns, all five on one row
+/// where each fits its share on one line, else three columns, the three
+/// choices on one row and the two lists on the next, the longer list across
+/// two columns; else one under another. Every row is as tall as its tallest field, and no cell of the
+/// band is left empty.
 fn band(ui: &mut Ui, fields: Vec<Field<'_>>) -> Option<GridEdit> {
     let width = visible_workspace_width(ui);
     let count = fields.len();
+    let label_width = label_width(ui, &fields);
     let share = width / count.max(1) as f32;
-    let rows = if fields.iter().all(|field| share >= field.least(ui)) {
-        vec![count]
+    let (columns, rows) = if fields.iter().all(|field| share >= field.least(label_width)) {
+        (count, vec![count])
     } else if width >= 3.0 * FIELD_MIN_WIDTH {
-        vec![3, count.saturating_sub(3)]
+        (3, vec![3, count.saturating_sub(3)])
     } else {
-        vec![1; count]
+        (1, vec![1; count])
+    };
+    let grid = Grid {
+        width,
+        columns,
+        label_width,
     };
     let last = rows.len().saturating_sub(1);
     let mut fields = fields.into_iter();
     let mut edit = None;
     for (index, take) in rows.into_iter().enumerate() {
         let row = fields.by_ref().take(take).collect::<Vec<_>>();
-        if let Some(asked) = band_row(ui, width, row, index == last) {
+        if let Some(asked) = band_row(ui, grid, row, index == last) {
             edit = Some(asked);
         }
     }
     edit
 }
 
-/// One row of the band: each field's label, then its control in what the
-/// label leaves of an equal share of `width`, a rule between fields, and
-/// under the row the band's rule, or its closing rule under the last.
-fn band_row(ui: &mut Ui, width: f32, fields: Vec<Field<'_>>, closing: bool) -> Option<GridEdit> {
+/// The columns every row of the band stands on, and the label column each
+/// of them keeps.
+#[derive(Clone, Copy)]
+struct Grid {
+    width: f32,
+    columns: usize,
+    label_width: f32,
+}
+
+/// One row of the band on `grid`: each field's label, then its control in
+/// what the label column leaves of its columns, a rule between fields, and
+/// under the row the band's rule, or its closing rule under the last. A row
+/// of fewer fields than columns gives the columns over to the field whose
+/// control is widest on one line, so the rules between fields stand on the
+/// grid's.
+fn band_row(ui: &mut Ui, grid: Grid, fields: Vec<Field<'_>>, closing: bool) -> Option<GridEdit> {
+    let Grid {
+        width,
+        columns,
+        label_width,
+    } = grid;
     let t = Tokens::get(ui.ctx());
     let least = page_bar_height(ui);
     // A wrapping control centres each line on a control's height; starting
@@ -188,22 +223,31 @@ fn band_row(ui: &mut Ui, width: f32, fields: Vec<Field<'_>>, closing: bool) -> O
     let inset = ((least - t.metrics.ctl_h) * 0.5).max(0.0);
     let font = label_font();
     let origin = ui.cursor().min;
-    let share = (width / fields.len().max(1) as f32).floor();
+    let share = (width / columns.max(1) as f32).floor();
     let mut bottom = origin.y + least;
     let mut labels = Vec::new();
     let mut edit = None;
     let count = fields.len();
+    let over = columns.saturating_sub(count);
+    let widest = fields
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.needs.total_cmp(&b.needs))
+        .map_or(0, |(index, _)| index);
+    let mut start = 0;
     for (index, field) in fields.into_iter().enumerate() {
-        let left = origin.x + share * index as f32;
+        let span = if index == widest { 1 + over } else { 1 };
+        let left = origin.x + share * start as f32;
+        start += span;
         let right = if index + 1 == count {
             origin.x + width
         } else {
-            left + share
+            left + share * span as f32
         };
         let galley =
             ui.painter()
                 .layout_no_wrap(field.label.to_owned(), font.clone(), t.color.text_dim);
-        let body_left = left + PANEL_INSET + galley.size().x + LABEL_GAP;
+        let body_left = left + PANEL_INSET + label_width + LABEL_GAP;
         let body = Rect::from_min_max(
             pos2(body_left, origin.y + inset),
             pos2(
