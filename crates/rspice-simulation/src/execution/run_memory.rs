@@ -315,13 +315,14 @@ pub struct MemoryWarning {
 }
 
 impl MemoryWarning {
-    /// What the run needs and what the machine has, in one sentence, and
-    /// what running it anyway does.
+    /// What the run needs and what the machine has, the numbers first so a
+    /// band too narrow for the whole sentence still shows them, and what
+    /// running it anyway does.
     #[must_use]
     pub fn message(&self) -> String {
         format!(
-            "This design has {} devices. Running it needs about {} of memory, and this \
-             computer has {} free of {}. It can run, but other programs slow while it does.",
+            "This design's {} devices need about {} of memory; {} of {} is free. Other \
+             programs slow while it runs.",
             grouped(self.devices),
             bytes(self.needed_bytes),
             bytes(self.memory.free_bytes),
@@ -657,9 +658,8 @@ mod tests {
         };
         assert_eq!(
             warning.message(),
-            "This design has 1,048,577 devices. Running it needs about 5.0 GB of memory, and \
-             this computer has 3.0 GB free of 16.0 GB. It can run, but other programs slow \
-             while it does."
+            "This design's 1,048,577 devices need about 5.0 GB of memory; 3.0 GB of 16.0 GB is \
+             free. Other programs slow while it runs."
         );
         assert_eq!(
             warning.status(),

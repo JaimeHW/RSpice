@@ -1772,9 +1772,8 @@ mod tests {
         assert_eq!(waiting.metadata().memory_warning, Some(warning));
         assert_eq!(
             warning.message(),
-            "This design has 262,145 devices. Running it needs about 1.3 GB of memory, and this \
-             computer has 512 MB free of 16.0 GB. It can run, but other programs slow while it \
-             does."
+            "This design's 262,145 devices need about 1.3 GB of memory; 512 MB of 16.0 GB is \
+             free. Other programs slow while it runs."
         );
 
         // A machine too small to lift the shipped count, and a design

@@ -1002,6 +1002,8 @@ fn memory_band(
             }
             ui.add_space(RUN_STRIP_GAP);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                // The mark keeps the gap from the words a run band's dot does.
+                ui.add_space(RUN_STRIP_DOT_GAP);
                 ui.add(egui::Label::new(&words).truncate())
                     .on_hover_text(&words);
             });
