@@ -1124,7 +1124,7 @@ pub fn show_plot<'a>(
         let samples = if trace.y.is_stored() {
             Trace::stored(&trace.x, &trace.y, color)
         } else if let Some(Some((xs, ys))) = held_traces.get(*index) {
-            Trace::new(xs, ys, color)
+            Trace::new(xs, ys, color).shared(&trace.x, &trace.y)
         } else {
             continue;
         };
@@ -1188,7 +1188,7 @@ pub fn show_plot<'a>(
             let samples = if trace.y.is_stored() {
                 Trace::stored(&trace.x, &trace.y, color)
             } else if let Some(Some((xs, ys))) = held_traces.get(*index) {
-                Trace::new(xs, ys, color)
+                Trace::new(xs, ys, color).shared(&trace.x, &trace.y)
             } else {
                 continue;
             };

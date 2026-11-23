@@ -21,6 +21,7 @@
 
 mod cursor;
 mod decimate;
+mod picture;
 mod render;
 mod spec;
 mod x_row;

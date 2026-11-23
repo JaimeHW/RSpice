@@ -12,7 +12,7 @@ use super::cursor::{CursorId, CursorPair};
 use super::decimate::DecimationCache;
 use super::format::{fmt_si_signed, fmt_si_significant, tick_with_unit};
 use super::scale::{LabelColumn, XScale, even_labels};
-use super::spec::{Axis, DrawMode, MarkerShape, PlotSpec, Trace};
+use super::spec::{Axis, MarkerShape, PlotSpec, Trace};
 use crate::palette::TRACE_HUES;
 
 /// Interaction contract selected by the owning result surface.
@@ -373,23 +373,41 @@ fn paint_trace_marker(
     color: Color32,
     background: Color32,
 ) {
+    let mut shapes = Vec::new();
+    trace_marker_shapes(center, shape, color, background, &mut shapes);
+    painter.extend(shapes);
+}
+
+/// The shapes a curve's marker of `shape` at `center` is drawn as.
+pub(super) fn trace_marker_shapes(
+    center: Pos2,
+    shape: TraceMarkerShape,
+    color: Color32,
+    background: Color32,
+    out: &mut Vec<Shape>,
+) {
     let radius = 3.4;
     let stroke = Stroke::new(1.35, color);
     match shape {
         TraceMarkerShape::Circle => {
-            painter.circle(center, radius, background, stroke);
+            out.push(Shape::Circle(egui::epaint::CircleShape {
+                center,
+                radius,
+                fill: background,
+                stroke,
+            }));
         }
         TraceMarkerShape::Square => {
-            painter.rect(
+            out.push(Shape::Rect(egui::epaint::RectShape::new(
                 Rect::from_center_size(center, vec2(radius * 2.0, radius * 2.0)),
                 0.0,
                 background,
                 stroke,
                 egui::StrokeKind::Inside,
-            );
+            )));
         }
         TraceMarkerShape::Diamond => {
-            painter.add(Shape::convex_polygon(
+            out.push(Shape::convex_polygon(
                 vec![
                     pos2(center.x, center.y - radius - 0.5),
                     pos2(center.x + radius + 0.5, center.y),
@@ -401,7 +419,7 @@ fn paint_trace_marker(
             ));
         }
         TraceMarkerShape::Triangle => {
-            painter.add(Shape::convex_polygon(
+            out.push(Shape::convex_polygon(
                 vec![
                     pos2(center.x, center.y - radius - 0.8),
                     pos2(center.x + radius + 0.8, center.y + radius),
@@ -412,7 +430,7 @@ fn paint_trace_marker(
             ));
         }
         TraceMarkerShape::TriangleDown => {
-            painter.add(Shape::convex_polygon(
+            out.push(Shape::convex_polygon(
                 vec![
                     pos2(center.x - radius - 0.8, center.y - radius),
                     pos2(center.x + radius + 0.8, center.y - radius),
@@ -423,8 +441,8 @@ fn paint_trace_marker(
             ));
         }
         TraceMarkerShape::Asterisk => {
-            paint_trace_marker(painter, center, TraceMarkerShape::Plus, color, background);
-            paint_trace_marker(painter, center, TraceMarkerShape::Cross, color, background);
+            trace_marker_shapes(center, TraceMarkerShape::Plus, color, background, out);
+            trace_marker_shapes(center, TraceMarkerShape::Cross, color, background, out);
         }
         TraceMarkerShape::Cross | TraceMarkerShape::Plus => {
             let diagonal = shape == TraceMarkerShape::Cross;
@@ -452,8 +470,8 @@ fn paint_trace_marker(
                 ]
             };
             for segment in segments {
-                painter.line_segment(segment, Stroke::new(3.4, background));
-                painter.line_segment(segment, stroke);
+                out.push(Shape::line_segment(segment, Stroke::new(3.4, background)));
+                out.push(Shape::line_segment(segment, stroke));
             }
         }
     }
@@ -482,7 +500,7 @@ pub fn hairline(width: f32, pixels_per_point: f32) -> f32 {
     (width * pixels_per_point).floor().max(1.0) / pixels_per_point
 }
 
-fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
+pub(super) fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
     points
         .split(|point| !(point.x.is_finite() && point.y.is_finite()))
         .filter(|run| !run.is_empty())
@@ -490,7 +508,7 @@ fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
 
 /// Whether a run of points covers no more than a pixel either way: one
 /// sample, or a dense column whose minimum and maximum coincide.
-fn run_is_a_point(run: &[Pos2]) -> bool {
+pub(super) fn run_is_a_point(run: &[Pos2]) -> bool {
     let first = run[0];
     run.iter()
         .all(|point| (point.x - first.x).abs() < 1.0 && (point.y - first.y).abs() < 1.0)
@@ -498,13 +516,13 @@ fn run_is_a_point(run: &[Pos2]) -> bool {
 
 /// Whether a run never steps back along X by more than a pixel, as the
 /// envelope of a curve against time or frequency does and a locus need not.
-fn runs_forward(run: &[Pos2]) -> bool {
+pub(super) fn runs_forward(run: &[Pos2]) -> bool {
     run.windows(2).all(|pair| pair[1].x >= pair[0].x - 1.0)
 }
 
 /// The stretches of a forward run that a dash of `dash` points with a gap of
 /// `gap` points keeps, measured along X from the run's first point.
-fn column_dashes(run: &[Pos2], dash: f32, gap: f32) -> Vec<&[Pos2]> {
+pub(super) fn column_dashes(run: &[Pos2], dash: f32, gap: f32) -> Vec<&[Pos2]> {
     let period = dash + gap;
     let origin = run[0].x;
     let mut stretches = Vec::new();
@@ -559,18 +577,22 @@ const EDGE_MIN_RISE: f32 = 6.0;
 
 /// Where on its pane's X grid one trace's markers stand.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct MarkerSlots {
+pub(super) struct MarkerSlots {
     /// The screen X of one of this trace's slots; the rest lie whole
     /// pitches either side of it.
-    origin: f32,
+    pub(super) origin: f32,
     /// The distance between this trace's slots.
-    pitch: f32,
+    pub(super) pitch: f32,
 }
 
 impl MarkerSlots {
     /// The slots of each of `spec`'s traces, in order: `None` for a trace
     /// that carries no marker.
-    fn for_pane(spec: &PlotSpec<'_>, plot_rect: Rect, color_safe: bool) -> Vec<Option<Self>> {
+    pub(super) fn for_pane(
+        spec: &PlotSpec<'_>,
+        plot_rect: Rect,
+        color_safe: bool,
+    ) -> Vec<Option<Self>> {
         let marked: Vec<bool> = spec
             .traces
             .iter()
@@ -600,7 +622,12 @@ impl MarkerSlots {
     /// pinned to the data, not to the pane — X = 0, or 1 on a log axis, is a
     /// grid line — so a pan carries the markers with their curves instead of
     /// sliding the curves under them.
-    fn on_pane(spec: &PlotSpec<'_>, plot_rect: Rect, rank: usize, marked: usize) -> Self {
+    pub(super) fn on_pane(
+        spec: &PlotSpec<'_>,
+        plot_rect: Rect,
+        rank: usize,
+        marked: usize,
+    ) -> Self {
         let marked = marked.max(1);
         let pitch = MARKER_PITCH.max(MARKER_STAGGER_MIN * marked as f32);
         let anchor = match spec.x_scale {
@@ -639,7 +666,11 @@ impl MarkerSlots {
 ///
 /// A locus — Smith, Nyquist, an XY loop — doubles back on X, so it has no X
 /// grid to stand on; its markers are spaced along the curve instead.
-fn trace_marker_positions(points: &[Pos2], plot_rect: Rect, slots: MarkerSlots) -> Vec<Pos2> {
+pub(super) fn trace_marker_positions(
+    points: &[Pos2],
+    plot_rect: Rect,
+    slots: MarkerSlots,
+) -> Vec<Pos2> {
     if points.len() < 2 || plot_rect.width() < 72.0 {
         return Vec::new();
     }
@@ -872,18 +903,42 @@ fn locus_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
     placed
 }
 
-fn paint_trace_markers(
-    painter: &egui::Painter,
-    points: &[Pos2],
-    plot_rect: Rect,
-    slots: MarkerSlots,
-    shape: TraceMarkerShape,
-    color: Color32,
-    background: Color32,
-) {
-    for point in trace_marker_positions(points, plot_rect, slots) {
-        paint_trace_marker(painter, point, shape, color, background);
-    }
+/// The plot's mark that the curves it shows are being drawn again: the
+/// kit's busy mark and the words, in the plot's top right corner.
+fn paint_updating(ui: &mut Ui, plot_rect: Rect, t: &Tokens) {
+    const MARK: f32 = 12.0;
+    const PAD: f32 = 4.0;
+    let text = "Updating curves\u{2026}";
+    let font = theme::sans(crate::tokens::FS_1, FontWeight::Regular);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), t.color.text_dim);
+    let size = vec2(
+        MARK + PAD + galley.size().x + 2.0 * PAD,
+        galley.size().y.max(MARK) + 2.0 * PAD,
+    );
+    let rect = Rect::from_min_size(
+        pos2(plot_rect.right() - size.x - PAD, plot_rect.top() + PAD),
+        size,
+    );
+    ui.painter().rect(
+        rect,
+        3.0,
+        t.color.canvas_bg,
+        Stroke::new(1.0, t.color.border),
+        egui::StrokeKind::Inside,
+    );
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink(PAD))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.spacing_mut().item_spacing.x = PAD;
+    crate::widgets::busy_mark(&mut row, MARK);
+    row.add(
+        egui::Label::new(egui::RichText::new(text).font(font).color(t.color.text_dim))
+            .selectable(false),
+    );
 }
 
 /// A framed plot runs to its rect's right edge unless it is told to keep a
@@ -1400,7 +1455,7 @@ pub fn show(
     }
 
     // ---- traces (clipped to the plot area)
-    {
+    let updating = {
         let clipped = ui.painter_at(plot_rect.expand(1.0));
         // One column per device pixel, so a dense trace strokes every pixel at
         // any scaling.
@@ -1408,168 +1463,26 @@ pub fn show(
         // A parametric reduction quantizes both axes, so it needs the vertical
         // resolution too, counted the same way.
         let rows = super::decimate::display_columns(plot_rect.height(), pixels_per_point);
-        let marker_slots = MarkerSlots::for_pane(spec, plot_rect, t.color_safe_traces);
-        for (trace_index, trace) in spec.traces.iter().enumerate() {
-            if trace.is_empty() {
-                continue;
-            }
-            // A hairline trace is a whole number of device pixels wide and
-            // runs through pixel centres, so its flat stretches stay sharp.
-            let hairline_trace = trace.width <= 1.0;
-            let width = if hairline_trace {
-                hairline(trace.width, pixels_per_point)
-            } else {
-                trace.width
-            };
-            let stroke = Stroke::new(width, trace.color);
-            // A trace on a second axis of the strip maps through that axis.
-            let (y_min, y_max, y_scale) = trace
-                .y_axis
-                .map_or((spec.y.min, spec.y.max, spec.y_scale), |axis| {
-                    (axis.min, axis.max, axis.scale)
-                });
-            let my = |y: f64| -> f32 {
-                plot_rect.bottom()
-                    - (y_scale.normalize(y, y_min, y_max) as f32) * plot_rect.height()
-            };
-            let view = super::decimate::TraceView {
-                x0: spec.x.min,
-                x1: spec.x.max,
-                y0: y_min,
-                y1: y_max,
-                x_scale: spec.x_scale,
-                y_scale,
+        super::picture::draw(
+            ui.ctx(),
+            out.response.id,
+            spec,
+            cache,
+            &clipped,
+            super::picture::Geometry {
+                plot_rect,
+                pixels_per_point,
+                x: (spec.x.min, spec.x.max, spec.x_scale),
+                y: (spec.y.min, spec.y.max, spec.y_scale),
                 columns,
                 rows,
-            };
-            let points: Vec<Pos2> = match (trace.stored, trace.cache_key) {
-                (Some(stored), key) => cache
-                    .stored_series(key, stored, view)
-                    .iter()
-                    .map(|p| pos2(mx(p[0]), my(p[1])))
-                    .collect(),
-                (None, Some(key)) => cache
-                    .series(key, trace.x, trace.y, view, trace.parametric, trace.shape)
-                    .iter()
-                    .map(|p| pos2(mx(p[0]), my(p[1])))
-                    .collect(),
-                (None, None) => trace
-                    .x
-                    .iter()
-                    .zip(trace.y.iter())
-                    .map(|(&x, &y)| pos2(mx(x), my(y)))
-                    .collect(),
-            };
-            let points = if hairline_trace {
-                points
-                    .into_iter()
-                    .map(|point| {
-                        pos2(
-                            clipped.round_to_pixel_center(point.x),
-                            clipped.round_to_pixel_center(point.y),
-                        )
-                    })
-                    .collect()
-            } else {
-                points
-            };
-            let look = trace.look(trace_index, t.color_safe_traces);
-            let marker = look.marker.or_else(|| {
-                (trace.show_single_point && points.len() == 1).then_some(TraceMarkerShape::Circle)
-            });
-            match trace.draw {
-                DrawMode::Line => {}
-                DrawMode::Points => {
-                    let radius = (trace.width * 0.9).max(1.5);
-                    for point in points.iter().filter(|point| point.is_finite()) {
-                        clipped.circle_filled(*point, radius, trace.color);
-                    }
-                    continue;
-                }
-                DrawMode::Stems => {
-                    let base = my(0.0);
-                    let base = if base.is_finite() {
-                        base.clamp(plot_rect.top(), plot_rect.bottom())
-                    } else {
-                        plot_rect.bottom()
-                    };
-                    for point in points.iter().filter(|point| point.is_finite()) {
-                        clipped.line_segment([pos2(point.x, base), *point], stroke);
-                        clipped.circle_filled(*point, (trace.width * 0.9).max(1.5), trace.color);
-                    }
-                    continue;
-                }
-                DrawMode::Steps => {}
-            }
-            let points = if trace.draw == DrawMode::Steps {
-                held_steps(&points)
-            } else {
-                points
-            };
-            let dense = points.len() >= columns;
-            for run in finite_runs(&points) {
-                // A sample with a hole either side, or a run that folds into
-                // one pixel, has no length to stroke; it is still data, so it
-                // draws as a dot the width of the curve. A lone sample that
-                // carries a marker already has its mark.
-                if run_is_a_point(run) {
-                    if !(points.len() == 1 && marker.is_some()) {
-                        clipped.circle_filled(run[0], (trace.width * 0.5).max(1.25), trace.color);
-                    }
-                    continue;
-                }
-                match look.dash {
-                    // A dense envelope zig-zags through every column, so
-                    // dashing it along its length would cut it into
-                    // thousands of slivers reading as noise. It is dashed
-                    // across: drawn over stretches of X and left out
-                    // between them, which keeps the dash a curve is told
-                    // apart by.
-                    Some((dash, gap)) if dense && runs_forward(run) => {
-                        for stretch in column_dashes(run, dash, gap) {
-                            clipped.add(Shape::line(stretch.to_vec(), stroke));
-                        }
-                    }
-                    Some((dash, gap)) if !dense => {
-                        clipped.extend(Shape::dashed_line(run, stroke, dash, gap));
-                    }
-                    _ => {
-                        clipped.add(Shape::line(run.to_vec(), stroke));
-                    }
-                }
-            }
-            if let Some(marker) = marker {
-                if points.len() == 1 {
-                    let source_point = points[0];
-                    if source_point.x.is_finite()
-                        && source_point.y.is_finite()
-                        && plot_rect.contains(source_point)
-                    {
-                        let marker_bounds = plot_rect.shrink(4.0);
-                        let point = pos2(
-                            source_point
-                                .x
-                                .clamp(marker_bounds.left(), marker_bounds.right()),
-                            source_point
-                                .y
-                                .clamp(marker_bounds.top(), marker_bounds.bottom()),
-                        );
-                        paint_trace_marker(&clipped, point, marker, trace.color, c.canvas_bg);
-                    }
-                } else {
-                    paint_trace_markers(
-                        &clipped,
-                        &points,
-                        plot_rect,
-                        marker_slots[trace_index]
-                            .unwrap_or_else(|| MarkerSlots::on_pane(spec, plot_rect, 0, 1)),
-                        marker,
-                        trace.color,
-                        c.canvas_bg,
-                    );
-                }
-            }
-        }
+                background: c.canvas_bg,
+            },
+            t.color_safe_traces,
+        )
+    };
+    if updating {
+        paint_updating(ui, plot_rect, &t);
     }
 
     // ---- frame + axis units
@@ -2745,7 +2658,7 @@ fn draw_readout(
 /// The staircase a sample-and-hold draws through `points`: each sample held
 /// level until the next one's X, where it steps. A hole (a non-finite point)
 /// stays a hole.
-fn held_steps(points: &[Pos2]) -> Vec<Pos2> {
+pub(super) fn held_steps(points: &[Pos2]) -> Vec<Pos2> {
     let mut steps = Vec::with_capacity(points.len() * 2);
     for pair in points.windows(2) {
         let (from, to) = (pair[0], pair[1]);

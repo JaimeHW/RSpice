@@ -63,18 +63,6 @@ fn text_rect(output: &egui::FullOutput, wanted: &str) -> Option<egui::Rect> {
         .map(|(_, rect)| rect)
 }
 
-fn click(ctx: &egui::Context, state: &mut ResultsTestHost, at: egui::Pos2) {
-    let button = |pressed| egui::Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::default(),
-    };
-    well_frame(ctx, state, vec![egui::Event::PointerMoved(at)]);
-    well_frame(ctx, state, vec![button(true)]);
-    well_frame(ctx, state, vec![button(false)]);
-}
-
 /// The review's first current: its analysis and column, its name and its
 /// strip's identity.
 fn first_current(state: &mut ResultsTestHost) -> (usize, usize, String, AnalysisPresentationKey) {

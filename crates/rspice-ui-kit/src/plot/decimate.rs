@@ -79,6 +79,9 @@ pub struct DecimationWork {
     pub rebuilds: u64,
     /// Retained envelopes dropped to admit another.
     pub evictions: u64,
+    /// Curves mapped and stroked into a plot's picture. A frame that keeps
+    /// the picture it drew strokes none.
+    pub strokes: u64,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -90,6 +93,7 @@ impl DecimationWork {
             hits: self.hits - earlier.hits,
             rebuilds: self.rebuilds - earlier.rebuilds,
             evictions: self.evictions - earlier.evictions,
+            strokes: self.strokes - earlier.strokes,
         }
     }
 }
@@ -315,73 +319,58 @@ impl DecimationCache {
         parametric: bool,
         shape: Option<&SweepShape>,
     ) -> Arc<[[f64; 2]]> {
-        let reduction = reduction_for(parametric, shape);
-        let reads_y = reduction.reads_y();
-        let key = CacheKey {
-            trace: trace_key,
-            columns: view.columns as u32,
-            x0_bits: view.x0.to_bits(),
-            x1_bits: view.x1.to_bits(),
-            rows: if reads_y { view.rows as u32 } else { 0 },
-            y0_bits: if reads_y { view.y0.to_bits() } else { 0 },
-            y1_bits: if reads_y { view.y1.to_bits() } else { 0 },
-            reduction,
-            x_scale: view.x_scale,
-            y_scale: view.y_scale,
-        };
+        let key = EnvelopeKey::series(trace_key, view, parametric, shape).0;
         if let Some(hit) = self.lookup(&key) {
             return hit;
         }
         let ascending = shape.is_some_and(|shape| shape.class() == SweepClass::Ascending);
-        let envelope: Arc<[[f64; 2]]> = match reduction {
-            Reduction::PixelCells => decimate_pixel_cells(x, y, view),
+        let envelope: Arc<[[f64; 2]]> = if key.reduction == Reduction::Ordered
+            && ascending
+            && x.len().min(y.len()) >= view.columns * BLOCK_INDEX_SAMPLES_PER_COLUMN
+        {
             // A long ascending trace is reduced a block at a time; the result
             // is the reference reduction's, point for point.
-            Reduction::Ordered
-                if ascending
-                    && x.len().min(y.len()) >= view.columns * BLOCK_INDEX_SAMPLES_PER_COLUMN =>
-            {
-                self.block_index(trace_key, x, y)
-                    .and_then(|index| {
-                        index.decimate_ascending(x, y, view.x0, view.x1, view.x_scale, view.columns)
-                    })
-                    .unwrap_or_else(|| {
-                        decimate_minmax(
-                            x,
-                            y,
-                            view.x0,
-                            view.x1,
-                            view.x_scale,
-                            view.columns,
-                            XOrientation::Ascending,
-                        )
-                    })
-            }
-            // `reduction_for` never selects a band or tiles; only `band` and
-            // `stored_series` key them.
-            Reduction::Ordered
-            | Reduction::OrderedReversed
-            | Reduction::Band
-            | Reduction::Tiles => {
-                let orientation = if reduction == Reduction::OrderedReversed {
-                    XOrientation::Descending
-                } else {
-                    XOrientation::Ascending
-                };
-                decimate_minmax(
-                    x,
-                    y,
-                    view.x0,
-                    view.x1,
-                    view.x_scale,
-                    view.columns,
-                    orientation,
-                )
-            }
-        }
-        .into();
+            self.block_index(trace_key, x, y)
+                .and_then(|index| {
+                    index.decimate_ascending(x, y, view.x0, view.x1, view.x_scale, view.columns)
+                })
+                .map_or_else(|| reduce(x, y, view, parametric, shape), Arc::from)
+        } else {
+            reduce(x, y, view, parametric, shape)
+        };
         self.retain(key, &envelope);
         envelope
+    }
+
+    /// The envelope held under `key`, if one is: what a picture asks before
+    /// it reduces anything, so a curve it already holds is not read again.
+    pub(super) fn held(&mut self, key: EnvelopeKey) -> Option<Arc<[[f64; 2]]>> {
+        self.lookup(&key.0)
+    }
+
+    /// Keep `envelope`, reduced off the frame, under `key`, as the frame
+    /// keeps the envelopes it reduces itself.
+    pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: &Arc<[[f64; 2]]>) {
+        self.retain(key.0, envelope);
+    }
+
+    /// Count `curves` stroked into a picture.
+    #[cfg_attr(not(any(test, feature = "test-support")), allow(unused_variables))]
+    pub(super) fn stroked(&mut self, curves: usize) {
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            self.held.work.strokes += curves as u64;
+        }
+    }
+
+    /// What the cache holds derived samples of: their source and data
+    /// version. A picture drawn from them is of these samples only.
+    pub(super) fn identity(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.version.hash(&mut hasher);
+        format!("{:?}", self.source).hash(&mut hasher);
+        hasher.finish()
     }
 
     /// [`Self::series`] of samples a results store keeps: the store's tile of
@@ -398,18 +387,7 @@ impl DecimationCache {
         let Some(trace_key) = trace_key else {
             return stored_envelope(stored, view).0;
         };
-        let key = CacheKey {
-            trace: trace_key,
-            columns: view.columns as u32,
-            x0_bits: view.x0.to_bits(),
-            x1_bits: view.x1.to_bits(),
-            rows: 0,
-            y0_bits: 0,
-            y1_bits: 0,
-            reduction: Reduction::Tiles,
-            x_scale: view.x_scale,
-            y_scale: view.y_scale,
-        };
+        let key = EnvelopeKey::stored(trace_key, view).0;
         if let Some(hit) = self.lookup(&key) {
             return hit;
         }
@@ -418,6 +396,33 @@ impl DecimationCache {
             self.retain(key, &envelope);
         }
         envelope
+    }
+
+    /// [`Self::stored_series`], and whether the envelope is the view's own
+    /// rather than a coarser one drawn while it is read.
+    pub(super) fn stored_series_read(
+        &mut self,
+        trace_key: Option<u64>,
+        stored: super::spec::StoredSamples<'_>,
+        view: TraceView,
+    ) -> (Arc<[[f64; 2]]>, bool) {
+        let Some(trace_key) = trace_key else {
+            return stored_envelope(stored, view);
+        };
+        let key = EnvelopeKey::stored(trace_key, view).0;
+        if let Some(hit) = self.lookup(&key) {
+            return (hit, true);
+        }
+        let (envelope, complete) = stored_envelope(stored, view);
+        if complete {
+            self.retain(key, &envelope);
+        }
+        (envelope, complete)
+    }
+
+    /// The budget the cache holds envelopes to, in bytes.
+    pub(super) fn capacity(&self) -> usize {
+        self.byte_capacity
     }
 
     /// The per-column extremes of a whole set of curves, for a pane that draws
@@ -697,6 +702,103 @@ fn band_columns(members: &[BandMember<'_>], view: TraceView) -> (Vec<[f64; 2]>, 
         }
     }
     (out, complete)
+}
+
+/// The name an envelope is kept under: a trace's reduction at one view.
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub(super) struct EnvelopeKey(CacheKey);
+
+impl EnvelopeKey {
+    /// The key [`DecimationCache::series`] keeps this trace's reduction at
+    /// `view` under.
+    pub(super) fn series(
+        trace_key: u64,
+        view: TraceView,
+        parametric: bool,
+        shape: Option<&SweepShape>,
+    ) -> Self {
+        let reduction = reduction_for(parametric, shape);
+        let reads_y = reduction.reads_y();
+        Self(CacheKey {
+            trace: trace_key,
+            columns: view.columns as u32,
+            x0_bits: view.x0.to_bits(),
+            x1_bits: view.x1.to_bits(),
+            rows: if reads_y { view.rows as u32 } else { 0 },
+            y0_bits: if reads_y { view.y0.to_bits() } else { 0 },
+            y1_bits: if reads_y { view.y1.to_bits() } else { 0 },
+            reduction,
+            x_scale: view.x_scale,
+            y_scale: view.y_scale,
+        })
+    }
+
+    /// The key [`DecimationCache::stored_series`] keeps this stored trace's
+    /// envelope at `view` under.
+    pub(super) fn stored(trace_key: u64, view: TraceView) -> Self {
+        Self(CacheKey {
+            trace: trace_key,
+            columns: view.columns as u32,
+            x0_bits: view.x0.to_bits(),
+            x1_bits: view.x1.to_bits(),
+            rows: 0,
+            y0_bits: 0,
+            y1_bits: 0,
+            reduction: Reduction::Tiles,
+            x_scale: view.x_scale,
+            y_scale: view.y_scale,
+        })
+    }
+}
+
+/// The reduction [`DecimationCache::series`] makes of `(x, y)` at `view`,
+/// made without a cache: what a picture drawn off the frame reads.
+pub(super) fn reduce(
+    x: &[f64],
+    y: &[f64],
+    view: TraceView,
+    parametric: bool,
+    shape: Option<&SweepShape>,
+) -> Arc<[[f64; 2]]> {
+    let reduction = reduction_for(parametric, shape);
+    if reduction == Reduction::PixelCells {
+        return decimate_pixel_cells(x, y, view).into();
+    }
+    let orientation = if reduction == Reduction::OrderedReversed {
+        XOrientation::Descending
+    } else {
+        XOrientation::Ascending
+    };
+    decimate_minmax(
+        x,
+        y,
+        view.x0,
+        view.x1,
+        view.x_scale,
+        view.columns,
+        orientation,
+    )
+    .into()
+}
+
+/// The envelope of stored samples at `view`, waited for: off the frame, a
+/// picture waits for the view's own tile rather than drawing a coarser one.
+/// Whether it is the view's own tile comes with it.
+pub(super) fn stored_envelope_waiting(
+    stored: super::spec::StoredSamples<'_>,
+    view: TraceView,
+) -> (Arc<[[f64; 2]]>, bool) {
+    let first = stored_envelope(stored, view);
+    if first.1 {
+        return first;
+    }
+    match rspice_results::waveform::read_service() {
+        Some(service) => {
+            service.settle();
+            stored_envelope(stored, view)
+        }
+        None => first,
+    }
 }
 
 /// The columns of `view` that pixel `pixel` of a tile of `pixels` pixels folds into: every

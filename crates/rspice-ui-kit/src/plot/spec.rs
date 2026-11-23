@@ -268,6 +268,10 @@ pub struct Trace<'a> {
     /// The samples, when a results store keeps them: `x` and `y` are then empty, and the trace
     /// is drawn from the store's tiles at the view's width without reading either column.
     pub stored: Option<StoredSamples<'a>>,
+    /// The shared columns `x` and `y` are borrowed from, when they are: what
+    /// lets the plot reduce this curve off the frame when drawing it costs
+    /// more than a frame. A curve without them is reduced on the frame.
+    pub shared: Option<StoredSamples<'a>>,
     /// The Y axis the trace reads against when it is not the plot's own: a
     /// second axis of the strip, with a range and scale of its own. `None`
     /// reads against [`PlotSpec::y`].
@@ -331,6 +335,7 @@ impl<'a> Trace<'a> {
             parametric: false,
             shape: None,
             stored: None,
+            shared: None,
             y_axis: None,
             draw: DrawMode::Line,
             chosen_dash: None,
@@ -430,6 +435,17 @@ impl<'a> Trace<'a> {
     /// Set the decimation-cache identity (globally unique per trace).
     pub fn cache_key(mut self, key: u64) -> Self {
         self.cache_key = Some(key);
+        self
+    }
+
+    /// Name the shared columns `x` and `y` are borrowed from, so the plot
+    /// can reduce this curve off the frame.
+    pub fn shared(
+        mut self,
+        x: &'a rspice_results::waveform::WaveformValues,
+        y: &'a rspice_results::waveform::WaveformValues,
+    ) -> Self {
+        self.shared = Some(StoredSamples { x, y });
         self
     }
 

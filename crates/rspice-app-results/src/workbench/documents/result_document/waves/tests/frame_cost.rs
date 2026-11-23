@@ -252,8 +252,8 @@ fn a_large_family_draws_its_band_and_rebuilds_nothing_warm_or_hovered() {
     assert!(
         first
             .iter()
-            .all(|cost| cost.work.hits + cost.work.rebuilds == 2),
-        "every hovered frame draws the band and the one curve under the pointer: {:?}",
+            .all(|cost| cost.work.hits + cost.work.rebuilds <= 2),
+        "a hovered frame reads the band and at most the one curve under the pointer: {:?}",
         first.iter().map(|cost| cost.work).collect::<Vec<_>>()
     );
     // The same sweep again finds every curve it highlights already reduced.
@@ -268,8 +268,9 @@ fn a_large_family_draws_its_band_and_rebuilds_nothing_warm_or_hovered() {
 
 /// A hundred unrelated curves in one pane are stroked one by one, never
 /// folded into a band: a band says its members are one quantity spread by
-/// what varied between them, which is false of unrelated signals. Every
-/// frame reads each curve's own envelope, and no frame reads a band.
+/// what varied between them, which is false of unrelated signals. The cold
+/// frame reduces each curve's own envelope; a warm or hovered frame keeps the
+/// picture it drew and reads nothing, no band included.
 #[test]
 fn a_hundred_unrelated_curves_are_never_drawn_as_a_band() {
     let mut state = crowded_transient(100, 1_000);
@@ -280,18 +281,19 @@ fn a_hundred_unrelated_curves_are_never_drawn_as_a_band() {
         (0, 100),
         "the cold frame reduces every curve on its own"
     );
+    assert_eq!(cold.work.strokes, 100, "the cold frame strokes every curve");
     let warm = frame(&ctx, &mut state, Vec::new());
     assert_eq!(
-        (warm.work.hits, warm.work.rebuilds),
-        (100, 0),
-        "a warm frame strokes every curve from its own envelope"
+        (warm.work.hits, warm.work.rebuilds, warm.work.strokes),
+        (0, 0, 0),
+        "a warm frame keeps the picture it drew"
     );
     for position in hover_positions(6) {
         let hover = frame(&ctx, &mut state, vec![egui::Event::PointerMoved(position)]);
         assert_eq!(
-            (hover.work.hits, hover.work.rebuilds),
-            (100, 0),
-            "a hovered frame strokes every curve, and reads no band"
+            (hover.work.hits, hover.work.rebuilds, hover.work.strokes),
+            (0, 0, 0),
+            "a hovered frame keeps the picture it drew, and reads no band"
         );
     }
 }
