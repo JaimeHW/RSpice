@@ -38,7 +38,7 @@ pub use parsing::{
     parse_runner_netlist_with_resource_limits_and_abort, validated_executable_hierarchy,
 };
 pub(crate) use parsing::{
-    parse_executable, unparsed_executable_source,
+    parse_executable, parse_under, unparsed_executable_source,
     validated_executable_hierarchy_with_limits_and_abort,
     validated_parsed_hierarchy_with_limits_and_abort,
 };

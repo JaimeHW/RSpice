@@ -72,6 +72,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         &exact_directive,
         &exact_runtimes,
         &Default::default(),
+        rspice_core::ResourceLimits::default(),
     )
     .expect("exact project identity is permitted");
 
@@ -99,6 +100,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         &altered_directive,
         &altered_runtimes,
         &Default::default(),
+        rspice_core::ResourceLimits::default(),
     )
     .expect_err("case-altered project key must remain an external dependency");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);

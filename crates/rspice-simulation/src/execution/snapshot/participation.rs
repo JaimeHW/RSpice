@@ -67,6 +67,7 @@ pub(super) fn expand_global_run_set_tasks(
     corner_veriloga: &CornerVerilogARuntimes,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
     if pvt_points.is_empty() {
         return Err(PreparationError::new(
@@ -134,6 +135,7 @@ pub(super) fn expand_global_run_set_tasks(
             executable_netlist,
             point,
             corner_veriloga,
+            limits,
         )?);
     }
 
@@ -262,6 +264,7 @@ pub(super) fn expand_global_run_set_tasks(
                             &environment,
                             point_index,
                             pvt_points.len(),
+                            limits,
                         )?);
                 }
                 point_task.execution_environment = Some(environment);

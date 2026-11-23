@@ -1306,6 +1306,7 @@ impl PreparedRunSnapshot {
                 &parts.corner_veriloga_runtimes,
                 parts.reference_process,
                 parts.reference_temperature_celsius,
+                limits,
             )?
         } else {
             // A Run Set object exists even when all of its axes are disabled.
@@ -1319,6 +1320,7 @@ impl PreparedRunSnapshot {
                 &parts.corner_veriloga_runtimes,
                 parts.reference_process,
                 parts.reference_temperature_celsius,
+                limits,
             )?
         };
 
@@ -1433,6 +1435,7 @@ impl PreparedRunSnapshot {
                         .as_ref()
                         .unwrap_or(&parts.project_veriloga_runtimes),
                     &parts.measurement_references,
+                    limits,
                 )?;
                 crate::netlist_preparation::validated_executable_hierarchy_with_limits_and_abort(
                     deck, limits, abort,
@@ -1683,7 +1686,7 @@ impl PreparedRunSnapshot {
                 None,
             ),
         };
-        saved_outputs::bind_decks(&mut parts.tasks, &parsed_netlist, abort, progress)?;
+        saved_outputs::bind_decks(&mut parts.tasks, &parsed_netlist, limits, abort, progress)?;
         let model_bin_config = rspice_core::SimulationConfig {
             resource_limits: limits,
             temperature: rspice_core::constants::celsius_to_kelvin(
@@ -1817,7 +1820,7 @@ impl PreparedRunSnapshot {
 
         parts
             .measurement_references
-            .validate_source(&parts.executable_netlist)
+            .validate_source(&parts.executable_netlist, limits)
             .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         let digest = snapshot_digest(&parts, &pvt_points);
         // Converted and checked once: the check below, the dispatch and every receipt share it.

@@ -26,12 +26,19 @@ pub(crate) fn validate_prepared_periodic_sources<'a>(
         return Ok(());
     }
 
-    let parsed = rspice_core::Netlist::parse(executable_netlist).map_err(|error| {
-        PreparationError::new(
-            PreparationStage::Netlist,
-            format!("Could not authenticate periodic sources in the executable netlist: {error}"),
-        )
-    })?;
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: limits,
+        ..Default::default()
+    };
+    let parsed =
+        rspice_core::Netlist::parse_with_options(executable_netlist, options).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::Netlist,
+                format!(
+                    "Could not authenticate periodic sources in the executable netlist: {error}"
+                ),
+            )
+        })?;
     let _installed = runtimes.install().map_err(|error| {
         PreparationError::new(
             PreparationStage::ModelBindings,

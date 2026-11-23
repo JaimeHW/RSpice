@@ -1423,6 +1423,7 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
         netlist,
         &Default::default(),
         &Default::default(),
+        rspice_core::ResourceLimits::default(),
     )?;
     validated_executable_hierarchy(netlist).map(|_| ())
 }

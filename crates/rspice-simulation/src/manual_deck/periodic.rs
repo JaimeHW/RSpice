@@ -1449,9 +1449,13 @@ endmodule
             "{errors:?}"
         );
 
-        let tasks =
-            crate::manual_deck::build_manual_deck_queue_with_runtimes(27.0, &deck, &runtimes)
-                .expect("the deck lowers over its sealed runtime");
+        let tasks = crate::manual_deck::build_manual_deck_queue_with_runtimes(
+            27.0,
+            &deck,
+            &runtimes,
+            rspice_core::ResourceLimits::default(),
+        )
+        .expect("the deck lowers over its sealed runtime");
         let pss = tasks
             .iter()
             .find_map(|task| match &task.spec {
@@ -1466,9 +1470,13 @@ endmodule
         // periodic steady state cannot take part in yet, and the lowering
         // answers with the engine's refusal of the module, structured.
         let clocked = deck.replace("SIN(0 1 1Meg)", "DC 1");
-        let refusal =
-            crate::manual_deck::build_manual_deck_queue_with_runtimes(27.0, &clocked, &runtimes)
-                .expect_err("a circuit clocked by a mixed module is refused for PSS");
+        let refusal = crate::manual_deck::build_manual_deck_queue_with_runtimes(
+            27.0,
+            &clocked,
+            &runtimes,
+            rspice_core::ResourceLimits::default(),
+        )
+        .expect_err("a circuit clocked by a mixed module is refused for PSS");
         let ManualDeckError::Refused(refusal) = refusal else {
             panic!("the refusal is the engine's, structured: {refusal:?}");
         };

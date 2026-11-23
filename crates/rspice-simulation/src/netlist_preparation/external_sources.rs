@@ -137,15 +137,20 @@ fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
 /// data files, which the prepared snapshot seals and checks deck by deck, and
 /// a `d_process` program named by an absolute path on a host that can start
 /// it.
+///
+/// The measurement tables are bound to the deck read under `limits`, the
+/// limits its run executes under.
 pub fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_with_abort(
         netlist,
         project_runtimes,
         measurement_references,
+        limits,
         &rspice_core::NoAbort,
     )
 }
@@ -156,6 +161,7 @@ pub fn reject_deferred_external_sources_with_abort(
     netlist: &str,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
+    limits: rspice_core::ResourceLimits,
     abort: &dyn rspice_core::abort_signal::AbortSignal,
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_for_host_with_abort(
@@ -163,6 +169,7 @@ pub fn reject_deferred_external_sources_with_abort(
         project_runtimes,
         measurement_references,
         process_programs::STARTS_PROGRAMS,
+        limits,
         abort,
     )
 }
@@ -176,12 +183,14 @@ pub(crate) fn reject_deferred_external_sources_for_host(
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
     starts_programs: bool,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_for_host_with_abort(
         netlist,
         project_runtimes,
         measurement_references,
         starts_programs,
+        limits,
         &rspice_core::NoAbort,
     )
 }
@@ -193,10 +202,11 @@ fn reject_deferred_external_sources_for_host_with_abort(
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
     starts_programs: bool,
+    limits: rspice_core::ResourceLimits,
     abort: &dyn rspice_core::abort_signal::AbortSignal,
 ) -> Result<(), PreparationError> {
     measurement_references
-        .validate_source(netlist)
+        .validate_source(netlist, limits)
         .map_err(|error| {
             PreparationError::new(
                 PreparationStage::SourceChecks,

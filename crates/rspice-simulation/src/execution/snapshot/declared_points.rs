@@ -36,6 +36,7 @@ pub(super) fn expand_corner_run_point_tasks(
     corner_veriloga: &CornerVerilogARuntimes,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
     let default_contract;
     let contract = match corner_task.task.spec_options.corner.as_ref() {
@@ -78,7 +79,7 @@ pub(super) fn expand_corner_run_point_tasks(
             corner_contract: Some(contract.clone()),
         };
         let (deck, nominal_supply_voltage) =
-            prepare_pvt_point_source(executable_netlist, &pvt, corner_veriloga)?;
+            prepare_pvt_point_source(executable_netlist, &pvt, corner_veriloga, limits)?;
         points.push(DeclaredPoint {
             identity: format!(
                 "{}/{:016x}/{:016x}/{contract_digest}",
@@ -140,6 +141,7 @@ pub(super) fn expand_temperature_run_point_tasks(
     executable_netlist: &str,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
     contract.validate().map_err(|error| {
         PreparationError::new(
@@ -157,8 +159,12 @@ pub(super) fn expand_temperature_run_point_tasks(
     for temperature_celsius in contract.temperatures_c.iter().copied() {
         let pvt = temperature_point(reference_process, temperature_celsius);
         // A temperature point binds no process, so no corner's Verilog-A.
-        let (deck, nominal_supply_voltage) =
-            prepare_pvt_point_source(executable_netlist, &pvt, &CornerVerilogARuntimes::default())?;
+        let (deck, nominal_supply_voltage) = prepare_pvt_point_source(
+            executable_netlist,
+            &pvt,
+            &CornerVerilogARuntimes::default(),
+            limits,
+        )?;
         points.push(DeclaredPoint {
             identity: format!("{:016x}", temperature_celsius.to_bits()),
             label: format!("{temperature_celsius} \u{00b0}C"),

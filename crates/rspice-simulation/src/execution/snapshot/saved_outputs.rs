@@ -13,10 +13,12 @@ use super::*;
 ///
 /// It is still the stage that costs most, so it is the one that reports: a
 /// point counts as prepared once the first task at it is bound, which is when
-/// its deck has been parsed. `abort` is honoured before each task.
+/// its deck has been parsed, under `limits`, the limits the run executes
+/// under. `abort` is honoured before each task.
 pub(super) fn bind_decks(
     tasks: &mut [PreparedTask],
     parsed_netlist: &rspice_core::Netlist,
+    limits: rspice_core::ResourceLimits,
     abort: &dyn rspice_core::abort_signal::AbortSignal,
     progress: &dyn Fn(PreparationProgress),
 ) -> Result<(), PreparationError> {
@@ -46,11 +48,11 @@ pub(super) fn bind_decks(
             let source = match executable_netlist_override.as_deref() {
                 Some(text) => match parsed_overrides.entry(text) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        entry.insert(rspice_core::Netlist::parse(text).map_err(|error| {
+                    std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                        crate::netlist_preparation::parse_under(text, limits).map_err(|error| {
                             PreparationError::new(PreparationStage::Netlist, error.to_string())
-                        })?)
-                    }
+                        })?,
+                    ),
                 },
                 None => parsed_netlist,
             };

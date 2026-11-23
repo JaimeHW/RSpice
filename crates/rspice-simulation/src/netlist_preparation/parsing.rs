@@ -152,6 +152,22 @@ pub(crate) fn parse_executable(
     )
 }
 
+/// `text`, a deck the run holds or one it made from it, read again under
+/// `limits`, the limits the run executes under: a second reading of a deck
+/// never refuses one the run takes.
+pub(crate) fn parse_under(
+    text: &str,
+    limits: rspice_core::ResourceLimits,
+) -> Result<rspice_core::Netlist, rspice_core::netlist::ParseError> {
+    rspice_core::Netlist::parse_with_options(
+        text,
+        rspice_core::netlist::NetlistParseOptions {
+            resource_limits: limits,
+            ..Default::default()
+        },
+    )
+}
+
 /// The refusal of an executable deck that does not parse.
 pub(crate) fn unparsed_executable_source(
     error: rspice_core::netlist::ParseWithAbortError,

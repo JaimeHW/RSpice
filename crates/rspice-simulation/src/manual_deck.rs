@@ -64,6 +64,7 @@ pub fn build_manual_deck_queue(
         reference_temperature_celsius,
         source,
         &crate::veriloga::PreparedVerilogARuntimeSet::default(),
+        rspice_core::ResourceLimits::default(),
     )
     .map_err(ManualDeckError::into_messages)
 }
@@ -75,15 +76,20 @@ pub fn build_manual_deck_queue(
 /// A driven `.PSS` takes its tone list from the circuit's elaborated sources,
 /// so lowering it elaborates the circuit, and a `.veriloga` directive that
 /// names a sealed key elaborates only against the runtimes the run carries.
+///
+/// The deck is read under `limits`, the limits its run executes under, so a
+/// deck the run takes is never refused here.
 pub fn build_manual_deck_queue_with_runtimes(
     reference_temperature_celsius: f64,
     source: &str,
     runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<Vec<QueuedAnalysis>, ManualDeckError> {
     build_manual_deck_queue_with_abort(
         reference_temperature_celsius,
         source,
         runtimes,
+        limits,
         &rspice_core::NoAbort,
     )
 }
@@ -95,10 +101,15 @@ pub fn build_manual_deck_queue_with_abort(
     reference_temperature_celsius: f64,
     source: &str,
     runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    limits: rspice_core::ResourceLimits,
     abort: &dyn rspice_core::abort_signal::AbortSignal,
 ) -> Result<Vec<QueuedAnalysis>, ManualDeckError> {
     let source = compose_manual_deck_source(source);
-    let parsed = Netlist::parse_with_abort(&source, abort)
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: limits,
+        ..Default::default()
+    };
+    let parsed = Netlist::parse_with_options_and_abort(&source, options, abort)
         .map_err(|err| vec![format!("Netlist parse error: {err}")])?;
     let periodic_tasks = periodic::parse_periodic_tasks(&parsed, &source, runtimes)?;
     queue_manual_deck_analyses(

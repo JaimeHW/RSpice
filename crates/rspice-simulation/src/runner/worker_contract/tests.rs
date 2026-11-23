@@ -33,7 +33,12 @@ fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
             logical_path: "worker-reference.csv".into(),
             contents: "TIME,V(out)\n0,2\n0.000001,2\n".into(),
         });
-    let references = PreparedMeasurementReferences::capture(source, &[definition.clone()]).unwrap();
+    let references = PreparedMeasurementReferences::capture(
+        source,
+        &[definition.clone()],
+        rspice_core::ResourceLimits::default(),
+    )
+    .unwrap();
     let request = WorkerRequest {
         id: 97,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::from(
@@ -94,7 +99,14 @@ fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
     .unwrap();
     assert!((result.measurement("fit").unwrap() - 0.5).abs() < 1e-8);
     definition.measurement_reference.as_mut().unwrap().contents = "TIME,V(out)\n1,1\n0,2\n".into();
-    assert!(PreparedMeasurementReferences::capture(source, &[definition]).is_err());
+    assert!(
+        PreparedMeasurementReferences::capture(
+            source,
+            &[definition],
+            rspice_core::ResourceLimits::default()
+        )
+        .is_err()
+    );
 }
 
 /// A worker has no file system, so the dump a `d_vcd` replays travels in the

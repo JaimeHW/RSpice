@@ -170,6 +170,7 @@ fn headless_tasks(origin: &Path) -> VecDeque<rspice_simulation::execution::Autho
         27.0,
         &format!("{}\n{card}\n.end\n", body.join("\n")),
         &sealed.runtimes,
+        rspice_core::ResourceLimits::default(),
     )
     .unwrap_or_else(|error| panic!("the card lowers: {error:?}"));
     let tasks = queue

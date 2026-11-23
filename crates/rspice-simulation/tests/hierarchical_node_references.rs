@@ -57,6 +57,7 @@ fn tasks() -> Vec<HeadlessTaskRequest> {
         27.0,
         &deck,
         &rspice_simulation::veriloga::PreparedVerilogARuntimeSet::default(),
+        rspice_core::ResourceLimits::default(),
     )
     .map_err(rspice_simulation::manual_deck::ManualDeckError::into_messages)
     .unwrap_or_else(|errors| panic!("cards lower: {errors:?}"));

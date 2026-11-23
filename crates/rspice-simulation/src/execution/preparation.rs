@@ -100,9 +100,16 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<ExecutableHierarchy, PreparationError> {
         let limits = self.execution_limits();
-        let parsed = parse_executable(executable_netlist, limits, abort)
-            .map_err(|error| unparsed_executable_source(error).located_in(executable_netlist))?;
+        let parsed = parse_executable(executable_netlist, limits, abort).map_err(|error| {
+            self.too_big(unparsed_executable_source(error).located_in(executable_netlist))
+        })?;
         self.flattened(parsed, abort)
+    }
+
+    /// `error` in the reader's words when it went past a limit sized to the
+    /// machine this run prepares on, as the Netlist page's check says it.
+    fn too_big(&self, error: PreparationError) -> PreparationError {
+        run_memory::too_big_for(error, self.machine_memory)
     }
 
     /// `parsed`, which [`parse_executable`] made under this run's limits,
@@ -114,7 +121,7 @@ impl<R, A> RunPreparationInputs<'_, R, A> {
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<ExecutableHierarchy, PreparationError> {
         let hierarchy = ExecutableHierarchy::of_parsed(parsed, self.execution_limits(), abort)
-            .map_err(|error| run_memory::too_big_for(error, self.machine_memory))?;
+            .map_err(|error| self.too_big(error))?;
         let Some(memory) = self.machine_memory else {
             return Ok(hierarchy);
         };
@@ -537,12 +544,14 @@ where
         crate::measurement_references::PreparedMeasurementReferences::capture(
             &netlist,
             &plan_payload.specification_definitions,
+            inputs.execution_limits(),
         )
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     reject_deferred_external_sources_with_project_runtimes(
         &netlist,
         &project_veriloga_runtimes,
         &measurement_references,
+        inputs.execution_limits(),
     )?;
     // The files the design's code models read, from beside its root sheet.
     let data_files = crate::data_files::PreparedDataFiles::capture(
@@ -550,7 +559,8 @@ where
         root_schematic.current_file().and_then(Path::parent),
         inputs.execution_limits(),
         abort,
-    )?;
+    )
+    .map_err(|error| inputs.too_big(error))?;
     validate_prepared_periodic_sources(
         tasks
             .iter()
@@ -910,7 +920,8 @@ fn expand_manual_deck<R, A>(
         &sealed_models,
         &|location| sealed_hdl.included_line(location),
         inputs.execution_limits(),
-    )?;
+    )
+    .map_err(|error| inputs.too_big(error))?;
     PreparationError::check_abort(abort)?;
     let source_lines = source_lines.map(|lines| (lines, expanded.clone()));
     let crate::netlist_preparation::SealedDeckHdl {
@@ -988,8 +999,10 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         Ok(parsed) => parsed,
         Err(error) => {
             // A deck that included files is refused where the card that
-            // failed can still be named by the file and line that wrote it.
+            // failed can still be named by the file and line that wrote it;
+            // a deck past a limit has no such card.
             if let rspice_core::netlist::ParseWithAbortError::Parse(failure) = &error
+                && !matches!(failure, rspice_core::netlist::ParseError::ResourceLimit(_))
                 && let Some(lines) = source_lines.as_ref().and_then(|(lines, expansion)| {
                     super::source_lines::aligned_line_map(lines, expansion, &expanded)
                 })
@@ -999,7 +1012,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
                     super::source_lines::located_parse_message(failure.to_string(), &lines),
                 ));
             }
-            return Err(unparsed_executable_source(error));
+            return Err(inputs.too_big(unparsed_executable_source(error)));
         }
     };
     let advisories = parsed
@@ -1041,6 +1054,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         crate::measurement_references::PreparedMeasurementReferences::capture(
             &expanded,
             definitions,
+            inputs.execution_limits(),
         )
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
     PreparationError::check_abort(abort)?;
@@ -1054,6 +1068,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         &expanded,
         &project_veriloga_runtimes,
         &measurement_references,
+        inputs.execution_limits(),
         abort,
     )?;
     // The files the deck's code models read, from beside the deck, held
@@ -1063,7 +1078,8 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         origin.and_then(Path::parent),
         inputs.execution_limits(),
         abort,
-    )?;
+    )
+    .map_err(|error| inputs.too_big(error))?;
     let _data_files = manual_deck::has_pss_card(&expanded)
         .then(|| data_files.hold(inputs.execution_limits()))
         .transpose()
@@ -1072,6 +1088,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
         &expanded,
         &project_veriloga_runtimes,
+        inputs.execution_limits(),
         abort,
     )
     .map_err(|error| {
@@ -1104,6 +1121,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         &expanded,
         inputs.analysis.sim_setup.reference_pvt.process,
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
+        inputs.execution_limits(),
     )?;
     reject_deferred_corner_model_sources_under(
         tasks.iter().map(PreparedTask::queued_analysis),
@@ -1210,11 +1228,14 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
 /// scoped to the nominal point or to a corner reads it as it reads a
 /// temperature step's point. A point that varies anything else is attributed
 /// to no PVT point: its condition is not one a PVT point can name.
+///
+/// The deck is read under `limits`, the limits its run executes under.
 fn attach_family_members(
     tasks: &mut [PreparedTask],
     expanded: &str,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<(), PreparationError> {
     use crate::execution_options::FamilyMember;
     use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
@@ -1229,9 +1250,14 @@ fn attach_family_members(
         .iter()
         .any(|task| matches!(member_of(task), Some(FamilyMember::StepPoint { .. })))
     {
-        let netlist =
-            rspice_core::Netlist::parse(&manual_deck::compose_manual_deck_source(expanded))
-                .map_err(|error| refused(error.to_string()))?;
+        let netlist = rspice_core::Netlist::parse_with_options(
+            &manual_deck::compose_manual_deck_source(expanded),
+            rspice_core::netlist::NetlistParseOptions {
+                resource_limits: limits,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| refused(error.to_string()))?;
         crate::deck_family::step_members(&netlist, &Default::default()).map_err(refused)?
     } else {
         Vec::new()

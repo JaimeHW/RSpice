@@ -104,6 +104,7 @@ pub(super) fn expand_pvt_point_tasks(
     corner_veriloga: &CornerVerilogARuntimes,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<Vec<PreparedTask>, PreparationError> {
     use rspice_simulation_contract::config::AnalysisConfig;
     use rspice_simulation_contract::config::OpRunPointContext;
@@ -212,6 +213,7 @@ pub(super) fn expand_pvt_point_tasks(
                 corner_veriloga,
                 reference_process,
                 reference_temperature_celsius,
+                limits,
             )?),
             // A parametric run declares a PVT space only when it carries a
             // temperature contract. Without one it steps a design parameter,
@@ -224,6 +226,7 @@ pub(super) fn expand_pvt_point_tasks(
                     executable_netlist,
                     reference_process,
                     reference_temperature_celsius,
+                    limits,
                 )?),
                 None => None,
             },
@@ -299,7 +302,7 @@ pub(super) fn expand_pvt_point_tasks(
             let mut config = base_config.clone();
             config.temperature_celsius = point.temperature_celsius;
             let (source_override, nominal_supply_voltage) =
-                prepare_pvt_point_source(executable_netlist, point, corner_veriloga)?;
+                prepare_pvt_point_source(executable_netlist, point, corner_veriloga, limits)?;
             config.run_point = OpRunPointContext {
                 index,
                 count: pvt_points.len(),
@@ -380,10 +383,12 @@ pub(super) fn expand_pvt_point_tasks(
 ///
 /// A point with a corner contract binds its process's model cards and the
 /// model-library Verilog-A its process's sections name (`corner_veriloga`).
+/// Each deck is read under `limits`, the limits the run executes under.
 pub(super) fn prepare_pvt_point_source(
     executable_netlist: &str,
     point: &PreparedPvtPoint,
     corner_veriloga: &CornerVerilogARuntimes,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<(Option<String>, Option<f64>), PreparationError> {
     let Some(contract) = point.corner_contract.as_ref() else {
         if point.voltage.is_some() {
@@ -392,7 +397,8 @@ pub(super) fn prepare_pvt_point_source(
                 "PVT run point voltage is missing its authenticated corner contract",
             ));
         }
-        let source = materialize_source_overrides(executable_netlist, &point.source_overrides)?;
+        let source =
+            materialize_source_overrides(executable_netlist, &point.source_overrides, limits)?;
         let source = materialize_parameter_overrides(&source, &point.parameter_overrides);
         let source = materialize_point_draws(source, point);
         return Ok(((source != executable_netlist).then_some(source), None));
@@ -416,7 +422,7 @@ pub(super) fn prepare_pvt_point_source(
     let source = corner_veriloga.bind_process(source, point.process)?;
 
     let nominal_supply_voltage = if point.voltage.is_some() {
-        let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {
+        let parsed = crate::netlist_preparation::parse_under(&source, limits).map_err(|error| {
             PreparationError::new(
                 PreparationStage::Netlist,
                 format!("Prepared operating-point corner source is invalid: {error}"),
@@ -447,7 +453,7 @@ pub(super) fn prepare_pvt_point_source(
         None
     };
 
-    let source = materialize_source_overrides(&source, &point.source_overrides)?;
+    let source = materialize_source_overrides(&source, &point.source_overrides, limits)?;
     let source = materialize_parameter_overrides(&source, &point.parameter_overrides);
     let source = materialize_point_draws(source, point);
     let source_override = (source != executable_netlist).then_some(source);
@@ -467,6 +473,7 @@ pub(super) fn materialize_spec_run_environment_source(
     environment: &crate::runner::AnalysisExecutionEnvironment,
     point_index: usize,
     point_count: usize,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<String, PreparationError> {
     if !environment.temperature_celsius.is_finite() || environment.temperature_celsius <= -273.15 {
         return Err(PreparationError::new(
@@ -508,7 +515,7 @@ pub(super) fn materialize_spec_run_environment_source(
             }
             let scale = supply / nominal;
             for source_name in &environment.supply_source_names {
-                let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {
+                let parsed = crate::netlist_preparation::parse_under(&source, limits).map_err(|error| {
                     let line = super::super::parse_error_line(&error);
                     PreparationError::new(
                         PreparationStage::Netlist,
@@ -637,10 +644,11 @@ fn materialize_point_draws(source: String, point: &PreparedPvtPoint) -> String {
 fn materialize_source_overrides(
     executable_netlist: &str,
     overrides: &[(String, String)],
+    limits: rspice_core::ResourceLimits,
 ) -> Result<String, PreparationError> {
     let mut source = executable_netlist.to_owned();
     for (name, value) in overrides {
-        let parsed = rspice_core::Netlist::parse(&source).map_err(|error| {
+        let parsed = crate::netlist_preparation::parse_under(&source, limits).map_err(|error| {
             PreparationError::new(
                 PreparationStage::Netlist,
                 format!("Cannot validate Run Set source binding {name:?}: {error}"),

@@ -247,9 +247,13 @@ impl WorkerRequestTransport {
         } = self.request;
         // Each runtime's payload is checked when the run installs it.
         request.project_veriloga_runtimes.check_structure()?;
+        // The deck is expanded, so its bytes are held to the expanded
+        // budget, as the run reads it.
+        let mut limits = request.execution_limits;
+        limits.max_netlist_bytes = limits.max_expanded_source_bytes;
         request
             .measurement_references
-            .validate_source(&request.netlist)?;
+            .validate_source(&request.netlist, limits)?;
         request.data_files.validate(request.execution_limits)?;
         if request.dependencies != Default::default() {
             return Err("worker request metadata carries duplicate inline dependencies".to_owned());

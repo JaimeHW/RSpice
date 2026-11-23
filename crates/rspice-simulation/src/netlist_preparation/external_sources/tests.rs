@@ -10,6 +10,7 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
         netlist,
         &Default::default(),
         &Default::default(),
+        rspice_core::ResourceLimits::default(),
     )?;
     validated_executable_hierarchy(netlist).map(|_| ())
 }
@@ -199,6 +200,7 @@ fn code_model_data_files_are_left_to_preparation_to_seal() {
             &format!("deck\n{line}\n.end\n"),
             &Default::default(),
             &Default::default(),
+            rspice_core::ResourceLimits::default(),
         )
         .unwrap_or_else(|error| panic!("{line}: {error}"));
     }

@@ -22,14 +22,20 @@ mod library_folders;
 fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
     let (sources, deck) =
         crate::simulation::veriloga_tests::test_support::standalone_connection_fixture();
-    reject_deferred_external_sources_with_project_runtimes(&deck, &sources, &Default::default())
-        .unwrap();
+    reject_deferred_external_sources_with_project_runtimes(
+        &deck,
+        &sources,
+        &Default::default(),
+        rspice_core::ResourceLimits::default(),
+    )
+    .unwrap();
     let altered = deck.replace(" UI_CONNECTIONS", " OTHER_CONNECTIONS");
     assert!(
         reject_deferred_external_sources_with_project_runtimes(
             &altered,
             &sources,
-            &Default::default()
+            &Default::default(),
+            rspice_core::ResourceLimits::default(),
         )
         .is_err()
     );

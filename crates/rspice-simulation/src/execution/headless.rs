@@ -258,6 +258,7 @@ pub fn prepare_headless_run(
         &input.veriloga_runtimes,
         &input.measurement_references,
         input.starts_programs,
+        expanded_limits,
     )?;
     // The files the deck's code models read, from beside the root deck. A
     // sealed bundle carries no data file, so its deck can name none.

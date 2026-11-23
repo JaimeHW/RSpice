@@ -141,6 +141,7 @@ fn task_in(
         27.0,
         &deck,
         &rspice_simulation::veriloga::PreparedVerilogARuntimeSet::default(),
+        rspice_core::ResourceLimits::default(),
     )
     .map_err(rspice_simulation::manual_deck::ManualDeckError::into_messages)
     .unwrap_or_else(|errors| panic!("{card} lowers: {errors:?}"));

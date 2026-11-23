@@ -28,11 +28,17 @@ impl PreparedMeasurementReferences {
         self.entries.is_empty()
     }
 
-    pub fn capture(source: &str, definitions: &[SpecificationDefinition]) -> Result<Self, String> {
+    /// The reference tables `source`'s measurements read, the deck read
+    /// under `limits`, the limits its run executes under.
+    pub fn capture(
+        source: &str,
+        definitions: &[SpecificationDefinition],
+        limits: rspice_core::ResourceLimits,
+    ) -> Result<Self, String> {
         if !may_reference_file(source) {
             return Ok(Self::default());
         }
-        let mut netlist = parse(source)?;
+        let mut netlist = parse(source, limits)?;
         let mut entries = Vec::new();
         for measurement in &netlist.measurements {
             let MeasureType::FileError { file, .. } = &measurement.measure_type else {
@@ -73,11 +79,16 @@ impl PreparedMeasurementReferences {
         Ok(prepared)
     }
 
-    pub fn validate_source(&self, source: &str) -> Result<(), String> {
+    /// Whether `source`, read under `limits`, binds these tables.
+    pub fn validate_source(
+        &self,
+        source: &str,
+        limits: rspice_core::ResourceLimits,
+    ) -> Result<(), String> {
         if self.is_empty() && !may_reference_file(source) {
             return Ok(());
         }
-        self.bind(&mut parse(source)?)
+        self.bind(&mut parse(source, limits)?)
     }
 
     pub fn bind(&self, netlist: &mut rspice_core::Netlist) -> Result<(), String> {
@@ -148,11 +159,15 @@ pub fn reference_digest(reference: &MeasurementReferenceSource) -> ContentDigest
     )
 }
 
-fn parse(source: &str) -> Result<rspice_core::Netlist, String> {
+fn parse(
+    source: &str,
+    limits: rspice_core::ResourceLimits,
+) -> Result<rspice_core::Netlist, String> {
     rspice_core::Netlist::parse_with_options(
         source,
         rspice_core::netlist::NetlistParseOptions {
             statistical_mode: rspice_core::netlist::StatisticalParamMode::Nominal,
+            resource_limits: limits,
             ..Default::default()
         },
     )
