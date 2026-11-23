@@ -111,14 +111,21 @@ pub fn build_manual_deck_queue_with_abort(
     };
     let parsed = Netlist::parse_with_options_and_abort(&source, options, abort)
         .map_err(|err| vec![format!("Netlist parse error: {err}")])?;
-    let periodic_tasks = periodic::parse_periodic_tasks(&parsed, &source, runtimes)?;
-    queue_manual_deck_analyses(
-        reference_temperature_celsius,
-        &source,
-        parsed,
-        periodic_tasks,
-    )
-    .map_err(ManualDeckError::Cards)
+    build_manual_deck_queue_of_parsed(reference_temperature_celsius, &source, &parsed, runtimes)
+}
+
+/// [`build_manual_deck_queue_with_runtimes`] for a deck already parsed:
+/// `parsed` is the parse of `deck`, read here rather than parsed again. A
+/// run's preparation queues its deck from the one parse it makes of it.
+pub fn build_manual_deck_queue_of_parsed(
+    reference_temperature_celsius: f64,
+    deck: &str,
+    parsed: &Netlist,
+    runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+) -> Result<Vec<QueuedAnalysis>, ManualDeckError> {
+    let periodic_tasks = periodic::parse_periodic_tasks(parsed, deck, runtimes)?;
+    queue_manual_deck_analyses(reference_temperature_celsius, deck, parsed, periodic_tasks)
+        .map_err(ManualDeckError::Cards)
 }
 
 /// Why a deck with nothing to run does not run: it names no analysis, or
@@ -132,7 +139,7 @@ const NO_ANALYSIS: &str = "the deck has no analysis, such as .op, .ac or .tran";
 fn queue_manual_deck_analyses(
     reference_temperature_celsius: f64,
     deck: &str,
-    parsed: Netlist,
+    parsed: &Netlist,
     periodic_tasks: Vec<QueuedAnalysis>,
 ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
     if parsed.analyses.is_empty() && periodic_tasks.is_empty() {
@@ -152,7 +159,7 @@ fn queue_manual_deck_analyses(
     // A `.STEP` over a swept analysis is a family: one analysis per point,
     // nested `.STEP` cards included. It claims the deck's temperature and
     // parameter steps alike, so neither older plan runs beside it.
-    let step_family_plan = match build_step_family_plan(reference_temperature_celsius, &parsed) {
+    let step_family_plan = match build_step_family_plan(reference_temperature_celsius, parsed) {
         Ok(plan) => plan,
         Err(err) => return Err(vec![err]),
     };
@@ -178,14 +185,14 @@ fn queue_manual_deck_analyses(
             Ok(plan) => plan,
             Err(err) => return Err(vec![err]),
         };
-        match build_parameter_step_plan(&parsed) {
+        match build_parameter_step_plan(parsed) {
             Ok(plan) => (temperature_plan, plan),
             Err(err) => return Err(vec![err]),
         }
     };
     let monte_carlo_plan = match build_monte_carlo_transient_plan(
         reference_temperature_celsius,
-        &parsed,
+        parsed,
         deck,
         [&temperature_plan, &parameter_step_plan, &step_family_plan],
     ) {
@@ -265,14 +272,14 @@ fn queue_manual_deck_analyses(
         }
         if let AnalysisCommand::Four { outputs, .. } = command {
             for output in outputs {
-                match fourier_queue_item(&parsed, command, output) {
+                match fourier_queue_item(parsed, command, output) {
                     Ok(item) => queue.push(item),
                     Err(error) => errors.push(error),
                 }
             }
             continue;
         }
-        match command_to_queue_item(reference_temperature_celsius, &parsed, command) {
+        match command_to_queue_item(reference_temperature_celsius, parsed, command) {
             Ok(item) => queue.push(item),
             Err(err) => errors.push(err),
         }
@@ -312,11 +319,8 @@ fn queue_manual_deck_analyses(
                 "Manual-deck {family} requires one unambiguous operating-point seed; found {op_count} .OP analyses."
             ));
         } else if op_count == 0 {
-            match command_to_queue_item(
-                reference_temperature_celsius,
-                &parsed,
-                &AnalysisCommand::Op,
-            ) {
+            match command_to_queue_item(reference_temperature_celsius, parsed, &AnalysisCommand::Op)
+            {
                 Ok(mut item) => {
                     item.analysis_line = format!(".op (implicit {family} seed)");
                     queue.push(item);
@@ -329,7 +333,7 @@ fn queue_manual_deck_analyses(
     // The deck already carries these cards and the engine already evaluates
     // them inside the transient; what was missing was the task that publishes
     // the spectrum, so that is all this adds.
-    match recorded_fft::manual_fft_tasks(&parsed) {
+    match recorded_fft::manual_fft_tasks(parsed) {
         Ok(tasks) => queue.extend(tasks),
         Err(mut card_errors) => errors.append(&mut card_errors),
     }

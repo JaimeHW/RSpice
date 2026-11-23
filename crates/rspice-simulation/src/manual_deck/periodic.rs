@@ -975,8 +975,14 @@ pub(crate) fn has_pss_card(source: &str) -> bool {
     })
 }
 
+/// The deck's directive cards, each with its line and its continuations
+/// folded in: every card this reader looks for is a directive, so an
+/// element's card, which a large deck is made of, is passed over without
+/// being copied.
 fn logical_cards(source: &str) -> Vec<(usize, String)> {
     let mut cards = Vec::<(usize, String)>::new();
+    // Whether the card a continuation continues is one kept.
+    let mut folding = false;
     for (zero_line, raw) in source.lines().enumerate() {
         let trimmed = raw.trim();
         if trimmed.is_empty()
@@ -987,12 +993,15 @@ fn logical_cards(source: &str) -> Vec<(usize, String)> {
             continue;
         }
         if let Some(continuation) = trimmed.strip_prefix('+') {
-            if let Some((_, card)) = cards.last_mut() {
+            if folding && let Some((_, card)) = cards.last_mut() {
                 card.push(' ');
                 card.push_str(continuation.trim());
             }
         } else {
-            cards.push((zero_line + 1, trimmed.to_owned()));
+            folding = trimmed.starts_with('.');
+            if folding {
+                cards.push((zero_line + 1, trimmed.to_owned()));
+            }
         }
     }
     cards

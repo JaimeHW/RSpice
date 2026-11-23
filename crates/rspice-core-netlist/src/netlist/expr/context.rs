@@ -1005,6 +1005,14 @@ impl ParamContext {
         self.random.counter.load(Ordering::Relaxed)
     }
 
+    /// Put the statistical stream back after `draws` draws, as
+    /// [`Self::statistical_draw_count`] read it: a reader that draws from a
+    /// parse it borrows leaves it as it found it.
+    #[doc(hidden)]
+    pub fn resume_statistical_stream_at(&self, draws: u64) {
+        self.random.restart_at(draws);
+    }
+
     /// Record the draws made so far as the deck's own: every build restarts
     /// after them.
     pub(crate) fn mark_parse_statistical_draws(&mut self) {

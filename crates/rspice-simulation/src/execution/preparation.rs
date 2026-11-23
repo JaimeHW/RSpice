@@ -1093,9 +1093,10 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         .then(|| data_files.hold(inputs.execution_limits()))
         .transpose()
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
-    let queued_tasks = manual_deck::build_manual_deck_queue_with_abort(
+    let queued_tasks = queue_manual_deck(
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
         &expanded,
+        &hierarchy.parsed,
         &project_veriloga_runtimes,
         inputs.execution_limits(),
         abort,
@@ -1128,6 +1129,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
     attach_family_members(
         &mut tasks,
         &expanded,
+        &hierarchy.parsed,
         inputs.analysis.sim_setup.reference_pvt.process,
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
         inputs.execution_limits(),
@@ -1228,6 +1230,54 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
     })
 }
 
+/// What `read` makes of `parsed`, the parse of the deck `expanded` the
+/// run's preparation made under the run's limits, read as a parse of its
+/// own would be: its statistical draws start where the deck's own `.param`
+/// draws end, and the parse is left drawn as far as it was. `None` for a
+/// deck a reader parses with an `.end` added, which the parse lacks.
+fn read_parsed_anew<T>(
+    expanded: &str,
+    parsed: &rspice_core::Netlist,
+    read: impl FnOnce(&rspice_core::Netlist) -> T,
+) -> Option<T> {
+    crate::netlist_preparation::terminal_end_card_offset(expanded)?;
+    let drawn = parsed.params.statistical_draw_count();
+    parsed.params.restart_statistical_stream();
+    let read = read(parsed);
+    parsed.params.resume_statistical_stream_at(drawn);
+    Some(read)
+}
+
+/// The analyses the deck `expanded` queues, read off `parsed`, its parse,
+/// rather than parsed again ([`read_parsed_anew`]); a deck read anew is read
+/// under `limits`, the limits its run executes under.
+fn queue_manual_deck(
+    reference_temperature_celsius: f64,
+    expanded: &str,
+    parsed: &rspice_core::Netlist,
+    runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> Result<Vec<QueuedAnalysis>, manual_deck::ManualDeckError> {
+    read_parsed_anew(expanded, parsed, |parsed| {
+        manual_deck::build_manual_deck_queue_of_parsed(
+            reference_temperature_celsius,
+            expanded,
+            parsed,
+            runtimes,
+        )
+    })
+    .unwrap_or_else(|| {
+        manual_deck::build_manual_deck_queue_with_abort(
+            reference_temperature_celsius,
+            expanded,
+            runtimes,
+            limits,
+            abort,
+        )
+    })
+}
+
 /// Record on each analysis that solves one trial or point of the deck's
 /// `.MC` study or `.STEP` sweep which member it solves, with the value each
 /// swept axis takes at a point, and name the task after it.
@@ -1242,6 +1292,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
 fn attach_family_members(
     tasks: &mut [PreparedTask],
     expanded: &str,
+    parsed: &rspice_core::Netlist,
     reference_process: ProcessCorner,
     reference_temperature_celsius: f64,
     limits: rspice_core::ResourceLimits,
@@ -1259,15 +1310,24 @@ fn attach_family_members(
         .iter()
         .any(|task| matches!(member_of(task), Some(FamilyMember::StepPoint { .. })))
     {
-        let netlist = rspice_core::Netlist::parse_with_options(
-            &manual_deck::compose_manual_deck_source(expanded),
-            rspice_core::netlist::NetlistParseOptions {
-                resource_limits: limits,
-                ..Default::default()
-            },
-        )
-        .map_err(|error| refused(error.to_string()))?;
-        crate::deck_family::step_members(&netlist, &Default::default()).map_err(refused)?
+        // The deck's parse is read again rather than the deck parsed again.
+        match read_parsed_anew(expanded, parsed, |parsed| {
+            crate::deck_family::step_members(parsed, &Default::default())
+        }) {
+            Some(members) => members,
+            None => {
+                let netlist = rspice_core::Netlist::parse_with_options(
+                    &manual_deck::compose_manual_deck_source(expanded),
+                    rspice_core::netlist::NetlistParseOptions {
+                        resource_limits: limits,
+                        ..Default::default()
+                    },
+                )
+                .map_err(|error| refused(error.to_string()))?;
+                crate::deck_family::step_members(&netlist, &Default::default())
+            }
+        }
+        .map_err(refused)?
     } else {
         Vec::new()
     };
