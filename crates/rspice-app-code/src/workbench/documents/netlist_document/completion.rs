@@ -1084,18 +1084,27 @@ fn draw_popover(
                                 theme::mono(tokens::FS_0, FontWeight::Regular),
                                 c.text_faint,
                             );
-                            ui.painter().text(
+                            let label = ui.painter().text(
                                 egui::pos2(rect.left() + 58.0, rect.center().y),
                                 egui::Align2::LEFT_CENTER,
                                 &candidate.label,
                                 theme::mono(tokens::FS_1, FontWeight::Regular),
                                 c.text,
                             );
+                            // The detail takes the room the label leaves, cut
+                            // at a word; the note below the list has it whole.
+                            let detail_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                            let room = rect.right() - 10.0 - (label.right() + 12.0);
                             ui.painter().text(
                                 egui::pos2(rect.right() - 10.0, rect.center().y),
                                 egui::Align2::RIGHT_CENTER,
-                                &candidate.detail,
-                                theme::mono(tokens::FS_0, FontWeight::Regular),
+                                crate::ui::panels::elide_at_words(
+                                    ui,
+                                    &candidate.detail,
+                                    &detail_font,
+                                    room,
+                                ),
+                                detail_font,
                                 c.text_faint,
                             );
                             theme::paint_focus_ring(ui, &response, rect);
