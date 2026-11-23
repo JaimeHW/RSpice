@@ -339,14 +339,43 @@ impl RetainedSimulationState {
     }
 }
 
+/// A view's waveforms with the cross-probe index over them, built together: a large set is
+/// built away from the frame, and the frame only swaps it in.
+#[derive(Debug, Clone, Default)]
+pub struct ShownWaveforms {
+    waveforms: Vec<RetainedTrace>,
+    node_to_waveform: HashMap<String, usize>,
+}
+
+impl ShownWaveforms {
+    /// `waveforms`, each found by its name; of two with one name, the later.
+    pub fn new(waveforms: Vec<RetainedTrace>) -> Self {
+        let node_to_waveform = waveforms
+            .iter()
+            .enumerate()
+            .map(|(index, waveform)| (waveform.name.clone(), index))
+            .collect();
+        Self {
+            waveforms,
+            node_to_waveform,
+        }
+    }
+}
+
 impl SimulationViewState {
     /// Replace the displayed waveform set and rebuild cross-probe mappings.
     pub fn replace_waveforms(&mut self, waveforms: Vec<RetainedTrace>) {
-        self.node_to_waveform.clear();
-        self.waveforms = waveforms;
-        for (index, waveform) in self.waveforms.iter().enumerate() {
-            self.node_to_waveform.insert(waveform.name.clone(), index);
-        }
+        self.install_waveforms(ShownWaveforms::new(waveforms));
+    }
+
+    /// Show `shown` in place of the displayed set, which is returned for the caller to let go
+    /// of where its size costs no frame.
+    pub fn install_waveforms(&mut self, shown: ShownWaveforms) -> ShownWaveforms {
+        let previous = ShownWaveforms {
+            waveforms: std::mem::replace(&mut self.waveforms, shown.waveforms),
+            node_to_waveform: std::mem::replace(&mut self.node_to_waveform, shown.node_to_waveform),
+        };
         self.data_version = self.data_version.wrapping_add(1);
+        previous
     }
 }

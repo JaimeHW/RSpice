@@ -1602,6 +1602,75 @@ fn a_manual_deck_transient_is_drawn_while_it_runs_every_column_of_it() {
     assert_eq!(drawn, Some(vec!["out".to_owned(), "ref".to_owned()]));
 }
 
+/// A manual deck that writes its segment as it runs is drawn from it: the live result holds
+/// every column in name order, the order the finished result keeps, and the view shows the
+/// same traces, each found by its name for probing, while the run goes on.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_manual_decks_live_preview_from_its_segment_is_every_column_in_name_order() {
+    let export_io = MockExportWorkflowIo::default();
+    let mut state = RunTestHost::default();
+    // Solved in steps of 0.5 us for a second: still running when its segment is read.
+    state.model.simulation.source.netlist_content =
+        "deck\nV1 in 0 PULSE(0 1 0 1n 1n 1 2)\nR1 in out 1k\nC1 out 0 1u\n.tran 0.5u 1 0 0.5u\n.end\n"
+            .to_string()
+            .into();
+    state.model.simulation.execution.request_manual_deck_run();
+    let mut controller = SimulationController::new();
+    controller
+        .prepare_deck_run(&state)
+        .expect("explicit validation authorizes the exact manual deck");
+    controller.start_simulation(&mut state);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    let drawn = loop {
+        let published = controller.last_live_publish;
+        controller.update(&mut state, &export_io);
+        // A publish made while the segment's rows are held draws from the segment.
+        let from_segment =
+            controller.live_segment.rows().is_some() && controller.last_live_publish != published;
+        let drawn = state
+            .model
+            .simulation
+            .active_run()
+            .filter(|_| from_segment)
+            .and_then(|run| {
+                run.analyses
+                    .iter()
+                    .find(|analysis| analysis.is_live_partial() && !analysis.waveforms.is_empty())
+                    .map(|analysis| {
+                        analysis
+                            .waveforms
+                            .iter()
+                            .map(|waveform| waveform.name.clone())
+                            .collect::<Vec<_>>()
+                    })
+            });
+        if let Some(drawn) = drawn {
+            break drawn;
+        }
+        assert!(
+            controller.has_active_batch() && std::time::Instant::now() < deadline,
+            "the run ended before its live preview was drawn from its segment"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let view = &state.model.simulation.view;
+    let shown = view
+        .waveforms
+        .iter()
+        .map(|waveform| waveform.name.clone())
+        .collect::<Vec<_>>();
+    let found = shown
+        .iter()
+        .map(|name| view.node_to_waveform.get(name).copied())
+        .collect::<Vec<_>>();
+    controller.abort();
+
+    assert_eq!(drawn, ["I(C1)", "I(R1)", "I(V1)", "IN", "OUT"]);
+    assert_eq!(shown, drawn);
+    assert_eq!(found, [Some(0), Some(1), Some(2), Some(3), Some(4)]);
+}
+
 #[test]
 fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
     let mut state = RunTestHost::default();

@@ -149,8 +149,8 @@ pub use rspice_results::run_history::RunHistoryRevision;
 pub use rspice_results::waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace};
 pub use rspice_simulation::execution::SimulationRunIntent;
 pub use state_model::{
-    RetainedSimulationState, SimulationExecutionState, SimulationSourceState, SimulationState,
-    SimulationViewState,
+    RetainedSimulationState, ShownWaveforms, SimulationExecutionState, SimulationSourceState,
+    SimulationState, SimulationViewState,
 };
 
 /// Why a campaign member never became a run: what the run controller reports

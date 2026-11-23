@@ -37,7 +37,8 @@ use crate::state::AnalysisResultFamilyMetadata;
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain,
     AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
-    RealEventTraceEvidence, RetainedTrace, RunEvent, SimulationRunIntent, SimulationRunLifecycle,
+    RealEventTraceEvidence, RetainedTrace, RunEvent, ShownWaveforms, SimulationRunIntent,
+    SimulationRunLifecycle,
 };
 use rspice_app_services::workbench::platform::spawn_or_inline;
 use rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo;
@@ -1516,7 +1517,9 @@ impl SimulationController {
     fn publish_live_transient_samples(&mut self, model: &mut Model) {
         let deltas = self.runner.drain_transient_samples();
         #[cfg(not(target_arch = "wasm32"))]
-        let grew = self.live_segment.poll(self.runner.live_segment());
+        let grew = self
+            .live_segment
+            .poll(self.runner.live_segment(), self.plots_every_column());
         #[cfg(target_arch = "wasm32")]
         let grew = false;
         #[cfg(not(target_arch = "wasm32"))]
@@ -1667,8 +1670,8 @@ impl SimulationController {
                     .as_ref()
                     .map(|config| self.analysis_name(config))
             })
-            .unwrap_or("Transient");
-        let source = self.live_source(analysis_type, label);
+            .unwrap_or("Transient")
+            .to_owned();
         #[cfg(not(target_arch = "wasm32"))]
         let from_segment = self.live_segment.rows().is_some();
         #[cfg(target_arch = "wasm32")]
@@ -1692,20 +1695,30 @@ impl SimulationController {
                 false,
             )
         };
-        let waveforms = if self.plots_every_column() {
+        let mut shown = None;
+        let waveforms = if self.plots_every_column() && from_segment {
+            // Every column of a segment is built with each opening, off the frame, and the
+            // frame only swaps it in: between openings there is nothing new to draw.
+            let Some((traces, built)) = self.take_built_preview() else {
+                return held_back;
+            };
+            shown = Some(built);
+            traces
+        } else if self.plots_every_column() {
             // In the order the finished result lists them, by name, so its panes and colours
             // stay where they are when the run ends.
-            let mut every = source.waveforms.clone();
+            let mut every = std::mem::take(&mut self.live_source(analysis_type, &label).waveforms);
             every.sort_by(|left, right| left.name.cmp(&right.name));
             every
         } else {
-            materialize_live_saved_outputs(&source, &contracts)
+            materialize_live_saved_outputs(&self.live_source(analysis_type, &label), &contracts)
         };
         let events = self.live_transient.event_payload(analysis_type);
         if waveforms.is_empty() && events.is_none() {
+            self.release(shown);
             return held_back;
         }
-        let partial = AnalysisResult::live_transient_partial(1, analysis_type, label)
+        let partial = AnalysisResult::live_transient_partial(1, analysis_type, &label)
             .with_waveforms(waveforms)
             .with_provenance(provenance);
         let partial = match events {
@@ -1714,12 +1727,36 @@ impl SimulationController {
         };
         let Some(run_id) = self.target_run_id() else {
             self.stop_live_preview(model, "the running analysis belongs to no run");
+            self.release((partial, shown));
             return held_back;
         };
-        if let Err(error) = self.retain_live_transient_analysis(model, run_id, partial) {
+        if let Err(error) = self.retain_live_transient_analysis(model, run_id, partial, shown) {
             self.stop_live_preview(model, &error);
         }
         held_back
+    }
+
+    /// A manual deck's preview as the newest opening of its segment built it, once: its
+    /// traces, and the view's copy of them.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_built_preview(&mut self) -> Option<(Vec<RetainedTrace>, ShownWaveforms)> {
+        self.live_segment
+            .take_preview()
+            .map(|preview| (preview.traces, preview.shown))
+    }
+
+    /// A browser run writes no segment, so nothing is built for it.
+    #[cfg(target_arch = "wasm32")]
+    fn take_built_preview(&mut self) -> Option<(Vec<RetainedTrace>, ShownWaveforms)> {
+        None
+    }
+
+    /// Let go of `value` where its size costs no frame: on the desktop, on a thread of its own.
+    fn release(&mut self, value: impl std::any::Any + Send) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.live_segment.release(value);
+        #[cfg(target_arch = "wasm32")]
+        drop(value);
     }
 
     /// Stop the live preview for the rest of the task, saying why in the
@@ -1733,13 +1770,17 @@ impl SimulationController {
         );
     }
 
+    /// Retain `partial` as the run's live result and redraw the run if it is shown: from
+    /// `shown`, the view's copy of its waveforms, when one was built off the frame. What it
+    /// replaces is let go of off the frame.
     fn retain_live_transient_analysis(
-        &self,
+        &mut self,
         model: &mut Model,
         run_id: u64,
         mut partial: AnalysisResult,
+        shown: Option<ShownWaveforms>,
     ) -> Result<(), String> {
-        model
+        let (index, replaced) = model
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
@@ -1749,7 +1790,18 @@ impl SimulationController {
                 self.validate_analysis_retention(run, &partial)?;
                 run.upsert_live_analysis(partial)
             })?;
-        model.simulation.refresh_run_samples(run_id);
+        self.release(replaced);
+        match shown {
+            Some(shown) => {
+                let previous = model
+                    .simulation
+                    .refresh_run_samples_with(run_id, index, shown);
+                self.release(previous);
+            }
+            None => {
+                model.simulation.refresh_run_samples(run_id);
+            }
+        }
         Ok(())
     }
 

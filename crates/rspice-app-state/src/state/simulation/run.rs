@@ -186,7 +186,14 @@ impl SimulationRun {
     /// Publish or refresh the single provisional result for an in-flight
     /// prepared task. This does not change run success: the task has not
     /// reached a terminal outcome yet.
-    pub fn upsert_live_analysis(&mut self, mut analysis: AnalysisResult) -> Result<(), String> {
+    ///
+    /// Where the result now is among the run's analyses, and the provisional
+    /// result it replaced, for the caller to let go of where its size costs
+    /// no frame.
+    pub fn upsert_live_analysis(
+        &mut self,
+        mut analysis: AnalysisResult,
+    ) -> Result<(usize, Option<AnalysisResult>), String> {
         if !analysis.is_live_partial() {
             return Err("only a live partial analysis can use provisional retention".to_owned());
         }
@@ -205,7 +212,9 @@ impl SimulationRun {
                 ));
             }
             analysis.id = self.analyses[index].id;
-            self.analyses[index] = analysis;
+            let replaced = std::mem::replace(&mut self.analyses[index], analysis);
+            self.validate_provenance()?;
+            Ok((index, Some(replaced)))
         } else {
             if analysis.id == 0
                 || self
@@ -216,8 +225,9 @@ impl SimulationRun {
                 analysis.id = self.next_available_analysis_id();
             }
             self.analyses.push(analysis);
+            self.validate_provenance()?;
+            Ok((self.analyses.len() - 1, None))
         }
-        self.validate_provenance()
     }
 
     /// Replace the provisional prefix for this exact task, or append the

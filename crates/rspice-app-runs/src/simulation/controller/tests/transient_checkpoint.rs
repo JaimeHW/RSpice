@@ -209,7 +209,7 @@ fn fixture() -> (SimulationController, RunTestHost) {
 /// look at another run while this one streamed.
 #[test]
 fn live_transient_updates_leave_the_run_the_reader_chose_on_screen() {
-    let (controller, mut state) = fixture();
+    let (mut controller, mut state) = fixture();
     let running = controller.current_run_id.unwrap();
     let mut earlier = crate::state::SimulationRun::new(running + 100);
     earlier.lifecycle = crate::state::SimulationRunLifecycle::Completed;
@@ -219,7 +219,9 @@ fn live_transient_updates_leave_the_run_the_reader_chose_on_screen() {
         ]),
     );
     state.model.simulation.retained.runs.push(earlier);
-    let update = |controller: &SimulationController, state: &mut RunTestHost, samples: usize| {
+    let update = |controller: &mut SimulationController,
+                  state: &mut RunTestHost,
+                  samples: usize| {
         let time = (0..samples)
             .map(|index| index as f64 * 1e-10)
             .collect::<Vec<_>>();
@@ -228,23 +230,23 @@ fn live_transient_updates_leave_the_run_the_reader_chose_on_screen() {
             .with_provenance(controller.current_provenance.clone().unwrap())
             .with_waveforms(vec![RetainedTrace::new("V(out)", time, values, "#fff")]);
         controller
-            .retain_live_transient_analysis(&mut state.model, running, partial)
+            .retain_live_transient_analysis(&mut state.model, running, partial, None)
             .unwrap();
     };
-    update(&controller, &mut state, 2);
+    update(&mut controller, &mut state, 2);
     assert!(
         state.model.simulation.select_run(1),
         "the reader turns to the earlier run"
     );
 
     for samples in 3..103 {
-        update(&controller, &mut state, samples);
+        update(&mut controller, &mut state, samples);
         assert_eq!(state.model.simulation.view.active_run_idx, Some(1));
     }
 
     assert!(state.model.simulation.select_run(0));
     let version = state.model.simulation.view.data_version;
-    update(&controller, &mut state, 103);
+    update(&mut controller, &mut state, 103);
     assert_eq!(state.model.simulation.view.active_analysis_idx, Some(0));
     assert_ne!(
         state.model.simulation.view.data_version, version,
@@ -257,7 +259,7 @@ fn live_transient_updates_leave_the_run_the_reader_chose_on_screen() {
 fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_results() {
     let bytes = images();
     for success in [false, true] {
-        let (controller, mut state) = fixture();
+        let (mut controller, mut state) = fixture();
         controller
             .retain_transient_checkpoint(&mut state.model, bytes[0].clone())
             .unwrap();
@@ -275,6 +277,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
                 &mut state.model,
                 controller.current_run_id.unwrap(),
                 partial,
+                None,
             )
             .unwrap();
         assert_ne!(before, state.model.simulation.view.data_version);

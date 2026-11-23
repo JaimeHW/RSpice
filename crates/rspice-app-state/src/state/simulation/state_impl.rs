@@ -536,6 +536,37 @@ impl SimulationState {
     /// that has just started shows what it streams. A run that is not shown
     /// only moves the data version, for whatever reads it elsewhere.
     pub fn refresh_run_samples(&mut self, run_sequence: u64) -> bool {
+        if self.shown_analysis_of(run_sequence).is_none() {
+            return false;
+        }
+        self.sync_selected_analysis_waveforms();
+        true
+    }
+
+    /// [`Self::refresh_run_samples`] for analysis `analysis_index` of the run, with `shown`
+    /// the view's copy of that analysis's waveforms, built away from the frame: when the view
+    /// shows that analysis, `shown` is installed whole and what the view showed comes back;
+    /// otherwise `shown` itself comes back. Either way the caller lets go of what comes back
+    /// where its size costs no frame.
+    pub fn refresh_run_samples_with(
+        &mut self,
+        run_sequence: u64,
+        analysis_index: usize,
+        shown: ShownWaveforms,
+    ) -> ShownWaveforms {
+        match self.shown_analysis_of(run_sequence) {
+            Some(index) if index == analysis_index => self.view.install_waveforms(shown),
+            Some(_) => {
+                self.sync_selected_analysis_waveforms();
+                shown
+            }
+            None => shown,
+        }
+    }
+
+    /// The analysis the view shows of the run `run_sequence`, when it shows that run: its first
+    /// once it has one and none is chosen. A run that is not shown only moves the data version.
+    fn shown_analysis_of(&mut self, run_sequence: u64) -> Option<usize> {
         let shown = self
             .retained
             .runs
@@ -544,11 +575,11 @@ impl SimulationState {
             .filter(|index| self.view.active_run_idx == Some(*index));
         let Some(run_idx) = shown else {
             self.view.data_version = self.view.data_version.wrapping_add(1);
-            return false;
+            return None;
         };
         let analyses = self.retained.runs[run_idx].analyses.len();
         if analyses == 0 {
-            return false;
+            return None;
         }
         if self
             .view
@@ -557,8 +588,7 @@ impl SimulationState {
         {
             self.view.active_analysis_idx = Some(0);
         }
-        self.sync_selected_analysis_waveforms();
-        true
+        self.view.active_analysis_idx
     }
 
     /// Whether a dataset is currently overlaid onto the active dataset.

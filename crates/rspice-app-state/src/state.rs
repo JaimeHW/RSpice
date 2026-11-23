@@ -191,7 +191,7 @@ pub use simulation::{
     PreparedRunReceipt, PreparedSpecification, PstbStabilityClassificationEvidence,
     RealEventPointEvidence, RealEventTraceEvidence, ResultImportFormat, ResultImportSource,
     ResultsStorageBudget, ResultsStorageStop, RetainedSimulationState, RetainedTrace, RunHistory,
-    RunRetention, SavedOutputMaterializationStatus, SharedWaveformValues,
+    RunRetention, SavedOutputMaterializationStatus, SharedWaveformValues, ShownWaveforms,
     SimulationCampaignMembership, SimulationExecutionState, SimulationRun, SimulationRunIntent,
     SimulationRunLifecycle, SimulationRunProvenance, SimulationSourceState, SimulationState,
     SimulationViewState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
