@@ -751,22 +751,15 @@ fn option_candidates(
             })
             .copied()
     };
-    let note = |name: &str| match package {
-        Some(package) => messages.format(
-            MessageId::NetlistCompletionPackagedOptionNote,
-            &[("name", name), ("package", package)],
-        ),
-        None => messages.format(MessageId::NetlistCompletionOptionNote, &[("name", name)]),
-    };
     let mut names = rspice_core::netlist::OPTION_NAMES
         .iter()
         .filter(|row| row.scope.admits(package))
-        .filter_map(|row| typed(row.spellings))
-        .map(|name| Candidate {
+        .filter_map(|row| typed(row.spellings).map(|name| (row, name)))
+        .map(|(row, name)| Candidate {
             kind: messages.text(MessageId::NetlistCompletionOption),
             label: name.to_owned(),
             detail: package.unwrap_or_default().to_owned(),
-            doc: note(name),
+            doc: option_note(row, name, messages),
             insert: spelled(name, '='),
         })
         .collect::<Vec<_>>();
@@ -778,16 +771,110 @@ fn option_candidates(
             kind: messages.text(MessageId::NetlistCompletionOptionPackage),
             label: found.name.to_owned(),
             detail: String::new(),
-            doc: messages.format(
-                MessageId::NetlistCompletionOptionPackageNote,
-                &[("name", found.name)],
-            ),
+            doc: package_note(found, messages),
             insert: spelled(found.name, ' '),
         })
         .collect::<Vec<_>>();
     packages.sort_by(|a, b| a.label.cmp(&b.label));
     names.extend(packages);
     names
+}
+
+/// What the option table holds of `row`, offered as `spelling`: where the
+/// parser reads it, its other spellings, and whether a number may end it.
+/// A spelling another row reads elsewhere (TIMEINT's RELTOL) is another
+/// name there, so only this row's places are said. The table holds no
+/// value or meaning, so neither is said.
+fn option_note(
+    row: &rspice_core::netlist::OptionName,
+    spelling: &str,
+    messages: MessageCatalog,
+) -> String {
+    let outside = row.scope.admits(None);
+    let after = rspice_core::netlist::OPTION_PACKAGES
+        .iter()
+        .filter(|found| row.scope.admits(Some(found.name)))
+        .map(|found| found.name)
+        .collect::<Vec<_>>();
+    let packages = match after.split_last() {
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => messages.format(
+            MessageId::NetlistCompletionOptionPackages,
+            &[("packages", &rest.join(", ")), ("last", last)],
+        ),
+        None => String::new(),
+    };
+    let mut sentences = vec![match (outside, after.is_empty()) {
+        (true, true) => messages.text(MessageId::NetlistCompletionOptionReadOutside),
+        (true, false) => messages.format(
+            MessageId::NetlistCompletionOptionReadAnywhere,
+            &[("packages", &packages)],
+        ),
+        (false, _) => messages.format(
+            MessageId::NetlistCompletionOptionReadIn,
+            &[("packages", &packages)],
+        ),
+    }];
+    let others = row
+        .spellings
+        .iter()
+        .filter(|other| **other != spelling)
+        .copied()
+        .collect::<Vec<_>>();
+    if !others.is_empty() {
+        sentences.push(messages.format(
+            MessageId::NetlistCompletionOptionSpellings,
+            &[("spellings", &others.join(", "))],
+        ));
+    }
+    if row.numbered {
+        sentences.push(messages.format(
+            MessageId::NetlistCompletionOptionNumbered,
+            &[("example", &format!("{spelling}2"))],
+        ));
+    }
+    sentences.join(" ")
+}
+
+/// What the option table holds of `package`: how many names it lists,
+/// how many others are read after it, and, for one that opens only before
+/// a name of its own, that it does.
+fn package_note(package: &rspice_core::netlist::OptionPackage, messages: MessageCatalog) -> String {
+    use rspice_core::netlist::{OPTION_NAMES, OptionScope};
+    let own = OPTION_NAMES
+        .iter()
+        .filter(|row| {
+            matches!(row.scope, OptionScope::In(packages) | OptionScope::GlobalAnd(packages)
+                if packages.contains(&package.name))
+        })
+        .count();
+    let others = OPTION_NAMES
+        .iter()
+        .filter(|row| row.scope.admits(Some(package.name)))
+        .count()
+        - own;
+    let mut sentences = vec![messages.counted(
+        own,
+        MessageId::NetlistCompletionPackageListsOne,
+        MessageId::NetlistCompletionPackageListsMany,
+    )];
+    sentences.push(if others == 0 {
+        messages.text(MessageId::NetlistCompletionPackageNoOthers)
+    } else {
+        messages.counted(
+            others,
+            MessageId::NetlistCompletionPackageOthersOne,
+            MessageId::NetlistCompletionPackageOthersMany,
+        )
+    });
+    if !package.opens_alone {
+        sentences.push(if own == 1 {
+            messages.text(MessageId::NetlistCompletionPackageOpensBeforeOne)
+        } else {
+            messages.text(MessageId::NetlistCompletionPackageOpensBeforeMany)
+        });
+    }
+    sentences.join(" ")
 }
 
 /// Filter both sources against the typed prefix. Where a parameter is being
@@ -886,7 +973,7 @@ fn collect_candidates(
             };
             let signature = analysis.signature;
             out.push(Candidate {
-                kind: messages.text(MessageId::NetlistCompletionDirective),
+                kind: messages.text(MessageId::NetlistCompletionAnalysis),
                 label: (*cmd).to_owned(),
                 detail: signature.to_owned(),
                 doc: format!("{cmd} {signature} — {}", analysis.description),
@@ -993,6 +1080,18 @@ fn revealing(offset: f32, selected: usize) -> f32 {
 /// The salt of the popover's list, which scrolls.
 const ROWS: &str = "rspice.netlist.completion.rows";
 
+/// Every word a row's kind column can show; the column is as wide as the
+/// widest, so a name starts at one place in every list.
+const KINDS: [MessageId; 7] = [
+    MessageId::NetlistCompletionPin,
+    MessageId::NetlistCompletionNode,
+    MessageId::NetlistCompletionDirective,
+    MessageId::NetlistCompletionAnalysis,
+    MessageId::NetlistCompletionParameter,
+    MessageId::NetlistCompletionOption,
+    MessageId::NetlistCompletionOptionPackage,
+];
+
 /// The popover itself: items grid + selected-item doc footer, which says
 /// ⇥ accepts when the popover takes the keys (`takes_keys`). The list
 /// brings the selected row into view when `reveal`. Returns the row index
@@ -1031,13 +1130,34 @@ fn draw_popover(
                     ui.set_max_width(geometry.width);
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
+                    let kind_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                    let kind_width = KINDS
+                        .iter()
+                        .map(|kind| {
+                            ui.painter()
+                                .layout_no_wrap(
+                                    messages.text(*kind),
+                                    kind_font.clone(),
+                                    c.text_faint,
+                                )
+                                .size()
+                                .x
+                        })
+                        .fold(0.0, f32::max);
+                    let label_left = 10.0 + kind_width + 12.0;
+
                     // Every row the engine offers is in the list; eight show at
                     // once and the rest scroll, the selected row brought into
-                    // view when a key or the typing moved it.
+                    // view when a key or the typing moved it. The list is
+                    // eight rows tall whatever room the popover had the frame
+                    // before, when the list may have been shorter, so its last
+                    // row ends whole on the note's rule.
                     let rows_id = ui.make_persistent_id(ROWS);
+                    let list_height = ROW_HEIGHT * VISIBLE_ROWS as f32;
                     let mut rows = egui::ScrollArea::vertical()
                         .id_salt(ROWS)
-                        .max_height(ROW_HEIGHT * VISIBLE_ROWS as f32)
+                        .max_height(list_height)
+                        .min_scrolled_height(list_height)
                         .auto_shrink([false, true]);
                     if reveal {
                         let offset = egui::scroll_area::State::load(ui.ctx(), rows_id)
@@ -1081,11 +1201,11 @@ fn draw_popover(
                                 egui::pos2(rect.left() + 10.0, rect.center().y),
                                 egui::Align2::LEFT_CENTER,
                                 &candidate.kind,
-                                theme::mono(tokens::FS_0, FontWeight::Regular),
+                                kind_font.clone(),
                                 c.text_faint,
                             );
                             let label = ui.painter().text(
-                                egui::pos2(rect.left() + 58.0, rect.center().y),
+                                egui::pos2(rect.left() + label_left, rect.center().y),
                                 egui::Align2::LEFT_CENTER,
                                 &candidate.label,
                                 theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -1237,7 +1357,7 @@ mod tests {
     fn a_model_card_completes_its_types_parameters_from_the_engines_table() {
         let (rows, note) = offered(&format!("{HEAD}.model d1 D(I"), "I");
         let param =
-            |name: &str, detail: &str| ("param".to_owned(), name.to_owned(), detail.to_owned());
+            |name: &str, detail: &str| ("parameter".to_owned(), name.to_owned(), detail.to_owned());
         assert_eq!(
             rows,
             [param("IS", "1e-14 A"), param("ISR", "0 A")],
@@ -1281,8 +1401,8 @@ mod tests {
         assert_eq!(
             rows,
             [
-                ("param".to_owned(), "W".to_owned(), "M1".to_owned()),
-                ("param".to_owned(), "WIDTH".to_owned(), "M1".to_owned()),
+                ("parameter".to_owned(), "W".to_owned(), "M1".to_owned()),
+                ("parameter".to_owned(), "WIDTH".to_owned(), "M1".to_owned()),
             ]
         );
         assert_eq!(note, "M1 reads W as an instance parameter.");
@@ -1293,7 +1413,10 @@ mod tests {
         let deck = format!("{SUBCIRCUIT_DECK}.model dmod d\nD1 a 0 dm");
         let (rows, _) = offered(&deck, "dm");
         assert!(rows.iter().any(|(_, label, _)| label == "dmod"), "{rows:?}");
-        assert!(!rows.iter().any(|(kind, _, _)| kind == "param"), "{rows:?}");
+        assert!(
+            !rows.iter().any(|(kind, _, _)| kind == "parameter"),
+            "{rows:?}"
+        );
     }
 
     #[test]
@@ -1479,10 +1602,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].insert, "reltol=");
         assert_eq!(rows[0].detail, "TIMEINT");
-        assert_eq!(
-            rows[0].doc,
-            "RELTOL: an option the engine reads after TIMEINT on .options."
-        );
+        assert_eq!(rows[0].doc, "Read only after TIMEINT.");
         assert_eq!(
             rows_at_end(&state, &format!("{HEAD}.OPTIONS TIME"))[0].insert,
             "TIMEINT "
