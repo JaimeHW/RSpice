@@ -8,15 +8,6 @@ use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_results::manifest::ManifestViewModel;
 use std::sync::Arc;
-pub fn manifest_for_run(run: &SimulationRun) -> ManifestViewModel {
-    frame_work::note(DatasetWalk::ManifestViewModel);
-    frame_work::note(DatasetWalk::DatasetDigest);
-    ManifestViewModel::with_dataset_digest(
-        run,
-        |analysis| analysis.is_live_partial(),
-        run.dataset_content_digest().to_string(),
-    )
-}
 /// The manifest of `run` with its dataset digest left empty: digesting reads
 /// every sample the run retained, and Run details computes it off the frame.
 pub(crate) fn manifest_without_digest(run: &SimulationRun) -> ManifestViewModel {
@@ -33,6 +24,9 @@ pub(crate) struct ManifestPlan {
     run: u64,
     pub(crate) model: ManifestViewModel,
 }
+/// The active run's manifest, without its dataset digest: digesting reads
+/// every sample the run retained, and nothing that reads this manifest states
+/// the digest.
 pub(crate) fn active_manifest(state: &mut ResultsParts<'_>) -> Option<Arc<ManifestPlan>> {
     let source = (
         state.model.simulation.retained.runs.revision(),
@@ -45,7 +39,7 @@ pub(crate) fn active_manifest(state: &mut ResultsParts<'_>) -> Option<Arc<Manife
     {
         return Some(Arc::clone(plan));
     }
-    let model = manifest_for_run(state.model.simulation.active_run()?);
+    let model = manifest_without_digest(state.model.simulation.active_run()?);
     let built = Arc::new(ManifestPlan {
         source,
         run: run_id,
@@ -64,7 +58,7 @@ mod tests {
     fn row_for_analysis(analysis: AnalysisResult) -> ManifestRow {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        manifest_for_run(&run).rows.remove(0)
+        manifest_without_digest(&run).rows.remove(0)
     }
     fn state_with_run(label: &str) -> ResultsTestHost {
         let mut run = SimulationRun::new(7);
@@ -133,10 +127,13 @@ mod tests {
         assert_eq!(state.model.simulation.view.data_version, version);
         let restored = active_manifest(&mut state.results_parts()).unwrap();
         assert_eq!(restored.model.dataset_id, original.model.dataset_id);
-        assert_ne!(restored.model.dataset_digest, original.model.dataset_digest);
+        assert!(
+            !Arc::ptr_eq(&restored, &original),
+            "the restored history kept the manifest of the one it replaced"
+        );
         assert_eq!(
             restored.model,
-            manifest_for_run(state.model.simulation.active_run().unwrap())
+            manifest_without_digest(state.model.simulation.active_run().unwrap())
         );
 
         state.model.simulation.retained.runs[0].analyses[0]
@@ -150,7 +147,7 @@ mod tests {
         let edited = active_manifest(&mut state.results_parts()).unwrap();
         assert_eq!(
             edited.model,
-            manifest_for_run(state.model.simulation.active_run().unwrap())
+            manifest_without_digest(state.model.simulation.active_run().unwrap())
         );
         assert_ne!(edited.model, restored.model);
         assert_eq!(state.model.simulation.view.data_version, version);
@@ -182,13 +179,10 @@ mod tests {
         assert_eq!(work.since().total(), 0);
         other.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
             vec![3.0; 100_000].into();
-        assert_ne!(
-            active_manifest(&mut other.results_parts())
-                .unwrap()
-                .model
-                .dataset_digest,
-            original.model.dataset_digest
-        );
+        assert!(!Arc::ptr_eq(
+            &active_manifest(&mut other.results_parts()).unwrap(),
+            &original
+        ));
         assert!(Arc::ptr_eq(
             &original,
             &active_manifest(&mut state.results_parts()).unwrap()
@@ -199,7 +193,6 @@ mod tests {
         let mut state = state_with_run("Transient");
         let before =
             active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
-        let before_digest = before.model.dataset_digest.clone();
 
         state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y = vec![0.0, 9.0].into();
         state.model.simulation.view.data_version =
@@ -207,15 +200,13 @@ mod tests {
 
         let after =
             active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
-        assert_ne!(
-            after.model.dataset_digest, before_digest,
-            "the sheet kept the previous dataset generation's content digest"
+        assert!(
+            !Arc::ptr_eq(&after, &before),
+            "the inspector kept the previous dataset generation's manifest"
         );
-        assert_eq!(
-            after.model.dataset_digest,
-            state.model.simulation.retained.runs[0]
-                .dataset_content_digest()
-                .to_string()
+        assert!(
+            after.model.dataset_digest.is_empty(),
+            "the inspector's manifest digested the run's samples"
         );
     }
     #[test]
@@ -239,6 +230,5 @@ mod tests {
         let after =
             active_manifest(&mut state.results_parts()).expect("a manifest for the active run");
         assert_ne!(after.model.run_sequence, first.run_sequence);
-        assert_ne!(after.model.dataset_digest, first.dataset_digest);
     }
 }
