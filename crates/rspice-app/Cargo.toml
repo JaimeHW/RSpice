@@ -111,7 +111,7 @@ rspice-results-ui = { workspace = true, features = ["test-support"] }
 rspice-schematic-editor = { workspace = true, features = ["test-support"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-formats = { workspace = true, features = ["result-validation-observation"] }
-rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
+rspice-simulation = { workspace = true, features = ["pdk-test-fixtures", "test-support"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }

@@ -13,6 +13,7 @@ mod deck_disk;
 #[cfg(not(target_arch = "wasm32"))]
 mod deck_in_front;
 mod deck_read_away;
+mod deck_run_memory;
 mod deck_run_preparing;
 mod deck_save_as;
 mod deck_setup;
