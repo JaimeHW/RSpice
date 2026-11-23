@@ -1440,10 +1440,12 @@ pub fn save_shown_file(
 #[must_use]
 pub fn stored_sources(
     netlist: &NetlistDocumentState,
-    shown: &str,
+    shown: &RevisedText,
 ) -> Option<(PathBuf, Vec<(PathBuf, String)>)> {
     let deck = netlist.open_deck.as_ref()?;
     let files = deck.stored_files.as_ref()?;
+    // Only a deck the project keeps reads the text in one piece.
+    let shown = shown.as_str();
     let include = netlist.front.include();
     let root_text = match include {
         None => shown.to_owned(),

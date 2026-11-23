@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::workbench::documents::text_editor_commands::{
-    queue_caret_position, queue_go_to_line, queue_reveal_line, queue_source_editor_request,
-    show_go_to_line, take_reveal_line,
+    line_count_of, queue_caret_position, queue_go_to_line, queue_reveal_line,
+    queue_source_editor_request, show_go_to_line, take_reveal_line,
 };
 
 const SCREEN: Vec2 = Vec2::new(900.0, 600.0);
@@ -560,7 +560,7 @@ fn go_to_line_proposes_the_caret_line() {
             accepted = show_go_to_line(
                 ui,
                 id,
-                &source,
+                || line_count_of(&source),
                 crate::workbench::MessageCatalog::new(
                     crate::workbench::UiTextLocale::EnglishUnitedStates,
                 ),
@@ -578,7 +578,7 @@ fn go_to_line_proposes_the_caret_line() {
         accepted = show_go_to_line(
             ui,
             id,
-            &source,
+            || line_count_of(&source),
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
             ),
@@ -629,7 +629,10 @@ fn a_jump_to_a_line_and_column_lands_the_caret_in_view() {
             ..Default::default()
         },
         |ui| {
-            assert_eq!(take_reveal_line(ui, id, &source), Some(40));
+            assert_eq!(
+                take_reveal_line(ui, id, || line_count_of(&source)),
+                Some(40)
+            );
         },
     );
     let revealed = bench.frame(Vec::new());

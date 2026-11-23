@@ -75,11 +75,12 @@ pub trait RunHost: ViewerHost {
 }
 
 /// A deck a manual run reads: its name, its text as the editor holds it,
-/// and where it is read from.
+/// and where it is read from. The text is read in one piece only by what
+/// reads the deck, a run or its check, not by naming it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ManualDeck<'a> {
     pub name: &'a str,
-    pub text: &'a str,
+    pub text: &'a crate::state::RevisedText,
     pub origin: DeckOrigin<'a>,
 }
 
@@ -94,11 +95,12 @@ pub enum DeckOrigin<'a> {
     },
 }
 
-/// A [`ManualDeck`] that owns what it names, for a host that keeps a copy.
+/// A [`ManualDeck`] that owns what it names, for a host that keeps a copy;
+/// the text is shared with the deck it copies, not copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManualDeckCopy {
     pub name: String,
-    pub text: String,
+    pub text: crate::state::RevisedText,
     pub origin: DeckOriginCopy,
 }
 
@@ -119,7 +121,7 @@ impl ManualDeckCopy {
         );
         Self {
             name,
-            text,
+            text: text.into(),
             origin: DeckOriginCopy::File(path),
         }
     }
@@ -129,7 +131,7 @@ impl ManualDeckCopy {
     pub fn of(deck: ManualDeck<'_>) -> Self {
         Self {
             name: deck.name.to_owned(),
-            text: deck.text.to_owned(),
+            text: deck.text.clone(),
             origin: match deck.origin {
                 DeckOrigin::File(path) => DeckOriginCopy::File(path.to_path_buf()),
                 DeckOrigin::Stored { files } => DeckOriginCopy::Stored(files.to_vec()),

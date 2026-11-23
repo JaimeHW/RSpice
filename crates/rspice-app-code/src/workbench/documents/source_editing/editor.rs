@@ -15,7 +15,7 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
 use crate::workbench::MessageId;
 use crate::workbench::documents::text_editor_commands::{
-    EditorSyntax, queue_caret_position, show_go_to_line, take_reveal_line,
+    EditorSyntax, line_count_of, queue_caret_position, show_go_to_line, take_reveal_line,
     veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line},
 };
 
@@ -414,8 +414,9 @@ fn show_code_document_impl(
     // Before the reveal is taken, so the step lands in this frame.
     let announcement = take_problem_step(ui.ctx(), editor_id)
         .map(|step| step_to_problem(ui.ctx(), editor_id, source, &held, step, messages));
-    let revealed = take_reveal_line(ui, editor_id, source);
-    let requested_line = revealed.or_else(|| show_go_to_line(ui, editor_id, source, messages));
+    let revealed = take_reveal_line(ui, editor_id, || line_count_of(source));
+    let requested_line =
+        revealed.or_else(|| show_go_to_line(ui, editor_id, || line_count_of(source), messages));
     let tokens = Tokens::get(ui.ctx());
     let colors = tokens.color;
     let text_size = editor_font::text_size(ui.ctx());

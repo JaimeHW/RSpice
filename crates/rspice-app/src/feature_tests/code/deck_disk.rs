@@ -639,3 +639,55 @@ fn a_project_saved_through_another_spelling_of_a_folder_keeps_its_deck_by_its_pa
         "{stored}"
     );
 }
+
+/// A key typed in the deck is what its check, its run and Save then read:
+/// the editor hands over its own text, and each reads the deck as typed.
+#[test]
+fn a_key_typed_in_the_deck_is_what_its_check_run_and_save_read() {
+    const UNCLOSED: &str = "* typed\nV1 in 0 1\nR1 in 0 {1k\n.op\n.end\n";
+    const TYPED: &str = "* typed\nV1 in 0 1\nR1 in 0 {1k}\n.op\n.end\n";
+    let folder = Folder::new();
+    let path = folder.write("typed.cir", UNCLOSED);
+    let mut app = app_with_deck(&path);
+    app.state.workbench.activate(Workspace::Netlist);
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    let on_the_card = |app: &RSpiceApp| {
+        app.state
+            .code
+            .netlist
+            .diagnostics
+            .iter()
+            .filter(|finding| finding.is_current() && finding.line == Some(2))
+            .count()
+    };
+    assert_ne!(on_the_card(&app), 0, "the open brace is found");
+
+    let editor = rspice_app_code::workbench::documents::netlist_document::editor_id_in(
+        &app.state.model,
+        &app.state.code.netlist,
+    );
+    let caret = UNCLOSED.find("{1k").expect("the card") + "{1k".len();
+    rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index(
+        &ctx, editor, caret,
+    );
+    ctx.memory_mut(|memory| memory.request_focus(editor));
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    crate::workbench::app::veriloga_design_tests::frame_with(
+        &ctx,
+        &mut app,
+        DESKTOP,
+        vec![egui::Event::Text("}".to_owned())],
+    );
+    frame(&ctx, &mut app, DESKTOP);
+
+    assert_eq!(app.state.model.simulation.source.netlist_content, TYPED);
+    assert_eq!(root(&app.state).text.as_str(), TYPED, "the deck's tab");
+    assert_eq!(on_the_card(&app), 0, "the check read the closed brace");
+    dispatched(&mut app.state).expect("the run reads the closed brace");
+    deck_files::save_shown_file(&mut app.state.code.netlist, app.state.workbench.messages())
+        .expect("saved");
+    assert_eq!(std::fs::read_to_string(&path).expect("the deck"), TYPED);
+}

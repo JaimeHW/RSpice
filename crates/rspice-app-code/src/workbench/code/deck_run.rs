@@ -39,7 +39,7 @@ use rspice_simulation::preparation::PreparationError;
 /// found.
 struct CheckedDeck {
     name: String,
-    text: String,
+    text: crate::state::RevisedText,
     result: Result<PreparedRunMetadata, PreparationError>,
 }
 
@@ -76,7 +76,7 @@ fn check_deck_run(cx: &mut Cx<'_, SourceFeature>, for_run: bool) -> DeckCheck {
         }
     }
     let Some((name, text)) =
-        manual_deck_in(&cx.state.netlist).map(|deck| (deck.name.to_owned(), deck.text.to_owned()))
+        manual_deck_in(&cx.state.netlist).map(|deck| (deck.name.to_owned(), deck.text.clone()))
     else {
         return DeckCheck::Held;
     };

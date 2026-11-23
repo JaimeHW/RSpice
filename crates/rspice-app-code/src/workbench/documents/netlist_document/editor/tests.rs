@@ -1565,7 +1565,11 @@ fn a_problem_is_marked_under_exactly_the_word_it_names() {
     whole_card.bind_validation(7, "check");
     let findings = NetlistDiagnosticCollection::try_new(vec![whole_card], source)
         .expect("the fixture collection is well formed");
-    let marks = super::super::diagnostics::problem_marks(&findings, source, 7);
+    let marks = super::super::diagnostics::problem_marks(
+        &findings,
+        &crate::state::RevisedText::from(source),
+        7,
+    );
     assert_eq!(
         marks
             .iter()

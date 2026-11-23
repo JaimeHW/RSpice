@@ -185,7 +185,9 @@ pub fn reveal_in_netlist(
 ) {
     let buffer = &model.simulation.source.netlist_content;
     let Some(line) =
-        crate::workbench::documents::text_editor_commands::take_reveal_line(ui, editor_id, buffer)
+        crate::workbench::documents::text_editor_commands::take_reveal_line(ui, editor_id, || {
+            buffer.line_count()
+        })
     else {
         return;
     };

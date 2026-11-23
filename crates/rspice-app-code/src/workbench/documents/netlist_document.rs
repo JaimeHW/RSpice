@@ -589,6 +589,7 @@ pub(crate) fn put_dependency_in_front(
     netlist.requested_line = None;
     netlist.cursor_line = 0;
     runs.manual_run.edited_lines.clear();
+    netlist.changed_lines_wanted = false;
     netlist.completion_open = false;
     netlist.completion_dismissed_at = None;
     netlist.revision = netlist.revision.wrapping_add(1);
@@ -620,7 +621,7 @@ pub(crate) fn close_active_dependency_in(
     netlist.completion_open = false;
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
-    refresh_diff_pips_from_baseline_in(model, runs);
+    refresh_diff_pips_from_baseline_in(model, netlist, runs);
     true
 }
 
@@ -777,9 +778,22 @@ pub struct NetlistDocumentState {
     pub revision: u64,
     /// Revision the diagnostics were parsed for.
     diag_revision: Option<u64>,
+    /// The deck's lines that differ from the last manual run's, worked out
+    /// away from the frame and keyed by the revisions of the two texts.
+    changed_lines: index_worker::BackgroundIndex<(u64, u64), HashSet<usize>>,
+    /// Whether the marks of the lines changed since the last manual run wait
+    /// to be worked out again, as an edit, a run or a return to the deck
+    /// asks.
+    changed_lines_wanted: bool,
     /// What the root deck the last check read says of the program that
     /// wrote it, found by the check beside its findings.
     dialect_hint: Option<dialect::DialectHint>,
+    /// The last check's findings as the editor marks them, with the revision
+    /// and the findings they mark.
+    checked_marks: Option<editor::HeldProblemMarks>,
+    /// The lines the last check's findings of files it could not read point
+    /// at, by their zero-based line, as it read them.
+    missing_file_lines: std::sync::Arc<[(usize, String)]>,
     /// Library folders the diagnostics resolved includes through; a change
     /// in Preferences stales them as an edit does.
     diag_library_folders: Vec<std::path::PathBuf>,
@@ -944,6 +958,20 @@ impl NetlistDocumentState {
         self.validated_revision().and(self.dialect_hint)
     }
 
+    /// Line `line` of the deck, which a finding of a file the check could
+    /// not read points at: as the check that found it read it, else as
+    /// `buffer` holds it now.
+    pub(crate) fn missing_file_line<'a>(
+        &'a self,
+        line: usize,
+        buffer: &'a crate::state::RevisedText,
+    ) -> Option<&'a str> {
+        match self.missing_file_lines.iter().find(|(at, _)| *at == line) {
+            Some((_, text)) => Some(text),
+            None => buffer.lines().nth(line),
+        }
+    }
+
     /// Record a settled parse of `revision`, as the editor does once it has
     /// validated the buffer.
     #[cfg(any(test, feature = "test-support"))]
@@ -972,31 +1000,104 @@ impl NetlistDocumentState {
 }
 
 /// Mark the lines changed since the last run before rendering the document,
-/// over the model, the netlist editor's state and the runs.
+/// over the model, the netlist editor's state and the runs: again once a run
+/// has finished, and as the marks worked out away from the frame are done.
 pub fn prepare(model: &mut Model, netlist: &mut NetlistDocumentState, runs: &mut RunsState) {
     let data_version = model.simulation.view.data_version;
-    if netlist.seen_data_version == data_version {
-        return;
+    if netlist.seen_data_version != data_version {
+        netlist.seen_data_version = data_version;
+        refresh_diff_pips_from_baseline_in(model, netlist, runs);
     }
-    netlist.seen_data_version = data_version;
-    if let Some(baseline) = runs.manual_run.last_run_buffer.as_deref() {
+    take_changed_lines(model, netlist, runs);
+}
+
+/// Mark the deck's lines that differ from the last manual run's buffer, over
+/// the model, the netlist editor's state and the runs. The diff reads both
+/// decks whole, so it is worked out away from the frame
+/// ([`start_changed_lines`]) and the marks stand until it is done; in the
+/// application's tests it is worked out at once, unless they detached the
+/// work.
+fn refresh_diff_pips_from_baseline_in(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &mut RunsState,
+) {
+    let Some(baseline) = runs.manual_run.last_run_buffer.as_deref() else {
+        return;
+    };
+    if netlist.waits_for_indexes() {
         runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
             &model.simulation.source.netlist_content,
             baseline,
         );
+    } else {
+        netlist.changed_lines_wanted = true;
     }
 }
 
-/// Mark the deck's lines that differ from the last manual run's buffer, over
-/// the model and the runs.
-fn refresh_diff_pips_from_baseline_in(model: &Model, runs: &mut RunsState) {
-    let Some(baseline) = runs.manual_run.last_run_buffer.as_deref() else {
+/// The revisions of the deck as it stands and of the last manual run's,
+/// which the marks of the lines changed between them are kept against;
+/// `None` when no marks are wanted: none were asked for, no run has
+/// finished, or an include is in front.
+fn changed_lines_key(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    runs: &RunsState,
+) -> Option<(u64, u64)> {
+    let baseline = runs.manual_run.last_run_buffer.as_ref()?;
+    (netlist.changed_lines_wanted && netlist.front.include().is_none()).then(|| {
+        (
+            model.simulation.source.netlist_content.revision(),
+            baseline.revision(),
+        )
+    })
+}
+
+/// Start working out the lines of the deck that differ from the last manual
+/// run's, away from the frame, when an edit, a run or a return to the deck
+/// asked for them and no build of them runs; `ctx`'s next frame is woken
+/// when it is done. It reads the model, the runs and the netlist editor's
+/// state, and keeps the build in it.
+pub(super) fn start_changed_lines(
+    ctx: &egui::Context,
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
+) {
+    let Some(key) = changed_lines_key(model, netlist, runs) else {
         return;
     };
-    runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
-        &model.simulation.source.netlist_content,
-        baseline,
-    );
+    let Some(baseline) = runs.manual_run.last_run_buffer.clone() else {
+        return;
+    };
+    if netlist.changed_lines.wants(|built| *built == key) {
+        let (current, wake) = (model.simulation.source.netlist_content.clone(), ctx.clone());
+        netlist.changed_lines.start(
+            key,
+            move || baseline::changed_lines_against_baseline(&current, &baseline),
+            move || wake.request_repaint(),
+        );
+    }
+}
+
+/// Take the marks of the lines changed since the last manual run once their
+/// build is done for the deck and the run's deck as they stand. Marks asked
+/// for where none are wanted any more are dropped.
+fn take_changed_lines(model: &Model, netlist: &mut NetlistDocumentState, runs: &mut RunsState) {
+    if !netlist.changed_lines_wanted {
+        return;
+    }
+    let Some(key) = changed_lines_key(model, netlist, runs) else {
+        netlist.changed_lines_wanted = false;
+        return;
+    };
+    netlist.changed_lines.wants(|built| *built == key);
+    if let Some((built, lines)) = netlist.changed_lines.built()
+        && *built == key
+    {
+        runs.manual_run.edited_lines = HashSet::clone(&lines);
+        netlist.changed_lines_wanted = false;
+    }
 }
 
 #[cfg(any(test, feature = "test-support"))]

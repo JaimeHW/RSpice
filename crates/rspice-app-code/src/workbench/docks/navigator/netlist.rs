@@ -1235,12 +1235,12 @@ pub(super) fn retained_include_facts(
         // its lines, one row a line, so a library two lines name for two
         // sections is two rows and one tab. A line naming a file the check
         // could not read is marked missing, with what the check said.
-        let buffer = model.simulation.source.netlist_content.as_str();
+        let buffer = &model.simulation.source.netlist_content;
         let missing = netlist.diagnostics.iter().filter_map(|finding| {
             let line = finding.line.filter(|_| {
                 crate::workbench::documents::netlist_document::is_missing_file_finding(finding)
             })?;
-            let raw = buffer.lines().nth(line)?;
+            let raw = netlist.missing_file_line(line, buffer)?;
             let named = rspice_core::netlist::parse_include_directive(raw)
                 .or_else(|| rspice_core::netlist::parse_lib_directive(raw).map(|(path, _)| path))?;
             Some(IncludeRowFacts {

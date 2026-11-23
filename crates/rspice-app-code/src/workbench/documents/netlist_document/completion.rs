@@ -215,7 +215,7 @@ pub fn show(
     ui: &mut Ui,
     state: &mut NetlistDocumentState,
     anchor: CompletionAnchor,
-    buffer: &str,
+    buffer: &crate::state::RevisedText,
     keys: (i32, bool, bool),
     messages: MessageCatalog,
 ) -> Option<(usize, usize, String, usize)> {
@@ -238,11 +238,15 @@ pub fn show(
     }
 
     let caret = anchor.caret_byte.min(buffer.len());
+    // Only the card the caret is on is read, as the deck reads there; what
+    // is found in it is placed back by the byte it starts at.
+    let (card, from) = card_around(buffer, caret);
+    let at = caret - from;
     // After a blank on an element line the next pin is what is offered.
     let (token_start, token, line_start) =
-        token_at(buffer, caret).unwrap_or((caret, String::new(), usize::MAX));
-    let pins = pin_help(state, buffer, token_start, messages);
-    let parameters = parameter_site(state, buffer, token_start);
+        token_at(&card, at).unwrap_or((at, String::new(), usize::MAX));
+    let pins = pin_help(state, &card, token_start, messages);
+    let parameters = parameter_site(state, &card, token_start);
     let unprompted = parameters
         .as_ref()
         .is_some_and(ParameterSite::offers_unprompted);
@@ -267,7 +271,7 @@ pub fn show(
         .data_mut(|data| data.insert_temp(egui::Id::new(PINS_ONLY), token.is_empty()));
     // A list the typing changed shows its selected row, as a key moving the
     // selection does; the wheel scrolls it freely otherwise.
-    let shown = (token_start, token.clone());
+    let shown = (from + token_start, token.clone());
     let retyped = ui.ctx().data_mut(|data| {
         let id = egui::Id::new(SHOWN_FOR);
         let before = data.get_temp::<(usize, String)>(id);
@@ -295,7 +299,12 @@ pub fn show(
         // A token is ASCII, a byte to a character.
         let placed_caret = anchor.caret_char_index - token.len() + chosen.insert.chars().count();
         state.completion_open = false;
-        return Some((token_start, caret, chosen.insert.clone(), placed_caret));
+        return Some((
+            from + token_start,
+            caret,
+            chosen.insert.clone(),
+            placed_caret,
+        ));
     }
 
     state.completion_open = true;
@@ -313,6 +322,34 @@ pub fn place_caret(ui: &Ui, editor_id: egui::Id, char_index: usize) {
         ctx, editor_id, char_index,
     );
     ctx.memory_mut(|memory| memory.request_focus(editor_id));
+}
+
+/// The part of `buffer` the popover reads for the caret at byte `caret`, and
+/// the byte it starts at: the card the caret is on, from the line break
+/// before its first line to the end of the caret's line, which reads as the
+/// whole deck does there (see [`card_before`]). A deck held as a rope is not
+/// put in one piece for it.
+fn card_around(
+    buffer: &crate::state::RevisedText,
+    caret: usize,
+) -> (std::borrow::Cow<'_, str>, usize) {
+    let line_from = |start: usize| buffer.slice(start..buffer.line_end_at(start));
+    let mut head = buffer.line_start_at(caret);
+    while head > 0 && line_from(head).trim_start().starts_with('+') {
+        let mut above = head;
+        loop {
+            let previous = buffer.line_start_at(above - 1);
+            let text = buffer.slice(previous..above - 1);
+            let text = text.trim();
+            above = previous;
+            if previous == 0 || !(text.is_empty() || text.starts_with('*')) {
+                break;
+            }
+        }
+        head = above;
+    }
+    let from = head.saturating_sub(1);
+    (buffer.slice(from..buffer.line_end_at(caret)), from)
 }
 
 /// The identifier token ending at the caret's byte `caret`: `(token's
@@ -1618,5 +1655,35 @@ mod tests {
         let rows = rows_at_end(&state, &format!("{HEAD}.fo"));
         assert!(rows.iter().any(|row| row.label == ".four"));
         assert!(!rows.iter().any(|row| row.label == ".fourier"));
+    }
+
+    /// The popover reads only the card the caret is on, held in one piece or
+    /// as the editor's rope, and finds in it what it finds reading the whole
+    /// deck: the token at the caret, the line it starts and the card it is
+    /// on, across continued lines, a comment and a blank line between them.
+    #[test]
+    fn the_card_at_the_caret_reads_as_the_whole_deck_does() {
+        let deck = "* title\n.options reltol=1e-3\n+ abstol=1e-9\n\n* note\n+ nonlin-tr\r\nM1 d g s b nch\n+ w=1u l\n";
+        let whole = crate::state::RevisedText::from(deck);
+        let roped =
+            crate::state::RevisedText::from_snapshot(&crate::state::TextSnapshot::new(deck));
+        for text in [&whole, &roped] {
+            for caret in 0..=deck.len() {
+                let (card, from) = card_around(text, caret);
+                assert_eq!(&*card, &deck[from..from + card.len()], "caret {caret}");
+                let found = token_at(deck, caret);
+                let part = token_at(&card, caret - from)
+                    .map(|(start, token, line)| (from + start, token, from + line));
+                assert_eq!(part, found, "caret {caret}");
+                if let Some((start, ..)) = found {
+                    assert_eq!(
+                        card_before(&card, start - from),
+                        card_before(deck, start),
+                        "caret {caret}"
+                    );
+                }
+            }
+        }
+        assert!(!roped.is_in_one_piece(), "the rope is read in place");
     }
 }

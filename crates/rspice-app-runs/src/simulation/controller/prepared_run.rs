@@ -1258,7 +1258,7 @@ pub fn manual_source_inputs_in<'a>(
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'a>, PreparationError> {
     Ok(match deck {
         Some(deck) => crate::simulation::execution::preparation::ManualSourceInputs {
-            source: deck.text,
+            source: deck.text.as_str(),
             // A deck the project keeps as text has no folder: it reads the
             // files kept with it.
             origin: match deck.origin {

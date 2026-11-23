@@ -214,6 +214,7 @@ pub fn show(
         .iter()
         .map(|problem| problem.mark.clone())
         .collect::<Vec<_>>();
+    super::start_changed_lines(ui.ctx(), model, netlist, runs);
     let edited_lines = &runs.manual_run.edited_lines;
     let net_marks = super::cross_probe::net_marks(model, netlist).to_vec();
     let cross_probe_line = (netlist.front.shows_generated())
@@ -236,7 +237,7 @@ pub fn show(
     let requested_line = netlist
         .requested_line
         .take()
-        .or_else(|| show_go_to_line(ui, editor_id, &buffer, workbench.messages()));
+        .or_else(|| show_go_to_line(ui, editor_id, || buffer.line_count(), workbench.messages()));
 
     let mut completion_changed = false;
     let changed;
@@ -294,13 +295,10 @@ pub fn show(
             marks_outdated: false,
             occurrences: &net_marks,
         };
-        let revision = netlist.revision;
-        let mut text = crate::workbench::documents::virtual_text_editor::string_owner_text(
-            ui.ctx(),
-            editor_id,
-            revision,
-            &buffer,
-        );
+        // The buffer holds the rope the editor gave it at the editor's
+        // revision, so the editor takes it back as it left it: shared, with
+        // nothing copied or compared.
+        let mut text = buffer.snapshot();
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
             ui,
             editor_id,
@@ -344,7 +342,7 @@ pub fn show(
         );
         changed = output.changed;
         if changed {
-            buffer.set(String::from(&text));
+            buffer.set_snapshot(&text);
         }
         // Where the caret and the selection stand in bytes, read from the
         // editor's rope rather than counted from the deck's first character.
@@ -355,12 +353,6 @@ pub fn show(
             let (start, end) = (start.min(end), start.max(end));
             (start < end).then(|| byte_of(start)..byte_of(end))
         });
-        crate::workbench::documents::virtual_text_editor::keep_string_owner_text(
-            ui.ctx(),
-            editor_id,
-            (!changed).then_some(revision),
-            text,
-        );
         cursor_line = output.cursor_line;
         cursor_column = output.cursor_column;
         cursor_char_index = output.cursor_char_index;
@@ -409,7 +401,7 @@ pub fn show(
         )
     {
         completion_changed = true;
-        buffer.edit(|buffer| buffer.replace_range(start..end, &text));
+        buffer.replace_range(start..end, &text);
         completion::place_caret(ui, editor_id, caret);
     }
     show_signature_help(ui, netlist, editor_id, anchor, workbench.messages());
@@ -503,7 +495,7 @@ pub fn show(
 /// The marks the editor drew last, with the revision and the findings they
 /// were read from. The findings are held weakly, so their address names them
 /// for as long as the marks are kept.
-type HeldProblemMarks = (
+pub(super) type HeldProblemMarks = (
     u64,
     std::sync::Weak<NetlistDiagnosticCollection>,
     Arc<[super::diagnostics::ProblemMark]>,
@@ -520,18 +512,26 @@ fn problem_marks_in(
     ctx: &egui::Context,
     editor_id: egui::Id,
     netlist: &super::NetlistDocumentState,
-    buffer: &str,
+    buffer: &crate::state::RevisedText,
 ) -> Arc<[super::diagnostics::ProblemMark]> {
     let id = problem_marks_id(editor_id);
-    if let Some((revision, collection, marks)) =
-        ctx.data(|data| data.get_temp::<HeldProblemMarks>(id))
-        && revision == netlist.revision
-        && std::sync::Weak::ptr_eq(&collection, &Arc::downgrade(&netlist.diagnostics))
+    let current = |(revision, collection, _): &HeldProblemMarks| {
+        *revision == netlist.revision
+            && std::sync::Weak::ptr_eq(collection, &Arc::downgrade(&netlist.diagnostics))
+    };
+    if let Some(held) = ctx.data(|data| data.get_temp::<HeldProblemMarks>(id))
+        && current(&held)
     {
-        return marks;
+        return held.2;
     }
-    let marks: Arc<[_]> =
-        super::diagnostics::problem_marks(&netlist.diagnostics, buffer, netlist.revision).into();
+    // The check that found them marked them on its own thread; marks are
+    // worked out here only for findings that came another way.
+    let marks = match netlist.checked_marks.clone() {
+        Some(checked) if current(&checked) => checked.2,
+        _ => {
+            super::diagnostics::problem_marks(&netlist.diagnostics, buffer, netlist.revision).into()
+        }
+    };
     let held = (
         netlist.revision,
         Arc::downgrade(&netlist.diagnostics),
@@ -624,8 +624,10 @@ pub fn commit_edit(
     netlist.last_edit_time = now;
     netlist.typed_revision = Some(netlist.revision);
     if netlist.front.include().is_none() {
+        // The line typed on is marked at once; the diff that marks the rest
+        // is worked out away from the frame.
         runs.manual_run.edited_lines.insert(cursor_line);
-        super::refresh_diff_pips_from_baseline_in(model, runs);
+        super::refresh_diff_pips_from_baseline_in(model, netlist, runs);
     }
 }
 
@@ -781,6 +783,12 @@ fn publish_check(netlist: &mut super::NetlistDocumentState, checked: CheckedSour
         netlist.unread_source = unread.map(|unread| (checked.revision, unread.into()));
     }
     netlist.dialect_hint = checked.dialect_hint;
+    netlist.checked_marks = Some((
+        checked.revision,
+        Arc::downgrade(&netlist.diagnostics),
+        checked.marks,
+    ));
+    netlist.missing_file_lines = checked.missing_file_lines;
     netlist.diag_revision = Some(checked.revision);
 }
 
@@ -951,6 +959,12 @@ struct CheckedSource {
     /// What the buffer, read as a root deck, says of the program that wrote
     /// it; absent for the Added lines and a dependency.
     dialect_hint: Option<super::dialect::DialectHint>,
+    /// The findings as the editor marks them, worked out here so the frame
+    /// the check lands in does not read the text for them.
+    marks: Arc<[super::diagnostics::ProblemMark]>,
+    /// The lines the findings of files the check could not read point at,
+    /// by their zero-based line, as it read them.
+    missing_file_lines: Arc<[(usize, String)]>,
 }
 
 /// What a check of the shown source reads, taken from the model at one
@@ -1075,8 +1089,19 @@ impl SourceCheck {
     }
 
     /// Check the source; `stop` ends the parse early once the text has moved
-    /// on.
+    /// on. What it finds is marked as the editor marks it, here rather than
+    /// on the frame the check lands in.
     fn run(self, stop: &dyn AbortSignal) -> CheckedSource {
+        let buffer = self.buffer.clone();
+        let mut checked = self.check(stop);
+        checked.marks =
+            super::diagnostics::problem_marks(&checked.diagnostics, &buffer, checked.revision)
+                .into();
+        checked.missing_file_lines = missing_file_lines(&checked.diagnostics, &buffer);
+        checked
+    }
+
+    fn check(self, stop: &dyn AbortSignal) -> CheckedSource {
         let Self {
             revision,
             library_folders,
@@ -1113,6 +1138,8 @@ impl SourceCheck {
                 reading: None,
                 includes: None,
                 dialect_hint: None,
+                marks: Arc::from([]),
+                missing_file_lines: Arc::from([]),
             };
         }
         // The hint reads the whole text, so it is read here, away from the
@@ -1169,6 +1196,8 @@ impl SourceCheck {
                     reading: None,
                     includes: None,
                     dialect_hint,
+                    marks: Arc::from([]),
+                    missing_file_lines: Arc::from([]),
                 };
             }
         };
@@ -1245,6 +1274,8 @@ impl SourceCheck {
             reading,
             includes,
             dialect_hint,
+            marks: Arc::from([]),
+            missing_file_lines: Arc::from([]),
         }
     }
 }
@@ -1803,6 +1834,29 @@ const MISSING_FROM_DECK: &str = "SPICE-INCLUDE-NOT-IN-DECK";
 /// not read, so the outline can mark that include as missing.
 pub(crate) fn is_missing_file_finding(diagnostic: &Diagnostic) -> bool {
     matches!(&*diagnostic.canonical.code, NOT_FOUND | MISSING_FROM_DECK)
+}
+
+/// The lines of `buffer` that `diagnostics`' findings of files a check could
+/// not read point at, by their zero-based line, read in one pass.
+fn missing_file_lines(
+    diagnostics: &NetlistDiagnosticCollection,
+    buffer: &crate::state::RevisedText,
+) -> Arc<[(usize, String)]> {
+    let wanted = diagnostics
+        .iter()
+        .filter(|finding| is_missing_file_finding(finding))
+        .filter_map(|finding| finding.line)
+        .collect::<std::collections::BTreeSet<_>>();
+    let Some(&last) = wanted.last() else {
+        return Arc::from([]);
+    };
+    buffer
+        .lines()
+        .enumerate()
+        .take(last + 1)
+        .filter(|(line, _)| wanted.contains(line))
+        .map(|(line, text)| (line, text.to_owned()))
+        .collect()
 }
 
 /// The finding at `origin`, the line that names a file the check could not

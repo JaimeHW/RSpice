@@ -19,7 +19,8 @@ use crate::state::{NetlistSourceIndex, RevisedText};
 /// one, so an outline kept for a revision is the outline of exactly that
 /// text, and a frame checks it by comparing two numbers, not the deck. How
 /// the engine reads the text is worked out only for a build, since deciding
-/// it reads the whole text; the build reads the text shared, not copied.
+/// it reads the whole text; the build reads the text shared, not copied, and
+/// puts it in one piece there rather than on the frame.
 pub(crate) type SourceIndexSlot = BackgroundIndex<(Option<ShownSource>, u64), NetlistSourceIndex>;
 
 /// How the engine reads `text` shown from `shown`: as the root deck, an
@@ -45,7 +46,7 @@ fn latest_in(
     let is_current =
         |built: &(Option<ShownSource>, u64)| built.1 == revision && built.0.as_ref() == shown;
     if slot.wants(is_current) {
-        let (read, from) = (source.shared(), shown.cloned());
+        let (read, from) = (source.clone(), shown.cloned());
         let wake = ctx.clone();
         slot.start(
             (shown.cloned(), revision),

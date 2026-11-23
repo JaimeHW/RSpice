@@ -305,18 +305,31 @@ pub(crate) fn queue_reveal_line(context: &egui::Context, editor_id: Id, line: us
     context.request_repaint();
 }
 
-pub(crate) fn take_reveal_line(ui: &Ui, editor_id: Id, source: &str) -> Option<usize> {
+/// How many lines `source` shows: a text that ends in a line break ends in
+/// an empty line.
+pub(crate) fn line_count_of(source: &str) -> usize {
+    source.lines().count().max(1) + usize::from(source.ends_with('\n'))
+}
+
+/// Take the line a reveal asked for, within the `line_count` lines the text
+/// shows, and send the caret there. The lines are counted only when a reveal
+/// was asked for.
+pub(crate) fn take_reveal_line(
+    ui: &Ui,
+    editor_id: Id,
+    line_count: impl FnOnce() -> usize,
+) -> Option<usize> {
     let line = ui
         .ctx()
         .data_mut(|data| data.remove_temp::<usize>(editor_id.with("reveal-line")))?;
-    let line_count = source.lines().count().max(1) + usize::from(source.ends_with('\n'));
-    let line = line.clamp(1, line_count);
+    let line = line.clamp(1, line_count());
     go_to_line_start(ui.ctx(), editor_id, line);
     Some(line)
 }
 
 /// Render the shared line-navigation dialog once Go to line has been asked
-/// for. Returns the accepted one-based logical line exactly once.
+/// for. Returns the accepted one-based logical line exactly once. The
+/// `line_count` lines the text shows are counted only while it is open.
 ///
 /// It is the kit's command form, placed like every other dialog: one Line
 /// field, its range or its refusal under it, Enter goes and Esc cancels. It
@@ -325,7 +338,7 @@ pub(crate) fn take_reveal_line(ui: &Ui, editor_id: Id, source: &str) -> Option<u
 pub(crate) fn show_go_to_line(
     ui: &Ui,
     editor_id: Id,
-    source: &str,
+    line_count: impl FnOnce() -> usize,
     messages: crate::workbench::MessageCatalog,
 ) -> Option<usize> {
     use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
@@ -339,7 +352,7 @@ pub(crate) fn show_go_to_line(
     if !state.open {
         return None;
     }
-    let line_count = source.lines().count().max(1) + usize::from(source.ends_with('\n'));
+    let line_count = line_count();
     if !state.seeded {
         state.input = current_one_based_line(ui.ctx(), editor_id, line_count).to_string();
         state.seeded = true;
@@ -1086,7 +1099,7 @@ mod tests {
         let mut accepted = None;
         for _ in 0..3 {
             let _ = context.run_ui(input(Vec::new()), |ui| {
-                accepted = show_go_to_line(ui, editor_id, source, english());
+                accepted = show_go_to_line(ui, editor_id, || line_count_of(source), english());
             });
         }
         assert_eq!(accepted, None, "nothing is accepted before Enter");
@@ -1112,7 +1125,7 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         let _ = context.run_ui(input(vec![enter]), |ui| {
-            accepted = show_go_to_line(ui, editor_id, source, english());
+            accepted = show_go_to_line(ui, editor_id, || line_count_of(source), english());
         });
         assert_eq!(accepted, Some(3));
     }
