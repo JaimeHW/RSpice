@@ -9,6 +9,9 @@ impl StackHost for WaveStackHost<'_, '_> {
     fn session(&self) -> &ResultViewerState {
         &self.0.results.session
     }
+    fn nothing_plotted_hint(&self) -> &'static str {
+        nothing_plotted_hint(self.0)
+    }
     fn session_mut(&mut self) -> &mut ResultViewerState {
         &mut self.0.results.session
     }

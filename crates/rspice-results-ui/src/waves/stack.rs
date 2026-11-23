@@ -99,6 +99,11 @@ pub trait StackHost {
     /// Say why an arrangement of the strips the reader asked for cannot be
     /// made: a fifth unit on a strip, say.
     fn refuse(&mut self, _reason: String) {}
+    /// The line under "Nothing plotted" on a strip whose signals are all off
+    /// the plot: where the reader plots one.
+    fn nothing_plotted_hint(&self) -> &'static str {
+        NOTHING_PLOTTED_HINT
+    }
     /// Whether the host takes a note added at a point of a plot, which the
     /// plot's menu then offers.
     fn offers_notes(&self) -> bool {
@@ -620,6 +625,23 @@ pub const NO_VISIBLE_TRACE: &str = "Nothing plotted — show a trace in the lege
 
 /// What a strip says when its analysis holds no samples to plot.
 const NO_SAMPLES: &str = "Nothing plotted — the analysis has no samples";
+
+/// The title of a strip whose signals are all off the plot.
+pub const NOTHING_PLOTTED: &str = "Nothing plotted";
+
+/// Where the reader plots a signal of a strip that plots none.
+pub const NOTHING_PLOTTED_HINT: &str = "Tick signals in the Data browser to plot them.";
+
+/// A strip whose signals are all off the plot, as the kit's empty state: they
+/// wait in the Data browser.
+fn nothing_plotted(ui: &mut Ui, host: &impl StackHost) {
+    rspice_ui_kit::panels::empty_state(
+        ui,
+        rspice_ui_kit::panels::WorkbenchIcon::Results,
+        NOTHING_PLOTTED,
+        host.nothing_plotted_hint(),
+    );
+}
 
 /// A complex expression is drawn as its magnitude, and says so.
 pub fn expression_label(expr: &ExprTrace, complex: bool) -> String {
@@ -1215,23 +1237,18 @@ fn show_strip_plot(
     let t = Tokens::get(ui.ctx());
     // A strip with signals and nothing of them plotted has no pane, and so
     // no legend to enable one in: they wait in the Data browser.
-    const NOTHING_PLOTTED: &str = "Nothing plotted — tick a signal in the Data browser";
     let Some(x_domain) = model.x_range else {
-        let retained = !model.traces.is_empty() || !model.lane_traces.is_empty();
-        well_hint(
-            ui,
-            if retained {
-                NOTHING_PLOTTED
-            } else {
-                NO_SAMPLES
-            },
-        );
+        if !model.traces.is_empty() || !model.lane_traces.is_empty() {
+            nothing_plotted(ui, host);
+        } else {
+            well_hint(ui, NO_SAMPLES);
+        }
         return;
     };
     let panes = model.unit_panes();
     let wanted_lanes = host.event_lane_height(model).max(0.0);
     if panes.is_empty() && wanted_lanes == 0.0 {
-        well_hint(ui, NOTHING_PLOTTED);
+        nothing_plotted(ui, host);
         return;
     }
 

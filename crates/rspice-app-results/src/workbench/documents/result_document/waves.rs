@@ -457,6 +457,24 @@ fn show_with_pane_chrome(
     drop::accept_browser_drop(ui, state, zone);
 }
 
+/// Where the reader plots a signal of the run in front: in the Data browser,
+/// or in what the run was made from, a deck's output cards or the schematic's
+/// probes.
+fn nothing_plotted_hint(state: &ResultsParts<'_>) -> &'static str {
+    let from_deck = state.model.simulation.active_run().is_some_and(|run| {
+        run.analyses.iter().any(|analysis| {
+            analysis.provenance().is_some_and(|provenance| {
+                provenance.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
+            })
+        })
+    });
+    if from_deck {
+        "Tick signals in the Data browser, or name them in the deck with .probe."
+    } else {
+        "Tick signals in the Data browser, or probe the schematic and run again."
+    }
+}
+
 fn show_strips(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
@@ -471,19 +489,22 @@ fn show_strips(
         &t,
     );
     if models.is_empty() {
-        let hint = if state.model.simulation.active_run().is_none() {
+        if state.model.simulation.active_run().is_none() {
             let shortcut = state.model.preferences.shortcuts().resolved_label(
                 state.commands,
                 crate::workbench::framework::command_registry::ids::RUN_SIMULATION,
                 rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
-            super::no_results_hint(&shortcut)
+            well_hint(ui, &super::no_results_hint(&shortcut));
         } else {
-            "Nothing plotted — tick a signal in the Data browser, or probe the schematic and run again"
-                .to_owned()
-        };
-        well_hint(ui, &hint);
+            rspice_ui_kit::panels::empty_state(
+                ui,
+                rspice_ui_kit::panels::WorkbenchIcon::Results,
+                rspice_results_ui::waves::stack::NOTHING_PLOTTED,
+                nothing_plotted_hint(state),
+            );
+        }
         return;
     }
 

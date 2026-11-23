@@ -144,7 +144,7 @@ fn a_pane_only_the_default_hides_is_not_drawn() {
     );
 
     // With nothing plotted at all, the strip says where signals are plotted
-    // from.
+    // from: this run's deck.
     let mut state = review_strip(false);
     for analysis in &mut state.model.simulation.retained.runs[0].analyses {
         for waveform in &mut analysis.waveforms {
@@ -156,11 +156,12 @@ fn a_pane_only_the_default_hides_is_not_drawn() {
     assert!(pane_units(&mut state).is_empty());
     let output = settled(&ctx, &mut state);
     assert!(
-        text_rect(
-            &output,
-            "Nothing plotted — tick a signal in the Data browser"
-        )
-        .is_some(),
+        text_rect(&output, "Nothing plotted").is_some()
+            && text_rect(
+                &output,
+                "Tick signals in the Data browser, or name them in the deck with .probe."
+            )
+            .is_some(),
         "an empty strip points at the signal browser: {:?}",
         texts(&output)
             .into_iter()
