@@ -93,20 +93,25 @@ impl HoverCard {
 /// a name's binding, and a name that binds nothing before silence. The
 /// pointer asks of the one character under it; the caret of the character
 /// after it and the one before, as it stands in a token or just ends one.
+/// A command waits (`wait`) for the map of the deck's values a pointer finds
+/// still being built.
 pub(super) fn hover_card_at(
     ctx: &egui::Context,
     model: &Model,
     netlist: &mut NetlistDocumentState,
     messages: crate::workbench::MessageCatalog,
     char_indices: &[usize],
+    wait: bool,
 ) -> Option<HoverCard> {
     let mut unbound = None;
     for &index in char_indices {
         match super::language::value_hover_at_in(
+            ctx,
             netlist,
             messages,
             &model.simulation.source.netlist_content,
             index,
+            wait,
         ) {
             Some(value) if value.value.is_some() || value.not_read => {
                 return Some(HoverCard::Value(value));
@@ -170,10 +175,10 @@ pub(super) fn show(
         // `w`, not the braces around it.
         let card = match caret.checked_sub(1) {
             Some(before) if ends_word(&model.simulation.source.netlist_content, caret) => {
-                hover_card_at(ctx, model, netlist, messages, &[before, caret])
+                hover_card_at(ctx, model, netlist, messages, &[before, caret], true)
             }
-            Some(before) => hover_card_at(ctx, model, netlist, messages, &[caret, before]),
-            None => hover_card_at(ctx, model, netlist, messages, &[caret]),
+            Some(before) => hover_card_at(ctx, model, netlist, messages, &[caret, before], true),
+            None => hover_card_at(ctx, model, netlist, messages, &[caret], true),
         };
         match card {
             Some(card) => {

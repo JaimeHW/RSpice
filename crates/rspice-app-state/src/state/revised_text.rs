@@ -188,6 +188,15 @@ impl RevisedText {
         self.body.rope().len_lines()
     }
 
+    /// The byte character `char_index` starts at, its length just past its
+    /// last character, and `None` further on: found in the rope, which a
+    /// text held only in one piece makes once, not by reading the text up to
+    /// it.
+    pub fn byte_of_char(&self, char_index: usize) -> Option<usize> {
+        let rope = self.body.rope();
+        (char_index <= rope.len_chars()).then(|| rope.char_to_byte(char_index))
+    }
+
     /// The byte the line holding byte `at` starts at, a line ending at `\n`,
     /// found without putting the text in one piece.
     pub fn line_start_at(&self, at: usize) -> usize {

@@ -16,6 +16,7 @@ use rspice_core::netlist::{
 
 use super::index_worker::BackgroundIndex;
 use super::{Model, NetlistDocumentState, NetlistRoot, canonical_root_document_in};
+use crate::state::RevisedText;
 use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -117,6 +118,9 @@ struct IndexedFile {
     dependency_identity: Option<String>,
     display_name: String,
     digest: crate::product::ContentDigest,
+    /// The revision of the text indexed: a text at it is that text, told
+    /// without reading it.
+    revision: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -228,6 +232,7 @@ impl NetlistProjectIndex {
                 dependency_identity: text.dependency_identity.clone(),
                 display_name: text.display_name.clone(),
                 digest: crate::state::content_digest(&text.text),
+                revision: text.text.revision(),
             })
             .collect::<Vec<_>>();
         let sources = texts
@@ -437,17 +442,21 @@ impl NetlistProjectIndex {
     }
 
     /// The file the index numbers the source `dependency_identity` names
-    /// (the root for `None`), while `text` is still the text it indexed.
+    /// (the root for `None`), while `text` is still the text it indexed: at
+    /// once when it is at the revision indexed, else by its digest.
     pub(crate) fn file_holding(
         &self,
         dependency_identity: Option<&str>,
-        text: &str,
+        text: &RevisedText,
     ) -> Option<usize> {
         let file = self
             .files
             .iter()
             .position(|file| file.dependency_identity.as_deref() == dependency_identity)?;
-        (self.files[file].digest == crate::state::content_digest(text)).then_some(file)
+        let indexed = &self.files[file];
+        (indexed.revision == text.revision()
+            || indexed.digest == crate::state::content_digest(text))
+        .then_some(file)
     }
 
     /// What the name at character `char_index` of `text`, the source
@@ -457,14 +466,11 @@ impl NetlistProjectIndex {
     pub(crate) fn definition_at(
         &self,
         dependency_identity: Option<&str>,
-        text: &str,
+        text: &RevisedText,
         char_index: usize,
     ) -> Option<Option<ProjectSourceLocation>> {
         let file = self.file_holding(dependency_identity, text)?;
-        let byte = text
-            .char_indices()
-            .nth(char_index)
-            .map_or(text.len(), |(byte, _)| byte);
+        let byte = text.byte_of_char(char_index).unwrap_or(text.len());
         let target = match self.deck.name_at(file, byte)? {
             DeckNameAt::Definition(symbol) => Some(symbol),
             DeckNameAt::Reference(reference) => self.deck.references()[reference].target,
@@ -486,15 +492,12 @@ impl NetlistProjectIndex {
     pub(crate) fn hover_at(
         &self,
         dependency_identity: Option<&str>,
-        text: &str,
+        text: &RevisedText,
         char_index: usize,
         messages: MessageCatalog,
     ) -> Option<ProjectSymbolHover> {
         let file = self.file_holding(dependency_identity, text)?;
-        let byte = text
-            .char_indices()
-            .nth(char_index)
-            .map_or(text.len(), |(byte, _)| byte);
+        let byte = text.byte_of_char(char_index).unwrap_or(text.len());
         let symbol = match self.deck.name_at(file, byte)? {
             DeckNameAt::Definition(symbol) => symbol,
             DeckNameAt::Reference(reference) => {
@@ -578,15 +581,12 @@ impl NetlistProjectIndex {
     pub(crate) fn signature_at(
         &self,
         dependency_identity: Option<&str>,
-        text: &str,
+        text: &RevisedText,
         char_index: usize,
         messages: MessageCatalog,
     ) -> Option<Result<ProjectSymbolHover, String>> {
         let file = self.file_holding(dependency_identity, text)?;
-        let byte = text
-            .char_indices()
-            .nth(char_index)
-            .map_or(text.len(), |(byte, _)| byte);
+        let byte = text.byte_of_char(char_index).unwrap_or(text.len());
         let bound = match self.deck.name_at(file, byte) {
             Some(DeckNameAt::Definition(symbol))
                 if self.deck.symbols()[symbol].kind != DeckSymbolKind::Instance =>
@@ -922,36 +922,94 @@ pub(crate) struct NetlistValueHover {
 ///
 /// A hover is a paint-rate query and must never cost a parse. The span index
 /// is derived once per buffer revision, and again when the debounced parse of
-/// that revision arrives with the lines it did not read; a pointer that has
-/// not moved reads the retained answer, and a pointer that moved within one
-/// scope reuses the retained parameter environment.
+/// that revision arrives with the lines it did not read, away from the frame;
+/// a pointer that has not moved reads the retained answer, and a pointer that
+/// moved within one scope reuses the retained parameter environment.
 #[derive(Debug, Clone)]
 pub(super) struct CachedValueIndex {
     revision: u64,
     /// Whether `map` applies what a parse of `revision` left unread.
     read_by_parse: bool,
-    map: Arc<NetlistSourceMap>,
+    map: Arc<ValueMap>,
     /// Parameter environment last built, with the scope it is for.
     context: Option<(Option<String>, rspice_core::netlist::ParamContext)>,
     /// Character index the last hover was resolved at, with its answer.
     hovered: Option<(usize, Option<NetlistValueHover>)>,
 }
 
-impl CachedValueIndex {
-    /// The index of `buffer` at `revision`, read as its parse read it when
-    /// `unread` carries what that parse left out.
-    fn build(revision: u64, buffer: &str, unread: Option<&[UnreadSourceRegion]>) -> Self {
+/// What a value hover reads of one revision of the buffer, built away from
+/// the frame: the engine's map of its values, and where each value span
+/// starts, so the span under the pointer is found by a search.
+#[derive(Debug, Default)]
+pub(crate) struct ValueMap {
+    map: NetlistSourceMap,
+    /// Positions in the map's value spans, by the byte each starts at.
+    by_start: Vec<usize>,
+    /// The longest value span, in bytes.
+    widest: usize,
+}
+
+/// What a value map was built for: the buffer's revision, and whether it
+/// applies what a parse of it left unread.
+type ValueMapKey = (u64, bool);
+
+/// The value maps of the buffer, built away from the editor's thread.
+pub(crate) type ValueMapSlot = BackgroundIndex<ValueMapKey, ValueMap>;
+
+impl ValueMap {
+    /// The map of `buffer`, read as its parse read it when `unread` carries
+    /// what that parse left out.
+    fn build(buffer: &str, unread: Option<&[UnreadSourceRegion]>) -> Self {
         let map = match unread {
             Some(unread) => rspice_core::netlist::source_map_for_editor_as_read(buffer, unread),
             None => rspice_core::netlist::source_map_for_editor(buffer),
         };
+        let spans = &map.value_spans;
+        let mut by_start = (0..spans.len()).collect::<Vec<_>>();
+        by_start.sort_by_key(|at| spans[*at].span.start);
+        let widest = spans.iter().map(|span| span.span.len()).max().unwrap_or(0);
+        Self {
+            map,
+            by_start,
+            widest,
+        }
+    }
+}
+
+impl std::ops::Deref for ValueMap {
+    type Target = NetlistSourceMap;
+
+    fn deref(&self) -> &NetlistSourceMap {
+        &self.map
+    }
+}
+
+/// A large deck's map is as many allocations as it writes values: whoever
+/// lets go of it last, it is freed away from that thread.
+impl Drop for ValueMap {
+    fn drop(&mut self) {
+        rspice_design::freed_away::free_away(&mut self.map);
+    }
+}
+
+impl CachedValueIndex {
+    /// The index of `map`, built for `revision`, read as its parse read it
+    /// when `read_by_parse`.
+    const fn of(revision: u64, read_by_parse: bool, map: Arc<ValueMap>) -> Self {
         Self {
             revision,
-            read_by_parse: unread.is_some(),
-            map: Arc::new(map),
+            read_by_parse,
+            map,
             context: None,
             hovered: None,
         }
+    }
+
+    /// A blank map in place of the one kept, for a test of what a hover
+    /// reads it for.
+    #[cfg(test)]
+    pub(super) fn blank_map(&mut self) {
+        self.map = Arc::new(ValueMap::default());
     }
 
     /// The answer the last hover query got, so a surface test can state which
@@ -978,7 +1036,7 @@ impl CachedValueIndex {
 
     fn resolve(
         &mut self,
-        buffer: &str,
+        buffer: &RevisedText,
         char_index: usize,
         messages: MessageCatalog,
     ) -> Option<NetlistValueHover> {
@@ -989,13 +1047,13 @@ impl CachedValueIndex {
             return None;
         }
         let byte = buffer
-            .char_indices()
-            .nth(char_index)
-            .map(|(byte, _)| byte)?;
+            .byte_of_char(char_index)
+            .filter(|byte| *byte < buffer.len())?;
         let map = Arc::clone(&self.map);
         let span = narrowest_value_span(&map, byte)?;
         let token = match span.kind {
-            NetlistValueKind::Expression => buffer.get(span.span.clone())?.to_owned(),
+            NetlistValueKind::Expression => (span.span.end <= buffer.len())
+                .then(|| buffer.slice(span.span.clone()).into_owned())?,
             NetlistValueKind::ParamDefinition | NetlistValueKind::ParamReference => {
                 span.name.clone()
             }
@@ -1097,12 +1155,23 @@ fn unread_reason(reason: &UnreadSourceReason, messages: MessageCatalog) -> Strin
 }
 
 /// The value a reader is pointing at: the tightest span covering `byte`, so a
-/// name inside an expression wins over the expression around it.
-fn narrowest_value_span(map: &NetlistSourceMap, byte: usize) -> Option<&NetlistValueSpan> {
-    map.value_spans
+/// name inside an expression wins over the expression around it, and of two
+/// as tight the first. Only the spans starting at most the longest span's
+/// length before it are read.
+fn narrowest_value_span(map: &ValueMap, byte: usize) -> Option<&NetlistValueSpan> {
+    let spans = &map.value_spans;
+    let first = map
+        .by_start
+        .partition_point(|at| spans[*at].span.start < byte.saturating_sub(map.widest));
+    let end = map
+        .by_start
+        .partition_point(|at| spans[*at].span.start <= byte);
+    map.by_start[first..end]
         .iter()
-        .filter(|span| span.span.contains(&byte))
-        .min_by_key(|span| span.span.len())
+        .copied()
+        .filter(|at| spans[*at].span.contains(&byte))
+        .min_by_key(|at| (spans[*at].span.len(), *at))
+        .map(|at| &spans[at])
 }
 
 /// Engineering notation only when re-parsing it lands back on the evaluated
@@ -1127,23 +1196,52 @@ fn format_hover_value(value: f64) -> String {
 /// `buffer` is the visible source, which is also what a generated document or
 /// a read-only run snapshot projects; a unified comparison is not a deck and
 /// answers nothing.
+///
+/// The map of the buffer's values is built away from the frame, once per
+/// revision: a pointer hovering before it is built answers nothing, and the
+/// frame its build wakes answers. `wait` waits for it, as a command does.
 pub(crate) fn value_hover_at_in(
+    ctx: &egui::Context,
     netlist: &mut NetlistDocumentState,
     messages: MessageCatalog,
-    buffer: &str,
+    buffer: &RevisedText,
     char_index: usize,
+    wait: bool,
 ) -> Option<NetlistValueHover> {
     if netlist.front.is_comparison() {
         return None;
     }
     let revision = netlist.revision;
     let unread = netlist.unread_source_at(revision);
-    let index = match &mut netlist.value_index {
-        Some(index) if index.revision == revision && index.read_by_parse == unread.is_some() => {
-            index
-        }
-        slot => slot.insert(CachedValueIndex::build(revision, buffer, unread.as_deref())),
-    };
+    let key = (revision, unread.is_some());
+    let current = netlist
+        .value_index
+        .as_ref()
+        .is_some_and(|index| (index.revision, index.read_by_parse) == key);
+    if !current {
+        let wait = wait || netlist.waits_for_indexes();
+        let slot = &mut netlist.value_maps;
+        let map = if wait {
+            slot.wait_for(|built| *built == key)
+                .unwrap_or_else(|| slot.store(key, ValueMap::build(buffer, unread.as_deref())))
+        } else {
+            if slot.wants(|built| *built == key) {
+                let (text, wake) = (buffer.clone(), ctx.clone());
+                slot.start(
+                    key,
+                    move || ValueMap::build(&text, unread.as_deref()),
+                    move || wake.request_repaint(),
+                );
+            }
+            let (built, map) = slot.built()?;
+            if *built != key {
+                return None;
+            }
+            map
+        };
+        netlist.value_index = Some(CachedValueIndex::of(key.0, key.1, map));
+    }
+    let index = netlist.value_index.as_mut()?;
     if let Some((resolved_at, hover)) = &index.hovered
         && *resolved_at == char_index
     {
@@ -1503,11 +1601,15 @@ fn preferred_quick_fix(netlist: &NetlistDocumentState) -> Option<BoundQuickFix> 
         .find_map(BoundQuickFix::of)
 }
 
-fn symbol_at_cursor(source: &str, cursor_char_index: usize) -> Option<String> {
-    let characters = source.chars().collect::<Vec<_>>();
-    if cursor_char_index > characters.len() {
-        return None;
-    }
+/// The name the caret at character `cursor_char_index` of `source` stands
+/// in or at either end of. A name is written on one line, so only the
+/// caret's line is read.
+fn symbol_at_cursor(source: &RevisedText, cursor_char_index: usize) -> Option<String> {
+    let at = source.byte_of_char(cursor_char_index)?;
+    let start = source.line_start_at(at);
+    let line = source.slice(start..source.line_end_at(at));
+    let characters = line.chars().collect::<Vec<_>>();
+    let cursor_char_index = line[..at - start].chars().count();
     let symbol_character = |character: char| {
         character.is_ascii_alphanumeric() || matches!(character, '_' | '$' | '!' | '#')
     };

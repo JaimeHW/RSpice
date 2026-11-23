@@ -862,6 +862,9 @@ pub struct NetlistDocumentState {
     project_index: language::ProjectIndexSlot,
     /// Buffer-revision-keyed value spans behind the editor's value hover.
     value_index: Option<language::CachedValueIndex>,
+    /// The maps of the buffer's values the value index reads, built away
+    /// from the editor's thread.
+    value_maps: language::ValueMapSlot,
     /// What the parse of one buffer revision left unread in the buffer: the
     /// lines of an untaken `.if` branch or an unselected inline `.lib`
     /// section. Absent when that parse failed, or read a deck other than the

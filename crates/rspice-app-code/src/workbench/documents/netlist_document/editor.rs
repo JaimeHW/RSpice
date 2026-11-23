@@ -454,7 +454,8 @@ pub fn show(
     // that resolves to neither still says so, so a hover never goes silent.
     let hovered_problems = hover_char_index
         .map(|index| {
-            let byte = buffer_byte_of(&model.simulation.source.netlist_content, index);
+            let content = &model.simulation.source.netlist_content;
+            let byte = content.byte_of_char(index).unwrap_or(content.len());
             problems
                 .iter()
                 .filter(|problem| {
@@ -483,6 +484,7 @@ pub fn show(
             netlist,
             workbench.messages(),
             &[index],
+            false,
         )
     }) {
         editor_response
@@ -542,12 +544,6 @@ fn problem_marks_in(
 }
 
 /// The byte of `text` its character `char_index` starts at.
-fn buffer_byte_of(text: &str, char_index: usize) -> usize {
-    text.char_indices()
-        .nth(char_index)
-        .map_or(text.len(), |(byte, _)| byte)
-}
-
 fn show_signature_help(
     ui: &mut Ui,
     netlist: &mut super::NetlistDocumentState,

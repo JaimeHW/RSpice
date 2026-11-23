@@ -411,7 +411,8 @@ fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
     let at = |needle: &str| deck.find(needle).expect("the deck writes it") + 1;
 
     let messages = harness.wb.messages();
-    let hover = |char_index| index.hover_at(None, deck, char_index, messages);
+    let text = RevisedText::from(deck);
+    let hover = |char_index| index.hover_at(None, &text, char_index, messages);
     assert_eq!(
         hover(at("{w*2}")),
         Some(ProjectSymbolHover {
@@ -434,7 +435,10 @@ fn a_hover_names_the_definition_a_name_is_bound_to_and_its_references() {
         })
     );
     // Text the index was not built from has no hover.
-    assert_eq!(index.hover_at(None, "other text", 1, messages), None);
+    assert_eq!(
+        index.hover_at(None, &RevisedText::from("other text"), 1, messages),
+        None
+    );
 }
 
 /// The signature help shown with the caret at the first `needle` of `deck`,
@@ -548,7 +552,14 @@ fn hover_state() -> SourceHarness {
 /// [`value_hover_at_in`] over the parts of `state` it reads.
 fn value_hover_at(harness: &mut SourceHarness, deck: &str, at: usize) -> Option<NetlistValueHover> {
     let netlist = &mut harness.state.netlist;
-    value_hover_at_in(netlist, harness.wb.messages(), deck, at)
+    value_hover_at_in(
+        &egui::Context::default(),
+        netlist,
+        harness.wb.messages(),
+        &RevisedText::from(deck),
+        at,
+        false,
+    )
 }
 
 fn hover_at(harness: &mut SourceHarness, needle: &str, offset: usize) -> Option<NetlistValueHover> {
@@ -673,8 +684,13 @@ fn value_hover_answers_a_repeated_pointer_position_from_retained_state() {
 
     // Blank the retained span index. A pointer that has not moved must
     // still answer, which it can only do without consulting it.
-    harness.state.netlist.value_index.as_mut().unwrap().map =
-        Arc::new(rspice_core::netlist::NetlistSourceMap::default());
+    harness
+        .state
+        .netlist
+        .value_index
+        .as_mut()
+        .unwrap()
+        .blank_map();
     assert_eq!(
         value_hover_at(&mut harness, HOVER_DECK, definition).as_ref(),
         Some(&first)
@@ -712,7 +728,7 @@ fn cursor_symbol_is_unicode_indexed_and_accepts_spice_identifier_punctuation() {
     let source = "R1 n1 0 model_name$1\n";
     let cursor = source.find("name").unwrap() + 2;
     assert_eq!(
-        symbol_at_cursor(source, cursor),
+        symbol_at_cursor(&RevisedText::from(source), cursor),
         Some("model_name$1".to_owned())
     );
 }

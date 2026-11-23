@@ -608,10 +608,12 @@ fn hover_on(
     let byte = deck.find(needle).expect("deck contains the token") + offset;
     let index = deck[..byte].chars().count();
     super::super::language::value_hover_at_in(
+        &egui::Context::default(),
         &mut harness.state.netlist,
         harness.wb.messages(),
-        deck,
+        &crate::state::RevisedText::from(deck),
         index,
+        false,
     )
 }
 
