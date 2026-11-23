@@ -38,7 +38,7 @@ use crate::workbench::state::SpecificationInspectorDraft;
 use crate::workbench::surfaces::verify::specification_edit::{
     definition_index, edit_specifications, plan_definition,
 };
-use crate::workbench::surfaces::verify::specifications::{status_word, worst_at};
+use crate::workbench::surfaces::verify::specifications::status_word;
 use draft::{ComparisonDraftKind, measurement_authoring};
 use reference_import::{ReferenceCompletion, ReferenceExchange};
 
@@ -429,7 +429,7 @@ fn verdict(ui: &mut Ui, model: &Model, measurement: &str) {
         let _ = property_row_problem(ui, "Status", status_word(status), problem);
     }
     let _ = property_row(ui, "Points judged", &points_judged(sheet, row));
-    if let Some(at) = row.worst.as_ref().and_then(|worst| worst_at(sheet, worst)) {
+    if let Some(at) = row.worst.as_ref().and_then(|worst| sheet.worst_at(worst)) {
         let _ = property_row(ui, "Worst at", &at);
     }
     if let Some(statistics) = &row.statistics {

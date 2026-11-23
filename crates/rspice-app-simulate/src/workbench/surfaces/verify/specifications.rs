@@ -16,7 +16,7 @@
 use egui::{Key, Modifiers, Ui};
 use rspice_results::family_measurements::FamilyMemberId;
 use rspice_results::specification::SpecificationComparison;
-use rspice_results::verification::{LimitsSinceRun, PointSource, Row, RowStatus, Sheet, Worst};
+use rspice_results::verification::{LimitsSinceRun, PointSource, Row, RowStatus, Sheet};
 
 use crate::io::file_exchange::{self, FileKind};
 use crate::state::{SpecEntry, SpecPointScope, SpecificationDefinition, VerificationPage};
@@ -963,24 +963,6 @@ fn summary_line(sheet: &Sheet, run: Option<u64>, runs_held: bool) -> String {
     parts.join(" \u{b7} ")
 }
 
-/// Where a row's worst value was: the trial, or the point.
-pub fn worst_at(sheet: &Sheet, worst: &Worst) -> Option<String> {
-    let point = worst
-        .point
-        .and_then(|point| sheet.points.get(point))
-        .map(|point| point.label.clone());
-    match &worst.member {
-        Some(
-            FamilyMemberId::MonteCarloTrial { index, .. }
-            | FamilyMemberId::MonteCarloSequenceTrial { index, .. },
-        ) => Some(match point.filter(|_| sheet.points.len() > 1) {
-            Some(point) => format!("trial {index} \u{b7} {point}"),
-            None => format!("trial {index}"),
-        }),
-        _ => point,
-    }
-}
-
 /// A row's status in words.
 pub fn status_word(status: RowStatus) -> &'static str {
     match status {
@@ -1175,7 +1157,7 @@ fn cell(sheet: &Sheet, row: &Row, col: Col, open: bool) -> Cell {
         Col::At => row
             .worst
             .as_ref()
-            .and_then(|worst| worst_at(sheet, worst))
+            .and_then(|worst| sheet.worst_at(worst))
             .map_or_else(Cell::absent, Cell::text),
         Col::Margin => row
             .worst

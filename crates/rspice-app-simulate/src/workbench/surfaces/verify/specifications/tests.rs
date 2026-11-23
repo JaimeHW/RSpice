@@ -218,7 +218,7 @@ fn the_table_the_toolbar_and_the_navigator_state_the_sheet() {
         );
         assert_eq!(
             cell(measurement, Col::At),
-            worst_at(&sheet, worst).expect("a named point")
+            sheet.worst_at(worst).expect("a named point")
         );
     }
     assert_eq!(cell("gain", Col::Status), "Fail");

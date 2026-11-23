@@ -108,6 +108,29 @@ pub struct Row {
     pub statistics: Option<Statistics>,
 }
 
+impl Row {
+    /// The least and greatest values the run gave the specification: across
+    /// its Monte Carlo trials when trials answered it, else across the
+    /// values its points gave. `None` when nothing gave a value.
+    #[must_use]
+    pub fn extremes(&self) -> Option<(f64, f64)> {
+        if let Some(statistics) = &self.statistics
+            && statistics.distribution.count > 0
+        {
+            return Some((statistics.distribution.min, statistics.distribution.max));
+        }
+        self.cells
+            .iter()
+            .filter(|cell| cell.status != CellStatus::Excluded)
+            .filter_map(|cell| cell.value)
+            .filter(|value| value.is_finite())
+            .fold(None, |extremes, value| match extremes {
+                None => Some((value, value)),
+                Some((least, most)) => Some((f64::min(least, value), f64::max(most, value))),
+            })
+    }
+}
+
 /// How many rows say each thing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StatusCounts {
@@ -299,6 +322,25 @@ impl Sheet {
     #[must_use]
     pub fn point_of_analysis(&self, analysis: usize) -> Option<usize> {
         self.analysis_points.get(analysis).copied().flatten()
+    }
+
+    /// Where a row's worst value was: the trial, or the point.
+    #[must_use]
+    pub fn worst_at(&self, worst: &Worst) -> Option<String> {
+        let point = worst
+            .point
+            .and_then(|point| self.points.get(point))
+            .map(|point| point.label.clone());
+        match &worst.member {
+            Some(
+                FamilyMemberId::MonteCarloTrial { index, .. }
+                | FamilyMemberId::MonteCarloSequenceTrial { index, .. },
+            ) => Some(match point.filter(|_| self.points.len() > 1) {
+                Some(point) => format!("trial {index} \u{b7} {point}"),
+                None => format!("trial {index}"),
+            }),
+            _ => point,
+        }
     }
 }
 
