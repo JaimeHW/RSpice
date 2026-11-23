@@ -437,6 +437,27 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
                 &library,
             );
         }
+        Some(ProjectInspectorAction::LibraryDescription {
+            library,
+            cell,
+            description,
+        }) => {
+            let applied = match cell {
+                Some(cell) => cx.model.edit_cell_properties(&library, &cell, &description),
+                None => {
+                    let read_only = cx
+                        .model
+                        .library_manager
+                        .get_library(&library)
+                        .is_some_and(|found| found.read_only);
+                    cx.model
+                        .edit_library_properties(&library, &description, read_only)
+                }
+            };
+            if let Err(refusal) = applied {
+                cx.wb.prompt(refusal);
+            }
+        }
         Some(ProjectInspectorAction::LibraryFile(intent)) => {
             crate::workbench::project::library_dialogs::library_files::run_library_file_intent(
                 cx, intent,

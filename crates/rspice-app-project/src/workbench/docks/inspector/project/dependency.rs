@@ -17,10 +17,10 @@ use crate::workbench::project::dependency_status::{
     shown_path,
 };
 use crate::workbench::project::library_dialogs::library_files::{
-    LibraryFileIntent, library_file_blocker, library_file_label,
+    LibraryFileIntent, library_file_blocker,
 };
 
-use super::{ProjectInspector, ProjectInspectorAction, inspector_action_enabled};
+use super::{ProjectInspector, ProjectInspectorAction};
 
 pub(super) fn project_dependency(
     ui: &mut Ui,
@@ -229,20 +229,6 @@ pub(super) fn design_facts(ui: &mut Ui, model: &Model, name: &str) {
     if !library.technology.is_empty() {
         property_row(ui, "Attached technology", &library.technology);
     }
-}
-
-/// Make editable or Make read-only, for a library kept in a folder of its
-/// own: the command its Access row states the result of.
-pub(super) fn mode_action(ui: &mut Ui, model: &Model, name: &str) -> Option<LibraryFileIntent> {
-    let reference = model.library_manager.reference(name)?;
-    let mode = if reference.mode.is_editable() {
-        LibraryMode::ReadOnly
-    } else {
-        LibraryMode::Editable
-    };
-    let intent = LibraryFileIntent::SetMode(name.to_owned(), mode);
-    let enabled = library_file_blocker(model, &intent).is_none();
-    inspector_action_enabled(ui, library_file_label(&intent), enabled).then_some(intent)
 }
 
 /// A model library: where it is read from and on whose authority, its

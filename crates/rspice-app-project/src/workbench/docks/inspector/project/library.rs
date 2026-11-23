@@ -1,7 +1,8 @@
-//! The inspector beside the Library page: what opening the selected view
-//! does, when it was last saved, what its cell and its library are for and
+//! The inspector beside the Library page: the selected view, when it was
+//! last saved, what its cell and its library are for, edited in place, and
 //! where the library lives, its checks and the schematics that place it, or
-//! the selected model when the built-in Verilog-A library is open.
+//! the selected model when the built-in Verilog-A library is open. What can
+//! be done with a row is its menu's and the page bar's.
 
 use egui::Ui;
 use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
@@ -11,25 +12,54 @@ use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::{LibraryFile, OnDisk};
-use crate::workbench::design_system::{property_row, property_row_path, property_row_problem};
-use crate::workbench::project::commands::{LibraryCommand, ProjectCommand, ProjectRequest};
+use crate::workbench::design_system::{
+    property_row, property_row_path, property_row_problem, property_row_wrapped,
+};
 use crate::workbench::project::dependency_status::{
     DependencyLibrary, PROJECT_FILE_SOURCE, library_status, view_exception,
 };
-use crate::workbench::project::library_dialogs::library_files::{LibraryFileIntent, lock_holder};
+use crate::workbench::project::library_dialogs::library_files::lock_holder;
 
-use super::dependency::{design_facts, mode_action, status_rows};
-use super::{ProjectInspector, ProjectInspectorAction, inspector_action_enabled};
+use super::dependency::{design_facts, status_rows};
+use super::properties::edited_text;
+use super::{ProjectInspector, ProjectInspectorAction};
 
-/// The selection in the built-in Verilog-A library. Nothing here acts: the
-/// page's band owns what can be done with a model.
+/// The selection in the built-in Verilog-A library. Nothing here acts: a
+/// model's row menu copies it or opens its file.
 fn builtin_model_selection(ui: &mut Ui, model: Option<&BuiltinVerilogAModel>) {
     section_header(ui, "Selection", None);
     if let Some(model) = model {
         property_row(ui, "Module", model.module);
         property_row(ui, "Version", model.version);
+        property_row_wrapped(ui, "Summary", model.summary);
     }
     property_row(ui, "Access", "read-only");
+}
+
+/// Why a description in `library` stays as it is, if it does: the project
+/// is open read-only, or the library is.
+fn description_refusal(model: &Model, read_only: bool) -> Option<&'static str> {
+    if model.safe_mode.project_read_only() {
+        Some("The project is open read-only.")
+    } else if read_only {
+        Some("The library is read-only; make it editable from its menu to change this.")
+    } else {
+        None
+    }
+}
+
+/// A description edited in place, under its own name in the panel so the
+/// cell's and the library's never share what is typed.
+fn description(
+    ui: &mut Ui,
+    salt: &str,
+    value: &str,
+    refusal: Option<&'static str>,
+) -> Option<String> {
+    ui.push_id(salt, |ui| {
+        edited_text(ui, "Description", value, (refusal, false), |_| None)
+    })
+    .inner
 }
 
 pub fn project_library(
@@ -61,7 +91,6 @@ pub fn project_library(
         .library_manager
         .current_view()
         .filter(|_| inspector.library_shown.view);
-    let view_type = view.map_or("—", |item| item.view_type.caption());
     let open_target = match (model.library_manager.current_library(), cell, view) {
         (Some(library), Some(cell), Some(view)) => Some((
             CellViewRef::new(&library.name, &cell.name, &view.name),
@@ -99,18 +128,19 @@ pub fn project_library(
     };
 
     // The library browser beside this panel shows the library, the cell and
-    // the view; what the panel adds is what opening the selection does, what
-    // the cell is for and where the library lives.
-    section_header(
+    // the view; what the panel adds is the view's type, what the cell is for
+    // and where the library lives.
+    let read_only = library.is_some_and(|item| item.read_only);
+    let refusal = description_refusal(model, read_only);
+    let mut asked = None;
+    section_header(ui, "Selection", read_only.then_some("read-only"));
+    property_row(
         ui,
-        "Selection",
-        library
-            .is_some_and(|item| item.read_only)
-            .then_some("read-only"),
+        "View type",
+        view.map_or("\u{2014}", |item| item.view_type.caption()),
     );
-    property_row(ui, "View type", view_type);
-    // The band cuts the path to the width its controls leave; here it is whole,
-    // with the cell's description and the file the view is kept in.
+    // The path whole, with the cell's description and the file the view is
+    // kept in.
     if let Some((reference, _)) = &open_target {
         property_row_path(
             ui,
@@ -121,10 +151,14 @@ pub fn project_library(
             ),
         );
     }
-    if let Some(cell) = cell
-        && !cell.description.trim().is_empty()
+    if let (Some(item), Some(cell)) = (library, cell)
+        && let Some(text) = description(ui, "cell", cell.description.trim(), refusal)
     {
-        property_row(ui, "Description", cell.description.trim());
+        asked = Some(ProjectInspectorAction::LibraryDescription {
+            library: item.name.clone(),
+            cell: Some(cell.name.clone()),
+            description: text,
+        });
     }
     if let Some(file) = view.and_then(|item| item.file_path.as_ref()) {
         property_row_path(ui, "File", &file.display().to_string());
@@ -133,8 +167,7 @@ pub fn project_library(
         property_row(ui, "Saved", &saved);
     }
     // A view kept in a library's own folder: its revisions, and who holds
-    // its file. Another holder's lock can be broken from here.
-    let mut break_lock = None;
+    // its file. Another holder's lock is broken from the view's menu.
     if let (Some(library), Some(cell), Some(view)) = (library, cell, view)
         && model.library_manager.is_referenced(&library.name)
     {
@@ -147,21 +180,20 @@ pub fn project_library(
         }
         if let Some(lock) = model.library_lock_elsewhere(&library.name, &file) {
             property_row(ui, "Lock", &lock_holder(lock));
-            break_lock = Some(LibraryFileIntent::BreakLock {
-                library: library.name.clone(),
-                file,
-            });
         } else if model.held_library_lock(&library.name, &file).is_some() {
             property_row(ui, "Lock", "Held here");
         }
     }
 
     section_header(ui, "Library", None);
-    if let Some(description) = library
-        .map(|item| item.description())
-        .filter(|description| !description.is_empty())
+    if let Some(item) = library
+        && let Some(text) = description(ui, "library", item.description(), refusal)
     {
-        property_row(ui, "Description", description);
+        asked = Some(ProjectInspectorAction::LibraryDescription {
+            library: item.name.clone(),
+            cell: None,
+            description: text,
+        });
     }
     if let Some(item) = library {
         status_rows(
@@ -195,31 +227,7 @@ pub fn project_library(
         property_row(ui, "Used by", &usage.join(", "));
     }
 
-    section_header(ui, "Actions", None);
-    let open = inspector_action_enabled(ui, "Open selected view", open_target.is_some());
-    // Library properties in the library column, Cell properties beside a
-    // cell or a view: the page's Properties command, on what it acts on.
-    let properties = inspector_action_enabled(ui, "Properties\u{2026}", library.is_some());
-    let mode = library.and_then(|item| mode_action(ui, model, &item.name));
-    let broken = match break_lock {
-        Some(intent) if inspector_action_enabled(ui, "Break lock\u{2026}", true) => Some(intent),
-        _ => None,
-    };
-    if let Some(intent) = mode.or(broken) {
-        return Some(ProjectInspectorAction::LibraryFile(intent));
-    }
-    // No "Where used & impact…": it wrote the consumers to the console, and
-    // the "Used by" row above names them in place. No "Revision history…"
-    // either — it is a project-level dialog, and the Project overview
-    // inspector is where the project's own actions live.
-    if properties {
-        return Some(ProjectInspectorAction::Execute(
-            ProjectCommand::Library(LibraryCommand::Properties).key(),
-        ));
-    }
-    open_target.filter(|_| open).map(|(reference, view_type)| {
-        ProjectInspectorAction::Shell(ProjectRequest::OpenView(reference, view_type))
-    })
+    asked
 }
 
 /// A file's revisions: the one loaded here, the one on disk when it moved

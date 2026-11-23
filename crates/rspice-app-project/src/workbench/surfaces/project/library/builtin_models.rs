@@ -145,7 +145,8 @@ fn matches_filter(model: &BuiltinVerilogAModel, query: &str) -> bool {
         .any(|field| field.to_ascii_lowercase().contains(query))
 }
 
-/// The menu a model or file row opens: the band's own two actions.
+/// The menu a model or file row opens: open the file read-only, or copy the
+/// model into a writable library.
 pub(super) fn row_items(
     ui: &mut Ui,
     browser: &BuiltinModelsBrowser,
@@ -174,73 +175,7 @@ pub(super) fn row_items(
     intent
 }
 
-/// The band under the columns: what the selected model is, and the two things
-/// a read-only library offers, Copy cell… while `libraries` holds a writable
-/// one. `creation` draws the page's Library actions at its right end; the strip
-/// above already names the selection.
-pub fn detail(
-    ui: &mut Ui,
-    browser: &BuiltinModelsBrowser,
-    libraries: &crate::state::LibraryManager,
-    creation: impl FnOnce(&mut Ui) -> Option<LibraryIntent>,
-) -> Option<LibraryIntent> {
-    let t = Tokens::get(ui.ctx());
-    let model = selected_model(browser);
-    let writable_library_available = libraries
-        .libraries_by_key()
-        .any(|(_, library)| !library.read_only);
-    let mut intent = None;
-    let shown = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
-        ui.set_min_height(t.metrics.ctl_h);
-        ui.horizontal(|ui| {
-            // The buttons stand apart by the kit's control gap, as on the
-            // band of a library of the project's own.
-            ui.spacing_mut().item_spacing.x = tokens::SP_3;
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if browser.source.is_none()
-                    && let Some(file) = browser.file.as_ref()
-                    && Button::new("Open read-only").accent().show(ui).clicked()
-                {
-                    intent = Some(LibraryIntent::BuiltinModels(BuiltinModelsIntent::OpenFile(
-                        file.clone(),
-                    )));
-                }
-                if let Some(model) = model
-                    && Button::new("Copy cell\u{2026}")
-                        .enabled(writable_library_available)
-                        .show(ui)
-                        .on_disabled_hover_text("Every library is read-only; none can take a copy.")
-                        .clicked()
-                {
-                    intent = Some(LibraryIntent::BuiltinModels(
-                        BuiltinModelsIntent::CopyModel(model.registry_name),
-                    ));
-                }
-                if let Some(asked) = creation(ui) {
-                    intent = Some(asked);
-                }
-                if let Some(model) = model {
-                    let font = egui::TextStyle::Body.resolve(ui.style());
-                    let summary = elide_text(ui, model.summary, &font, ui.available_width());
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        let label = ui.label(&summary);
-                        if summary != model.summary {
-                            label.on_hover_text(model.summary);
-                        }
-                    });
-                }
-            });
-        });
-    });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.top(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    intent
-}
-
-/// The open file, read-only, between the columns and the band: the editor well
+/// The open file, read-only, under the columns: the editor well
 /// every other Verilog-A source reads in, so it highlights the same.
 pub(super) fn source_pane(
     ui: &mut Ui,

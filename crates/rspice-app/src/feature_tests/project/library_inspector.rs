@@ -92,14 +92,7 @@ fn the_open_built_in_library_is_what_the_inspector_describes() {
     ] {
         assert!(said.iter().any(|text| text == row), "{row:?} in {said:?}");
     }
-    for row in [
-        "View type",
-        "Location",
-        "State",
-        "Checks",
-        "Used by",
-        "Open selected view",
-    ] {
+    for row in ["View type", "Location", "State", "Checks", "Used by"] {
         assert!(!said.iter().any(|text| text == row), "{row:?} in {said:?}");
     }
 }
@@ -124,9 +117,8 @@ fn a_verilog_a_view_reads_as_verilog_a() {
     assert!(!said.iter().any(|text| text == "veriloga"), "{said:?}");
 }
 
-/// The band cuts the selection's path to the width its controls leave; the
-/// inspector states it whole, with what the cell is for and the file the view
-/// is kept in.
+/// The inspector states the selection's path whole, with what the cell is
+/// for and the file the view is kept in.
 #[test]
 fn the_selection_reads_its_whole_path_description_and_file() {
     let mut state = AppState::default();

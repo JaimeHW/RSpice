@@ -73,6 +73,9 @@ pub struct LibraryBrowserState {
     /// The view type the find asks for: its cells hold one, and only views
     /// of it are listed.
     pub view_type: Option<ViewType>,
+    /// Where the rules between the columns stand, as fractions of the
+    /// page's width, once the reader has dragged one; equal columns before.
+    pub(super) split: Option<[f32; 2]>,
 }
 
 /// What the context strip asks the columns to find, in every library: the
@@ -512,6 +515,32 @@ fn list_column(
     })
 }
 
+/// The exception a read-only library's status column once said, which its
+/// lock now says.
+const READ_ONLY: &str = "Read-only";
+
+/// Why `library` refuses changes, as the hover over its lock says it, or
+/// `None` while it takes them.
+fn read_only_reason(manager: &LibraryManager, library: &LibraryRow) -> Option<&'static str> {
+    if library.builtin {
+        return Some(
+            "Read-only: the built-in models ship with RSpice. Copy a model into a library of \
+             your own to change it.",
+        );
+    }
+    if !manager
+        .get_library(&library.name)
+        .is_some_and(|found| found.read_only)
+    {
+        return None;
+    }
+    Some(if manager.is_referenced(&library.name) {
+        "Read-only: its folder is attached read-only. Make it editable from its menu."
+    } else {
+        "Read-only: it is set read-only. Make it editable from its menu."
+    })
+}
+
 /// A row's exception, or nothing when it has none.
 fn exception(found: Option<&RowException>) -> Entry {
     found.map_or_else(Entry::empty, RowException::entry)
@@ -559,30 +588,34 @@ pub(super) fn library_column(
     follow_lead(&mut browser.libraries, &libraries.keys, lead);
     let count = libraries.keys.len();
     let nothing_found = find.nothing_found();
-    let status = status_width(
-        ui,
-        72.0,
-        width,
-        libraries
-            .rows
-            .iter()
-            .filter_map(|library| exceptions.get(&library.name)),
-    );
+    // Read-only is the lock at the right of a library's name; the status
+    // column is there only while a library has something else to say.
+    let status_of = |name: &str| {
+        exceptions
+            .get(name)
+            .filter(|found| found.label != READ_ONLY)
+    };
+    let statuses = libraries
+        .rows
+        .iter()
+        .filter_map(|library| status_of(&library.name))
+        .collect::<Vec<_>>();
     // A list column has no heads, so each column says what it holds: the
     // find's matches while a find runs, a status in words. Where a library
     // is kept is its icon: the project's own, or a folder of its own, whose
     // stored path the name's hint gives.
     let finding = !find.is_everything();
-    let columns = [
-        Column::name("Library", 60.0),
-        Column::words("Matches", 88.0),
-        Column::words("Status", status),
-    ];
-    let columns = if finding {
-        columns.to_vec()
-    } else {
-        vec![columns[0].clone(), columns[2].clone()]
-    };
+    let mut columns = vec![Column::name("Library", 60.0)];
+    if finding {
+        columns.push(Column::words("Matches", 88.0));
+    }
+    if !statuses.is_empty() {
+        columns.push(Column::words(
+            "Status",
+            status_width(ui, 72.0, width, statuses.iter().copied()),
+        ));
+    }
+    let with_status = !statuses.is_empty();
     let host = rspice_design::library::folder::HostPlatform::current();
     let focus = browser.focusing == Some(BrowserColumn::Library);
     let response = list_column(
@@ -609,23 +642,37 @@ pub(super) fn library_column(
                         .then(|| manager.reference(&library.name))
                         .flatten();
                     let name = Entry::text(library.label.as_str());
-                    let name = match kept {
-                        Some(reference) => name.icon(Icon::Folder).hint(format!(
+                    let kept_at = kept.map(|reference| {
+                        format!(
                             "Kept in a folder of its own: {}",
                             reference.path.shown(host)
-                        )),
+                        )
+                    });
+                    let name = match kept {
+                        Some(_) => name.icon(Icon::Folder),
                         None if library.builtin => name.icon(Icon::Folder),
                         None => name.icon(Icon::Library),
+                    };
+                    let locked = read_only_reason(manager, library);
+                    let hint = match (kept_at, locked) {
+                        (Some(kept_at), Some(locked)) => Some(format!("{kept_at}\n{locked}")),
+                        (kept_at, locked) => kept_at.or(locked.map(str::to_owned)),
+                    };
+                    let name = match locked {
+                        Some(_) => name.trailing(Icon::Lock),
+                        None => name,
+                    };
+                    let name = match hint {
+                        Some(hint) => name.hint(hint),
+                        None => name,
                     };
                     let mut entries = vec![name];
                     if finding {
                         entries.push(Entry::text(library.matches.as_str()));
                     }
-                    entries.push(if library.builtin {
-                        Entry::text("Read-only")
-                    } else {
-                        exception(exceptions.get(&library.name))
-                    });
+                    if with_status {
+                        entries.push(exception(status_of(&library.name)));
+                    }
                     entries
                 })
         },

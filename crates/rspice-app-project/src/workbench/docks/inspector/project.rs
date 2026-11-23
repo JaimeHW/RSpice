@@ -95,6 +95,13 @@ pub enum ProjectInspectorAction {
     Properties(ProjectPropertiesEdit),
     /// Open this dependency where it is edited, as its row's Open does.
     OpenDependency(DependencyLibrary),
+    /// Apply this description to a library, or with `cell` to that cell, as
+    /// its properties are applied.
+    LibraryDescription {
+        library: String,
+        cell: Option<String>,
+        description: String,
+    },
     /// A command over a library kept in a folder of its own: its mode, or
     /// Break lock… on one of its files.
     LibraryFile(crate::workbench::project::library_dialogs::library_files::LibraryFileIntent),

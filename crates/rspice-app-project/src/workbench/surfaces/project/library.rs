@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use crate::state::shortcuts::ShortcutStroke;
 use crate::state::{CellViewRef, LibraryManager, ViewType};
+use crate::ui::accessibility::{counted, grouped};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::LibraryMode;
 use crate::workbench::design_system::elide_text;
@@ -22,6 +23,7 @@ use crate::workbench::project::library_dialogs::library_files::{
 use crate::workbench::project::workspace_state::LibraryDeletionTarget;
 use crate::workbench::slots::ProjectState;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform;
+use rspice_ui_kit::widgets::{PageBar, PageBarFilter, page_bar_kind};
 
 pub mod builtin_models;
 mod columns;
@@ -102,6 +104,12 @@ pub enum LibraryIntent {
     CopyView(CellViewRef),
     /// Open the view in Design as a reference that refuses edits.
     OpenReadOnly(CellViewRef),
+    /// Make a library the project file holds read-only, or editable again,
+    /// as its properties do.
+    SetReadOnly {
+        library: String,
+        read_only: bool,
+    },
     /// Library properties, or with `cell` Cell properties.
     EditProperties {
         library: String,
@@ -264,29 +272,25 @@ pub fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     if let Some(intent) = cx.state.library_browser.queued.take() {
         apply_library_intent(&ctx, cx, intent);
     }
+    ensure_valid_selection(
+        &mut cx.model.library_manager,
+        &cx.model.workspace.content.active_view,
+    );
+    ui.spacing_mut().item_spacing.y = 0.0;
+    if let Some(intent) = library_bar(ui, cx) {
+        apply_library_intent(&ctx, cx, intent);
+    }
     let (intent, source_height) = library_browser(ui, cx);
     if let Some(intent) = intent {
         apply_library_intent(&ctx, cx, intent);
     }
-    if cx.state.builtin_models.open {
-        if let Some(intent) = builtin_source(ui, cx, source_height) {
-            apply_library_intent(&ctx, cx, intent);
-        }
-        if let Some(intent) = builtin_detail(ui, cx) {
-            apply_library_intent(&ctx, cx, intent);
-        }
-    } else if let Some(intent) = library_detail(ui, cx) {
+    if cx.state.builtin_models.open
+        && let Some(intent) = builtin_source(ui, cx, source_height)
+    {
         apply_library_intent(&ctx, cx, intent);
     }
     show_library_usage_report(&ctx);
     show_library_audit_history(&ctx, cx.model);
-}
-
-/// The height of the strip over the columns and of the band under them: one
-/// control and the bar's padding above and below it, under the live metrics.
-fn bar_height(ui: &Ui) -> f32 {
-    let metrics = Tokens::get(ui.ctx()).metrics;
-    metrics.ctl_h + 2.0 * metrics.bar_pad
 }
 
 /// A bar's frame: the bar's padding above and below its one row of controls.
@@ -297,17 +301,10 @@ fn bar_frame(ui: &Ui, fill: Color32) -> egui::Frame {
         .inner_margin(Margin::symmetric(10, pad))
 }
 
-/// The browser: the selection repaired to a real library, cell and view, the
-/// context strip, the library, cell and view columns and the menu a row asked
+/// The browser: the library, cell and view columns and the menu a row asked
 /// for. It returns what the reader asked of a column or a row's menu, and the
-/// height the columns leave an open built-in source above the band.
+/// height the columns leave an open built-in source under them.
 fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<LibraryIntent>, f32) {
-    ensure_valid_selection(
-        &mut cx.model.library_manager,
-        &cx.model.workspace.content.active_view,
-    );
-    library_context(ui, cx);
-
     let find = columns::Find::of(cx.state);
     // The lists' memory is the feature's; it is taken for the frame, so the
     // columns write it while they read the rest of the feature.
@@ -326,15 +323,14 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
     let available = ui.available_size();
     let visible_width = available.x.min(visible_workspace_width(ui)).max(1.0);
     // The columns fill a page at least their minimum wide, to a fraction of a
-    // pixel that must not raise a scroll bar. On a narrower one the bar takes
-    // its height from the columns, never from the band under them.
+    // pixel that must not raise a scroll bar; a narrower one scrolls them.
     let scrolls_sideways = visible_width < MIN_BROWSER_WIDTH;
     let scroll_bar = if scrolls_sideways {
         ui.spacing().scroll.allocated_width()
     } else {
         0.0
     };
-    let page_height = (available.y - bar_height(ui) - scroll_bar).max(120.0);
+    let page_height = (available.y - scroll_bar).max(120.0);
     let browser_height =
         builtin_models::columns_height(ui, &read.state.builtin_models, page_height);
     let mut intent = None;
@@ -346,9 +342,8 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
         .show(ui, |ui| {
             let width = visible_width.max(MIN_BROWSER_WIDTH);
             ui.set_min_width(width);
-            let library_width = (width * 0.25).max(205.0);
-            let cell_width = (width * 0.37).max(210.0);
-            let view_width = (width - library_width - cell_width).max(220.0);
+            let [library_width, cell_width, view_width] = column_widths(browser.split, width);
+            let top = ui.cursor().min;
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let (find, height) = (&find, browser_height);
@@ -358,6 +353,8 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
                 let view = columns::view_column(ui, read, &mut browser, find, view_width, height);
                 intent = library.or(cell).or(view);
             });
+            let rules = [library_width, library_width + cell_width];
+            resize_columns(ui, &mut browser.split, top, rules, width, browser_height);
         });
     let asked = browser.asked_menu.take();
     let holds_keyboard = browser.holds_keyboard;
@@ -367,6 +364,60 @@ fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<Libr
     }
     let menu = row_menu(ui.ctx(), cx, asked);
     (intent.or(menu), (page_height - browser_height).max(0.0))
+}
+
+/// The least a column is made, by the page or by a drag.
+const MIN_COLUMN_WIDTH: f32 = 160.0;
+
+/// Where the rules between the columns stand while the reader has not moved
+/// them: three equal columns.
+const EQUAL_COLUMNS: [f32; 2] = [1.0 / 3.0, 2.0 / 3.0];
+
+/// The three columns' widths across `width`: where the two rules between
+/// them stand, as fractions of the width, each column at least its least.
+fn column_widths(split: Option<[f32; 2]>, width: f32) -> [f32; 3] {
+    let [first, second] = split.unwrap_or(EQUAL_COLUMNS);
+    let least = MIN_COLUMN_WIDTH.min(width / 3.0);
+    let left = (width * first).round().clamp(least, width - 2.0 * least);
+    let middle = (width * second).round().clamp(left + least, width - least);
+    [left, middle - left, width - middle]
+}
+
+/// The two rules between the columns, each dragged sideways to share the
+/// width of the columns on either side of it. The pointer says a rule moves,
+/// and the rule lights while it is pointed at or held.
+fn resize_columns(
+    ui: &mut Ui,
+    split: &mut Option<[f32; 2]>,
+    top: egui::Pos2,
+    rules: [f32; 2],
+    width: f32,
+    height: f32,
+) {
+    const NAMES: [&str; 2] = [
+        "Resize the Library and Cell columns",
+        "Resize the Cell and View columns",
+    ];
+    let t = Tokens::get(ui.ctx());
+    let mut moved = rules;
+    for (index, x) in rules.into_iter().enumerate() {
+        let at = top.x + x;
+        let rule = Rect::from_x_y_ranges(at - 3.0..=at + 3.0, top.y..=top.y + height);
+        let id = egui::Id::new(("workbench.project.library.column-rule", index));
+        let response = ui.interact(rule, id, Sense::drag());
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, NAMES[index]));
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            ui.painter()
+                .vline(at, rule.y_range(), Stroke::new(2.0, t.color.accent));
+        }
+        if response.dragged() {
+            moved[index] += response.drag_delta().x;
+        }
+    }
+    if moved != rules {
+        *split = Some([moved[0] / width, moved[1] / width]);
+    }
 }
 
 /// Undo or Redo, pressed while a list holds the keyboard.
@@ -437,8 +488,13 @@ fn row_menu(
     if asked.is_none() && !egui::Popup::is_id_open(ctx, id) {
         return None;
     }
-    let target = Target::of(cx.model, cx.state);
     let builtin = cx.state.builtin_models.open;
+    // The built-in library itself takes no command: its models are copied
+    // from their own rows.
+    if builtin && column == BrowserColumn::Library {
+        return None;
+    }
+    let target = Target::of(cx.model, cx.state);
     let mut intent = None;
     egui::Popup::new(
         id,
@@ -455,31 +511,23 @@ fn row_menu(
     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
     .show(|ui| {
         intent = match column {
-            BrowserColumn::Library if builtin => library_items(ui, cx, None),
-            BrowserColumn::Library => library_items(ui, cx, target.library.clone()),
+            BrowserColumn::Library => target
+                .library
+                .clone()
+                .and_then(|library| library_items(ui, cx.model, library)),
             BrowserColumn::Cell | BrowserColumn::View if builtin => builtin_models::row_items(
                 ui,
                 &cx.state.builtin_models,
                 target.writable_library_available,
             ),
             BrowserColumn::Cell => cell_items(ui, &target),
-            BrowserColumn::View => {
-                let open = target.view.as_ref().and_then(|(reference, view_type, _)| {
-                    ui.button(open_view_label(*view_type))
-                        .clicked()
-                        .then(|| LibraryIntent::OpenView(reference.clone(), *view_type))
-                });
-                if open.is_some() {
-                    ui.close();
-                }
-                open.or_else(|| view_items(ui, &target))
-            }
+            BrowserColumn::View => view_items(ui, cx.model, &target),
         };
     });
     intent
 }
 
-/// The open built-in source, `height` tall, between the columns and the band.
+/// The open built-in source, `height` tall, under the columns.
 fn builtin_source(
     ui: &mut Ui,
     cx: &mut Cx<'_, ProjectFeature>,
@@ -492,18 +540,6 @@ fn builtin_source(
         cx.peers.code(),
         messages,
         height,
-    )
-}
-
-/// The built-in library's band under the columns. It keeps Library actions:
-/// a reader looking at the built-in library can still make a cell or a
-/// library of their own.
-fn builtin_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
-    builtin_models::detail(
-        ui,
-        &cx.state.builtin_models,
-        &cx.model.library_manager,
-        |ui| library_actions_menu(ui, cx, None),
     )
 }
 
@@ -591,66 +627,173 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
     }
 }
 
-/// The strip over the columns: the find and the view-type filter. What is
-/// selected is the inspector's to state, with its description and file; the
-/// columns mark it, and a read-only library says so on its row.
-pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
-    let t = Tokens::get(ui.ctx());
-    // No rule under this strip: the column header below opens with one of its
-    // own, and two hairlines a pixel apart read as one thick, uneven line.
-    bar_frame(ui, t.color.bg_inset).show(ui, |ui| {
-        ui.set_min_height(t.metrics.ctl_h);
-        // A `Frame` shrinks to its content, so a band that is not told
-        // to take the visible width stops partway across the workspace.
-        // Measured from inside the frame, the visible width is already the
-        // band's inner width: subtracting the margins again leaves the fill
-        // 20 px short of the edge.
-        ui.set_width(visible_workspace_width(ui));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            let search_width = (ui.available_width() * 0.32).clamp(150.0, 380.0);
-            let search = ui.add_sized(
-                [search_width, t.metrics.ctl_h],
-                egui::TextEdit::singleline(&mut cx.state.project_library_filter)
-                    .hint_text("Find in every library\u{2026}")
-                    .vertical_align(Align::Center),
-            );
-            ui.ctx().accesskit_node_builder(search.id, |node| {
-                node.set_label("Find cells in every library");
-            });
-            let mut asked = search.changed();
-            // Enter takes the keyboard to the cells the find turned up, and
-            // is spent there: the list it reaches opens nothing with it.
-            if search.lost_focus()
-                && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
-            {
-                cx.state.library_browser.focus = Some(BrowserColumn::Cell);
-            }
-            let view_type = cx.state.library_browser.view_type;
-            if let Some(index) = crate::ui::widgets::select(
-                ui,
-                "workbench.project.library.view-type",
-                "View type",
-                view_type.map_or(ANY_VIEW_TYPE, |view_type| view_type.caption()),
-                &VIEW_TYPE_CHOICES,
-                VIEW_TYPE_WIDTH,
-            ) {
-                cx.state.library_browser.view_type =
-                    index.checked_sub(1).map(|index| ViewType::ALL[index]);
-                asked = true;
-            }
-            if asked {
-                select_found(ui.ctx(), cx);
+/// The page's one bar: the find and the view type, then New library…,
+/// Attach library…, Refresh… and the page's other actions under More; on
+/// the right, how many libraries and cells there are, or how many cells the
+/// find turns up. What is selected is the inspector's to state; the columns
+/// mark it, and a read-only library carries its lock.
+fn library_bar(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
+    let find = columns::Find::of(cx.state);
+    let report = bar_report(ui.ctx(), cx.model, &find);
+    let project_open = cx.platform.project_lifecycle.is_open();
+    let mut intent = None;
+    let asked = PageBar::new().report(report, None).show(ui, |ui| {
+        let search = PageBarFilter::new("workbench.project.library", "Find cells in every library")
+            .hint("Find in every library\u{2026}")
+            .show(ui, &mut cx.state.project_library_filter);
+        let mut asked = search.changed();
+        // Enter takes the keyboard to the cells the find turned up, and is
+        // spent there: the list it reaches opens nothing with it.
+        if search.lost_focus()
+            && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
+        {
+            cx.state.library_browser.focus = Some(BrowserColumn::Cell);
+        }
+        let current = cx
+            .state
+            .library_browser
+            .view_type
+            .and_then(|wanted| {
+                ViewType::ALL
+                    .iter()
+                    .position(|view_type| *view_type == wanted)
+            })
+            .map_or(0, |index| index + 1);
+        if let Some(index) = page_bar_kind(
+            ui,
+            "workbench.project.library.view-type",
+            "View type",
+            &VIEW_TYPE_CHOICES,
+            current,
+        ) {
+            cx.state.library_browser.view_type =
+                index.checked_sub(1).map(|index| ViewType::ALL[index]);
+            asked = true;
+        }
+        if bar_button(ui, "New library\u{2026}", None) {
+            intent = Some(LibraryIntent::NewLibrary);
+        }
+        let attach = LibraryFileIntent::Attach;
+        let blocker = library_file_blocker(cx.model, &attach);
+        if bar_button(ui, library_file_label(&attach), blocker.as_deref()) {
+            intent = Some(LibraryIntent::Files(attach));
+        }
+        let refresh = refresh_refusal(cx.model);
+        if bar_button(ui, "Refresh\u{2026}", refresh.as_deref()) {
+            intent = Some(LibraryIntent::Files(LibraryFileIntent::Refresh));
+        }
+        let side = Tokens::get(ui.ctx()).metrics.ctl_h;
+        let more = crate::ui::panels::icon_button(
+            ui,
+            WorkbenchIcon::More,
+            "More library actions",
+            false,
+            vec2(side, side),
+        );
+        egui::Popup::menu(&more).show(|ui| {
+            if let Some(asked) = more_items(ui, cx.model, project_open) {
+                intent = Some(asked);
             }
         });
+        asked
     });
+    if asked {
+        select_found(ui.ctx(), cx);
+    }
+    intent
+}
+
+/// A button of the bar, disabled with its reason under the pointer.
+fn bar_button(ui: &mut Ui, label: &str, refusal: Option<&str>) -> bool {
+    Button::new(label)
+        .enabled(refusal.is_none())
+        .show(ui)
+        .on_disabled_hover_text(refusal.unwrap_or_default())
+        .clicked()
+}
+
+/// Why Refresh… cannot run, if it cannot: it reads what changed in the
+/// folders libraries are kept in, and the project may keep none.
+fn refresh_refusal(model: &Model) -> Option<String> {
+    if model.library_manager.references().next().is_none() {
+        return Some("No library is kept in a folder of its own.".to_owned());
+    }
+    library_file_blocker(model, &LibraryFileIntent::Refresh)
+}
+
+/// More: the page's commands taken less often, each disabled with its
+/// reason. Embed library from folder… brings a library in as Attach does;
+/// Publish project…, Restore project from publication… and Audit history…
+/// act on every library the project holds.
+fn more_items(ui: &mut Ui, model: &Model, project_open: bool) -> Option<LibraryIntent> {
+    let readiness = super::library_publication::PublicationReadiness::of(model, project_open);
+    let mut intent = file_item(ui, model, LibraryFileIntent::EmbedFromFolder);
+    ui.separator();
+    if menu_item(ui, "Publish project\u{2026}", readiness.publish_blocker()) {
+        intent = Some(LibraryIntent::PublishProject);
+    }
+    if menu_item(
+        ui,
+        "Restore project from publication\u{2026}",
+        readiness.restore_blocker(),
+    ) {
+        intent = Some(LibraryIntent::RestoreFromPublication);
+    }
+    if menu_item(ui, "Audit history\u{2026}", None) {
+        intent = Some(LibraryIntent::ShowAuditHistory);
+    }
+    intent
+}
+
+/// What the bar says on its right: how many libraries and cells the page
+/// lists, the built-in library and its models counted, or while a find asks
+/// for something, how many of the cells it turns up. Counted again only when
+/// the catalog or the find moves.
+fn bar_report(ctx: &Context, model: &Model, find: &columns::Find) -> String {
+    let manager = &model.library_manager;
+    let (libraries, cells, found) = super::derived::derived(
+        ctx,
+        "library.report",
+        (manager.catalog().stamp(), find.clone()),
+        || {
+            let models = rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS.len();
+            let libraries = manager.library_count() + 1;
+            let cells = manager
+                .libraries_by_key()
+                .map(|(_, library)| library.cell_count())
+                .sum::<usize>()
+                + models;
+            let found = if find.is_everything() {
+                cells
+            } else {
+                manager
+                    .libraries_by_key()
+                    .map(|(_, library)| {
+                        library
+                            .cells
+                            .values()
+                            .filter(|cell| find.cell(cell))
+                            .count()
+                    })
+                    .sum::<usize>()
+                    + find.builtin_models().len()
+            };
+            (libraries, cells, found)
+        },
+    );
+    let cells = counted(cells, "cell", "cells");
+    if find.is_everything() {
+        format!(
+            "{} \u{b7} {cells}",
+            counted(libraries, "library", "libraries")
+        )
+    } else {
+        format!("{} of {cells}", grouped(found))
+    }
 }
 
 /// The view-type select's choice that asks for no type.
 const ANY_VIEW_TYPE: &str = "Any type";
-
-/// The view-type select's width: its longest caption and the chevron.
-const VIEW_TYPE_WIDTH: f32 = 116.0;
 
 /// The view-type select's choices: any type, then each type by its caption.
 static VIEW_TYPE_CHOICES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
@@ -908,22 +1051,42 @@ fn menu_item(ui: &mut Ui, label: &str, blocker: Option<&str>) -> bool {
     taken
 }
 
-/// The cell's half of Cell actions, the menu a cell row opens too.
+/// The menu a cell row opens: open its default view or its symbol's form,
+/// make, rename, copy and move it, ask where it is used, make it the project
+/// top, its properties, and delete it, or every cell chosen with it. Each
+/// item is disabled with its reason.
 fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
     let (library, cell, _) = target.cell.clone()?;
     let read_only = target.read_only();
     let mut intent = None;
+    if menu_item(ui, "Open", None) {
+        intent = Some(LibraryIntent::OpenCell {
+            library: library.clone(),
+            cell: cell.clone(),
+        });
+    }
     if let Some(symbol) = &target.symbol
         && menu_item(ui, "Open in Symbol & form", None)
     {
         intent = Some(LibraryIntent::OpenSymbolForm(symbol.clone()));
     }
+    ui.separator();
     if menu_item(
         ui,
         "New view\u{2026}",
         read_only.then_some("The library is read-only; a view cannot be added to it."),
     ) {
         intent = Some(LibraryIntent::NewView {
+            library: library.clone(),
+            cell: cell.clone(),
+        });
+    }
+    if menu_item(
+        ui,
+        "Rename cell\u{2026}",
+        read_only.then_some("The library is read-only; its cells cannot be renamed."),
+    ) {
+        intent = Some(LibraryIntent::RenameCell {
             library: library.clone(),
             cell: cell.clone(),
         });
@@ -941,16 +1104,6 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
     }
     if menu_item(
         ui,
-        "Rename cell\u{2026}",
-        read_only.then_some("The library is read-only; its cells cannot be renamed."),
-    ) {
-        intent = Some(LibraryIntent::RenameCell {
-            library: library.clone(),
-            cell: cell.clone(),
-        });
-    }
-    if menu_item(
-        ui,
         "Move cell\u{2026}",
         read_only.then_some("The library is read-only; its cells cannot be moved."),
     ) {
@@ -959,6 +1112,7 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
             cell: cell.clone(),
         });
     }
+    ui.separator();
     if menu_item(ui, "Where cell is used\u{2026}", None) {
         intent = Some(LibraryIntent::ReportUsage(UsageSubject::Cell {
             library: library.clone(),
@@ -977,6 +1131,7 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
             cell: Some(cell.clone()),
         });
     }
+    ui.separator();
     let label = match target.cells_chosen.len() {
         0 | 1 => "Delete cell\u{2026}".to_owned(),
         count => format!("Delete {count} cells\u{2026}"),
@@ -991,18 +1146,27 @@ fn cell_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
     intent
 }
 
-/// The view's half of Cell actions, the menu a view row opens too.
-fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
+/// The menu a view row opens: open it, or open it read-only, copy and
+/// rename it, ask where it is used, break another holder's lock on its file,
+/// and delete it, or every view chosen with it. Each item is disabled with
+/// its reason.
+fn view_items(ui: &mut Ui, model: &Model, target: &Target) -> Option<LibraryIntent> {
     let (reference, view_type, _) = target.view.clone()?;
     let read_only = target.read_only();
     let mut intent = None;
+    if menu_item(ui, open_view_label(view_type), None) {
+        intent = Some(LibraryIntent::OpenView(reference.clone(), view_type));
+    }
     if menu_item(ui, "Open read-only", read_only_open_refusal(view_type)) {
         intent = Some(LibraryIntent::OpenReadOnly(reference.clone()));
     }
-    if menu_item(ui, "Where view is used\u{2026}", None) {
-        intent = Some(LibraryIntent::ReportUsage(UsageSubject::View(
-            reference.clone(),
-        )));
+    ui.separator();
+    if menu_item(
+        ui,
+        "Rename view\u{2026}",
+        read_only.then_some("The library is read-only; its views cannot be renamed."),
+    ) {
+        intent = Some(LibraryIntent::RenameView(reference.clone()));
     }
     if menu_item(
         ui,
@@ -1012,13 +1176,18 @@ fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
     ) {
         intent = Some(LibraryIntent::CopyView(reference.clone()));
     }
-    if menu_item(
-        ui,
-        "Rename view\u{2026}",
-        read_only.then_some("The library is read-only; its views cannot be renamed."),
-    ) {
-        intent = Some(LibraryIntent::RenameView(reference.clone()));
+    ui.separator();
+    if menu_item(ui, "Where view is used\u{2026}", None) {
+        intent = Some(LibraryIntent::ReportUsage(UsageSubject::View(
+            reference.clone(),
+        )));
     }
+    if let Some(lock) = lock_elsewhere(model, &reference)
+        && let Some(asked) = file_item(ui, model, lock)
+    {
+        intent = Some(asked);
+    }
+    ui.separator();
     let label = match target.views_chosen.len() {
         0 | 1 => "Delete view\u{2026}".to_owned(),
         count => format!("Delete {count} views\u{2026}"),
@@ -1035,6 +1204,25 @@ fn view_items(ui: &mut Ui, target: &Target) -> Option<LibraryIntent> {
         );
     }
     intent
+}
+
+/// Break lock… on the view's file, while someone else holds it: only a
+/// library kept in a folder of its own has files others can lock.
+fn lock_elsewhere(model: &Model, reference: &CellViewRef) -> Option<LibraryFileIntent> {
+    if !model.library_manager.is_referenced(&reference.library) {
+        return None;
+    }
+    let view = model
+        .library_manager
+        .get_library(&reference.library)?
+        .get_cell(&reference.cell)?
+        .get_view(&reference.view)?;
+    let file = crate::workbench::app_state::model::LibraryFile::cell_view(&reference.cell, view);
+    model.library_lock_elsewhere(&reference.library, &file)?;
+    Some(LibraryFileIntent::BreakLock {
+        library: reference.library.clone(),
+        file,
+    })
 }
 
 /// Why a view of `view_type` does not open read-only, or `None` when it
@@ -1079,72 +1267,6 @@ fn deletion_intent(library: &str, cell: Option<&str>, chosen: &[String]) -> Opti
     }
 }
 
-/// The band under the columns: Attach library…, Library actions, Cell actions
-/// and Open, and what to do while no view is selected. The selection itself
-/// is the inspector's to state.
-fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
-    let t = Tokens::get(ui.ctx());
-    let target = Target::of(cx.model, cx.state);
-    let mut intent = None;
-    let shown = bar_frame(ui, t.color.bg_panel).show(ui, |ui| {
-        ui.set_min_height(t.metrics.ctl_h);
-        // The buttons end at the visible edge, even where the page is
-        // wider than the screen and scrolls.
-        ui.set_max_width(visible_workspace_width(ui));
-        ui.horizontal(|ui| {
-            // The page lays its columns flush; the band's buttons stand apart
-            // by the kit's control gap, as a dialog footer's do.
-            ui.spacing_mut().item_spacing.x = tokens::SP_3;
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if let Some((reference, view_type, _)) = &target.view
-                    && Button::new(open_view_label(*view_type))
-                        .accent()
-                        .show(ui)
-                        .clicked()
-                {
-                    intent = Some(LibraryIntent::OpenView(reference.clone(), *view_type));
-                }
-                if target.cell.is_some() {
-                    rspice_ui_kit::widgets::menu_button(ui, "Cell actions", |ui| {
-                        let cell = cell_items(ui, &target);
-                        if target.view.is_some() {
-                            ui.separator();
-                        }
-                        let view = view_items(ui, &target);
-                        if let Some(asked) = cell.or(view) {
-                            intent = Some(asked);
-                        }
-                    });
-                }
-                if let Some(asked) = library_actions_menu(ui, cx, target.library.clone()) {
-                    intent = Some(asked);
-                }
-                if target.view.is_none() {
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        select_prompt(ui);
-                    });
-                }
-            });
-        });
-    });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.top(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    intent
-}
-
-/// What to do while no view is selected, cut to the room the band's buttons
-/// leave.
-fn select_prompt(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let body = egui::TextStyle::Body.resolve(ui.style());
-    let prompt = "Select a view to inspect or open";
-    let shown = elide_text(ui, prompt, &body, ui.available_width());
-    ui.label(egui::RichText::new(shown).color(t.color.text_dim));
-}
-
 /// A command over library folders, or the clause its refusal is stated in.
 fn file_command(model: &Model, intent: LibraryFileIntent) -> Result<LibraryIntent, &'static str> {
     library_file_refusal(model, &intent).map_or(Ok(LibraryIntent::Files(intent)), Err)
@@ -1153,118 +1275,80 @@ fn file_command(model: &Model, intent: LibraryFileIntent) -> Result<LibraryInten
 /// Why a library kept in a folder of its own cannot be renamed.
 const KEEPS_ITS_NAME: &str = "A library in its own folder keeps its name; copy it to rename it.";
 
-/// Library actions: create, attach or embed a library or create a cell;
-/// rename, copy and delete the library, or for one kept in a folder of its
-/// own change its mode, relink, refresh, embed or detach it, or move an
-/// embedded one to a folder; then the commands over the whole project that
-/// live with them, Publish project…, Restore project from publication… and
-/// Audit history…, each disabled with its reason. `selected_library` is the
-/// library the page shows and whether it is read-only; the built-in
-/// library's band passes none. Attach library… stands beside it on the
-/// band, as the page's own way to bring in a library kept elsewhere.
-pub(super) fn library_actions_menu(
-    ui: &mut Ui,
-    cx: &Cx<'_, ProjectFeature>,
-    selected_library: Option<(String, bool)>,
-) -> Option<LibraryIntent> {
-    let mut intent = None;
-    rspice_ui_kit::widgets::menu_button(ui, "Library actions", |ui| {
-        intent = library_items(ui, cx, selected_library);
-    });
-    let attach = LibraryFileIntent::Attach;
-    let blocker = library_file_blocker(cx.model, &attach);
-    let button = Button::new(library_file_label(&attach)).enabled(blocker.is_none());
-    // Where the band is too narrow for it, Attach library… stays in Library
-    // actions, which always holds it, rather than being cut at the edge.
-    if button.measured_width(ui) <= ui.available_width()
-        && button
-            .show(ui)
-            .on_disabled_hover_text(blocker.unwrap_or_default())
-            .clicked()
-    {
-        intent = Some(LibraryIntent::Files(attach));
-    }
-    intent
-}
-
-/// The items of Library actions, the menu a library row opens too.
+/// The menu a library row opens: rename, copy, where used and properties;
+/// then its access and where it is kept: for one in a folder of its own its
+/// mode, Relink…, Embed in project and Detach library…, for one the project
+/// file holds Make read-only or Make editable, Move to its own folder… and
+/// Delete library…. Each item is disabled with its reason.
 fn library_items(
     ui: &mut Ui,
-    cx: &Cx<'_, ProjectFeature>,
-    selected_library: Option<(String, bool)>,
+    model: &Model,
+    (library, read_only): (String, bool),
 ) -> Option<LibraryIntent> {
-    let readiness = super::library_publication::PublicationReadiness::of(
-        cx.model,
-        cx.platform.project_lifecycle.is_open(),
-    );
+    let referenced = model.library_manager.is_referenced(&library);
     let mut intent = None;
-    if menu_item(ui, "New library\u{2026}", None) {
-        intent = Some(LibraryIntent::NewLibrary);
+    let rename_refusal = if referenced {
+        Some(KEEPS_ITS_NAME)
+    } else {
+        read_only.then_some("The library is read-only; it cannot be renamed.")
+    };
+    if menu_item(ui, "Rename library\u{2026}", rename_refusal) {
+        intent = Some(LibraryIntent::RenameLibrary(library.clone()));
     }
-    if menu_item(ui, "New cell\u{2026}", None) {
-        intent = Some(LibraryIntent::NewCell);
+    if menu_item(ui, "Copy library\u{2026}", None) {
+        intent = Some(LibraryIntent::CopyLibrary(library.clone()));
     }
-    for global in [
-        LibraryFileIntent::Attach,
-        LibraryFileIntent::EmbedFromFolder,
-    ] {
-        if let Some(asked) = file_item(ui, cx.model, global) {
+    if menu_item(ui, "Where used\u{2026}", None) {
+        intent = Some(LibraryIntent::ReportUsage(UsageSubject::Library(
+            library.clone(),
+        )));
+    }
+    if menu_item(ui, "Library properties\u{2026}", None) {
+        intent = Some(LibraryIntent::EditProperties {
+            library: library.clone(),
+            cell: None,
+        });
+    }
+    ui.separator();
+    if !referenced {
+        // A library the project file holds takes its access as its
+        // properties do.
+        let label = if read_only {
+            "Make editable"
+        } else {
+            "Make read-only"
+        };
+        let refusal = model
+            .safe_mode
+            .project_read_only()
+            .then_some("The project is open read-only.");
+        if menu_item(ui, label, refusal) {
+            intent = Some(LibraryIntent::SetReadOnly {
+                library: library.clone(),
+                read_only: !read_only,
+            });
+        }
+    }
+    // Refresh… reads every library folder, so it is the bar's.
+    for file_intent in library_file_intents(model, &library)
+        .into_iter()
+        .filter(|file_intent| *file_intent != LibraryFileIntent::Refresh)
+    {
+        if let Some(asked) = file_item(ui, model, file_intent) {
             intent = Some(asked);
         }
     }
-    if let Some((library, read_only)) = selected_library {
+    // A library kept in a folder of its own is detached, never deleted:
+    // its files are its folder's.
+    if !referenced {
         ui.separator();
-        let referenced = cx.model.library_manager.is_referenced(&library);
-        let rename_refusal = if referenced {
-            Some(KEEPS_ITS_NAME)
-        } else {
-            read_only.then_some("The library is read-only; it cannot be renamed.")
-        };
-        if menu_item(ui, "Rename library\u{2026}", rename_refusal) {
-            intent = Some(LibraryIntent::RenameLibrary(library.clone()));
-        }
-        if menu_item(ui, "Copy library\u{2026}", None) {
-            intent = Some(LibraryIntent::CopyLibrary(library.clone()));
-        }
-        if menu_item(ui, "Where used\u{2026}", None) {
-            intent = Some(LibraryIntent::ReportUsage(UsageSubject::Library(
-                library.clone(),
-            )));
-        }
-        if menu_item(ui, "Library properties\u{2026}", None) {
-            intent = Some(LibraryIntent::EditProperties {
-                library: library.clone(),
-                cell: None,
-            });
-        }
-        for file_intent in library_file_intents(cx.model, &library) {
-            if let Some(asked) = file_item(ui, cx.model, file_intent) {
-                intent = Some(asked);
-            }
-        }
-        // A library kept in a folder of its own is detached, never deleted:
-        // its files are its folder's.
-        if !referenced
-            && menu_item(
-                ui,
-                "Delete library\u{2026}",
-                read_only.then_some("The library is read-only; it cannot be deleted."),
-            )
-        {
+        if menu_item(
+            ui,
+            "Delete library\u{2026}",
+            read_only.then_some("The library is read-only; it cannot be deleted."),
+        ) {
             intent = Some(LibraryIntent::DeleteLibrary(library));
         }
-    }
-    ui.separator();
-    let publish = readiness.publish_blocker();
-    if menu_item(ui, "Publish project\u{2026}", publish) {
-        intent = Some(LibraryIntent::PublishProject);
-    }
-    let restore = readiness.restore_blocker();
-    if menu_item(ui, "Restore project from publication\u{2026}", restore) {
-        intent = Some(LibraryIntent::RestoreFromPublication);
-    }
-    if menu_item(ui, "Audit history\u{2026}", None) {
-        intent = Some(LibraryIntent::ShowAuditHistory);
     }
     intent
 }
@@ -1527,6 +1611,20 @@ pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, inte
             cx.wb
                 .outbox
                 .push(ProjectRequest::OpenViewReadOnly(reference));
+        }
+        LibraryIntent::SetReadOnly { library, read_only } => {
+            let description = cx
+                .model
+                .library_manager
+                .get_library(&library)
+                .map(|found| found.description().to_owned())
+                .unwrap_or_default();
+            if let Err(error) = cx
+                .model
+                .edit_library_properties(&library, &description, read_only)
+            {
+                cx.wb.prompt(error);
+            }
         }
         LibraryIntent::EditProperties { library, cell } => {
             if let Err(error) =

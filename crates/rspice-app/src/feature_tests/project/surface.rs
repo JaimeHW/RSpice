@@ -189,13 +189,10 @@ fn the_configurations_command_availability_reads_through_the_snapshot() {
     assert!(!runs(&mut app), "no open project, so it cannot run");
 }
 
-/// The detail under the Library browser shows the view a click in the
-/// browser selects, in the frame that took the click: what the reader
-/// asked of the browser is carried out before the detail draws. The band
-/// offers to open the view selected, by its kind; its path is the
-/// inspector's to state.
+/// A click on a view in the Library browser selects it, and the next frame
+/// marks that row selected and no other.
 #[test]
-fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_clicked_in() {
+fn a_click_in_the_library_browser_selects_that_view() {
     use rspice_app_state::state::{Cell, Library, View, ViewType};
     let (ctx, mut app, _) = settled_on(ProjectPage::Library);
     let mut library = Library::new("frame_test");
@@ -210,24 +207,29 @@ fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_cli
     for _ in 0..2 {
         settled = project_frame(&ctx, &mut app, Vec::new());
     }
-    let (first, second) = ("Open schematic", "Open symbol");
-    let painted = painted_text(&settled);
-    assert!(
-        painted.contains(first) && !painted.contains(second),
-        "{painted}"
-    );
+    let selected = |output: &egui::FullOutput, label: &str| {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("the frame publishes its tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .and_then(|(_, node)| node.is_selected())
+            == Some(true)
+    };
+    let (first, second) = ("schematic_a, schematic", "symbol_b, symbol");
+    assert!(selected(&settled, first) && !selected(&settled, second));
 
-    let clicked = click_announced(&ctx, &mut app, settled, "symbol_b, symbol");
+    click_announced(&ctx, &mut app, settled, second);
 
     assert_eq!(
         app.state.model.library_manager.selected_view.as_deref(),
         Some("symbol_b")
     );
-    let painted = painted_text(&clicked);
-    assert!(
-        painted.contains(second) && !painted.contains(first),
-        "{painted}"
-    );
+    let next = project_frame(&ctx, &mut app, Vec::new());
+    assert!(selected(&next, second) && !selected(&next, first));
 }
 
 /// The label of the control `output` announces whose label starts with

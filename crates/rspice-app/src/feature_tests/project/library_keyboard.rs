@@ -44,6 +44,9 @@ fn library_page() -> Replay {
     replay
 }
 
+/// The name the page bar's find is read by.
+const FIND: &str = "Find cells in every library";
+
 fn press(replay: &mut Replay, key: Key) {
     replay.key(key, Modifiers::NONE);
 }
@@ -147,7 +150,7 @@ fn f2_renames_and_delete_reviews_the_row_the_keyboard_is_on() {
 }
 
 #[test]
-fn shift_f10_opens_the_rows_menu_with_the_bands_items() {
+fn shift_f10_opens_the_rows_menu() {
     let mut replay = library_page();
     let menu = replay.key(Key::F10, Modifiers::SHIFT);
     for item in [
@@ -316,6 +319,29 @@ fn library_page_with_analog() -> Replay {
     replay
 }
 
+/// Shift+Tab from the lists until the control whose name starts `name` has
+/// the keys: the bar's actions stand between the lists and its find.
+fn back_to(replay: &mut Replay, name: &str) {
+    let stops = replay.frames(Vec::new()).len();
+    for _ in 0..stops {
+        replay.key(Key::Tab, Modifiers::SHIFT);
+        let output = replay.frame(Vec::new());
+        let update = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("the frame publishes its tree");
+        let focused = update.nodes.iter().find(|(id, _)| *id == update.focus);
+        if focused
+            .and_then(|(_, node)| node.label())
+            .is_some_and(|label| label.starts_with(name))
+        {
+            return;
+        }
+    }
+    panic!("Shift+Tab never reaches {name:?}");
+}
+
 /// The labels of the listed rows: a library's reads its name, and while a
 /// find runs how many cells it turns up there.
 fn rows(controls: &[super::super::replay::Control]) -> Vec<&str> {
@@ -333,10 +359,7 @@ fn rows(controls: &[super::super::replay::Control]) -> Vec<&str> {
 #[test]
 fn the_find_searches_every_library_and_selects_what_it_finds() {
     let mut replay = library_page_with_analog();
-    // From the Cell column back past the Library column and the view type.
-    for _ in 0..3 {
-        replay.key(Key::Tab, Modifiers::SHIFT);
-    }
+    back_to(&mut replay, FIND);
     replay.type_text("divid");
     assert_eq!(replay.app.state.project.project_library_filter, "divid");
     assert_eq!(
@@ -368,9 +391,7 @@ fn the_find_searches_every_library_and_selects_what_it_finds() {
 #[test]
 fn the_view_type_narrows_every_library_to_cells_holding_one() {
     let mut replay = library_page_with_analog();
-    for _ in 0..2 {
-        replay.key(Key::Tab, Modifiers::SHIFT);
-    }
+    back_to(&mut replay, "View type");
     replay.type_text("sym");
     assert_eq!(
         replay.app.state.project.library_browser.view_type,
@@ -409,8 +430,8 @@ fn words(output: &egui::FullOutput) -> Vec<String> {
         .collect()
 }
 
-/// A find that hides the selected view hides it everywhere: the strip, the
-/// band and the inspector name none, and the selection waits behind the find
+/// A find that hides the selected view hides it everywhere: neither the
+/// page nor the inspector names it, and the selection waits behind the find
 /// for it to be cleared.
 #[test]
 fn a_view_the_find_hides_is_described_nowhere() {
@@ -421,18 +442,11 @@ fn a_view_the_find_hides_is_described_nowhere() {
         said.iter().any(|text| text == path),
         "the page states the selection: {said:#?}"
     );
-    for _ in 0..3 {
-        replay.key(Key::Tab, Modifiers::SHIFT);
-    }
+    back_to(&mut replay, FIND);
     replay.type_text("nothing");
     assert_eq!(replay.app.state.project.project_library_filter, "nothing");
     replay.frames(Vec::new());
     let said = words(&replay.frame(Vec::new()));
-    assert!(
-        said.iter()
-            .any(|text| text == "Select a view to inspect or open"),
-        "the band asks for a view: {said:#?}"
-    );
     assert!(
         !said.iter().any(|text| text.contains(path)),
         "nothing describes the hidden view: {said:#?}"
@@ -502,23 +516,6 @@ fn a_cell_dragged_onto_a_library_opens_copy_cell_aimed_at_it() {
     );
     assert_eq!(project.copy_cell_target_library, "analog");
     assert_eq!(project.copy_cell_name, "bias");
-}
-
-/// On a phone the page is wider than the screen, and the band still ends
-/// at the screen's edge: Open stands whole beside the two menus, and the
-/// selection's path, with no room left, gives way to them.
-#[test]
-fn on_a_phone_the_band_keeps_open_on_the_screen() {
-    let mut replay = library_page().sized(egui::vec2(390.0, 844.0));
-    replay.app.state.workbench.coarse_pointer = true;
-    let controls = replay.frames(Vec::new());
-    let open = only(&controls, "Open schematic", Role::Button);
-    assert!(
-        open.center.x <= 390.0 - 40.0,
-        "Open is whole on the screen: {:?}",
-        open.center
-    );
-    only(&controls, "Cell actions", Role::Button);
 }
 
 /// Ctrl+Z on the Library page undoes the last library operation, however

@@ -4,7 +4,7 @@
 //! cell, and the Dependencies page the include search paths. What they apply
 //! survives save and reopen, each change is one step of Undo, and runs
 //! without a configuration start at the top it sets, as they do after Set as
-//! project top in Cell actions.
+//! project top in a cell's menu.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -208,8 +208,8 @@ fn each_change_is_one_step_of_undo_and_runs_start_at_the_top_it_sets() {
     std::fs::remove_dir_all(folder).ok();
 }
 
-/// Set as project top in Library > Cell actions moves where runs without a
-/// configuration start, says so, and is one step of Undo.
+/// Set as project top in a cell's menu on the Library page moves where runs
+/// without a configuration start, says so, and is one step of Undo.
 #[test]
 fn set_as_project_top_moves_where_runs_start() {
     let folder = unique_temp_dir("project-properties-set-top");
@@ -222,7 +222,8 @@ fn set_as_project_top_moves_where_runs_start() {
         .library_manager
         .select_view(USER_LIBRARY, AMP_CELL, SCHEMATIC_VIEW);
 
-    click_named(&mut replay, "Cell actions");
+    replay.frames(Vec::new());
+    replay.key(egui::Key::F10, egui::Modifiers::SHIFT);
     click_named(&mut replay, "Set as project top");
     assert_eq!(runs_start_at(&replay), schematic(AMP_CELL));
     let shown = painted(&replay.frame(Vec::new()));

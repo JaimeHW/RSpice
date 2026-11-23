@@ -73,11 +73,11 @@ fn every_kind_of_view_opens_the_view_that_was_asked_for() {
     }
 }
 
-/// A cell with a symbol view offers Symbol & form in Cell actions; the
+/// A cell with a symbol view offers Symbol & form in its row's menu; the
 /// entry selects that symbol and opens the manager on the page that edits
 /// it.
 #[test]
-fn cell_actions_open_a_cells_symbol_in_symbol_and_form() {
+fn the_cells_menu_opens_its_symbol_in_symbol_and_form() {
     use rspice_app_project::workbench::project::workspace_state::LibraryCellviewPage;
 
     let mut app = RSpiceApp::test_instance();
@@ -94,7 +94,8 @@ fn cell_actions_open_a_cells_symbol_in_symbol_and_form() {
     app.state.project.project_page = ProjectPage::Library;
     app.state.workbench.activate(Workspace::Project);
     let mut replay = super::super::replay::Replay::of(app);
-    press_named(&mut replay, "Cell actions");
+    replay.frames(Vec::new());
+    replay.key(egui::Key::F10, egui::Modifiers::SHIFT);
     press_named(&mut replay, "Open in Symbol & form");
 
     let state = &replay.app.state;
@@ -113,23 +114,28 @@ fn cell_actions_open_a_cells_symbol_in_symbol_and_form() {
     );
 }
 
-/// Library actions holds Publish project… and Restore project from
-/// publication… beside the library's own actions.
+/// The page bar holds New library… and, under More, Publish project… and
+/// Restore project from publication…, which act on no row.
 #[test]
-fn library_actions_hold_publish_and_restore() {
+fn the_bar_holds_new_library_and_more_holds_publish_and_restore() {
     let mut app = RSpiceApp::test_instance();
     app.state.project.project_page = ProjectPage::Library;
     app.state.workbench.activate(Workspace::Project);
     let mut replay = super::super::replay::Replay::of(app);
-    let menu = press_named(&mut replay, "Library actions");
+    let bar = replay.frames(Vec::new());
+    assert!(
+        bar.iter()
+            .any(|control| control.label == "New library\u{2026}"),
+        "New library\u{2026} is on the bar"
+    );
+    let menu = press_named(&mut replay, "More library actions");
     for entry in [
-        "New library\u{2026}",
         "Publish project\u{2026}",
         "Restore project from publication\u{2026}",
     ] {
         assert!(
             menu.iter().any(|control| control.label == entry),
-            "{entry} is in Library actions"
+            "{entry} is under More"
         );
     }
 }
@@ -809,37 +815,47 @@ fn filtered_library_app() -> RSpiceApp {
     app
 }
 
-/// The rows state only the exception: a read-only library and a modified
-/// view are marked; a writable library and a saved view say nothing, and the
-/// band does not repeat the library's access.
+/// The rows state only the exception: a read-only library carries a lock,
+/// read out with its name, and a modified view is marked; a writable library
+/// and a saved view say nothing, and no column spells the access out.
 #[test]
 fn library_rows_mark_only_a_read_only_library_and_a_modified_view() {
     let mut app = filtered_library_app();
     let text = painted_frame(&mut app);
     let lines = text.lines().collect::<Vec<_>>();
-    for retired in ["RW", "RO", "saved", "writable", "working changes"] {
+    for retired in [
+        "RW",
+        "RO",
+        "saved",
+        "writable",
+        "working changes",
+        "Read-only",
+    ] {
         assert!(!lines.contains(&retired), "{retired:?} in:\n{text}");
     }
-    assert!(lines.contains(&"Read-only"), "{text}");
     assert!(lines.contains(&"modified"), "{text}");
+
+    let mut replay = super::super::replay::Replay::of(filtered_library_app());
+    let rows = replay.frames(Vec::new());
+    let labels = rows
+        .iter()
+        .map(|control| control.label.as_str())
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"ref, Read-only"), "{labels:?}");
+    assert!(labels.contains(&"work"), "{labels:?}");
 }
 
-/// A filter that hides the selected cell empties the View column and takes
-/// the cell's actions off the band; the Cell column counts "1 of 2" and says
-/// when nothing matches. A new project starts with no filter.
+/// A filter that hides the selected cell empties the View column; the Cell
+/// column counts "1 of 2" and says when nothing matches. A new project
+/// starts with no filter.
 #[test]
 fn a_filter_states_what_it_hides_and_never_acts_on_a_hidden_cell() {
     let mut app = filtered_library_app();
-    let shown = painted_frame(&mut app);
-    assert!(shown.contains("Cell actions"), "{shown}");
-
     app.state.project.project_library_filter = "bias".to_owned();
     let hidden = painted_frame(&mut app);
     let lines = hidden.lines().collect::<Vec<_>>();
     assert!(lines.contains(&"1 of 2"), "{hidden}");
     assert!(lines.contains(&"No cell selected"), "{hidden}");
-    assert!(!hidden.contains("Cell actions"), "{hidden}");
-    assert!(!hidden.contains("Open schematic"), "{hidden}");
 
     app.state.project.project_library_filter = "zzz".to_owned();
     let none = painted_frame(&mut app);
