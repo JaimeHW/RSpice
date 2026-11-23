@@ -19,6 +19,8 @@ use crate::{
 pub struct StoreSink<I: RunIo> {
     io: Option<I>,
     writer: Option<RunWriter<I>>,
+    /// A writer a stopped run left closing its segment; dropping the sink waits for it.
+    closing: Option<RunWriter<I>>,
     receipt: Option<StoreReceipt>,
     /// Event changes converted for the writer, reused across calls.
     changes: Vec<EventChange>,
@@ -42,6 +44,7 @@ impl<I: RunIo> StoreSink<I> {
         Self {
             io: Some(io),
             writer: None,
+            closing: None,
             receipt: None,
             changes: Vec::new(),
             seam: None,
@@ -64,6 +67,7 @@ impl<I: RunIo> StoreSink<I> {
                 repeated: 0,
             }),
             writer: Some(writer),
+            closing: None,
             receipt: None,
             changes: Vec::new(),
         })
@@ -78,6 +82,38 @@ impl<I: RunIo> StoreSink<I> {
     /// open, or after the writer failed to close it.
     pub fn into_io(self) -> Option<I> {
         self.io
+    }
+
+    /// [`ResultSink::end`], unless `stopped` says the run was stopped while its segment
+    /// closes: then the sink answers at once that it stopped, and the segment, still closing,
+    /// is never read; dropping the sink waits for the close.
+    pub fn end_unless(
+        &mut self,
+        status: sink::RunStatus,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<SinkReceipt, SinkStop> {
+        let Some(writer) = self.writer.take() else {
+            return Err(SinkStop::Io(
+                "the results segment ended without being begun".to_owned(),
+            ));
+        };
+        let (receipt, io) = match writer.finish_unless(store_status(status), stopped) {
+            Ok(finished) => finished.map_err(sink_stop)?,
+            Err(closing) => {
+                self.closing = Some(*closing);
+                return Err(SinkStop::Io(
+                    "the run was stopped while its results closed".to_owned(),
+                ));
+            }
+        };
+        self.io = Some(io);
+        self.receipt = Some(receipt.clone());
+        Ok(SinkReceipt {
+            rows: receipt.rows,
+            events: receipt.events,
+            bytes: receipt.bytes,
+            digest: Some(receipt.digest.0),
+        })
     }
 
     fn writer(&mut self) -> Result<&mut RunWriter<I>, SinkStop> {
@@ -167,20 +203,7 @@ impl<I: RunIo> ResultSink for StoreSink<I> {
     }
 
     fn end(&mut self, status: sink::RunStatus) -> Result<SinkReceipt, SinkStop> {
-        let Some(writer) = self.writer.take() else {
-            return Err(SinkStop::Io(
-                "the results segment ended without being begun".to_owned(),
-            ));
-        };
-        let (receipt, io) = writer.finish(store_status(status)).map_err(sink_stop)?;
-        self.io = Some(io);
-        self.receipt = Some(receipt.clone());
-        Ok(SinkReceipt {
-            rows: receipt.rows,
-            events: receipt.events,
-            bytes: receipt.bytes,
-            digest: Some(receipt.digest.0),
-        })
+        self.end_unless(status, &|| false)
     }
 }
 

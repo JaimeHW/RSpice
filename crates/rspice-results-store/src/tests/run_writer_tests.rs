@@ -359,3 +359,84 @@ fn what_a_run_says_of_itself_is_kept_in_end_and_read_back_by_key() {
     assert_eq!(reader.annotation("precision"), Some(&[9u8][..]));
     assert_eq!(reader.annotation("sources"), None);
 }
+
+/// A segment whose close waits until the test releases it.
+struct HeldClose {
+    io: SharedIo,
+    release: Option<std::sync::mpsc::Receiver<()>>,
+}
+
+impl SegmentIo for HeldClose {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        self.io.read_at(offset, buf)
+    }
+    fn write_at(&mut self, offset: u64, data: &[u8]) -> io::Result<()> {
+        self.io.write_at(offset, data)
+    }
+    fn truncate(&mut self, len: u64) -> io::Result<()> {
+        self.io.truncate(len)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.io.flush()
+    }
+    fn size(&self) -> io::Result<u64> {
+        self.io.size()
+    }
+    fn closing(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.recv();
+        }
+    }
+}
+
+/// A run stopped while its segment closes is answered at once, the segment still open; the
+/// writer, dropped, waits for the close to end, so the segment is complete once it is gone.
+#[test]
+fn a_close_the_run_stopped_answers_at_once_and_its_writer_waits_for_it_when_dropped() {
+    let io = SharedIo::default();
+    let (release, held) = std::sync::mpsc::channel();
+    let held = HeldClose {
+        io: io.clone(),
+        release: Some(held),
+    };
+    let (steps, _) = run(200, 0, 25);
+    let mut writer = RunWriter::with_options(held, &event_schema(), &meta(), 64, NEVER).unwrap();
+    for step in &steps {
+        writer.push_row(step.x, &step.values).unwrap();
+    }
+    let asked = std::cell::Cell::new(0);
+    let stopped = || {
+        asked.set(asked.get() + 1);
+        true
+    };
+    let Err(closing) = writer.finish_unless(RunStatus::Completed, &stopped) else {
+        panic!("a close the run stopped answers before the segment is closed");
+    };
+    assert_eq!(asked.get(), 1);
+    let complete = SegmentReader::open(MemoryIo::from_bytes(io.snapshot()))
+        .is_ok_and(|reader| matches!(reader.state(), SegmentState::Complete { .. }));
+    assert!(!complete, "the segment is still closing");
+    release.send(()).unwrap();
+    drop(closing);
+    let closed = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
+    assert!(matches!(closed.state(), SegmentState::Complete { .. }));
+    assert_eq!(closed.rows(), 200);
+}
+
+/// A close nobody stops is waited for, as `finish` waits.
+#[test]
+fn a_close_nobody_stops_ends_the_segment_as_finish_does() {
+    let io = SharedIo::default();
+    let (steps, _) = run(200, 0, 25);
+    let mut writer =
+        RunWriter::with_options(io.clone(), &event_schema(), &meta(), 64, NEVER).unwrap();
+    for step in &steps {
+        writer.push_row(step.x, &step.values).unwrap();
+    }
+    let Ok(Ok((receipt, _))) = writer.finish_unless(RunStatus::Completed, &|| false) else {
+        panic!("a close nobody stops ends the segment");
+    };
+    assert_eq!(receipt.rows, 200);
+    let closed = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
+    assert!(matches!(closed.state(), SegmentState::Complete { .. }));
+}

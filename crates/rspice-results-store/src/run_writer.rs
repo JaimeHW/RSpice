@@ -129,6 +129,28 @@ impl<I: RunIo> RunWriter<I> {
     pub fn finish(self, status: RunStatus) -> Result<(StoreReceipt, I), StoreError> {
         self.inner.finish(status)
     }
+
+    /// [`Self::finish`], unless `stopped` says the run was stopped while the segment closes:
+    /// closing a run of a million columns takes seconds, and a stopped run's segment is not
+    /// read. The writer then comes back as it is, still closing on its thread; dropping it waits
+    /// for that. A writer with no thread of its own closes before it answers.
+    pub fn finish_unless(
+        self,
+        status: RunStatus,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<Result<(StoreReceipt, I), StoreError>, Box<Self>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.inner
+                .finish_unless(status, stopped)
+                .map_err(|inner| Box::new(Self { inner: *inner }))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = stopped;
+            Ok(self.inner.finish(status))
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -145,6 +167,10 @@ mod threaded {
 
     /// Wall clock between durability flushes while a run goes.
     pub(super) const SYNC_INTERVAL: Duration = Duration::from_secs(1);
+
+    /// How often a close that may be stopped asks whether it was: well under what a person
+    /// notices.
+    const CLOSING_POLL: Duration = Duration::from_millis(10);
 
     /// What a run said of itself, by key, for `END`.
     type Annotations = Vec<(String, Vec<u8>)>;
@@ -499,8 +525,20 @@ mod threaded {
             }
         }
 
-        pub(super) fn finish(mut self, status: RunStatus) -> Result<(StoreReceipt, I), StoreError> {
-            let stopped = matches!(status, RunStatus::Stopped(_));
+        pub(super) fn finish(self, status: RunStatus) -> Result<(StoreReceipt, I), StoreError> {
+            let ends_stopped = matches!(status, RunStatus::Stopped(_));
+            self.finish_unless(status, &|| false)
+                .unwrap_or_else(|mut writer| writer.settle(ends_stopped))
+        }
+
+        /// [`Self::finish`], waiting for the thread to close the segment only while `stopped`
+        /// says the run goes on; once it says otherwise the writer comes back still closing.
+        pub(super) fn finish_unless(
+            mut self,
+            status: RunStatus,
+            stopped: &dyn Fn() -> bool,
+        ) -> Result<Result<(StoreReceipt, I), StoreError>, Box<Self>> {
+            let ends_stopped = matches!(status, RunStatus::Stopped(_));
             let sent = if self.stopped {
                 Err(StoreError::WriterStopped)
             } else {
@@ -511,15 +549,30 @@ mod threaded {
                 })
             };
             if let Err(error) = sent {
-                return match self.closed.take() {
-                    Some((receipt, io, _)) if stopped => Ok((receipt, io)),
+                return Ok(match self.closed.take() {
+                    Some((receipt, io, _)) if ends_stopped => Ok((receipt, io)),
                     Some((.., full)) => Err(full),
                     None => Err(self.failure.take().unwrap_or(error)),
-                };
+                });
             }
+            while self
+                .thread
+                .as_ref()
+                .is_some_and(|thread| !thread.is_finished())
+            {
+                if stopped() {
+                    return Err(Box::new(self));
+                }
+                std::thread::sleep(CLOSING_POLL);
+            }
+            Ok(self.settle(ends_stopped))
+        }
+
+        /// What the thread that closed the segment ended with.
+        fn settle(&mut self, ends_stopped: bool) -> Result<(StoreReceipt, I), StoreError> {
             match self.join() {
                 Outcome::Closed(receipt, io) => Ok((receipt, io)),
-                Outcome::Full(receipt, io, _) if stopped => Ok((receipt, io)),
+                Outcome::Full(receipt, io, _) if ends_stopped => Ok((receipt, io)),
                 Outcome::Full(.., full) => Err(full),
                 Outcome::Failed(error) => Err(error),
             }

@@ -385,6 +385,16 @@ impl<I: RunIo> WatchedSink<I> {
         self.rows_needed
     }
 
+    /// [`StoreSink::end_unless`]: the run ends, unless `stopped` says it was stopped while its
+    /// segment closes.
+    pub fn end_unless(
+        &mut self,
+        status: RunStatus,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<SinkReceipt, SinkStop> {
+        self.inner.end_unless(status, stopped)
+    }
+
     /// The store's sink and the free space it was watched against.
     pub fn into_parts(self) -> (StoreSink<WatchedIo<I>>, FreeSpace) {
         (self.inner, self.free)
