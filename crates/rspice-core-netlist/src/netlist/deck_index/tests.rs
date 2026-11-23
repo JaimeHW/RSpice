@@ -224,6 +224,36 @@ fn the_first_line_is_the_title_whatever_it_says_and_control_lines_are_no_instanc
 }
 
 #[test]
+fn an_analysis_or_options_card_is_known_by_the_parser_s_own_spellings() {
+    let deck = "bench
+R1 a 0 1k
+.tr 1n 1u
+.lin sparcalc=1
+.mc 10
+.opts reltol=1e-4
+                .temp 27
+.end
+";
+    let kinds = index(deck)
+        .cards()
+        .iter()
+        .map(|card| (card.head.clone(), card.kind))
+        .collect::<Vec<_>>();
+    for (head, kind) in [
+        (".tr", DeckCardKind::Analysis),
+        (".lin", DeckCardKind::Analysis),
+        (".mc", DeckCardKind::Analysis),
+        (".opts", DeckCardKind::Option),
+        (".temp", DeckCardKind::Directive),
+    ] {
+        assert!(
+            kinds.contains(&(head.to_owned(), kind)),
+            "{head} is not {kind:?}: {kinds:?}"
+        );
+    }
+}
+
+#[test]
 fn a_transistor_reads_the_model_its_fields_name_not_its_area() {
     let deck =
         "bjt\nQ1 c b e QN 2\nQ2 c b e s QN\nD1 c 0 1N4148\n.model QN npn\n.model 1N4148 d\n.end\n";

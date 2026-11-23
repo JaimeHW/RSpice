@@ -1637,13 +1637,13 @@ fn card_kind(head: &str, fields: &[Range<usize>], text: &str) -> DeckCardKind {
         ".param" | ".csparam" | ".params" => DeckCardKind::Parameter,
         ".global" | ".global_param" => DeckCardKind::Global,
         ".func" => DeckCardKind::Function,
-        ".option" | ".options" | ".opt" => DeckCardKind::Option,
+        head if super::is_options_card(head) => DeckCardKind::Option,
         ".model" => DeckCardKind::Model,
         ".subckt" => DeckCardKind::Subcircuit,
         ".ends" => DeckCardKind::EndSubcircuit,
-        ".op" | ".dc" | ".ac" | ".tran" | ".noise" | ".pz" | ".sens" | ".tf" | ".disto"
-        | ".four" | ".fourier" | ".hb" | ".sp" | ".pss" | ".pac" | ".pnoise" | ".qpss"
-        | ".qpnoise" | ".stb" | ".step" => DeckCardKind::Analysis,
+        // The analyses are the parser's; `.temp` it reads as one, but a
+        // deck states with it the temperature its analyses run at.
+        head if head != ".temp" && super::is_analysis_directive(head) => DeckCardKind::Analysis,
         ".meas" | ".measure" => DeckCardKind::Measurement,
         ".save" | ".probe" | ".print" | ".plot" => DeckCardKind::Output,
         ".if" | ".elseif" | ".else" | ".endif" => DeckCardKind::Conditional,
