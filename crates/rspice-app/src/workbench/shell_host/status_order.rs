@@ -599,7 +599,7 @@ fn deck_preparing_words(app: &RSpiceApp) -> Option<String> {
 }
 
 /// What a deck's run, prepared and waiting for more memory than is free,
-/// needs, against what is free: "Needs about 3.5 GB of memory · 3.1 GB
+/// needs, against what is free: "Needs about 3.5 GB of memory Â· 3.1 GB
 /// free".
 fn memory_words(app: &RSpiceApp) -> Option<String> {
     Some(app.state.runs.memory_warning()?.status())
