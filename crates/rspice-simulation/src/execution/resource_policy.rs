@@ -67,10 +67,23 @@ pub fn execution_resource_policy_blocker(
     limits.max_flattened_elements = defaults.max_flattened_elements;
     // A count above the default narrows nothing: the command line starts
     // from a larger result budget so a large batch run is not refused for its
-    // size, and a desktop run's counts are sized to the machine's memory.
+    // size, and a desktop run's sizes are sized to the machine's memory,
+    // which only ever widens them.
     limits.max_circuit_nodes = limits.max_circuit_nodes.min(defaults.max_circuit_nodes);
     limits.max_matrix_unknowns = limits.max_matrix_unknowns.min(defaults.max_matrix_unknowns);
     limits.max_result_values = limits.max_result_values.min(defaults.max_result_values);
+    limits.max_external_data_bytes = limits
+        .max_external_data_bytes
+        .min(defaults.max_external_data_bytes);
+    limits.max_external_data_values = limits
+        .max_external_data_values
+        .min(defaults.max_external_data_values);
+    limits.max_shared_cache_bytes = limits
+        .max_shared_cache_bytes
+        .min(defaults.max_shared_cache_bytes);
+    limits.max_transport_history_bytes = limits
+        .max_transport_history_bytes
+        .min(defaults.max_transport_history_bytes);
     (limits != defaults).then_some(
         "this analysis does not yet enforce custom execution resource limits; use default execution limits",
     )
@@ -108,15 +121,17 @@ mod tests {
         );
     }
 
-    /// A desktop run's counts are sized to the machine's memory, which only
+    /// A desktop run's limits are sized to the machine's memory, which only
     /// ever widens them.
     #[test]
     fn counts_sized_to_a_large_machine_do_not_refuse_an_analysis() {
-        let mut limits = ResourceLimits::default();
-        limits.max_flattened_elements *= 16;
-        limits.max_circuit_nodes *= 16;
-        limits.max_matrix_unknowns *= 16;
-        limits.max_result_values *= 16;
+        const GB: u64 = 1024 * 1024 * 1024;
+        let mut limits = crate::execution::run_memory::deck_limits(Some(
+            crate::execution::run_memory::MachineMemory {
+                installed_bytes: 64 * GB,
+                free_bytes: 32 * GB,
+            },
+        ));
         assert_eq!(
             execution_resource_policy_blocker(&NON_ENFORCING, limits),
             None
