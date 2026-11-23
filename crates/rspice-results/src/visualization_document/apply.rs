@@ -628,9 +628,11 @@ impl VisualizationDocument {
             }
             DocumentEdit::FollowRun { next } => self.follow_run(next),
             DocumentEdit::AddViewPane(pane) => self.add_view_pane(pane, created).map(|_| ()),
-            DocumentEdit::PlotSignal { pane_id, signal } => {
-                self.plot_signal(pane_id, &signal, created)
-            }
+            DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals,
+                plotted,
+            } => self.set_signals_plotted(pane_id, &signals, plotted, created),
             DocumentEdit::SetPaneHidden { pane_id, hidden } => {
                 self.pane_mut(pane_id)?.hidden = hidden;
                 Ok(())
@@ -1970,11 +1972,6 @@ impl VisualizationDocument {
             "visualization-document.axes",
             self.axes.len(),
             MAX_VISUALIZATION_AXES,
-        )?;
-        ensure_maximum_len(
-            "visualization-document.traces",
-            self.traces.len(),
-            MAX_VISUALIZATION_TRACES,
         )?;
         ensure_maximum_len(
             "visualization-document.cursors",

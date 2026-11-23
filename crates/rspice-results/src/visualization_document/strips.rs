@@ -105,7 +105,6 @@ fn invalid(message: impl Into<String>) -> VisualizationError {
 /// a share of the height above zero, and draws no curve twice. A curve may
 /// stand on two strips: one copied to a new strip is drawn on both.
 pub(super) fn validate_strips(strips: &[Strip]) -> Result<(), VisualizationError> {
-    ensure_maximum_len("pane.strips", strips.len(), MAX_VISUALIZATION_TRACES)?;
     let mut keys = HashSet::new();
     for strip in strips {
         validate_key("pane.strips.key", &strip.key)?;

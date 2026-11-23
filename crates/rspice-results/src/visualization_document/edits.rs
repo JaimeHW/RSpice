@@ -132,12 +132,14 @@ pub enum DocumentEdit {
     /// Add a bound pane with its axes and no traces: a view pane, which
     /// plots only the signals the reader plots.
     AddViewPane(NewPane),
-    /// Plot one signal of the analysis a pane draws: show its trace, or add
-    /// one.
-    PlotSignal {
+    /// Plot or take off any number of signals of the analysis a pane draws,
+    /// as one edit: one tick, or a whole group ticked at once. Plotting shows
+    /// each signal's trace, or adds one where the pane has none; taking off
+    /// hides every trace of each.
+    SetSignalsPlotted {
         pane_id: PaneId,
-        #[serde(deserialize_with = "deserialize_label_string")]
-        signal: String,
+        signals: Vec<String>,
+        plotted: bool,
     },
     /// Close or reopen a pane's strip; what it plots stays.
     SetPaneHidden {

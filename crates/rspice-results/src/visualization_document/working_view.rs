@@ -80,9 +80,7 @@ impl VisualizationDocument {
                 },
                 &mut created,
             )?;
-            for name in &pane.plotted {
-                document.plot_signal(pane_id, name, &mut created)?;
-            }
+            document.set_signals_plotted(pane_id, &pane.plotted, true, &mut created)?;
             previous = Some(pane_id);
         }
         document.validate()?;
@@ -154,85 +152,97 @@ impl VisualizationDocument {
         Ok(pane_id)
     }
 
-    /// Plot the signal `name` of the analysis `pane_id` draws: show its
-    /// trace, or add one when the pane has none.
-    pub(super) fn plot_signal(
+    /// Plot or take off the signals `names` of the analysis `pane_id` draws.
+    /// Plotting shows each one's traces, or adds a trace for a signal the
+    /// pane has none of; taking off hides every trace of each. The pane's
+    /// traces and its dataset's signals are each read once, however many
+    /// signals the edit names.
+    pub(super) fn set_signals_plotted(
         &mut self,
         pane_id: PaneId,
-        name: &str,
+        names: &[String],
+        plotted: bool,
         created: &mut Vec<EntityRef>,
     ) -> Result<(), VisualizationError> {
-        let mut held = false;
+        let pane = self
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
+        let (binding, viewer_id) = (pane.binding, pane.viewer_id.clone());
+        for name in names {
+            validate_label("trace.signal", name)?;
+        }
+        let named: HashSet<&str> = names.iter().map(String::as_str).collect();
+        let mut held = HashSet::new();
         for trace in &mut self.traces {
-            if trace.pane_id == pane_id && trace.source_signal().unwrap_or(&trace.label) == name {
-                trace.visible = true;
-                held = true;
+            let signal = trace.source_signal().unwrap_or(&trace.label);
+            if trace.pane_id == pane_id && named.contains(signal) {
+                held.insert(signal.to_owned());
+                trace.visible = plotted;
             }
         }
-        if held {
+        let mut added = HashSet::new();
+        let new: Vec<&String> = names
+            .iter()
+            .filter(|name| !held.contains(name.as_str()) && added.insert(name.as_str()))
+            .collect();
+        if !plotted || new.is_empty() {
             return Ok(());
         }
-        let binding = self
-            .panes
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?
-            .binding
-            .ok_or_else(|| VisualizationError::InvalidValue {
-                field: "pane.binding",
-                message: "only a pane bound to an analysis plots its signals".to_owned(),
-            })?;
-        let (signal_key, coordinate_key, row_predicates) =
-            {
-                let dataset = self.dataset_for_binding(binding.dataset)?;
-                let (by_name, long_form) =
-                    apply::display_predicates_by_name(dataset, binding.analysis_id, "pane's")?;
-                if long_form {
-                    let predicates = by_name.get(name).cloned().ok_or_else(|| {
-                        VisualizationError::InvalidValue {
-                            field: "trace.signal",
-                            message: format!("the pane's analysis has no signal named {name:?}"),
-                        }
-                    })?;
-                    ("y".to_owned(), "x".to_owned(), predicates)
+        let binding = binding.ok_or_else(|| VisualizationError::InvalidValue {
+            field: "pane.binding",
+            message: "only a pane bound to an analysis plots its signals".to_owned(),
+        })?;
+        let mut traces = Vec::with_capacity(new.len());
+        {
+            let dataset = self.dataset_for_binding(binding.dataset)?;
+            let (by_name, long_form) =
+                apply::display_predicates_by_name(dataset, binding.analysis_id, "pane's")?;
+            let coordinate = dataset
+                .columns
+                .iter()
+                .find(|column| column.role == ColumnRole::Coordinate);
+            for name in new {
+                let trace = if long_form {
+                    by_name
+                        .get(name.as_str())
+                        .map(|predicates| ("y".to_owned(), "x".to_owned(), predicates.clone()))
                 } else {
-                    let coordinate = dataset
+                    dataset
                         .columns
                         .iter()
-                        .find(|column| column.role == ColumnRole::Coordinate);
-                    let signal = dataset
-                        .columns
-                        .iter()
-                        .find(|column| column.role == ColumnRole::Signal && column.label == name);
-                    let (Some(coordinate), Some(signal)) = (coordinate, signal) else {
-                        return Err(VisualizationError::InvalidValue {
-                            field: "trace.signal",
-                            message: format!("the pane's dataset has no signal named {name:?}"),
-                        });
-                    };
-                    (signal.key.clone(), coordinate.key.clone(), Vec::new())
-                }
-            };
-        let viewer_id = self
-            .panes
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .map(|pane| pane.viewer_id.clone())
-            .unwrap_or_default();
+                        .find(|column| column.role == ColumnRole::Signal && column.label == *name)
+                        .zip(coordinate)
+                        .map(|(signal, coordinate)| {
+                            (signal.key.clone(), coordinate.key.clone(), Vec::new())
+                        })
+                };
+                let (signal_key, coordinate_key, row_predicates) =
+                    trace.ok_or_else(|| VisualizationError::InvalidValue {
+                        field: "trace.signal",
+                        message: format!("the pane's analysis has no signal named {name:?}"),
+                    })?;
+                traces.push((name.clone(), signal_key, coordinate_key, row_predicates));
+            }
+        }
         let (x_axis_id, y_axis_id) = self.provision_axes(pane_id, &viewer_id, created)?;
-        self.add_trace(
-            NewTrace {
-                pane_id,
-                binding: binding.dataset,
-                signal_key,
-                coordinate_key,
-                row_predicates,
-                x_axis_id,
-                y_axis_id,
-                label: name.to_owned(),
-            },
-            created,
-        )
+        for (label, signal_key, coordinate_key, row_predicates) in traces {
+            self.add_trace(
+                NewTrace {
+                    pane_id,
+                    binding: binding.dataset,
+                    signal_key,
+                    coordinate_key,
+                    row_predicates,
+                    x_axis_id,
+                    y_axis_id,
+                    label,
+                },
+                created,
+            )?;
+        }
+        Ok(())
     }
 
     /// Read `next`, a newer run, wherever this document reads the same

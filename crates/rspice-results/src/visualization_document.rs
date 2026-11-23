@@ -63,8 +63,6 @@ pub const MAX_VISUALIZATION_PAGES: usize = 64;
 pub const MAX_VISUALIZATION_PANES: usize = 256;
 /// Maximum number of axes in one visualization document.
 pub const MAX_VISUALIZATION_AXES: usize = 512;
-/// Maximum number of traces in one visualization document.
-pub const MAX_VISUALIZATION_TRACES: usize = 4_096;
 /// Maximum exact source-row predicates carried by one trace.
 pub const MAX_TRACE_ROW_PREDICATES: usize = 16;
 /// Maximum number of cursors in one visualization document.
@@ -119,8 +117,6 @@ pub const MAX_VISUALIZATION_UNIT_BYTES: usize = 64;
 pub const MAX_SOURCE_TEXT_BYTES: usize = 4_096;
 /// Maximum retained annotation length in UTF-8 bytes.
 pub const MAX_ANNOTATION_TEXT_BYTES: usize = 16_384;
-/// Maximum number of edits accepted by one atomic visualization transaction.
-pub const MAX_VISUALIZATION_TRANSACTION_EDITS: usize = 4_096;
 /// Maximum declared family dimensions in one presentation policy.
 pub const MAX_FAMILY_DIMENSIONS: usize = 32;
 /// Maximum visual encoding maps in one family presentation policy.
@@ -2754,7 +2750,7 @@ struct VisualizationDocumentWire {
     pages: BoundedVec<Page, MAX_VISUALIZATION_PAGES>,
     panes: BoundedVec<Pane, MAX_VISUALIZATION_PANES>,
     axes: BoundedVec<Axis, MAX_VISUALIZATION_AXES>,
-    traces: BoundedVec<Trace, MAX_VISUALIZATION_TRACES>,
+    traces: Vec<Trace>,
     cursors: BoundedVec<Cursor, MAX_VISUALIZATION_CURSORS>,
     markers: BoundedVec<Marker, MAX_VISUALIZATION_MARKERS>,
     measurements: AggregateBoundedVec<
@@ -2822,7 +2818,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             pages: wire.pages.into_inner(),
             panes: wire.panes.into_inner(),
             axes: wire.axes.into_inner(),
-            traces: wire.traces.into_inner(),
+            traces: wire.traces,
             cursors: wire.cursors.into_inner(),
             markers: wire.markers.into_inner(),
             measurements: wire.measurements.into_inner(),
@@ -3211,12 +3207,10 @@ impl VisualizationDocument {
                 actual: self.revision,
             });
         }
-        if edits.is_empty() || edits.len() > MAX_VISUALIZATION_TRANSACTION_EDITS {
+        if edits.is_empty() {
             return Err(VisualizationError::InvalidValue {
                 field: "transaction.edits",
-                message: format!(
-                    "a transaction must contain 1 to {MAX_VISUALIZATION_TRANSACTION_EDITS} edits"
-                ),
+                message: "a transaction holds at least one edit".to_owned(),
             });
         }
         let previous_revision = self.revision;

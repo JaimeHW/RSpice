@@ -370,21 +370,24 @@ fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, run
         if !reads_run {
             continue;
         }
-        for waveform in run.analyses[index]
+        let drawn: HashSet<&str> = document
+            .traces()
+            .iter()
+            .filter(|trace| trace.pane_id == pane_id)
+            .map(trace_signal)
+            .collect();
+        let signals: Vec<String> = run.analyses[index]
             .waveforms
             .iter()
-            .filter(|waveform| waveform.visible)
-        {
-            let drawn = document
-                .traces()
-                .iter()
-                .any(|trace| trace.pane_id == pane_id && trace_signal(trace) == waveform.name);
-            if !drawn {
-                edits.push(DocumentEdit::PlotSignal {
-                    pane_id,
-                    signal: waveform.name.clone(),
-                });
-            }
+            .filter(|waveform| waveform.visible && !drawn.contains(waveform.name.as_str()))
+            .map(|waveform| waveform.name.clone())
+            .collect();
+        if !signals.is_empty() {
+            edits.push(DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals,
+                plotted: true,
+            });
         }
     }
     if edits.is_empty() {
@@ -1103,36 +1106,40 @@ fn capture_edits(state: &ResultsParts<'_>, binding: &QuickViewBinding) -> Vec<Do
         let Some(pane) = document.panes().iter().find(|pane| pane.id == pane_id) else {
             continue;
         };
-        let traces: Vec<_> = document
+        // Each signal the pane draws, and whether every trace of it is shown.
+        let mut drawn = HashMap::<&str, bool>::new();
+        for trace in document
             .traces()
             .iter()
             .filter(|trace| trace.pane_id == pane_id)
-            .collect();
+        {
+            *drawn.entry(trace_signal(trace)).or_insert(true) &= trace.visible;
+        }
+        // However many signals one gesture ticks or unticks, the view takes
+        // them as one edit each way.
+        let (mut ticked, mut unticked) = (Vec::new(), Vec::new());
         for waveform in &analysis.waveforms {
             let wanted = session.waveform_visibility(
                 &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
                 waveform.visible,
             );
-            let held: Vec<_> = traces
-                .iter()
-                .filter(|trace| trace_signal(trace) == waveform.name)
-                .collect();
-            let plotted = !held.is_empty() && held.iter().all(|trace| trace.visible);
+            let plotted = drawn.get(waveform.name.as_str()).copied().unwrap_or(false);
             if wanted == plotted {
                 continue;
             }
             if wanted {
-                edits.push(DocumentEdit::PlotSignal {
-                    pane_id,
-                    signal: waveform.name.clone(),
-                });
+                ticked.push(waveform.name.clone());
             } else {
-                edits.extend(held.iter().filter(|trace| trace.visible).map(|trace| {
-                    DocumentEdit::SetTraceVisibility {
-                        trace_id: trace.id,
-                        visible: false,
-                    }
-                }));
+                unticked.push(waveform.name.clone());
+            }
+        }
+        for (signals, plotted) in [(ticked, true), (unticked, false)] {
+            if !signals.is_empty() {
+                edits.push(DocumentEdit::SetSignalsPlotted {
+                    pane_id,
+                    signals,
+                    plotted,
+                });
             }
         }
         if let Some(names) = lanes::EventNames::of(analysis)

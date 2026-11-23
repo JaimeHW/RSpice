@@ -1107,24 +1107,27 @@ fn visualization_document_deserialization_rejects_oversized_entity_sequences() {
 }
 
 #[test]
-fn atomic_transactions_reject_oversized_edit_batches_before_mutation() {
+fn a_transaction_holds_any_number_of_edits_but_not_none() {
     let (mut document, _) = document();
     let before = document.clone();
-    let page = document.pages()[0].id;
-    let edits = (0..=MAX_VISUALIZATION_TRANSACTION_EDITS)
-        .map(|_| DocumentEdit::Rename {
-            entity: EntityRef::Page(page),
-            value: "Bounded".to_owned(),
-        })
-        .collect();
     assert!(matches!(
-        document.transact(document.revision(), edits),
+        document.transact(document.revision(), Vec::new()),
         Err(VisualizationError::InvalidValue {
             field: "transaction.edits",
             ..
         })
     ));
     assert_eq!(document, before);
+    let page = document.pages()[0].id;
+    let edits: Vec<_> = (0..10_000)
+        .map(|step| DocumentEdit::Rename {
+            entity: EntityRef::Page(page),
+            value: format!("Step {step}"),
+        })
+        .collect();
+    let receipt = document.transact(document.revision(), edits).unwrap();
+    assert_eq!(receipt.edit_count, 10_000);
+    assert_eq!(document.pages()[0].title, "Step 9999");
 }
 
 #[test]

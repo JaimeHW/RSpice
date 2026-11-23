@@ -155,9 +155,10 @@ fn plotting_a_signal_adds_its_trace_once_and_closing_a_strip_keeps_it() {
         document
             .transact(
                 document.revision(),
-                vec![DocumentEdit::PlotSignal {
+                vec![DocumentEdit::SetSignalsPlotted {
                     pane_id,
-                    signal: signal.to_owned(),
+                    signals: vec![signal.to_owned()],
+                    plotted: true,
                 }],
             )
             .expect("the pane plots its analysis' signal");
@@ -191,9 +192,10 @@ fn plotting_a_signal_adds_its_trace_once_and_closing_a_strip_keeps_it() {
         document
             .transact(
                 document.revision(),
-                vec![DocumentEdit::PlotSignal {
+                vec![DocumentEdit::SetSignalsPlotted {
                     pane_id,
-                    signal: "V(nowhere)".to_owned(),
+                    signals: vec!["V(nowhere)".to_owned()],
+                    plotted: true,
                 }],
             )
             .is_err()
@@ -454,9 +456,10 @@ fn a_run_read_while_running_is_read_again_once_it_grows() {
                         ],
                     ),
                 },
-                DocumentEdit::PlotSignal {
+                DocumentEdit::SetSignalsPlotted {
                     pane_id: tran_pane,
-                    signal: "V(late)".to_owned(),
+                    signals: vec!["V(late)".to_owned()],
+                    plotted: true,
                 },
             ],
         )
@@ -592,5 +595,61 @@ fn a_working_view_saved_as_a_document_is_copied_whole() {
     assert!(
         saved.saved_copy("Again").is_err(),
         "only a working view is saved as a document"
+    );
+}
+
+/// Ticking a group of signals is one edit however many it names, and so is
+/// taking them all off again: no count cuts either short.
+#[test]
+fn one_edit_plots_or_takes_off_every_signal_it_names() {
+    let tran = AnalysisInstanceId::new();
+    let names: Vec<String> = (0..5_000).map(|index| format!("V(n{index})")).collect();
+    let named: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut document = VisualizationDocument::new_working_view(
+        WorkingViewSource::Plan {
+            plan_id: SimulationPlanId::new(),
+        },
+        run(binding(1), &[(tran, AnalysisType::Transient, &named)]),
+        ResultDocumentTracking::pinned(),
+        vec![pane("Transient", tran, &[])],
+    )
+    .expect("a working view");
+    let pane_id = document.pane_of_analysis(tran).expect("the pane").id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: names.clone(),
+                plotted: true,
+            }],
+        )
+        .expect("one edit plots every signal it names");
+    assert_eq!(
+        document
+            .traces()
+            .iter()
+            .filter(|trace| trace.visible)
+            .count(),
+        names.len()
+    );
+    let back: VisualizationDocument =
+        serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
+    assert_eq!(back.traces().len(), names.len(), "and reads back whole");
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: names.clone(),
+                plotted: false,
+            }],
+        )
+        .expect("one edit takes every signal it names off");
+    assert!(document.traces().iter().all(|trace| !trace.visible));
+    assert_eq!(
+        document.traces().len(),
+        names.len(),
+        "a signal taken off keeps its trace, hidden"
     );
 }
