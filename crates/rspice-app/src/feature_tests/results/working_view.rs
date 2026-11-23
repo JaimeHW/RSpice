@@ -17,6 +17,8 @@ use rspice_app_state::workbench::workspace::Workspace;
 use rspice_results::feature_search::{Anchor, nearest};
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
+mod large_runs;
+
 const TIME: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 const FIRST_OUT: [f64; 5] = [0.0, 0.4, 1.0, 0.4, 0.0];
 const RERUN_OUT: [f64; 5] = [0.0, 0.2, 0.4, 1.0, 0.1];

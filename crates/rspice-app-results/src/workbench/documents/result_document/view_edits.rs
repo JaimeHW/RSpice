@@ -22,6 +22,7 @@ use crate::results::visualization_document::{
     DocumentEdit, ViewSnapshot, VisualizationDocument, VisualizationTransactionReceipt,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use super::{ResultsParts, ResultsReads};
 
@@ -263,9 +264,15 @@ pub(crate) fn step(
     Ok(())
 }
 
-/// The view Ctrl+Z and Ctrl+Y step in Results: the one the workspace shows.
+/// The view Ctrl+Z and Ctrl+Y step in Results: the one the workspace shows,
+/// a saved document or the working view of the run it shows.
 pub(crate) fn shown_view(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
-    super::document_edit::active_document_id(state)
+    match state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => {
+            super::working_view::view_of_run(state, *dataset_id)
+        }
+        _ => super::document_edit::active_document_id(state),
+    }
 }
 
 /// Whose step Undo or Redo takes next in Results.
