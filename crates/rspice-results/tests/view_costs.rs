@@ -104,7 +104,7 @@ fn view(signals: usize) -> VisualizationDocument {
 /// A small edit of the trace at `index`: its colour, or whether it shows.
 fn small_edit(document: &VisualizationDocument, index: usize) -> DocumentEdit {
     let trace_id = document.traces()[index % document.traces().len()].id;
-    if index % 2 == 0 {
+    if index.is_multiple_of(2) {
         DocumentEdit::SetTraceColor {
             trace_id,
             color: Some(TraceColor::from_rgb(1, 2, 3)),

@@ -272,12 +272,7 @@ fn a_new_document_and_an_added_pane_plot_what_the_deck_names_of_a_million_signal
     show_newest(&mut app.state);
     quick_frame(&mut app.state);
 
-    let started = std::time::Instant::now();
     let document_id = create_document(&mut app.state);
-    println!(
-        "a new document of a million-signal run in {:?}",
-        started.elapsed()
-    );
     let named = vec!["V(n7)".to_owned(), format!("V(n{})", SIGNALS - 1)];
     assert_eq!(document_plots(&app.state, document_id), [named.clone()]);
 

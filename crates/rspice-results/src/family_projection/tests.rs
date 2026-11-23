@@ -337,12 +337,16 @@ fn a_pick_of_thousands_of_runs_keeps_exactly_those_runs() {
     };
     assert_eq!(
         kept(picked.clone()),
-        (0..RUNS).filter(|index| index % 2 == 1).collect::<Vec<_>>()
+        (0..RUNS)
+            .filter(|index| !index.is_multiple_of(2))
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         kept(FamilyPredicate::Not {
             predicate: Box::new(picked),
         }),
-        (0..RUNS).filter(|index| index % 2 == 0).collect::<Vec<_>>()
+        (0..RUNS)
+            .filter(|index| index.is_multiple_of(2))
+            .collect::<Vec<_>>()
     );
 }
