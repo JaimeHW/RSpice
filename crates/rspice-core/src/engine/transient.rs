@@ -6034,6 +6034,13 @@ impl Engine {
             }
         };
 
+        // Stop is answered between the sections that shape the run's results,
+        // not only in the step loop: on a large circuit each of them runs for
+        // a noticeable time after the operating point, and the loop's first
+        // check comes only after the last of them.
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         // Initialize result storage with actual MNA node names. Native Xyce
         // memristor resistance remains a typed store trace and never enters
         // this voltage namespace.
@@ -6156,6 +6163,9 @@ impl Engine {
                 }
             },
         )?;
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let capture_plan = TransientCapturePlan::compile(
             netlist,
             TransientNodeNamespace {
@@ -6338,6 +6348,9 @@ impl Engine {
         } else {
             None
         };
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let mut rows = {
             let layout = TransientRowLayout::new(
                 &capture_plan.voltages,
@@ -6415,6 +6428,9 @@ impl Engine {
             rows.push(resume_time)?;
         }
         drop(branch_currents);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if let Some((report, observed)) = initial_device_ops {
             result_rows::record_first_device_ops(&mut result, &mut rows, report, &observed)?;
         }
