@@ -321,8 +321,22 @@ pub fn pane_trace_extremes(
     window: Option<(f64, f64)>,
     mut note_samples: impl FnMut(usize),
 ) -> Extremes {
+    // A window that holds every sample the strip's visible traces hold, as an
+    // unzoomed strip's does, measures what the whole record measures: each
+    // such trace answers from its whole-record extent, read once a data
+    // version, rather than measuring the same samples again as a window.
+    let whole_record = window.is_some_and(|(x0, x1)| {
+        model
+            .x_bounds
+            .is_some_and(|(low, high)| x0.min(x1) <= low && x0.max(x1) >= high)
+    });
     let mut extremes = Extremes::default();
     for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
+        let window = if whole_record && trace.visible {
+            None
+        } else {
+            window
+        };
         // A stored trace's extent comes from its tiles, never its whole column.
         if trace.y.is_stored()
             && let Some(extent) = derived.stored_extent_or(trace_key(model, trace), window, || {
