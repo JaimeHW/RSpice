@@ -619,16 +619,17 @@ fn the_history_page_lists_checkpoints_newest_first() {
     assert!(at.is_sorted(), "{made:?} are not newest first:\n{text}");
 }
 
-/// An empty history says so once; a damaged checkpoint is a row of its own
-/// that says in a few words what is wrong; and a store that cannot be read
-/// says what to do and offers Try again instead of an empty list.
+/// A project with no checkpoint counts none and still lists its journal; a
+/// damaged checkpoint is a row of its own that says in a few words what is
+/// wrong; and a store that cannot be read says so and offers Try again
+/// rather than counting no checkpoints.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn the_history_page_states_empty_damaged_and_unreadable_catalogs() {
     let size = egui::vec2(1440.0, 900.0);
     let mut empty = recovery_project_app(0, false, false);
     let text = painted_project_page(size, |ui| show(ui, &mut empty));
-    for expected in ["0 checkpoints \u{b7} ", "No checkpoints or revisions yet."] {
+    for expected in ["0 checkpoints \u{b7} ", "Default plan"] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
 
@@ -663,16 +664,11 @@ fn the_history_page_states_empty_damaged_and_unreadable_catalogs() {
     );
     assert!(!text.contains("integrity manifest"), "{text}");
 
-    // An unreadable store says what is wrong and what to do in plain
-    // words; what the system said is the Console's.
+    // An unreadable store says so in plain words and offers to list again,
+    // what to do under the pointer; what the system said is the Console's.
     let mut unreadable = recovery_project_app(0, false, true);
     let text = painted_project_page(size, |ui| show(ui, &mut unreadable));
-    for expected in [
-        "Checkpoints unreadable",
-        "RSpice could not open the folder that keeps this project's checkpoints. Check that \
-         you are allowed to open it, then try again.",
-        "Try again",
-    ] {
+    for expected in ["Checkpoints unreadable", "Try again"] {
         assert!(text.contains(expected), "{expected:?} missing:\n{text}");
     }
     for system in ["Access is denied", "os error", "rspice-recovery"] {

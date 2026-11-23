@@ -466,7 +466,14 @@ fn a_damaged_checkpoint_says_what_is_wrong_and_the_console_keeps_the_store_text(
         "{}",
         painted(&listed)
     );
-    let text = painted(&select_row(&ctx, &mut app, &listed, "Manual checkpoint"));
+    // The damaged one bears the same name as the sound one beside it.
+    let set_aside = click_where(
+        &listed,
+        |label| label.contains("Kind: Set aside"),
+        egui::PointerButton::Primary,
+    );
+    app_frame(&ctx, &mut app, set_aside);
+    let text = painted(&app_frame(&ctx, &mut app, Vec::new()));
     assert!(
         text.contains("The copy of the project it keeps has changed since it was taken"),
         "{text}"
