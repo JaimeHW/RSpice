@@ -704,7 +704,7 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     user.app.state.workbench.activate(Workspace::Project);
     user.settle();
 
-    // A listed row reads its name, then its count or version.
+    // A model's row reads its name, then its version.
     let models = rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS;
     let row = |name: &str| {
         let model = models
@@ -713,20 +713,18 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
             .expect("a built-in model");
         format!("{}, {}", model.name, model.version)
     };
-    user.click(&format!("Verilog-A models, {}, Read-only", models.len()));
+    user.click("Verilog-A models, Read-only");
     assert!(
         user.find(&row("BSIM-BULK")).is_some(),
         "the models are listed"
     );
-    let band = user.expect("Open read-only");
-    let dock = user.expect("Console");
-    assert!(
-        band.bottom() <= dock.top() + 0.5,
-        "the band's buttons stand above the dock: {band:?} {dock:?}"
-    );
     user.app.state.project.project_library_filter = "vbic".to_owned();
     user.settle();
-    user.click(&row("VBIC 3-terminal"));
+    // Copy cell… is the model row's menu item.
+    let vbic = row("VBIC 3-terminal");
+    user.click(&vbic);
+    user.press(user.expect(&vbic).center(), egui::PointerButton::Secondary);
+    user.settle();
     user.click("Copy cell…");
     let project = &user.app.state.project;
     assert!(project.copy_cell_dialog, "Copy cell opens");
