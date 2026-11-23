@@ -11,9 +11,7 @@ use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
 use super::SourceEditingState;
-use super::{
-    CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
-};
+use super::{SourceFileAction, SourceFileDialogState, SourceHistoryState, VerilogAFileSelection};
 
 pub fn source_file_mutation_block_reason(parts: &SourceEditingParts<'_>) -> Option<String> {
     source_file_mutation_block_reason_in(
@@ -120,7 +118,7 @@ pub(crate) fn source_bundle_contains_document_in(
 
 pub fn open_source_file_dialog(
     parts: &mut SourceEditingParts<'_>,
-    action: CodeSourceFileAction,
+    action: SourceFileAction,
     source_path: &str,
     importer_path: &str,
 ) -> Result<(), String> {
@@ -136,7 +134,7 @@ pub fn open_source_file_dialog(
 pub fn open_source_file_dialog_in_bundle(
     parts: &mut SourceEditingParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
-    action: CodeSourceFileAction,
+    action: SourceFileAction,
     source_path: &str,
     importer_path: &str,
 ) -> Result<(), String> {
@@ -144,7 +142,7 @@ pub fn open_source_file_dialog_in_bundle(
     if let Some(reason) = source_file_mutation_block_reason(parts) {
         return Err(reason);
     }
-    let named = if action == CodeSourceFileAction::New {
+    let named = if action == SourceFileAction::New {
         importer_path
     } else {
         source_path
@@ -159,10 +157,10 @@ pub fn open_source_file_dialog_in_bundle(
         .project_sources
         .get_bundle(bundle_id)
         .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
-    if action != CodeSourceFileAction::New && !bundle.contains_file(source_path) {
+    if action != SourceFileAction::New && !bundle.contains_file(source_path) {
         return Err(not_in_project(messages, source_path));
     }
-    if action == CodeSourceFileAction::Delete
+    if action == SourceFileAction::Delete
         && crate::state::project_source_paths_equal(source_path, bundle.root().logical_path())
     {
         return Err(messages.text(MessageId::CodeSourceFileMainNotDeleted));
@@ -173,27 +171,27 @@ pub fn open_source_file_dialog_in_bundle(
     // new file asked for from there is included from the main file instead.
     // A copy stands beside its original: it is included from the file that
     // includes the original, rather than from the original itself.
-    let importer_path = if action == CodeSourceFileAction::Duplicate {
+    let importer_path = if action == SourceFileAction::Duplicate {
         veriloga_includers_of(bundle, source_path)
             .into_iter()
             .find(|includer| !bundle.is_build_profile(includer))
             .unwrap_or_else(|| bundle.root().logical_path().to_owned())
-    } else if action == CodeSourceFileAction::New && bundle.is_build_profile(importer_path) {
+    } else if action == SourceFileAction::New && bundle.is_build_profile(importer_path) {
         bundle.root().logical_path().to_owned()
     } else {
         importer_path.to_owned()
     };
     let importer_path = importer_path.as_str();
     let proposed_path = match action {
-        CodeSourceFileAction::New => unique_suggestion(bundle, importer_path, default_file_name()),
-        CodeSourceFileAction::Duplicate => {
+        SourceFileAction::New => unique_suggestion(bundle, importer_path, default_file_name()),
+        SourceFileAction::Duplicate => {
             unique_suggestion(bundle, source_path, duplicate_file_name(source_path))
         }
-        CodeSourceFileAction::Rename
-        | CodeSourceFileAction::Move
-        | CodeSourceFileAction::Delete => source_path.to_owned(),
+        SourceFileAction::Rename | SourceFileAction::Move | SourceFileAction::Delete => {
+            source_path.to_owned()
+        }
     };
-    parts.code.source_file_dialog = Some(CodeSourceFileDialogState {
+    parts.code.source_file_dialog = Some(SourceFileDialogState {
         action,
         project_id: parts.model.workspace.content.project.id(),
         bundle_id,
@@ -227,7 +225,7 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
         .project_sources
         .get_bundle(draft.bundle_id)
         .ok_or_else(|| messages.text(MessageId::SourceRemoved))?;
-    let named = if draft.action == CodeSourceFileAction::New {
+    let named = if draft.action == SourceFileAction::New {
         draft.importer_path.as_str()
     } else {
         draft.source_path.as_str()
@@ -247,7 +245,7 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
         .next()
         .unwrap_or_else(|| bundle.root().logical_path().to_owned());
     let changed = match draft.action {
-        CodeSourceFileAction::New => {
+        SourceFileAction::New => {
             let file = ProjectSourceFile::try_new(proposed, new_file_template())
                 .map_err(|error| error.to_string())?;
             parts
@@ -257,7 +255,7 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
                 .add_project_source_bundle_file(draft.bundle_id, &draft.importer_path, file)
                 .map_err(|error| error.to_string())?
         }
-        CodeSourceFileAction::Duplicate => {
+        SourceFileAction::Duplicate => {
             let content = bundle
                 .file_content(&draft.source_path)
                 .ok_or_else(|| not_in_project(messages, &draft.source_path))?
@@ -271,13 +269,13 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
                 .add_project_source_bundle_file(draft.bundle_id, &draft.importer_path, file)
                 .map_err(|error| error.to_string())?
         }
-        CodeSourceFileAction::Rename | CodeSourceFileAction::Move => parts
+        SourceFileAction::Rename | SourceFileAction::Move => parts
             .model
             .workspace
             .content
             .rename_project_source_bundle_file(draft.bundle_id, &draft.source_path, proposed)
             .map_err(|error| error.to_string())?,
-        CodeSourceFileAction::Delete => parts
+        SourceFileAction::Delete => parts
             .model
             .workspace
             .content
@@ -292,7 +290,7 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
     // A deleted file leaves the reader on the file that included it, else
     // on the main file.
     let selected_path = match draft.action {
-        CodeSourceFileAction::Delete => after_delete,
+        SourceFileAction::Delete => after_delete,
         _ => proposed.to_owned(),
     };
     parts.code.veriloga.selected_file = Some(VerilogAFileSelection {
@@ -302,22 +300,22 @@ pub fn commit_source_file_dialog(parts: &mut SourceEditingParts<'_>) -> Result<S
     super::veriloga::invalidate_veriloga_evidence_in(parts.model, parts.code, draft.bundle_id);
     parts.code.source_file_dialog = None;
     let message = match draft.action {
-        CodeSourceFileAction::New => {
+        SourceFileAction::New => {
             messages.format(MessageId::CodeSourceFileCreated, &[("file", proposed)])
         }
-        CodeSourceFileAction::Duplicate => messages.format(
+        SourceFileAction::Duplicate => messages.format(
             MessageId::CodeSourceFileDuplicated,
             &[("file", &draft.source_path), ("new", proposed)],
         ),
-        CodeSourceFileAction::Rename => messages.format(
+        SourceFileAction::Rename => messages.format(
             MessageId::CodeSourceFileRenamed,
             &[("file", &draft.source_path), ("new", proposed)],
         ),
-        CodeSourceFileAction::Move => messages.format(
+        SourceFileAction::Move => messages.format(
             MessageId::CodeSourceFileMoved,
             &[("file", &draft.source_path), ("new", proposed)],
         ),
-        CodeSourceFileAction::Delete => messages.format(
+        SourceFileAction::Delete => messages.format(
             MessageId::CodeSourceFileDeleted,
             &[("file", &draft.source_path)],
         ),
@@ -360,7 +358,7 @@ pub(crate) fn open_source_history_in_bundle(
     if !bundle.contains_file(source_path) {
         return Err(not_in_project(messages, source_path));
     }
-    parts.code.source_history = Some(CodeSourceHistoryState {
+    parts.code.source_history = Some(SourceHistoryState {
         project_id: parts.model.workspace.content.project.id(),
         bundle_id,
         bundle_revision: bundle.revision().get(),
@@ -658,7 +656,7 @@ mod tests {
         open_source_file_dialog_in_bundle(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
             bundle_id,
-            CodeSourceFileAction::Duplicate,
+            SourceFileAction::Duplicate,
             "cell/gain.va",
             "cell/gain.va",
         )
@@ -756,7 +754,7 @@ mod tests {
 
         open_source_file_dialog(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
-            CodeSourceFileAction::New,
+            SourceFileAction::New,
             &root,
             &root,
         )
@@ -774,7 +772,7 @@ mod tests {
 
         open_source_file_dialog(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
-            CodeSourceFileAction::Rename,
+            SourceFileAction::Rename,
             "models/helper.va",
             &root,
         )
@@ -792,7 +790,7 @@ mod tests {
 
         open_source_file_dialog(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
-            CodeSourceFileAction::Move,
+            SourceFileAction::Move,
             "models/renamed.va",
             &root,
         )
@@ -810,7 +808,7 @@ mod tests {
 
         open_source_file_dialog(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
-            CodeSourceFileAction::Duplicate,
+            SourceFileAction::Duplicate,
             "library/renamed.va",
             &root,
         )
@@ -828,7 +826,7 @@ mod tests {
 
         open_source_file_dialog(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
-            CodeSourceFileAction::Delete,
+            SourceFileAction::Delete,
             &duplicate,
             &root,
         )
@@ -848,7 +846,7 @@ mod tests {
         let create = |harness: &mut SourceHarness, path: &str| {
             open_source_file_dialog(
                 &mut SourceFeature::workspace_parts(&mut harness.cx()),
-                CodeSourceFileAction::New,
+                SourceFileAction::New,
                 &root,
                 &root,
             )
@@ -888,7 +886,7 @@ mod tests {
         let before = verilog_a_bundle(&harness).closure_digest();
         open_source_file_dialog(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
-            CodeSourceFileAction::New,
+            SourceFileAction::New,
             &root,
             &root,
         )
@@ -994,7 +992,7 @@ mod tests {
         let root = verilog_a_bundle(&harness).root().logical_path().to_owned();
         let error = open_source_file_dialog(
             &mut SourceFeature::workspace_parts(&mut harness.cx()),
-            CodeSourceFileAction::Delete,
+            SourceFileAction::Delete,
             &root,
             &root,
         )

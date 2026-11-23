@@ -81,7 +81,7 @@ pub struct LanguageServiceIndex {
 /// the caret, and the new name being typed, with what renaming to it would
 /// do, worked out once for each new name.
 #[derive(Debug, Clone)]
-pub struct CodeLanguageToolsState {
+pub struct SourceLanguageToolsState {
     pub index: LanguageServiceIndex,
     pub active_path: String,
     /// The character the name was taken from.
@@ -105,7 +105,7 @@ pub(crate) struct SourceRenamePlan {
     pub(crate) files: usize,
 }
 
-impl CodeLanguageToolsState {
+impl SourceLanguageToolsState {
     /// The new name as written, without the space around it.
     pub fn new_name(&self) -> &str {
         self.replacement.trim()
@@ -181,7 +181,7 @@ pub fn open_language_tools_in_bundle(
         .symbol_at(&active_path, caret_char_index)
         .unwrap_or_default()
         .to_owned();
-    parts.code.language_tools = Some(CodeLanguageToolsState {
+    parts.code.language_tools = Some(SourceLanguageToolsState {
         index,
         active_path,
         caret: caret_char_index,
@@ -272,7 +272,7 @@ pub fn extent_words(messages: MessageCatalog, occurrences: usize, files: usize) 
 
 fn current_language_transaction(
     parts: &SourceEditingParts<'_>,
-) -> Result<CodeLanguageToolsState, String> {
+) -> Result<SourceLanguageToolsState, String> {
     let messages = parts.wb.messages();
     let state = parts
         .code
@@ -1572,7 +1572,7 @@ mod tests {
     fn a_rename_plan_lists_each_changed_line_and_is_worked_out_once_for_each_name() {
         use crate::workbench::documents::netlist_document::references::RenameRow;
         let caret = char_of(TWO_SCOPES, "b;\n  analog V(a");
-        let mut tools = CodeLanguageToolsState {
+        let mut tools = SourceLanguageToolsState {
             index: two_scopes(),
             active_path: "two.va".to_owned(),
             caret,

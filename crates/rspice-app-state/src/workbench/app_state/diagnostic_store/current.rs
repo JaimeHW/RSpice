@@ -15,7 +15,7 @@ use std::sync::Arc;
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::FindingKey;
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::model::Model;
 
@@ -33,12 +33,12 @@ pub struct SourceCollections<'a> {
     pub netlist_validated: Option<u64>,
     /// The diagnostics of the last Verilog-A compile that produced a
     /// receipt.
-    pub veriloga: Option<&'a Arc<CodeDiagnosticCollection>>,
+    pub veriloga: Option<&'a Arc<SourceDiagnosticCollection>>,
     /// The token that compile was authorized under, where there is one.
     pub veriloga_token: Option<VerilogASourceOperationToken>,
     /// The diagnostics of the last Verilog-A compile that failed before it
     /// could produce a receipt.
-    pub veriloga_failure: &'a Arc<CodeDiagnosticCollection>,
+    pub veriloga_failure: &'a Arc<SourceDiagnosticCollection>,
     /// The token that failed compile was authorized under.
     pub veriloga_failure_token: Option<&'a VerilogASourceOperationToken>,
 }
@@ -80,7 +80,7 @@ pub(super) struct SourceFingerprint {
 /// One source editor's findings, as the reconciliation reads them.
 enum Records<'a> {
     Netlist(&'a NetlistDiagnosticCollection),
-    Code(&'a CodeDiagnosticCollection),
+    Code(&'a SourceDiagnosticCollection),
 }
 
 impl Records<'_> {
@@ -159,7 +159,7 @@ fn records<'a>(sources: &SourceCollections<'a>, segment: SourceSegment) -> Optio
 }
 
 fn fingerprint(sources: &SourceCollections<'_>) -> SourceFingerprint {
-    let address = |collection: Option<&Arc<CodeDiagnosticCollection>>| {
+    let address = |collection: Option<&Arc<SourceDiagnosticCollection>>| {
         collection.map_or(0, |collection| Arc::as_ptr(collection) as usize)
     };
     SourceFingerprint {

@@ -20,14 +20,14 @@ use crate::workbench::{MessageId, WorkbenchSession};
 
 use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_problem_mark};
 
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::workbench::app::actions::veriloga_placement::{
     take_offered_veriloga_placement, veriloga_placement_target,
 };
 use crate::workbench::app::actions::veriloga_symbol::update_active_veriloga_symbol_in;
 use crate::workbench::code::commands::VerilogAStripRequest;
 use crate::workbench::documents::code_workspace::{
-    CodeEditorLanguage, EditorFindings, SourceEditingState, show_veriloga_document_versioned,
+    EditorFindings, SourceEditingState, SourceEditorLanguage, show_veriloga_document_versioned,
 };
 
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
@@ -87,11 +87,11 @@ fn editor_language(
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     active_path: &str,
     header_shown: bool,
-) -> CodeEditorLanguage {
+) -> SourceEditorLanguage {
     if !header_shown && selected.bundle().is_build_profile(active_path) {
-        CodeEditorLanguage::Toml
+        SourceEditorLanguage::Toml
     } else {
-        CodeEditorLanguage::VerilogA
+        SourceEditorLanguage::VerilogA
     }
 }
 
@@ -103,7 +103,7 @@ fn page_editor(
     platform: &PlatformState,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     shown_path: &str,
-    editor_language: CodeEditorLanguage,
+    editor_language: SourceEditorLanguage,
     editable: bool,
 ) -> ActiveSourceEditor {
     let bundle_id = selected.bundle().id();
@@ -117,7 +117,7 @@ fn page_editor(
         // The build profile beside the module is TOML, which the language
         // service does not index, and a built-in header is not part of the
         // bundle it indexes.
-        navigable: editable && editor_language == CodeEditorLanguage::VerilogA,
+        navigable: editable && editor_language == SourceEditorLanguage::VerilogA,
         // A step the editor's own history has not is the bundle's: a
         // format, rename or replace across its files.
         can_undo: code.source_edit_history.has_step(
@@ -328,8 +328,8 @@ fn source_editor(
     active_path: &str,
     source: &mut String,
     // `None` when the source changed after its last check.
-    diagnostics: Option<&CodeDiagnosticCollection>,
-    editor_language: CodeEditorLanguage,
+    diagnostics: Option<&SourceDiagnosticCollection>,
+    editor_language: SourceEditorLanguage,
     // False for a built-in header: it is read here, and nothing that writes
     // a file, searches the bundle, or records a place in it applies.
     editable: bool,
@@ -572,7 +572,7 @@ fn source_editor(
         (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,
     );
-    if editor_language == CodeEditorLanguage::VerilogA {
+    if editor_language == SourceEditorLanguage::VerilogA {
         let project_id = cx.model.workspace.content.project.id();
         crate::workbench::documents::code_workspace::drive_veriloga_live_check(
             ui.ctx(),
@@ -765,7 +765,7 @@ enum StripAction {
 fn current_diagnostics(
     cx: &Cx<'_, SourceFeature>,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
-) -> Option<std::sync::Arc<CodeDiagnosticCollection>> {
+) -> Option<std::sync::Arc<SourceDiagnosticCollection>> {
     crate::workbench::documents::code_workspace::veriloga_current_diagnostics(
         &cx.state.code_workspace.veriloga,
         cx.model.workspace.content.project.id(),

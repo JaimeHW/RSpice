@@ -23,10 +23,10 @@ mod veriloga_live_check;
 mod veriloga_symbols;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
-pub use super::CodeSourceFileAction;
+pub use super::SourceFileAction;
 
 pub use editor::{
-    CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity, EditorFindings,
+    EditorFindings, SourceEditorDiagnostic, SourceEditorLanguage, SourceEditorSeverity,
     show_code_document_interaction_versioned,
 };
 pub use editor::{
@@ -35,12 +35,12 @@ pub use editor::{
     show_veriloga_document_versioned, take_problem_step,
 };
 pub use language_services::{
-    CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,
+    LanguageServiceIndex, SourceLanguageToolsState, commit_language_rename, extent_words,
     format_language_document, open_language_tools_in_bundle,
 };
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{
-    CodeSourceFileDialogState, CodeSourceHistoryState, PendingVerilogACompile, SourceEditingState,
+    PendingVerilogACompile, SourceEditingState, SourceFileDialogState, SourceHistoryState,
     VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
     VerilogAReplaceTarget, VerilogAWorkbenchState,
 };

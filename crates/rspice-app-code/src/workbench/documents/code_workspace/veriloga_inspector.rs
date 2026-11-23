@@ -25,8 +25,8 @@ use rspice_app_state::workbench::app_state::model::compiled_parameters;
 use rspice_design::library::metadata::{CellParameter, ParameterValueType};
 
 use super::page::VerilogAWorkbenchState;
-use super::{CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource};
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use super::{SelectedVerilogASource, SourceEditorDiagnostic, SourceEditorSeverity};
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
 
 /// The compile receipt for exactly this source, if the last compile was of it.
@@ -47,9 +47,9 @@ pub fn veriloga_diagnostics(
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
-) -> Arc<CodeDiagnosticCollection> {
+) -> Arc<SourceDiagnosticCollection> {
     veriloga_current_diagnostics(state, project_id, selected)
-        .unwrap_or_else(|| Arc::new(CodeDiagnosticCollection::default()))
+        .unwrap_or_else(|| Arc::new(SourceDiagnosticCollection::default()))
 }
 
 /// The findings of the last check of exactly this source, a compile's or
@@ -60,7 +60,7 @@ pub fn veriloga_current_diagnostics(
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
-) -> Option<Arc<CodeDiagnosticCollection>> {
+) -> Option<Arc<SourceDiagnosticCollection>> {
     veriloga_receipt(state, project_id, selected)
         .map(|receipt| Arc::clone(&receipt.diagnostics))
         .or_else(|| {
@@ -555,9 +555,9 @@ fn shown_file<'a>(
 /// list, so it has no section. Returns the finding the reader activated.
 fn diagnostics_section(
     ui: &mut Ui,
-    diagnostics: &CodeDiagnosticCollection,
+    diagnostics: &SourceDiagnosticCollection,
     messages: MessageCatalog,
-) -> Option<CodeEditorDiagnostic> {
+) -> Option<SourceEditorDiagnostic> {
     const INSPECTOR_DIAGNOSTIC_PREVIEW: usize = 50;
 
     if diagnostics.is_empty() {
@@ -630,7 +630,7 @@ const DIAGNOSTIC_PAD_Y: i8 = 8;
 /// editor's caret there. Returns true when it was activated.
 fn diagnostic_row(
     ui: &mut Ui,
-    diagnostic: &CodeEditorDiagnostic,
+    diagnostic: &SourceEditorDiagnostic,
     messages: MessageCatalog,
 ) -> bool {
     /// The side of the kit's problem mark, so a row's mark matches the one in
@@ -651,18 +651,18 @@ fn diagnostic_row(
                 let (icon, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
                 let mark = egui::Rect::from_center_size(icon.center(), Vec2::splat(MARK_SIDE));
                 match diagnostic.severity {
-                    CodeEditorSeverity::Error => {
+                    SourceEditorSeverity::Error => {
                         paint_problem_mark(ui.painter(), mark, Problem::Failure);
                     }
-                    CodeEditorSeverity::Warning => {
+                    SourceEditorSeverity::Warning => {
                         paint_problem_mark(ui.painter(), mark, Problem::Warning);
                     }
                     // Advice is the kit's info mark in ink, not a status in
                     // a colour: only a warning or an error earns colour.
-                    CodeEditorSeverity::Info => {
+                    SourceEditorSeverity::Info => {
                         paint_status_mark(ui.painter(), mark, StatusMark::Info, t.color.text_dim);
                     }
-                    CodeEditorSeverity::Hint => {
+                    SourceEditorSeverity::Hint => {
                         paint_status_mark(ui.painter(), mark, StatusMark::Info, t.color.text_faint);
                     }
                 }
@@ -766,7 +766,7 @@ fn diagnostic_row(
 
 /// Where a finding is, as the row shows it: "21:29", or "21" when it names
 /// no column.
-fn diagnostic_place(diagnostic: &CodeEditorDiagnostic) -> Option<String> {
+fn diagnostic_place(diagnostic: &SourceEditorDiagnostic) -> Option<String> {
     match (diagnostic.line, diagnostic.column) {
         (Some(line), Some(column)) => Some(format!("{line}:{column}")),
         (Some(line), None) => Some(line.to_string()),

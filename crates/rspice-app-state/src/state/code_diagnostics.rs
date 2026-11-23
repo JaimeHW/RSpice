@@ -10,29 +10,29 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use rspice_vocabulary::diagnostics::{
-    DiagnosticSeverity as CodeEditorSeverity, MAX_DIAGNOSTICS,
-    SourceDiagnostic as CodeEditorDiagnostic, validate_diagnostic_count,
+    DiagnosticSeverity as SourceEditorSeverity, MAX_DIAGNOSTICS,
+    SourceDiagnostic as SourceEditorDiagnostic, validate_diagnostic_count,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CodeDiagnosticSummary {
+pub struct SourceDiagnosticSummary {
     pub hints: usize,
     pub information: usize,
     pub warnings: usize,
     pub errors: usize,
 }
 
-impl CodeDiagnosticSummary {
+impl SourceDiagnosticSummary {
     pub const fn total(self) -> usize {
         self.hints + self.information + self.warnings + self.errors
     }
 
-    fn record(&mut self, severity: CodeEditorSeverity) {
+    fn record(&mut self, severity: SourceEditorSeverity) {
         match severity {
-            CodeEditorSeverity::Hint => self.hints += 1,
-            CodeEditorSeverity::Info => self.information += 1,
-            CodeEditorSeverity::Warning => self.warnings += 1,
-            CodeEditorSeverity::Error => self.errors += 1,
+            SourceEditorSeverity::Hint => self.hints += 1,
+            SourceEditorSeverity::Info => self.information += 1,
+            SourceEditorSeverity::Warning => self.warnings += 1,
+            SourceEditorSeverity::Error => self.errors += 1,
         }
     }
 }
@@ -48,17 +48,17 @@ struct DocumentDiagnosticIndex {
 /// indexes. Product surfaces clone an `Arc` to this collection, so a million
 /// diagnostics are never copied or rescanned during a frame.
 #[derive(Debug, Clone, Default)]
-pub struct CodeDiagnosticCollection {
-    records: Vec<CodeEditorDiagnostic>,
-    summary: CodeDiagnosticSummary,
+pub struct SourceDiagnosticCollection {
+    records: Vec<SourceEditorDiagnostic>,
+    summary: SourceDiagnosticSummary,
     global: DocumentDiagnosticIndex,
     documents: HashMap<String, DocumentDiagnosticIndex>,
     interned_strings: HashMap<Arc<str>, Arc<str>>,
     diagnostic_ids: HashSet<uuid::Uuid>,
 }
 
-impl CodeDiagnosticCollection {
-    pub fn try_new(records: Vec<CodeEditorDiagnostic>) -> Result<Self, String> {
+impl SourceDiagnosticCollection {
+    pub fn try_new(records: Vec<SourceEditorDiagnostic>) -> Result<Self, String> {
         validate_diagnostic_count(records.len())?;
         let mut collection = Self::default();
         collection.records.reserve(records.len());
@@ -68,7 +68,7 @@ impl CodeDiagnosticCollection {
         Ok(collection)
     }
 
-    pub fn try_push(&mut self, record: CodeEditorDiagnostic) -> Result<(), String> {
+    pub fn try_push(&mut self, record: SourceEditorDiagnostic) -> Result<(), String> {
         if self.records.len() >= MAX_DIAGNOSTICS {
             return Err(format!(
                 "Diagnostic collection reached the supported maximum of {MAX_DIAGNOSTICS} records."
@@ -79,14 +79,14 @@ impl CodeDiagnosticCollection {
 
     pub fn clear(&mut self) {
         self.records.clear();
-        self.summary = CodeDiagnosticSummary::default();
+        self.summary = SourceDiagnosticSummary::default();
         self.global = DocumentDiagnosticIndex::default();
         self.documents.clear();
         self.interned_strings.clear();
         self.diagnostic_ids.clear();
     }
 
-    pub fn summary(&self) -> CodeDiagnosticSummary {
+    pub fn summary(&self) -> SourceDiagnosticSummary {
         self.summary
     }
 
@@ -98,16 +98,16 @@ impl CodeDiagnosticCollection {
         self.records.is_empty()
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, CodeEditorDiagnostic> {
+    pub fn iter(&self) -> std::slice::Iter<'_, SourceEditorDiagnostic> {
         self.records.iter()
     }
 
-    pub fn as_slice(&self) -> &[CodeEditorDiagnostic] {
+    pub fn as_slice(&self) -> &[SourceEditorDiagnostic] {
         &self.records
     }
 
-    pub fn view<'a>(&'a self, logical_path: Option<&str>) -> CodeDiagnosticView<'a> {
-        CodeDiagnosticView {
+    pub fn view<'a>(&'a self, logical_path: Option<&str>) -> SourceDiagnosticView<'a> {
+        SourceDiagnosticView {
             collection: self,
             document_key: logical_path.map(normalize_diagnostic_path),
         }
@@ -116,7 +116,7 @@ impl CodeDiagnosticCollection {
     /// Index `record`, or drop it when the collection already holds a record
     /// with its identity: a finding reported twice is one finding, and the
     /// repeat is bookkeeping, never a reason to refuse the rest.
-    fn push_indexed(&mut self, mut record: CodeEditorDiagnostic) -> Result<(), String> {
+    fn push_indexed(&mut self, mut record: SourceEditorDiagnostic) -> Result<(), String> {
         if !self.diagnostic_ids.insert(record.canonical.diagnostic_id) {
             if cfg!(debug_assertions) {
                 log::warn!(
@@ -163,7 +163,7 @@ impl CodeDiagnosticCollection {
 
 fn intern_diagnostic_strings(
     pool: &mut HashMap<Arc<str>, Arc<str>>,
-    diagnostic: &mut CodeEditorDiagnostic,
+    diagnostic: &mut SourceEditorDiagnostic,
 ) {
     intern_string(pool, &mut diagnostic.canonical.source);
     intern_string(pool, &mut diagnostic.canonical.code);
@@ -182,26 +182,26 @@ pub(super) fn intern_string(pool: &mut HashMap<Arc<str>, Arc<str>>, value: &mut 
     }
 }
 
-impl AsRef<[CodeEditorDiagnostic]> for CodeDiagnosticCollection {
-    fn as_ref(&self) -> &[CodeEditorDiagnostic] {
+impl AsRef<[SourceEditorDiagnostic]> for SourceDiagnosticCollection {
+    fn as_ref(&self) -> &[SourceEditorDiagnostic] {
         self.as_slice()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct CodeDiagnosticView<'a> {
-    collection: &'a CodeDiagnosticCollection,
+pub struct SourceDiagnosticView<'a> {
+    collection: &'a SourceDiagnosticCollection,
     document_key: Option<String>,
 }
 
-impl<'a> CodeDiagnosticView<'a> {
-    pub fn severity_for_line(&self, one_based_line: usize) -> Option<CodeEditorSeverity> {
+impl<'a> SourceDiagnosticView<'a> {
+    pub fn severity_for_line(&self, one_based_line: usize) -> Option<SourceEditorSeverity> {
         self.worst_for_line(one_based_line)
             .map(|diagnostic| diagnostic.severity)
     }
 
     /// The most severe finding on a one-based line of this document.
-    pub fn worst_for_line(&self, one_based_line: usize) -> Option<&'a CodeEditorDiagnostic> {
+    pub fn worst_for_line(&self, one_based_line: usize) -> Option<&'a SourceEditorDiagnostic> {
         let records = &self.collection.records;
         let global = self
             .collection
@@ -222,7 +222,7 @@ impl<'a> CodeDiagnosticView<'a> {
 
     /// This document's findings that name a line, in source order: by line,
     /// then column, a finding with no column first on its line.
-    pub fn located(&self) -> Vec<&'a CodeEditorDiagnostic> {
+    pub fn located(&self) -> Vec<&'a SourceEditorDiagnostic> {
         let mut located = self
             .collection
             .records
@@ -251,7 +251,7 @@ fn normalize_diagnostic_path(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
 }
 
-fn diagnostic_line(diagnostic: &CodeEditorDiagnostic) -> Option<usize> {
+fn diagnostic_line(diagnostic: &SourceEditorDiagnostic) -> Option<usize> {
     diagnostic.line.or_else(|| {
         diagnostic
             .source
@@ -283,10 +283,10 @@ mod tests {
 
     #[test]
     fn line_diagnostics_use_one_based_lines() {
-        let diagnostic = CodeEditorDiagnostic::current(
+        let diagnostic = SourceEditorDiagnostic::current(
             "rspice.test",
             "TEST-001",
-            CodeEditorSeverity::Error,
+            SourceEditorSeverity::Error,
             "broken",
             "",
             Some("model.va".to_owned()),
@@ -295,10 +295,10 @@ mod tests {
             Some(2),
             Some(1),
         );
-        let diagnostics = CodeDiagnosticCollection::try_new(vec![diagnostic]).unwrap();
+        let diagnostics = SourceDiagnosticCollection::try_new(vec![diagnostic]).unwrap();
         assert_eq!(
             diagnostics.view(Some("MODEL.VA")).severity_for_line(2),
-            Some(CodeEditorSeverity::Error)
+            Some(SourceEditorSeverity::Error)
         );
         assert_eq!(
             diagnostics.view(Some("other.va")).severity_for_line(2),
@@ -308,11 +308,11 @@ mod tests {
 
     #[test]
     fn diagnostic_collection_summarizes_without_frame_time_rescans() {
-        let diagnostics = CodeDiagnosticCollection::try_new(vec![
-            CodeEditorDiagnostic::current(
+        let diagnostics = SourceDiagnosticCollection::try_new(vec![
+            SourceEditorDiagnostic::current(
                 "rspice.test",
                 "TEST-ERROR",
-                CodeEditorSeverity::Error,
+                SourceEditorSeverity::Error,
                 "error",
                 "",
                 None,
@@ -321,10 +321,10 @@ mod tests {
                 None,
                 None,
             ),
-            CodeEditorDiagnostic::current(
+            SourceEditorDiagnostic::current(
                 "rspice.test",
                 "TEST-WARNING",
-                CodeEditorSeverity::Warning,
+                SourceEditorSeverity::Warning,
                 "warning",
                 "",
                 None,
@@ -342,10 +342,10 @@ mod tests {
 
     #[test]
     fn diagnostic_collection_keeps_one_record_per_canonical_identity() {
-        let diagnostic = CodeEditorDiagnostic::current(
+        let diagnostic = SourceEditorDiagnostic::current(
             "rspice.test",
             "TEST-DUPLICATE",
-            CodeEditorSeverity::Error,
+            SourceEditorSeverity::Error,
             "duplicate",
             "detail",
             None,
@@ -354,7 +354,7 @@ mod tests {
             None,
             None,
         );
-        let collection = CodeDiagnosticCollection::try_new(vec![diagnostic.clone(), diagnostic])
+        let collection = SourceDiagnosticCollection::try_new(vec![diagnostic.clone(), diagnostic])
             .expect("a repeated finding is one finding, never a failure");
         assert_eq!(collection.as_slice().len(), 1);
         assert_eq!(collection.summary().errors, 1);

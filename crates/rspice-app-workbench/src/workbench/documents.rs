@@ -8,7 +8,7 @@
 
 /// A project-owned source-tree transaction requested by a document navigator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodeSourceFileAction {
+pub enum SourceFileAction {
     New,
     Rename,
     Move,

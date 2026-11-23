@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::state::{CellViewRef, PortSpec};
 
 /// Retained metadata from the latest compile of the exact current source.
@@ -14,7 +14,7 @@ use crate::state::{CellViewRef, PortSpec};
 pub struct VerilogACompileReceipt {
     pub compilation: rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt,
     pub bytecode_available: bool,
-    pub diagnostics: Arc<CodeDiagnosticCollection>,
+    pub diagnostics: Arc<SourceDiagnosticCollection>,
     /// What this compile did to its cell's interface. `None` for a compile
     /// that was not a cell view's published result.
     pub interface: Option<VerilogAInterfaceOutcome>,

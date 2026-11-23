@@ -47,12 +47,12 @@ use rspice_veriloga::{
     RuntimeCompileReport,
 };
 use rspice_vocabulary::diagnostics::{
-    DiagnosticSeverity as CodeEditorSeverity, SourceDiagnostic as CodeEditorDiagnostic,
+    DiagnosticSeverity as SourceEditorSeverity, SourceDiagnostic as SourceEditorDiagnostic,
 };
 
 use super::Model;
 use super::veriloga_compile::compile_project_bundle_receipt;
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::state::workspace::{starter_veriloga_source, verilog_module_name};
 use crate::state::{
     CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle, ProjectSourceOwner,
@@ -555,10 +555,10 @@ pub fn with_interface_outcome(
 ) -> VerilogACompileReceipt {
     if let VerilogAInterfaceOutcome::SchematicMismatch { schematic, module } = &outcome {
         let token = receipt.compilation.token();
-        let finding = CodeEditorDiagnostic::current(
+        let finding = SourceEditorDiagnostic::current(
             "rspice.veriloga.interface",
             INTERFACE_MISMATCH_CODE,
-            CodeEditorSeverity::Error,
+            SourceEditorSeverity::Error,
             "Module ports differ from the cell's schematic",
             interface_mismatch_detail(reference, schematic, module),
             None,
@@ -578,7 +578,7 @@ pub fn with_interface_outcome(
             .cloned()
             .chain([finding])
             .collect::<Vec<_>>();
-        if let Ok(collection) = CodeDiagnosticCollection::try_new(records) {
+        if let Ok(collection) = SourceDiagnosticCollection::try_new(records) {
             receipt.diagnostics = Arc::new(collection);
         }
     }

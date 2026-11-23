@@ -197,7 +197,7 @@ impl CodePort for SourceState {
         messages: crate::workbench::MessageCatalog,
     ) {
         use crate::workbench::documents::code_workspace::{
-            CodeEditorLanguage, EditorFindings, release_closed_code_editors,
+            EditorFindings, SourceEditorLanguage, release_closed_code_editors,
             show_veriloga_document_versioned,
         };
 
@@ -209,7 +209,7 @@ impl CodePort for SourceState {
             id,
             source,
             revision,
-            CodeEditorLanguage::VerilogA,
+            SourceEditorLanguage::VerilogA,
             EditorFindings::Outdated,
             None,
             false,

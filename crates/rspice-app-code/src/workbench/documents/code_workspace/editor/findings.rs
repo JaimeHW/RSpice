@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use rspice_vocabulary::diagnostics::DiagnosticSeverity;
 
-use crate::state::code_diagnostics::CodeDiagnosticView;
+use crate::state::code_diagnostics::SourceDiagnosticView;
 use crate::workbench::documents::virtual_text_editor::SourceMark;
 
 /// One finding, placed in the held text.
@@ -54,7 +54,7 @@ impl HeldFindings {
         source: &str,
         revision: u64,
         origin: usize,
-        view: &CodeDiagnosticView<'_>,
+        view: &SourceDiagnosticView<'_>,
     ) {
         if self.origin == Some(origin)
             && self.revision == Some(revision)

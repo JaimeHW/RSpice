@@ -390,7 +390,7 @@ define_messages! {
     CodeSourceRenameKey => "F2",
     CodeSourceDeleteKey => "Del",
     CodeSourceRootDeleteBlocked => "The main file can't be deleted. Rename it or replace its source instead.",
-    CodeInspectorNetlistTitle => "Netlist details",
+    NetlistInspectorTitle => "Netlist details",
     CodeSourceCreatePrimary => "Create",
     CodeSourceRenamePrimary => "Rename",
     CodeSourceMovePrimary => "Move",

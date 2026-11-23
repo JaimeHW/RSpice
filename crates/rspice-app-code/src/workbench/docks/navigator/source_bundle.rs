@@ -31,7 +31,7 @@ use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::code::commands::LifecycleAction;
 use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, SourceEditingState, SourceIncludeTarget, SourceNavigation,
+    self, SourceEditingState, SourceFileAction, SourceIncludeTarget, SourceNavigation,
     SourceOutlineGroup, VerilogAHeaderView, document_navigation,
 };
 use crate::workbench::{MessageCatalog, MessageId};
@@ -54,7 +54,7 @@ pub(crate) enum RailAction {
     /// Open `action`'s form for `path`.
     FileAction {
         bundle_id: ProjectSourceId,
-        action: CodeSourceFileAction,
+        action: SourceFileAction,
         path: String,
     },
     /// Ask the shell for `action` on the file at `path`: its revision
@@ -149,7 +149,7 @@ impl FileActions {
         if let Some(held) = &self.held {
             return Some(held.clone());
         }
-        if operation != FileOperation::File(CodeSourceFileAction::Delete) {
+        if operation != FileOperation::File(SourceFileAction::Delete) {
             return None;
         }
         self.delete_refusals
@@ -163,7 +163,7 @@ impl FileActions {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FileOperation {
     /// A transaction with a form of its own.
-    File(CodeSourceFileAction),
+    File(SourceFileAction),
     /// The revision history of the file's cell.
     History,
     /// Replace the file's text from a picked file.
@@ -189,22 +189,22 @@ impl FileOperation {
 const FILE_MENU: [(MessageId, FileOperation, Option<MessageId>); 7] = [
     (
         MessageId::CodeSourceNewFile,
-        FileOperation::File(CodeSourceFileAction::New),
+        FileOperation::File(SourceFileAction::New),
         None,
     ),
     (
         MessageId::CodeSourceRename,
-        FileOperation::File(CodeSourceFileAction::Rename),
+        FileOperation::File(SourceFileAction::Rename),
         Some(MessageId::CodeSourceRenameKey),
     ),
     (
         MessageId::CodeSourceMove,
-        FileOperation::File(CodeSourceFileAction::Move),
+        FileOperation::File(SourceFileAction::Move),
         None,
     ),
     (
         MessageId::CodeSourceDuplicate,
-        FileOperation::File(CodeSourceFileAction::Duplicate),
+        FileOperation::File(SourceFileAction::Duplicate),
         None,
     ),
     (
@@ -219,7 +219,7 @@ const FILE_MENU: [(MessageId, FileOperation, Option<MessageId>); 7] = [
     ),
     (
         MessageId::CodeSourceDelete,
-        FileOperation::File(CodeSourceFileAction::Delete),
+        FileOperation::File(SourceFileAction::Delete),
         Some(MessageId::CodeSourceDeleteKey),
     ),
 ];
@@ -227,20 +227,20 @@ const FILE_MENU: [(MessageId, FileOperation, Option<MessageId>); 7] = [
 /// The height at which the controls are sized for a finger.
 const TOUCH_CONTROL_HEIGHT: f32 = 44.0;
 
-const FILE_ACTIONS: [(MessageId, CodeSourceFileAction, WorkbenchIcon); 3] = [
+const FILE_ACTIONS: [(MessageId, SourceFileAction, WorkbenchIcon); 3] = [
     (
         MessageId::CodeSourceNewFile,
-        CodeSourceFileAction::New,
+        SourceFileAction::New,
         WorkbenchIcon::Add,
     ),
     (
         MessageId::CodeSourceRename,
-        CodeSourceFileAction::Rename,
+        SourceFileAction::Rename,
         WorkbenchIcon::Text,
     ),
     (
         MessageId::CodeSourceDelete,
-        CodeSourceFileAction::Delete,
+        SourceFileAction::Delete,
         WorkbenchIcon::Trash,
     ),
 ];
@@ -329,7 +329,7 @@ fn row_file_menu(
     let (popup, _) = row_context_menu(response);
     popup.show(|ui| {
         for (label, operation, key) in FILE_MENU {
-            if operation == FileOperation::File(CodeSourceFileAction::Delete) {
+            if operation == FileOperation::File(SourceFileAction::Delete) {
                 ui.separator();
             }
             let refusal = actions.refusal(operation, path);
@@ -401,7 +401,7 @@ fn select(model: &Model, code: &mut SourceEditingState, logical_path: &str) {
 /// What a click in the rail asked for, applied once the rows are painted.
 enum RailRequest {
     Select(String),
-    FileAction(CodeSourceFileAction, String),
+    FileAction(SourceFileAction, String),
     /// Ask the shell for a choice on the file at the path.
     Document(LifecycleAction, String),
     /// Say why a key's file operation is refused.
@@ -609,9 +609,9 @@ fn row_file_keys(
         return None;
     }
     let action = if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F2)) {
-        CodeSourceFileAction::Rename
+        SourceFileAction::Rename
     } else if ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Delete)) {
-        CodeSourceFileAction::Delete
+        SourceFileAction::Delete
     } else {
         return None;
     };

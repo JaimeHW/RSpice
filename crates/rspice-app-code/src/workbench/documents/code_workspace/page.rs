@@ -18,11 +18,11 @@ use rspice_simulation::veriloga::PreparedVerilogARuntime;
 
 use std::sync::{Arc, Mutex, mpsc};
 
-use super::super::CodeSourceFileAction;
+use super::super::SourceFileAction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeSourceFileDialogState {
-    pub action: CodeSourceFileAction,
+pub struct SourceFileDialogState {
+    pub action: SourceFileAction,
     pub project_id: ProjectId,
     pub bundle_id: ProjectSourceId,
     pub bundle_revision: u64,
@@ -37,7 +37,7 @@ pub struct CodeSourceFileDialogState {
 /// revision is a whole-bundle graph operation (files, roles, and dependency
 /// edges), so the dialog captures the exact current closure it was opened on.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeSourceHistoryState {
+pub struct SourceHistoryState {
     pub project_id: ProjectId,
     pub bundle_id: ProjectSourceId,
     pub bundle_revision: u64,
@@ -125,7 +125,7 @@ pub struct VerilogAWorkbenchState {
     pub(crate) viewed_header: Option<VerilogAHeaderView>,
     pub pending: Option<PendingVerilogACompile>,
     pub receipt: Option<VerilogACompileReceipt>,
-    pub last_failure: Arc<crate::state::code_diagnostics::CodeDiagnosticCollection>,
+    pub last_failure: Arc<crate::state::code_diagnostics::SourceDiagnosticCollection>,
     pub last_failure_token: Option<VerilogASourceOperationToken>,
     /// How long the last finished compile took, and of which source.
     pub last_compile_duration: Option<(VerilogASourceOperationToken, std::time::Duration)>,
@@ -157,7 +157,7 @@ pub struct VerilogALiveCheck {
     /// What the last check of the source its token names found.
     pub findings: Option<(
         VerilogASourceOperationToken,
-        Arc<crate::state::code_diagnostics::CodeDiagnosticCollection>,
+        Arc<crate::state::code_diagnostics::SourceDiagnosticCollection>,
     )>,
 }
 
@@ -165,7 +165,7 @@ pub struct VerilogALiveCheck {
 #[derive(Debug, Clone)]
 pub struct RunningVerilogACheck {
     pub token: VerilogASourceOperationToken,
-    pub receiver: Arc<Mutex<mpsc::Receiver<Vec<super::CodeEditorDiagnostic>>>>,
+    pub receiver: Arc<Mutex<mpsc::Receiver<Vec<super::SourceEditorDiagnostic>>>>,
     /// Stops the check; dropped with the last clone of this check (the
     /// project closed, or the evidence voided), it stops the check too.
     pub cancellation: CompileCancellation,
@@ -277,9 +277,9 @@ pub struct SourceEditingState {
     /// the navigator brings the dialog up around its own review section, and
     /// closing the dialog abandons the draft rather than committing it.
     pub source_document_dialog: bool,
-    pub source_file_dialog: Option<CodeSourceFileDialogState>,
-    pub source_history: Option<CodeSourceHistoryState>,
-    pub language_tools: Option<super::CodeLanguageToolsState>,
+    pub source_file_dialog: Option<SourceFileDialogState>,
+    pub source_history: Option<SourceHistoryState>,
+    pub language_tools: Option<super::SourceLanguageToolsState>,
     /// Format, Rename and Replace, each one step of the bundle it changed.
     pub(crate) source_edit_history: super::source_edit_history::SourceEditHistory,
     /// Language index retained against the exact closure it was built from,

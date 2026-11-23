@@ -24,7 +24,7 @@ use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::{LifecycleAction, SourceDocumentRequest};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, CodeSourceFileDialogState, SourceEditingState,
+    self, SourceEditingState, SourceFileAction, SourceFileDialogState,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -63,7 +63,7 @@ pub(in crate::workbench) fn render(
     });
     let hosts = bundle.map_or_else(Vec::new, code_workspace::veriloga_include_hosts);
 
-    let deleting = draft.action == CodeSourceFileAction::Delete;
+    let deleting = draft.action == SourceFileAction::Delete;
     let refusal = bundle
         .filter(|_| deleting)
         .and_then(|bundle| delete_refusal(bundle, &draft.source_path, messages));
@@ -96,11 +96,11 @@ pub(in crate::workbench) fn render(
     // What the name field's line says: the commit's failure, else why the
     // name is refused, else what the change rewrites besides the file.
     let rewrites = match draft.action {
-        CodeSourceFileAction::Rename | CodeSourceFileAction::Move => {
+        SourceFileAction::Rename | SourceFileAction::Move => {
             include_extent(&includers, messages, IncludeEdit::Update)
         }
-        CodeSourceFileAction::Delete => include_extent(&includers, messages, IncludeEdit::Remove),
-        CodeSourceFileAction::New | CodeSourceFileAction::Duplicate => None,
+        SourceFileAction::Delete => include_extent(&includers, messages, IncludeEdit::Remove),
+        SourceFileAction::New | SourceFileAction::Duplicate => None,
     };
     let name_line = draft.error.clone().or_else(|| match &name {
         Some(NameCheck::Refused(reason)) => Some(reason.clone()),
@@ -122,30 +122,28 @@ pub(in crate::workbench) fn render(
             let field = Id::new(NAME_FIELD);
             let file = messages.text(MessageId::CodeSourceFileFile);
             match draft.action {
-                CodeSourceFileAction::Delete => {
+                SourceFileAction::Delete => {
                     rows.value_mono(&file, &draft.source_path);
                     if let Some(rewrites) = rewrites.as_deref() {
                         rows.field_line(None, FieldLine::Derived(rewrites));
                     }
                     return None;
                 }
-                CodeSourceFileAction::New => {}
-                CodeSourceFileAction::Rename
-                | CodeSourceFileAction::Move
-                | CodeSourceFileAction::Duplicate => {
+                SourceFileAction::New => {}
+                SourceFileAction::Rename | SourceFileAction::Move | SourceFileAction::Duplicate => {
                     rows.value_mono(&file, &draft.source_path);
                 }
             }
             let label = messages.text(match draft.action {
-                CodeSourceFileAction::New => MessageId::CodeSourceFileName,
-                CodeSourceFileAction::Move => MessageId::CodeSourceFileNewPath,
+                SourceFileAction::New => MessageId::CodeSourceFileName,
+                SourceFileAction::Move => MessageId::CodeSourceFileNewPath,
                 _ => MessageId::CodeSourceFileNewName,
             });
             let response = rows.text(&label, field, &mut proposed, "");
             edited |= response.changed();
             // The form keeps the whole name selected for the keyboard to land
             // on; a name, unlike a path, keeps its folder and extension.
-            if draft.action != CodeSourceFileAction::Move && !response.has_focus() {
+            if draft.action != SourceFileAction::Move && !response.has_focus() {
                 select_stem(ctx, field, &proposed);
             }
             let line = match (name_line.as_deref(), rewrites.as_deref()) {
@@ -156,7 +154,7 @@ pub(in crate::workbench) fn render(
             rows.field_line(Some(field), line);
             let adds_file = matches!(
                 draft.action,
-                CodeSourceFileAction::New | CodeSourceFileAction::Duplicate
+                SourceFileAction::New | SourceFileAction::Duplicate
             );
             if adds_file {
                 let label = messages.text(MessageId::CodeSourceFileIncludedFrom);
@@ -195,27 +193,27 @@ pub(in crate::workbench) fn render(
 }
 
 /// The form's title and its primary, by transaction.
-fn titles(draft: &CodeSourceFileDialogState, messages: MessageCatalog) -> (String, String) {
+fn titles(draft: &SourceFileDialogState, messages: MessageCatalog) -> (String, String) {
     let (title, primary) = match draft.action {
-        CodeSourceFileAction::New => {
+        SourceFileAction::New => {
             return (
                 messages.text(MessageId::CodeSourceFileNewTitle),
                 messages.text(MessageId::CodeSourceCreatePrimary),
             );
         }
-        CodeSourceFileAction::Rename => (
+        SourceFileAction::Rename => (
             MessageId::CodeSourceFileRenameTitle,
             MessageId::CodeSourceRenamePrimary,
         ),
-        CodeSourceFileAction::Move => (
+        SourceFileAction::Move => (
             MessageId::CodeSourceFileMoveTitle,
             MessageId::CodeSourceMovePrimary,
         ),
-        CodeSourceFileAction::Duplicate => (
+        SourceFileAction::Duplicate => (
             MessageId::CodeSourceFileDuplicateTitle,
             MessageId::CodeSourceDuplicatePrimary,
         ),
-        CodeSourceFileAction::Delete => (
+        SourceFileAction::Delete => (
             MessageId::CodeSourceFileDeleteTitle,
             MessageId::CodeSourceDeletePrimary,
         ),
@@ -303,7 +301,7 @@ enum NameCheck {
 /// Judge the draft's name as the commit would, before the commit.
 fn check_name(
     bundle: Option<&ProjectSourceBundle>,
-    draft: &CodeSourceFileDialogState,
+    draft: &SourceFileDialogState,
     messages: MessageCatalog,
 ) -> NameCheck {
     let name = draft.proposed_path.trim();
@@ -312,7 +310,7 @@ fn check_name(
     }
     let moves = matches!(
         draft.action,
-        CodeSourceFileAction::Rename | CodeSourceFileAction::Move
+        SourceFileAction::Rename | SourceFileAction::Move
     );
     if moves && name == draft.source_path {
         return NameCheck::Unchanged;

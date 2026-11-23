@@ -31,7 +31,7 @@ pub(crate) fn drive_veriloga_live_check(
     use std::sync::{Arc, Mutex, mpsc};
 
     use super::page::RunningVerilogACheck;
-    use crate::state::code_diagnostics::CodeDiagnosticCollection;
+    use crate::state::code_diagnostics::SourceDiagnosticCollection;
 
     if let Some(running) = state.live_check.running.take() {
         let received = running
@@ -43,7 +43,7 @@ pub(crate) fn drive_veriloga_live_check(
         match received {
             // Kept with the source it was of, which may have moved on.
             Ok(findings) => {
-                let findings = CodeDiagnosticCollection::try_new(findings).unwrap_or_default();
+                let findings = SourceDiagnosticCollection::try_new(findings).unwrap_or_default();
                 state.live_check.findings = Some((running.token, Arc::new(findings)));
             }
             Err(mpsc::TryRecvError::Empty) => state.live_check.running = Some(running),

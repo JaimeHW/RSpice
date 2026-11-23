@@ -2,7 +2,7 @@
 //! shifted with it, and dropped with it when it is deleted.
 
 use super::*;
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use rspice_vocabulary::diagnostics::SourceDiagnostic;
 
 const SOURCE: &str = "module amp(out);\n  analog V(out) <+ gbww * 2;\nendmodule\n";
@@ -32,7 +32,7 @@ fn finding(
 /// warning that names only the place of `out` on the first line.
 fn held() -> HeldFindings {
     let start = SOURCE.find("gbww").expect("the error is in the source");
-    let collection = CodeDiagnosticCollection::try_new(vec![
+    let collection = SourceDiagnosticCollection::try_new(vec![
         finding(
             DiagnosticSeverity::Error,
             "unknown identifier",
@@ -84,7 +84,7 @@ fn a_finding_that_names_only_a_place_covers_the_word_there() {
 #[test]
 fn a_range_that_disagrees_with_its_line_and_column_gives_way_to_them() {
     // A range into some other text: the line and column are this one's.
-    let collection = CodeDiagnosticCollection::try_new(vec![finding(
+    let collection = SourceDiagnosticCollection::try_new(vec![finding(
         DiagnosticSeverity::Error,
         "unknown identifier",
         Some(0..6),
@@ -128,7 +128,7 @@ fn findings_move_through_edits_and_go_when_their_text_does() {
 #[test]
 fn a_deleted_line_takes_its_finding_even_when_its_neighbour_starts_alike() {
     let source = "  vin = 1;\n  vslw = 2;\n  vtarget = 3;\n";
-    let collection = CodeDiagnosticCollection::try_new(vec![finding(
+    let collection = SourceDiagnosticCollection::try_new(vec![finding(
         DiagnosticSeverity::Error,
         "undeclared",
         None,
@@ -172,7 +172,7 @@ fn a_fresh_check_replaces_the_held_findings() {
         &edited,
         2,
         8,
-        &CodeDiagnosticCollection::default().view(None),
+        &SourceDiagnosticCollection::default().view(None),
     );
     assert!(!held.is_outdated());
     assert!(held.iter().next().is_none());

@@ -21,7 +21,7 @@ use rspice_vocabulary::diagnostics::{
 };
 
 use super::{BatchStanding, DiagnosticBatch, DiagnosticLevel, DiagnosticRoute, SourceCollections};
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::model::{Model, SlotFacts};
 
@@ -188,7 +188,7 @@ pub enum Segment<'a> {
     /// was run on that bundle as it stands.
     Code {
         bundle: Option<crate::state::ProjectSourceId>,
-        collection: &'a CodeDiagnosticCollection,
+        collection: &'a SourceDiagnosticCollection,
         source_current: bool,
     },
 }
@@ -856,7 +856,7 @@ fn code_collections<'a>(
     inputs: &ListingInputs<'a>,
 ) -> Vec<(
     Option<crate::state::ProjectSourceId>,
-    &'a CodeDiagnosticCollection,
+    &'a SourceDiagnosticCollection,
     bool,
 )> {
     let code = &inputs.sources;

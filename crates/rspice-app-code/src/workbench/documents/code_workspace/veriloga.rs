@@ -23,10 +23,10 @@ use rspice_app_state::workbench::app_state::model::{
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
-    CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile, SourceEditingState,
+    PendingVerilogACompile, SourceEditingState, SourceEditorDiagnostic, SourceEditorSeverity,
     VerilogACompileOutcome,
 };
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 
 /// The exact project-owned Verilog-A closure selected by the current editor:
 /// the active Verilog-A cell view, the bundle that serves it, which it owns
@@ -592,7 +592,7 @@ pub fn poll_veriloga_compile(
                     let _ = record_veriloga_qualification(model, pending.token, None, &diagnostics);
                     code.veriloga.receipt = None;
                     code.veriloga.last_failure = Arc::new(
-                        CodeDiagnosticCollection::try_new(vec![diagnostic]).unwrap_or_default(),
+                        SourceDiagnosticCollection::try_new(vec![diagnostic]).unwrap_or_default(),
                     );
                     code.veriloga.last_failure_token = Some(pending.token);
                     model.record(
@@ -726,8 +726,8 @@ pub fn poll_veriloga_compile(
                 })
                 .collect();
             code.veriloga.last_failure = Arc::new(
-                CodeDiagnosticCollection::try_new(diagnostics).unwrap_or_else(|error| {
-                    CodeDiagnosticCollection::try_new(vec![diagnostic_capacity_failure(
+                SourceDiagnosticCollection::try_new(diagnostics).unwrap_or_else(|error| {
+                    SourceDiagnosticCollection::try_new(vec![diagnostic_capacity_failure(
                         pending.token,
                         error,
                     )])
@@ -745,11 +745,11 @@ pub fn poll_veriloga_compile(
         Err(()) => {
             code.veriloga.receipt = None;
             code.veriloga.last_failure = Arc::new(
-                CodeDiagnosticCollection::try_new(vec![
-                    CodeEditorDiagnostic::current(
+                SourceDiagnosticCollection::try_new(vec![
+                    SourceEditorDiagnostic::current(
                         "rspice.veriloga.compiler-worker",
                         "VA-WORKER-STOPPED",
-                        CodeEditorSeverity::Error,
+                        SourceEditorSeverity::Error,
                         "Compiler worker stopped unexpectedly",
                         "No compiler report was published; the source was not validated.",
                         None,
@@ -844,7 +844,7 @@ fn announce_compiled(
 
 /// Say on the status bar that the compile was refused, and how many errors
 /// refused it: "Compile failed: 2 errors".
-fn announce_compile_failed(workbench: &mut WorkbenchSession, failure: &CodeDiagnosticCollection) {
+fn announce_compile_failed(workbench: &mut WorkbenchSession, failure: &SourceDiagnosticCollection) {
     let messages = workbench.messages();
     let errors = failure.summary().errors.max(1);
     let errors = messages.format(
@@ -866,7 +866,7 @@ fn record_veriloga_qualification(
     model: &mut Model,
     token: VerilogASourceOperationToken,
     report: Option<&RuntimeCompileReport>,
-    diagnostics: &[CodeEditorDiagnostic],
+    diagnostics: &[SourceEditorDiagnostic],
 ) -> Result<u64, String> {
     let selected = selected_veriloga_source_in(model)?;
     if !selected.matches_token(model.workspace.content.project.id(), token) {
@@ -919,11 +919,11 @@ fn record_veriloga_qualification(
         .unwrap_or_default();
     let error_count = diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.severity == CodeEditorSeverity::Error)
+        .filter(|diagnostic| diagnostic.severity == SourceEditorSeverity::Error)
         .count();
     let warning_count = diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.severity == CodeEditorSeverity::Warning)
+        .filter(|diagnostic| diagnostic.severity == SourceEditorSeverity::Warning)
         .count();
     let recorded_at_unix_ms = crate::time_compat::unix_epoch()
         .as_millis()
@@ -1588,7 +1588,7 @@ mod tests {
             .iter()
             .find(|diagnostic| diagnostic.code() == "VA-SEM-NO-EFFECT-SYSTEM-TASK")
             .expect("the compiler's own warning reaches the editor with its code");
-        assert_eq!(warning.severity, CodeEditorSeverity::Warning);
+        assert_eq!(warning.severity, SourceEditorSeverity::Warning);
         assert!(warning.message.contains("$display"));
         let summary = receipt.diagnostics.summary();
         assert_eq!(summary.errors, 0);
@@ -1664,7 +1664,7 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code(), "VA-PARSE-UNSUPPORTED-GENERATE");
-        assert_eq!(diagnostics[0].severity, CodeEditorSeverity::Error);
+        assert_eq!(diagnostics[0].severity, SourceEditorSeverity::Error);
         assert!(diagnostics[0].message.contains("no open generate region"));
         assert_eq!(diagnostics[0].line, Some(3));
     }
@@ -1699,7 +1699,7 @@ mod tests {
             .filter(|diagnostic| diagnostic.code() == "VA-SEM-RETAINED-VARIABLE")
             .collect();
         assert_eq!(retained.len(), 1, "one warning per module");
-        assert_eq!(retained[0].severity, CodeEditorSeverity::Warning);
+        assert_eq!(retained[0].severity, SourceEditorSeverity::Warning);
         assert_eq!(
             &*retained[0].message,
             "Module `counter` has 1 variable read before it is assigned, so it keeps its value \

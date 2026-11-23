@@ -9,7 +9,7 @@
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Stroke, Ui};
 
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
@@ -32,13 +32,13 @@ const POPUP_FONT_SIZE: f32 = 11.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodeEditorLanguage {
+pub enum SourceEditorLanguage {
     VerilogA,
     Toml,
 }
 
 pub use rspice_vocabulary::diagnostics::{
-    DiagnosticSeverity as CodeEditorSeverity, SourceDiagnostic as CodeEditorDiagnostic,
+    DiagnosticSeverity as SourceEditorSeverity, SourceDiagnostic as SourceEditorDiagnostic,
 };
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ pub struct SourceDocumentInteraction {
 #[derive(Debug, Clone, Copy)]
 pub enum EditorFindings<'a> {
     /// A check of the very text the editor shows reported these.
-    Current(&'a CodeDiagnosticCollection),
+    Current(&'a SourceDiagnosticCollection),
     /// The text changed after the last check. What that check found stays
     /// shown, dimmed as outdated, each finding moved through the edits.
     Outdated,
@@ -71,7 +71,7 @@ pub fn show_code_document_interaction_versioned(
     id: impl std::hash::Hash + std::fmt::Debug,
     source: &mut String,
     source_revision: u64,
-    language: CodeEditorLanguage,
+    language: SourceEditorLanguage,
     findings: EditorFindings<'_>,
     diagnostic_path: Option<&str>,
     editable: bool,
@@ -98,7 +98,7 @@ pub fn show_veriloga_document_versioned(
     id: impl std::hash::Hash + std::fmt::Debug,
     source: &mut String,
     source_revision: u64,
-    language: CodeEditorLanguage,
+    language: SourceEditorLanguage,
     findings: EditorFindings<'_>,
     diagnostic_path: Option<&str>,
     editable: bool,
@@ -286,7 +286,7 @@ pub fn problem_step_index(
 /// What a step says it reached: "Error 2 of 5, line 14: …".
 pub fn problem_step_announcement(
     messages: crate::workbench::MessageCatalog,
-    severity: CodeEditorSeverity,
+    severity: SourceEditorSeverity,
     index: usize,
     count: usize,
     line: usize,
@@ -308,7 +308,7 @@ pub fn problem_step_announcement(
 /// place and message, and whether it was found before the latest edits.
 pub fn problem_at_caret_announcement(
     messages: crate::workbench::MessageCatalog,
-    severity: CodeEditorSeverity,
+    severity: SourceEditorSeverity,
     code: &str,
     (line, column): (usize, usize),
     message: &str,
@@ -388,7 +388,7 @@ fn show_code_document_impl(
     editor_id: egui::Id,
     source: &mut String,
     source_revision: u64,
-    language: CodeEditorLanguage,
+    language: SourceEditorLanguage,
     findings: EditorFindings<'_>,
     diagnostic_path: Option<&str>,
     editable: bool,
@@ -421,15 +421,15 @@ fn show_code_document_impl(
     let text_size = editor_font::text_size(ui.ctx());
     let font = theme::mono(text_size, FontWeight::Regular);
     let syntax = match language {
-        CodeEditorLanguage::VerilogA => EditorSyntax::VerilogA,
-        CodeEditorLanguage::Toml => EditorSyntax::Toml,
+        SourceEditorLanguage::VerilogA => EditorSyntax::VerilogA,
+        SourceEditorLanguage::Toml => EditorSyntax::Toml,
     };
     let edited_lines = std::collections::HashSet::new();
     let accessible_label = messages.text(match (language, editable) {
-        (CodeEditorLanguage::VerilogA, true) => MessageId::EditorVerilogASourceEditor,
-        (CodeEditorLanguage::VerilogA, false) => MessageId::EditorVerilogASourceViewer,
-        (CodeEditorLanguage::Toml, true) => MessageId::EditorTomlManifestEditor,
-        (CodeEditorLanguage::Toml, false) => MessageId::EditorTomlManifestViewer,
+        (SourceEditorLanguage::VerilogA, true) => MessageId::EditorVerilogASourceEditor,
+        (SourceEditorLanguage::VerilogA, false) => MessageId::EditorVerilogASourceViewer,
+        (SourceEditorLanguage::Toml, true) => MessageId::EditorTomlManifestEditor,
+        (SourceEditorLanguage::Toml, false) => MessageId::EditorTomlManifestViewer,
     });
     let style = crate::workbench::documents::virtual_text_editor::VirtualEditorStyle {
         accessible_label: &accessible_label,
@@ -458,12 +458,12 @@ fn show_code_document_impl(
     // The reading of each line is kept between frames, so a frame reads
     // only the lines it shows.
     let highlighter_id = editor_id.with("veriloga-syntax");
-    let mut highlighter = (language == CodeEditorLanguage::VerilogA).then(|| {
+    let mut highlighter = (language == SourceEditorLanguage::VerilogA).then(|| {
         ui.ctx()
             .data_mut(|data| data.remove_temp::<VerilogAHighlighter>(highlighter_id))
             .unwrap_or_default()
     });
-    let assist_keys = (language == CodeEditorLanguage::VerilogA)
+    let assist_keys = (language == SourceEditorLanguage::VerilogA)
         .then(|| assist::consume_keys(ui, editor_id, editable));
     let mut text = crate::workbench::documents::virtual_text_editor::string_owner_text(
         ui.ctx(),
@@ -573,9 +573,9 @@ fn show_code_document_impl(
 
 fn layout_job(
     source: &str,
-    language: CodeEditorLanguage,
+    language: SourceEditorLanguage,
     font: FontId,
-    diagnostics: &[CodeEditorDiagnostic],
+    diagnostics: &[SourceEditorDiagnostic],
     colors: &crate::ui::palette::Palette,
 ) -> LayoutJob {
     let mut job = LayoutJob {
@@ -589,7 +589,7 @@ fn layout_job(
         let (line, newline) = segment
             .strip_suffix('\n')
             .map_or((segment, ""), |line| (line, "\n"));
-        if language == CodeEditorLanguage::VerilogA {
+        if language == SourceEditorLanguage::VerilogA {
             let (spans, exit) = tokenize_line(line, state);
             state = exit;
             append_classified(&mut job, &spans, line, 0..line.len(), &font, colors);
@@ -716,10 +716,10 @@ const fn syntax_color(class: SyntaxClass, colors: &crate::ui::palette::Palette) 
 fn highlight_line(
     job: &mut LayoutJob,
     line: &str,
-    language: CodeEditorLanguage,
+    language: SourceEditorLanguage,
     line_start: usize,
     font: &FontId,
-    diagnostics: &[CodeEditorDiagnostic],
+    diagnostics: &[SourceEditorDiagnostic],
     colors: &crate::ui::palette::Palette,
 ) {
     let mut cursor = 0;
@@ -750,7 +750,7 @@ fn highlight_line(
 
 fn next_token(
     text: &str,
-    language: CodeEditorLanguage,
+    language: SourceEditorLanguage,
     colors: &crate::ui::palette::Palette,
 ) -> (usize, Color32) {
     if text.starts_with("//") || text.starts_with('#') {
@@ -791,7 +791,7 @@ fn next_token(
             .last()
             .map_or(first.len_utf8(), |(index, ch)| index + ch.len_utf8());
         let color = match language {
-            CodeEditorLanguage::Toml
+            SourceEditorLanguage::Toml
                 if text[length..].trim_start().starts_with(':')
                     || text[length..].trim_start().starts_with('=') =>
             {
@@ -821,14 +821,14 @@ fn append(job: &mut LayoutJob, text: &str, font: FontId, color: Color32, underli
 
 /// A finding's severity as the word that opens a sentence about it.
 pub fn severity_title(
-    severity: CodeEditorSeverity,
+    severity: SourceEditorSeverity,
     messages: crate::workbench::MessageCatalog,
 ) -> String {
     messages.text(match severity {
-        CodeEditorSeverity::Error => MessageId::SourceDiagnosticSeverityError,
-        CodeEditorSeverity::Warning => MessageId::SourceDiagnosticSeverityWarning,
-        CodeEditorSeverity::Info => MessageId::SourceDiagnosticSeverityInformation,
-        CodeEditorSeverity::Hint => MessageId::SourceDiagnosticSeverityHint,
+        SourceEditorSeverity::Error => MessageId::SourceDiagnosticSeverityError,
+        SourceEditorSeverity::Warning => MessageId::SourceDiagnosticSeverityWarning,
+        SourceEditorSeverity::Info => MessageId::SourceDiagnosticSeverityInformation,
+        SourceEditorSeverity::Hint => MessageId::SourceDiagnosticSeverityHint,
     })
 }
 
@@ -885,26 +885,26 @@ fn findings_tooltip(
 
 /// The gutter mark a diagnostic earns: only a warning or an error is marked.
 /// A note or a hint keeps its squiggle and leaves the gutter alone.
-const fn diagnostic_problem(severity: CodeEditorSeverity) -> Option<Problem> {
+const fn diagnostic_problem(severity: SourceEditorSeverity) -> Option<Problem> {
     match severity {
-        CodeEditorSeverity::Error => Some(Problem::Failure),
-        CodeEditorSeverity::Warning => Some(Problem::Warning),
-        CodeEditorSeverity::Info | CodeEditorSeverity::Hint => None,
+        SourceEditorSeverity::Error => Some(Problem::Failure),
+        SourceEditorSeverity::Warning => Some(Problem::Warning),
+        SourceEditorSeverity::Info | SourceEditorSeverity::Hint => None,
     }
 }
 
 /// The squiggle under the offending text: an error or a warning in its own
 /// colour, a note or a hint in the faint neutral, since neither is a problem.
 const fn diagnostic_color(
-    severity: CodeEditorSeverity,
+    severity: SourceEditorSeverity,
     error: Color32,
     warning: Color32,
     neutral: Color32,
 ) -> Color32 {
     match severity {
-        CodeEditorSeverity::Hint | CodeEditorSeverity::Info => neutral,
-        CodeEditorSeverity::Warning => warning,
-        CodeEditorSeverity::Error => error,
+        SourceEditorSeverity::Hint | SourceEditorSeverity::Info => neutral,
+        SourceEditorSeverity::Warning => warning,
+        SourceEditorSeverity::Error => error,
     }
 }
 
@@ -986,10 +986,10 @@ mod tests {
 
     #[test]
     fn serialized_editor_diagnostic_contains_the_complete_canonical_contract() {
-        let diagnostic = CodeEditorDiagnostic::current(
+        let diagnostic = SourceEditorDiagnostic::current(
             "rspice.veriloga.compiler",
             "VA-100",
-            CodeEditorSeverity::Hint,
+            SourceEditorSeverity::Hint,
             "consider a bounded sweep",
             "The current range is large.",
             Some("gain.va".to_owned()),

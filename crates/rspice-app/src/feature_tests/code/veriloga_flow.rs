@@ -244,7 +244,7 @@ impl User {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_was_written() {
-    use rspice_app_code::workbench::documents::code_workspace::CodeEditorSeverity;
+    use rspice_app_code::workbench::documents::code_workspace::SourceEditorSeverity;
     use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing;
 
     let (mut user, _, _) = new_device("opamp_bhv", ["inp inn", "out", "vdd vss"]);
@@ -333,7 +333,7 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
     let failure = std::sync::Arc::clone(&user.app.state.code.code_workspace.veriloga.last_failure);
     let mut errors = failure
         .iter()
-        .filter(|diagnostic| diagnostic.severity == CodeEditorSeverity::Error)
+        .filter(|diagnostic| diagnostic.severity == SourceEditorSeverity::Error)
         .map(|diagnostic| {
             (
                 diagnostic.line.expect("an error names its line"),

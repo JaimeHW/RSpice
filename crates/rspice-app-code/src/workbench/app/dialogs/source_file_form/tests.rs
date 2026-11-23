@@ -72,7 +72,7 @@ fn bundle(harness: &SourceHarness) -> &ProjectSourceBundle {
         .expect("the view's bundle")
 }
 
-fn open(harness: &mut SourceHarness, action: CodeSourceFileAction, path: &str) {
+fn open(harness: &mut SourceHarness, action: SourceFileAction, path: &str) {
     let id = bundle(harness).id();
     code_workspace::open_source_file_dialog_in_bundle(
         &mut SourceFeature::workspace_parts(&mut harness.cx()),
@@ -180,7 +180,7 @@ fn the_bundles_other_refusals_are_worded_and_the_rest_fall_back_to_its_own() {
 #[test]
 fn a_new_name_is_judged_before_the_commit() {
     let mut harness = two_files();
-    open(&mut harness, CodeSourceFileAction::New, "gain.va");
+    open(&mut harness, SourceFileAction::New, "gain.va");
     assert_eq!(judged(&mut harness, "  "), NameCheck::Empty);
     assert_eq!(
         judged(&mut harness, "STAGE.VA"),
@@ -201,7 +201,7 @@ fn a_new_name_is_judged_before_the_commit() {
 #[test]
 fn renaming_the_main_file_keeps_a_verilog_a_extension_and_allows_a_case_change() {
     let mut harness = two_files();
-    open(&mut harness, CodeSourceFileAction::Rename, "gain.va");
+    open(&mut harness, SourceFileAction::Rename, "gain.va");
     assert_eq!(judged(&mut harness, "gain.va"), NameCheck::Unchanged);
     assert_eq!(judged(&mut harness, "Gain.va"), NameCheck::Ready);
     assert_eq!(
@@ -214,7 +214,7 @@ fn renaming_the_main_file_keeps_a_verilog_a_extension_and_allows_a_case_change()
     );
 
     // Any other file may be named anything the bundle can hold.
-    open(&mut harness, CodeSourceFileAction::Rename, "stage.va");
+    open(&mut harness, SourceFileAction::Rename, "stage.va");
     assert_eq!(judged(&mut harness, "notes.txt"), NameCheck::Ready);
 }
 

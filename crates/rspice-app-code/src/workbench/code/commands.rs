@@ -20,7 +20,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 use crate::workbench::framework::requests::{
     Drain, EditorViewCommand, Request, SourceEditorRequest, StandardCommand, StructuralCommand,
 };
-use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
+use rspice_app_workbench::workbench::documents::SourceFileAction;
 
 /// One command of the source feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,7 +177,7 @@ pub enum SourceRequest {
     /// the file a new one is included from.
     SourceFileAction {
         bundle_id: crate::state::ProjectSourceId,
-        action: CodeSourceFileAction,
+        action: SourceFileAction,
         path: String,
     },
     /// Open the schematic an instance of the cell is placed in, with the

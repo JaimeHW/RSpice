@@ -1,7 +1,7 @@
 //! `workbench/app_state/diagnostic_store/listing` observed through a whole session.
 
 use crate::workbench::app_state::AppState;
-use rspice_app_state::state::code_diagnostics::CodeDiagnosticCollection;
+use rspice_app_state::state::code_diagnostics::SourceDiagnosticCollection;
 use rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use rspice_app_state::workbench::app_state::diagnostic_store::BatchStanding;
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticBatch;
@@ -338,7 +338,7 @@ fn source_collections_count_what_their_rows_say() {
     let mut waived_code = code("T-WAIVED-CODE");
     waived_code.canonical.suppression = Some(waiver());
     state.code.code_workspace.veriloga.last_failure = Arc::new(
-        CodeDiagnosticCollection::try_new(vec![stale_code, waived_code, code("T-CODE")])
+        SourceDiagnosticCollection::try_new(vec![stale_code, waived_code, code("T-CODE")])
             .expect("the fixture collection is well formed"),
     );
 
@@ -388,7 +388,7 @@ fn a_stale_code_finding_offers_no_route() {
     moved
         .canonical
         .mark_currentness(DiagnosticCurrentness::StaleSource);
-    let collection = CodeDiagnosticCollection::try_new(vec![finding("T-CURRENT"), moved])
+    let collection = SourceDiagnosticCollection::try_new(vec![finding("T-CURRENT"), moved])
         .expect("the fixture collection is well formed");
     let segment = Segment::Code {
         bundle: Some(rspice_app_state::state::ProjectSourceId::new()),

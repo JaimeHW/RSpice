@@ -655,12 +655,12 @@ impl Host for RSpiceApp {
                 }
             },
             Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
-            Workspace::Netlist => messages.text(MessageId::CodeInspectorNetlistTitle),
+            Workspace::Netlist => messages.text(MessageId::NetlistInspectorTitle),
             // A deck project's Design and Simulate pages inspect its deck.
             Workspace::Design | Workspace::Simulate
                 if app.state.is_netlist_first_without_schematic() =>
             {
-                messages.text(MessageId::CodeInspectorNetlistTitle)
+                messages.text(MessageId::NetlistInspectorTitle)
             }
             // A result sheet's context panel is named by the sheet it is
             // reading, the way every other workspace names its subject.

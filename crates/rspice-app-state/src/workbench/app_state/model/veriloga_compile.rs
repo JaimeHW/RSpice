@@ -14,10 +14,10 @@ use std::sync::Arc;
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 use rspice_veriloga::{RuntimeCompileReport, RuntimeTarget};
 use rspice_vocabulary::diagnostics::{
-    DiagnosticSeverity as CodeEditorSeverity, SourceDiagnostic as CodeEditorDiagnostic,
+    DiagnosticSeverity as SourceEditorSeverity, SourceDiagnostic as SourceEditorDiagnostic,
 };
 
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::code_diagnostics::SourceDiagnosticCollection;
 use crate::state::{ProjectSourceBundle, VerilogACompileReceipt};
 
 /// Compile `bundle`'s `selected_module` in place, as the receipt a published
@@ -27,7 +27,7 @@ pub fn compile_project_bundle_receipt(
     project_id: crate::product::ProjectId,
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
-) -> Result<VerilogACompileReceipt, Vec<CodeEditorDiagnostic>> {
+) -> Result<VerilogACompileReceipt, Vec<SourceEditorDiagnostic>> {
     let token = VerilogASourceOperationToken::capture(project_id, bundle, selected_module);
     match rspice_simulation::project_veriloga::receipt::compile_project_bundle_receipt(
         project_id,
@@ -38,7 +38,7 @@ pub fn compile_project_bundle_receipt(
             .map_err(|error| vec![diagnostic_capacity_failure(token, error)]),
         Err(diagnostics) => Err(diagnostics
             .into_iter()
-            .map(|diagnostic| bind_to_compile(CodeEditorDiagnostic::from(diagnostic), token))
+            .map(|diagnostic| bind_to_compile(SourceEditorDiagnostic::from(diagnostic), token))
             .collect()),
     }
 }
@@ -46,9 +46,9 @@ pub fn compile_project_bundle_receipt(
 /// `diagnostic` bound to the compile `token` names, in the document it was
 /// found in: two findings in different documents are two findings.
 fn bind_to_compile(
-    diagnostic: CodeEditorDiagnostic,
+    diagnostic: SourceEditorDiagnostic,
     token: VerilogASourceOperationToken,
-) -> CodeEditorDiagnostic {
+) -> SourceEditorDiagnostic {
     let document_id = diagnostic
         .source_path
         .clone()
@@ -88,9 +88,9 @@ fn receipt_projection(
     let report = compilation.report();
     let diagnostics = diagnostics
         .into_iter()
-        .map(|diagnostic| bind_to_compile(CodeEditorDiagnostic::from(diagnostic), token))
+        .map(|diagnostic| bind_to_compile(SourceEditorDiagnostic::from(diagnostic), token))
         .collect();
-    let diagnostics = Arc::new(CodeDiagnosticCollection::try_new(diagnostics)?);
+    let diagnostics = Arc::new(SourceDiagnosticCollection::try_new(diagnostics)?);
     Ok(VerilogACompileReceipt {
         bytecode_available: report.targets.is_available(RuntimeTarget::BytecodeVm),
         diagnostics,
@@ -105,11 +105,11 @@ fn receipt_projection(
 pub fn diagnostic_capacity_failure(
     token: VerilogASourceOperationToken,
     detail: String,
-) -> CodeEditorDiagnostic {
-    CodeEditorDiagnostic::current(
+) -> SourceEditorDiagnostic {
+    SourceEditorDiagnostic::current(
         "rspice.diagnostics",
         "DIAGNOSTIC-CAPACITY",
-        CodeEditorSeverity::Error,
+        SourceEditorSeverity::Error,
         "Diagnostic collection exceeded the supported maximum",
         detail,
         None,
