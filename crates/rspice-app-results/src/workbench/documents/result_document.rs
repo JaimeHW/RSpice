@@ -1662,6 +1662,9 @@ pub struct ResultsState {
     /// left, so what the reader changed is written back to it. Boxed to keep
     /// the results state inside its stack budget. Transient.
     pub(crate) working_view: Option<Box<working_view::QuickViewBinding>>,
+    /// What the working view last followed the shown run from, when that
+    /// changed nothing. Transient.
+    pub(crate) working_view_followed: Option<working_view::FollowedAt>,
     /// The runs a working view read while they were still running, so each
     /// is read again once it finishes. A run opened finished is read as it
     /// is: its samples may be kept another way after a save, not grown.

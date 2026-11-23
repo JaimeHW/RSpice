@@ -164,19 +164,80 @@ pub(crate) fn keep_analysis(
 pub fn sync(state: &mut ResultsParts<'_>) {
     capture(state);
     prune(state);
-    let Some(run) = state.model.simulation.active_run().cloned() else {
+    let Some(shown) = state.model.simulation.active_run() else {
         state.results.session.working_view_panes.clear();
         return;
     };
-    let Some(view) = ensure(state, &run) else {
-        state.results.session.working_view_panes.clear();
-        return;
+    let (dataset, source) = (shown.dataset_id, source_of(shown));
+    // Following the shown run reads all of it: a copy of the run, and walks
+    // of its signals' names; after a million-device run, most of a frame. A
+    // pass that changed nothing changes nothing again until what it reads
+    // changes, so until then the view is drawn as it stands, or, for a run
+    // that has none, a view is not sought again.
+    let held = state
+        .results
+        .working_view_followed
+        .as_ref()
+        .filter(|at| {
+            followed_at(state.results_reads(), at.view).as_ref() == Some(*at)
+                && (at.view.is_some() || view_of(state.results_reads(), source).is_none())
+        })
+        .map(|at| at.view);
+    let view = match held {
+        Some(view) => view,
+        None => follow_shown(state),
     };
-    follow_a_new_run(state, view, &run);
-    follow(state, view, &run);
-    reread_grown(state, view, &run);
-    plot_marked_outputs(state, view, &run);
-    project(state, view, &run);
+    match view {
+        Some(view) => project(state, view, dataset),
+        None => state.results.session.working_view_panes.clear(),
+    }
+}
+
+/// Make or find the shown run's view and follow the run with it, noting
+/// what it was followed from when that changed nothing.
+fn follow_shown(state: &mut ResultsParts<'_>) -> Option<ResultDocumentId> {
+    let run = state.model.simulation.active_run().cloned()?;
+    let view = ensure(state, &run);
+    let before = followed_at(state.results_reads(), view);
+    if let Some(view) = view {
+        follow_a_new_run(state, view, &run);
+        follow(state, view, &run);
+        reread_grown(state, view, &run);
+        plot_marked_outputs(state, view, &run);
+    }
+    let after = followed_at(state.results_reads(), view);
+    state.results.working_view_followed = after.filter(|after| before.as_ref() == Some(after));
+    view
+}
+
+/// What following the shown run reads: the retained runs, the one shown,
+/// and its view, if it has one, at its revision.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FollowedAt {
+    runs: crate::state::RunHistoryRevision,
+    shown: Option<usize>,
+    view: Option<ResultDocumentId>,
+    revision: Option<rspice_vocabulary::product::ObjectRevision>,
+}
+
+fn followed_at(state: ResultsReads<'_>, view: Option<ResultDocumentId>) -> Option<FollowedAt> {
+    let revision = match view {
+        Some(view) => Some(
+            state
+                .model
+                .workspace
+                .content
+                .visualization_document(view)?
+                .revision(),
+        ),
+        None => None,
+    };
+    Some(FollowedAt {
+        runs: state.model.simulation.retained.runs.revision(),
+        shown: state.model.simulation.view.active_run_idx,
+        view,
+        revision,
+    })
 }
 
 /// After the quick view drew, or before anything else draws over its state:
@@ -684,8 +745,21 @@ fn trace_signal(trace: &crate::results::visualization_document::Trace) -> &str {
     trace.source_signal().unwrap_or(&trace.label)
 }
 
-/// Draw `run` from `view`.
-fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
+/// The retained run `dataset`, borrowed where it is kept.
+fn retained_run(
+    model: &rspice_app_state::workbench::app_state::model::Model,
+    dataset: DatasetId,
+) -> Option<&SimulationRun> {
+    model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == dataset)
+}
+
+/// Draw the retained run `dataset` from `view`.
+fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: DatasetId) {
     let Some(document) = state
         .model
         .workspace
@@ -695,9 +769,18 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
     else {
         return;
     };
+    // The run is borrowed where it is kept, not copied: a copy is every
+    // signal's name. A marker's anchor is read through the strip models,
+    // which may be built as it is read, so each pane borrows it afresh.
+    let Some(run) = retained_run(state.model, dataset) else {
+        return;
+    };
     let panes = bound_panes(&document, run);
     let mut markers = Vec::new();
     for &(index, key, pane_id) in &panes {
+        let Some(run) = retained_run(state.model, dataset) else {
+            return;
+        };
         let analysis = &run.analyses[index];
         let Some(pane) = document.panes().iter().find(|pane| pane.id == pane_id) else {
             continue;
@@ -916,7 +999,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulatio
     let scratch = scratch_of(state.results_reads(), &keys);
     state.results.working_view = Some(Box::new(QuickViewBinding {
         view,
-        dataset: run.dataset_id,
+        dataset,
         keys,
         scratch,
     }));
