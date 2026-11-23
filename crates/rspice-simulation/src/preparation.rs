@@ -41,6 +41,11 @@ pub struct PreparationError {
     /// small as a `Result` should carry.
     finding_from: u32,
     interruption: Option<PreparationInterruption>,
+    /// Whether the limit `interruption` went past was sized to the machine
+    /// the deck runs on, which `message` says in the reader's words rather
+    /// than the engine's. A flag beside the stage rather than a variant of
+    /// its own, so a failure stays as small as a `Result` should carry.
+    sized_limit: bool,
     refusal: Option<PreparationRefusal>,
     /// The SPICE directive note line the failure is on, where a note wrote
     /// the card that failed.
@@ -60,9 +65,6 @@ pub struct PreparationRefusal {
 enum PreparationInterruption {
     Aborted,
     ResourceLimit(rspice_core::ResourceLimitError),
-    /// A limit sized to the machine the deck runs on, which the message
-    /// says in the reader's words rather than the engine's.
-    SizedLimit(rspice_core::ResourceLimitError),
 }
 
 impl PreparationError {
@@ -73,6 +75,7 @@ impl PreparationError {
             line: None,
             finding_from: 0,
             interruption: None,
+            sized_limit: false,
             refusal: None,
             directive_note: None,
         }
@@ -165,10 +168,7 @@ impl PreparationError {
 
     pub fn resource_limit(&self) -> Option<&rspice_core::ResourceLimitError> {
         match &self.interruption {
-            Some(
-                PreparationInterruption::ResourceLimit(error)
-                | PreparationInterruption::SizedLimit(error),
-            ) => Some(error),
+            Some(PreparationInterruption::ResourceLimit(error)) => Some(error),
             _ => None,
         }
     }
@@ -178,17 +178,12 @@ impl PreparationError {
     /// on, which the [`message`](Self::message) already says: that the
     /// machine has not the memory for the deck.
     pub fn catalogued_limit(&self) -> Option<&rspice_core::ResourceLimitError> {
-        match &self.interruption {
-            Some(PreparationInterruption::ResourceLimit(error)) => Some(error),
-            _ => None,
-        }
+        self.resource_limit().filter(|_| !self.sized_limit)
     }
 
     /// The same failure past a limit sized to the machine, said as `words`.
     pub(crate) fn sized_as(mut self, words: impl Into<String>) -> Self {
-        if let Some(PreparationInterruption::ResourceLimit(limit)) = self.interruption {
-            self.interruption = Some(PreparationInterruption::SizedLimit(limit));
-        }
+        self.sized_limit = self.resource_limit().is_some();
         self.said_as(words)
     }
 

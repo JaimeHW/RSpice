@@ -59,6 +59,10 @@ pub(super) fn run_set_point_task_label(
 }
 
 /// Expand every ordinary plan analysis across the points it declared itself at.
+///
+/// Each point's deck is read under `limits`, the limits its run executes
+/// under.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn expand_global_run_set_tasks(
     tasks: Vec<PreparedTask>,
     pvt_points: &[PreparedPvtPoint],
