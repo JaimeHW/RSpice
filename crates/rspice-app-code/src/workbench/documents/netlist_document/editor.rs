@@ -995,6 +995,10 @@ struct SourceCheck {
     shown_path: Option<PathBuf>,
     /// The words the findings the application states itself are put in.
     messages: crate::workbench::MessageCatalog,
+    /// The memory of the machine the deck is checked on, read on the frame
+    /// as a run reads it: the check holds the deck to the limits a run of
+    /// it is held to, sized to that memory.
+    machine: Option<rspice_simulation::execution::run_memory::MachineMemory>,
 }
 
 /// The model libraries a check of a deck the project keeps seals, shared
@@ -1126,6 +1130,7 @@ impl SourceCheck {
                 .map(|shown| shown.path)
                 .filter(|path| !path.as_os_str().is_empty()),
             messages,
+            machine: rspice_simulation::execution::run_memory::machine_memory(),
         }
     }
 
@@ -1158,6 +1163,7 @@ impl SourceCheck {
             include_resolutions,
             shown_path,
             messages,
+            machine,
         } = self;
         // A deck the project keeps as text: its files put together, and the
         // libraries sealed when a line of it names a file to read, here
@@ -1272,9 +1278,15 @@ impl SourceCheck {
             match materialized {
                 Ok(source) => {
                     let (diagnostics, symbols, unread, reading, includes) = match &stored {
-                        Some((at, files)) => {
-                            parse_stored(source, at, files, sealed_sources.as_ref(), messages, stop)
-                        }
+                        Some((at, files)) => parse_stored(
+                            source,
+                            at,
+                            files,
+                            sealed_sources.as_ref(),
+                            messages,
+                            machine,
+                            stop,
+                        ),
                         None => parse_buffer_with_context(
                             source,
                             source_path.as_deref(),
@@ -1284,6 +1296,7 @@ impl SourceCheck {
                             sealed_sources.as_ref(),
                             stop,
                             messages,
+                            machine,
                         ),
                     };
                     (
@@ -1367,6 +1380,7 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
         None,
         &rspice_core::abort_signal::NoAbort,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        None,
     );
     (diagnostics, symbols)
 }
@@ -1418,7 +1432,9 @@ fn checked_includes(netlist: &rspice_core::Netlist) -> Vec<CheckedInclude> {
 
 /// Check `buffer`, the text of the file `source_path`, or of no file and
 /// called `name`, as the engine reads it under that name: SPICE, or Spectre
-/// for a `.scs` name or a `simulator lang=` line.
+/// for a `.scs` name or a `simulator lang=` line; within the limits a run of
+/// it on `machine` is held to.
+#[allow(clippy::too_many_arguments)]
 fn parse_buffer_with_context(
     buffer: &str,
     source_path: Option<&Path>,
@@ -1428,6 +1444,7 @@ fn parse_buffer_with_context(
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
     abort: &dyn AbortSignal,
     messages: MessageCatalog,
+    machine: Option<rspice_simulation::execution::run_memory::MachineMemory>,
 ) -> BufferParse {
     let external_line = first_external_dependency_line(buffer);
     let file = match source_path
@@ -1442,7 +1459,7 @@ fn parse_buffer_with_context(
         buffer,
     );
     let options = rspice_core::netlist::NetlistParseOptions {
-        resource_limits: rspice_core::ResourceLimits::default(),
+        resource_limits: rspice_simulation::execution::run_memory::deck_limits(machine),
         ..Default::default()
     };
     // The name the parse reads the text under, which its findings name, and
@@ -1541,18 +1558,21 @@ fn parse_buffer_with_context(
         spectre,
         source_path,
         messages,
+        machine,
     )
 }
 
 /// Check `buffer`, the file of a deck the project keeps as text that the
 /// engine reads at `at`, among `files`, every file of the deck where the
-/// engine reads it, and beside the model sources sealed for it.
+/// engine reads it, and beside the model sources sealed for it; within the
+/// limits a run of it on `machine` is held to.
 fn parse_stored(
     buffer: &str,
     at: &Path,
     files: &[(PathBuf, String)],
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
     messages: MessageCatalog,
+    machine: Option<rspice_simulation::execution::run_memory::MachineMemory>,
     abort: &dyn AbortSignal,
 ) -> BufferParse {
     let spectre = rspice_core::netlist::is_spectre_source(at, buffer);
@@ -1566,7 +1586,7 @@ fn parse_stored(
         Err(error) => return (vec![Diagnostic::error(error)], None, None, None, None),
     };
     let options = rspice_core::netlist::NetlistParseOptions {
-        resource_limits: rspice_core::ResourceLimits::default(),
+        resource_limits: rspice_simulation::execution::run_memory::deck_limits(machine),
         ..Default::default()
     };
     let parsed = rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
@@ -1581,7 +1601,7 @@ fn parse_stored(
         }
         Ok(_) | Err(rspice_core::netlist::ParseWithAbortError::Aborted) => Vec::new(),
     };
-    let mut found = parse_findings(parsed, Some(at), buffer, spectre, None, messages);
+    let mut found = parse_findings(parsed, Some(at), buffer, spectre, None, messages, machine);
     // Each line that names a file the deck does not keep says so in the
     // reader's words, and offers to add it.
     for (origin, requested, outside) in missing {
@@ -1670,7 +1690,19 @@ fn parse_findings(
     spectre: bool,
     source_path: Option<&Path>,
     messages: MessageCatalog,
+    machine: Option<rspice_simulation::execution::run_memory::MachineMemory>,
 ) -> BufferParse {
+    // A deck past a limit sized to the machine it is checked on is too big
+    // for that machine, which the finding says as a refusal to run it does.
+    let sized = match &parsed {
+        Err(rspice_core::netlist::ParseWithAbortError::Parse(
+            rspice_core::netlist::ParseError::ResourceLimit(refusal),
+        )) => rspice_simulation::execution::run_memory::sized_refusal(refusal, machine),
+        _ => None,
+    };
+    if let Some(words) = sized {
+        return (vec![Diagnostic::error(words)], None, None, None, None);
+    }
     match parsed {
         Ok(netlist) => {
             let unread = netlist.unread_root_source().cloned().collect::<Vec<_>>();

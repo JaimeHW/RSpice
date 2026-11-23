@@ -246,7 +246,7 @@ fn checks_the_design_as_it_stands(
 pub(crate) fn preparation_issue(state: &impl RunHost, error: &PreparationError) -> PreflightIssue {
     PreflightIssue {
         check: preparation_check_label(error.stage()).to_owned(),
-        observed: error.resource_limit().map_or_else(
+        observed: error.catalogued_limit().map_or_else(
             || error.message().to_owned(),
             |refusal| state.resource_refusal(refusal, None),
         ),

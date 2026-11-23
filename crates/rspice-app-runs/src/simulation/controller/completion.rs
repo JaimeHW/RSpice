@@ -665,7 +665,9 @@ impl SimulationController {
     }
 
     /// What `error` says, in `state`'s words, when the run went past one of
-    /// the engine's limits; `None` for every other failure.
+    /// the engine's limits, or that the machine has not the memory for the
+    /// run when the limit was one sized to it; `None` for every other
+    /// failure.
     pub(super) fn limit_refusal(state: &impl RunHost, error: &SimulationError) -> Option<String> {
         let (device, resource, requested, limit) = match error {
             SimulationError::ResourceLimit {
@@ -688,7 +690,13 @@ impl SimulationController {
             requested,
             limit,
         };
-        Some(state.resource_refusal(&refusal, device))
+        let machine = rspice_simulation::execution::run_memory::machine_memory();
+        match rspice_simulation::execution::run_memory::sized_refusal(&refusal, machine) {
+            Some(words) => {
+                Some(device.map_or_else(|| words.clone(), |at| format!("{at}: {words}")))
+            }
+            None => Some(state.resource_refusal(&refusal, device)),
+        }
     }
 
     /// The console line for a deliberate refusal: the analysis the author

@@ -257,6 +257,7 @@ fn parse_native_fixture(
         None,
         &NoAbort,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        None,
     );
     (diagnostics, symbols)
 }
@@ -487,6 +488,7 @@ fn live_lint_fails_closed_when_browser_cannot_resolve_include() {
         None,
         &NoAbort,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        None,
     );
 
     assert!(symbols.is_none());
@@ -507,6 +509,7 @@ fn live_lint_parses_dependency_free_browser_deck_without_a_bundle() {
         None,
         &NoAbort,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        None,
     );
 
     assert!(symbols.is_some());
@@ -543,6 +546,7 @@ fn live_lint_parses_authenticated_browser_model_bundle_without_filesystem_fallba
         Some(&sealed),
         &NoAbort,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        None,
     );
 
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
@@ -566,6 +570,7 @@ fn live_lint_uses_abort_aware_parser_contract() {
         None,
         &rspice_core::abort_signal::ImmediateAbort,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        None,
     );
 
     assert!(symbols.is_none());
@@ -1644,6 +1649,7 @@ fn a_spectre_deck_is_checked_as_spectre_under_its_own_name() {
             crate::workbench::MessageCatalog::new(
                 crate::workbench::UiTextLocale::EnglishUnitedStates,
             ),
+            None,
         );
         let case = format!("{file:?} {name:?} {access:?}");
         assert!(
@@ -1667,6 +1673,7 @@ fn a_finding_about_unnamed_text_names_no_file() {
         None,
         &NoAbort,
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates),
+        None,
     );
     assert!(
         !diagnostics.is_empty(),
