@@ -56,13 +56,12 @@ pub(super) fn project_properties(
         (refusal, false),
         |_| None,
     );
-    // A path is told apart by its end, so it is cut in the middle.
-    property_row_path(
-        ui,
-        "Location",
-        &health::location(model, inspector.lifecycle.platform)
-            .unwrap_or_else(|| "Not saved".to_owned()),
-    );
+    // A path is told apart by its end, so it is cut in the middle; a project
+    // not saved yet has no path, and says so in words.
+    match health::location(model, inspector.lifecycle.platform) {
+        Some(location) => property_row_path(ui, "Location", &location),
+        None => property_row(ui, "Location", "Not saved"),
+    };
     property_row(ui, "Revision", &project.revision().get().to_string());
     if let Some(saved) = project
         .path
@@ -137,10 +136,10 @@ fn technology(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
 fn deck(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
     section_header(ui, "Deck", None);
     let Some(deck) = inspector.model.workspace.content.decks.first() else {
-        property_row(ui, "Deck", "None");
+        property_row(ui, "Name", "None");
         return;
     };
-    property_row(ui, "Deck", &deck.name());
+    property_row(ui, "Name", &deck.name());
     match &deck.source {
         crate::state::DeckSource::File { path } => {
             property_row_path(ui, "File", &path.display().to_string());
@@ -161,7 +160,14 @@ fn deck(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
     if !summary.includes.is_empty() {
         row.on_hover_text(summary.includes.join("\n"));
     }
-    property_row_wrapped(ui, "Runs", &summary.runs());
+    // A line breaks between the cards, never inside one.
+    let runs = summary
+        .runs()
+        .split(" \u{b7} ")
+        .map(|part| part.replace(' ', "\u{a0}"))
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ");
+    property_row_wrapped(ui, "Runs", &runs);
 }
 
 /// Which configuration runs use, chosen as the Configuration page chooses it.
