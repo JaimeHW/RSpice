@@ -4,13 +4,15 @@
 //! above it and the status bar, so the three never state the same interval
 //! two ways. It reads the way the axis ticks do — the shortest engineering
 //! form with the axis unit, `0 … 1 ms`, `4 … 6 V`, `−0.105 … 1.415 V` — and
-//! fits the details panel's field whole. Both ends share the larger end's
-//! decade and are written to a ten-thousandth of the interval's width, which
-//! is finer than a pixel of any plot: an autofit's padding leaves `f64` noise
-//! such as `3.9559999999999995`, which reads `3.956`, and `-104.849 mV` under
-//! `1.41546 V` reads `−0.105`. An end smaller than a hundredth of the other,
-//! as on a log axis, keeps its own decade and four significant digits of
-//! itself, so `1 kHz` never reads as zero under `1 GHz`. The field commits
+//! fits the details panel's field whole. Each end carries its own decade:
+//! `880 … 4.12k`, `194.3m … 620.6m`, `100 Hz … 100 MHz`, never `0.88 …
+//! 4.12k`, which reads as 0.88. Both ends are written to a ten-thousandth of
+//! the interval's width, which is finer than a pixel of any plot: an
+//! autofit's padding leaves `f64` noise such as `3.9559999999999995`, which
+//! reads `3.956`. Ends on the unit's own decade share it, so `-104.849 mV`
+//! under `1.41546 V` reads `−0.105 … 1.415 V`. An end smaller than a
+//! hundredth of the other, as on a log axis, keeps four significant digits
+//! of itself, so `1 kHz` never reads as zero under `1 GHz`. The field commits
 //! only text the reader edited, so the rounding never moves an axis.
 //!
 //! The digits are the app's own engineering formatter and parser; this module
@@ -44,8 +46,8 @@ const MAX_DECIMALS: i32 = 17;
 /// `(minimum, maximum)` as the range field writes it.
 ///
 /// The unit is written once, after the maximum, wherever the minimum would
-/// carry nothing else — `0 … 1 ms`, `4 … 6 V`. A minimum on a decade of its
-/// own keeps its prefix and the unit with it, `500 µs … 2 ms`, and so does a
+/// carry nothing else — `0 … 1 ms`, `4 … 6 V`. A minimum with a prefix keeps
+/// it and the unit with it, `500 µs … 2 ms`, `300 mA … 900 mA`, and so does a
 /// unity minimum under a prefixed maximum, `2 V … 1.5 kV`, which would
 /// otherwise read as kilovolts too.
 pub(crate) fn format_axis_range(range: (f64, f64), unit: &str) -> String {
@@ -81,23 +83,29 @@ fn written((minimum, maximum): (f64, f64), unit: &str, digits: i32) -> String {
     let high = AxisValue::of(maximum, width, unit, digits);
     let low_text = if low.is_zero || (low.prefix.is_empty() && high.prefix.is_empty()) {
         low.mantissa.clone()
-    } else if unit.is_empty() && low.prefix.is_empty() && !low.mantissa.contains('e') {
-        // A bare minimum reads on the maximum's decade, so one on a decade of
-        // its own states it: `1e2 … 100Meg`, never `100 … 100Meg`, which
-        // reads back as 100Meg to 100Meg.
-        low.mantissa
-            .parse::<f64>()
-            .map_or_else(|_| low.mantissa.clone(), |value| format!("{value:e}"))
     } else {
         low.text(unit)
     };
-    format!("{low_text} \u{2026} {}", high.text(unit))
+    format!(
+        "{} \u{2026} {}",
+        typographic_minus(&low_text),
+        typographic_minus(&high.text(unit))
+    )
 }
 
-/// `(minimum, maximum)` on the larger end's decade, both ends to the width's
-/// resolution: `−0.105 … 1.415 V`. `None` when the smaller end is too small
-/// beside the larger to be written on its decade, or the interval has no
-/// finite width.
+/// `text` with a leading hyphen-minus drawn as the axis ticks draw it.
+fn typographic_minus(text: &str) -> String {
+    match text.strip_prefix('-') {
+        Some(magnitude) => format!("{MINUS}{magnitude}"),
+        None => text.to_owned(),
+    }
+}
+
+/// `(minimum, maximum)` on the unit's own decade, both ends to the width's
+/// resolution: `−0.105 … 1.415 V`. `None` when the larger end needs a
+/// prefix — each end then carries its own — when the smaller end is too
+/// small beside the larger to be written on its decade, or when the interval
+/// has no finite width.
 fn shared_decade_range(
     (minimum, maximum): (f64, f64),
     width: f64,
@@ -117,23 +125,18 @@ fn shared_decade_range(
     // A decade is between -324 and 308, so each cast is exact.
     let step = width.log10().floor() as i32 - (digits - 1);
     let large_decade = large.log10().floor() as i32;
-    // Past a prefix, or positional digits, the ends keep their exponents.
-    let (decade, prefix) = if unit_carries_its_decade(unit) {
+    // Past positional digits the ends keep their exponents, and past the
+    // unit's own decade each end carries its own prefix.
+    if unit_carries_its_decade(unit) {
         if !(-6..15).contains(&large_decade) {
             return None;
         }
-        (0, "")
-    } else {
-        if !(-15..15).contains(&large_decade) {
-            return None;
-        }
-        let decade = large_decade.div_euclid(3) * 3;
-        (decade, engineering_prefix(decade, unit))
-    };
-    let decimals = usize::try_from((decade - step).clamp(0, MAX_DECIMALS)).unwrap_or(0);
-    let scale = 10f64.powi(decade);
+    } else if large_decade.div_euclid(3) != 0 {
+        return None;
+    }
+    let decimals = usize::try_from((-step).clamp(0, MAX_DECIMALS)).unwrap_or(0);
     let write = |value: f64| {
-        let digits = format!("{:.decimals$}", value / scale);
+        let digits = format!("{value:.decimals$}");
         let digits = if digits.contains('.') {
             digits.trim_end_matches('0').trim_end_matches('.')
         } else {
@@ -149,32 +152,10 @@ fn shared_decade_range(
     };
     let (low, high) = (write(minimum), write(maximum));
     Some(if unit.is_empty() {
-        format!("{low} \u{2026} {high}{prefix}")
+        format!("{low} \u{2026} {high}")
     } else {
-        format!("{low} \u{2026} {high} {prefix}{unit}")
+        format!("{low} \u{2026} {high} {unit}")
     })
-}
-
-/// The decade letter the axis ticks write for `decade`, a multiple of three
-/// between femto and tera.
-///
-/// Before a unit the letters are SI's, as the ticks, the details pane and
-/// Spectre write them: `1 MHz`, never `1 MegHz`. A bare number keeps SPICE's
-/// `Meg`, because there a lone `M` is milli.
-fn engineering_prefix(decade: i32, unit: &str) -> &'static str {
-    match decade {
-        12 => "T",
-        9 => "G",
-        6 if unit.is_empty() => "Meg",
-        6 => "M",
-        3 => "k",
-        -3 => "m",
-        -6 => "\u{b5}",
-        -9 => "n",
-        -12 => "p",
-        -15 => "f",
-        _ => "",
-    }
 }
 
 /// Read an interval typed as `min … max`, in engineering notation, with or
@@ -184,8 +165,9 @@ fn engineering_prefix(decade: i32, unit: &str) -> &'static str {
 /// plain space, so a value pasted from a datasheet or a netlist parses without
 /// reformatting, and the typographic minus the axis ticks are drawn with. A
 /// unit word after a number belongs to that number: `0 … 1 ms` is zero to one
-/// millisecond. A bare minimum takes the maximum's decade, as the field
-/// writes it and as a reader reads `0.5 … 2 ms`. A reversed or degenerate
+/// millisecond. Each end is read as itself: `0.88 … 4.12k` starts at 0.88,
+/// as a reader reads it, so the field writes every end with its own decade.
+/// A reversed or degenerate
 /// interval is refused rather than silently sorted: on a log axis the two are
 /// not the same request.
 pub(crate) fn parse_axis_range(text: &str, unit: &str) -> Option<(f64, f64)> {
@@ -211,15 +193,7 @@ pub(crate) fn parse_axis_range(text: &str, unit: &str) -> Option<(f64, f64)> {
     let [minimum, maximum] = values.as_slice() else {
         return None;
     };
-    let decade = decade_suffix(maximum, unit);
-    let bare = minimum
-        .chars()
-        .all(|character| character.is_ascii_digit() || matches!(character, '.' | '-' | '+'));
-    let minimum = if bare && !decade.is_empty() {
-        parse_axis_value(&format!("{minimum}{decade}"), unit)?
-    } else {
-        parse_axis_value(minimum, unit)?
-    };
+    let minimum = parse_axis_value(minimum, unit)?;
     let maximum = parse_axis_value(maximum, unit)?;
     (minimum.is_finite() && maximum.is_finite() && maximum > minimum).then_some((minimum, maximum))
 }
@@ -245,20 +219,6 @@ fn parse_axis_value(text: &str, unit: &str) -> Option<f64> {
         }
         _ => parse_engineering_value(number).ok(),
     }
-}
-
-/// The decade letters `text` ends with once its unit is stripped: `m` of
-/// `2 ms`, nothing of `1.415 V` or `4e-21`.
-fn decade_suffix<'a>(text: &'a str, unit: &str) -> &'a str {
-    let text = text.trim();
-    let number = if unit.is_empty() {
-        text
-    } else {
-        text.strip_suffix(unit).unwrap_or(text)
-    }
-    .trim_end();
-    let digits = number.trim_end_matches(|character: char| character.is_alphabetic());
-    &number[digits.len()..]
 }
 
 /// One end of an interval, as written.
@@ -383,10 +343,10 @@ mod tests {
     #[test]
     fn a_range_too_wide_for_its_field_offers_shorter_spellings() {
         let range = (-1.763e6, 1.763e6);
-        assert_eq!(format_axis_range(range, ""), "−1.763 … 1.763Meg");
+        assert_eq!(format_axis_range(range, ""), "−1.763Meg … 1.763Meg");
         assert_eq!(
             shorter_axis_ranges(range, ""),
-            ["−1.76 … 1.76Meg", "−1.8 … 1.8Meg"]
+            ["−1.76Meg … 1.76Meg", "−1.8Meg … 1.8Meg"]
         );
         // Nothing is shorter than what already reads whole.
         assert!(shorter_axis_ranges((4.0, 6.0), "V").is_empty());
@@ -411,7 +371,7 @@ mod tests {
         );
         assert_eq!(
             format_axis_range((5.0e-4, 2.0e-3), "s"),
-            "0.5 \u{2026} 2 ms"
+            "500 \u{b5}s \u{2026} 2 ms"
         );
         assert_eq!(format_axis_range((2.0, 1500.0), "V"), "2 V \u{2026} 1.5 kV");
         assert_eq!(
@@ -437,14 +397,14 @@ mod tests {
         assert_eq!(format_axis_range((1.0, 1.0e6), "Hz"), "1 Hz \u{2026} 1 MHz");
         assert_eq!(
             format_axis_range((5.0e5, 2.0e6), "Hz"),
-            "0.5 \u{2026} 2 MHz"
+            "500 kHz \u{2026} 2 MHz"
         );
         assert_eq!(
             parse_axis_range("1 Hz \u{2026} 1 MHz", "Hz"),
             Some((1.0, 1.0e6))
         );
         assert_eq!(
-            parse_axis_range("0.5 \u{2026} 2 MHz", "Hz"),
+            parse_axis_range("500 kHz \u{2026} 2 MHz", "Hz"),
             Some((5.0e5, 2.0e6))
         );
         assert_eq!(
@@ -453,31 +413,41 @@ mod tests {
         );
         assert_eq!(
             parse_axis_range("1 \u{2026} 2Meg", "Hz"),
-            Some((1.0e6, 2.0e6))
+            Some((1.0, 2.0e6))
         );
         // A bare number keeps SPICE's spelling, where a lone M is milli.
         assert_eq!(format_axis_range((0.0, 2.0e6), ""), "0 \u{2026} 2Meg");
     }
 
-    /// A noise sheet's field showed its own `100 … 100Meg` in red: the
-    /// parser gives a bare minimum the maximum's decade, so the field read
-    /// its own text back as 100Meg to 100Meg. A minimum on a decade of its
-    /// own is never written bare.
+    /// `0.88 … 4.12k` reads as 0.88 to 4.12k, which is not what the field
+    /// meant, and a noise sheet's `100 … 100Meg` read back as 100Meg to
+    /// 100Meg. Each end carries its own decade, and reads back as written.
     #[test]
-    fn a_minimum_on_its_own_decade_is_never_written_bare() {
+    fn each_end_of_a_range_carries_its_own_decade() {
+        assert_eq!(format_axis_range((880.0, 4120.0), ""), "880 \u{2026} 4.12k");
+        assert_eq!(
+            format_axis_range((0.1943, 0.6206), ""),
+            "194.3m \u{2026} 620.6m"
+        );
         let decades = (100.0, 100.0e6);
         assert_eq!(format_axis_range(decades, "Hz"), "100 Hz \u{2026} 100 MHz");
+        for (range, unit) in [
+            ((880.0, 4120.0), ""),
+            ((0.1943, 0.6206), ""),
+            (decades, "Hz"),
+            (decades, ""),
+        ] {
+            assert_eq!(
+                parse_axis_range(&format_axis_range(range, unit), unit),
+                Some(range),
+                "{range:?} in {unit:?}"
+            );
+        }
         assert_eq!(
-            parse_axis_range(&format_axis_range(decades, "Hz"), "Hz"),
-            Some(decades)
+            parse_axis_range("0.88 \u{2026} 4.12k", ""),
+            Some((0.88, 4120.0))
         );
-        assert_eq!(format_axis_range(decades, ""), "1e2 \u{2026} 100Meg");
-        assert_eq!(
-            parse_axis_range(&format_axis_range(decades, ""), ""),
-            Some(decades)
-        );
-        // On the maximum's decade it stays bare, and reads on that decade.
-        assert_eq!(format_axis_range((5.0e5, 2.0e6), ""), "0.5 \u{2026} 2Meg");
+        assert_eq!(format_axis_range((5.0e5, 2.0e6), ""), "500k \u{2026} 2Meg");
         for range in [(1.0, 1.0e3), (2.5, 1.0e9), (-150.0, 2.0e4), (999.0, 1.0e7)] {
             let text = format_axis_range(range, "");
             let (low, high) = parse_axis_range(&text, "").unwrap_or_else(|| {
@@ -503,11 +473,11 @@ mod tests {
         );
         assert_eq!(
             format_axis_range((0.1 + 0.2, 0.9), "A"),
-            "300 \u{2026} 900 mA"
+            "300 mA \u{2026} 900 mA"
         );
         assert_eq!(
             format_axis_range((1.234_5e-3, 1.234_6e-3), "s"),
-            "1.2345 \u{2026} 1.2346 ms"
+            "1.2345 ms \u{2026} 1.2346 ms"
         );
     }
 
@@ -574,8 +544,13 @@ mod tests {
         assert_eq!(parse_axis_range("\u{2212}2 … 1 V", "V"), Some((-2.0, 1.0)));
         // A unit that is a scale letter to SPICE is still the unit here.
         assert_eq!(parse_axis_range("300 … 400 K", "K"), Some((300.0, 400.0)));
-        // A bare minimum is on the maximum's decade, as the field writes it.
-        assert_eq!(parse_axis_range("0.5 … 2 ms", "s"), Some((0.5e-3, 2.0e-3)));
+        // A bare minimum is itself, not on the maximum's decade: `0.5 … 2 ms`
+        // starts at half a second, above its end.
+        assert_eq!(parse_axis_range("0.5 … 2 ms", "s"), None);
+        assert_eq!(
+            parse_axis_range("0.0005 … 2 ms", "s"),
+            Some((5.0e-4, 2.0e-3))
+        );
         assert_eq!(
             parse_axis_range("\u{2212}0.105 \u{2026} 1.415 V", "V"),
             Some((-0.105, 1.415))
