@@ -511,16 +511,82 @@ pub struct WaveformLook {
 /// The reader's ticks: a signal named here is on the plot or off it whatever
 /// its dataset chose. Every edit gives them a new revision, so what is built
 /// from them asks whether they changed without reading them all.
+///
+/// They also keep which signals the reader set since a view last took them,
+/// so what a frame changed is read without comparing them all.
 #[derive(Debug, Clone, Default)]
 pub struct VisibilityOverrides {
     overrides: HashMap<SourceWaveformPresentationKey, bool>,
     revision: rspice_vocabulary::source_revision::SourceRevision,
+    /// The signals [`Self::set`] changed since [`Self::take_set`]; `None`
+    /// once a mutable borrow may have changed any of them.
+    set_since: Option<HashSet<SourceWaveformPresentationKey>>,
 }
 
 impl VisibilityOverrides {
     /// Equal to an earlier revision while no edit was made since it.
     pub fn revision(&self) -> rspice_vocabulary::source_revision::SourceRevision {
         self.revision.clone()
+    }
+
+    /// The reader shows `key`'s signal (`Some(true)`), hides it
+    /// (`Some(false)`) or leaves it to its dataset (`None`); kept as one the
+    /// reader set. Whether that changed anything.
+    pub fn set(&mut self, key: SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
+        if !self.put(&key, visible) {
+            return false;
+        }
+        if let Some(set) = &mut self.set_since {
+            set.insert(key);
+        }
+        true
+    }
+
+    /// [`Self::set`] for what a view draws, not what the reader set.
+    pub fn project(&mut self, key: SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
+        self.put(&key, visible)
+    }
+
+    /// Make `analysis`' overrides exactly `desired`, for what a view draws,
+    /// not what the reader set. Whether that changed anything.
+    pub fn project_analysis(
+        &mut self,
+        analysis: AnalysisPresentationKey,
+        desired: HashMap<SourceWaveformPresentationKey, bool>,
+    ) -> bool {
+        let unchanged = self
+            .overrides
+            .keys()
+            .filter(|key| key.analysis() == analysis)
+            .count()
+            == desired.len()
+            && desired
+                .iter()
+                .all(|(key, visible)| self.overrides.get(key) == Some(visible));
+        if unchanged {
+            return false;
+        }
+        self.overrides.retain(|key, _| key.analysis() != analysis);
+        self.overrides.extend(desired);
+        self.revision.advance();
+        true
+    }
+
+    /// The signals the reader set since this was last asked, and forget
+    /// them: `None` when anything may have changed any signal.
+    pub fn take_set(&mut self) -> Option<HashSet<SourceWaveformPresentationKey>> {
+        self.set_since.replace(HashSet::new())
+    }
+
+    fn put(&mut self, key: &SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
+        let changed = match visible {
+            Some(visible) => self.overrides.insert(key.clone(), visible) != Some(visible),
+            None => self.overrides.remove(key).is_some(),
+        };
+        if changed {
+            self.revision.advance();
+        }
+        changed
     }
 }
 
@@ -534,8 +600,9 @@ impl std::ops::Deref for VisibilityOverrides {
 
 impl std::ops::DerefMut for VisibilityOverrides {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        // Any mutable borrow may edit them.
+        // Any mutable borrow may edit them, any of them.
         self.revision.advance();
+        self.set_since = None;
         &mut self.overrides
     }
 }

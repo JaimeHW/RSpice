@@ -44,13 +44,9 @@ fn untick_noise_columns(state: &mut ResultsParts<'_>) {
     {
         let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
         for waveform in &analysis.waveforms {
-            if !view::is_coefficient(&waveform.name) {
-                visibility
-                    .entry(SourceWaveformPresentationKey::new(
-                        key,
-                        waveform.name.clone(),
-                    ))
-                    .or_insert(false);
+            let key = SourceWaveformPresentationKey::new(key, waveform.name.clone());
+            if !view::is_coefficient(&waveform.name) && !visibility.contains_key(&key) {
+                visibility.set(key, Some(false));
             }
         }
     }

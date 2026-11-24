@@ -133,11 +133,8 @@ impl ResultsState {
         let mut changed = false;
         for (key, dataset_default) in waveforms {
             if !self.session.waveform_visibility(&key, dataset_default) {
-                if dataset_default {
-                    self.session.waveform_visibility.remove(&key);
-                } else {
-                    self.session.waveform_visibility.insert(key.clone(), true);
-                }
+                let visible = (!dataset_default).then_some(true);
+                self.session.waveform_visibility.set(key.clone(), visible);
                 changed = true;
             }
             self.session.note_recent_signal(key);
@@ -156,11 +153,10 @@ impl ResultsState {
         // A hide is kept even when it restores the dataset's default: a pane
         // whose signal the reader plotted and then hid keeps its header, where
         // the signal waits to be shown again.
-        if visible && visible == dataset_default {
-            self.session.waveform_visibility.remove(&key);
-        } else {
-            self.session.waveform_visibility.insert(key, visible);
-        }
+        let kept = !(visible && visible == dataset_default);
+        self.session
+            .waveform_visibility
+            .set(key, kept.then_some(visible));
         // Hiding or showing a trace keeps the A/B cursors, and the cached
         // series of every other trace: each is keyed by its own trace, so the
         // one shown again is the only one built.
@@ -177,7 +173,7 @@ impl ResultsState {
         dataset_default: bool,
     ) {
         if !dataset_default && self.session.waveform_visibility.get(key) == Some(&false) {
-            self.session.waveform_visibility.remove(key);
+            self.session.waveform_visibility.set(key.clone(), None);
             self.models.invalidate();
             self.session.cache.invalidate();
         }
@@ -202,24 +198,25 @@ impl ResultsState {
                 })
             })
             .collect::<HashMap<_, _>>();
-        let unchanged = self
+        if self
             .session
             .waveform_visibility
-            .iter()
-            .filter(|(key, _)| key.analysis() == analysis)
-            .count()
-            == desired.len()
-            && desired
-                .iter()
-                .all(|(key, visible)| self.session.waveform_visibility.get(key) == Some(visible));
-        if unchanged {
-            return;
+            .project_analysis(analysis, desired)
+        {
+            self.models.invalidate();
         }
-        self.session
-            .waveform_visibility
-            .retain(|key, _| key.analysis() != analysis);
-        self.session.waveform_visibility.extend(desired);
-        self.models.invalidate();
+    }
+
+    /// Draw `key`'s signal shown (`Some(true)`), hidden (`Some(false)`) or as
+    /// its dataset draws it (`None`), as the view being drawn has it.
+    pub(crate) fn project_waveform_visible(
+        &mut self,
+        key: SourceWaveformPresentationKey,
+        visible: Option<bool>,
+    ) {
+        if self.session.waveform_visibility.project(key, visible) {
+            self.models.invalidate();
+        }
     }
 
     /// Draw `analysis`'s traces in the colours the view being drawn gives
