@@ -359,21 +359,55 @@ fn describe(named: &CodeModelDataFile) -> String {
     )
 }
 
-/// The code models with a parameter that names a data file, lowercased.
-fn data_file_models() -> &'static [String] {
-    static MODELS: OnceLock<Vec<String>> = OnceLock::new();
-    MODELS.get_or_init(|| {
+/// The words a deck that names a data file spells: `.vec`, and the type of
+/// each code model with a parameter that names a data file, lowercased;
+/// with the bytes, in either case, that one of them starts with.
+struct DataFileWords {
+    words: Vec<String>,
+    starts: [bool; 256],
+}
+
+fn data_file_words() -> &'static DataFileWords {
+    static WORDS: OnceLock<DataFileWords> = OnceLock::new();
+    WORDS.get_or_init(|| {
         let registry = rspice_core::xspice::CodeModelRegistry::with_builtins();
-        registry
-            .model_names()
-            .into_iter()
-            .filter(|name| {
+        let words: Vec<String> = std::iter::once(".vec".to_owned())
+            .chain(
                 registry
-                    .get(name)
-                    .is_some_and(|model| !model.input_data_file_parameters().is_empty())
+                    .model_names()
+                    .into_iter()
+                    .filter(|name| {
+                        registry
+                            .get(name)
+                            .is_some_and(|model| !model.input_data_file_parameters().is_empty())
+                    })
+                    .map(str::to_ascii_lowercase),
+            )
+            .filter(|word| !word.is_empty())
+            .collect();
+        let mut starts = [false; 256];
+        for word in &words {
+            let first = word.as_bytes()[0];
+            starts[usize::from(first.to_ascii_lowercase())] = true;
+            starts[usize::from(first.to_ascii_uppercase())] = true;
+        }
+        DataFileWords { words, starts }
+    })
+}
+
+/// Whether `deck` spells, in any case, a word a deck that names a data file
+/// spells ([`data_file_words`]). One pass over the deck that copies nothing:
+/// a large deck is not put in lower case and searched once per word.
+fn may_name_data_files(deck: &str) -> bool {
+    let DataFileWords { words, starts } = data_file_words();
+    let bytes = deck.as_bytes();
+    bytes.iter().enumerate().any(|(at, byte)| {
+        starts[usize::from(*byte)]
+            && words.iter().any(|word| {
+                bytes
+                    .get(at..at + word.len())
+                    .is_some_and(|text| text.eq_ignore_ascii_case(word.as_bytes()))
             })
-            .map(str::to_ascii_lowercase)
-            .collect()
     })
 }
 
@@ -386,12 +420,7 @@ fn discover(
 ) -> Result<Vec<CodeModelDataFile>, PreparationError> {
     // A code model is named by its type on a `.model` card, and a vector
     // file by a `.vec` card, so a deck that spells neither needs no parse.
-    let lower = deck.to_ascii_lowercase();
-    if !lower.contains(".vec")
-        && !data_file_models()
-            .iter()
-            .any(|model| lower.contains(model.as_str()))
-    {
+    if !may_name_data_files(deck) {
         return Ok(Vec::new());
     }
     let netlist = rspice_core::Netlist::parse_with_options_and_abort(
