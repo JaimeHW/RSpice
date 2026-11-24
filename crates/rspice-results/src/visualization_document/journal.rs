@@ -157,29 +157,108 @@ struct EntityJournal<T> {
     /// entity at or above it was made by the transaction.
     since: u64,
     /// Each entity made before the transaction that it changed, took out
-    /// or put back, as it stood before: `None` for one it put back.
-    before: HashMap<u64, Option<T>>,
+    /// or put back, as it stood before, in the order first touched: `None`
+    /// for one it put back.
+    kept: Vec<Option<T>>,
+    /// Where `kept` holds each identity first touched above every identity
+    /// touched before it, in ascending identity. A transaction mostly
+    /// touches a list in its order, so these are found without hashing.
+    ascending: Vec<(u64, usize)>,
+    /// Where `kept` holds each identity first touched out of that order.
+    rest: HashMap<u64, usize>,
+}
+
+impl<T> EntityJournal<T> {
+    fn new(since: u64) -> Self {
+        Self {
+            since,
+            kept: Vec::new(),
+            ascending: Vec::new(),
+            rest: HashMap::new(),
+        }
+    }
+
+    /// Keep what `was` gives for `identity`, the first time the transaction
+    /// touches it. An identity above every one kept so far is new to the
+    /// journal and found again by a binary search; any other is looked up.
+    fn keep(&mut self, identity: u64, was: impl FnOnce() -> Option<T>) {
+        if identity >= self.since {
+            return;
+        }
+        if self
+            .ascending
+            .last()
+            .is_none_or(|(last, _)| *last < identity)
+        {
+            self.ascending.push((identity, self.kept.len()));
+        } else if self.slot(identity).is_some() {
+            return;
+        } else {
+            self.rest.insert(identity, self.kept.len());
+        }
+        self.kept.push(was());
+    }
+
+    fn slot(&self, identity: u64) -> Option<usize> {
+        match self
+            .ascending
+            .binary_search_by_key(&identity, |(held, _)| *held)
+        {
+            Ok(at) => Some(self.ascending[at].1),
+            Err(_) => self.rest.get(&identity).copied(),
+        }
+    }
+
+    /// Each identity kept, with where `kept` holds it, in ascending identity.
+    fn in_order(&self) -> Vec<(u64, usize)> {
+        let mut order = self.ascending.clone();
+        if !self.rest.is_empty() {
+            order.extend(self.rest.iter().map(|(identity, slot)| (*identity, *slot)));
+            order.sort_unstable_by_key(|(identity, _)| *identity);
+        }
+        order
+    }
+
+    /// Each identity kept, with what it stood as, in ascending identity.
+    fn into_order(self) -> impl Iterator<Item = (u64, Option<T>)> {
+        let order = self.in_order();
+        let mut kept = self.kept;
+        order
+            .into_iter()
+            .map(move |(identity, slot)| (identity, kept[slot].take()))
+    }
 }
 
 /// Keep `item` as it stands, the first time the transaction touches it.
 fn keep_present<T: Identified + Clone>(journal: &mut Option<EntityJournal<T>>, item: &T) {
-    if let Some(journal) = journal
-        && item.identity() < journal.since
-    {
-        journal
-            .before
-            .entry(item.identity())
-            .or_insert_with(|| Some(item.clone()));
+    if let Some(journal) = journal {
+        journal.keep(item.identity(), || Some(item.clone()));
     }
 }
 
 /// Keep that `identity` was absent, the first time the transaction puts it
 /// back.
 fn keep_absent<T>(journal: &mut Option<EntityJournal<T>>, identity: u64) {
-    if let Some(journal) = journal
-        && identity < journal.since
-    {
-        journal.before.entry(identity).or_insert(None);
+    if let Some(journal) = journal {
+        journal.keep(identity, || None);
+    }
+}
+
+/// Where `items`, in ascending identity, hold `identity`, searching from
+/// `from` on; `from` moves past what the search passed, so a run of
+/// ascending look-ups reads each part of the list once.
+fn position_from<T: Identified>(items: &[T], from: &mut usize, identity: u64) -> Option<usize> {
+    let rest = items.get(*from..).unwrap_or_default();
+    match rest.binary_search_by_key(&identity, Identified::identity) {
+        Ok(at) => {
+            let index = *from + at;
+            *from = index + 1;
+            Some(index)
+        }
+        Err(at) => {
+            *from += at;
+            None
+        }
     }
 }
 
@@ -296,10 +375,7 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
     /// Start keeping what a transaction changes; `since` is the identity
     /// the document makes next.
     pub(super) fn begin(&mut self, since: u64) {
-        self.journal = Some(EntityJournal {
-            since,
-            before: HashMap::new(),
-        });
+        self.journal = Some(EntityJournal::new(since));
     }
 
     /// Stop keeping what the transaction changed.
@@ -319,12 +395,11 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
             let key = self.index.key(&item);
             self.index.remove(key, item.identity());
         }
-        let mut before: Vec<_> = journal.before.into_iter().collect();
-        before.sort_unstable_by_key(|(identity, _)| *identity);
         let mut put_back = Vec::new();
-        let mut taken_out = HashSet::new();
-        for (identity, was) in before {
-            match (self.position(identity), was) {
+        let mut taken_out = Vec::new();
+        let mut from = 0;
+        for (identity, was) in journal.into_order() {
+            match (position_from(&self.items, &mut from, identity), was) {
                 (Some(index), Some(was)) => {
                     let now = std::mem::replace(&mut self.items[index], was);
                     let (now, was) = (self.index.key(&now), self.index.key(&self.items[index]));
@@ -333,15 +408,13 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
                         self.index.insert(was, identity);
                     }
                 }
-                (Some(_), None) => {
-                    taken_out.insert(identity);
-                }
+                (Some(_), None) => taken_out.push(identity),
                 (None, Some(was)) => put_back.push(was),
                 (None, None) => {}
             }
         }
         if !taken_out.is_empty() {
-            self.retain(|item| !taken_out.contains(&item.identity()));
+            self.retain(|item| taken_out.binary_search(&item.identity()).is_err());
         }
         self.merge_in(put_back);
     }
@@ -353,11 +426,14 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
         let Some(journal) = self.journal.take() else {
             return Changed::default();
         };
-        let mut before: Vec<_> = journal.before.into_iter().collect();
-        before.sort_unstable_by_key(|(identity, _)| *identity);
+        let made = self
+            .items
+            .partition_point(|item| item.identity() < journal.since);
         let mut changed = Changed::default();
-        for (identity, was) in before {
-            let now = self.position(identity).map(|index| &self.items[index]);
+        let mut from = 0;
+        for (identity, was) in journal.into_order() {
+            let now =
+                position_from(&self.items, &mut from, identity).map(|index| &self.items[index]);
             match (was, now) {
                 (Some(was), Some(now)) if was == *now => {}
                 (Some(was), Some(_)) => {
@@ -369,9 +445,6 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
                 (None, None) => {}
             }
         }
-        let made = self
-            .items
-            .partition_point(|item| item.identity() < journal.since);
         changed
             .out
             .extend(self.items[made..].iter().map(Identified::identity));
@@ -403,48 +476,54 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
 
     /// Each entity the transaction made or changed, in the list's order.
     pub(super) fn touched(&self) -> Vec<&T> {
+        self.touched_with_before()
+            .into_iter()
+            .map(|(now, _)| now)
+            .collect()
+    }
+
+    /// Each entity the transaction made or changed, in the list's order,
+    /// with what it stood as before: `None` for one it made or put back.
+    pub(super) fn touched_with_before(&self) -> Vec<(&T, Option<&T>)> {
         let Some(journal) = &self.journal else {
             return Vec::new();
         };
         let made = self
             .items
             .partition_point(|item| item.identity() < journal.since);
-        let mut changed: Vec<usize> = journal
-            .before
-            .keys()
-            .filter_map(|identity| self.position(*identity))
-            .collect();
-        changed.sort_unstable();
-        changed
-            .into_iter()
-            .map(|index| &self.items[index])
-            .chain(&self.items[made..])
-            .collect()
+        let mut from = 0;
+        let mut touched = Vec::new();
+        for (identity, slot) in journal.in_order() {
+            if let Some(index) = position_from(&self.items[..made], &mut from, identity) {
+                touched.push((&self.items[index], journal.kept[slot].as_ref()));
+            }
+        }
+        touched.extend(self.items[made..].iter().map(|item| (item, None)));
+        touched
     }
 
-    /// The identities of the entities the transaction took out.
+    /// The identities of the entities the transaction took out, ascending.
     pub(super) fn taken_out(&self) -> Vec<u64> {
         let Some(journal) = &self.journal else {
             return Vec::new();
         };
-        let mut taken: Vec<u64> = journal
-            .before
-            .iter()
-            .filter(|(identity, was)| was.is_some() && self.position(**identity).is_none())
-            .map(|(identity, _)| *identity)
-            .collect();
-        taken.sort_unstable();
-        taken
+        let mut from = 0;
+        journal
+            .in_order()
+            .into_iter()
+            .filter(|(identity, slot)| {
+                journal.kept[*slot].is_some()
+                    && position_from(&self.items, &mut from, *identity).is_none()
+            })
+            .map(|(identity, _)| identity)
+            .collect()
     }
 
     /// The entity `identity` as it stood before the transaction, when the
     /// transaction changed or took it out.
     pub(super) fn before(&self, identity: u64) -> Option<&T> {
-        self.journal
-            .as_ref()?
-            .before
-            .get(&identity)
-            .and_then(Option::as_ref)
+        let journal = self.journal.as_ref()?;
+        journal.kept[journal.slot(identity)?].as_ref()
     }
 }
 

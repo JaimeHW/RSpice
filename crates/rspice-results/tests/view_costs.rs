@@ -354,19 +354,21 @@ fn a_refused_transaction_leaves_a_large_view_as_it_was() {
     let saved = serde_json::to_vec(&document).expect("the view serializes");
     let revision = document.revision();
     let gone = document.traces()[3].id;
-    let mut edits = vec![
-        DocumentEdit::MoveCursor {
-            cursor_id,
-            position: TypedValue::Real(2e-9),
-        },
-        DocumentEdit::Remove(EntityRef::Trace(gone)),
-    ];
+    let mut edits = vec![DocumentEdit::MoveCursor {
+        cursor_id,
+        position: TypedValue::Real(2e-9),
+    }];
     edits.extend((0..TRACES).map(|index| small_edit(&document, index)));
+    edits.push(DocumentEdit::Remove(EntityRef::Trace(gone)));
+    edits.push(DocumentEdit::SetTraceVisibility {
+        trace_id: gone,
+        visible: true,
+    });
+    let count = edits.len();
     let started = Instant::now();
     let refused = document.transact(revision, edits);
     println!(
-        "a transaction of {} edits refused at its last: {:?}",
-        TRACES + 2,
+        "a transaction of {count} edits refused at its last: {:?}",
         started.elapsed()
     );
     assert!(refused.is_err(), "an edit of a removed trace is refused");

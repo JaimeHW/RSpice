@@ -2201,8 +2201,7 @@ impl VisualizationDocument {
         // reads it.
         let mut reread = HashSet::new();
         let mut relaned = false;
-        for trace in self.traces.touched() {
-            let before = self.traces.before(trace.id.get());
+        for (trace, before) in self.traces.touched_with_before() {
             relaned |= before.is_some_and(|before| before.lane.kind != trace.lane.kind);
             if before.is_some_and(|before| reads_the_same(before, trace)) {
                 continue;
