@@ -2072,7 +2072,7 @@ fn show_library_audit_history(
     ];
     let choice = Dialog::new("Audit history", "Close")
         .description(&description)
-        .size(DialogSize::Manager)
+        .size(DialogSize::RecordHistory)
         .flush_body()
         .overlay_scrollbar()
         .show(ctx, |ui| {
