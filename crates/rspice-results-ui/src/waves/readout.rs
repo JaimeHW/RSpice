@@ -20,6 +20,8 @@ use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -566,15 +568,20 @@ impl Measuring {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (held, halt, ctx) = (Arc::clone(&answer), Arc::clone(&stop), ctx.clone());
+            let under_way = under_way(&ctx);
+            under_way.fetch_add(1, Ordering::SeqCst);
+            let ending = Arc::clone(&under_way);
             let spawned = std::thread::Builder::new()
                 .name("results-measurements".to_owned())
                 .spawn(move || {
                     let _ = held.set(plan.plan().measure(&halt).map(Arc::new));
+                    ending.fetch_sub(1, Ordering::SeqCst);
                     ctx.request_repaint();
                 });
             // With no thread to be had, the table says nothing rather than
             // measure on the frame.
             if spawned.is_err() {
+                under_way.fetch_sub(1, Ordering::SeqCst);
                 let _ = answer.set(None);
             }
         }
@@ -590,6 +597,33 @@ impl Measuring {
             answer,
             stop,
         }
+    }
+}
+
+/// How many measurings `ctx` has under way off the frame.
+#[cfg(not(target_arch = "wasm32"))]
+fn under_way(ctx: &egui::Context) -> Arc<AtomicUsize> {
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<Arc<AtomicUsize>>(egui::Id::new(
+            "rspice measurements under way",
+        ))
+        .clone()
+    })
+}
+
+/// Whether a Measurements table drawn in `ctx` is measuring off the frame:
+/// what a frame-cost test waits out before it counts idle frames.
+#[cfg(any(test, feature = "test-support"))]
+pub fn measuring_off_frame(ctx: &egui::Context) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        under_way(ctx).load(Ordering::SeqCst) > 0
+    }
+    // The page measures as it starts.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = ctx;
+        false
     }
 }
 

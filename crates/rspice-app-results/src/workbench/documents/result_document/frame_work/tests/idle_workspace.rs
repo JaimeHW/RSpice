@@ -342,17 +342,22 @@ fn idle_workspace_work(
     });
     assert!(known, "the selected trace's statistics are computed");
     // A plot too large to draw on a frame is drawn off it, reading its
-    // curves there; that is the first frame's work, so idle frames are
-    // counted once its picture has been taken.
-    let drawn = (0..3_000).any(|_| {
+    // curves there, and the Measurements table measures off it, reading the
+    // traces it measures; that is the first frames' work, so idle frames are
+    // counted once the picture has been taken and the measuring has ended.
+    let settled = (0..3_000).any(|_| {
         workspace_frame(&ctx, state, &mut controller, document_id);
-        let drawing = rspice_ui_kit::plot::drawing_off_frame(&ctx);
-        if drawing {
+        let busy = rspice_ui_kit::plot::drawing_off_frame(&ctx)
+            || rspice_results_ui::waves::readout::measuring_off_frame(&ctx);
+        if busy {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        !drawing
+        !busy
     });
-    assert!(drawn, "the plots' pictures are drawn");
+    assert!(
+        settled,
+        "the plots' pictures are drawn and the measurements measured"
+    );
     let (work, columns, reads) = (WorkCounts::reset(), ColumnWork::read(), store_reads());
     for _ in 0..super::IDLE_FRAMES {
         workspace_frame(&ctx, state, &mut controller, document_id);
