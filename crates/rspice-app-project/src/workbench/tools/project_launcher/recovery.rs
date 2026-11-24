@@ -719,7 +719,7 @@ pub(super) fn safe_mode_option(ui: &mut Ui, checked: &mut bool, title: &str, det
         t.color.text_faint
     };
     let (row_rect, response) = ui.allocate_exact_size(
-        vec2(ui.available_width().max(1.0), SAFE_MODE_OPTION_HEIGHT),
+        vec2(ui.available_width().max(1.0), two_line_row_height(ui).0),
         if enabled {
             Sense::click()
         } else {
