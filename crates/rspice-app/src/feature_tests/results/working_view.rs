@@ -578,3 +578,66 @@ fn an_edit_of_the_view_made_elsewhere_reaches_the_quick_view() {
         "drawing the edit edits the view no further"
     );
 }
+
+/// A tick is unsaved work, and so is its undo: the undo puts the view's
+/// traces back, but the view a save keeps moved on to a new revision, so the
+/// project still holds work the save did not.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_tick_and_its_undo_are_unsaved_work() {
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+        has_unsaved_changes_fresh, snapshot, unsaved_work,
+    };
+    use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
+    let host = state_with_current_clean_drc();
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.model = host.model;
+    app.state.runs = host.runs;
+    app.state.workbench.activate(Workspace::Results);
+    run_plan(&mut app.state, FIRST_OUT);
+    // Shown from the data browser, as a reader shows a run.
+    assert!(
+        rspice_app_results::workbench::docks::navigator::results_actions::select_result_dataset(
+            &mut app.state.results_parts(),
+            0
+        )
+    );
+    let analysis = {
+        let run = app.state.model.simulation.active_run().expect("the shown run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    };
+    quick_frame(&mut app.state);
+    let saved = snapshot(&app.state).expect("the project as saved");
+    crate::workbench::app_state::services_access::accept_loaded_project(
+        &mut app.state,
+        saved,
+        None,
+    );
+    quick_frame(&mut app.state);
+    let unsaved = |app: &crate::workbench::RSpiceApp| {
+        let (unsaved, _) = unsaved_work(&app.state);
+        assert_eq!(
+            unsaved,
+            has_unsaved_changes_fresh(&app.state),
+            "the frame's answer is the one a capture gets"
+        );
+        unsaved
+    };
+    assert!(!unsaved(&app), "the project as saved holds no unsaved work");
+
+    app.state.results.results.session.waveform_visibility.set(
+        SourceWaveformPresentationKey::new(analysis, "V(in)"),
+        Some(false),
+    );
+    quick_frame(&mut app.state);
+    assert_eq!(input_shown(&app.state, analysis), Some(false));
+    assert!(unsaved(&app), "the tick is unsaved work");
+
+    app.execute_command_key(WorkbenchCommand::Undo.key());
+    quick_frame(&mut app.state);
+    assert_eq!(input_shown(&app.state, analysis), None, "the undo is drawn");
+    assert!(
+        unsaved(&app),
+        "the undo leaves the view at a revision the save did not keep"
+    );
+}
