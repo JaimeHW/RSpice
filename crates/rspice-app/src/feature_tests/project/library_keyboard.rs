@@ -436,10 +436,15 @@ fn words(output: &egui::FullOutput) -> Vec<String> {
 #[test]
 fn a_view_the_find_hides_is_described_nowhere() {
     let mut replay = library_page();
-    let path = "work/amp/schematic";
+    // The inspector names the selected view's cell and view, each beside
+    // its label.
+    let states = |said: &[String], label: &str, value: &str| {
+        said.windows(2)
+            .any(|pair| pair[0] == label && pair[1] == value)
+    };
     let said = words(&replay.frame(Vec::new()));
     assert!(
-        said.iter().any(|text| text == path),
+        states(&said, "Cell", "amp") && states(&said, "View", "schematic"),
         "the page states the selection: {said:#?}"
     );
     back_to(&mut replay, FIND);
@@ -448,7 +453,7 @@ fn a_view_the_find_hides_is_described_nowhere() {
     replay.frames(Vec::new());
     let said = words(&replay.frame(Vec::new()));
     assert!(
-        !said.iter().any(|text| text.contains(path)),
+        !states(&said, "Cell", "amp") && !states(&said, "View", "schematic"),
         "nothing describes the hidden view: {said:#?}"
     );
     assert_eq!(
