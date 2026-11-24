@@ -109,7 +109,8 @@ pub(crate) struct NetlistProjectIndex {
     files: Vec<IndexedFile>,
     /// The definitions, by their position among the deck's, in the order
     /// the navigator lists them: by name ignoring case, then file and line.
-    symbols: Vec<u32>,
+    /// An edit that keeps them shares them.
+    symbols: Arc<[u32]>,
     tables: Arc<TablesCell>,
 }
 
@@ -503,7 +504,7 @@ impl NetlistProjectIndex {
         Self {
             deck,
             files,
-            symbols,
+            symbols: symbols.into(),
             tables,
         }
     }
@@ -560,7 +561,7 @@ impl NetlistProjectIndex {
             files,
             // The definitions are the same, in the same order: an edit that
             // changes them is built anew.
-            symbols: self.symbols.clone(),
+            symbols: Arc::clone(&self.symbols),
             tables: Arc::clone(&self.tables),
         }
     }
@@ -1060,26 +1061,33 @@ fn by_name(left: &str, right: &str) -> std::cmp::Ordering {
 fn nodes_by_name(deck: &DeckIndex) -> Vec<Vec<u32>> {
     let mut by_scope = vec![Vec::<u32>::new(); deck.scope_count().max(1)];
     let mut everywhere = Vec::new();
+    // Every node's name, as `by_name` orders it, in one buffer while the
+    // names are sorted, read out of the deck's text once rather than at
+    // every comparison: where each ends, by the node's position.
+    let mut written = Vec::<u8>::new();
+    let mut ends = Vec::<usize>::with_capacity(deck.node_count());
     for node in deck.nodes() {
         let position = node.id() as u32;
-        if node.name() == "0" || node.card_kind() == rspice_core::netlist::DeckCardKind::Global {
+        let name = node.name();
+        written.extend(name.bytes().map(|byte| byte.to_ascii_lowercase()));
+        ends.push(written.len());
+        if name == "0" || node.card_kind() == rspice_core::netlist::DeckCardKind::Global {
             everywhere.push(position);
         } else if let Some(names) = by_scope.get_mut(node.scope()) {
             names.push(position);
         }
     }
     let name_of = |position: u32| {
-        deck.node(position as usize)
-            .map_or(Cow::Borrowed(""), |node| node.name())
+        let at = position as usize;
+        let start = at.checked_sub(1).map_or(0, |before| ends[before]);
+        &written[start..ends[at]]
     };
     for names in &mut by_scope {
         // Sorted by each name ignoring case, and then by where it is
         // written, so the first written of a name is the one kept.
         names.extend_from_slice(&everywhere);
-        names.sort_unstable_by(|one, two| {
-            by_name(&name_of(*one), &name_of(*two)).then(one.cmp(two))
-        });
-        names.dedup_by(|later, kept| by_name(&name_of(*later), &name_of(*kept)).is_eq());
+        names.sort_unstable_by(|one, two| name_of(*one).cmp(name_of(*two)).then(one.cmp(two)));
+        names.dedup_by(|later, kept| name_of(*later) == name_of(*kept));
         names.shrink_to_fit();
     }
     by_scope
@@ -1238,6 +1246,12 @@ pub(crate) struct ValueMap {
     by_start: Vec<usize>,
     /// The longest value span, in bytes.
     widest: usize,
+    /// The text mapped, shared: the next revision's map is this one read
+    /// again where the edit since touched it.
+    text: RevisedText,
+    /// Whether it is the lexical map, every line taken as read: built
+    /// without a parse, or after one that left nothing unread.
+    lexical: bool,
 }
 
 /// What a value map was built for: the buffer's revision, and whether it
@@ -1250,11 +1264,31 @@ pub(crate) type ValueMapSlot = BackgroundIndex<ValueMapKey, ValueMap>;
 impl ValueMap {
     /// The map of `buffer`, read as its parse read it when `unread` carries
     /// what that parse left out.
-    fn build(buffer: &str, unread: Option<&[UnreadSourceRegion]>) -> Self {
+    fn build(buffer: &RevisedText, unread: Option<&[UnreadSourceRegion]>) -> Self {
         let map = match unread {
             Some(unread) => rspice_core::netlist::source_map_for_editor_as_read(buffer, unread),
             None => rspice_core::netlist::source_map_for_editor(buffer),
         };
+        Self::of(map, buffer.clone(), unread.is_none_or(<[_]>::is_empty))
+    }
+
+    /// The lexical map of `buffer`, from this one, a lexical map: the cards
+    /// the edit since touched read again and the rest moved. An edit to what
+    /// scopes the lines around it, or to a deck only a parse reads, is
+    /// built anew.
+    fn edited(&self, buffer: &RevisedText) -> Self {
+        let Some(change) = DeckTextChange::between(&self.text, buffer) else {
+            return Self::of(self.map.clone(), buffer.clone(), true);
+        };
+        match rspice_core::netlist::source_map_for_editor_edited(
+            &self.map, &self.text, buffer, change,
+        ) {
+            Some(map) => Self::of(map, buffer.clone(), true),
+            None => Self::build(buffer, None),
+        }
+    }
+
+    fn of(map: NetlistSourceMap, text: RevisedText, lexical: bool) -> Self {
         let spans = &map.value_spans;
         let mut by_start = (0..spans.len()).collect::<Vec<_>>();
         by_start.sort_by_key(|at| spans[*at].span.start);
@@ -1263,6 +1297,8 @@ impl ValueMap {
             map,
             by_start,
             widest,
+            text,
+            lexical,
         }
     }
 }
@@ -1512,17 +1548,22 @@ pub(crate) fn value_hover_at_in(
     if !current {
         let wait = wait || netlist.waits_for_indexes();
         let slot = &mut netlist.value_maps;
+        // The lexical map of a revision before this one is read again only
+        // where the edit since touched it. A parse that left nothing unread
+        // read every line as the lexical map does.
+        let unread = unread.filter(|unread| !unread.is_empty());
+        let last = slot.built().map(|(_, map)| map).filter(|map| map.lexical);
+        let build = move |text: &RevisedText| match (&last, unread.as_deref()) {
+            (Some(last), None) => last.edited(text),
+            (_, unread) => ValueMap::build(text, unread),
+        };
         let map = if wait {
             slot.wait_for(|built| *built == key)
-                .unwrap_or_else(|| slot.store(key, ValueMap::build(buffer, unread.as_deref())))
+                .unwrap_or_else(|| slot.store(key, build(buffer)))
         } else {
             if slot.wants(|built| *built == key) {
                 let (text, wake) = (buffer.clone(), ctx.clone());
-                slot.start(
-                    key,
-                    move || ValueMap::build(&text, unread.as_deref()),
-                    move || wake.request_repaint(),
-                );
+                slot.start(key, move || build(&text), move || wake.request_repaint());
             }
             let (built, map) = slot.built()?;
             if *built != key {
