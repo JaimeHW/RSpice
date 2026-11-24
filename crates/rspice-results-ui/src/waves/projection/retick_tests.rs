@@ -221,7 +221,7 @@ fn a_tick_in_one_strip_leaves_the_other_strip_as_it_was() {
     let signal = |analysis, name: &str| SourceWaveformPresentationKey::new(analysis, name);
     let mut host = Host::new(&run);
     let mut ticks = VisibilityOverrides::default();
-    ticks.insert(signal(first, "V(n5)"), true);
+    ticks.set(signal(first, "V(n5)"), Some(true));
     let (untouched, before) = {
         let models = host.models(&ticks);
         (
@@ -232,9 +232,9 @@ fn a_tick_in_one_strip_leaves_the_other_strip_as_it_was() {
     assert_eq!(host.builds, 1);
 
     // Ticks in the second strip: one signal on the plot, the dataset's own off it.
-    ticks.insert(signal(second, "V(n742)"), true);
-    ticks.insert(signal(second, "V(n7)"), true);
-    ticks.insert(signal(second, "V(n0)"), false);
+    ticks.set(signal(second, "V(n742)"), Some(true));
+    ticks.set(signal(second, "V(n7)"), Some(true));
+    ticks.set(signal(second, "V(n0)"), Some(false));
     let models = host.models(&ticks);
     assert_eq!(host.builds, 1, "a tick builds no strip afresh");
     assert_eq!(
@@ -260,8 +260,8 @@ fn a_tick_in_one_strip_leaves_the_other_strip_as_it_was() {
     drop(models);
 
     // Taking a curve off and putting the dataset's own back on, the same.
-    ticks.remove(&signal(second, "V(n7)"));
-    ticks.remove(&signal(second, "V(n0)"));
+    ticks.set(signal(second, "V(n7)"), None);
+    ticks.set(signal(second, "V(n0)"), None);
     let models = host.models(&ticks);
     assert_eq!(host.builds, 1, "an untick builds no strip afresh");
     assert_eq!(strip(&models, first).revision(), untouched);
