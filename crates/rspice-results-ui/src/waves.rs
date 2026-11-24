@@ -421,6 +421,9 @@ pub struct StripModel {
     /// What a control acting on each pane calls it, by the pane's slot and
     /// unit, found once a revision (see [`stack::pane_name`]).
     pub(crate) pane_names: std::sync::OnceLock<Vec<((usize, String), Option<String>)>>,
+    /// What each unit's pane may plot its curves against, by the unit,
+    /// found once a revision (see [`stack::abscissa_menu`]).
+    pub(crate) abscissa_signals: std::sync::OnceLock<Vec<(String, Arc<[String]>)>>,
 }
 
 /// Where one expression trace is drawn.
@@ -659,6 +662,7 @@ impl StripModel {
         self.trace_panes = std::sync::OnceLock::new();
         self.trace_facts = std::sync::OnceLock::new();
         self.pane_names = std::sync::OnceLock::new();
+        self.abscissa_signals = std::sync::OnceLock::new();
         self.revision = next_revision();
     }
 

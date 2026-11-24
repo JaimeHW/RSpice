@@ -2525,11 +2525,49 @@ pub(crate) fn abscissa_menu(
     pane: &UnitPane,
     current: Option<rspice_results::visualization_document::Abscissa>,
 ) -> pane_header::AbscissaMenu {
+    // A strip can hold a hundred thousand signals and this is asked on
+    // every frame, so each unit's list is found once a revision of the
+    // strip and shared.
+    let unit = pane.quantity_unit();
+    let held = model.abscissa_signals.get_or_init(|| {
+        let mut units: Vec<String> = model
+            .unit_panes()
+            .iter()
+            .map(|pane| pane.quantity_unit().to_owned())
+            .collect();
+        units.sort_unstable();
+        units.dedup();
+        units
+            .into_iter()
+            .map(|unit| {
+                let signals = signals_against(model, &unit);
+                (unit, signals)
+            })
+            .collect()
+    });
+    let signals = held.iter().find(|(held, _)| held == unit).map_or_else(
+        || signals_against(model, unit),
+        |(_, signals)| Arc::clone(signals),
+    );
+    pane_header::AbscissaMenu {
+        current,
+        signals,
+        expressions: session
+            .analysis_exprs
+            .get(&model.analysis_key)
+            .into_iter()
+            .flatten()
+            .map(|expr| expr.text.clone())
+            .collect(),
+    }
+}
+
+/// The strip's signals by source name, each once, those in `unit` first.
+fn signals_against(model: &StripModel, unit: &str) -> Arc<[String]> {
     let mut own = Vec::new();
     let mut others = Vec::new();
-    // Each signal once, by its source name. A strip can hold a million
-    // signals and this is built on every frame, so a name is not found by
-    // searching the others.
+    // Each signal once, by its source name, a name not found by searching
+    // the others.
     let mut seen = std::collections::HashSet::new();
     for trace in model.traces.iter().take(model.signal_trace_count) {
         if !matches!(
@@ -2539,24 +2577,14 @@ pub(crate) fn abscissa_menu(
         {
             continue;
         }
-        if model.trace_unit(trace) == pane.quantity_unit() {
+        if model.trace_unit(trace) == unit {
             own.push(trace.source_waveform_name.clone());
         } else {
             others.push(trace.source_waveform_name.clone());
         }
     }
     own.extend(others);
-    pane_header::AbscissaMenu {
-        current,
-        signals: own,
-        expressions: session
-            .analysis_exprs
-            .get(&model.analysis_key)
-            .into_iter()
-            .flatten()
-            .map(|expr| expr.text.clone())
-            .collect(),
-    }
+    own.into()
 }
 
 #[cfg(test)]

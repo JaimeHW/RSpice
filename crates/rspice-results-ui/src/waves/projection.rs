@@ -1086,6 +1086,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             trace_panes: std::sync::OnceLock::new(),
             trace_facts: std::sync::OnceLock::new(),
             pane_names: std::sync::OnceLock::new(),
+            abscissa_signals: std::sync::OnceLock::new(),
             revision: super::next_revision(),
             retickable,
         };

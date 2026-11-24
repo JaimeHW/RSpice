@@ -124,7 +124,7 @@ pub struct AbscissaMenu {
     /// a signal or an expression.
     pub current: Option<Abscissa>,
     /// The strip's signals, by source name: the pane's own first.
-    pub signals: Vec<String>,
+    pub signals: std::sync::Arc<[String]>,
     /// The strip's expressions.
     pub expressions: Vec<String>,
 }

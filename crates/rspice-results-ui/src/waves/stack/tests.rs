@@ -113,5 +113,16 @@ fn a_pane_is_offered_each_signal_once_its_own_units_first() {
         .find(|pane| pane.quantity_unit() == "V")
         .expect("a volts pane");
     let menu = abscissa_menu(&ResultViewerState::default(), &model, &pane, None);
-    assert_eq!(menu.signals, ["V(a)", "V(b)", "I(r1)", "I(r2)"]);
+    assert_eq!(*menu.signals, ["V(a)", "V(b)", "I(r1)", "I(r2)"]);
+    let amps = model
+        .unit_panes()
+        .into_iter()
+        .find(|pane| pane.quantity_unit() == "A")
+        .expect("an amps pane");
+    let against_amps = abscissa_menu(&ResultViewerState::default(), &model, &amps, None);
+    assert_eq!(*against_amps.signals, ["I(r1)", "I(r2)", "V(a)", "V(b)"]);
+    // Every frame asks again: the strip's list is the one found before, not
+    // a walk of its curves.
+    let again = abscissa_menu(&ResultViewerState::default(), &model, &pane, None);
+    assert!(std::sync::Arc::ptr_eq(&menu.signals, &again.signals));
 }
