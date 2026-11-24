@@ -376,29 +376,26 @@ impl ResultsReads<'_> {
 }
 
 fn active_analysis_supports_eye_diagram(model: &Model) -> bool {
-    active_time_domain_waveform_len(model)
-        .map(|len| len >= 8)
-        .unwrap_or(false)
+    active_time_domain_waveform_holds(model, 8)
 }
 
 fn active_analysis_supports_fft(model: &Model) -> bool {
-    active_time_domain_waveform_len(model)
-        .map(|len| len >= rspice_results_ui::fft::MIN_FFT_SAMPLES)
-        .unwrap_or(false)
+    active_time_domain_waveform_holds(model, rspice_results_ui::fft::MIN_FFT_SAMPLES)
 }
 
-fn active_time_domain_waveform_len(model: &Model) -> Option<usize> {
-    let analysis = model.simulation.active_analysis()?;
+/// Whether a time-domain waveform of the active analysis holds `samples`
+/// samples or more. The first that does answers: the tab strip asks on
+/// every frame, and the longest of a million waveforms is a walk of them all.
+fn active_time_domain_waveform_holds(model: &Model, samples: usize) -> bool {
+    let Some(analysis) = model.simulation.active_analysis() else {
+        return false;
+    };
     crate::simulation::SimulationController::analysis_supports_transient_derivation(
         analysis.analysis_type,
-    )
-    .then_some(())?;
-
-    analysis
+    ) && analysis
         .waveforms
         .iter()
-        .map(|wf| wf.x.len().min(wf.y.len()))
-        .max()
+        .any(|wf| wf.x.len().min(wf.y.len()) >= samples)
 }
 
 /// The timebase map's key for one result.

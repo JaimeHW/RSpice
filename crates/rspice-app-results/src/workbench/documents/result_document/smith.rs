@@ -23,7 +23,13 @@ use rspice_results_ui::smith_chart::view::{self, SmithBarOffer, SmithPlotTrace};
 /// Whether an analysis retains a complex AC or harmonic-balance response the
 /// Smith sheet can read against the pane's Z₀.
 fn retains_response(analysis: &crate::state::AnalysisResult) -> bool {
-    rspice_results::renderability::retains_smith_response(analysis)
+    // Only an AC or HB analysis retains a response the sheet reads against
+    // the pane's Z0, so no other analysis's columns are walked for one: the
+    // tab strip asks on every frame.
+    matches!(
+        analysis.analysis_type,
+        crate::state::AnalysisType::Ac | crate::state::AnalysisType::HarmonicBalance
+    ) && rspice_results::renderability::retains_smith_response(analysis)
 }
 
 pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) -> bool {

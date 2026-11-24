@@ -159,6 +159,18 @@ pub fn quantities(analysis: &AnalysisResult) -> Vec<PolarQuantity> {
         return Vec::new();
     }
     let network = polar_reference_impedances(analysis);
+    // Without port impedances only an AC or HB response is a polar quantity,
+    // so no other analysis's columns are walked for one: the tab strip asks
+    // on every frame.
+    if network.is_none()
+        && !matches!(
+            analysis.analysis_type,
+            rspice_results::analysis_type::AnalysisType::Ac
+                | rspice_results::analysis_type::AnalysisType::HarmonicBalance
+        )
+    {
+        return Vec::new();
+    }
     let mut resolved = Vec::new();
     for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
         let Some(source) = polar_quantity_source(analysis.analysis_type, network, waveform) else {
