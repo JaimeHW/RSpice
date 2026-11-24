@@ -419,6 +419,10 @@ pub fn drawing_off_frame(ctx: &egui::Context) -> bool {
 /// Draw `spec`'s curves into `painter`, from the picture the plot keeps when
 /// nothing they show has changed. Says whether the plot shows an older
 /// picture while a new one is drawn.
+///
+/// Curves the spec makes on demand ([`PlotSpec::curves`]) are known by the
+/// key they come with and made only for a new picture: a frame that shows the
+/// picture it holds is bounded by the plot's pixels, not by its curves.
 pub(super) fn draw(
     ctx: &egui::Context,
     id: egui::Id,
@@ -428,33 +432,105 @@ pub(super) fn draw(
     geometry: Geometry,
     color_safe: bool,
 ) -> bool {
-    let slots = MarkerSlots::for_pane(spec, geometry.plot_rect, color_safe);
-    let looks: Vec<Option<Look>> = spec
-        .traces
+    let Some(curves) = &spec.curves else {
+        let looks = looks_of(spec, &spec.traces, color_safe, &geometry);
+        // A curve with no identity cannot be known unchanged, so a plot of one
+        // is drawn afresh each frame.
+        if !identified(&spec.traces) {
+            let built = build_on_frame(&spec.traces, &looks, &[], cache, &geometry, None);
+            if let Drawing::Shapes(shapes) = built.drawing {
+                painter.extend(shapes);
+            }
+            return false;
+        }
+        let key = picture_key(&spec.traces, &looks, &geometry, cache.identity());
+        return show_picture((ctx, id, key), cache, painter, geometry, || {
+            Some((Listing::Listed(&spec.traces), looks))
+        });
+    };
+    let key = {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (cache.identity(), curves.key, color_safe).hash(&mut hasher);
+        geometry.hash_into(&mut hasher);
+        hasher.finish()
+    };
+    let mut unidentified = None;
+    let drawing = show_picture((ctx, id, key), cache, painter, geometry, || {
+        let made = (curves.make)();
+        let looks = looks_of(spec, &made, color_safe, &geometry);
+        if identified(&made) {
+            return Some((Listing::Made(made), looks));
+        }
+        unidentified = Some((made, looks));
+        None
+    });
+    if let Some((made, looks)) = unidentified {
+        let built = build_on_frame(&made, &looks, &[], cache, &geometry, None);
+        if let Drawing::Shapes(shapes) = built.drawing {
+            painter.extend(shapes);
+        }
+        return false;
+    }
+    drawing
+}
+
+/// Whether every curve of `traces` that draws something has an identity.
+fn identified(traces: &[Trace<'_>]) -> bool {
+    traces
+        .iter()
+        .all(|trace| trace.is_empty() || trace.cache_key.is_some())
+}
+
+/// The look of each of `traces`, `spec`'s, in `geometry`: `None` for one
+/// that draws nothing.
+fn looks_of(
+    spec: &PlotSpec<'_>,
+    traces: &[Trace<'_>],
+    color_safe: bool,
+    geometry: &Geometry,
+) -> Vec<Option<Look>> {
+    let slots = MarkerSlots::for_pane((spec, traces), geometry.plot_rect, color_safe);
+    traces
         .iter()
         .enumerate()
         .map(|(index, trace)| {
             (!trace.is_empty()).then(|| {
                 let slots = slots[index]
                     .unwrap_or_else(|| MarkerSlots::on_pane(spec, geometry.plot_rect, 0, 1));
-                Look::of(trace, index, color_safe, slots, &geometry)
+                Look::of(trace, index, color_safe, slots, geometry)
             })
         })
-        .collect();
-    // A curve with no identity cannot be known unchanged, so a plot of one
-    // is drawn afresh each frame.
-    if spec
-        .traces
-        .iter()
-        .any(|trace| !trace.is_empty() && trace.cache_key.is_none())
-    {
-        let built = build_on_frame(spec, &looks, &[], cache, &geometry, None);
-        if let Drawing::Shapes(shapes) = built.drawing {
-            painter.extend(shapes);
+        .collect()
+}
+
+/// The curves of a picture to draw: the ones a spec lists, or the ones it
+/// made for the picture.
+enum Listing<'s, 'a: 's> {
+    Listed(&'s [Trace<'a>]),
+    Made(Vec<Trace<'a>>),
+}
+
+impl<'s, 'a: 's> Listing<'s, 'a> {
+    fn traces(&self) -> &[Trace<'a>] {
+        match self {
+            Self::Listed(traces) => traces,
+            Self::Made(traces) => traces,
         }
-        return false;
     }
-    let key = picture_key(spec, &looks, &geometry, cache.identity());
+}
+
+/// Paint the picture `key` of the plot `id`: the one shown when it is that
+/// picture, else the one shown meanwhile while it is drawn from `curves`,
+/// which are asked for only then. `curves` answers `None` for curves that
+/// cannot be drawn as a picture. Says whether the plot shows an older
+/// picture while a new one is drawn.
+fn show_picture<'s, 'a: 's>(
+    (ctx, id, key): (&egui::Context, egui::Id, u64),
+    cache: &mut DecimationCache,
+    painter: &egui::Painter,
+    geometry: Geometry,
+    curves: impl FnOnce() -> Option<(Listing<'s, 'a>, Vec<Option<Look>>)>,
+) -> bool {
     let store = store(ctx);
     let Ok(mut plots) = store.lock() else {
         return false;
@@ -484,12 +560,15 @@ pub(super) fn draw(
         }
         return true;
     }
+    let Some((listing, looks)) = curves() else {
+        return false;
+    };
+    let traces = listing.traces();
     // A picture to draw: what the cache holds of it, and what drawing the
     // rest costs.
     let mut work = 0usize;
     let mut points = 0usize;
-    let held: Vec<Option<HeldEnvelope>> = spec
-        .traces
+    let held: Vec<Option<HeldEnvelope>> = traces
         .iter()
         .zip(&looks)
         .map(|(trace, look)| {
@@ -520,7 +599,7 @@ pub(super) fn draw(
     if !off_frame {
         pictures.pending = None;
         let built = build_on_frame(
-            spec,
+            traces,
             &looks,
             &held,
             cache,
@@ -532,8 +611,7 @@ pub(super) fn draw(
         pictures.shown = Some(picture);
         return false;
     }
-    let curves: Vec<Curve> = spec
-        .traces
+    let curves: Vec<Curve> = traces
         .iter()
         .zip(&looks)
         .zip(held)
@@ -566,7 +644,7 @@ pub(super) fn draw(
 /// What identifies a picture: the cache's samples, where and through what
 /// view it is drawn, and each curve's identity and look.
 fn picture_key(
-    spec: &PlotSpec<'_>,
+    traces: &[Trace<'_>],
     looks: &[Option<Look>],
     geometry: &Geometry,
     identity: u64,
@@ -574,7 +652,7 @@ fn picture_key(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     identity.hash(&mut hasher);
     geometry.hash_into(&mut hasher);
-    for (trace, look) in spec.traces.iter().zip(looks) {
+    for (trace, look) in traces.iter().zip(looks) {
         let Some(look) = look else {
             0u8.hash(&mut hasher);
             continue;
@@ -647,7 +725,7 @@ fn source_of(
 /// Draw the picture now, reducing through the frame's cache what it does
 /// not hold. Without tessellation options it is drawn as shapes.
 fn build_on_frame(
-    spec: &PlotSpec<'_>,
+    traces: &[Trace<'_>],
     looks: &[Option<Look>],
     held: &[Option<HeldEnvelope>],
     cache: &mut DecimationCache,
@@ -658,7 +736,7 @@ fn build_on_frame(
     let mut complete = true;
     let mut curves = 0;
     let mut points = 0usize;
-    for (index, (trace, look)) in spec.traces.iter().zip(looks).enumerate() {
+    for (index, (trace, look)) in traces.iter().zip(looks).enumerate() {
         let Some(look) = look else {
             continue;
         };

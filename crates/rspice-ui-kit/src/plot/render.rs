@@ -586,15 +586,14 @@ pub(super) struct MarkerSlots {
 }
 
 impl MarkerSlots {
-    /// The slots of each of `spec`'s traces, in order: `None` for a trace
-    /// that carries no marker.
+    /// The slots of each of `traces`, `spec`'s, in order: `None` for a
+    /// trace that carries no marker.
     pub(super) fn for_pane(
-        spec: &PlotSpec<'_>,
+        (spec, traces): (&PlotSpec<'_>, &[Trace<'_>]),
         plot_rect: Rect,
         color_safe: bool,
     ) -> Vec<Option<Self>> {
-        let marked: Vec<bool> = spec
-            .traces
+        let marked: Vec<bool> = traces
             .iter()
             .enumerate()
             .map(|(index, trace)| {
@@ -1071,7 +1070,8 @@ fn axis_accessibility_range(axis: &super::spec::Axis) -> String {
 
 fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -> String {
     use crate::accessibility::counted;
-    let trace_count = spec.traces.iter().filter(|trace| !trace.is_empty()).count();
+    let trace_count = spec.traces.iter().filter(|trace| !trace.is_empty()).count()
+        + spec.curves.as_ref().map_or(0, |curves| curves.count);
     let trace_summary = if trace_count == 0 && spec.accessible_detail.is_some() {
         "custom-rendered engineering data".to_owned()
     } else {
@@ -1510,6 +1510,17 @@ pub fn show(
     // What a tag keeps clear of beside the curves: the limit labels, and
     // every tag already placed.
     let mut obstacles = limit_labels;
+    // The curves a plot makes only for a new picture, made here once, and
+    // only when a tag has to keep clear of them.
+    let made = std::cell::OnceCell::new();
+    let curves = || {
+        made.get_or_init(|| {
+            spec.curves
+                .as_ref()
+                .map_or_else(Vec::new, |curves| (curves.make)())
+        })
+        .as_slice()
+    };
     for marker in &spec.markers {
         // A marker states where something is. Off the window there is no
         // "where" to draw, and a dot pinned to the frame would claim a
@@ -1618,7 +1629,8 @@ pub fn show(
         if !limit_line {
             let (right, left) = (px + 9.0, px - tag_w - 9.0);
             let lift = tag_h + 4.0;
-            let clear = |rect: Rect| !tag_collides(rect, spec, plot_rect, &mx, &my, &obstacles);
+            let clear =
+                |rect: Rect| !tag_collides(rect, (spec, curves()), plot_rect, &mx, &my, &obstacles);
             if !clear(tag_rect)
                 && let Some(rect) = [0.0, lift, 2.0 * lift]
                     .into_iter()
@@ -2511,7 +2523,7 @@ fn handle_navigation(
 /// a dense trace is read at a stride, which is fine enough for a tag.
 fn tag_collides(
     rect: Rect,
-    spec: &PlotSpec,
+    (spec, curves): (&PlotSpec, &[Trace<'_>]),
     plot_rect: Rect,
     mx: &dyn Fn(f64) -> f32,
     my: &dyn Fn(f64) -> f32,
@@ -2532,7 +2544,7 @@ fn tag_collides(
         spec.x_scale.denormalize(at, spec.x.min, spec.x.max)
     };
     let (from, to) = (data_x(near.left()), data_x(near.right()));
-    spec.traces.iter().any(|trace| {
+    spec.traces.iter().chain(curves).any(|trace| {
         let (x, y) = (trace.x, trace.y);
         let n = x.len().min(y.len());
         // A trace that does not rise in x, or whose ends are not numbers,

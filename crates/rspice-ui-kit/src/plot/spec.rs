@@ -619,6 +619,19 @@ pub fn padded_fit((min, max): (f64, f64)) -> (f64, f64) {
 /// Receives a painter clipped to the plot area and the data→screen mapper.
 pub type Underlay<'a> = Box<dyn Fn(&egui::Painter, &PlotMapper) + 'a>;
 
+/// Curves a plot makes only when it draws a new picture of them. A pane of a
+/// hundred thousand curves names them all by one key, and a frame that shows
+/// the picture it holds of them never lists them.
+pub struct Curves<'a> {
+    /// Changes whenever a curve, its samples or how it is drawn would:
+    /// what each curve's identity and look say for curves listed one by one.
+    pub key: u64,
+    /// How many curves draw something.
+    pub count: usize,
+    /// The curves, drawn after [`PlotSpec::traces`], in order.
+    pub make: Box<dyn Fn() -> Vec<Trace<'a>> + 'a>,
+}
+
 /// The full declarative plot description for one frame.
 pub struct PlotSpec<'a> {
     /// Concise screen-reader name for this engineering graphic.
@@ -638,6 +651,9 @@ pub struct PlotSpec<'a> {
     pub y_scale: XScale,
     /// Traces, drawn in order (first = bottom).
     pub traces: Vec<Trace<'a>>,
+    /// Curves drawn after `traces` and made only when the plot draws them
+    /// afresh. Each must carry its cache key.
+    pub curves: Option<Curves<'a>>,
     /// Analysis markers, drawn above traces.
     pub markers: Vec<Marker>,
     /// Horizontal reference lines.
@@ -701,6 +717,7 @@ impl<'a> PlotSpec<'a> {
             y,
             y_scale: XScale::Linear,
             traces: Vec::new(),
+            curves: None,
             markers: Vec::new(),
             ref_lines: Vec::new(),
             x_ref_lines: Vec::new(),
