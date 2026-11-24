@@ -574,7 +574,12 @@ impl Measuring {
             let spawned = std::thread::Builder::new()
                 .name("results-measurements".to_owned())
                 .spawn(move || {
-                    let _ = held.set(plan.plan().measure(&halt).map(Arc::new));
+                    // The traces are taken from the strips before they are
+                    // measured, so the strips are not held while they are:
+                    // a tick meanwhile changes them in place.
+                    let measured = plan.plan();
+                    drop(plan);
+                    let _ = held.set(measured.measure(&halt).map(Arc::new));
                     ending.fetch_sub(1, Ordering::SeqCst);
                     ctx.request_repaint();
                 });
