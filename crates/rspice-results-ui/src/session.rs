@@ -509,10 +509,12 @@ pub struct WaveformLook {
 }
 
 /// The reader's ticks: a signal named here is on the plot or off it whatever
-/// its dataset chose. Every edit gives them a new revision, so what is built
+/// its dataset chose. An edit gives them a new revision, so what is built
 /// from them asks whether they changed without reading them all, and which
 /// signals an edit touched is kept, so what was built from an earlier
-/// revision changes by those signals alone.
+/// revision changes by those signals alone. Edits made while nothing holds
+/// the revision they leave share one: a gesture or a drawing of many
+/// signals is one change to whatever reads them next.
 ///
 /// They also keep which signals the reader set since a view last took them,
 /// so what a frame changed is read without comparing them all.
@@ -523,13 +525,12 @@ pub struct VisibilityOverrides {
     /// The signals [`Self::set`] changed since [`Self::take_set`]; `None`
     /// once a mutable borrow may have changed any of them.
     set_since: Option<Vec<SourceWaveformPresentationKey>>,
-    /// The signals edited one at a time, oldest first, each with the
-    /// revision its edit left. An edit that does not say which signals it
-    /// touched empties it.
-    edits: Vec<(
-        rspice_vocabulary::source_revision::SourceRevision,
-        SourceWaveformPresentationKey,
-    )>,
+    /// The signals edited one at a time, oldest first. An edit that does
+    /// not say which signals it touched empties it.
+    edited: Vec<SourceWaveformPresentationKey>,
+    /// Each revision an edit left while something held it, oldest first,
+    /// with where in `edited` the edits since it begin.
+    left: Vec<(rspice_vocabulary::source_revision::SourceRevision, usize)>,
 }
 
 impl Clone for VisibilityOverrides {
@@ -540,7 +541,8 @@ impl Clone for VisibilityOverrides {
             overrides: self.overrides.clone(),
             revision: self.revision.clone(),
             set_since: self.set_since.clone(),
-            edits: Vec::new(),
+            edited: Vec::new(),
+            left: Vec::new(),
         }
     }
 }
@@ -600,11 +602,11 @@ impl VisibilityOverrides {
         revision: &rspice_vocabulary::source_revision::SourceRevision,
     ) -> Option<impl Iterator<Item = &SourceWaveformPresentationKey>> {
         let from = if *revision == self.revision {
-            self.edits.len()
+            self.edited.len()
         } else {
-            self.edits.iter().rposition(|(left, _)| left == revision)?
+            self.left.iter().rev().find(|(left, _)| left == revision)?.1
         };
-        Some(self.edits[from..].iter().map(|(_, key)| key))
+        Some(self.edited[from..].iter())
     }
 
     /// The signals the reader set since this was last asked, each as often
@@ -632,14 +634,24 @@ impl VisibilityOverrides {
         changed
     }
 
-    /// Record an edit of `key`'s tick and move to a new revision. Edits
-    /// beyond twice the ticks are let go: rebuilding from the ticks then
-    /// reads no more than replaying the edits would.
+    /// Record an edit of `key`'s tick, under a new revision when something
+    /// holds the one it leaves. Edits beyond twice the ticks are let go:
+    /// rebuilding from the ticks then reads no more than replaying the
+    /// edits would.
     fn note(&mut self, key: SourceWaveformPresentationKey) {
-        self.edits.push((self.revision.clone(), key));
-        self.revision.advance();
-        if self.edits.len() > 2 * self.overrides.len().max(1) {
-            self.edits.drain(..self.edits.len() / 2);
+        if self.revision.is_observed() {
+            self.left.push((self.revision.clone(), self.edited.len()));
+            self.revision.advance();
+        }
+        self.edited.push(key);
+        if self.edited.len() > 2 * self.overrides.len().max(1) {
+            let gone = self.edited.len() / 2;
+            self.edited.drain(..gone);
+            self.left.retain_mut(|(_, from)| {
+                let kept = *from >= gone;
+                *from = from.saturating_sub(gone);
+                kept
+            });
         }
     }
 }
@@ -656,7 +668,8 @@ impl std::ops::DerefMut for VisibilityOverrides {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // Any mutable borrow may edit them, any of them, and does not say
         // which.
-        self.edits.clear();
+        self.edited.clear();
+        self.left.clear();
         self.revision.advance();
         self.set_since = None;
         &mut self.overrides

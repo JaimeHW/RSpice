@@ -12,6 +12,13 @@ impl SourceRevision {
         // Unobserved consecutive writes need no additional allocation.
         Arc::make_mut(&mut self.0);
     }
+
+    /// Whether anything besides this holds the revision: an owner whose
+    /// revision nothing else holds may change its source again without
+    /// telling the change apart from the one before.
+    pub fn is_observed(&self) -> bool {
+        Arc::strong_count(&self.0) > 1
+    }
 }
 
 impl PartialEq for SourceRevision {
