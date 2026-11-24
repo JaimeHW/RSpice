@@ -388,6 +388,15 @@ fn compare(
     let changed = match validity(state, &stamp).and(stamp.presentation.clone()) {
         Ok(presentation) => {
             let source = working_source(state, &stamp, presentation);
+            let result_history = || {
+                let workspace = &state.model.workspace.content;
+                lifecycle.authority.result_fingerprints().digest(
+                    &lifecycle.result_cache.headers(&state.model.simulation),
+                    &workspace.report_documents,
+                    &workspace.visualization_documents,
+                    &state.presentation.saved_signal_sets(),
+                )
+            };
             documents
                 .update(
                     &source,
@@ -397,23 +406,15 @@ fn compare(
                             &state.model.model_library_manager,
                         )
                     },
-                    || {
-                        let workspace = &state.model.workspace.content;
-                        lifecycle.authority.result_fingerprints().digest(
-                            &lifecycle.result_cache.headers(&state.model.simulation),
-                            &workspace.report_documents,
-                            &workspace.visualization_documents,
-                            &state.presentation.saved_signal_sets(),
-                        )
-                    },
+                    result_history,
                 )
                 .and_then(|mut changed| {
                     changed.extend(settle(
                         state,
-                        dirty_answer,
-                        &mut documents,
+                        (dirty_answer, &mut documents),
                         &source,
                         &baseline,
+                        result_history,
                     )?);
                     Ok(changed)
                 })
@@ -441,14 +442,17 @@ fn compare(
 /// time: each drawing the baseline holds as it stands is where the baseline
 /// left it, so an undo back to there reads clean, and any other position the
 /// history names since reads unsaved with no digest. A drawing edited before
-/// the first comparison is digested until the next baseline. Returns the
-/// documents whose digest changed.
+/// the first comparison is digested until the next baseline. The views the
+/// baseline holds are known from then on, so a view moved to a revision the
+/// baseline does not hold reads unsaved with no digest; `result_history`
+/// digests the result history when it is read again. Returns the documents
+/// whose digest changed.
 fn settle(
     state: &LifecycleView<'_>,
-    answer: &DirtyAnswer,
-    documents: &mut WorkingDocuments,
+    (answer, documents): (&DirtyAnswer, &mut WorkingDocuments),
     source: &WorkingSource<'_>,
     baseline: &DirtyBaseline,
+    result_history: impl FnOnce() -> Result<ContentDigest, String>,
 ) -> Result<Vec<ProjectDocumentId>, String> {
     let mut settled = answer.settled.borrow_mut();
     if settled.as_ref() == Some(baseline) {
@@ -457,7 +461,13 @@ fn settle(
     let accepted = state.platform.project_lifecycle.authority.accepted();
     let changed = documents.settle(
         source,
-        accepted.and_then(|accepted| accepted.fingerprints().ok()),
+        (
+            accepted.and_then(|accepted| accepted.fingerprints().ok()),
+            accepted.map(|accepted| {
+                rspice_project::registry::view_revisions(&accepted.baseline().workspace)
+            }),
+        ),
+        result_history,
     )?;
     *settled = Some(baseline.clone());
     Ok(changed)

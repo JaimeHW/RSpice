@@ -22,6 +22,14 @@
 //! Netlist editor or a deck added, and the netlist source reads unsaved
 //! with no digest: a key typed in a 100 MB deck digests nothing. The texts
 //! are digested when the next baseline is settled.
+//!
+//! The result history is read by its views' revisions first. A view's
+//! revision is part of what a save writes of it and moves on every change,
+//! so once the views the baseline holds are known, a view at a revision the
+//! baseline does not hold it at, or a view added or taken out, makes the
+//! history unsaved with no digest: a tick on a view of a hundred thousand
+//! traces digests nothing. The history is digested when its views are the
+//! baseline's, and when the next baseline is settled.
 
 use std::collections::{HashMap, HashSet};
 
@@ -29,7 +37,7 @@ use rspice_design::deck::{DeckText, ProjectDeck};
 use rspice_design::library::ViewType;
 use rspice_design::schematic::owned::Schematic;
 use rspice_design_model::cell_view::CellViewRef;
-use rspice_vocabulary::product::ContentDigest;
+use rspice_vocabulary::product::{ContentDigest, ObjectRevision, ResultDocumentId};
 
 use super::fingerprints::{
     drawing_digest, layout_digest, model_catalog_digest, netlist_source_digest,
@@ -65,6 +73,57 @@ pub struct WorkingDocuments {
     held: Option<Held>,
     positions: Positions,
     decks: DeckTexts,
+    views: SavedViews,
+}
+
+/// A view by its identity and revision.
+pub type ViewRevision = (ResultDocumentId, ObjectRevision);
+
+/// The views of `workspace` by identity and revision, in its order.
+pub fn view_revisions(workspace: &ProjectWorkspace) -> Vec<ViewRevision> {
+    workspace
+        .visualization_documents
+        .iter()
+        .map(|view| (view.id(), view.revision()))
+        .collect()
+}
+
+/// How the result history reads the views the project keeps.
+#[derive(Debug, Clone, Default)]
+struct SavedViews {
+    /// The views the baseline holds, by identity and revision, in its
+    /// order, once the baseline was settled.
+    saved: Option<Vec<ViewRevision>>,
+    /// Whether the result history reads unsaved, its views not the ones the
+    /// baseline holds.
+    unsaved: bool,
+}
+
+impl SavedViews {
+    /// The views of `workspace` by identity and revision when they are not
+    /// the ones the baseline holds, in which case the result history is not
+    /// the baseline's whatever else it holds; `None` when they are, or the
+    /// baseline's are not known.
+    fn edited(&self, workspace: &ProjectWorkspace) -> Option<Vec<ViewRevision>> {
+        let saved = self.saved.as_ref()?;
+        let views = view_revisions(workspace);
+        (views != *saved).then_some(views)
+    }
+
+    /// The result history's share: unsaved, named by the views' revisions,
+    /// when they are not the baseline's, else `history` digested.
+    fn share(
+        &mut self,
+        workspace: &ProjectWorkspace,
+        history: impl FnOnce() -> Result<ContentDigest, String>,
+    ) -> Result<ContentDigest, String> {
+        if let Some(views) = self.edited(workspace) {
+            self.unsaved = true;
+            return digest(&("unsaved result history", views));
+        }
+        self.unsaved = false;
+        history()
+    }
 }
 
 /// How the netlist source reads the texts of the decks the project keeps.
@@ -140,9 +199,10 @@ impl WorkingDocuments {
     }
 
     /// The documents whose drawing stands at a position named since the
-    /// baseline was settled, and the netlist source while a deck's text kept
-    /// since has no digest: each reads unsaved, with no digest of its
-    /// content.
+    /// baseline was settled, the netlist source while a deck's text kept
+    /// since has no digest, and the result history while a view stands at a
+    /// revision the baseline does not hold: each reads unsaved, with no
+    /// digest of its content.
     pub fn read_unsaved(&self) -> Vec<ProjectDocumentId> {
         let mut unsaved = self.held.as_ref().map_or_else(Vec::new, |held| {
             held.cell_views
@@ -154,6 +214,9 @@ impl WorkingDocuments {
         if self.decks.unsaved {
             unsaved.push(ProjectDocumentId::NetlistSource);
         }
+        if self.views.unsaved {
+            unsaved.push(ProjectDocumentId::ResultHistory);
+        }
         unsaved
     }
 
@@ -161,14 +224,18 @@ impl WorkingDocuments {
     /// revert takes one: every drawing read unsaved from its position is
     /// digested, and each drawing whose cell view the baseline holds as it
     /// stands is known to stand where the baseline left it; the decks'
-    /// texts are digested, and a text kept after this reads unsaved. Returns
-    /// the documents whose digest changed. A failure forgets every digest.
+    /// texts are digested, and a text kept after this reads unsaved; the
+    /// views the baseline holds, `saved_views`, are known, and a result
+    /// history read unsaved is read again against them, `result_history`
+    /// digesting it when its views are the baseline's. Returns the
+    /// documents whose digest changed. A failure forgets every digest.
     pub fn settle(
         &mut self,
         source: &WorkingSource<'_>,
-        baseline: Option<&DocumentFingerprints>,
+        (baseline, saved_views): (Option<&DocumentFingerprints>, Option<Vec<ViewRevision>>),
+        result_history: impl FnOnce() -> Result<ContentDigest, String>,
     ) -> Result<Vec<ProjectDocumentId>, String> {
-        let settled = self.settle_drawings(source, baseline);
+        let settled = self.settle_drawings(source, (baseline, saved_views), result_history);
         if settled.is_err() {
             self.clear();
         }
@@ -178,9 +245,24 @@ impl WorkingDocuments {
     fn settle_drawings(
         &mut self,
         source: &WorkingSource<'_>,
-        baseline: Option<&DocumentFingerprints>,
+        (baseline, saved_views): (Option<&DocumentFingerprints>, Option<Vec<ViewRevision>>),
+        result_history: impl FnOnce() -> Result<ContentDigest, String>,
     ) -> Result<Vec<ProjectDocumentId>, String> {
         let mut changed = Vec::new();
+        self.views.saved = saved_views;
+        if self.views.unsaved {
+            let history = self.views.share(source.workspace, || {
+                digested();
+                result_history()
+            })?;
+            if self
+                .documents
+                .insert(ProjectDocumentId::ResultHistory, history)
+                != Some(history)
+            {
+                changed.push(ProjectDocumentId::ResultHistory);
+            }
+        }
         if self.decks.unsaved {
             let netlist = netlist_source_digest(source.workspace)?;
             digested();
@@ -399,10 +481,13 @@ impl WorkingDocuments {
         let results_moved =
             workspace_moved || held.is_none_or(|held| held.results != source.results_stamp);
         let mut result_history = Some(result_history);
+        let views = &mut self.views;
         document(ProjectDocumentId::ResultHistory, results_moved, &mut || {
-            result_history
-                .take()
-                .expect("the result history is digested once")()
+            views.share(workspace, || {
+                result_history
+                    .take()
+                    .expect("the result history is digested once")()
+            })
         })?;
         document(
             ProjectDocumentId::StimulusLibrary,

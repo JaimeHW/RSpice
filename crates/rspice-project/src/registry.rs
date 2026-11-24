@@ -14,7 +14,7 @@ pub use fingerprints::{
 
 pub mod result_fingerprint;
 pub use result_fingerprint::ResultFingerprintCache;
-pub use working::{WorkingDocuments, WorkingSource};
+pub use working::{ViewRevision, WorkingDocuments, WorkingSource, view_revisions};
 
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design_model::cell_view::CellViewRef;
