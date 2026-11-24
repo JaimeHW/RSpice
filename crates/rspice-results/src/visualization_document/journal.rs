@@ -88,6 +88,11 @@ pub(super) trait ListIndex<T>: Default + Clone {
     fn key(&self, item: &T) -> Self::Key;
     fn insert(&mut self, key: Self::Key, identity: u64);
     fn remove(&mut self, key: Self::Key, identity: u64);
+
+    /// Whether `one` and `other` are kept under the same key.
+    fn same_key(&self, one: &T, other: &T) -> bool {
+        self.key(one) == self.key(other)
+    }
 }
 
 /// A list kept by identity alone.
@@ -125,6 +130,10 @@ impl ListIndex<Trace> for SignalIndex {
 
     fn key(&self, trace: &Trace) -> (PaneId, u64) {
         (trace.pane_id, self.hashing.hash_one(signal_of(trace)))
+    }
+
+    fn same_key(&self, one: &Trace, other: &Trace) -> bool {
+        one.pane_id == other.pane_id && signal_of(one) == signal_of(other)
     }
 
     fn insert(&mut self, key: (PaneId, u64), identity: u64) {
@@ -246,9 +255,16 @@ fn keep_absent<T>(journal: &mut Option<EntityJournal<T>>, identity: u64) {
 
 /// Where `items`, in ascending identity, hold `identity`, searching from
 /// `from` on; `from` moves past what the search passed, so a run of
-/// ascending look-ups reads each part of the list once.
+/// ascending look-ups reads each part of the list once. The search widens
+/// from `from` before it halves, so an identity near the last one found is
+/// found in a step or two.
 fn position_from<T: Identified>(items: &[T], from: &mut usize, identity: u64) -> Option<usize> {
     let rest = items.get(*from..).unwrap_or_default();
+    let mut reach = 1;
+    while reach < rest.len() && rest[reach - 1].identity() < identity {
+        reach *= 2;
+    }
+    let rest = &rest[..reach.min(rest.len())];
     match rest.binary_search_by_key(&identity, Identified::identity) {
         Ok(at) => {
             let index = *from + at;
@@ -402,8 +418,9 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
             match (position_from(&self.items, &mut from, identity), was) {
                 (Some(index), Some(was)) => {
                     let now = std::mem::replace(&mut self.items[index], was);
-                    let (now, was) = (self.index.key(&now), self.index.key(&self.items[index]));
-                    if now != was {
+                    let was = &self.items[index];
+                    if !self.index.same_key(&now, was) {
+                        let (now, was) = (self.index.key(&now), self.index.key(was));
                         self.index.remove(now, identity);
                         self.index.insert(was, identity);
                     }
