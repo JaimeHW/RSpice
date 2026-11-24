@@ -153,6 +153,7 @@ fn surface_header(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
         .fill(tokens.color.bg_panel)
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             let access = project_access(cx);
             if compact {
                 identity_block(ui, &tokens);
@@ -245,6 +246,7 @@ fn page_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
             bottom: 0,
         })
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 for (index, page) in LibraryCellviewPage::ALL.into_iter().enumerate() {
