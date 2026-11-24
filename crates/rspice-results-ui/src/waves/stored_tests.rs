@@ -13,6 +13,7 @@ use crate::derived::{DerivedSeries, FRAME_EXTENTS};
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::executed_deck::ExecutedDeckArchive;
+use rspice_results::sampling::SweepClass;
 use rspice_results::waveform::{
     ColumnSource, ColumnTile, Read, ReadService, ReadValue, RetainedTrace, RowsAround,
     StoredWindow, WaveformValues, WindowLead, perform,
@@ -739,6 +740,16 @@ fn run_on_one_axis(
     time: &Arc<Counted>,
     traces: usize,
 ) -> rspice_results::run::SimulationRun<AnalysisResult<RetainedTrace>> {
+    run_of(AnalysisType::Transient, time, traces)
+}
+
+/// A run of one `analysis_type` analysis of many traces, each holding a handle of its own on one
+/// stored axis.
+fn run_of(
+    analysis_type: AnalysisType,
+    time: &Arc<Counted>,
+    traces: usize,
+) -> rspice_results::run::SimulationRun<AnalysisResult<RetainedTrace>> {
     let out = counted("V(out)", vec![0.5; time.values.len()]);
     let mut run = rspice_results::run::SimulationRun::new(
         1,
@@ -746,7 +757,7 @@ fn run_on_one_axis(
         rspice_results::run::ExecutionTarget::LocalDesktop,
     );
     run.analyses.push(
-        AnalysisResult::new(1, AnalysisType::Transient, "Tran", 0.0).with_waveforms(
+        AnalysisResult::new(1, analysis_type, "Sweep", 0.0).with_waveforms(
             (0..traces)
                 .map(|trace| {
                     RetainedTrace::new(format!("V(n{trace})"), stored(time), stored(&out), "#fff")
@@ -837,4 +848,57 @@ fn the_bounds_never_read_a_stored_axis_whole_themselves() {
         let models = models(&run);
         assert_eq!(models[0].x_bounds, Some((1.0, 3.0)), "the axis has arrived");
     });
+}
+
+/// A stored sweep that does not ascend, as a DC sweep stepped down holds, is classified once for
+/// every curve on it, and read off the frame: building the strips of 100,000 curves on it reads
+/// none of it on the thread that draws the window, and once the reader service holds it, each
+/// curve has its shape from the one whole read.
+#[test]
+fn curves_on_a_descending_stored_sweep_classify_it_once_off_the_frame() {
+    const TRACES: usize = 100_000;
+    let sweep = counted("sweep", (0..64).rev().map(f64::from).collect());
+    let run = run_of(AnalysisType::DcSweep, &sweep, TRACES);
+    let waiting: &'static Waiting = Box::leak(Box::default());
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            rspice_results::waveform::never_wait_for_reads_here();
+            rspice_results::waveform::read_through(waiting, || {
+                let models = models(&run);
+                assert_eq!(models[0].traces.len(), TRACES);
+                assert!(
+                    models[0]
+                        .traces
+                        .iter()
+                        .all(|trace| trace.shape.class() == SweepClass::Empty),
+                    "no curve has a shape before its axis arrives"
+                );
+            });
+        });
+    });
+    assert_eq!(
+        sweep.reads.load(Ordering::SeqCst),
+        0,
+        "nothing on the frame read the sweep whole"
+    );
+    // The run's markers stand at its first and last X, read once.
+    assert!(sweep.rows_read.load(Ordering::SeqCst) <= 2);
+
+    let reader: &'static Keeping = Box::leak(Box::default());
+    rspice_results::waveform::read_through(reader, || {
+        let models = models(&run);
+        assert!(
+            models[0]
+                .traces
+                .iter()
+                .all(|trace| trace.shape.class() == SweepClass::Descending),
+            "every curve has the sweep's shape"
+        );
+        assert_eq!(models[0].x_bounds, Some((0.0, 63.0)));
+    });
+    assert_eq!(
+        sweep.reads.load(Ordering::SeqCst),
+        1,
+        "the sweep is read whole once, by the service"
+    );
 }

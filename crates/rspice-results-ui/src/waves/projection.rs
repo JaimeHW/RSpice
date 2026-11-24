@@ -340,7 +340,8 @@ fn append_projected_traces(
             || base_name.to_owned(),
             |group| format!("{base_name} · {}", group.label),
         );
-        let shape = derived.shape_or(
+        let shape = curve_shape(
+            derived,
             shape_key(
                 analysis_key,
                 source_waveform_name,
@@ -349,7 +350,7 @@ fn append_projected_traces(
                 run_id,
                 false,
             ),
-            || SweepShape::of_axis(&projection.x),
+            &projection.x,
         );
         traces.push(StripTrace {
             waveform_index,
@@ -970,7 +971,8 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 } else {
                     (overlay_waveform.x.clone(), source_y)
                 };
-                let shape = derived.shape_or(
+                let shape = curve_shape(
+                    derived,
                     shape_key(
                         analysis_key,
                         source_name,
@@ -979,7 +981,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                         overlay_run.id,
                         true,
                     ),
-                    || SweepShape::of_axis(&projected.0),
+                    &projected.0,
                 );
                 projected_overlay_traces.push(StripTrace {
                     waveform_index: overlay_index,
@@ -1093,6 +1095,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         model.grid_ascending = super::grid_is_ascending(&model);
         models.push(model);
     }
+    derived.forget_build_axes();
     models
 }
 
@@ -1221,6 +1224,15 @@ fn displayed_phase_series(
 /// key has to name the group and the run as well as the signal. It is not
 /// [`super::trace_key`], because that folds in the phase wrap/unwrap choice — which
 /// changes Y and leaves X exactly where it was.
+/// The structure of `x`, the axis of the curve `key` names. A stored axis still being read off
+/// the frame has none yet, and the curve stands as empty until a build after the read has
+/// arrived ([`crate::derived::DerivedSeries::axis_shape_or`]).
+fn curve_shape(derived: &mut DerivedSeries, key: u64, x: &SharedWaveformValues) -> Arc<SweepShape> {
+    derived
+        .axis_shape_or(key, x)
+        .unwrap_or_else(|| Arc::new(SweepShape::of(&[])))
+}
+
 fn shape_key(
     analysis_key: AnalysisPresentationKey,
     source_waveform_name: &str,

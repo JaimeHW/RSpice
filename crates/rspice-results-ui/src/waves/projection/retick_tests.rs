@@ -44,6 +44,7 @@ fn two_transients(signals: usize) -> Run {
 /// made from, and how many times they were built afresh.
 struct Host<'r> {
     run: &'r Run,
+    viewer: ResultViewer,
     cache: ModelsCache,
     derived: DerivedSeries,
     decks: ExecutedDeckArchive,
@@ -59,6 +60,7 @@ impl<'r> Host<'r> {
     fn new(run: &'r Run) -> Self {
         Self {
             run,
+            viewer: ResultViewer::Waves,
             cache: ModelsCache::default(),
             derived: DerivedSeries::default(),
             decks: ExecutedDeckArchive::default(),
@@ -84,7 +86,7 @@ impl<'r> Host<'r> {
             ModelCacheInput {
                 active_run_idx: Some(0),
                 overlay_dataset_ids: &[],
-                viewer: ResultViewer::Waves,
+                viewer: self.viewer,
                 projection: options(ticks, &hidden, &self.indices, &self.revision),
                 waveform_visibility: ticks,
                 waveform_colors: colors,
@@ -287,4 +289,90 @@ fn ticks_edited_past_what_is_known_build_the_strips_afresh() {
         .map(|trace| trace.source_waveform_name.as_str())
         .collect();
     assert_eq!(names, ["V(n0)", "V(n3)"]);
+}
+
+/// A stored sweep stepped down, which does not ascend.
+struct SteppedDown;
+
+impl rspice_results::waveform::ColumnSource for SteppedDown {
+    fn name(&self) -> &str {
+        "sweep"
+    }
+
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
+    fn rows(&self) -> u64 {
+        3
+    }
+
+    fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+        for (row, value) in (first..).zip(out) {
+            *value = 2.0 - row as f64;
+        }
+        Ok(())
+    }
+}
+
+/// A reader service whose reads arrive once it is opened.
+#[derive(Default)]
+struct Gate {
+    open: std::sync::atomic::AtomicBool,
+}
+
+impl rspice_results::waveform::ReadService for Gate {
+    fn request(
+        &self,
+        _run: u64,
+        values: &rspice_results::waveform::WaveformValues,
+        x: &rspice_results::waveform::WaveformValues,
+        read: rspice_results::waveform::Read,
+    ) -> Option<rspice_results::waveform::ReadValue> {
+        self.open
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .then(|| rspice_results::waveform::perform(values, x, read))
+    }
+}
+
+/// Strips built while a stored axis is read off the frame are built again
+/// once it has arrived, and not before: the curves on it take its shape then.
+#[test]
+fn strips_built_without_their_axis_are_built_again_once_it_arrives() {
+    use rspice_results::sampling::SweepClass;
+    use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
+    let window = StoredWindow {
+        first: 0,
+        rows: 3,
+        lead: WindowLead::None,
+    };
+    let sweep = WaveformValues::stored(Arc::new(SteppedDown), window).expect("the window fits");
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    run.analyses.push(
+        AnalysisResult::new(1, AnalysisType::DcSweep, "DC", 0.0).with_waveforms(vec![
+            RetainedTrace::new("V(out)", sweep, vec![0.0, 1.0, 2.0], "").with_unit("V"),
+        ]),
+    );
+    let gate: &'static Gate = Box::leak(Box::default());
+    // On the thread that draws the window, which never waits for a read.
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            rspice_results::waveform::never_wait_for_reads_here();
+            rspice_results::waveform::read_through(gate, || {
+                let mut host = Host::new(&run);
+                host.viewer = ResultViewer::DcSweep;
+                let ticks = VisibilityOverrides::default();
+                let mut shape = || host.models(&ticks)[0].traces[0].shape.class();
+                assert_eq!(shape(), SweepClass::Empty);
+                assert_eq!(shape(), SweepClass::Empty);
+                gate.open.store(true, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(shape(), SweepClass::Descending);
+                assert_eq!(shape(), SweepClass::Descending);
+                assert_eq!(
+                    host.builds, 2,
+                    "built while the axis was read, and once it arrived"
+                );
+            });
+        });
+    });
 }

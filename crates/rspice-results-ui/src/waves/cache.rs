@@ -8,7 +8,7 @@ use rspice_results::{
     result_presentation::{ResultViewer, SourceWaveformPresentationKey},
     run::SimulationRun,
     visualization_document::TraceColor,
-    waveform::RetainedTrace,
+    waveform::{Fetched, RetainedTrace, SharedWaveformValues},
 };
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::product::DatasetId;
@@ -61,6 +61,35 @@ struct CachedModels {
     visibility: rspice_vocabulary::source_revision::SourceRevision,
     decks: ExecutedDeckArchive,
     models: Arc<Vec<StripModel>>,
+    /// The stored axes the models were built without, the reader service
+    /// reading them off the frame: once one has arrived, a build gives the
+    /// curves on it their shape and the strip its X extent.
+    awaiting: Vec<SharedWaveformValues>,
+}
+
+impl CachedModels {
+    /// Whether an axis the models were built without has arrived, or will
+    /// not: either way a build reads what it can of it.
+    fn axis_arrived(&self) -> bool {
+        self.awaiting
+            .iter()
+            .any(|x| !matches!(x.fetch_whole(), Fetched::Pending))
+    }
+}
+
+/// The distinct stored axes of `models`' curves that do not ascend and are
+/// still being read off the frame.
+fn awaiting_axes<'m>(
+    models: impl IntoIterator<Item = &'m StripModel>,
+) -> Vec<SharedWaveformValues> {
+    let axes = models
+        .into_iter()
+        .flat_map(|model| model.traces.iter().map(|trace| &trace.x));
+    extent::each_axis_once(axes)
+        .filter(|x| x.is_stored() && !x.is_ascending_axis())
+        .filter(|x| matches!(x.fetch_whole(), Fetched::Pending))
+        .cloned()
+        .collect()
 }
 
 impl ModelsCache {
@@ -189,7 +218,9 @@ impl ModelsCache {
         let fp = models_fingerprint(&input, tokens);
         let visibility = input.waveform_visibility.revision();
         if let Some(cached) = self.cached.take_if(|cached| {
-            cached.fingerprint == fp && cached.decks.shares_content_with(executed_decks)
+            cached.fingerprint == fp
+                && cached.decks.shares_content_with(executed_decks)
+                && !cached.axis_arrived()
         }) {
             if cached.visibility == visibility {
                 let models = Arc::clone(&cached.models);
@@ -238,6 +269,7 @@ impl ModelsCache {
             },
             _ => true,
         });
+        let awaiting = awaiting_axes(&built);
         let models = Arc::new(built);
         self.next_generation(envelopes);
         self.cached = Some(CachedModels {
@@ -245,6 +277,7 @@ impl ModelsCache {
             visibility,
             decks: executed_decks.clone(),
             models: Arc::clone(&models),
+            awaiting,
         });
         models
     }
@@ -283,6 +316,8 @@ impl ModelsCache {
             model.x_bounds = super::stack::visible_x_bounds(model);
             extent::resolve_x_ranges(std::slice::from_mut(model));
         }
+        let mut awaiting = cached.awaiting;
+        awaiting.extend(awaiting_axes(touched.iter().map(|&place| &models[place])));
         let models = Arc::new(models);
         self.next_generation(envelopes);
         self.cached = Some(CachedModels {
@@ -290,6 +325,7 @@ impl ModelsCache {
             visibility: ticks.revision(),
             decks: cached.decks,
             models: Arc::clone(&models),
+            awaiting,
         });
         Some(models)
     }

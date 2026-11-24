@@ -44,6 +44,16 @@ pub struct DerivedSeries {
     /// every frame. It is held here rather than on the trace because only the
     /// cache knows when the data behind it changed.
     shapes: std::collections::HashMap<u64, std::sync::Arc<rspice_results::sampling::SweepShape>>,
+    /// The structure of each distinct X axis one build of the strips classified, with the axis,
+    /// held so that its key names it while the build lasts: the curves of a run share its axis,
+    /// which is classified once rather than once a curve.
+    axis_shapes: std::collections::HashMap<
+        rspice_results::waveform::SharingKey,
+        (
+            SharedWaveformValues,
+            std::sync::Arc<rspice_results::sampling::SweepShape>,
+        ),
+    >,
     /// An analysis' committed event history as lanes, per analysis key.
     /// Reading every point is a pass over the history, so it is done once per
     /// data version rather than each time the strips are rebuilt.
@@ -179,6 +189,7 @@ impl DerivedSeries {
             self.overviews.clear();
             self.stats.clear();
             self.shapes.clear();
+            self.axis_shapes.clear();
             self.event_lanes.clear();
             self.bus_lanes.clear();
             self.xy_curves.clear();
@@ -216,6 +227,45 @@ impl DerivedSeries {
         self.overviews
             .insert(key, std::sync::Arc::clone(&miniature));
         miniature
+    }
+
+    /// The monotone structure of `x`, a curve's X axis, kept under the curve's `key`. An axis its
+    /// run checked ascends is not read. Any other is classified once for all the curves of a
+    /// build that share it: from its samples in memory, or once the reader service holds it
+    /// whole, as it reads a stored axis off the frame. `None` while that read is on its way, or
+    /// was refused, keeping nothing: a build after it has arrived asks again.
+    pub fn axis_shape_or(
+        &mut self,
+        key: u64,
+        x: &SharedWaveformValues,
+    ) -> Option<std::sync::Arc<rspice_results::sampling::SweepShape>> {
+        use rspice_results::sampling::SweepShape;
+        if let Some(hit) = self.shapes.get(&key) {
+            return Some(std::sync::Arc::clone(hit));
+        }
+        let shape = if x.is_ascending_axis() {
+            std::sync::Arc::new(SweepShape::ascending(x.len()))
+        } else {
+            let sharing = x.sharing_key();
+            if let Some((_, shape)) = self.axis_shapes.get(&sharing) {
+                std::sync::Arc::clone(shape)
+            } else {
+                let shape = std::sync::Arc::new(match x.in_memory() {
+                    Some(samples) => SweepShape::of(samples),
+                    None => SweepShape::of(&x.fetch_whole().ready()?),
+                });
+                self.axis_shapes
+                    .insert(sharing, (x.clone(), std::sync::Arc::clone(&shape)));
+                shape
+            }
+        };
+        self.shapes.insert(key, std::sync::Arc::clone(&shape));
+        Some(shape)
+    }
+
+    /// Let go of the axes a build of the strips classified.
+    pub fn forget_build_axes(&mut self) {
+        self.axis_shapes.clear();
     }
 
     /// Fetch or classify the monotone structure of a series' X column.

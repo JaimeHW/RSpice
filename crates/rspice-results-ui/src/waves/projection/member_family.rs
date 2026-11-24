@@ -25,7 +25,7 @@ use rspice_results::provenance::AnalysisResultFamilyMember;
 use rspice_results::waveform::RetainedTrace;
 
 use super::{FamilyTraceStyle, FamilyTraceVisibilityKey, ProjectionContext, StripTrace, TraceKind};
-use super::{SweepShape, displayed_phase_series, shape_key, stable_hash};
+use super::{curve_shape, displayed_phase_series, shape_key, stable_hash};
 use crate::derived::DerivedSeries;
 
 /// How one analysis of the active run takes part in a member family.
@@ -187,7 +187,8 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 trace.kind,
             );
             let x = waveform.x.clone();
-            let shape = derived.shape_or(
+            let shape = curve_shape(
+                derived,
                 shape_key(
                     context.analysis_key,
                     &trace.source_waveform_name,
@@ -196,7 +197,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                     context.run_id,
                     false,
                 ),
-                || SweepShape::of_values(&x),
+                &x,
             );
             traces.push(StripTrace {
                 waveform_index: trace.waveform_index,

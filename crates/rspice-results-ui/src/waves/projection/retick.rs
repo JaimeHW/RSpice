@@ -133,6 +133,7 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
         }
         changes.push((place, fresh, taken));
     }
+    derived.forget_build_axes();
     let mut touched = Vec::with_capacity(changes.len());
     for (place, fresh, taken) in changes {
         let model = &mut models[place];
