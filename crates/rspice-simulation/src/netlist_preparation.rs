@@ -19,7 +19,7 @@ pub mod measurements;
 mod external_sources;
 mod hdl_sources;
 mod process_programs;
-pub(crate) use external_sources::reject_deferred_external_sources_for_host;
+pub(crate) use external_sources::{UnreadLines, reject_deferred_external_sources_for_host};
 pub use external_sources::{
     contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
     reject_deferred_external_sources_with_abort,

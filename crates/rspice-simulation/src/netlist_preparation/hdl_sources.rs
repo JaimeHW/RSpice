@@ -386,18 +386,13 @@ fn deck_hdl_sites(source: &str) -> Vec<(usize, VerilogAInclude)> {
 /// Preparation refuses it either way; counted in the expanded text its line
 /// number points nowhere the author can look, so this finds the file and
 /// line that hold it. A line the parser skips, such as one in a false `.if`
-/// branch, is skipped here too: read off `parsed`, the parse of `expanded`
-/// a run's preparation made, where there is one. `None` when no such line
-/// is left, or when no included file holds it as written.
+/// branch, is skipped here too (`unread`). `None` when no such line is left,
+/// or when no included file holds it as written.
 pub(crate) fn included_hdl_source_refusal(
     expanded: &str,
     includes: &[ResolvedIncludeDependency],
-    parsed: Option<&rspice_core::Netlist>,
+    unread: &super::UnreadLines<'_>,
 ) -> Option<PreparationError> {
-    let unread = parsed.map_or_else(
-        || super::external_sources::UnreadLines::new(expanded),
-        super::external_sources::UnreadLines::of_parsed,
-    );
     let mut refusal = None;
     let _ = super::external_sources::for_each_logical_line(expanded, |number, line| {
         // A source is named by a directive: a record that starts none names

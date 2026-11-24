@@ -1068,7 +1068,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
     if let Some(refusal) = crate::netlist_preparation::included_hdl_source_refusal(
         &expanded,
         &sealed_source_dependencies,
-        Some(&hierarchy.parsed),
+        &crate::netlist_preparation::UnreadLines::of_parsed(&hierarchy.parsed),
     ) {
         return Err(refusal);
     }

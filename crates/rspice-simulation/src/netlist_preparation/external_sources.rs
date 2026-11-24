@@ -191,7 +191,7 @@ pub(crate) fn reject_deferred_external_sources_for_host(
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_for_host_with_abort(
         netlist,
-        &UnreadLines::new(netlist),
+        &UnreadLines::new(netlist, limits),
         project_runtimes,
         measurement_references,
         starts_programs,
@@ -248,7 +248,7 @@ fn reject_deferred_external_sources_on(
         project_runtimes,
         starts_programs,
         search_path,
-        &UnreadLines::new(netlist),
+        &UnreadLines::new(netlist, rspice_core::ResourceLimits::default()),
         &rspice_core::NoAbort,
     )
 }
@@ -402,19 +402,22 @@ fn admit_process_programs(
 /// and its includes are read (`inp.c` `dotifeval`).
 ///
 /// A deck that is not parsed yet is parsed on the first question only, so a
-/// deck no check would refuse a line of costs nothing; a deck its run's
-/// preparation parsed is not parsed again ([`UnreadLines::of_parsed`]). A
-/// deck that does not parse has no line the parser skips, and every line is
-/// checked.
+/// deck no check would refuse a line of costs nothing, and under the limits
+/// its run executes under, so a deck the run reads is read here too; a deck
+/// its run's preparation parsed is not parsed again
+/// ([`UnreadLines::of_parsed`]). A deck that does not parse has no line the
+/// parser skips, and every line is checked.
 pub(crate) struct UnreadLines<'a> {
-    deck: Option<&'a str>,
+    deck: Option<(&'a str, rspice_core::ResourceLimits)>,
     regions: std::cell::OnceCell<Vec<std::ops::RangeInclusive<usize>>>,
 }
 
 impl<'a> UnreadLines<'a> {
-    pub(crate) fn new(deck: &'a str) -> Self {
+    /// The lines `deck` skips, read under `limits`, the limits its run
+    /// executes under.
+    pub(crate) fn new(deck: &'a str, limits: rspice_core::ResourceLimits) -> Self {
         Self {
-            deck: Some(deck),
+            deck: Some((deck, limits)),
             regions: std::cell::OnceCell::new(),
         }
     }
@@ -433,7 +436,7 @@ impl<'a> UnreadLines<'a> {
         self.regions
             .get_or_init(|| {
                 self.deck
-                    .and_then(|deck| rspice_core::Netlist::parse(deck).ok())
+                    .and_then(|(deck, limits)| super::parse_under(deck, limits).ok())
                     .as_ref()
                     .map_or_else(Vec::new, unread_regions)
             })

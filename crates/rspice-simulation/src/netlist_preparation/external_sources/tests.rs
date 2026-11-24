@@ -75,6 +75,30 @@ fn a_runtime_input_on_a_line_the_parser_skips_passes() {
     }
 }
 
+/// The lines the parser skips are found under the limits the run executes
+/// under: a deck those limits read has its false branch skipped, and a deck
+/// they refuse has every line checked, whatever the shipped limits read.
+#[test]
+fn the_lines_the_parser_skips_are_read_under_the_runs_limits() {
+    let deck =
+        "deck\n.param mode=0\n.if (mode == 1)\n.hdl compact_model.va\n.endif\nR1 a 0 1k\n.end\n";
+    let lines = deck.lines().count();
+    let check = |max_netlist_lines| {
+        reject_deferred_external_sources_with_project_runtimes(
+            deck,
+            &Default::default(),
+            &Default::default(),
+            rspice_core::ResourceLimits::default().with(|limits| {
+                limits.max_netlist_lines = max_netlist_lines;
+            }),
+        )
+    };
+    check(lines).unwrap_or_else(|error| panic!("the run reads this deck: {error}"));
+    let error =
+        check(lines - 1).expect_err("a deck the run's limits refuse has no line the parser skips");
+    assert!(error.message().contains("not kept with the run"), "{error}");
+}
+
 #[test]
 fn project_veriloga_path_is_exact_while_spice_identifiers_ignore_case() {
     let source_key = "__rspice_project__/project/digest/Model.va";
