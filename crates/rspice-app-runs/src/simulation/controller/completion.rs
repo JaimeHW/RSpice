@@ -496,6 +496,7 @@ impl SimulationController {
             analysis: mut analysis_result,
             shown,
             looked_over,
+            samples,
         } = converted;
         // The Console has had the prose as the engine logged it; the
         // run's batch gets the conditions, one record each for the
@@ -542,6 +543,7 @@ impl SimulationController {
                 target_run_id,
                 analysis_result,
                 provenance,
+                samples,
             );
             if kept.is_ok() {
                 retained = Some(completed_instance);
@@ -779,6 +781,8 @@ pub(super) struct Converted {
     analysis: AnalysisResult,
     shown: Option<ShownWaveforms>,
     looked_over: Option<LookedOver>,
+    /// Whether keeping it has samples to put in the results store.
+    samples: super::Samples,
 }
 
 /// What the frames that show a finished result would otherwise work out of
@@ -896,12 +900,19 @@ impl Conversion {
         }
         // Samples held in memory move into the results store as the run
         // keeps them, so a copy of them now is not what the view would show.
-        let shown = (!crate::state::run_store::holds_samples_in_memory(&analysis.data))
-            .then(|| ShownWaveforms::new(analysis.waveforms.clone()));
+        // Found here, where the result is converted: keeping one with none
+        // in memory walks none of its signals to find that out again.
+        let stored = !crate::state::run_store::holds_samples_in_memory(&analysis.data);
+        let shown = stored.then(|| ShownWaveforms::new(analysis.waveforms.clone()));
         Converted {
             analysis,
             shown,
             looked_over: None,
+            samples: if stored {
+                super::Samples::Stored
+            } else {
+                super::Samples::ToStore
+            },
         }
     }
 }

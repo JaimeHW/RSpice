@@ -361,7 +361,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
             .run_by_sequence_mut(controller.current_run_id.unwrap())
             .unwrap();
         controller
-            .retain_analysis_under_current_policy(run, terminal)
+            .retain_analysis_under_current_policy(run, terminal, Samples::ToStore)
             .unwrap();
         assert_eq!(run.analyses.len(), 1);
         assert!(!run.analyses[0].is_live_partial());
@@ -431,7 +431,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
         .unwrap();
     assert!(
         controller
-            .retain_analysis_under_current_policy(run, terminal)
+            .retain_analysis_under_current_policy(run, terminal, Samples::ToStore)
             .unwrap_err()
             .contains("without its requested")
     );

@@ -194,6 +194,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
             controller.current_run_id,
             without_checkpoint,
             controller.current_provenance.clone().unwrap(),
+            Samples::ToStore,
         )
         .unwrap_err();
     assert!(error.contains("without its requested retained checkpoint"));

@@ -140,6 +140,17 @@ pub struct SimulationCampaignDispatchReceipt {
 // Simulation Controller
 //=============================================================================
 
+/// Where a result's samples are as the run keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Samples {
+    /// All in the results store already, as a run that wrote them there as
+    /// it ran leaves them, which its conversion found.
+    Stored,
+    /// Some may be held in memory, which keeping the result puts in the
+    /// store.
+    ToStore,
+}
+
 /// Orchestrates simulation execution from UI trigger to result display
 ///
 /// Supports commercial-grade multi-analysis execution where multiple enabled
@@ -1264,9 +1275,13 @@ impl SimulationController {
 
         // Retention already fails the run when the family did, so only a
         // retention error of its own needs answering here.
-        if let Err(error) =
-            self.retain_completed_analysis(model, target_run_id, analysis, provenance)
-        {
+        if let Err(error) = self.retain_completed_analysis(
+            model,
+            target_run_id,
+            analysis,
+            provenance,
+            Samples::ToStore,
+        ) {
             self.run_line(
                 model,
                 LogSeverity::Error,
@@ -1312,6 +1327,7 @@ impl SimulationController {
         target_run_id: Option<u64>,
         analysis: AnalysisResult,
         provenance: AnalysisResultProvenance,
+        samples: Samples,
     ) -> Result<bool, String> {
         let run_id = target_run_id.ok_or_else(|| "the analysis belongs to no run".to_owned())?;
         let completed_instance = provenance.source_instance_id();
@@ -1322,7 +1338,7 @@ impl SimulationController {
             .retained
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("run {run_id} is no longer in the result history"))?;
-        let replaced = self.retain_analysis_under_current_policy(run, analysis)?;
+        let replaced = self.retain_analysis_under_current_policy(run, analysis, samples)?;
         if succeeded {
             self.successful_analysis_instances
                 .insert(completed_instance);
@@ -1392,7 +1408,8 @@ impl SimulationController {
             return errors;
         };
         if let Some(failed) = failed
-            && let Err(error) = self.retain_analysis_under_current_policy(run, failed)
+            && let Err(error) =
+                self.retain_analysis_under_current_policy(run, failed, Samples::ToStore)
         {
             errors.push(error);
         }
@@ -1442,6 +1459,7 @@ impl SimulationController {
         &self,
         run: &mut crate::state::SimulationRun,
         mut analysis: AnalysisResult,
+        samples: Samples,
     ) -> Result<Option<AnalysisResult>, String> {
         // Terminal conversion must keep the last admitted journal, including
         // on abort/error. Match the complete prepared identity, not a label.
@@ -1470,7 +1488,10 @@ impl SimulationController {
             checkpoint.validate_for((&analysis).into())?;
         }
         self.validate_analysis_retention(run, &analysis)?;
-        Ok(run.replace_live_or_add_analysis(analysis))
+        Ok(match samples {
+            Samples::Stored => run.replace_live_or_add_stored_analysis(analysis),
+            Samples::ToStore => run.replace_live_or_add_analysis(analysis),
+        })
     }
 
     fn preserve_live_checkpoints(

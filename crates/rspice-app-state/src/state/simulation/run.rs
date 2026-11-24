@@ -248,6 +248,17 @@ impl SimulationRun {
         if let Err(error) = super::run_store::store_analysis(&mut analysis.data) {
             log::warn!("{}: {error}", analysis.label);
         }
+        self.replace_live_or_add_stored_analysis(analysis)
+    }
+
+    /// [`Self::replace_live_or_add_analysis`] for a result whose samples
+    /// are all in the results store already, as a run that wrote them there
+    /// as it ran leaves them: keeping it walks none of its signals.
+    #[must_use = "the replaced provisional result is let go of away from the frame"]
+    pub fn replace_live_or_add_stored_analysis(
+        &mut self,
+        mut analysis: AnalysisResult,
+    ) -> Option<AnalysisResult> {
         let matching_live = analysis.provenance().and_then(|provenance| {
             let instance = provenance.source_instance_id();
             self.analyses.iter().position(|existing| {

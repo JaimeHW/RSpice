@@ -156,7 +156,13 @@ fn failed_result_retention_never_satisfies_prepared_dependencies() {
 
     assert!(
         !controller
-            .retain_completed_analysis(&mut state.model, Some(run_sequence), failed, provenance)
+            .retain_completed_analysis(
+                &mut state.model,
+                Some(run_sequence),
+                failed,
+                provenance,
+                Samples::ToStore,
+            )
             .expect("failed result is retained as failure evidence")
     );
     assert!(!controller.successful_analysis_instances.contains(&instance));
@@ -295,7 +301,13 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
     };
 
     let error = controller
-        .retain_completed_analysis(&mut state.model, Some(run_sequence), analysis, provenance)
+        .retain_completed_analysis(
+            &mut state.model,
+            Some(run_sequence),
+            analysis,
+            provenance,
+            Samples::ToStore,
+        )
         .expect_err("oversized evidence must not enter the retained run");
 
     assert!(error.contains("storage limit"));
