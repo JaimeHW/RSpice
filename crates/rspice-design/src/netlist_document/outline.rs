@@ -622,7 +622,20 @@ impl NetlistOutline {
             ..*entry
         }));
         entries.shrink_to_fit();
-        let sections = sections_of(&entries);
+        // A key that leaves the page with as many entries, of the same kinds
+        // in the same scopes, leaves every section and row as it was: they
+        // name entries by position, and no position moved.
+        let same_shape = entry_shift == 0
+            && page_scopes.iter().all(|(old, new)| old == new)
+            && self.entries[first..end]
+                .iter()
+                .zip(&entries[first..end])
+                .all(|(old, new)| old.kind == new.kind && old.scope == new.scope);
+        let sections = if same_shape {
+            self.sections.clone()
+        } else {
+            sections_of(&entries)
+        };
         Self {
             deck,
             entries,
