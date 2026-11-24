@@ -29,7 +29,7 @@ use egui::epaint::TessellationOptions;
 use egui::{Color32, Pos2, Rect, Shape, Stroke, pos2};
 use rspice_results::waveform::WaveformValues;
 
-use super::decimate::{self, DecimationCache, EnvelopeKey, Kept, TraceView};
+use super::decimate::{self, DecimationCache, Envelope, EnvelopeKey, Kept, TraceView};
 use super::render::{
     MarkerSlots, TraceMarkerShape, column_dashes, finite_runs, held_steps, run_is_a_point,
     runs_forward, trace_marker_positions, trace_marker_shapes,
@@ -256,7 +256,7 @@ pub(super) enum Source {
     /// An envelope the frame holds, and the key the cache holds it under
     /// when it does.
     Held {
-        envelope: Arc<[[f64; 2]]>,
+        envelope: Envelope,
         key: Option<EnvelopeKey>,
     },
     /// Samples in memory, reduced off the frame.
@@ -276,7 +276,7 @@ pub(super) enum Source {
 }
 
 /// An envelope the cache holds, with the key it holds it under.
-type HeldEnvelope = (EnvelopeKey, Arc<[[f64; 2]]>);
+type HeldEnvelope = (EnvelopeKey, Envelope);
 
 /// One curve of a picture drawn off the frame.
 pub(super) struct Curve {
@@ -731,14 +731,16 @@ fn source_of(
         };
     }
     owned_source(trace).unwrap_or_else(|| Source::Held {
-        envelope: cache.series(
-            trace.cache_key.unwrap_or_default(),
-            trace.x,
-            trace.y,
-            geometry.view(look.y),
-            trace.parametric,
-            trace.shape,
-        ),
+        envelope: cache
+            .series(
+                trace.cache_key.unwrap_or_default(),
+                trace.x,
+                trace.y,
+                geometry.view(look.y),
+                trace.parametric,
+                trace.shape,
+            )
+            .into(),
         key: None,
     })
 }
@@ -793,8 +795,8 @@ impl MadeOffFrame {
                     Some(_) => EnvelopeKey::stored(key, view),
                     None => EnvelopeKey::series(key, view, trace.parametric, trace.shape),
                 });
-                let held =
-                    key.and_then(|key| self.held.iter().rev().find_map(|kept| kept.get(key)));
+                let held = key
+                    .and_then(|key| self.held.iter().rev().find_map(|kept| Kept::get(kept, key)));
                 let source = match held {
                     Some(envelope) => {
                         points = points.saturating_add(envelope.len());
@@ -813,7 +815,8 @@ impl MadeOffFrame {
                                 view,
                                 trace.parametric,
                                 trace.shape,
-                            ),
+                            )
+                            .into(),
                             key,
                         })
                     }
@@ -850,10 +853,12 @@ fn build_on_frame(
             (None, Some(stored)) => {
                 let (envelope, done) = cache.stored_series_read(trace.cache_key, stored, view);
                 complete &= done;
-                Some(envelope)
+                Some(envelope.into())
             }
             (None, None) => trace.cache_key.map(|key| {
-                cache.series(key, trace.x, trace.y, view, trace.parametric, trace.shape)
+                cache
+                    .series(key, trace.x, trace.y, view, trace.parametric, trace.shape)
+                    .into()
             }),
         };
         let projected = match envelope {
@@ -1064,7 +1069,7 @@ fn draw_run(
         }
         let view = geometry.view(curve.look.y);
         let (envelope, done, envelope_key) = match &curve.source {
-            Source::Held { envelope, key } => (Arc::clone(envelope), true, *key),
+            Source::Held { envelope, key } => (envelope.clone(), true, *key),
             Source::Memory {
                 key,
                 x,
@@ -1073,17 +1078,17 @@ fn draw_run(
                 shape,
             } => match (x.in_memory(), y.in_memory()) {
                 (Some(xs), Some(ys)) => (
-                    decimate::reduce(xs, ys, view, *parametric, shape.as_ref()),
+                    decimate::reduce(xs, ys, view, *parametric, shape.as_ref()).into(),
                     true,
                     Some(EnvelopeKey::series(*key, view, *parametric, shape.as_ref())),
                 ),
-                _ => (Arc::from([]), true, None),
+                _ => (Envelope::Own(Arc::from([])), true, None),
             },
             Source::Stored { key, x, y } => {
                 let (envelope, done) =
                     decimate::stored_envelope_waiting(StoredSamples { x, y }, view);
                 (
-                    envelope,
+                    envelope.into(),
                     done,
                     done.then(|| EnvelopeKey::stored(*key, view)),
                 )
@@ -1097,7 +1102,7 @@ fn draw_run(
             // budget came to more than it, and the frame let all of it go.
             let bytes = decimate::kept_bytes(envelope.len());
             if kept_bytes.fetch_add(bytes, Ordering::Relaxed) + bytes <= job.keep_budget {
-                kept.keep(envelope_key, Arc::clone(&envelope));
+                kept.keep(envelope_key, &envelope);
             }
         }
         let start = shapes.len();
@@ -1113,6 +1118,7 @@ fn draw_run(
             }
         }
     }
+    kept.fit();
     Some(Run {
         drawing: match canvas {
             Some(canvas) => Drawn::Pixels(Box::new(canvas)),

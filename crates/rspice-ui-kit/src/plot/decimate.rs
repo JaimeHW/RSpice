@@ -71,52 +71,146 @@ struct Held {
 /// The envelopes one picture drawn off the frame reads, gathered off the
 /// frame so the frame takes them in as one: a frame that shows a picture of
 /// a hundred thousand curves touches none of their envelopes.
+///
+/// Their points lie end to end in a few large blocks, so the set is let go
+/// a block at a time. Kept each on its own, a picture's 32,640 envelopes of
+/// 16 KB, too large for the heap's small blocks, took 2.8 s to free, holding
+/// the heap all the while, and the frames meanwhile waited on it.
 #[derive(Debug, Default)]
 pub(super) struct Kept {
-    map: HashMap<CacheKey, Arc<[[f64; 2]]>>,
+    map: HashMap<CacheKey, Slot>,
+    blocks: Vec<Vec<[f64; 2]>>,
     /// What they hold the cache to.
     bytes: usize,
 }
 
+/// Where one kept envelope lies: its block, and its points there.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Slot {
+    block: usize,
+    start: usize,
+    len: usize,
+}
+
+/// The points a block of kept envelopes is made for: 2 MiB, past what the
+/// heap hands out of its own pages, so each block is a free of its own.
+const BLOCK_POINTS: usize = (2 << 20) / size_of::<[f64; 2]>();
+
 impl Kept {
-    /// The envelope kept under `key`.
-    pub(super) fn get(&self, key: EnvelopeKey) -> Option<Arc<[[f64; 2]]>> {
-        self.map.get(&key.0).cloned()
+    /// The envelope `kept` keeps under `key`.
+    pub(super) fn get(kept: &Arc<Self>, key: EnvelopeKey) -> Option<Envelope> {
+        kept.map
+            .get(&key.0)
+            .map(|slot| Envelope::Kept(Arc::clone(kept), *slot))
     }
 
-    /// Keep `envelope` under `key`.
-    pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: Arc<[[f64; 2]]>) {
-        let bytes = kept_bytes(envelope.len());
-        if let Some(replaced) = self.map.insert(key.0, envelope) {
-            self.bytes = self.bytes.saturating_sub(kept_bytes(replaced.len()));
+    /// The points of the envelope at `slot`.
+    fn envelope(&self, slot: Slot) -> &[[f64; 2]] {
+        if slot.len == 0 {
+            return &[];
         }
-        self.bytes = self.bytes.saturating_add(bytes);
+        &self.blocks[slot.block][slot.start..slot.start + slot.len]
+    }
+
+    /// Keep a copy of `envelope` under `key`, after the envelopes kept
+    /// before it.
+    pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: &[[f64; 2]]) {
+        let mut slot = Slot {
+            block: 0,
+            start: 0,
+            len: envelope.len(),
+        };
+        if !envelope.is_empty() {
+            if !self
+                .blocks
+                .last()
+                .is_some_and(|block| block.capacity() - block.len() >= envelope.len())
+            {
+                self.blocks
+                    .push(Vec::with_capacity(BLOCK_POINTS.max(envelope.len())));
+            }
+            slot.block = self.blocks.len() - 1;
+            let block = &mut self.blocks[slot.block];
+            slot.start = block.len();
+            block.extend_from_slice(envelope);
+        }
+        self.note(key.0, slot);
+    }
+
+    /// Hold `slot` under `key`, in place of what was held there.
+    fn note(&mut self, key: CacheKey, slot: Slot) {
+        if let Some(replaced) = self.map.insert(key, slot) {
+            self.bytes = self.bytes.saturating_sub(kept_bytes(replaced.len));
+        }
+        self.bytes = self.bytes.saturating_add(kept_bytes(slot.len));
     }
 
     /// The points of each envelope kept.
     #[cfg(test)]
     pub(super) fn points(&self) -> Vec<usize> {
-        self.map.values().map(|envelope| envelope.len()).collect()
+        self.map.values().map(|slot| slot.len).collect()
     }
 
-    /// Keep everything `other` keeps too.
+    /// Keep everything `other` keeps too, its blocks as they are.
     pub(super) fn extend(&mut self, mut other: Self) {
         if other.map.len() > self.map.len() {
             std::mem::swap(self, &mut other);
         }
-        for (key, envelope) in other.map {
-            self.keep(EnvelopeKey(key), envelope);
+        let offset = self.blocks.len();
+        self.blocks.append(&mut other.blocks);
+        for (key, slot) in other.map {
+            self.note(
+                key,
+                Slot {
+                    block: slot.block + offset,
+                    ..slot
+                },
+            );
         }
+    }
+
+    /// Give back the room each block was made with beyond its points: the
+    /// last block of each run drawing a picture is filled only in part.
+    pub(super) fn fit(&mut self) {
+        for block in &mut self.blocks {
+            if block.capacity() > block.len() {
+                block.shrink_to_fit();
+            }
+        }
+    }
+}
+
+/// An envelope a picture reads: one of the cache's own, or one of a
+/// picture's kept envelopes, read in its block.
+#[derive(Debug, Clone)]
+pub(super) enum Envelope {
+    Own(Arc<[[f64; 2]]>),
+    Kept(Arc<Kept>, Slot),
+}
+
+impl std::ops::Deref for Envelope {
+    type Target = [[f64; 2]];
+
+    fn deref(&self) -> &[[f64; 2]] {
+        match self {
+            Self::Own(envelope) => envelope,
+            Self::Kept(kept, slot) => kept.envelope(*slot),
+        }
+    }
+}
+
+impl From<Arc<[[f64; 2]]>> for Envelope {
+    fn from(envelope: Arc<[[f64; 2]]>) -> Self {
+        Self::Own(envelope)
     }
 }
 
 /// What one envelope of `points` kept with a picture holds the cache to.
 pub(super) const fn kept_bytes(points: usize) -> usize {
-    points * size_of::<[f64; 2]>() + size_of::<(CacheKey, Arc<[[f64; 2]]>)>()
+    points * size_of::<[f64; 2]>() + size_of::<(CacheKey, Slot)>()
 }
 
-/// Let `kept` go. Freeing a picture's envelopes is as much work as it has
-/// curves, so it is done off the frame.
+/// Let `kept` go, off the frame: a free a block.
 fn release(kept: Arc<Kept>) {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -425,8 +519,8 @@ impl DecimationCache {
 
     /// The envelope held under `key`, if one is: what a picture asks before
     /// it reduces anything, so a curve it already holds is not read again.
-    pub(super) fn held(&mut self, key: EnvelopeKey) -> Option<Arc<[[f64; 2]]>> {
-        self.lookup(&key.0)
+    pub(super) fn held(&mut self, key: EnvelopeKey) -> Option<Envelope> {
+        self.lookup_envelope(&key.0)
     }
 
     /// Take in the envelopes a picture drawn off the frame reads, whole:
@@ -604,7 +698,8 @@ impl DecimationCache {
         Some(Arc::clone(index))
     }
 
-    fn lookup(&mut self, key: &CacheKey) -> Option<Arc<[[f64; 2]]>> {
+    /// The envelope held under `key`, wherever the cache holds it.
+    fn lookup_envelope(&mut self, key: &CacheKey) -> Option<Envelope> {
         let held = &mut *self.held;
         let envelope = if let Some(hit) = held.map.get_mut(key) {
             hit.last_used = self.tick;
@@ -612,13 +707,13 @@ impl DecimationCache {
             held.order.remove(&hit.read);
             hit.read = held.reads;
             held.order.insert(hit.read, *key);
-            Arc::clone(&hit.envelope)
+            Envelope::Own(Arc::clone(&hit.envelope))
         } else {
             let (envelope, last_used) =
                 held.kept.iter_mut().rev().find_map(|(kept, last_used)| {
                     kept.map
                         .get(key)
-                        .map(|envelope| (Arc::clone(envelope), last_used))
+                        .map(|slot| (Envelope::Kept(Arc::clone(kept), *slot), last_used))
                 })?;
             *last_used = self.tick;
             envelope
@@ -630,11 +725,29 @@ impl DecimationCache {
         Some(envelope)
     }
 
+    /// [`Self::lookup_envelope`], as an envelope of its own: one a picture
+    /// kept is copied out of its block once, and held from then on.
+    fn lookup(&mut self, key: &CacheKey) -> Option<Arc<[[f64; 2]]>> {
+        match self.lookup_envelope(key)? {
+            Envelope::Own(envelope) => Some(envelope),
+            kept @ Envelope::Kept(..) => {
+                let envelope: Arc<[[f64; 2]]> = Arc::from(&*kept);
+                self.hold(*key, &envelope);
+                Some(envelope)
+            }
+        }
+    }
+
     fn retain(&mut self, key: CacheKey, envelope: &Arc<[[f64; 2]]>) {
         #[cfg(any(test, feature = "test-support"))]
         {
             self.held.work.rebuilds += 1;
         }
+        self.hold(key, envelope);
+    }
+
+    /// Hold `envelope` under `key`, if the budget has room for it.
+    fn hold(&mut self, key: CacheKey, envelope: &Arc<[[f64; 2]]>) {
         let bytes = entry_bytes(envelope.len());
         if bytes <= self.byte_capacity && self.evict_to_fit(bytes) {
             let held = &mut *self.held;
@@ -1635,6 +1748,37 @@ mod tests {
         assert!(first.iter().all(|point| point[1] == 0.0));
         assert!(next.iter().any(|point| point[1] == 1.0));
         assert_eq!(cache.resident_bytes, entry_bytes(next.len()));
+    }
+
+    /// A picture's kept envelopes lie end to end in blocks of 2 MiB, so
+    /// letting a set go frees a block at a time rather than an envelope at a
+    /// time; two runs' sets joined each read back their own points.
+    #[test]
+    fn kept_envelopes_lie_in_a_few_blocks_and_read_back_their_own_points() {
+        let view = sweep_view(0.0, 2.0);
+        let envelope = |trace: u64| -> Vec<[f64; 2]> {
+            (0..1_000)
+                .map(|point| [point as f64, trace as f64])
+                .collect()
+        };
+        let (mut first, mut second) = (Kept::default(), Kept::default());
+        for trace in 0..1_000 {
+            let run = if trace < 600 { &mut first } else { &mut second };
+            run.keep(EnvelopeKey::stored(trace, view), &envelope(trace));
+        }
+        first.extend(second);
+        first.fit();
+        let points: usize = 1_000 * 1_000;
+        assert!(
+            first.blocks.len() <= points.div_ceil(BLOCK_POINTS) + 1,
+            "{} blocks for {points} points",
+            first.blocks.len()
+        );
+        let kept = Arc::new(first);
+        for trace in [0, 599, 600, 999] {
+            let read = Kept::get(&kept, EnvelopeKey::stored(trace, view));
+            assert_eq!(read.as_deref(), Some(envelope(trace).as_slice()));
+        }
     }
 
     /// Oracle 6: a hysteresis trace through the cache reaches an
