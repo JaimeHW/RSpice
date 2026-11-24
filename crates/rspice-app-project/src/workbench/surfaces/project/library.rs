@@ -1979,7 +1979,13 @@ impl AuditRecord {
         let changes = project.library_mutation_audit().iter().map(|receipt| Self {
             revision: receipt.target_project_revision().get(),
             sequence: receipt.sequence(),
-            change: receipt.mutation().operation_label().to_owned(),
+            change: {
+                let label = receipt.mutation().operation_label();
+                let mut letters = label.chars();
+                letters.next().map_or_else(String::new, |first| {
+                    first.to_uppercase().chain(letters).collect()
+                })
+            },
             what: library_mutation_summary(receipt.mutation()),
             made_unix_ms: None,
             by: String::new(),
