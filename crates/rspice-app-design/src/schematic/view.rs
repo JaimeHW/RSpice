@@ -305,6 +305,13 @@ fn full_crosshair_at(
 /// narrower window, would cut off what the view showed: instead the middle of
 /// the view stays where it was, and a drawing the old view showed whole that
 /// the new one would cut is framed whole again.
+///
+/// The armed tool's options strip is no resize: it takes its band from the
+/// top of the canvas and holds the drawing still itself, so the canvas
+/// measures itself with that band. Counting it here as well moved the
+/// drawing half the strip's height out from under the pointer each time the
+/// strip came or went, and the click that followed landed beside what it
+/// was aimed at.
 fn keep_the_drawing_in_sight(
     ui: &Ui,
     canvas: &mut CanvasFrame<'_>,
@@ -316,17 +323,20 @@ fn keep_the_drawing_in_sight(
         "rspice.schematic.canvas-size",
         canvas.model.active_sheet_id(),
     ));
-    let size = available.size();
+    let band = egui::vec2(0.0, canvas.design.tool_strip_height);
+    let measured = available.size() + band;
     let last = ui.ctx().data_mut(|data| {
         let last = data.get_temp::<egui::Vec2>(size_key);
-        data.insert_temp(size_key, size);
+        data.insert_temp(size_key, measured);
         last
     });
-    let Some(last) =
-        last.filter(|last| last.x > 0.0 && last.y > 0.0 && (*last - size).abs().max_elem() > 0.5)
+    let Some(last) = last
+        .filter(|last| last.x > 0.0 && last.y > 0.0 && (*last - measured).abs().max_elem() > 0.5)
     else {
         return;
     };
+    // What the canvas showed and shows, below the band.
+    let (last, size) = (last - band, available.size());
     let bounds = symbol_context.sheet_content_bounds(canvas.model.schematic.document(), |id| {
         sheet_visibility::object_is_on_active_sheet(&*canvas.model, id)
     });

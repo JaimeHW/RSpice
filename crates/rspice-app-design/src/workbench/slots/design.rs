@@ -156,6 +156,10 @@ pub struct DesignState {
     /// Select tool, reported each frame the canvas renders. With nothing
     /// selected, Move, Stretch, Rotate, Mirror and Delete act on it.
     pub canvas_hover_target: Option<rspice_schematic_editor::view::pointer_target::PointerTarget>,
+    /// The height the armed tool's options strip takes from the top of the
+    /// canvas this frame, none without one. The canvas counts the band as its
+    /// own, since the strip holds the drawing still for it.
+    pub tool_strip_height: f32,
     /// Canvas grid style (dots / lines / off).
     pub grid: GridStyle,
     /// Last non-Off display style retained for backward-compatible session

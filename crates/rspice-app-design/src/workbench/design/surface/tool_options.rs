@@ -22,7 +22,9 @@ const NAME_GAP: f32 = 12.0;
 pub(super) fn show(ui: &mut Ui, model: &mut Model, design: &mut DesignState) {
     let top = ui.cursor().top();
     options(ui, model, design);
-    hold_drawing_still(ui, model, ui.cursor().top() - top);
+    let height = ui.cursor().top() - top;
+    hold_drawing_still(ui, model, height);
+    design.tool_strip_height = height;
 }
 
 /// The strip takes its height from the top of the canvas, so the canvas
@@ -303,5 +305,121 @@ mod tests {
         let (done_top, done) = frame(&mut state);
         assert_eq!(done_top, resting_top);
         assert_eq!(done, resting, "ending the command moved the drawing");
+    }
+
+    /// A label clicked on a pin end lands on that pin end and joins the
+    /// pin's net. Arming the Label tool brings its strip in over the drawn
+    /// canvas, and the canvas, which keeps the drawing in sight when it
+    /// changes size, took the strip's band for a resize on top of the pan
+    /// the strip had already taken up: the drawing moved half the strip's
+    /// height out from under the pointer, and the click aimed at the pin end
+    /// landed on the grid point beside it.
+    #[test]
+    fn a_label_clicked_on_a_pin_end_lands_on_it_and_joins_its_net() {
+        use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+        use crate::workbench::app::dialogs::placement::net_label::{DraftValidation, tests};
+        use crate::workbench::design::DesignFeature;
+        use crate::workbench::framework::feature::harness::FeatureHarness;
+
+        let mut host = DesignTestHost::default();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("top");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        host.model.library_manager.add_library(library);
+        host.open_workspace_view(CellViewRef::new("work", "top", "schematic"));
+        let id = host
+            .model
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(100, 100));
+        let (pin, end) = host.model.schematic.document().components[0]
+            .terminal_positions_resolved(None)
+            .into_iter()
+            .next()
+            .expect("a resistor has pins");
+        let DesignTestHost {
+            design,
+            model,
+            workbench,
+            ..
+        } = host;
+        let mut harness = FeatureHarness::<DesignFeature>::with_model(model, *workbench);
+        harness.state = *design;
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let frame = |harness: &mut FeatureHarness<DesignFeature>, events: Vec<egui::Event>| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 700.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    // As the shell lends the surface its context: no modal open.
+                    let mut cx = harness
+                        .cx()
+                        .with_application_modal(false)
+                        .with_dialog_modal(false);
+                    super::super::show_surface(&mut cx, ui);
+                },
+            );
+        };
+        frame(&mut harness, Vec::new());
+        // At 100 % with the drawing's origin on the canvas's corner, a pin
+        // end's place on the screen is its coordinates from that corner.
+        let editor = &mut harness.model.schematic.session.editor;
+        (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
+        (editor.zoom, editor.pan) = (1.0, (0.0, 0.0));
+        frame(&mut harness, Vec::new());
+        let resting = harness.state.touch_strip_canvas.expect("the canvas");
+        let at = resting.min + egui::vec2(end.x as f32, end.y as f32);
+
+        harness.model.schematic.arm_tool(Tool::Label);
+        frame(&mut harness, vec![egui::Event::PointerMoved(at)]);
+        let armed = harness.state.touch_strip_canvas.expect("the canvas");
+        assert!(armed.top() > resting.top(), "the Label strip took its band");
+        for pressed in [true, false] {
+            frame(
+                &mut harness,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        let entry = &mut harness.state.net_label_placement;
+        assert!(entry.open, "the click opens the label's entry");
+        assert_eq!(
+            entry.anchor,
+            Some(end),
+            "the label is anchored on the pin end"
+        );
+
+        entry.name = "VIN".to_owned();
+        let DraftValidation::Valid(commit) = tests::validate_draft(entry, &harness.model) else {
+            panic!("VIN is a net name");
+        };
+        tests::apply_commit(&mut harness.model, &mut harness.wb, *commit).expect("placed");
+        let nets = rspice_design::connectivity::summary::design_nets(&harness.model.schematic);
+        let net = nets
+            .iter()
+            .find(|net| net.name == "VIN")
+            .expect("the label names a net");
+        assert!(
+            net.terminals
+                .iter()
+                .any(|terminal| terminal.component_id == id && terminal.pin == pin),
+            "the pin {pin} is on VIN: {:?}",
+            net.terminals
+                .iter()
+                .map(|terminal| (terminal.component_id, &terminal.pin))
+                .collect::<Vec<_>>()
+        );
     }
 }
