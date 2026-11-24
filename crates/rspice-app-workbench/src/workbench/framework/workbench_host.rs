@@ -58,7 +58,8 @@ pub trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSpec> {
     fn platform(&self) -> &PlatformState;
 
     /// Whether a run is being prepared, a preflight check or a deck's run,
-    /// which the run control offers to stop.
+    /// or a plan's run waits for memory, which the run control offers to
+    /// stop.
     fn run_preparing(&self) -> bool;
 
     /// Whether anything modal the shell lists is open, which owns the

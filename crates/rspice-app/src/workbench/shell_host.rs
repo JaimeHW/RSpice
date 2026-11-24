@@ -1053,7 +1053,9 @@ impl WorkbenchHost for RSpiceApp {
     }
 
     fn run_preparing(&self) -> bool {
-        self.state.runs.preflight.checking.is_some() || self.state.runs.preparing_deck.is_some()
+        self.state.runs.preflight.checking.is_some()
+            || self.state.runs.preparing_deck.is_some()
+            || self.state.runs.preflight.held_for_memory.is_some()
     }
 
     fn application_modal_open(&self) -> bool {

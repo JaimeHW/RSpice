@@ -31,6 +31,20 @@ fn run_started(app: &RSpiceApp) -> bool {
         || !simulation.retained.runs.is_empty()
 }
 
+/// Whether a frame's accessibility tree has a label that starts `text`.
+fn says_first(output: &egui::FullOutput, text: &str) -> bool {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .is_some_and(|update| {
+            update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label().is_some_and(|label| label.starts_with(text)))
+        })
+}
+
 /// Whether a frame's accessibility tree says `text`.
 fn says(output: &egui::FullOutput, text: &str) -> bool {
     output
@@ -89,6 +103,10 @@ fn a_plan_run_needing_more_than_is_free_waits_for_run_anyway() {
     let status = format!("Warning: {}", warning.status());
     assert!(says(&output, &status), "the status line says {status:?}");
     assert!(says(&output, &warning.numbers()), "the band says it");
+    assert!(
+        says_first(&output, "Stop the run waiting for memory"),
+        "the run control is Stop"
+    );
     for _ in 0..3 {
         replay.frame(Vec::new());
     }

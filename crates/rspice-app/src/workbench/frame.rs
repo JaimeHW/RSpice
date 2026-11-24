@@ -461,6 +461,7 @@ fn follow_pressed_run(
             && !execution.trigger_simulation
             && !execution.has_active_execution()
             && !app.state.runs.preflight.run_awaits_check()
+            && app.state.runs.preflight.held_for_memory.is_none()
             && app.state.runs.preparing_deck.is_none()
         {
             app.state.workbench.run_press_route = None;

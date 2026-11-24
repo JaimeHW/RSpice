@@ -58,6 +58,9 @@ pub(in crate::workbench) struct RunControls<'a> {
     pub(in crate::workbench) checking: bool,
     /// A deck's run is being prepared.
     pub(in crate::workbench) preparing_deck: bool,
+    /// The plan's run waits for Run anyway or Stop: it needs more memory
+    /// than is free.
+    pub(in crate::workbench) held_for_memory: bool,
     /// Run, or Stop while a run or a preflight is active.
     pub(in crate::workbench) primary: RunEntry,
     pub(in crate::workbench) preflight: RunEntry,
@@ -88,11 +91,11 @@ pub(in crate::workbench) fn run_controls(
     layout: LayoutSpec,
 ) -> Option<CommandKey> {
     let model = controls.model;
-    // A preflight preparing its run or building its decks, and a deck's run
-    // being prepared, are stopped the way a run is: the control is Stop until
-    // they finish.
+    // A preflight preparing its run or building its decks, a deck's run
+    // being prepared, and a plan's run waiting for memory are stopped the way
+    // a run is: the control is Stop until they finish.
     let checking = controls.checking;
-    let preparing = checking || controls.preparing_deck;
+    let preparing = checking || controls.preparing_deck || controls.held_for_memory;
     let execution_active = model.simulation.execution.has_active_execution() || preparing;
     let cancellation_pending = model.simulation.cancellation_is_pending();
     let command = controls.primary.key;
@@ -133,6 +136,8 @@ pub(in crate::workbench) fn run_controls(
                 "Stop the preflight check".to_owned()
             } else if controls.preparing_deck {
                 "Stop preparing the deck's run".to_owned()
+            } else if controls.held_for_memory {
+                "Stop the run waiting for memory".to_owned()
             } else if cancellation_pending {
                 "Simulation cancellation in progress".to_owned()
             } else if execution_active {
