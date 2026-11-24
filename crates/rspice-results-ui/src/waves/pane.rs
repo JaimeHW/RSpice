@@ -190,6 +190,96 @@ fn curve_samples<'t>(
     Some(Trace::new(xs, ys, color).shared(&trace.x, &trace.y))
 }
 
+/// The curves of `traces`, `model`'s, as a pane strokes them. Run owns
+/// weight: overlay traces keep the signal hue at reduced alpha and stroke,
+/// painted first so the active run draws at full strength on top. A member
+/// `highlighted` is stroked last, over everything it was among; one of a
+/// family `banded` is left to its band unless it is highlighted.
+fn pane_curves<'m>(
+    model: &'m StripModel,
+    traces: &[(usize, &'m StripTrace)],
+    (highlighted, banded): (&[usize], &std::collections::HashSet<usize>),
+    held: &'m std::collections::HashMap<
+        usize,
+        (
+            rspice_results::waveform::HeldColumn,
+            rspice_results::waveform::HeldColumn,
+        ),
+    >,
+    trace_width: f32,
+) -> Vec<Trace<'m>> {
+    let highlighted_members: Vec<&StripTrace> = highlighted
+        .iter()
+        .filter(|index| !banded.contains(*index))
+        .filter_map(|index| model.traces.get(*index))
+        .collect();
+    // A member of the family a highlighted member belongs to.
+    let sibling_of_highlight = |trace: &StripTrace| {
+        trace.family_group_ordinal.is_some()
+            && highlighted_members
+                .iter()
+                .any(|member| same_family(member, trace))
+    };
+    let mut curves = Vec::new();
+    let draw_order = traces
+        .iter()
+        .filter(|(_, trace)| trace.overlay)
+        .chain(
+            traces
+                .iter()
+                .filter(|(index, trace)| !trace.overlay && !highlighted.contains(index)),
+        )
+        .chain(
+            traces
+                .iter()
+                .filter(|(index, trace)| !trace.overlay && highlighted.contains(index)),
+        )
+        .filter(|(index, _)| !banded.contains(index) || highlighted.contains(index));
+    for (index, trace) in draw_order {
+        // While one member of a family that is stroked member by member is
+        // highlighted, its siblings step back to an overlay's weight: members
+        // of one quantity share its hue, and a wider stroke alone is lost
+        // among them.
+        let lifted = highlighted.contains(index) && !banded.contains(index);
+        let sibling = !lifted && sibling_of_highlight(trace);
+        let color = if trace.overlay || sibling {
+            trace.color.gamma_multiply(0.40)
+        } else {
+            trace.color
+        };
+        // The reduction has to be told what the abscissa is. Without it a
+        // reverse sweep vanished the moment it was zoomed — every window it
+        // was asked for came back empty — and a hysteresis loop lost whichever
+        // branch fell outside one contiguous index window.
+        // A stored trace draws from its store's tiles, never its columns.
+        let Some(samples) = curve_samples(trace, *index, held, color) else {
+            continue;
+        };
+        let mut plot_trace = strip_trace_cues(
+            samples
+                .width(trace_width)
+                .cache_key(trace_key(model, trace))
+                .shape(&trace.shape),
+            trace.palette_slot,
+            trace.family_style,
+            trace.waveform_index,
+        );
+        let width = trace
+            .style
+            .width
+            .map_or(trace_width, |width| width.points());
+        plot_trace = styled(plot_trace, trace.style);
+        if trace.overlay {
+            plot_trace = plot_trace.width(width * SECONDARY_TRACE_RATIO);
+        }
+        if lifted {
+            plot_trace = plot_trace.width(width);
+        }
+        curves.push(plot_trace);
+    }
+    curves
+}
+
 /// How far apart, relative to their size, a fit's extremes may be and still
 /// be one level: a node held steady differs from itself only in the rounding
 /// of its solution, far below any tolerance a solver converges to.
@@ -574,6 +664,9 @@ pub struct PanePlot<'a> {
     /// The ink of the first axis' labels, when it says whose axis it is by
     /// its curves' one colour.
     pub y_ink: Option<egui::Color32>,
+    /// The strips the sheet shows, the pane's among them, which a pane of
+    /// many curves draws from where the frame is not.
+    pub strips: Option<&'a Arc<Vec<StripModel>>>,
 }
 
 /// One Y axis of a strip after its first, as its plot draws it: the curves
@@ -903,8 +996,6 @@ pub fn show_plot<'a>(
     // before the spec, whose curves are made from them.
     let mut banded = std::collections::HashSet::new();
     let mut highlighted: Vec<usize> = Vec::new();
-    let highlighted_members: Vec<&StripTrace>;
-    let sibling_of_highlight;
     let mut spec = pane_spec(PlotSpec::new(x_axis, model.x_scale, y_axis), pane)
         .accessible_name("Waveform plot")
         .with_right_margin(input.right_margin)
@@ -1123,80 +1214,26 @@ pub fn show_plot<'a>(
         }));
     }
 
-    highlighted_members = highlighted
+    let highlighted_members: Vec<&StripTrace> = highlighted
         .iter()
         .filter(|index| !banded.contains(*index))
         .filter_map(|index| model.traces.get(*index))
         .collect();
     // A member of the family a highlighted member belongs to.
-    sibling_of_highlight = |trace: &StripTrace| {
+    let sibling_of_highlight = |trace: &StripTrace| {
         trace.family_group_ordinal.is_some()
             && highlighted_members
                 .iter()
                 .any(|member| same_family(member, trace))
     };
-    // Run owns weight: overlay traces keep the signal hue at reduced alpha
-    // and stroke, painted first so the active run draws at full strength
-    // on top.
-    // A highlighted member is stroked last, over everything it was among.
     let make = || {
-        let mut traces = Vec::new();
-        let draw_order = pane_traces()
-            .iter()
-            .filter(|(_, trace)| trace.overlay)
-            .chain(
-                pane_traces()
-                    .iter()
-                    .filter(|(index, trace)| !trace.overlay && !highlighted.contains(index)),
-            )
-            .chain(
-                pane_traces()
-                    .iter()
-                    .filter(|(index, trace)| !trace.overlay && highlighted.contains(index)),
-            )
-            .filter(|(index, _)| !banded.contains(index) || highlighted.contains(index));
-        for (index, trace) in draw_order {
-            // While one member of a family that is stroked member by member is
-            // highlighted, its siblings step back to an overlay's weight: members
-            // of one quantity share its hue, and a wider stroke alone is lost
-            // among them.
-            let lifted = highlighted.contains(index) && !banded.contains(index);
-            let sibling = !lifted && sibling_of_highlight(trace);
-            let color = if trace.overlay || sibling {
-                trace.color.gamma_multiply(0.40)
-            } else {
-                trace.color
-            };
-            // The reduction has to be told what the abscissa is. Without it a
-            // reverse sweep vanished the moment it was zoomed — every window it
-            // was asked for came back empty — and a hysteresis loop lost whichever
-            // branch fell outside one contiguous index window.
-            // A stored trace draws from its store's tiles, never its columns.
-            let Some(samples) = curve_samples(trace, *index, &held_traces, color) else {
-                continue;
-            };
-            let mut plot_trace = strip_trace_cues(
-                samples
-                    .width(input.trace_width)
-                    .cache_key(trace_key(model, trace))
-                    .shape(&trace.shape),
-                trace.palette_slot,
-                trace.family_style,
-                trace.waveform_index,
-            );
-            let width = trace
-                .style
-                .width
-                .map_or(input.trace_width, |width| width.points());
-            plot_trace = styled(plot_trace, trace.style);
-            if trace.overlay {
-                plot_trace = plot_trace.width(width * SECONDARY_TRACE_RATIO);
-            }
-            if lifted {
-                plot_trace = plot_trace.width(width);
-            }
-            traces.push(plot_trace);
-        }
+        let mut traces = pane_curves(
+            model,
+            pane_traces(),
+            (&highlighted, &banded),
+            &held_traces,
+            input.trace_width,
+        );
         for (expr, held) in exprs.iter().zip(&held_exprs) {
             let Some((expr_x, expr_y)) = held else {
                 continue;
@@ -1332,10 +1369,47 @@ pub fn show_plot<'a>(
             + held_exprs.iter().flatten().count()
             + held_secondary.iter().flatten().flatten().count())
         .saturating_sub(waiting);
+        // A pane of nothing but its traces makes them again where the frame
+        // is not, from the strips the sheet shares.
+        let off_frame = input
+            .strips
+            .filter(|_| {
+                exprs.is_empty()
+                    && input.secondary.is_empty()
+                    && model.trace_facts().over_stored_axes.is_empty()
+            })
+            .and_then(|strips| {
+                let strip = strips.iter().position(|other| std::ptr::eq(other, model))?;
+                let strips = Arc::clone(strips);
+                let indices = pane.traces.clone();
+                let (highlighted, banded) = (highlighted.clone(), banded.clone());
+                let trace_width = input.trace_width;
+                let make: plot::OwnedCurves =
+                    Arc::new(move |visit: &mut dyn FnMut(&[Trace<'_>])| {
+                        let Some(model) = strips.get(strip) else {
+                            return;
+                        };
+                        let traces: Vec<(usize, &StripTrace)> = indices
+                            .iter()
+                            .copied()
+                            .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
+                            .collect();
+                        let held = std::collections::HashMap::new();
+                        visit(&pane_curves(
+                            model,
+                            &traces,
+                            (&highlighted, &banded),
+                            &held,
+                            trace_width,
+                        ));
+                    });
+                Some(make)
+            });
         spec.curves = Some(plot::Curves {
             key: hasher.finish(),
             count,
             make: Box::new(make),
+            off_frame,
         });
     } else {
         spec.traces.extend(make());

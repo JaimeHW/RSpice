@@ -36,7 +36,7 @@ use super::render::{
 };
 use super::sample::SweepShape;
 use super::scale::XScale;
-use super::spec::{DrawMode, PlotSpec, StoredSamples, Trace};
+use super::spec::{DrawMode, OwnedCurves, PlotSpec, StoredSamples, Trace};
 
 /// What a frame can afford to draw itself: points stroked, a sample reduced
 /// counting a sixteenth of one. About what a frame maps and strokes in a
@@ -287,6 +287,8 @@ pub(super) struct Curve {
 /// A picture to draw off the frame.
 struct Job {
     curves: Vec<Curve>,
+    /// Curves made off the frame, before the job draws them.
+    made: Option<MadeOffFrame>,
     geometry: Geometry,
     /// Drawn as pixels rather than shapes.
     pixels: bool,
@@ -433,7 +435,7 @@ pub(super) fn draw(
     color_safe: bool,
 ) -> bool {
     let Some(curves) = &spec.curves else {
-        let looks = looks_of(spec, &spec.traces, color_safe, &geometry);
+        let looks = looks_of(&spec.traces, color_safe, &geometry);
         // A curve with no identity cannot be known unchanged, so a plot of one
         // is drawn afresh each frame.
         if !identified(&spec.traces) {
@@ -445,7 +447,7 @@ pub(super) fn draw(
         }
         let key = picture_key(&spec.traces, &looks, &geometry, cache.identity());
         return show_picture((ctx, id, key), cache, painter, geometry, || {
-            Some((Listing::Listed(&spec.traces), looks))
+            Some(Wanted::Made(Listing::Listed(&spec.traces), looks))
         });
     };
     let key = {
@@ -454,12 +456,21 @@ pub(super) fn draw(
         geometry.hash_into(&mut hasher);
         hasher.finish()
     };
+    // More curves than a frame strokes, made where the frame is not, are
+    // asked for without the frame making, looking at or reading one of them.
+    let off_frame = curves.off_frame.as_ref().filter(|_| {
+        cfg!(not(target_arch = "wasm32"))
+            && curves.count.saturating_mul(2 * geometry.columns) > FRAME_WORK
+    });
     let mut unidentified = None;
     let drawing = show_picture((ctx, id, key), cache, painter, geometry, || {
+        if let Some(make) = off_frame {
+            return Some(Wanted::OffFrame(Arc::clone(make), color_safe));
+        }
         let made = (curves.make)();
-        let looks = looks_of(spec, &made, color_safe, &geometry);
+        let looks = looks_of(&made, color_safe, &geometry);
         if identified(&made) {
-            return Some((Listing::Made(made), looks));
+            return Some(Wanted::Made(Listing::Made(made), looks));
         }
         unidentified = Some((made, looks));
         None
@@ -481,22 +492,17 @@ fn identified(traces: &[Trace<'_>]) -> bool {
         .all(|trace| trace.is_empty() || trace.cache_key.is_some())
 }
 
-/// The look of each of `traces`, `spec`'s, in `geometry`: `None` for one
-/// that draws nothing.
-fn looks_of(
-    spec: &PlotSpec<'_>,
-    traces: &[Trace<'_>],
-    color_safe: bool,
-    geometry: &Geometry,
-) -> Vec<Option<Look>> {
-    let slots = MarkerSlots::for_pane((spec, traces), geometry.plot_rect, color_safe);
+/// The look of each of `traces` in `geometry`: `None` for one that draws
+/// nothing.
+fn looks_of(traces: &[Trace<'_>], color_safe: bool, geometry: &Geometry) -> Vec<Option<Look>> {
+    let slots = MarkerSlots::for_pane((geometry.x, traces), geometry.plot_rect, color_safe);
     traces
         .iter()
         .enumerate()
         .map(|(index, trace)| {
             (!trace.is_empty()).then(|| {
                 let slots = slots[index]
-                    .unwrap_or_else(|| MarkerSlots::on_pane(spec, geometry.plot_rect, 0, 1));
+                    .unwrap_or_else(|| MarkerSlots::on_pane(geometry.x, geometry.plot_rect, 0, 1));
                 Look::of(trace, index, color_safe, slots, geometry)
             })
         })
@@ -519,6 +525,13 @@ impl<'s, 'a: 's> Listing<'s, 'a> {
     }
 }
 
+/// The curves of a new picture: the ones the frame has, with their looks,
+/// or ones made off the frame, in colour-safe looks or not.
+enum Wanted<'s, 'a: 's> {
+    Made(Listing<'s, 'a>, Vec<Option<Look>>),
+    OffFrame(OwnedCurves, bool),
+}
+
 /// Paint the picture `key` of the plot `id`: the one shown when it is that
 /// picture, else the one shown meanwhile while it is drawn from `curves`,
 /// which are asked for only then. `curves` answers `None` for curves that
@@ -529,7 +542,7 @@ fn show_picture<'s, 'a: 's>(
     cache: &mut DecimationCache,
     painter: &egui::Painter,
     geometry: Geometry,
-    curves: impl FnOnce() -> Option<(Listing<'s, 'a>, Vec<Option<Look>>)>,
+    curves: impl FnOnce() -> Option<Wanted<'s, 'a>>,
 ) -> bool {
     let store = store(ctx);
     let Ok(mut plots) = store.lock() else {
@@ -560,8 +573,25 @@ fn show_picture<'s, 'a: 's>(
         }
         return true;
     }
-    let Some((listing, looks)) = curves() else {
-        return false;
+    let (listing, looks) = match curves() {
+        None => return false,
+        Some(Wanted::Made(listing, looks)) => (listing, looks),
+        Some(Wanted::OffFrame(make, color_safe)) => {
+            let job = Job {
+                curves: Vec::new(),
+                made: Some(MadeOffFrame {
+                    make,
+                    color_safe,
+                    held: cache.kept_sets(),
+                }),
+                geometry,
+                pixels: false,
+                options: ctx.tessellation_options(|options| *options),
+                keep_budget: cache.capacity(),
+            };
+            ask_off_frame((ctx, key), pictures, job, painter);
+            return true;
+        }
     };
     let traces = listing.traces();
     // A picture to draw: what the cache holds of it, and what drawing the
@@ -625,11 +655,25 @@ fn show_picture<'s, 'a: 's>(
         .collect();
     let job = Job {
         curves,
+        made: None,
         geometry,
         pixels: points > geometry.pixels(),
         options: ctx.tessellation_options(|options| *options),
         keep_budget: cache.capacity(),
     };
+    ask_off_frame((ctx, key), pictures, job, painter);
+    true
+}
+
+/// Ask for the picture `key` to be drawn off the frame by `job`, and paint
+/// the one shown meanwhile.
+fn ask_off_frame(
+    (ctx, key): (&egui::Context, u64),
+    pictures: &mut Pictures,
+    job: Job,
+    painter: &egui::Painter,
+) {
+    let geometry = job.geometry;
     let (cancel, arrival) = pictures.request(key, geometry);
     if !spawn(ctx.clone(), job, cancel, arrival) {
         // Without a thread to draw on, the next frame asks again.
@@ -638,7 +682,6 @@ fn show_picture<'s, 'a: 's>(
     if let Some(shown) = &pictures.shown {
         paint(shown, painter, &geometry);
     }
-    true
 }
 
 /// What identifies a picture: the cache's samples, where and through what
@@ -687,31 +730,9 @@ fn source_of(
             key: Some(key),
         };
     }
-    let key = trace.cache_key.unwrap_or_default();
-    if let Some(stored) = trace.stored {
-        return Source::Stored {
-            key,
-            x: stored.x.clone(),
-            y: stored.y.clone(),
-        };
-    }
-    // Columns shared from memory are reduced off the frame; an axis read
-    // from a store is borrowed for this frame only.
-    if let Some(shared) = trace.shared
-        && shared.x.in_memory().is_some()
-        && shared.y.in_memory().is_some()
-    {
-        return Source::Memory {
-            key,
-            x: shared.x.clone(),
-            y: shared.y.clone(),
-            parametric: trace.parametric,
-            shape: trace.shape.cloned(),
-        };
-    }
-    Source::Held {
+    owned_source(trace).unwrap_or_else(|| Source::Held {
         envelope: cache.series(
-            key,
+            trace.cache_key.unwrap_or_default(),
             trace.x,
             trace.y,
             geometry.view(look.y),
@@ -719,6 +740,88 @@ fn source_of(
             trace.shape,
         ),
         key: None,
+    })
+}
+
+/// Where a curve holding its samples reads its envelope off the frame: the
+/// store it reads, or the columns shared from memory it reduces. `None` for
+/// samples it only borrows; an axis read from a store is borrowed for one
+/// frame only.
+fn owned_source(trace: &Trace<'_>) -> Option<Source> {
+    let key = trace.cache_key.unwrap_or_default();
+    if let Some(stored) = trace.stored {
+        return Some(Source::Stored {
+            key,
+            x: stored.x.clone(),
+            y: stored.y.clone(),
+        });
+    }
+    let shared = trace
+        .shared
+        .filter(|shared| shared.x.in_memory().is_some() && shared.y.in_memory().is_some())?;
+    Some(Source::Memory {
+        key,
+        x: shared.x.clone(),
+        y: shared.y.clone(),
+        parametric: trace.parametric,
+        shape: trace.shape.cloned(),
+    })
+}
+
+/// Curves a picture makes off the frame, and the envelopes the frame's cache
+/// keeps of the pictures drawn before it, read there too.
+struct MadeOffFrame {
+    make: OwnedCurves,
+    color_safe: bool,
+    held: Vec<Arc<Kept>>,
+}
+
+impl MadeOffFrame {
+    /// The curves made, each with its look and where it reads its envelope,
+    /// and whether they are drawn as pixels.
+    fn curves(self, geometry: &Geometry) -> (Vec<Curve>, bool) {
+        let mut curves = Vec::new();
+        let mut points = 0usize;
+        (self.make)(&mut |traces: &[Trace<'_>]| {
+            let looks = looks_of(traces, self.color_safe, geometry);
+            for (trace, look) in traces.iter().zip(looks) {
+                let Some(look) = look else {
+                    continue;
+                };
+                let view = geometry.view(look.y);
+                let key = trace.cache_key.map(|key| match trace.stored {
+                    Some(_) => EnvelopeKey::stored(key, view),
+                    None => EnvelopeKey::series(key, view, trace.parametric, trace.shape),
+                });
+                let held =
+                    key.and_then(|key| self.held.iter().rev().find_map(|kept| kept.get(key)));
+                let source = match held {
+                    Some(envelope) => {
+                        points = points.saturating_add(envelope.len());
+                        Source::Held { envelope, key }
+                    }
+                    None => {
+                        let samples = match trace.stored {
+                            Some(_) => 2 * geometry.columns,
+                            None => trace.x.len().min(trace.y.len()).min(2 * geometry.columns),
+                        };
+                        points = points.saturating_add(samples);
+                        owned_source(trace).unwrap_or_else(|| Source::Held {
+                            envelope: decimate::reduce(
+                                trace.x,
+                                trace.y,
+                                view,
+                                trace.parametric,
+                                trace.shape,
+                            ),
+                            key,
+                        })
+                    }
+                };
+                curves.push(Curve { source, look });
+            }
+        });
+        (curves, points > geometry.pixels())
     }
 }
 
@@ -848,7 +951,7 @@ fn spawn(ctx: egui::Context, job: Job, cancel: Arc<AtomicBool>, arrival: Arrival
     std::thread::Builder::new()
         .name("plot curves".to_owned())
         .spawn(move || {
-            if let Some(built) = build_off_frame(&job, &cancel)
+            if let Some(built) = build_off_frame(job, &cancel)
                 && !cancel.load(Ordering::Relaxed)
                 && let Ok(mut slot) = arrival.lock()
             {
@@ -868,7 +971,14 @@ fn spawn(_ctx: egui::Context, _job: Job, _cancel: Arc<AtomicBool>, _arrival: Arr
 /// Draw `job`, its curves shared among the machine's threads in runs, each
 /// thread drawing its run whole, and the runs laid over one another in
 /// order. `None` once called off.
-fn build_off_frame(job: &Job, cancel: &AtomicBool) -> Option<Built> {
+fn build_off_frame(mut job: Job, cancel: &AtomicBool) -> Option<Built> {
+    if let Some(made) = job.made.take() {
+        (job.curves, job.pixels) = made.curves(&job.geometry);
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+    }
+    let job = &job;
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     // Every thread drawing pixels holds a canvas of its own, and the
     // canvases of one picture stay within the display cache's budget.

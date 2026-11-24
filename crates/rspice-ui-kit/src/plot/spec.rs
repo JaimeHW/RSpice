@@ -630,7 +630,15 @@ pub struct Curves<'a> {
     pub count: usize,
     /// The curves, drawn after [`PlotSpec::traces`], in order.
     pub make: Box<dyn Fn() -> Vec<Trace<'a>> + 'a>,
+    /// The same curves made where the frame is not, when they borrow
+    /// nothing of it. A picture of more curves than a frame strokes is then
+    /// drawn without the frame making, looking at or reading any of them.
+    pub off_frame: Option<OwnedCurves>,
 }
+
+/// Curves made off the frame: handed, in order, to the visitor while they
+/// are made. Each carries its cache key.
+pub type OwnedCurves = std::sync::Arc<dyn Fn(&mut dyn FnMut(&[Trace<'_>])) + Send + Sync>;
 
 /// The full declarative plot description for one frame.
 pub struct PlotSpec<'a> {

@@ -392,6 +392,7 @@ fn every_curve_a_strip_draws_reads_out_on_hover() {
                 secondary: &[],
                 right_margin: 14.0,
                 y_ink: None,
+                strips: None,
             },
         );
     });

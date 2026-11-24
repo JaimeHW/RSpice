@@ -3,7 +3,7 @@
 //! superseded is never shown.
 
 use super::*;
-use crate::plot::{Axis, DecimationWork};
+use crate::plot::{Axis, Curves, DecimationWork};
 
 const COLOR: Color32 = Color32::from_rgb(90, 170, 250);
 
@@ -304,4 +304,100 @@ fn a_superseded_picture_is_called_off_and_never_shown() {
         .expect("the picture asked for last arrives");
     assert_eq!(key, 2);
     assert!(pictures.arrived().is_none(), "and arrives once");
+}
+
+/// `curves` copies of a curve, each with an identity of its own.
+fn copies<'a>(curve: (&'a WaveformValues, &'a WaveformValues), curves: usize) -> Vec<Trace<'a>> {
+    let (x, y) = (
+        curve.0.in_memory().unwrap_or_default(),
+        curve.1.in_memory().unwrap_or_default(),
+    );
+    (0..curves)
+        .map(|index| {
+            Trace::new(x, y, COLOR)
+                .cache_key(index as u64)
+                .shared(curve.0, curve.1)
+        })
+        .collect()
+}
+
+/// One frame of a plot of `curves` copies of a curve that it makes only for
+/// a new picture, on the frame or off it, counting in `made` the times the
+/// frame made them.
+fn made_frame(
+    ctx: &egui::Context,
+    cache: &mut DecimationCache,
+    curve: (&WaveformValues, &WaveformValues),
+    (curves, size): (usize, egui::Vec2),
+    made: &std::cell::Cell<usize>,
+) -> (DecimationWork, Vec<egui::epaint::ClippedShape>) {
+    cache.ensure_version(1);
+    let before = cache.work();
+    let owned = (curve.0.clone(), curve.1.clone());
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ui| {
+            let mut spec = PlotSpec::new(
+                Axis::linear(0.0, 10.0, "s"),
+                XScale::Linear,
+                Axis::linear(-1.5, 1.5, "V"),
+            );
+            let owned = owned.clone();
+            spec.curves = Some(Curves {
+                key: 7,
+                count: curves,
+                make: Box::new(|| {
+                    made.set(made.get() + 1);
+                    copies(curve, curves)
+                }),
+                off_frame: Some(Arc::new(move |visit: &mut dyn FnMut(&[Trace<'_>])| {
+                    visit(&copies((&owned.0, &owned.1), curves));
+                })),
+            });
+            super::super::render::show(ui, &spec, cache, None, None);
+        },
+    );
+    (cache.work().since(before), output.shapes)
+}
+
+/// A picture of more curves than a frame strokes, made where the frame is
+/// not, is drawn without any frame making, reading or stroking one of them.
+#[test]
+fn a_picture_of_more_curves_than_a_frame_strokes_is_made_off_it() {
+    let ctx = context();
+    let mut cache = DecimationCache::default();
+    let (x, y) = sine(4_000);
+    let curve = (&WaveformValues::from(x), &WaveformValues::from(y));
+    let plot = (500, egui::vec2(900.0, 400.0));
+    let made = std::cell::Cell::new(0);
+    let (asked, shown) = made_frame(&ctx, &mut cache, curve, plot, &made);
+    assert_eq!(
+        (made.get(), asked.hits, asked.rebuilds, asked.strokes),
+        (0, 0, 0, 0),
+        "the frame that asks for the picture makes, reads and strokes none of its curves"
+    );
+    assert!(
+        says_updating(&shown),
+        "the plot says its curves are updating"
+    );
+    let started = std::time::Instant::now();
+    let arrived = loop {
+        let (work, shown) = made_frame(&ctx, &mut cache, curve, plot, &made);
+        if !says_updating(&shown) {
+            break work;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "the picture never arrived"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert_eq!(
+        arrived.strokes, 500,
+        "the arriving picture holds every curve"
+    );
+    assert_eq!(made.get(), 0, "no frame made a curve");
 }

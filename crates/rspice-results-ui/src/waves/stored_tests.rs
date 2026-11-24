@@ -214,6 +214,7 @@ fn a_stored_trace_is_read_once_and_kept_however_many_frames_draw_it() {
                                 secondary: &[],
                                 right_margin: 14.0,
                                 y_ink: None,
+                                strips: None,
                             },
                         );
                     }
@@ -408,6 +409,7 @@ fn a_stored_run_builds_fits_draws_and_reads_its_cursors_without_reading_a_column
                         secondary: &[],
                         right_margin: 14.0,
                         y_ink: None,
+                        strips: None,
                     },
                 );
             }

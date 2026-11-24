@@ -717,7 +717,12 @@ pub(crate) fn last_strip_area(ctx: &egui::Context) -> Option<egui::Rect> {
     ctx.data(|data| data.get_temp(strip_area_id()))
 }
 
-pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], options: StackOptions) {
+pub fn show(
+    ui: &mut Ui,
+    host: &mut impl StackHost,
+    models: &Arc<Vec<StripModel>>,
+    options: StackOptions,
+) {
     let t = Tokens::get(ui.ctx());
     let pane_chrome = options.pane_chrome;
     // Apply hide/maximize strip state.
@@ -972,7 +977,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                             show_strip_plot(
                                 ui,
                                 host,
-                                (model, window_slots, several),
+                                (models, model, window_slots, several),
                                 linked_cursor_domain.as_ref(),
                                 options,
                                 &mut edits,
@@ -1112,6 +1117,9 @@ pub(crate) struct StripFrame<'a> {
     /// Whether the sheet shows more than one strip, so the one the bar's
     /// actions reach is told from the others.
     pub(crate) several: bool,
+    /// The strips the sheet shows, this one among them, when it is one of
+    /// them.
+    pub(crate) strips: Option<&'a Arc<Vec<StripModel>>>,
 }
 
 /// The share of a strip its ruler takes, up to the ruler's own height.
@@ -1284,7 +1292,7 @@ struct ExpressionEdits {
 fn show_strip_plot(
     ui: &mut Ui,
     host: &mut impl StackHost,
-    (model, window_slots, several): (&StripModel, usize, bool),
+    (strips, model, window_slots, several): (&Arc<Vec<StripModel>>, &StripModel, usize, bool),
     linked_cursor_domain: Option<&CursorDomain>,
     options: StackOptions,
     edits: &mut ExpressionEdits,
@@ -1353,6 +1361,7 @@ fn show_strip_plot(
         gutter,
         window_slots,
         several,
+        strips: Some(strips),
     };
     // The strips share what is left by their weights, as the reader sized
     // them; a divider being dragged moves the line between two of them
@@ -1658,6 +1667,7 @@ fn show_xy_strip(
         gutter,
         window_slots: slots,
         several,
+        strips: None,
     };
 
     // The pane's header: its legend, its unit and its scale, which the strip
@@ -1889,6 +1899,7 @@ fn show_unit_pane(
         gutter,
         window_slots,
         several,
+        strips,
     } = frame;
     let t = Tokens::get(ui.ctx());
     let presentation = options.readout;
@@ -2159,6 +2170,7 @@ fn show_unit_pane(
         secondary: &secondary,
         right_margin: gutter.right_margin(),
         y_ink,
+        strips,
     };
     let drawn = pane_view::show_plot(ui, &mut host.session_mut().cache, model, pane, input);
     let y_labels_width = drawn.y_labels_width;

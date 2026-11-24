@@ -586,10 +586,11 @@ pub(super) struct MarkerSlots {
 }
 
 impl MarkerSlots {
-    /// The slots of each of `traces`, `spec`'s, in order: `None` for a
-    /// trace that carries no marker.
+    /// The slots of each of `traces`, in order, on a pane whose X axis is
+    /// `x` (its least, its greatest and its scale): `None` for a trace that
+    /// carries no marker.
     pub(super) fn for_pane(
-        (spec, traces): (&PlotSpec<'_>, &[Trace<'_>]),
+        (x, traces): ((f64, f64, XScale), &[Trace<'_>]),
         plot_rect: Rect,
         color_safe: bool,
     ) -> Vec<Option<Self>> {
@@ -607,7 +608,7 @@ impl MarkerSlots {
             .map(|marked| {
                 marked.then(|| {
                     rank += 1;
-                    Self::on_pane(spec, plot_rect, rank - 1, count)
+                    Self::on_pane(x, plot_rect, rank - 1, count)
                 })
             })
             .collect()
@@ -622,19 +623,18 @@ impl MarkerSlots {
     /// grid line — so a pan carries the markers with their curves instead of
     /// sliding the curves under them.
     pub(super) fn on_pane(
-        spec: &PlotSpec<'_>,
+        (x_min, x_max, x_scale): (f64, f64, XScale),
         plot_rect: Rect,
         rank: usize,
         marked: usize,
     ) -> Self {
         let marked = marked.max(1);
         let pitch = MARKER_PITCH.max(MARKER_STAGGER_MIN * marked as f32);
-        let anchor = match spec.x_scale {
+        let anchor = match x_scale {
             XScale::Linear => 0.0,
             XScale::Log10 => 1.0,
         };
-        let anchor =
-            spec.x_scale.normalize(anchor, spec.x.min, spec.x.max) * f64::from(plot_rect.width());
+        let anchor = x_scale.normalize(anchor, x_min, x_max) * f64::from(plot_rect.width());
         let phase = if anchor.is_finite() {
             anchor.rem_euclid(f64::from(pitch)) as f32
         } else {

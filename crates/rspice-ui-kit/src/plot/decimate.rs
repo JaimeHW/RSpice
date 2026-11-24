@@ -79,6 +79,11 @@ pub(super) struct Kept {
 }
 
 impl Kept {
+    /// The envelope kept under `key`.
+    pub(super) fn get(&self, key: EnvelopeKey) -> Option<Arc<[[f64; 2]]>> {
+        self.map.get(&key.0).cloned()
+    }
+
     /// Keep `envelope` under `key`.
     pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: Arc<[[f64; 2]]>) {
         let bytes = kept_bytes(envelope.len());
@@ -426,6 +431,16 @@ impl DecimationCache {
         } else {
             release(kept);
         }
+    }
+
+    /// The envelopes each picture drawn off the frame keeps, the latest
+    /// last, for a picture made off the frame to read there.
+    pub(super) fn kept_sets(&self) -> Vec<Arc<Kept>> {
+        self.held
+            .kept
+            .iter()
+            .map(|(kept, _)| Arc::clone(kept))
+            .collect()
     }
 
     /// Let go of the pictures' envelopes this frame has not drawn from.
