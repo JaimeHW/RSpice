@@ -299,14 +299,52 @@ impl TextDocumentModel {
     }
 
     /// The display cells the widest of `line_count` lines from `start_line`
-    /// takes.
+    /// takes. Most source is ASCII with no tab and no line break but `\n`, a
+    /// cell a byte: its lines are measured by the distances between their
+    /// breaks, a piece of the text at a time, so the editor's scan of a long
+    /// text's lines costs a fraction of a millisecond a frame. From the first
+    /// piece that is not, the lines left are measured character by
+    /// character.
     pub fn maximum_line_cells_in_range(&self, start_line: usize, line_count: usize) -> usize {
-        if start_line >= self.line_count() || line_count == 0 {
+        let lines = self.line_count();
+        if start_line >= lines || line_count == 0 {
             return 0;
         }
+        let end_line = start_line + line_count.min(lines - start_line);
+        let start = self.text.line_to_byte(start_line);
+        let end = if end_line < lines {
+            self.text.line_to_byte(end_line)
+        } else {
+            self.text.len_bytes()
+        };
+        let (mut widest, mut line, mut width) = (0, start_line, 0);
+        for piece in self.text.byte_slice(start..end).chunks() {
+            if !piece.is_ascii() {
+                return widest.max(self.measured_line_cells(line, end_line - line));
+            }
+            for &byte in piece.as_bytes() {
+                match byte {
+                    b'\n' => {
+                        widest = widest.max(width);
+                        width = 0;
+                        line += 1;
+                    }
+                    b'\t' | b'\r' | 0x0B | 0x0C => {
+                        return widest.max(self.measured_line_cells(line, end_line - line));
+                    }
+                    _ => width += 1,
+                }
+            }
+        }
+        widest.max(width)
+    }
+
+    /// The display cells the widest of `line_count` lines from `start_line`
+    /// takes, each line measured character by character.
+    fn measured_line_cells(&self, start_line: usize, line_count: usize) -> usize {
         self.text
             .lines_at(start_line)
-            .take(line_count.min(self.line_count() - start_line))
+            .take(line_count)
             .map(|line| {
                 line_cells(line.slice(..line.len_chars() - trailing_line_break_chars(line)))
             })
@@ -1580,6 +1618,30 @@ mod tests {
             kept,
             "an unchanged text and history are not copied again"
         );
+    }
+
+    #[test]
+    fn the_widest_line_measures_alike_by_its_bytes_and_by_its_characters() {
+        // ASCII lines longer than a piece of the rope, then a tab, a wide
+        // glyph and a carriage return further down.
+        let mut source = String::new();
+        for width in [3, 2_000, 70, 5_000, 12] {
+            source.push_str(&"a".repeat(width));
+            source.push('\n');
+        }
+        source.push_str("x\ty\n\u{4E2D}\u{4E2D}\nend\r\nlast");
+        let model = TextDocumentModel::from_source(&source);
+        let lines = model.line_count();
+        for start in 0..lines {
+            for count in 0..=lines - start {
+                assert_eq!(
+                    model.maximum_line_cells_in_range(start, count),
+                    model.measured_line_cells(start, count),
+                    "{count} lines from line {start}"
+                );
+            }
+        }
+        assert_eq!(model.maximum_line_cells(), 5_000);
     }
 
     #[test]
