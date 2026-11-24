@@ -146,8 +146,8 @@ pub enum Outputs {
     },
     /// What the run measured, where no limit judges it.
     Measured(Vec<MeasurementLine>),
-    /// No run yet: what runs one.
-    NoRun(Action),
+    /// No run yet: what a run does, and what runs one.
+    NoRun(String, Action),
     /// A run that measured nothing: where outputs are added.
     Unmeasured(Action),
 }
@@ -170,10 +170,19 @@ impl OverviewSnapshot {
     pub fn capture(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> Self {
         let model = &*cx.model;
         let netlist_first = model.is_netlist_first_without_schematic();
-        let mut facts = vec![SummaryFact::new(
-            "Plan",
-            model.sim_setup.active_plan_name().as_str(),
-        )];
+        let deck = (netlist_first || !model.workspace.content.decks.is_empty())
+            .then(|| deck_summary(ctx, model, cx.peers.code()))
+            .flatten();
+        // A deck-driven project runs its deck as written, not the plan.
+        let mut facts = vec![if netlist_first {
+            SummaryFact::new(
+                "Runs",
+                deck.as_deref()
+                    .map_or_else(|| "The deck".to_owned(), DeckSummary::runs),
+            )
+        } else {
+            SummaryFact::new("Plan", model.sim_setup.active_plan_name().as_str())
+        }];
         // The inspector names the configuration the project marks for runs;
         // the page says which one runs only where that is not it, or where
         // it cannot run.
@@ -196,8 +205,7 @@ impl OverviewSnapshot {
             facts.push(SummaryFact::new("Devices", census.devices_text()));
         }
         if netlist_first || !model.workspace.content.decks.is_empty() {
-            let includes =
-                deck_includes(ctx, model, cx.peers.code()).map(|includes| includes.len());
+            let includes = deck.as_ref().map(|deck| deck.includes.len());
             let deck = command_gate(cx, ids::open_workspace(Workspace::Netlist));
             facts.push(
                 SummaryFact::of("Source deck", health::source_deck(model, includes)).linked(Some(
@@ -210,7 +218,7 @@ impl OverviewSnapshot {
             facts.push(checks(cx));
         }
         facts.extend(latest_run(cx));
-        let (note, outputs) = outputs(cx);
+        let (note, outputs) = outputs(cx, netlist_first.then_some(deck.as_deref()));
         Self {
             netlist_first,
             facts,
@@ -237,6 +245,18 @@ fn open_gate(cx: &Cx<'_, ProjectFeature>) -> (bool, Option<&'static str>) {
 fn dependencies(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> SummaryFact {
     let model = &*cx.model;
     let rows = dependency_rows(ctx, model);
+    // A deck-driven project's own library holds only the empty top cell a
+    // drawing would start from: it is not something the project reads.
+    let placeholder = model
+        .is_netlist_first_without_schematic()
+        .then_some(model.workspace.content.project.root_library.as_str());
+    let rows = rows
+        .iter()
+        .filter(|row| {
+            row.library.kind != DependencyKind::Design
+                || Some(row.library.name.as_str()) != placeholder
+        })
+        .collect::<Vec<_>>();
     let of_kind = |kind| rows.iter().filter(|row| row.library.kind == kind).count();
     // What the project reads, each kind it reads counted.
     let mut said = [
@@ -259,6 +279,7 @@ fn dependencies(ctx: &egui::Context, cx: &Cx<'_, ProjectFeature>) -> SummaryFact
     let wrong = rows
         .iter()
         .filter(|row| row.status.mark != Tone::Neutral)
+        .copied()
         .collect::<Vec<_>>();
     let scan_errors = model.pdk_config.scan_errors.len();
     let mut tone = wrong
@@ -493,7 +514,11 @@ fn worst_head(run: Option<&SimulationRun>) -> &'static str {
 
 /// The latest run's outputs: Verify's verdicts where the plan sets limits,
 /// else what the run measured; and what the reader has to know first.
-fn outputs(cx: &Cx<'_, ProjectFeature>) -> (Option<String>, Outputs) {
+/// `deck` is the deck a deck-driven project runs, where its text is at hand.
+fn outputs(
+    cx: &Cx<'_, ProjectFeature>,
+    deck: Option<Option<&DeckSummary>>,
+) -> (Option<String>, Outputs) {
     let model = &*cx.model;
     let verify = command_gate(cx, ids::open_workspace(Workspace::Verify));
     let sheet = model
@@ -555,7 +580,22 @@ fn outputs(cx: &Cx<'_, ProjectFeature>) -> (Option<String>, Outputs) {
             OverviewIntent::Command(ids::RUN_SIMULATION),
             command_gate(cx, ids::RUN_SIMULATION),
         );
-        return (None, Outputs::NoRun(run));
+        let does = match deck {
+            None => {
+                "Run the plan to read its outputs against their specifications here.".to_owned()
+            }
+            Some(deck) => {
+                let name = health::deck_name(model).unwrap_or_else(|| "the deck".to_owned());
+                match deck {
+                    Some(deck) if !deck.analyses.is_empty() => format!(
+                        "Run simulates {name} as written ({}); what it measures is read here.",
+                        deck.runs()
+                    ),
+                    _ => format!("Run simulates {name} as written; what it measures is read here."),
+                }
+            }
+        };
+        return (None, Outputs::NoRun(does, run));
     };
     // A plan that sets no limit: the run's measurements, as the console
     // spells them, each opening Verify, where a limit is added.
@@ -582,15 +622,40 @@ fn outputs(cx: &Cx<'_, ProjectFeature>) -> (Option<String>, Outputs) {
     (None, outputs)
 }
 
-/// What the project's deck's include lines name, in the order it names
-/// them, where its text is at hand: a deck the project keeps as text, or a
-/// deck file the Netlist workspace has open. `None` where the text is not
-/// at hand. Read again only when the text changes.
-pub fn deck_includes(
+/// What the project's deck says of itself: the files its include lines name,
+/// in the order it names them, the analyses a run of it runs, and how many
+/// measurements it makes.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DeckSummary {
+    pub includes: Vec<String>,
+    pub analyses: Vec<String>,
+    pub measurements: usize,
+}
+
+impl DeckSummary {
+    /// What a run of the deck runs, as one line: its analysis cards as
+    /// written, then its measurements, counted.
+    pub fn runs(&self) -> String {
+        let mut said = self.analyses.clone();
+        if said.is_empty() {
+            said.push("No analysis card".to_owned());
+        }
+        if self.measurements > 0 {
+            said.push(counted(self.measurements, "measurement", "measurements"));
+        }
+        said.join(" \u{b7} ")
+    }
+}
+
+/// [`DeckSummary`] of the project's deck, where its text is at hand: a deck
+/// the project keeps as text, or a deck file the Netlist workspace has
+/// open. `None` where the text is not at hand. Read again only when the
+/// text changes.
+pub fn deck_summary(
     ctx: &egui::Context,
     model: &Model,
     code: &dyn CodePort,
-) -> Option<Arc<[String]>> {
+) -> Option<Arc<DeckSummary>> {
     let deck = model.workspace.content.decks.first()?;
     let text = match &deck.source {
         crate::state::DeckSource::Stored(stored) => DeckIncludesText::Kept(&stored.text),
@@ -616,18 +681,36 @@ pub fn deck_includes(
     text.identity().hash(&mut identity);
     Some(derived(
         ctx,
-        "overview.deck includes",
+        "overview.deck summary",
         identity.finish(),
         || {
-            rspice_design::netlist_document::parse_include_directives(text.as_str())
-                .into_iter()
-                .map(|include| include.locator().to_owned())
-                .collect::<Arc<[String]>>()
+            let text = text.as_str();
+            let index = rspice_design::netlist_document::NetlistSourceIndex::parse(text);
+            let entries = index.outline().entries();
+            let of = |kind| {
+                entries
+                    .into_iter()
+                    .filter(move |entry| entry.kind() == kind)
+            };
+            Arc::new(DeckSummary {
+                includes: rspice_design::netlist_document::parse_include_directives(text)
+                    .into_iter()
+                    .map(|include| include.locator().to_owned())
+                    .collect(),
+                analyses: of(rspice_design::netlist_document::OutlineEntryKind::Analysis)
+                    .map(|entry| match entry.detail() {
+                        Some(detail) => format!("{} {detail}", entry.name()),
+                        None => entry.name().into_owned(),
+                    })
+                    .collect(),
+                measurements: of(rspice_design::netlist_document::OutlineEntryKind::Measurement)
+                    .count(),
+            })
         },
     ))
 }
 
-/// The text [`deck_includes`] reads: the deck the project keeps, or the
+/// The text [`deck_summary`] reads: the deck the project keeps, or the
 /// deck file open in the Netlist workspace. Each is told apart from the
 /// text before it by its identity, so a frame reads no text unless the
 /// text changed.

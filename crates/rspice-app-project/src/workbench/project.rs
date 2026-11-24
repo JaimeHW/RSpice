@@ -409,6 +409,16 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             facts: cx.runs.slot_facts(cx.peers.design().review_markers()),
             lifecycle: lifecycle_view(model, cx.platform, cx.wb, &cx.peers),
             focus_name,
+            deck: model
+                .is_netlist_first_without_schematic()
+                .then(|| {
+                    crate::workbench::surfaces::project::overview::deck_summary(
+                        ui.ctx(),
+                        model,
+                        cx.peers.code(),
+                    )
+                })
+                .flatten(),
         },
     );
     match action {

@@ -6,7 +6,9 @@
 //! step of Undo; which configuration runs use is set as the Configuration
 //! page sets it. Where the project file is, its revision and when it was
 //! saved are facts. A project open read-only shows every field as a fact,
-//! its refusal on hover.
+//! its refusal on hover. A project that runs a deck and draws nothing yet
+//! describes its deck in place of a top cell and a configuration, which it
+//! does not run.
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +16,7 @@ use egui::{Key, Ui};
 use rspice_ui_kit::panels::section_header;
 
 use crate::workbench::design_system::{
-    property_row, property_row_choice, property_row_input, property_row_path,
+    property_row, property_row_choice, property_row_input, property_row_path, property_row_wrapped,
 };
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::health;
@@ -80,6 +82,12 @@ pub(super) fn project_properties(
         row.on_hover_text(unsaved.join("\n"));
     }
 
+    if model.is_netlist_first_without_schematic() {
+        deck(ui, inspector);
+        technology(ui, inspector);
+        return (!edit.is_empty()).then_some(ProjectInspectorAction::Properties(edit));
+    }
+
     section_header(ui, "Setup", None);
     let top = format!("{}/{}", properties.root_library, properties.top_cell);
     match refusal {
@@ -104,13 +112,56 @@ pub(super) fn project_properties(
         }
     }
     let use_for_runs = runs_use(ui, inspector, refusal);
-    let technology = project.technology_binding().map_or_else(
-        || "None".to_owned(),
-        |binding| binding.display_label().to_string(),
-    );
-    property_row(ui, "Technology", &technology);
+    technology(ui, inspector);
 
     use_for_runs.or_else(|| (!edit.is_empty()).then_some(ProjectInspectorAction::Properties(edit)))
+}
+
+fn technology(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
+    let technology = inspector
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        .map_or_else(
+            || "None".to_owned(),
+            |binding| binding.display_label().to_string(),
+        );
+    property_row(ui, "Technology", &technology);
+}
+
+/// The deck a deck-driven project runs: its name, where it is kept, the
+/// files its include lines name and what a run of it runs, as the Overview
+/// reads them.
+fn deck(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
+    section_header(ui, "Deck", None);
+    let Some(deck) = inspector.model.workspace.content.decks.first() else {
+        property_row(ui, "Deck", "None");
+        return;
+    };
+    property_row(ui, "Deck", &deck.name());
+    match &deck.source {
+        crate::state::DeckSource::File { path } => {
+            property_row_path(ui, "File", &path.display().to_string());
+        }
+        crate::state::DeckSource::Stored(_) => {
+            property_row(ui, "File", "Kept in the project");
+        }
+    }
+    let Some(summary) = inspector.deck.as_deref() else {
+        property_row(ui, "Runs", "The deck as written");
+        return;
+    };
+    let includes = match summary.includes.len() {
+        0 => "None".to_owned(),
+        count => crate::ui::accessibility::counted(count, "file", "files"),
+    };
+    let row = property_row(ui, "Includes", &includes);
+    if !summary.includes.is_empty() {
+        row.on_hover_text(summary.includes.join("\n"));
+    }
+    property_row_wrapped(ui, "Runs", &summary.runs());
 }
 
 /// Which configuration runs use, chosen as the Configuration page chooses it.

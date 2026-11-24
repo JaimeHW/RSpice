@@ -34,8 +34,8 @@ use crate::workbench::state::Workspace;
 
 pub use census::DesignCensus;
 pub use snapshot::{
-    Action, MeasurementLine, Outputs, OverviewSnapshot, SpecificationLine, SummaryFact,
-    deck_includes,
+    Action, DeckSummary, MeasurementLine, Outputs, OverviewSnapshot, SpecificationLine,
+    SummaryFact, deck_summary,
 };
 
 /// How a fact on this page stands.

@@ -53,6 +53,7 @@ fn announced(
                     presentation: &*state.results.results,
                 },
                 focus_name: false,
+                deck: None,
             };
             let _ = project_library(ui, &inspector);
         });

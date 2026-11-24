@@ -58,6 +58,9 @@ pub struct ProjectInspector<'a> {
     /// Whether the project's Name takes the keys as the inspector draws:
     /// File > Project properties… asked for it.
     pub focus_name: bool,
+    /// What the deck a deck-driven project runs says of itself, where its
+    /// text is at hand.
+    pub deck: Option<std::sync::Arc<crate::workbench::surfaces::project::overview::DeckSummary>>,
 }
 
 /// Which of the Library page's selected cell and view its find lists. A

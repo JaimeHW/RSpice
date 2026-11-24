@@ -77,10 +77,10 @@ pub(super) fn page(
                 rows.get(row).map(|line| line.action.clone())
             });
         }
-        Outputs::NoRun(run) => empty(
+        Outputs::NoRun(does, run) => empty(
             &mut child,
             (WorkbenchIcon::Run, "No runs yet"),
-            "Run the plan to read its outputs against their specifications here.",
+            does,
             run,
             &mut asked,
         ),

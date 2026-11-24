@@ -154,7 +154,7 @@ fn the_band_states_the_analyses_the_newest_run_ran() {
 #[test]
 fn the_run_offered_before_any_run_is_the_plans_run() {
     let mut app = schematic_project();
-    let Outputs::NoRun(run) = snapshot_of(&mut app).outputs else {
+    let Outputs::NoRun(_, run) = snapshot_of(&mut app).outputs else {
         panic!("no run yet: the table offers one");
     };
     assert_eq!(run.intent, OverviewIntent::Command(ids::RUN_SIMULATION));

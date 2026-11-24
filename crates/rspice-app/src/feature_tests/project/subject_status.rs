@@ -11,7 +11,7 @@ use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::DependencyLibrary;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::overview::{
-    OverviewIntent, OverviewSnapshot, SummaryFact, Tone,
+    Outputs, OverviewIntent, OverviewSnapshot, SummaryFact, Tone,
 };
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::CellViewRef;
@@ -186,13 +186,12 @@ fn the_overview_names_a_configuration_only_where_the_inspector_does_not() {
 /// offers the plan's Run.
 #[test]
 fn the_latest_run_reads_its_outcome() {
-    use rspice_app_project::workbench::surfaces::project::overview::Outputs;
     use rspice_app_state::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
     let mut app = schematic_project();
     let before = snapshot(&mut app);
     assert_eq!(before.fact("Latest run"), None);
-    let Outputs::NoRun(run) = before.outputs else {
+    let Outputs::NoRun(_, run) = before.outputs else {
         panic!("no run yet: {:?}", before.outputs);
     };
     assert_eq!(run.label, "Run");
@@ -268,19 +267,37 @@ fn a_project_never_saved_says_so_in_the_inspector() {
 }
 
 /// A netlist-first project's Overview states its deck, which its value
-/// opens, never the pristine bootstrap schematic or its checks.
+/// opens, and what a run of it runs, never the pristine bootstrap schematic,
+/// its library or its checks; the inspector beside it describes the deck,
+/// with no top cell to pick and no configuration a run does not use.
 #[test]
 fn a_netlist_first_overview_states_the_deck_and_no_drawing() {
     let mut app = RSpiceApp::test_instance();
-    assert!(
-        app.state
-            .open_test_deck("V1 out 0 1\n.op\n.end\n".to_owned(), None, "front_end.sp")
-    );
+    assert!(app.state.open_test_deck(
+        "V1 out 0 1\n.op\n.meas op vout find v(out)\n.end\n".to_owned(),
+        None,
+        "front_end.sp"
+    ));
     let snapshot = snapshot(&mut app);
     assert!(snapshot.netlist_first);
     let deck = snapshot.fact("Source deck").expect("the deck is a fact");
     assert_eq!(deck.value, "front_end.sp \u{b7} no includes");
-    for label in ["Hierarchy", "Devices", "Checks", "Configuration"] {
+    let runs = snapshot.fact("Runs").expect("what a run runs is a fact");
+    assert_eq!(runs.value, ".op \u{b7} 1 measurement");
+    let dependencies = snapshot.fact("Dependencies").expect("dependencies");
+    assert!(
+        !dependencies.value.contains("librar"),
+        "the bootstrap library is not counted: {}",
+        dependencies.value
+    );
+    let Outputs::NoRun(does, _) = &snapshot.outputs else {
+        panic!("no run yet");
+    };
+    assert!(
+        does.contains("front_end.sp") && does.contains(".op") && !does.contains("plan"),
+        "{does}"
+    );
+    for label in ["Plan", "Hierarchy", "Devices", "Checks", "Configuration"] {
         assert_eq!(
             snapshot.fact(label),
             None,
@@ -294,9 +311,22 @@ fn a_netlist_first_overview_states_the_deck_and_no_drawing() {
         rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     )
     .display_path();
+    let top = format!(
+        "{}/{}",
+        app.state.model.workspace.content.project.root_library,
+        app.state.model.workspace.content.project.top_cell
+    );
     let overview = painted_on(&mut app, ProjectPage::Overview);
     assert!(has_line(&overview, &deck.value), "{overview}");
-    assert!(!overview.contains(&bootstrap), "{overview}");
+    for placeholder in [bootstrap.as_str(), top.as_str()] {
+        assert!(!overview.contains(placeholder), "{placeholder}: {overview}");
+    }
+    for line in ["Top cell", "Configuration for runs", "Run the plan"] {
+        assert!(!overview.contains(line), "{line}: {overview}");
+    }
+    for line in ["Deck", "File", "Includes"] {
+        assert!(has_line(&overview, line), "{line}: {overview}");
+    }
 
     let deck = deck.clone();
     follow(&mut app, &deck);
