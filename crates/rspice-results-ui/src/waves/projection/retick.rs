@@ -43,8 +43,9 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
     with: &Retick<'_, A>,
 ) -> Option<Vec<usize>> {
     let lookup = with.options.signals?;
-    let mut names: HashMap<usize, HashSet<&str>> = HashMap::new();
-    for key in edited {
+    // The edited signals of each strip's analysis, by the strip's place.
+    let mut edits: HashMap<usize, Vec<&SourceWaveformPresentationKey>> = HashMap::new();
+    for &key in edited {
         if key.analysis().dataset_id() != with.run.dataset_id {
             // Another run's ticks: the strips draw this run's.
             continue;
@@ -55,12 +56,12 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
         if !models[place].retickable {
             return None;
         }
-        names.entry(place).or_default().insert(key.source_name());
+        edits.entry(place).or_default().push(key);
     }
     // What each edit adds and takes away, worked out before any strip is
     // changed, so a refusal leaves every strip as it was.
     let mut changes = Vec::new();
-    for (place, names) in names {
+    for (place, keys) in edits {
         let model = &models[place];
         let analysis = with.run.analyses.get(model.analysis_index)?.as_ref();
         let index = lookup
@@ -68,14 +69,17 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
             .index(lookup.revision, model.analysis_key, analysis)?;
         let mut added = Vec::new();
         let mut taken = HashSet::new();
-        for name in names {
-            let key = SourceWaveformPresentationKey::new(model.analysis_key, name);
-            for column in index.columns_named(analysis, name) {
+        // The signals' columns found together; a name no column or more
+        // than one has is looked for column by column.
+        let names: Vec<&str> = keys.iter().map(|key| key.source_name()).collect();
+        let found = index.columns(analysis, &names);
+        for (key, found) in keys.into_iter().zip(found) {
+            let mut follow = |column: usize| {
                 let waveform = &analysis.waveforms[column];
                 let shown = with
                     .options
                     .waveform_visibility
-                    .get(&key)
+                    .get(key)
                     .copied()
                     .unwrap_or(waveform.visible);
                 let held = model
@@ -87,6 +91,12 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 } else if !shown && held {
                     taken.insert(column);
                 }
+            };
+            match found {
+                Some(column) => follow(column),
+                None => index
+                    .columns_named(analysis, key.source_name())
+                    .for_each(follow),
             }
         }
         if added.is_empty() && taken.is_empty() {

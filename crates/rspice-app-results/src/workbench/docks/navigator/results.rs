@@ -1018,7 +1018,7 @@ pub(super) fn follow_ticks(
     visibility: rspice_vocabulary::source_revision::SourceRevision,
 ) -> Option<TickedQuantities> {
     use std::collections::HashSet;
-    let edited: HashSet<&SourceWaveformPresentationKey> = state
+    let edited: Vec<&SourceWaveformPresentationKey> = state
         .results
         .session
         .waveform_visibility
@@ -1062,79 +1062,117 @@ pub(super) fn follow_ticks(
             })
             .collect::<Vec<_>>();
         // Whether a whole read ticks `signal` of the active run's analysis
+        // `at` by its column `column`: that column is on the plot.
+        let column_plotted =
+            |at: usize, signal: &SourceWaveformPresentationKey, column: usize| -> bool {
+                let waveform = &analyses[at].1.waveforms[column];
+                crate::workbench::documents::result_document::waveform_plotted(
+                    state.model,
+                    state.results,
+                    signal,
+                    &waveform.name,
+                    waveform.visible,
+                )
+            };
+        // Whether a whole read ticks `signal` of the active run's analysis
         // `at`: one of its columns of that name is on the plot.
         let plotted = |at: usize, signal: &SourceWaveformPresentationKey| -> Option<bool> {
             let (_, analysis, index, _) = &analyses[at];
-            let name = signal.source_name();
             Some(
                 index
                     .as_ref()?
-                    .columns_named(&analysis.data, name)
-                    .any(|column| {
-                        let waveform = &analysis.waveforms[column];
-                        crate::workbench::documents::result_document::waveform_plotted(
-                            state.model,
-                            state.results,
-                            signal,
-                            &waveform.name,
-                            waveform.visible,
-                        )
-                    }),
+                    .columns_named(&analysis.data, signal.source_name())
+                    .any(|column| column_plotted(at, signal, column)),
             )
         };
-        let ticked = std::sync::Arc::make_mut(&mut kept.ticked);
-        let mut events = HashSet::new();
+        // The edited signals of each analysis of the active run, by its place.
+        let mut edits = vec![Vec::new(); analyses.len()];
         for signal in edited {
-            let Some(at) = analyses
+            // Another run's ticks are not followed: a whole read reads the
+            // active run's.
+            if let Some(at) = analyses
                 .iter()
                 .position(|(key, ..)| *key == signal.analysis())
-            else {
-                // Another run's ticks: a whole read reads the active run's.
+            {
+                edits[at].push(signal);
+            }
+        }
+        let ticked = std::sync::Arc::make_mut(&mut kept.ticked);
+        let mut events = HashSet::new();
+        for (at, signals) in edits.into_iter().enumerate() {
+            if signals.is_empty() {
                 continue;
-            };
-            let (_, analysis, _, overlays) = &analyses[at];
+            }
+            let (_, analysis, index, overlays) = &analyses[at];
+            let index = index.as_ref()?;
             if matches!(
                 analysis.result_payload,
                 Some(crate::state::AnalysisResultPayload::TransientEvents { .. })
             ) {
                 events.insert(at);
             }
-            let name = signal.source_name();
-            let on = plotted(at, signal)?;
-            let own = ResultBrowserSelectionKey::Waveform(signal.clone());
-            if on {
-                ticked.insert(own);
-            } else if !checked.contains(&own) {
-                ticked.remove(&own);
-            }
-            for (other_key, other, other_index) in overlays {
-                let overlays = match other_index {
-                    Some(index) => index.columns_named(other, name).next().is_some(),
-                    None => other.waveforms.iter().any(|waveform| waveform.name == name),
-                };
-                if !overlays {
-                    continue;
-                }
-                let overlay = ResultBrowserSelectionKey::Waveform(
-                    SourceWaveformPresentationKey::new(*other_key, name),
-                );
-                // Another analysis of the active run on the same overlaid
-                // one may still plot the signal there.
-                let still = on
-                    || checked.contains(&overlay)
-                    || analyses
+            // Each signal's column, and whether each overlaid analysis has a
+            // signal of its name, found together; a name no column or more
+            // than one has is looked for column by column.
+            let names: Vec<&str> = signals.iter().map(|signal| signal.source_name()).collect();
+            let found = index.columns(&analysis.data, &names);
+            let overlaid = overlays
+                .iter()
+                .map(|(_, other, other_index)| match other_index {
+                    Some(index) => index
+                        .first_columns(other, &names)
+                        .into_iter()
+                        .map(|column| column.is_some())
+                        .collect(),
+                    None => names
                         .iter()
-                        .enumerate()
-                        .any(|(place, (key, _, _, others))| {
-                            place != at
-                                && others.iter().any(|(other, ..)| other == other_key)
-                                && plotted(place, &SourceWaveformPresentationKey::new(*key, name))
-                                    == Some(true)
-                        });
-                if still {
-                    ticked.insert(overlay);
-                } else {
-                    ticked.remove(&overlay);
+                        .map(|name| {
+                            other
+                                .waveforms
+                                .iter()
+                                .any(|waveform| waveform.name == *name)
+                        })
+                        .collect::<Vec<_>>(),
+                })
+                .collect::<Vec<_>>();
+            for (place, (signal, found)) in signals.into_iter().zip(found).enumerate() {
+                let name = signal.source_name();
+                let on = match found {
+                    Some(column) => column_plotted(at, signal, column),
+                    None => plotted(at, signal)?,
+                };
+                let own = ResultBrowserSelectionKey::Waveform(signal.clone());
+                if on {
+                    ticked.insert(own);
+                } else if !checked.contains(&own) {
+                    ticked.remove(&own);
+                }
+                for ((other_key, ..), present) in overlays.iter().zip(&overlaid) {
+                    if !present[place] {
+                        continue;
+                    }
+                    let overlay = ResultBrowserSelectionKey::Waveform(
+                        SourceWaveformPresentationKey::new(*other_key, name),
+                    );
+                    // Another analysis of the active run on the same overlaid
+                    // one may still plot the signal there.
+                    let still =
+                        on || checked.contains(&overlay)
+                            || analyses.iter().enumerate().any(
+                                |(other_place, (key, _, _, others))| {
+                                    other_place != at
+                                        && others.iter().any(|(other, ..)| other == other_key)
+                                        && plotted(
+                                            other_place,
+                                            &SourceWaveformPresentationKey::new(*key, name),
+                                        ) == Some(true)
+                                },
+                            );
+                    if still {
+                        ticked.insert(overlay);
+                    } else {
+                        ticked.remove(&overlay);
+                    }
                 }
             }
         }
