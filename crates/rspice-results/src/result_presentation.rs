@@ -475,14 +475,16 @@ pub struct WaveformPresentationKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceWaveformPresentationKey {
     analysis: AnalysisPresentationKey,
-    source_name: String,
+    /// Shared by the key's copies: the reader's ticks, the signals they
+    /// set and the edits they record each hold one, and copy no name.
+    source_name: std::sync::Arc<str>,
 }
 
 impl SourceWaveformPresentationKey {
-    pub fn new(analysis: AnalysisPresentationKey, source_name: impl Into<String>) -> Self {
+    pub fn new(analysis: AnalysisPresentationKey, source_name: impl AsRef<str>) -> Self {
         Self {
             analysis,
-            source_name: source_name.into(),
+            source_name: source_name.as_ref().into(),
         }
     }
 
@@ -503,7 +505,7 @@ impl SourceWaveformPresentationKey {
             .waveforms
             .iter()
             .enumerate()
-            .filter(|(_, waveform)| waveform.as_ref().name == self.source_name);
+            .filter(|(_, waveform)| *waveform.as_ref().name == *self.source_name);
         let (waveform_index, waveform) = matches.next()?;
         matches
             .next()

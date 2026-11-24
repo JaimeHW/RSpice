@@ -1842,10 +1842,9 @@ fn project_traces(
         for name in names.history_only() {
             let plotted = listed.as_ref().map_or_else(
                 || {
-                    results.session.waveform_visibility(
-                        &SourceWaveformPresentationKey::new(key, name.clone()),
-                        false,
-                    )
+                    results
+                        .session
+                        .waveform_visibility(&SourceWaveformPresentationKey::new(key, &name), false)
                 },
                 |listed| listed.contains(name),
             );
@@ -1957,7 +1956,7 @@ fn project_history_nets(
     };
     for name in names.history_only() {
         results.project_waveform_visible(
-            &SourceWaveformPresentationKey::new(key, name.clone()),
+            &SourceWaveformPresentationKey::new(key, &name),
             listed.contains(name).then_some(true),
         );
     }
@@ -2214,7 +2213,7 @@ fn capture_edits(
                 }
                 for (column, waveform) in analysis.waveforms.iter().enumerate() {
                     let wanted = session.waveform_visibility(
-                        &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
+                        &SourceWaveformPresentationKey::new(key, &waveform.name),
                         waveform.visible,
                     );
                     let drawn = drawn.get(waveform.name.as_str()).copied();

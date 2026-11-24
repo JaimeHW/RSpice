@@ -73,7 +73,7 @@ pub(crate) fn ticked_result_quantities(
             };
         for column in columns {
             let waveform = &analysis.waveforms[column];
-            let key = SourceWaveformPresentationKey::new(analysis_key, waveform.name.clone());
+            let key = SourceWaveformPresentationKey::new(analysis_key, &waveform.name);
             if !waveform_plotted(model, results, &key, &waveform.name, waveform.visible) {
                 continue;
             }
@@ -85,7 +85,7 @@ pub(crate) fn ticked_result_quantities(
                 };
                 if overlays {
                     ticked.insert(ResultBrowserSelectionKey::Waveform(
-                        SourceWaveformPresentationKey::new(*other_key, waveform.name.clone()),
+                        SourceWaveformPresentationKey::new(*other_key, &waveform.name),
                     ));
                 }
             }

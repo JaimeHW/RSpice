@@ -72,7 +72,7 @@ impl ResultsReads<'_> {
             .find(|waveform| {
                 is_voltage(&waveform.name)
                     && self.results.session.waveform_visibility(
-                        &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
+                        &SourceWaveformPresentationKey::new(key, &waveform.name),
                         waveform.visible,
                     )
             })

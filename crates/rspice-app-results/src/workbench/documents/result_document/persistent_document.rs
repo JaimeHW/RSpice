@@ -943,7 +943,7 @@ pub fn project_pane_presentation(
             let visible = listed.as_ref().map_or_else(
                 || {
                     state.results.session.waveform_visibility(
-                        &super::SourceWaveformPresentationKey::new(analysis_key, name.clone()),
+                        &super::SourceWaveformPresentationKey::new(analysis_key, &name),
                         false,
                     )
                 },

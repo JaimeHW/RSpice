@@ -1276,7 +1276,7 @@ pub fn open_materialized_traces(
         .map(|index| {
             analysis.waveforms.get(*index).map(|waveform| {
                 (
-                    SourceWaveformPresentationKey::new(key, waveform.name.clone()),
+                    SourceWaveformPresentationKey::new(key, &waveform.name),
                     waveform.visible,
                 )
             })

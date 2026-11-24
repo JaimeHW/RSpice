@@ -166,7 +166,7 @@ pub fn event_net_plotted(
     let Some(default) = event_net_default(state, analysis, name) else {
         return false;
     };
-    let key = SourceWaveformPresentationKey::new(analysis, name.to_owned());
+    let key = SourceWaveformPresentationKey::new(analysis, name);
     waveform_plotted(state.model, state.results, &key, name, default)
 }
 
@@ -183,7 +183,7 @@ pub fn set_event_net_plotted(
         return;
     };
     if event_net_plotted(state, analysis, name) != plotted {
-        let key = SourceWaveformPresentationKey::new(analysis, name.to_owned());
+        let key = SourceWaveformPresentationKey::new(analysis, name);
         toggle_source_visibility(state, key, name.to_owned(), default);
     }
 }
