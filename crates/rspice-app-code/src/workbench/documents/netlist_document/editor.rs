@@ -795,12 +795,20 @@ fn publish_check(netlist: &mut super::NetlistDocumentState, checked: CheckedSour
 
 /// The live check of the shown source, run away from the editor's thread.
 /// One runs at a time: the check of a newer text stops the one before, and
-/// what a stopped check found is never received. The browser build has no
-/// threads and checks in place.
+/// waits for it to give up its turn; a check stopped before its turn came
+/// gives it up unread, so however fast the text changes, one check reads it
+/// and the latest wins. What a stopped check found is never received. The
+/// browser build has no threads and checks in place.
 #[derive(Clone, Default)]
 pub(super) struct LiveCheck {
     #[cfg(not(target_arch = "wasm32"))]
     running: Option<RunningCheck>,
+    /// The turn the one check that reads the text holds while it reads.
+    #[cfg(not(target_arch = "wasm32"))]
+    turn: Arc<std::sync::Mutex<()>>,
+    /// The checks that took their turn, and the most that read at once.
+    #[cfg(test)]
+    turns: Arc<CheckTurns>,
     /// A check that finished before a frame took it.
     finished: Option<CheckedSource>,
     /// Whether a frame leaves the check it starts running, as the
@@ -817,6 +825,31 @@ struct RunningCheck {
     library_folders: Vec<PathBuf>,
     stop: Arc<rspice_core::abort_signal::AtomicAbort>,
     receiver: Arc<std::sync::Mutex<std::sync::mpsc::Receiver<CheckedSource>>>,
+}
+
+/// How many checks took their turn to read the text, and the most that
+/// read it at once.
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct CheckTurns {
+    taken: std::sync::atomic::AtomicUsize,
+    reading: std::sync::atomic::AtomicUsize,
+    most: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl CheckTurns {
+    fn enter(&self) {
+        use std::sync::atomic::Ordering;
+        self.taken.fetch_add(1, Ordering::SeqCst);
+        let reading = self.reading.fetch_add(1, Ordering::SeqCst) + 1;
+        self.most.fetch_max(reading, Ordering::SeqCst);
+    }
+
+    fn leave(&self) {
+        self.reading
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl std::fmt::Debug for LiveCheck {
@@ -879,10 +912,26 @@ impl LiveCheck {
             let (sender, receiver) = mpsc::channel();
             let (revision, library_folders) = (check.revision, check.library_folders.clone());
             let stopped = Arc::clone(&stop);
+            let turn = Arc::clone(&self.turn);
+            #[cfg(test)]
+            let turns = Arc::clone(&self.turns);
             let spawned = std::thread::Builder::new()
                 .name("netlist-check".to_owned())
                 .spawn(move || {
-                    if sender.send(check.run(&stopped)).is_ok() {
+                    // The check before, stopped, reads on until it sees so;
+                    // this one reads once it has, unless it was stopped too.
+                    let _turn = turn
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if stopped.is_aborted() {
+                        return;
+                    }
+                    #[cfg(test)]
+                    turns.enter();
+                    let checked = check.run(&stopped);
+                    #[cfg(test)]
+                    turns.leave();
+                    if sender.send(checked).is_ok() {
                         wake();
                     }
                 });
@@ -966,6 +1015,25 @@ struct CheckedSource {
     /// The lines the findings of files the check could not read point at,
     /// by their zero-based line, as it read them.
     missing_file_lines: Arc<[(usize, String)]>,
+}
+
+impl CheckedSource {
+    /// What a check stopped before it finished leaves: nothing, as what a
+    /// stopped check found is never received.
+    fn stopped(revision: u64, library_folders: Vec<PathBuf>) -> Self {
+        Self {
+            revision,
+            library_folders,
+            diagnostics: NetlistDiagnosticCollection::default(),
+            symbols: None,
+            unread: None,
+            reading: None,
+            includes: None,
+            dialect_hint: None,
+            marks: Arc::from([]),
+            missing_file_lines: Arc::from([]),
+        }
+    }
 }
 
 /// What a check of the shown source reads, taken from the model at one
@@ -1145,6 +1213,9 @@ impl SourceCheck {
     fn run(self, stop: &dyn AbortSignal) -> CheckedSource {
         let buffer = self.buffer.clone();
         let mut checked = self.check(stop);
+        if stop.is_aborted() {
+            return checked;
+        }
         checked.marks =
             super::diagnostics::problem_marks(&checked.diagnostics, &buffer, checked.revision)
                 .into();
@@ -1209,6 +1280,12 @@ impl SourceCheck {
         let dialect_hint = (!is_dependency)
             .then(|| super::dialect::hint(&buffer))
             .flatten();
+        // A check the check of a newer text stopped reads no further: the
+        // parse sees it stopped as it reads, and what is left reads the
+        // whole text again.
+        if stop.is_aborted() {
+            return CheckedSource::stopped(revision, library_folders);
+        }
         // A narrow override is parsed as the deck it executes as: the
         // generated base with the override spliced in. Every position the
         // parse reports is a position in that deck, and has to be carried
@@ -1315,6 +1392,9 @@ impl SourceCheck {
                 Err(error) => (vec![Diagnostic::error(error)], None, None, None, None),
             }
         };
+        if stop.is_aborted() {
+            return CheckedSource::stopped(revision, library_folders);
+        }
         // A shadowed include is reported from what this check walked when it
         // read the deck's includes, else from the last run's walk.
         let walked = includes.as_ref().map(|includes| {

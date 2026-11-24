@@ -1855,6 +1855,70 @@ fn a_check_of_a_text_the_editor_moved_past_is_dropped() {
     );
 }
 
+/// Checks started one after another while a stopped check still reads, as
+/// a slow frame after each key starts them, wait for it rather than read
+/// beside it: each stops the one before, a check stopped before its turn
+/// came never reads the text, and the check of the latest text is the one
+/// that reads it and is received.
+#[test]
+fn checks_started_in_a_row_leave_one_check_reading_and_the_latest_wins() {
+    use std::sync::atomic::Ordering;
+    let mut harness = harness();
+    harness
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .set("amp\nR1 a\n.op\n.end\n".to_owned());
+    let messages =
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
+    let resolutions = BTreeMap::new();
+    let mut live = LiveCheck::default();
+    // The turn a stopped check still reading holds.
+    let turn = Arc::clone(&live.turn);
+    let reading = turn.lock().expect("the turn is free");
+    for revision in 1..=6 {
+        harness.state.netlist.revision = revision;
+        let check = SourceCheck::of(
+            &harness.model,
+            &harness.state.netlist,
+            &resolutions,
+            revision,
+            messages,
+        );
+        live.start(check, || {});
+    }
+    assert_eq!(
+        live.turns.taken.load(Ordering::SeqCst),
+        0,
+        "none reads beside it"
+    );
+    drop(reading);
+    live.wait();
+    let received = live.take_finished().expect("the latest check reports");
+    assert_eq!(
+        received.revision, 6,
+        "the check of the latest text is received"
+    );
+    assert!(
+        received
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error),
+        "it read the text: the resistor that names one node is found"
+    );
+    assert_eq!(
+        live.turns.taken.load(Ordering::SeqCst),
+        1,
+        "only the latest read"
+    );
+    assert_eq!(
+        live.turns.most.load(Ordering::SeqCst),
+        1,
+        "one check read at a time"
+    );
+}
+
 /// In the application the check runs while the frame goes on: the deck is
 /// shown in the frame that opens it, and what the check found is shown in
 /// the first frame after it reports.
