@@ -194,6 +194,63 @@ pub struct AnalysisResult<W = RetainedWaveform> {
 }
 
 impl<W> AnalysisResult<W> {
+    /// A copy of all but the waveforms, holding none, of any kind: what a
+    /// copy made a share of the waveforms at a time starts from. Every field
+    /// is named, so one added is copied here too.
+    #[must_use]
+    pub fn without_waveforms<V>(&self) -> AnalysisResult<V> {
+        let Self {
+            id,
+            analysis_type,
+            label,
+            timestamp,
+            waveforms: _,
+            dc_op,
+            device_op,
+            noise_summary,
+            family_metadata,
+            result_payload,
+            native_scalar_units,
+            monte_carlo_checkpoint,
+            transient_checkpoint,
+            measurements,
+            checks,
+            saved_output_receipts,
+            success,
+            error_message,
+            failure_attribution,
+            failure_capability,
+            convergence,
+            provenance,
+            import_source,
+        } = self;
+        AnalysisResult {
+            id: *id,
+            analysis_type: *analysis_type,
+            label: label.clone(),
+            timestamp: *timestamp,
+            waveforms: Vec::new(),
+            dc_op: dc_op.clone(),
+            device_op: device_op.clone(),
+            noise_summary: noise_summary.clone(),
+            family_metadata: family_metadata.clone(),
+            result_payload: result_payload.clone(),
+            native_scalar_units: native_scalar_units.clone(),
+            monte_carlo_checkpoint: monte_carlo_checkpoint.clone(),
+            transient_checkpoint: transient_checkpoint.clone(),
+            measurements: measurements.clone(),
+            checks: checks.clone(),
+            saved_output_receipts: saved_output_receipts.clone(),
+            success: *success,
+            error_message: error_message.clone(),
+            failure_attribution: failure_attribution.clone(),
+            failure_capability: failure_capability.clone(),
+            convergence: convergence.clone(),
+            provenance: provenance.clone(),
+            import_source: import_source.clone(),
+        }
+    }
+
     pub fn imported_coordinate(&self) -> Option<&crate::result_import::ResultImportCoordinate> {
         self.import_source.as_ref()?.coordinate.as_ref()
     }

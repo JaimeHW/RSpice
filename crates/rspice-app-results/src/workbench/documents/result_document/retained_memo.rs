@@ -83,6 +83,44 @@ impl<K: Eq + Hash, V: Clone> RetainedMemo<K, V> {
         value
     }
 
+    /// The answer held for `key`, while the retained data it was computed
+    /// from stands; nothing is computed.
+    pub(super) fn get(&self, simulation: &SimulationState, key: &K) -> Option<V> {
+        let source = (
+            simulation.retained.runs.revision(),
+            simulation.view.data_version,
+        );
+        let entries = self.inner.borrow();
+        if entries.source.as_ref() != Some(&source) {
+            return None;
+        }
+        entries.values.get(key).cloned()
+    }
+
+    /// Keep `value` for `key`, computed elsewhere from the retained data
+    /// `source` names: kept only while the retained data stands as it did.
+    pub(super) fn insert(
+        &self,
+        simulation: &SimulationState,
+        source: &(crate::state::RunHistoryRevision, u64),
+        key: K,
+        value: V,
+    ) {
+        let now = (
+            simulation.retained.runs.revision(),
+            simulation.view.data_version,
+        );
+        if *source != now {
+            return;
+        }
+        let mut entries = self.inner.borrow_mut();
+        if entries.source.as_ref() != Some(&now) {
+            entries.source = Some(now);
+            entries.values.clear();
+        }
+        entries.values.insert(key, value);
+    }
+
     /// Release entries whose datasets are no longer retained, even when no
     /// reader asks another question of this memo after the removal.
     pub(super) fn retain(&mut self, keep: impl FnMut(&K, &mut V) -> bool) {

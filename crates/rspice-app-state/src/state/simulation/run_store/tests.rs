@@ -217,3 +217,39 @@ fn a_result_that_does_not_validate_stays_in_memory() {
         assert_eq!(bits(&right.y), bits(&left.y), "{}", right.name);
     }
 }
+
+/// A copy of a run's analyses holding their waveforms alone, without the
+/// colour and tick the run keeps with each, made a share at a time as a
+/// frame makes it, digests as the run does.
+#[test]
+fn analyses_copied_apart_from_their_run_digest_as_the_run_does() {
+    let traced = |analysis: RetainedAnalysisResult<RetainedWaveform>| {
+        let mut traced: RetainedAnalysisResult<rspice_results::waveform::RetainedTrace> =
+            analysis.without_waveforms();
+        traced.waveforms = analysis
+            .waveforms
+            .into_iter()
+            .map(|waveform| rspice_results::waveform::RetainedTrace {
+                data: waveform,
+                color: "#123456".to_owned(),
+                visible: false,
+            })
+            .collect();
+        traced
+    };
+    let mut second = analysis();
+    second.id = 2;
+    let analyses = vec![traced(analysis()), traced(second)];
+    let mut copy: Vec<RetainedAnalysisResult<RetainedWaveform>> = Vec::new();
+    for analysis in &analyses {
+        let mut copied = analysis.without_waveforms();
+        for trace in &analysis.waveforms {
+            copied.waveforms.push(trace.data.clone());
+        }
+        copy.push(copied);
+    }
+    assert_eq!(analyses_digest(&copy), analyses_digest(&analyses));
+    let mut other = copy.clone();
+    other[1].waveforms.pop();
+    assert_ne!(analyses_digest(&other), analyses_digest(&analyses));
+}

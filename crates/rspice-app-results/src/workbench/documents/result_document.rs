@@ -1704,6 +1704,9 @@ pub struct ResultsState {
     /// The traces the working view is being given away from the frame, and
     /// the rest of the reader's change they belong to. Transient.
     pub(crate) working_view_plotting: working_view::PlottingSlot,
+    /// The run the working view waits on to be digested away from the
+    /// frame, while it is. Transient.
+    pub(crate) working_view_digesting: working_view::DigestSlot,
     /// The runs a working view read while they were still running, so each
     /// is read again once it finishes. A run opened finished is read as it
     /// is: its samples may be kept another way after a save, not grown.

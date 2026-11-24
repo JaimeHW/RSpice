@@ -174,13 +174,24 @@ where
     A: AsRef<RetainedAnalysisResult<W>>,
     W: Clone + AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
 {
-    let stored: Vec<_> = run
-        .analyses
+    analyses_digest(&run.analyses)
+}
+
+/// [`dataset_digest`] of a run's analyses, however they are held: a copy of
+/// them made apart from the run, of their waveforms alone, digests as the
+/// run does.
+#[must_use]
+pub fn analyses_digest<A, W>(analyses: &[A]) -> ContentDigest
+where
+    A: AsRef<RetainedAnalysisResult<W>>,
+    W: Clone + AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
+{
+    let stored: Vec<_> = analyses
         .iter()
         .map(|analysis| as_stored(analysis.as_ref()))
         .collect();
     rspice_results::result_digest::dataset_content_digest(
-        run.analyses
+        analyses
             .iter()
             .zip(&stored)
             .map(|(analysis, stored)| stored.as_ref().unwrap_or(analysis.as_ref()))

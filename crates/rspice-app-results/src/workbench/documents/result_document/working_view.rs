@@ -71,6 +71,9 @@ pub(crate) struct QuickViewBinding {
     /// The content of the view, and the run history, it last drew from.
     generation: u64,
     runs: crate::state::RunHistoryRevision,
+    /// What it read of the run besides the view, as [`run_drawn_as`]
+    /// numbers it.
+    signals: Option<u64>,
     /// The drawing state changed in ways the reader's ticks do not name:
     /// it is drawn whole from the view again.
     redraw: bool,
@@ -216,7 +219,9 @@ fn follow_shown(state: &mut ResultsParts<'_>) -> Option<ResultDocumentId> {
         reread_grown(state, view, shown);
         plot_marked_outputs(state, view, shown);
     }
-    let after = followed_at(state.results_reads(), view);
+    // A run still being digested is followed again on a later frame.
+    let after = followed_at(state.results_reads(), view)
+        .filter(|_| state.results.working_view_digesting.pending.is_none());
     state.results.working_view_followed = after.filter(|after| before.as_ref() == Some(after));
     view
 }
@@ -456,9 +461,223 @@ pub(crate) fn wake_on_plotted(state: &mut ResultsParts<'_>, ctx: &egui::Context)
     }
 }
 
-/// Have the view take in the traces being made for it, waiting for them:
-/// before anything else changes the view or draws from it.
+/// A retained run being digested away from the frame, for the working view
+/// to read it by.
+#[derive(Default)]
+pub(crate) struct DigestSlot {
+    pending: Option<Digesting>,
+}
+
+/// The digest of run `dataset` being taken from the retained runs as they
+/// stood at `source`.
+struct Digesting {
+    dataset: DatasetId,
+    source: (crate::state::RunHistoryRevision, u64),
+    stage: Stage,
+}
+
+/// Where a digest taken away from the frame is.
+enum Stage {
+    /// The run's analyses being copied, a share of their signals a frame:
+    /// each copied so far, the last with the signals copied so far.
+    Copying(Vec<CopiedAnalysis>),
+    /// The copy being digested.
+    Taking(std::thread::JoinHandle<crate::product::ContentDigest>),
+}
+
+/// An analysis as its digest reads it: its waveforms without the colour
+/// and tick the run keeps with each.
+type CopiedAnalysis =
+    rspice_results::analysis_result::AnalysisResult<rspice_results::waveform::RetainedWaveform>;
+
+impl DigestSlot {
+    /// The run being digested, while one is.
+    pub(crate) fn dataset(&self) -> Option<DatasetId> {
+        self.pending.as_ref().map(|pending| pending.dataset)
+    }
+}
+
+impl Clone for DigestSlot {
+    /// A copy digests what it needs itself.
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for DigestSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DigestSlot")
+            .field("pending", &self.dataset())
+            .finish()
+    }
+}
+
+/// How large a run a frame digests itself, in signals and in samples. A
+/// run's digest reads every sample of every signal, and hashes each signal
+/// twice, about two microseconds a signal and a millisecond for half a
+/// megabyte of samples, so a run this size is digested in a few tens of
+/// milliseconds. A larger one is digested away from the frame. The page has
+/// one thread, and digests every run itself.
+const FRAME_DIGEST: (usize, usize) = if cfg!(target_arch = "wasm32") {
+    (usize::MAX, usize::MAX)
+} else {
+    (10_000, 2_000_000)
+};
+
+/// How many signals of a run a frame copies for its digest: each is a name,
+/// a unit and two shared sample arrays, a few hundredths of a microsecond,
+/// so this many take a few milliseconds.
+const FRAME_COPY: usize = 50_000;
+
+/// The digest of the retained run `dataset`, which the view reads it by: of
+/// a run a frame digests itself, now; of a larger one, once it is copied a
+/// share a frame and digested away from the frame, `None` until then.
+fn run_digest(
+    state: &mut ResultsParts<'_>,
+    dataset: DatasetId,
+) -> Option<crate::product::ContentDigest> {
+    let simulation = &state.model.simulation;
+    if let Some(digest) = state.results.dataset_digests.get(simulation, &dataset) {
+        return Some(digest);
+    }
+    let run = retained_run(state.model, dataset)?;
+    let source = (
+        simulation.retained.runs.revision(),
+        simulation.view.data_version,
+    );
+    let slot = &mut state.results.working_view_digesting;
+    // A digest of another run, or of this one as it stood before, is let
+    // go.
+    let mut pending = slot
+        .pending
+        .take()
+        .filter(|pending| pending.dataset == dataset && pending.source == source);
+    if pending.is_none() {
+        // A run a frame digests itself is digested here; a larger one is
+        // not walked again while it is copied and digested.
+        let (signals, samples) = run
+            .analyses
+            .iter()
+            .flat_map(|analysis| &analysis.waveforms)
+            .fold((0usize, 0usize), |(signals, samples), waveform| {
+                (signals + 1, samples + waveform.x.len() + waveform.y.len())
+            });
+        if signals <= FRAME_DIGEST.0 && samples <= FRAME_DIGEST.1 {
+            return Some(super::retained_dataset_digest(state.results_reads(), run));
+        }
+        pending = Some(Digesting {
+            dataset,
+            source: source.clone(),
+            stage: Stage::Copying(Vec::new()),
+        });
+    }
+    let mut pending = pending?;
+    match pending.stage {
+        Stage::Copying(mut copy) => {
+            if !copy_share(&mut copy, run, FRAME_COPY) {
+                pending.stage = Stage::Copying(copy);
+                state.results.working_view_digesting.pending = Some(pending);
+                return None;
+            }
+            let waker = state.results.working_view_plotting.waker.clone();
+            let spawned = std::thread::Builder::new()
+                .name("digest run".to_owned())
+                .spawn(move || {
+                    let digest = crate::state::run_store::analyses_digest(&copy);
+                    if let Some(ctx) = waker {
+                        ctx.request_repaint();
+                    }
+                    digest
+                });
+            match spawned {
+                Ok(taking) => {
+                    pending.stage = Stage::Taking(taking);
+                    state.results.working_view_digesting.pending = Some(pending);
+                    None
+                }
+                // A thread that cannot start digests nothing: the frame
+                // does.
+                Err(_) => Some(super::retained_dataset_digest(state.results_reads(), run)),
+            }
+        }
+        Stage::Taking(taking) if !taking.is_finished() => {
+            pending.stage = Stage::Taking(taking);
+            state.results.working_view_digesting.pending = Some(pending);
+            None
+        }
+        Stage::Taking(taking) => {
+            // A digest that could not be taken there is taken here.
+            let digest = taking
+                .join()
+                .unwrap_or_else(|_| super::retained_dataset_digest(state.results_reads(), run));
+            state
+                .results
+                .dataset_digests
+                .insert(simulation, &source, dataset, digest);
+            Some(digest)
+        }
+    }
+}
+
+/// Copy up to `share` more signals of `run`'s analyses into `copy`, in
+/// order: whether every analysis is copied whole.
+fn copy_share(copy: &mut Vec<CopiedAnalysis>, run: &SimulationRun, mut share: usize) -> bool {
+    loop {
+        let index = match copy.last() {
+            Some(last) if last.waveforms.len() < run.analyses[copy.len() - 1].waveforms.len() => {
+                copy.len() - 1
+            }
+            _ if copy.len() == run.analyses.len() => return true,
+            _ => {
+                copy.push(run.analyses[copy.len()].data.without_waveforms());
+                copy.len() - 1
+            }
+        };
+        let from = &run.analyses[index].waveforms;
+        let to = &mut copy[index].waveforms;
+        let start = to.len();
+        let end = from.len().min(start.saturating_add(share));
+        to.extend(from[start..end].iter().map(|trace| trace.data.clone()));
+        share -= end - start;
+        if share == 0 {
+            return end == from.len() && copy.len() == run.analyses.len();
+        }
+    }
+}
+
+/// Wait for the run being digested away from the frame, if one is, and
+/// keep its digest: whether there was one.
+fn wait_for_digest(state: &mut ResultsParts<'_>) -> bool {
+    let Some(pending) = state.results.working_view_digesting.pending.take() else {
+        return false;
+    };
+    let simulation = &state.model.simulation;
+    let Some(run) = retained_run(state.model, pending.dataset) else {
+        return true;
+    };
+    let digest = match pending.stage {
+        Stage::Copying(mut copy) => {
+            copy_share(&mut copy, run, usize::MAX);
+            crate::state::run_store::analyses_digest(&copy)
+        }
+        Stage::Taking(taking) => taking
+            .join()
+            .unwrap_or_else(|_| super::retained_dataset_digest(state.results_reads(), run)),
+    };
+    state
+        .results
+        .dataset_digests
+        .insert(simulation, &pending.source, pending.dataset, digest);
+    true
+}
+
+/// Have the view take in the traces being made for it, waiting for them,
+/// and read the run it waits to be digested, once it is: before anything
+/// else changes the view or draws from it.
 pub fn settle(state: &mut ResultsParts<'_>) {
+    if wait_for_digest(state) {
+        sync(state);
+    }
     if state.results.working_view_plotting.pending.is_none() {
         return;
     }
@@ -635,12 +854,14 @@ fn prune(state: &mut ResultsParts<'_>) {
 /// The working view `run` is drawn through, made the first time a run of
 /// its plan, or the imported run itself, is shown.
 fn ensure(state: &mut ResultsParts<'_>, shown: DatasetId) -> Option<ResultDocumentId> {
-    let run = retained_run(state.model, shown)?;
-    let source = source_of(run);
+    let source = source_of(retained_run(state.model, shown)?);
     if let Some(view) = view_of(state.results_reads(), source) {
         return Some(view);
     }
-    let dataset = run_reference(state.results_reads(), run)?;
+    // A run is drawn from the reader's ticks until it is digested.
+    let digest = run_digest(state, shown)?;
+    let run = retained_run(state.model, shown)?;
+    let dataset = run_reference(run, digest)?;
     let panes: Vec<WorkingPane> = run
         .analyses
         .iter()
@@ -710,16 +931,14 @@ fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, sho
         if !reads_run {
             continue;
         }
-        let drawn: HashSet<&str> = document
-            .traces()
-            .iter()
-            .filter(|trace| trace.pane_id == pane_id)
-            .map(trace_signal)
-            .collect();
+        // The signals the run plots are looked up in the view, not every
+        // signal the view draws gathered.
         let signals: Vec<String> = run.analyses[index]
             .waveforms
             .iter()
-            .filter(|waveform| waveform.visible && !drawn.contains(waveform.name.as_str()))
+            .filter(|waveform| {
+                waveform.visible && document.signal_drawn(pane_id, &waveform.name).is_none()
+            })
             .map(|waveform| waveform.name.clone())
             .collect();
         if !signals.is_empty() {
@@ -736,7 +955,9 @@ fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, sho
     let revision = document.revision();
     let label = run.label.clone();
     if let Err(error) = view_edits::apply_following(state, view, revision, edits) {
-        state.prompt(format!("The view could not plot what {label} plots: {error}"));
+        state.prompt(format!(
+            "The view could not plot what {label} plots: {error}"
+        ));
     }
 }
 
@@ -771,14 +992,17 @@ fn first_plotted(
 
 /// `run` as a view reads it: by identity and digest, and every analysis it
 /// solved. The view lists none of its signals, so a run of any size has one.
-fn run_reference(state: ResultsReads<'_>, run: &SimulationRun) -> Option<SourceDataset> {
+fn run_reference(
+    run: &SimulationRun,
+    digest: crate::product::ContentDigest,
+) -> Option<SourceDataset> {
     let analyses = run
         .analyses
         .iter()
         .map(|analysis| super::create_document::run_source_analysis(run, analysis))
         .collect();
     SourceDataset::run_reference(
-        DatasetBinding::new(run.dataset_id, super::retained_dataset_digest(state, run)),
+        DatasetBinding::new(run.dataset_id, digest),
         super::create_document::reference_run_label(run),
         analyses,
     )
@@ -835,7 +1059,8 @@ fn follow_a_new_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown:
         revision,
         vec![DocumentEdit::SetTracking(tracking)],
     ) {
-        let label = retained_run(state.model, shown).map_or_else(String::new, |run| run.label.clone());
+        let label =
+            retained_run(state.model, shown).map_or_else(String::new, |run| run.label.clone());
         state.prompt(format!("The view could not follow {label}: {error}"));
     }
 }
@@ -851,8 +1076,7 @@ fn follow(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: DatasetId
     if document.tracking().mode != ResultDocumentTrackingMode::Latest {
         return;
     }
-    let Some(newest) =
-        newest_run_of_plan(state.results_reads(), source).map(|run| run.dataset_id)
+    let Some(newest) = newest_run_of_plan(state.results_reads(), source).map(|run| run.dataset_id)
     else {
         return;
     };
@@ -883,8 +1107,7 @@ fn reread_grown(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: Datas
 /// Read `run` through `view`: each pane onto the same analysis of `run`, and
 /// a pane for each analysis of `run` the view does not draw yet.
 fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: DatasetId) {
-    let Some(terminal) =
-        retained_run(state.model, dataset).map(|run| run.lifecycle.is_terminal())
+    let Some(terminal) = retained_run(state.model, dataset).map(|run| run.lifecycle.is_terminal())
     else {
         return;
     };
@@ -909,26 +1132,52 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datas
     // while still running, and has analyses now that it had not then, or it
     // finished with samples it had not then. A signal it gained needs no
     // reading: the view names the signals it plots, not the run's list.
-    let grown = reads_run
-        && document
-            .datasets()
-            .iter()
-            .find(|dataset| dataset.binding().dataset_id == run.dataset_id)
-            .is_some_and(|held| {
-                let analyses_changed = held.run_source().is_none_or(|source| {
-                    run.analyses.iter().any(|analysis| {
-                        source
-                            .analysis(super::create_document::source_analysis_identity(
-                                run, analysis,
-                            ))
-                            .is_none()
-                    })
-                });
-                analyses_changed
-                    || (finished
-                        && held.binding().content_digest
-                            != super::retained_dataset_digest(state.results_reads(), run))
+    let held = document
+        .datasets()
+        .iter()
+        .find(|dataset| dataset.binding().dataset_id == run.dataset_id)
+        .map(|held| {
+            let analyses_changed = held.run_source().is_none_or(|source| {
+                run.analyses.iter().any(|analysis| {
+                    source
+                        .analysis(super::create_document::source_analysis_identity(
+                            run, analysis,
+                        ))
+                        .is_none()
+                })
             });
+            (analyses_changed, held.binding().content_digest)
+        });
+    let missing = run.analyses.iter().any(|analysis| {
+        document
+            .pane_of_analysis(super::create_document::source_analysis_identity(
+                run, analysis,
+            ))
+            .is_none()
+    });
+    let analyses_changed = reads_run && held.is_some_and(|(changed, _)| changed);
+    if reads_run && !missing && !analyses_changed && !finished {
+        return;
+    }
+    // The run as it stands is read by its digest: one still being digested
+    // is read once it is, and a finished one counts as finished till then.
+    let Some(digest) = run_digest(state, dataset) else {
+        if finished {
+            state.results.read_while_running.insert(dataset);
+        }
+        return;
+    };
+    let grown =
+        analyses_changed || (reads_run && finished && held.is_some_and(|(_, held)| held != digest));
+    if reads_run && !missing && !grown {
+        return;
+    }
+    let (Some(document), Some(run)) = (
+        state.model.workspace.content.visualization_document(view),
+        retained_run(state.model, dataset),
+    ) else {
+        return;
+    };
     let missing: Vec<_> = run
         .analyses
         .iter()
@@ -940,9 +1189,6 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datas
                 .is_none()
         })
         .collect();
-    if reads_run && missing.is_empty() && !grown {
-        return;
-    }
     let revision = document.revision();
     let page_id = document.pages()[0].id;
     let last_pane = document
@@ -950,7 +1196,7 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datas
         .iter()
         .max_by_key(|pane| pane.order)
         .map(|pane| pane.id);
-    let Some(next) = run_reference(state.results_reads(), run) else {
+    let Some(next) = run_reference(run, digest) else {
         return;
     };
     let binding = next.binding();
@@ -1129,15 +1375,25 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         return;
     };
     let generation = document.generation();
-    let drawn = state.results.working_view.as_deref().filter(|binding| {
-        binding.view == view
-            && binding.dataset == dataset
-            && binding.runs == runs
-            && !binding.redraw
+    let held =
+        state.results.working_view.as_deref().filter(|binding| {
+            binding.view == view && binding.dataset == dataset && !binding.redraw
+        });
+    // A run that grew since the view was drawn over it, as a run does when
+    // it finishes, is drawn from what changed while it gives each pane the
+    // analysis, and each signal the name, place and default, it gave them.
+    let signals = match held {
+        Some(binding) if binding.runs == runs => binding.signals,
+        _ => retained_run(state.model, dataset).map(|run| run_drawn_as(document, run)),
+    };
+    let drawn = held.filter(|binding| {
+        binding.runs == runs || (binding.signals.is_some() && binding.signals == signals)
     });
     if drawn.is_some_and(|binding| binding.generation == generation && binding.retake.is_none()) {
         let results = &mut *state.results;
-        if let Some(binding) = results.working_view.as_deref() {
+        if let Some(binding) = results.working_view.as_deref_mut() {
+            binding.runs = runs;
+            binding.signals = signals;
             let session = &mut results.session;
             let panes = binding
                 .keys
@@ -1183,7 +1439,12 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
     });
     let retaken: Vec<AnalysisPresentationKey> = drawn
         .and_then(|binding| binding.retake.as_ref())
-        .map(|ticks| ticks.iter().map(SourceWaveformPresentationKey::analysis).collect())
+        .map(|ticks| {
+            ticks
+                .iter()
+                .map(SourceWaveformPresentationKey::analysis)
+                .collect()
+        })
         .unwrap_or_default();
     // The run is borrowed where it is kept, not copied: a copy is every
     // signal's name.
@@ -1437,9 +1698,48 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         scratch,
         generation,
         runs,
+        signals,
         redraw: false,
         retake: None,
     }));
+}
+
+/// What drawing the view reads of `run` besides the view, as one number:
+/// the analysis each pane draws, each signal's name, place and whether the
+/// run plots it, and the nets and buses an event history names.
+fn run_drawn_as(document: &VisualizationDocument, run: &SimulationRun) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    for (index, key, pane_id) in bound_panes(document, run) {
+        let analysis = &run.analyses[index];
+        (index, key, pane_id.get()).hash(&mut hasher);
+        analysis.waveforms.len().hash(&mut hasher);
+        for waveform in &analysis.waveforms {
+            waveform.name.hash(&mut hasher);
+            waveform.visible.hash(&mut hasher);
+        }
+        if let Some(rspice_results::analysis_payload::AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+            digital_buses,
+            ..
+        }) = analysis.result_payload.as_ref()
+        {
+            digital_traces.len().hash(&mut hasher);
+            for trace in digital_traces {
+                trace.node_name.hash(&mut hasher);
+            }
+            real_traces.len().hash(&mut hasher);
+            for trace in real_traces {
+                trace.node_name.hash(&mut hasher);
+            }
+            digital_buses.len().hash(&mut hasher);
+            for bus in digital_buses {
+                (&bus.name, bus.msb, bus.lsb, &bus.members).hash(&mut hasher);
+            }
+        }
+    }
+    hasher.finish()
 }
 
 /// Whether the quick view draws `view` over the retained run `dataset` as
