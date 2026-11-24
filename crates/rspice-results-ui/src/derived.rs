@@ -74,6 +74,10 @@ pub struct DerivedSeries {
     /// a frame that changes neither the strip nor the data reads a pane's
     /// answer, not every trace of it.
     pane_extremes: std::collections::HashMap<u64, StripExtremesMemo>,
+    /// How many times stored extents measured away from the frame have
+    /// arrived: a pane's answer kept while some of its traces were being
+    /// measured stands until more arrive.
+    measured_arrivals: u64,
 }
 
 /// Which pane an answer is of: its strip, the strip's revision, and a digest
@@ -96,8 +100,16 @@ struct StripExtremesMemo {
 /// of it by its bounds' bits.
 #[derive(Debug, Clone, Copy, Default)]
 struct PaneExtremesMemo {
-    whole: Option<Extremes>,
-    window: Option<((u64, u64), Extremes)>,
+    whole: Option<KeptExtremes>,
+    window: Option<((u64, u64), KeptExtremes)>,
+}
+
+/// A pane's extremes as kept, and, when some of its traces were still being
+/// measured away from the frame, how many measurements had arrived then.
+#[derive(Debug, Clone, Copy)]
+struct KeptExtremes {
+    extremes: Extremes,
+    measuring: Option<u64>,
 }
 
 /// A stored series' extent over its whole record, and over the last window
@@ -347,7 +359,11 @@ impl DerivedSeries {
     /// Keep the stored extents measured away from the frame that have
     /// arrived.
     pub fn keep_measured_extents(&mut self) {
-        for (key, bits, extent) in self.measuring.arrived() {
+        let arrived = self.measuring.arrived();
+        if !arrived.is_empty() {
+            self.measured_arrivals = self.measured_arrivals.wrapping_add(1);
+        }
+        for (key, bits, extent) in arrived {
             let memo = self.stored_extents.entry(key).or_default();
             match bits {
                 None => memo.whole = Some(extent),
@@ -357,7 +373,9 @@ impl DerivedSeries {
     }
 
     /// What the pane `pane` drew over `window`, or over its whole record
-    /// when there is none, as last kept for the strip's revision.
+    /// when there is none, as last kept for the strip's revision. An answer
+    /// kept while traces were being measured stands until measurements
+    /// arrive.
     pub(crate) fn pane_extremes(
         &self,
         pane: PaneOf,
@@ -368,23 +386,31 @@ impl DerivedSeries {
             .get(&pane.strip)
             .filter(|strip| strip.revision == pane.revision)?;
         let memo = strip.panes.get(&pane.traces)?;
-        match measuring::bits(window) {
+        let kept = match measuring::bits(window) {
             None => memo.whole,
             Some(bits) => memo
                 .window
                 .filter(|(held, _)| *held == bits)
-                .map(|(_, extremes)| extremes),
-        }
+                .map(|(_, kept)| kept),
+        }?;
+        kept.measuring
+            .is_none_or(|arrivals| arrivals == self.measured_arrivals)
+            .then_some(kept.extremes)
     }
 
-    /// Keep what the pane `pane` drew over `window`, every trace of it
-    /// measured. An answer of an earlier revision of the strip is let go.
+    /// Keep what the pane `pane` drew over `window`, `measuring` when some
+    /// of its traces were still being measured. An answer of an earlier
+    /// revision of the strip is let go.
     pub(crate) fn keep_pane_extremes(
         &mut self,
         pane: PaneOf,
         window: Option<(f64, f64)>,
-        extremes: Extremes,
+        (extremes, measuring): (Extremes, bool),
     ) {
+        let kept = KeptExtremes {
+            extremes,
+            measuring: measuring.then_some(self.measured_arrivals),
+        };
         let strip = self.pane_extremes.entry(pane.strip).or_default();
         if strip.revision != pane.revision {
             strip.panes.clear();
@@ -392,8 +418,8 @@ impl DerivedSeries {
         }
         let memo = strip.panes.entry(pane.traces).or_default();
         match measuring::bits(window) {
-            None => memo.whole = Some(extremes),
-            Some(bits) => memo.window = Some((bits, extremes)),
+            None => memo.whole = Some(kept),
+            Some(bits) => memo.window = Some((bits, kept)),
         }
     }
 

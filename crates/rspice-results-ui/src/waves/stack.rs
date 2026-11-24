@@ -345,9 +345,11 @@ pub fn pane_trace_extremes(
     }
     super::extent::note_pane_summary();
     let mut extremes = Extremes::default();
-    // A trace whose read or measurement is on its way has not said all it
-    // will: the answer is not kept without it.
-    let mut waiting = false;
+    // A trace whose measurement is on its way has not said all it will: the
+    // answer stands only until measurements arrive. One whose read is on its
+    // way keeps the answer from being kept at all.
+    let mut measuring = false;
+    let mut reading = false;
     let mut here = FRAME_EXTENTS;
     for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
         let window = if whole_record && trace.visible {
@@ -374,13 +376,13 @@ pub fn pane_trace_extremes(
                         max: extent.max,
                         min_positive: extent.min_positive,
                     });
-                    waiting = true;
+                    measuring = true;
                     continue;
                 }
                 // Its extent arrives on a later frame; reading it whole
                 // meanwhile reads what the measurement does.
                 StoredExtent::Measuring(None) => {
-                    waiting = true;
+                    measuring = true;
                     continue;
                 }
                 StoredExtent::Measured(None) => {}
@@ -388,7 +390,7 @@ pub fn pane_trace_extremes(
         }
         // Held in memory, or held once its read has arrived.
         let Some((x, y)) = trace.held() else {
-            waiting = true;
+            reading = true;
             continue;
         };
         let index = derived.extrema_or(trace_key(model, trace), &y, &mut note_samples);
@@ -398,8 +400,8 @@ pub fn pane_trace_extremes(
         });
     }
     derived.measure_asked_extents();
-    if !waiting {
-        derived.keep_pane_extremes(pane, window, extremes);
+    if !reading {
+        derived.keep_pane_extremes(pane, window, (extremes, measuring));
     }
     extremes
 }
