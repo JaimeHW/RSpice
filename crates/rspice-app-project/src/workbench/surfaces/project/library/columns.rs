@@ -76,6 +76,8 @@ pub struct LibraryBrowserState {
     /// Where the rules between the columns stand, as fractions of the
     /// page's width, once the reader has dragged one; equal columns before.
     pub(super) split: Option<[f32; 2]>,
+    /// The Audit history dialog's table.
+    pub(super) audit: TableState,
 }
 
 /// What the context strip asks the columns to find, in every library: the

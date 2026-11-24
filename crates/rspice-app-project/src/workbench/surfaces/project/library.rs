@@ -290,7 +290,7 @@ pub fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
         apply_library_intent(&ctx, cx, intent);
     }
     show_library_usage_report(&ctx);
-    show_library_audit_history(&ctx, cx.model);
+    show_library_audit_history(&ctx, cx.model, &mut cx.state.library_browser.audit);
 }
 
 /// A bar's frame: the bar's padding above and below its one row of controls.
@@ -1956,7 +1956,86 @@ fn show_library_usage_report(ctx: &Context) {
     }
 }
 
-fn show_library_audit_history(ctx: &Context, model: &Model) {
+/// One record the Audit history lists: a change made to a library, or a
+/// publication of one.
+struct AuditRecord {
+    /// The project revision the record left behind, which orders them.
+    revision: u64,
+    sequence: u64,
+    change: String,
+    what: String,
+    /// When it was made, where the record says: a publication does.
+    made_unix_ms: Option<u64>,
+    by: String,
+    approved_by: String,
+    reason: String,
+    project_revision: String,
+    library_revision: String,
+}
+
+impl AuditRecord {
+    /// The project's library changes and publications, newest first.
+    fn of(project: &crate::state::ProjectDescriptor) -> Vec<Self> {
+        let changes = project.library_mutation_audit().iter().map(|receipt| Self {
+            revision: receipt.target_project_revision().get(),
+            sequence: receipt.sequence(),
+            change: receipt.mutation().operation_label().to_owned(),
+            what: library_mutation_summary(receipt.mutation()),
+            made_unix_ms: None,
+            by: String::new(),
+            approved_by: String::new(),
+            reason: String::new(),
+            project_revision: format!(
+                "{} \u{2192} {}",
+                receipt.source_project_revision().get(),
+                receipt.target_project_revision().get()
+            ),
+            library_revision: format!(
+                "{} \u{2192} {}",
+                receipt.source_library_revision(),
+                receipt.target_library_revision()
+            ),
+        });
+        let publications = project
+            .library_publications()
+            .iter()
+            .map(|publication| Self {
+                revision: publication.receipt_project_revision().get(),
+                sequence: publication.sequence(),
+                change: "Publication".to_owned(),
+                what: publication.label().to_owned(),
+                made_unix_ms: Some(publication.created_unix_ms()).filter(|made| *made != 0),
+                by: publication.actor_id().to_owned(),
+                approved_by: publication.authority_id().to_owned(),
+                reason: publication.reason().to_owned(),
+                project_revision: format!(
+                    "{} \u{2192} {}",
+                    publication.source_project_revision().get(),
+                    publication.receipt_project_revision().get()
+                ),
+                library_revision: publication.library_revision().to_string(),
+            });
+        let mut records = changes.chain(publications).collect::<Vec<_>>();
+        records.sort_by_key(|record| {
+            std::cmp::Reverse((
+                record.revision,
+                record.made_unix_ms.is_some(),
+                record.sequence,
+            ))
+        });
+        records
+    }
+}
+
+/// The project's library changes and publications in one table sized to the
+/// dialog, newest first; where the project and its libraries stand now, and
+/// how many of each it records, said above it.
+fn show_library_audit_history(
+    ctx: &Context,
+    model: &Model,
+    table: &mut crate::ui::widgets::table::TableState,
+) {
+    use crate::ui::widgets::table::{Cell, Column, DataTable};
     if !ctx.data(|data| {
         data.get_temp::<bool>(egui::Id::new(AUDIT_REPORT_ID))
             .unwrap_or(false)
@@ -1964,121 +2043,78 @@ fn show_library_audit_history(ctx: &Context, model: &Model) {
         return;
     }
 
-    let receipts = model.workspace.content.project.library_mutation_audit();
-    let publications = model.workspace.content.project.library_publications();
+    let project = &model.workspace.content.project;
+    let records = AuditRecord::of(project);
     let description = format!(
-        "{} recorded library change{} and {} publication{}.",
-        receipts.len(),
-        if receipts.len() == 1 { "" } else { "s" },
-        publications.len(),
-        if publications.len() == 1 { "" } else { "s" }
+        "Project revision {} \u{b7} library revision {}. {} and {}.",
+        project.revision().get(),
+        model.library_manager.revision(),
+        counted(
+            project.library_mutation_audit().len(),
+            "recorded library change",
+            "recorded library changes"
+        ),
+        counted(
+            project.library_publications().len(),
+            "publication",
+            "publications"
+        ),
     );
+    let columns = [
+        Column::number("Revision", 76.0),
+        Column::name("Change", 120.0),
+        Column::name("What", 160.0),
+        Column::number("When", 128.0),
+        Column::name("By", 90.0),
+        Column::name("Approved by", 90.0),
+        Column::name("Reason", 160.0),
+        Column::number("Library revision", 96.0),
+    ];
     let choice = Dialog::new("Audit history", "Close")
         .description(&description)
         .size(DialogSize::Manager)
+        .flush_body()
+        .overlay_scrollbar()
         .show(ctx, |ui| {
-            property_card(ui, "This project", |ui| {
-                property_row(
+            if records.is_empty() {
+                crate::ui::panels::empty_state(
                     ui,
-                    "Project revision",
-                    &model.workspace.content.project.revision().get().to_string(),
+                    crate::ui::panels::WorkbenchIcon::History,
+                    "Nothing recorded",
+                    "No library in this project has been changed or published yet.",
                 );
-                property_row(
-                    ui,
-                    "Library revision",
-                    &model.library_manager.revision().to_string(),
-                );
-                property_row(ui, "Library changes", &receipts.len().to_string());
-                property_row(ui, "Publications", &publications.len().to_string());
+                return;
+            }
+            let absent = || Cell::absent();
+            let words = |text: &str| {
+                if text.is_empty() {
+                    absent()
+                } else {
+                    Cell::text(text)
+                }
+            };
+            let _ = DataTable::new(
+                "workbench.project.library.audit-history",
+                &columns,
+                records.len(),
+            )
+            .state(table)
+            .max_height(ui.available_height().max(1.0))
+            .show(ui, |index| {
+                let record = &records[index];
+                vec![
+                    Cell::number(&record.project_revision),
+                    Cell::text(&record.change),
+                    words(&record.what),
+                    record.made_unix_ms.map_or_else(absent, |made| {
+                        Cell::number(crate::time_compat::local_stamp(made))
+                    }),
+                    words(&record.by),
+                    words(&record.approved_by),
+                    words(&record.reason),
+                    Cell::number(&record.library_revision),
+                ]
             });
-            ui.add_space(8.0);
-            ScrollArea::vertical()
-                .id_salt("workbench.project.library.audit-history.receipts")
-                .auto_shrink([false, true])
-                .max_height(360.0)
-                .show(ui, |ui| {
-                    if receipts.is_empty() && publications.is_empty() {
-                        property_card(ui, "Nothing recorded", |ui| {
-                            crate::workbench::design_system::property_row_wrapped(
-                                ui,
-                                "Status",
-                                "No library in this project has been changed or published yet.",
-                            );
-                        });
-                    }
-                    for publication in publications.iter().rev() {
-                        let title = format!(
-                            "Publication #{:04} \u{00b7} {}",
-                            publication.sequence(),
-                            publication.label()
-                        );
-                        property_card(ui, &title, |ui| {
-                            property_row(
-                                ui,
-                                "When",
-                                &crate::time_compat::utc_stamp(publication.created_unix_ms()),
-                            );
-                            property_row(ui, "Published by", publication.actor_id());
-                            property_row(ui, "Approved by", publication.authority_id());
-                            crate::workbench::design_system::property_row_wrapped(
-                                ui,
-                                "Reason",
-                                publication.reason(),
-                            );
-                            property_row(
-                                ui,
-                                "Project revision",
-                                &format!(
-                                    "{} \u{2192} {}",
-                                    publication.source_project_revision().get(),
-                                    publication.receipt_project_revision().get()
-                                ),
-                            );
-                            property_row(
-                                ui,
-                                "Library revision",
-                                &publication.library_revision().to_string(),
-                            );
-                            property_row(
-                                ui,
-                                "Snapshot",
-                                &rspice_simulation_contract::run_set::format_bytes(
-                                    publication.snapshot_byte_len(),
-                                ),
-                            );
-                        });
-                        ui.add_space(6.0);
-                    }
-                    for receipt in receipts.iter().rev() {
-                        let title = format!(
-                            "#{:04} \u{00b7} {}",
-                            receipt.sequence(),
-                            receipt.mutation().operation_label()
-                        );
-                        property_card(ui, &title, |ui| {
-                            property_row(ui, "What", &library_mutation_summary(receipt.mutation()));
-                            property_row(
-                                ui,
-                                "Project revision",
-                                &format!(
-                                    "{} \u{2192} {}",
-                                    receipt.source_project_revision().get(),
-                                    receipt.target_project_revision().get()
-                                ),
-                            );
-                            property_row(
-                                ui,
-                                "Library revision",
-                                &format!(
-                                    "{} \u{2192} {}",
-                                    receipt.source_library_revision(),
-                                    receipt.target_library_revision()
-                                ),
-                            );
-                        });
-                        ui.add_space(6.0);
-                    }
-                });
         });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
         ctx.data_mut(|data| {
