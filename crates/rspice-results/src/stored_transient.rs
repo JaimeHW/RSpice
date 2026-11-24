@@ -51,14 +51,14 @@ impl<I: SegmentIo> StoredTransientRun<I> {
         io: I,
         fill: fn(&SegmentReader<I>, &mut TransientResult) -> Result<(), StoreError>,
     ) -> Result<Self, StoreError> {
-        let mut reader = SegmentReader::open(io)?;
+        let reader = SegmentReader::open(io)?;
         let mut shell = match reader.annotation(TRANSIENT_SHELL_ANNOTATION) {
             Some(bytes) => decode_transient_shell(bytes),
             None => transient_shell(reader.schema()),
         }
         .map_err(StoreError::Schema)?;
         let targets = slot_targets(&reader, &shell).map_err(StoreError::Schema)?;
-        fill(&mut reader, &mut shell)?;
+        fill(&reader, &mut shell)?;
         let parameters = instance_parameters(&reader);
         Ok(Self {
             shell,
@@ -74,7 +74,7 @@ impl<I: SegmentIo> StoredTransientRun<I> {
         let rows = usize::try_from(self.reader.rows()).map_err(|_| {
             StoreError::Schema("the segment holds more rows than this host can address".into())
         })?;
-        fill_rows(&mut self.reader, &self.targets, &mut self.shell, 0, rows)?;
+        fill_rows(&self.reader, &self.targets, &mut self.shell, 0, rows)?;
         let mut adoption = InstanceParameterAdoption::of(&self.shell);
         for (slot, &target) in self.targets.iter().enumerate() {
             let SlotTarget::Parameter(index) = target else {

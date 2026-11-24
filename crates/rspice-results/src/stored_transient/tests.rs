@@ -244,9 +244,9 @@ fn a_stored_run_s_events_dump_from_the_store_as_from_the_traces_read_back() {
     let bytes = sink.into_io().unwrap().into_bytes();
     let held = StoredTransientRun::open(MemoryIo::from_bytes(bytes.clone())).unwrap();
     let shell = &held.shell;
-    let mut reader = SegmentReader::open(MemoryIo::from_bytes(bytes)).unwrap();
+    let reader = SegmentReader::open(MemoryIo::from_bytes(bytes)).unwrap();
     let mut empty = transient_shell(reader.schema()).unwrap();
-    fill_impulses(&mut reader, &mut empty).unwrap();
+    fill_impulses(&reader, &mut empty).unwrap();
     assert!(
         empty
             .digital_traces
@@ -379,7 +379,7 @@ c1 out 0 100p
         asked.get() > 1
     };
     let read =
-        fill_span_unless_stopped(&mut run.reader, &run.targets, &mut run.shell, &stopped).unwrap();
+        fill_span_unless_stopped(&run.reader, &run.targets, &mut run.shell, &stopped).unwrap();
     assert!(!read, "a stopped read says it stopped");
     assert_eq!(asked.get(), 2);
     // Never stopped: every column is asked about once and read.
@@ -389,7 +389,7 @@ c1 out 0 100p
         false
     };
     let read =
-        fill_span_unless_stopped(&mut run.reader, &run.targets, &mut run.shell, &never).unwrap();
+        fill_span_unless_stopped(&run.reader, &run.targets, &mut run.shell, &never).unwrap();
     assert!(read);
     assert_eq!(asked.get(), columns);
 }
