@@ -245,6 +245,13 @@ fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnve
     envelopes
 }
 
+/// Report a walk of a pane's traces for a summary of them, its extremes or
+/// its legend's order, which a frame finds again while the strip stands.
+#[inline]
+pub(crate) fn note_pane_summary() {
+    note_extent(2);
+}
+
 // Dataset-walk observations used by the owner and application regression gates.
 #[inline]
 fn note_extent(_index: usize) {
@@ -258,7 +265,7 @@ fn note_extent(_index: usize) {
 
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
-    static EXTENT_WALKS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+    static EXTENT_WALKS: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -266,20 +273,23 @@ thread_local! {
 pub struct ExtentWork {
     pub x_ranges: u64,
     pub envelopes: u64,
+    /// Walks of a pane's traces for its extremes or its legend's order.
+    pub pane_summaries: u64,
 }
 
 #[cfg(any(test, feature = "test-support"))]
 impl ExtentWork {
     pub fn read() -> Self {
-        let [x_ranges, envelopes] = EXTENT_WALKS.with(std::cell::Cell::get);
+        let [x_ranges, envelopes, pane_summaries] = EXTENT_WALKS.with(std::cell::Cell::get);
         Self {
             x_ranges,
             envelopes,
+            pane_summaries,
         }
     }
 
     pub fn reset() -> Self {
-        EXTENT_WALKS.with(|counts| counts.set([0; 2]));
+        EXTENT_WALKS.with(|counts| counts.set([0; 3]));
         Self::read()
     }
 }

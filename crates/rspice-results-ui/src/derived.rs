@@ -70,15 +70,26 @@ pub struct DerivedSeries {
     /// what it measures names the build of the models it was taken of.
     measurements: crate::waves::readout::MeasurementsMemo,
     /// What each pane's traces draw over their whole record and over the
-    /// last window asked of it, per pane, as read while `extents_kept` was
-    /// what it is: a frame that changes neither the strip nor an extent
-    /// reads a pane's answer, not every trace of it.
-    pane_extremes: std::collections::HashMap<u64, PaneExtremesMemo>,
-    /// How many extents, whole-record extremes and block summaries have
-    /// been kept: an answer read at an earlier count may have missed one.
-    extents_kept: u64,
-    /// The count the pane answers held were read at.
-    pane_extremes_at: u64,
+    /// last window asked of it, per strip, for the strip's revision alone:
+    /// a frame that changes neither the strip nor the data reads a pane's
+    /// answer, not every trace of it.
+    pane_extremes: std::collections::HashMap<u64, StripExtremesMemo>,
+}
+
+/// Which pane an answer is of: its strip, the strip's revision, and a digest
+/// of the traces the pane draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PaneOf {
+    pub(crate) strip: u64,
+    pub(crate) revision: u64,
+    pub(crate) traces: u64,
+}
+
+/// The answers of a strip's panes, for one revision of the strip.
+#[derive(Debug, Clone, Default)]
+struct StripExtremesMemo {
+    revision: u64,
+    panes: std::collections::HashMap<u64, PaneExtremesMemo>,
 }
 
 /// A pane's extremes over its whole record, and over the last window asked
@@ -162,7 +173,6 @@ impl DerivedSeries {
             self.stored_extents.clear();
             self.measuring.forget();
             self.pane_extremes.clear();
-            self.extents_kept = self.extents_kept.wrapping_add(1);
             self.version = version;
         }
     }
@@ -278,13 +288,7 @@ impl DerivedSeries {
     ) -> Option<rspice_results::waveform::ValueExtent> {
         let memo = self.stored_extents.entry(key).or_default();
         let Some((x0, x1)) = window else {
-            if let Some(whole) = memo.whole {
-                return whole;
-            }
-            let whole = build();
-            memo.whole = Some(whole);
-            self.extents_kept = self.extents_kept.wrapping_add(1);
-            return whole;
+            return *memo.whole.get_or_insert_with(build);
         };
         let bits = (x0.to_bits(), x1.to_bits());
         if let Some((held, extent)) = memo.window
@@ -294,7 +298,6 @@ impl DerivedSeries {
         }
         let extent = build();
         memo.window = Some((bits, extent));
-        self.extents_kept = self.extents_kept.wrapping_add(1);
         extent
     }
 
@@ -350,18 +353,21 @@ impl DerivedSeries {
                 None => memo.whole = Some(extent),
                 Some(bits) => memo.window = Some((bits, extent)),
             }
-            self.extents_kept = self.extents_kept.wrapping_add(1);
         }
     }
 
     /// What the pane `pane` drew over `window`, or over its whole record
-    /// when there is none, as last kept, unless an extent has been kept
-    /// since that it may not have read.
-    pub(crate) fn pane_extremes(&self, pane: u64, window: Option<(f64, f64)>) -> Option<Extremes> {
-        if self.pane_extremes_at != self.extents_kept {
-            return None;
-        }
-        let memo = self.pane_extremes.get(&pane)?;
+    /// when there is none, as last kept for the strip's revision.
+    pub(crate) fn pane_extremes(
+        &self,
+        pane: PaneOf,
+        window: Option<(f64, f64)>,
+    ) -> Option<Extremes> {
+        let strip = self
+            .pane_extremes
+            .get(&pane.strip)
+            .filter(|strip| strip.revision == pane.revision)?;
+        let memo = strip.panes.get(&pane.traces)?;
         match measuring::bits(window) {
             None => memo.whole,
             Some(bits) => memo
@@ -371,19 +377,20 @@ impl DerivedSeries {
         }
     }
 
-    /// Keep what the pane `pane` drew over `window`, read from the extents
-    /// kept so far.
+    /// Keep what the pane `pane` drew over `window`, every trace of it
+    /// measured. An answer of an earlier revision of the strip is let go.
     pub(crate) fn keep_pane_extremes(
         &mut self,
-        pane: u64,
+        pane: PaneOf,
         window: Option<(f64, f64)>,
         extremes: Extremes,
     ) {
-        if self.pane_extremes_at != self.extents_kept {
-            self.pane_extremes.clear();
-            self.pane_extremes_at = self.extents_kept;
+        let strip = self.pane_extremes.entry(pane.strip).or_default();
+        if strip.revision != pane.revision {
+            strip.panes.clear();
+            strip.revision = pane.revision;
         }
-        let memo = self.pane_extremes.entry(pane).or_default();
+        let memo = strip.panes.entry(pane.traces).or_default();
         match measuring::bits(window) {
             None => memo.whole = Some(extremes),
             Some(bits) => memo.window = Some((bits, extremes)),
@@ -426,7 +433,6 @@ impl DerivedSeries {
         }
         note_samples(values.len());
         let index = std::sync::Arc::new(ExtremaIndex::build(values));
-        self.extents_kept = self.extents_kept.wrapping_add(1);
         self.extrema.insert(key, std::sync::Arc::clone(&index));
         // The pass that built the summary read the whole-record range too,
         // and a reader of `range_or` under the same key (the shared X axis'

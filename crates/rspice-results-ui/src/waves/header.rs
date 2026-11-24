@@ -708,6 +708,7 @@ fn legend_order(
     {
         return order;
     }
+    super::extent::note_pane_summary();
     // A magnitude's phase is drawn in the phase pane, so it is named there,
     // and the signal a pane is drawn against is its X, not a curve.
     let curve = |trace: &StripTrace| {

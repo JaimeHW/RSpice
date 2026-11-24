@@ -409,3 +409,33 @@ fn idle_frames_of_the_workspace_over_a_large_stored_run_read_no_column_whole() {
     );
     assert_eq!(store_reads, 0, "the store was read whole on an idle frame");
 }
+
+/// Idle frames of the workspace over a strip of two thousand curves find
+/// no pane's extremes or legend again and make none of its curves: what a
+/// frame does is bounded by what it draws, not by the curves the strip holds.
+#[test]
+fn idle_frames_over_a_strip_of_many_curves_summarise_no_pane_again() {
+    const CURVES: usize = 2_000;
+    let x: Vec<f64> = (0..64).map(|row| row as f64 * 1.0e-9).collect();
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(
+        (0..CURVES)
+            .map(|signal| {
+                let rate = 1.0e7 * (signal + 1) as f64;
+                let y: Vec<f64> = x.iter().map(|time| (time * rate).sin()).collect();
+                RetainedTrace::new(format!("V(s{signal})"), x.clone(), y, "#fff")
+            })
+            .collect(),
+    );
+    let (mut state, document_id) = large_workspace(analysis);
+    let (work, columns, _) = idle_workspace_work(&mut state, document_id, || 0);
+    assert_eq!(
+        work.get(DatasetWalk::WavePaneSummary),
+        0,
+        "an idle frame summarised a pane's curves again"
+    );
+    assert_eq!(work.total(), 0, "{:?}", work.nonzero());
+    assert_eq!(
+        columns.memory_views, 0,
+        "an idle frame made the strip's curves"
+    );
+}

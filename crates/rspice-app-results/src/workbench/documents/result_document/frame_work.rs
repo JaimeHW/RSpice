@@ -92,12 +92,16 @@ pub enum DatasetWalk {
     BrowserRows,
     /// Measuring the measurement form's expression for its preview.
     MeasurementPreview,
+    /// A walk of a pane's traces for its extremes or its legend's order,
+    /// which a frame finds again while the strip stands.
+    #[cfg(any(test, feature = "test-support"))]
+    WavePaneSummary,
 }
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(any(test, feature = "test-support"))]
-    pub(crate) const ALL: [Self; 27] = [
+    pub(crate) const ALL: [Self; 28] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -125,6 +129,7 @@ impl DatasetWalk {
         Self::NetlistDigest,
         Self::BrowserRows,
         Self::MeasurementPreview,
+        Self::WavePaneSummary,
     ];
 }
 
@@ -221,6 +226,7 @@ impl WorkCounts {
                 let geometry = rspice_results_ui::waves::extent::ExtentWork::read();
                 walks[DatasetWalk::WaveXRange as usize] += geometry.x_ranges;
                 walks[DatasetWalk::WaveEnvelope as usize] += geometry.envelopes;
+                walks[DatasetWalk::WavePaneSummary as usize] += geometry.pane_summaries;
                 walks
             }),
             samples: SAMPLES.with(|samples| *samples.borrow()),

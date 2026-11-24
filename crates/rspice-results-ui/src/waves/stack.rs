@@ -332,19 +332,21 @@ pub fn pane_trace_extremes(
     });
     derived.keep_measured_extents();
     // A pane of the same strip revision and traces, over the same window,
-    // drew what it drew while no extent was kept since: the frame reads its
-    // answer rather than every trace again.
-    let pane = super::stable_hash(&(
-        model.revision(),
-        super::indices_digest(indices.iter().copied()),
-    ));
+    // draws what it drew: the frame reads its answer rather than every trace
+    // again.
+    let pane = crate::derived::PaneOf {
+        strip: super::stable_hash(&model.analysis_key),
+        revision: model.revision(),
+        traces: super::indices_digest(indices.iter().copied()),
+    };
     if let Some(extremes) = derived.pane_extremes(pane, window) {
         derived.measure_asked_extents();
         return extremes;
     }
+    super::extent::note_pane_summary();
     let mut extremes = Extremes::default();
-    // A trace whose read is on its way has nothing to say yet, and its
-    // arrival keeps no extent: the answer is not kept without it.
+    // A trace whose read or measurement is on its way has not said all it
+    // will: the answer is not kept without it.
     let mut waiting = false;
     let mut here = FRAME_EXTENTS;
     for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
@@ -358,7 +360,7 @@ pub fn pane_trace_extremes(
         if trace.y.is_stored() {
             let key = trace_key(model, trace);
             match derived.stored_extent(key, window, (&trace.x, &trace.y), &mut here) {
-                StoredExtent::Measured(Some(extent)) | StoredExtent::Measuring(Some(extent)) => {
+                StoredExtent::Measured(Some(extent)) => {
                     extremes.absorb(Extremes {
                         min: extent.min,
                         max: extent.max,
@@ -366,9 +368,21 @@ pub fn pane_trace_extremes(
                     });
                     continue;
                 }
+                StoredExtent::Measuring(Some(extent)) => {
+                    extremes.absorb(Extremes {
+                        min: extent.min,
+                        max: extent.max,
+                        min_positive: extent.min_positive,
+                    });
+                    waiting = true;
+                    continue;
+                }
                 // Its extent arrives on a later frame; reading it whole
                 // meanwhile reads what the measurement does.
-                StoredExtent::Measuring(None) => continue,
+                StoredExtent::Measuring(None) => {
+                    waiting = true;
+                    continue;
+                }
                 StoredExtent::Measured(None) => {}
             }
         }
