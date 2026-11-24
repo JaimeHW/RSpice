@@ -26,7 +26,9 @@ const TEXT_BYTES_PER_DECK_BYTE: f64 = 2.2;
 /// deck: the outline and the engine's index of the text it reads, the
 /// project index with its definitions and node tables, and the map of the
 /// deck's values. Measured on a 100 MB deck of devices with long node
-/// names, the most an index holds for a byte.
+/// names, the most an index holds for a byte: 1.6 for the outline and its
+/// index, 1.3 for the project index and its tables, 2.9 in all; the rest is
+/// what building them holds for a moment.
 const INDEX_BYTES_PER_DECK_BYTE: f64 = 4.0;
 
 #[cfg(any(test, feature = "test-support"))]
