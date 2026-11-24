@@ -17,6 +17,7 @@ mod loop_gain;
 mod navigation;
 mod navigator_browser;
 mod op_inspector;
+mod optimization_apply;
 mod persistent_document;
 mod result_import_adapters;
 mod result_import_workflow;

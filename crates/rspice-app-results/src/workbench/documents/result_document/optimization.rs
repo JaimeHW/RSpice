@@ -8,11 +8,15 @@ use std::collections::BTreeMap;
 use egui::Ui;
 
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, RunHistoryRevision, SimulationState,
+    AnalysisResult, AnalysisResultFamilyMetadata, DesignVariableQuantity, RunHistoryRevision,
+    SimulationState,
 };
 use crate::workbench::design_system::section_header;
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+use rspice_app_state::workbench::app_state::design_history::SetupParts;
+use rspice_app_state::workbench::app_state::model::Model;
+use rspice_simulation_contract::design_variable_quantity::parse_design_quantity;
 
 use std::sync::Arc;
 
@@ -92,6 +96,182 @@ pub(super) fn active_metadata_is_valid(state: ResultsReads<'_>) -> bool {
     active_optimization(&state.model.simulation, optimization_plan(state).as_deref()).is_some()
 }
 
+/// The sheet's bar: which table stands at the foot, and "Apply best to
+/// design".
+pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
+    let plan = optimization_plan(state.results_reads());
+    let Some((analysis, view)) = active_optimization(&state.model.simulation, plan.as_deref())
+    else {
+        return false;
+    };
+    let application = best_application(&*state.model, analysis);
+    let offer = application.as_ref().map(|application| {
+        format!(
+            "Set {} in the active plan; Undo takes it back",
+            application.assignments
+        )
+    });
+    let bar = presentation::domain_bar(
+        ui,
+        &view,
+        state.results.session.optimization_table,
+        offer.as_deref().map_err(|reason| reason.as_str()),
+    );
+    if let Some(table) = bar.table {
+        state.results.session.optimization_table = table;
+    }
+    if bar.apply_best
+        && let Ok(application) = application
+    {
+        let _ = commit_best(state, application);
+    }
+    true
+}
+
+/// Write the shown optimization's best candidate into the active plan's
+/// design variables, as one step of the setup's history that Undo takes
+/// back. Returns the plan's receipt, or why nothing was written.
+pub fn apply_best_to_design(state: &mut ResultsParts<'_>) -> Result<String, String> {
+    let plan = optimization_plan(state.results_reads());
+    let (analysis, _) = active_optimization(&state.model.simulation, plan.as_deref())
+        .ok_or_else(|| "The shown analysis is no validated optimization".to_owned())?;
+    let application = best_application(&*state.model, analysis)?;
+    commit_best(state, application)
+}
+
+/// What "Apply best to design" writes: each optimized variable's best value
+/// onto the active plan's design variable of the same name.
+#[derive(Debug, Clone, PartialEq)]
+struct BestApplication {
+    plan: crate::product::SimulationPlanId,
+    updates: Vec<(crate::product::DesignVariableId, String)>,
+    /// The assignments, as the plan will read them: `RLOAD = 2345.5 ohm`.
+    assignments: String,
+}
+
+/// The best candidate as design-variable writes, or why it cannot be one.
+/// A candidate is applied whole or not at all: a design holding some of its
+/// values is no candidate the optimizer evaluated.
+fn best_application(model: &Model, analysis: &AnalysisResult) -> Result<BestApplication, String> {
+    let Some(AnalysisResultFamilyMetadata::Optimization { best_variables, .. }) =
+        analysis.family_metadata.as_ref()
+    else {
+        return Err("The shown analysis is no optimization".to_owned());
+    };
+    let (plan, _) = model
+        .active_plan_revision()
+        .ok_or_else(|| "No simulation plan is open to write the best candidate into".to_owned())?;
+    let payload = model
+        .workspace
+        .content
+        .plan_data(plan)
+        .ok_or_else(|| "The active plan holds no design variables".to_owned())?;
+    let mut updates = Vec::with_capacity(best_variables.len());
+    let mut assignments = Vec::with_capacity(best_variables.len());
+    let mut missing = Vec::new();
+    let mut unchanged = 0;
+    for (name, &value) in best_variables {
+        let Some(variable) = payload
+            .design_variables
+            .iter()
+            .find(|variable| variable.name.eq_ignore_ascii_case(name))
+        else {
+            missing.push(name.as_str());
+            continue;
+        };
+        let held = parse_design_quantity(&variable.expression, variable.quantity).ok();
+        if held.is_some_and(|held| held.to_bits() == value.to_bits()) {
+            unchanged += 1;
+        }
+        let expression = design_expression(value, variable.quantity);
+        assignments.push(format!("{} = {expression}", variable.name));
+        updates.push((variable.id, expression));
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "The active plan has no design variable named {}",
+            missing.join(", ")
+        ));
+    }
+    if updates.is_empty() {
+        return Err("The optimization varied no design variable".to_owned());
+    }
+    if unchanged == updates.len() {
+        return Err("The design already holds the best candidate".to_owned());
+    }
+    Ok(BestApplication {
+        plan,
+        updates,
+        assignments: assignments.join(", "),
+    })
+}
+
+/// `value` as a design variable of `quantity` spells it, at the precision
+/// the optimizer found it: the shortest decimal that reads back as the same
+/// number, in the unit the quantity asks for.
+fn design_expression(value: f64, quantity: DesignVariableQuantity) -> String {
+    let number = if value != 0.0 && !(1e-3..1e6).contains(&value.abs()) {
+        format!("{value:e}")
+    } else {
+        format!("{value}")
+    };
+    match quantity {
+        DesignVariableQuantity::Resistance => format!("{number} ohm"),
+        DesignVariableQuantity::Capacitance => format!("{number}F"),
+        DesignVariableQuantity::Voltage => format!("{number}V"),
+        DesignVariableQuantity::Current => format!("{number}A"),
+        DesignVariableQuantity::Temperature | DesignVariableQuantity::Dimensionless => number,
+    }
+}
+
+/// Adopt the writes as one validated plan transaction and one step of the
+/// setup's history, as every plan edit is.
+fn commit_best(
+    state: &mut ResultsParts<'_>,
+    application: BestApplication,
+) -> Result<String, String> {
+    let step = state.model.setup_snapshot(SetupParts::PLAN_DATA);
+    let mut workspace = state.model.workspace.clone();
+    let mut setup = state.model.sim_setup.clone();
+    let outcome = workspace
+        .content
+        .update_design_variable_expressions(application.plan, &application.updates)
+        .map_err(|error| error.to_string())
+        .and_then(|_| {
+            workspace
+                .content
+                .validate_simulation_configuration()
+                .map_err(|error| error.to_string())
+        })
+        .and_then(|()| {
+            setup
+                .commit_active_plan_configuration_change(format!(
+                    "Applied the best optimization candidate: {}",
+                    application.assignments
+                ))
+                .map_err(|error| error.to_string())
+        });
+    match outcome {
+        Ok(receipt) => {
+            state.model.workspace = workspace;
+            state.model.sim_setup = setup;
+            state
+                .model
+                .record_setup_change("Apply best optimization candidate", step);
+            state.preflight.invalidate();
+            let line = receipt.status_line();
+            state.model.record_plan_receipt(line.clone());
+            Ok(line)
+        }
+        Err(error) => {
+            if let Some(prompt) = state.model.record_plan_refusal(error.clone()) {
+                state.workbench.prompt(prompt);
+            }
+            Err(error)
+        }
+    }
+}
+
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let significant_digits = significant_digits(state.results_reads());
     let Some(run) = state.model.simulation.active_run() else {
@@ -127,6 +307,22 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .derived
         .range_or(cost_key, || super::finite_extremes(&view.cost.y))
         .unwrap_or((0.0, 1.0));
+    // Each variable's axis fits its history, which is as fixed as the cost's.
+    let variable_ranges = view
+        .variables
+        .iter()
+        .map(|(name, waveform)| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (analysis_key, "optimization-variable", *name).hash(&mut hasher);
+            state
+                .results
+                .session
+                .derived
+                .range_or(hasher.finish(), || super::finite_extremes(&waveform.y))
+                .unwrap_or((0.0, 1.0))
+        })
+        .collect::<Vec<_>>();
     let response = presentation::show(
         ui,
         presentation::OptimizationPlot {
@@ -141,6 +337,8 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             history: view,
             plot_view,
             cost_range: (cost_min, cost_max),
+            variable_ranges: &variable_ranges,
+            table: state.results.session.optimization_table,
             significant_digits,
         },
         &mut state.results.session.cache,

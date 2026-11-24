@@ -69,6 +69,7 @@ pub(crate) use events::EventOrderCache;
 pub(crate) use network_matrix::exact_values as network_matrix_exact_values;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
+pub use optimization::apply_best_to_design;
 pub(crate) use optimization::export_csv as export_optimization_csv;
 pub use trace_style::{rename_trace, set_trace_style};
 pub(crate) use view_history::{
@@ -2810,6 +2811,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         ResultViewer::Hist => return hist::domain_bar(ui, state),
         ResultViewer::Op => return op_inspector::domain_bar(ui, state),
         ResultViewer::PhaseNoise => return phase_noise::domain_bar(ui, state),
+        ResultViewer::Optimization => return optimization::domain_bar(ui, state),
         _ => {}
     }
     let mut context = SheetContext::of(state);

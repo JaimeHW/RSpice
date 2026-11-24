@@ -739,6 +739,8 @@ pub struct ResultViewerState {
     /// Sweep sheet controls: the value drawn, the swept quantity on X and
     /// where a signal is read.
     pub sweep: Box<crate::sweep::SweepSheetState>,
+    /// The table at the optimization sheet's foot.
+    pub optimization_table: crate::optimization::OptimizationTable,
     /// The family members the reader picked, in any sheet that shows them.
     /// Boxed: the results slot is built by value and has a stack budget.
     pub members: Box<MemberSelection>,
