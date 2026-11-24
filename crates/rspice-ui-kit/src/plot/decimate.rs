@@ -76,10 +76,20 @@ struct Held {
 /// a block at a time. Kept each on its own, a picture's 32,640 envelopes of
 /// 16 KB, too large for the heap's small blocks, took 2.8 s to free, holding
 /// the heap all the while, and the frames meanwhile waited on it.
+///
+/// A picture reading again the envelopes a picture before it kept shares
+/// their blocks rather than copying them, as the envelopes were shared when
+/// each was its own: a new Y axis over a hundred thousand curves holds one
+/// copy of their envelopes, not two.
 #[derive(Debug, Default)]
 pub(super) struct Kept {
     map: HashMap<CacheKey, Slot>,
-    blocks: Vec<Vec<[f64; 2]>>,
+    blocks: Vec<Arc<Vec<[f64; 2]>>>,
+    /// The block being filled, while the set is gathered.
+    filling: Option<usize>,
+    /// Where each block shared from another set lies in `blocks`, by its
+    /// address, while the set is gathered.
+    shared: HashMap<usize, usize>,
     /// What they hold the cache to.
     bytes: usize,
 }
@@ -112,29 +122,56 @@ impl Kept {
         &self.blocks[slot.block][slot.start..slot.start + slot.len]
     }
 
-    /// Keep a copy of `envelope` under `key`, after the envelopes kept
-    /// before it.
-    pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: &[[f64; 2]]) {
+    /// Keep `envelope` under `key`: in the block it lies in when another set
+    /// keeps it, or else a copy after the envelopes kept before it.
+    pub(super) fn keep(&mut self, key: EnvelopeKey, envelope: &Envelope) {
+        let slot = match envelope {
+            Envelope::Kept(from, slot) if slot.len > 0 => self.share(from, *slot),
+            _ => self.copy(envelope),
+        };
+        self.note(key.0, slot);
+    }
+
+    /// `slot` of `from`, read in `from`'s own block.
+    fn share(&mut self, from: &Self, slot: Slot) -> Slot {
+        let block = &from.blocks[slot.block];
+        let blocks = &mut self.blocks;
+        let at = *self
+            .shared
+            .entry(Arc::as_ptr(block) as usize)
+            .or_insert_with(|| {
+                blocks.push(Arc::clone(block));
+                blocks.len() - 1
+            });
+        Slot { block: at, ..slot }
+    }
+
+    /// A copy of `points` after the envelopes this set copied before them.
+    fn copy(&mut self, points: &[[f64; 2]]) -> Slot {
         let mut slot = Slot {
             block: 0,
             start: 0,
-            len: envelope.len(),
+            len: points.len(),
         };
-        if !envelope.is_empty() {
-            if !self
-                .blocks
-                .last()
-                .is_some_and(|block| block.capacity() - block.len() >= envelope.len())
-            {
-                self.blocks
-                    .push(Vec::with_capacity(BLOCK_POINTS.max(envelope.len())));
-            }
-            slot.block = self.blocks.len() - 1;
-            let block = &mut self.blocks[slot.block];
-            slot.start = block.len();
-            block.extend_from_slice(envelope);
+        if points.is_empty() {
+            return slot;
         }
-        self.note(key.0, slot);
+        let room = self.filling.filter(|at| {
+            Arc::get_mut(&mut self.blocks[*at])
+                .is_some_and(|block| block.capacity() - block.len() >= points.len())
+        });
+        let at = room.unwrap_or_else(|| {
+            self.blocks
+                .push(Arc::new(Vec::with_capacity(BLOCK_POINTS.max(points.len()))));
+            self.blocks.len() - 1
+        });
+        self.filling = Some(at);
+        if let Some(block) = Arc::get_mut(&mut self.blocks[at]) {
+            slot.block = at;
+            slot.start = block.len();
+            block.extend_from_slice(points);
+        }
+        slot
     }
 
     /// Hold `slot` under `key`, in place of what was held there.
@@ -169,11 +206,39 @@ impl Kept {
         }
     }
 
-    /// Give back the room each block was made with beyond its points: the
-    /// last block of each run drawing a picture is filled only in part.
+    /// Done gathering: give back the room each block of its own was made
+    /// with beyond its points, as the last is filled only in part, and copy
+    /// out what it reads of a shared block it reads less than half of, so
+    /// it never holds on to more of another set's blocks than it reads.
     pub(super) fn fit(&mut self) {
+        let mut read = vec![0usize; self.blocks.len()];
+        for slot in self.map.values() {
+            if slot.len > 0 {
+                read[slot.block] += slot.len;
+            }
+        }
+        let sparse: Vec<usize> = std::mem::take(&mut self.shared)
+            .into_values()
+            .filter(|&at| 2 * read[at] < self.blocks[at].len())
+            .collect();
+        for at in sparse {
+            let block = std::mem::take(&mut self.blocks[at]);
+            let slots: Vec<(CacheKey, Slot)> = self
+                .map
+                .iter()
+                .filter(|(_, slot)| slot.len > 0 && slot.block == at)
+                .map(|(key, slot)| (*key, *slot))
+                .collect();
+            for (key, slot) in slots {
+                let copied = self.copy(&block[slot.start..slot.start + slot.len]);
+                self.map.insert(key, copied);
+            }
+        }
+        self.filling = None;
         for block in &mut self.blocks {
-            if block.capacity() > block.len() {
+            if let Some(block) = Arc::get_mut(block)
+                && block.capacity() > block.len()
+            {
                 block.shrink_to_fit();
             }
         }
@@ -1761,13 +1826,15 @@ mod tests {
                 .map(|point| [point as f64, trace as f64])
                 .collect()
         };
+        let own = |trace: u64| Envelope::Own(Arc::from(envelope(trace)));
         let (mut first, mut second) = (Kept::default(), Kept::default());
         for trace in 0..1_000 {
             let run = if trace < 600 { &mut first } else { &mut second };
-            run.keep(EnvelopeKey::stored(trace, view), &envelope(trace));
+            run.keep(EnvelopeKey::stored(trace, view), &own(trace));
         }
-        first.extend(second);
         first.fit();
+        second.fit();
+        first.extend(second);
         let points: usize = 1_000 * 1_000;
         assert!(
             first.blocks.len() <= points.div_ceil(BLOCK_POINTS) + 1,
@@ -1779,6 +1846,53 @@ mod tests {
             let read = Kept::get(&kept, EnvelopeKey::stored(trace, view));
             assert_eq!(read.as_deref(), Some(envelope(trace).as_slice()));
         }
+    }
+
+    /// A set reading again most of the envelopes a set before it kept shares
+    /// that set's blocks, holding no second copy; one reading few of them
+    /// copies those out, holding on to none of the other set's blocks.
+    #[test]
+    fn a_kept_set_shares_the_blocks_it_reads_most_of() {
+        let view = sweep_view(0.0, 2.0);
+        let mut before = Kept::default();
+        for trace in 0..1_000 {
+            let points: Vec<[f64; 2]> = (0..1_000).map(|point| [point as f64, 0.0]).collect();
+            before.keep(
+                EnvelopeKey::stored(trace, view),
+                &Envelope::Own(Arc::from(points)),
+            );
+        }
+        before.fit();
+        let before = Arc::new(before);
+        let again = |traces: std::ops::Range<u64>| {
+            let mut kept = Kept::default();
+            for trace in traces {
+                let key = EnvelopeKey::stored(trace, view);
+                if let Some(envelope) = Kept::get(&before, key) {
+                    kept.keep(key, &envelope);
+                }
+            }
+            kept.fit();
+            kept
+        };
+        let shares = |kept: &Kept| {
+            kept.blocks
+                .iter()
+                .filter(|block| before.blocks.iter().any(|old| Arc::ptr_eq(old, block)))
+                .count()
+        };
+        let most = again(0..1_000);
+        assert_eq!(shares(&most), before.blocks.len());
+        assert!(
+            most.blocks
+                .iter()
+                .all(|block| before.blocks.iter().any(|old| Arc::ptr_eq(old, block)))
+        );
+        let few = again(0..10);
+        assert_eq!(shares(&few), 0);
+        let few = Arc::new(few);
+        let read = Kept::get(&few, EnvelopeKey::stored(9, view));
+        assert_eq!(read.map(|envelope| envelope.len()), Some(1_000));
     }
 
     /// Oracle 6: a hysteresis trace through the cache reaches an
