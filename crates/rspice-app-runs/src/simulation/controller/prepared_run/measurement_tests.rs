@@ -4,6 +4,7 @@ use super::fixtures::definition;
 use crate::product::AnalysisInstanceId;
 use crate::simulation::config::AnalysisConfig;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+use rspice_core::ResourceLimits;
 use rspice_simulation::netlist_preparation::measurements::materialize;
 use std::collections::HashMap;
 
@@ -19,7 +20,13 @@ fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {
     let source = "Measurement context\n.param freq=1000\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1u\n.end\n";
     let mut measurement = definition("gain", ".MEAS AC gain FIND VM(out) AT={freq}");
     measurement.producing_analysis = Some(study);
-    let composed = materialize(source, &[measurement.clone()], &drafts).unwrap();
+    let composed = materialize(
+        source,
+        &[measurement.clone()],
+        &drafts,
+        ResourceLimits::default(),
+    )
+    .unwrap();
     let config = AnalysisConfig::Ac(crate::simulation::config::AcAnalysisConfig {
         start_freq: 1000.0,
         stop_freq: 1000.0,
@@ -35,10 +42,15 @@ fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {
     assert!((result.measurement("gain").unwrap() - expected).abs() < 1e-9);
     let duplicate = composed.replace(".MEAS AC gain", ".MEAS AC GAIN");
     assert!(
-        materialize(&duplicate, &[measurement.clone()], &drafts)
-            .unwrap_err()
-            .to_string()
-            .contains("already defined")
+        materialize(
+            &duplicate,
+            &[measurement.clone()],
+            &drafts,
+            ResourceLimits::default()
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("already defined")
     );
     for expression in [
         ".MEAS AC wrong MAX VM(out)",
@@ -49,11 +61,17 @@ fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {
     ] {
         measurement.expression = expression.into();
         assert!(
-            materialize(source, &[measurement.clone()], &drafts).is_err(),
+            materialize(
+                source,
+                &[measurement.clone()],
+                &drafts,
+                ResourceLimits::default()
+            )
+            .is_err(),
             "{expression}"
         );
     }
     measurement.expression = ".MEAS AC gain FIND VM(out) AT={freq}".into();
     measurement.producing_analysis = Some(AnalysisInstanceId::new());
-    assert!(materialize(source, &[measurement], &drafts).is_err());
+    assert!(materialize(source, &[measurement], &drafts, ResourceLimits::default()).is_err());
 }

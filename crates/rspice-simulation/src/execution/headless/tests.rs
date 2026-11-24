@@ -813,6 +813,7 @@ fn a_trial_that_ends_in_finish_returns_its_transient_up_to_the_finish() {
         source,
         Some(&path),
         &crate::netlist_preparation::IncludeSearchChain::default(),
+        rspice_core::ResourceLimits::default(),
     )
     .unwrap();
     let mut trial = task(

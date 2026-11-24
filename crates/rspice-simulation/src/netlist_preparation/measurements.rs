@@ -32,10 +32,14 @@ fn family(
     None
 }
 
+/// Append the plan's authored measurements to `source`, the design's deck,
+/// and check each against the deck's own parameters and expressions. The
+/// deck is read under `limits`, those its run reads it under.
 pub fn materialize(
     source: &str,
     definitions: &[SpecificationDefinition],
     drafts: &HashMap<AnalysisInstanceId, &AnalysisDraft>,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<String, PreparationError> {
     if !definitions
         .iter()
@@ -45,6 +49,7 @@ pub fn materialize(
     }
     let parse_options = rspice_core::netlist::NetlistParseOptions {
         statistical_mode: rspice_core::netlist::StatisticalParamMode::Nominal,
+        resource_limits: limits,
         ..Default::default()
     };
     let parsed = rspice_core::Netlist::parse_with_options(source, parse_options)

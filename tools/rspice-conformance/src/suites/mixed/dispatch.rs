@@ -270,8 +270,12 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         .map(|(_, card)| card)
         .collect();
     let circuit = strip_cards(source);
-    let sealed = match seal_deck_hdl_sources(&circuit, Some(origin), &IncludeSearchChain::default())
-    {
+    let sealed = match seal_deck_hdl_sources(
+        &circuit,
+        Some(origin),
+        &IncludeSearchChain::default(),
+        rspice_core::ResourceLimits::default(),
+    ) {
         Ok(sealed) => sealed,
         Err(refusal) => return result.failed(hdl_refusal(&refusal)),
     };

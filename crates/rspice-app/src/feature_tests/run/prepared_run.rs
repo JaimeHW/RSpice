@@ -65,6 +65,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
             .as_ref()
             .map(|receipt| &receipt.compilation),
         &exact_directive,
+        rspice_core::ResourceLimits::default(),
     )
     .expect("inspect exact project directive");
     assert_eq!(exact_runtimes.len(), 1);
@@ -90,6 +91,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
             .as_ref()
             .map(|receipt| &receipt.compilation),
         &altered_directive,
+        rspice_core::ResourceLimits::default(),
     )
     .expect("inspect altered project directive");
     assert!(

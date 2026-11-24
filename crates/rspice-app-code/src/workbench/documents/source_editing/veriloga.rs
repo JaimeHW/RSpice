@@ -442,10 +442,14 @@ fn start_veriloga_compile(
                 SimulationController::prepare_design_netlist_for_inspection(model)
                     .ok()
                     .map(|netlist| {
-                        use rspice_simulation::project_veriloga::preparation::{
-                            deck_delay_select, deck_external_cells,
+                        // Read under the limits its run reads it under.
+                        use rspice_simulation::execution::run_memory::{
+                            deck_limits, machine_memory,
                         };
-                        (deck_external_cells(&netlist), deck_delay_select(&netlist))
+                        rspice_simulation::project_veriloga::preparation::deck_hdl(
+                            &netlist,
+                            deck_limits(machine_memory()),
+                        )
                     })
             }
         }

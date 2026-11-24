@@ -155,8 +155,13 @@ fn headless_tasks(origin: &Path) -> VecDeque<rspice_simulation::execution::Autho
         panic!("one .tran card, saw {cards:?}");
     };
     let circuit = circuit.join("\n") + "\n";
-    let sealed = seal_deck_hdl_sources(&circuit, Some(origin), &IncludeSearchChain::default())
-        .unwrap_or_else(|refusal| panic!("the deck's sources seal: {refusal:?}"));
+    let sealed = seal_deck_hdl_sources(
+        &circuit,
+        Some(origin),
+        &IncludeSearchChain::default(),
+        rspice_core::ResourceLimits::default(),
+    )
+    .unwrap_or_else(|refusal| panic!("the deck's sources seal: {refusal:?}"));
     let expanded = IncludeProcessor::new(origin.parent().expect("a deck directory"))
         .expand_content_rewriting(&sealed.source, origin, &mut |location, _| {
             sealed.included_line(location)

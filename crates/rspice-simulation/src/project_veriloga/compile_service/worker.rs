@@ -550,8 +550,9 @@ mod tests {
     }
 
     fn deck_cells() -> Vec<ExternalCell> {
-        let cells = crate::project_veriloga::preparation::deck_external_cells(
+        let (cells, _) = crate::project_veriloga::preparation::deck_hdl(
             "* deck\n.subckt half a b\nr1 a b 1k\n.ends\n.end\n",
+            rspice_core::ResourceLimits::default(),
         );
         assert_eq!(cells.len(), 1, "the deck offers `half`");
         cells

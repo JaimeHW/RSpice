@@ -3,6 +3,7 @@
 use crate::netlist_preparation::executable_logical_lines;
 use crate::preparation::{PreparationError, PreparationStage};
 use crate::project_veriloga::receipt::ProjectCompileReceipt;
+use rspice_core::ResourceLimits;
 use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceRegistry};
 use rspice_design::projection::ConfigurationExecutionProjection;
 use rspice_veriloga::ExternalCell;
@@ -10,31 +11,36 @@ use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_vocabulary::product::ProjectId;
 use std::collections::HashMap;
 
-/// The cells the deck `source` offers its HDL designs as leaves: its
-/// `.subckt`s and model cards, read as the engine reads them from the deck
-/// it builds ([`rspice_core::engine::hdl_external_cells`]). A deck that does
-/// not parse offers none; its run is refused where it is built.
-pub fn deck_external_cells(source: &str) -> Vec<ExternalCell> {
-    rspice_core::Netlist::parse(source).map_or_else(
-        |_| Vec::new(),
-        |netlist| rspice_core::engine::hdl_external_cells(&netlist),
-    )
-}
-
-/// The value of each min:typ:max expression the deck `source` keeps in its
-/// HDL designs: its `.options hdl_delay_select`, resolved into the run's
-/// configuration as the engine resolves it for the deck it builds
-/// ([`rspice_core::engine::hdl_delay_select`]). A deck that does not parse
-/// keeps the typical values; its run is refused where it is built.
-pub fn deck_delay_select(source: &str) -> DigitalDelaySelect {
-    rspice_core::Netlist::parse(source).map_or_else(
-        |_| DigitalDelaySelect::Typ,
+/// What the deck `source` gives its HDL designs, read once as the engine
+/// reads it from the deck it builds:
+///
+/// - the cells it offers them as leaves, its `.subckt`s and model cards
+///   ([`rspice_core::engine::hdl_external_cells`]);
+/// - the value of each min:typ:max expression they keep, its `.options
+///   hdl_delay_select` resolved into the run's configuration
+///   ([`rspice_core::engine::hdl_delay_select`]).
+///
+/// The deck is read under `limits`, those its run reads it under, so a deck
+/// the run accepts offers its cells here too. A deck that does not parse
+/// offers no cells and keeps the typical values; its run is refused where it
+/// is built.
+pub fn deck_hdl(source: &str, limits: ResourceLimits) -> (Vec<ExternalCell>, DigitalDelaySelect) {
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits: limits,
+        ..Default::default()
+    };
+    rspice_core::Netlist::parse_with_options(source, options).map_or_else(
+        |_| (Vec::new(), DigitalDelaySelect::Typ),
         |netlist| {
-            rspice_core::engine::hdl_delay_select(&rspice_core::resolve_simulation_config(
+            let config = rspice_core::resolve_simulation_config(
                 &rspice_core::SimulationConfig::default(),
                 Some(&netlist.options),
                 &rspice_core::SimulationConfigOverrides::default(),
-            ))
+            );
+            (
+                rspice_core::engine::hdl_external_cells(&netlist),
+                rspice_core::engine::hdl_delay_select(&config),
+            )
         },
     )
 }
@@ -352,12 +358,15 @@ fn compile_model_library_authority(
 }
 
 /// The project Verilog-A runtimes a deck's `.veriloga` directives name
-/// exactly, one per bundle, whichever cell view owns it.
+/// exactly, one per bundle, whichever cell view owns it, each compiled
+/// against the deck's cells and selection read under `limits`
+/// ([`deck_hdl`]).
 pub fn project_veriloga_runtimes_referenced_by(
     project_id: ProjectId,
     sources: &ProjectSourceRegistry,
     retained: Option<&ProjectCompileReceipt>,
     source: &str,
+    limits: ResourceLimits,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let lines = executable_logical_lines(source);
     let mut runtimes = Vec::new();
@@ -378,8 +387,7 @@ pub fn project_veriloga_runtimes_referenced_by(
         if !references_bundle {
             continue;
         }
-        let (cells, delay_select) =
-            deck.get_or_insert_with(|| (deck_external_cells(source), deck_delay_select(source)));
+        let (cells, delay_select) = deck.get_or_insert_with(|| deck_hdl(source, limits));
         let runtime =
             prepared_project_veriloga_runtime(project_id, bundle, retained, cells, *delay_select)?;
         let exact_reference = lines.iter().any(|(_, line)| {

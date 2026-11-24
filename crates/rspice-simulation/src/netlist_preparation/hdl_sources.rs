@@ -19,12 +19,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use rspice_core::ElaborationErrorKind;
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::netlist::{
     IncludeProcessor, NetlistParseOptions, NetlistSourceLocation, ParseError, ParseWithAbortError,
     ResolvedIncludeDependency, VerilogAInclude,
 };
+use rspice_core::{ElaborationErrorKind, ResourceLimits};
 use rspice_veriloga::ExternalCell;
 use rspice_veriloga::canonical_ir::digital::{DigitalDelaySelect, DigitalRealResolution};
 use rspice_vocabulary::product::ContentDigest;
@@ -199,19 +199,24 @@ impl From<DeckHdlRefusal> for PreparationError {
 /// [`SealedDeckHdl::source`]; an included file's lines are rewritten where
 /// an expansion of the deck's includes puts them
 /// ([`SealedDeckHdl::included_line`]).
+///
+/// The deck, its includes and its sources are read under `limits`, those the
+/// run reads the deck under, so a deck the run accepts offers its cells and
+/// its included lines here too.
 pub fn seal_deck_hdl_sources(
     source: &str,
     origin: Option<&Path>,
     include_search: &IncludeSearchChain,
+    limits: ResourceLimits,
 ) -> Result<SealedDeckHdl, DeckHdlRefusal> {
     let own = deck_hdl_sites(source);
-    if own.is_empty() && !includes_name_hdl_sources(source, origin, include_search) {
+    if own.is_empty() && !includes_name_hdl_sources(source, origin, include_search, limits) {
         return Ok(SealedDeckHdl {
             source: source.to_owned(),
             ..SealedDeckHdl::default()
         });
     }
-    let deck = DeckContext::read(source, origin, include_search);
+    let deck = DeckContext::read(source, origin, include_search, limits);
     let sites = match &deck.sites {
         // The parse names every line the run reads, in the engine's order;
         // the deck's own keep the spelling they were written with.
@@ -248,7 +253,8 @@ pub fn seal_deck_hdl_sources(
         super::dependencies::absolute_source_identity(origin)
             .unwrap_or_else(|_| origin.to_path_buf())
     });
-    let mut processor = IncludeProcessor::new(owner.as_deref().unwrap_or(Path::new(".")));
+    let mut processor = IncludeProcessor::new(owner.as_deref().unwrap_or(Path::new(".")))
+        .with_resource_limits(limits);
     include_search.apply_to(&mut processor);
 
     let mut reads = Vec::with_capacity(sites.len());
@@ -320,6 +326,7 @@ fn includes_name_hdl_sources(
     source: &str,
     origin: Option<&Path>,
     include_search: &IncludeSearchChain,
+    limits: ResourceLimits,
 ) -> bool {
     let Some(origin) = origin else {
         return false;
@@ -330,7 +337,7 @@ fn includes_name_hdl_sources(
     let origin = super::dependencies::absolute_source_identity(origin)
         .unwrap_or_else(|_| origin.to_path_buf());
     let root = canonical(&origin);
-    let mut processor = IncludeProcessor::new(&origin);
+    let mut processor = IncludeProcessor::new(&origin).with_resource_limits(limits);
     include_search.apply_to(&mut processor);
     let mut found = false;
     // An expansion that fails is refused by the same expansion when the deck
@@ -454,9 +461,18 @@ impl DeckContext {
     /// chain. A deck that does not parse here is refused by the same parser
     /// when it is prepared; its sources are still sealed, so a source that
     /// cannot be read is refused by name first.
-    fn read(source: &str, origin: Option<&Path>, include_search: &IncludeSearchChain) -> Self {
+    fn read(
+        source: &str,
+        origin: Option<&Path>,
+        include_search: &IncludeSearchChain,
+        limits: ResourceLimits,
+    ) -> Self {
+        let options = NetlistParseOptions {
+            resource_limits: limits,
+            ..NetlistParseOptions::default()
+        };
         let parsed = include_search
-            .parse_with_abort(source, origin, NetlistParseOptions::default(), &NoAbort)
+            .parse_with_abort(source, origin, options, &NoAbort)
             .ok();
         let Some(netlist) = parsed else {
             return Self {

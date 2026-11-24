@@ -40,12 +40,22 @@ impl Drop for Scratch {
 }
 
 fn seal(source: &str, origin: &Path) -> SealedDeckHdl {
-    seal_deck_hdl_sources(source, Some(origin), &IncludeSearchChain::default())
-        .unwrap_or_else(|refusal| panic!("the deck seals: {refusal}"))
+    seal_deck_hdl_sources(
+        source,
+        Some(origin),
+        &IncludeSearchChain::default(),
+        shipped(),
+    )
+    .unwrap_or_else(|refusal| panic!("the deck seals: {refusal}"))
 }
 
 fn refuse(source: &str, origin: &Path) -> super::DeckHdlRefusal {
-    match seal_deck_hdl_sources(source, Some(origin), &IncludeSearchChain::default()) {
+    match seal_deck_hdl_sources(
+        source,
+        Some(origin),
+        &IncludeSearchChain::default(),
+        shipped(),
+    ) {
         Ok(sealed) => panic!("the deck must be refused, sealed:\n{}", sealed.source),
         Err(refusal) => refusal,
     }
@@ -61,6 +71,11 @@ fn device_keys(sealed: &SealedDeckHdl) -> Vec<String> {
     keys
 }
 
+/// The limits this build ships, which every deck here is far inside.
+fn shipped() -> rspice_core::ResourceLimits {
+    rspice_core::ResourceLimits::default()
+}
+
 /// The sealed directive a key and alias take on a deck line.
 fn sealed_line(key: &str, alias: &str) -> String {
     format!(".veriloga \"{key}\" {alias}")
@@ -72,7 +87,7 @@ const PAIR: &str = "module tb(c);\n  output c;\n  reg c;\n  initial c = 1'b0;\ne
 #[test]
 fn a_deck_naming_no_source_is_returned_as_written() {
     let source = "t\nR1 a 0 1k\n.end\n";
-    let sealed = seal_deck_hdl_sources(source, None, &IncludeSearchChain::default())
+    let sealed = seal_deck_hdl_sources(source, None, &IncludeSearchChain::default(), shipped())
         .expect("nothing to seal");
     assert_eq!(sealed.source, source);
     assert!(sealed.runtimes.is_empty());
@@ -296,6 +311,7 @@ fn an_unsaved_deck_naming_a_relative_source_is_told_to_save() {
         "t\n.hdl \"pair.v\"\n.end\n",
         None,
         &IncludeSearchChain::default(),
+        shipped(),
     )
     .expect_err("a relative path with no deck file resolves nowhere");
     assert_eq!(refusal.kind, ElaborationErrorKind::MissingSource);

@@ -79,8 +79,14 @@ fn prepared(
     sources: &ProjectSourceRegistry,
     deck: &str,
 ) -> crate::veriloga::PreparedVerilogARuntimeSet {
-    let runtimes = project_veriloga_runtimes_referenced_by(project_id, sources, None, deck)
-        .unwrap_or_else(|error| panic!("the project route prepares the design: {error:?}"));
+    let runtimes = project_veriloga_runtimes_referenced_by(
+        project_id,
+        sources,
+        None,
+        deck,
+        ResourceLimits::default(),
+    )
+    .unwrap_or_else(|error| panic!("the project route prepares the design: {error:?}"));
     serde_json::from_str(&serde_json::to_string(&runtimes).expect("encode for the worker"))
         .expect("decode in the worker")
 }
@@ -281,7 +287,7 @@ fn a_design_without_leaves_keeps_its_identity_under_any_table() {
         project_id,
         bundle,
         "load",
-        Some(&deck_external_cells(HALF)),
+        Some(&deck_hdl(HALF, ResourceLimits::default()).0),
         DigitalDelaySelect::Typ,
     )
     .expect("compile against the deck's cells");
@@ -396,14 +402,11 @@ fn a_typical_receipt_goes_stale_when_the_deck_selects_min() {
     let bundle = sources.iter_bundles().next().expect("the design's bundle");
     let typ_deck = delayed_project_deck(project_id, &sources, "");
     let min_deck = delayed_project_deck(project_id, &sources, ".options hdl_delay_select=min\n");
-    let cells = deck_external_cells(&typ_deck);
-    assert_eq!(
-        cells,
-        deck_external_cells(&min_deck),
-        "only the selection changed"
-    );
-    assert_eq!(deck_delay_select(&typ_deck), DigitalDelaySelect::Typ);
-    assert_eq!(deck_delay_select(&min_deck), DigitalDelaySelect::Min);
+    let (cells, typ) = deck_hdl(&typ_deck, ResourceLimits::default());
+    let (min_cells, min) = deck_hdl(&min_deck, ResourceLimits::default());
+    assert_eq!(cells, min_cells, "only the selection changed");
+    assert_eq!(typ, DigitalDelaySelect::Typ);
+    assert_eq!(min, DigitalDelaySelect::Min);
 
     let (receipt, _) = crate::project_veriloga::receipt::compile_project_bundle_receipt_against(
         project_id,
@@ -421,12 +424,18 @@ fn a_typical_receipt_goes_stale_when_the_deck_selects_min() {
         .expect("the receipt seals");
 
     let from = |deck: &str| {
-        project_veriloga_runtimes_referenced_by(project_id, &sources, Some(&receipt), deck)
-            .unwrap_or_else(|error| panic!("the project route prepares the design: {error:?}"))
-            .device_runtimes()
-            .next()
-            .cloned()
-            .expect("the design")
+        project_veriloga_runtimes_referenced_by(
+            project_id,
+            &sources,
+            Some(&receipt),
+            deck,
+            ResourceLimits::default(),
+        )
+        .unwrap_or_else(|error| panic!("the project route prepares the design: {error:?}"))
+        .device_runtimes()
+        .next()
+        .cloned()
+        .expect("the design")
     };
     assert_eq!(from(&typ_deck), typical, "the current receipt serves");
     let minimum = from(&min_deck);

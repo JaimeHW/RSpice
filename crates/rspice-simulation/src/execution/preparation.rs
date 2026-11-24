@@ -30,10 +30,9 @@ use crate::output_contract::selection::{effective_plan_capture, projection_occur
 use crate::preparation::{QueuedAnalysis, validate_prepared_periodic_sources};
 use crate::project_technology::ProjectTechnologyInputs;
 use crate::project_veriloga::preparation::{
-    deck_delay_select, deck_external_cells, prepared_configuration_veriloga_runtimes,
-    prepared_corner_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
-    prepared_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
-    rebind_project_veriloga_source_keys,
+    deck_hdl, prepared_configuration_veriloga_runtimes, prepared_corner_veriloga_runtimes,
+    prepared_model_library_veriloga_runtimes, prepared_pdk_veriloga_runtimes,
+    project_veriloga_runtimes_referenced_by, rebind_project_veriloga_source_keys,
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -527,16 +526,26 @@ where
             .iter()
             .map(|instance| (instance.id(), instance.draft()))
             .collect(),
+        inputs.execution_limits(),
     )?;
     // A configured design is compiled against the cells of the deck it runs
     // in, which a design may instantiate as leaves, and under its min:typ:max
-    // selection.
+    // selection. A run that configures none reads nothing more of its deck.
+    let configures_veriloga = execution_projection
+        .plan()
+        .distinct_bindings()
+        .any(|execution| execution.project_veriloga().is_some());
+    let (deck_cells, delay_select) = if configures_veriloga {
+        deck_hdl(&netlist, inputs.execution_limits())
+    } else {
+        Default::default()
+    };
     let project_veriloga_runtimes = prepared_configuration_veriloga_runtimes(
         inputs.technology.project.id(),
         inputs.project_sources,
         &execution_projection,
-        &deck_external_cells(&netlist),
-        deck_delay_select(&netlist),
+        &deck_cells,
+        delay_select,
     )?
     .try_merge(external_veriloga_runtimes.clone())
     .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
@@ -811,12 +820,8 @@ pub fn manual_deck_hdl<R, A>(
     ),
     PreparationError,
 > {
-    expand_manual_deck(inputs, &manual, false, &rspice_core::NoAbort).map(|deck| {
-        (
-            deck_external_cells(&deck.expanded),
-            deck_delay_select(&deck.expanded),
-        )
-    })
+    expand_manual_deck(inputs, &manual, false, &rspice_core::NoAbort)
+        .map(|deck| deck_hdl(&deck.expanded, inputs.execution_limits()))
 }
 
 /// Expand the manual deck `manual` as its run executes it. With
@@ -897,6 +902,7 @@ fn expand_manual_deck<R, A>(
             &composed,
             origin,
             &inputs.include_search(),
+            inputs.execution_limits(),
         )?
     } else {
         crate::netlist_preparation::SealedDeckHdl {
@@ -1037,6 +1043,7 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         inputs.project_sources,
         inputs.compilation,
         &expanded,
+        inputs.execution_limits(),
     )?
     .try_merge(external_veriloga_runtimes)
     .and_then(|runtimes| runtimes.try_merge(deck_hdl_runtimes))
