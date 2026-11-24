@@ -13,6 +13,15 @@
 //! drops it, and an edit made meanwhile is not what is prepared. A save that
 //! fails holds the press, and the notice says why.
 //!
+//! The press looks at the deck's files on disk first, by their length and
+//! time. A file whose length or time moved since it was read is read away
+//! from the frame, and the press waits for it where a deck being prepared
+//! waits: a file changed on disk whose tab holds no edits is read again
+//! into its tab, and the deck is taken as it then stands. A file changed on
+//! disk while its tab held edits holds the press there, the notice saying
+//! so, until the reader reloads it or keeps theirs above the deck, and the
+//! press then goes on with the text they chose; Stop drops it.
+//!
 //! Run starts the run once it is prepared. A deck its preparation stops does
 //! not run: the deck comes to the front, where the editor marks its errors,
 //! and the notice names the deck and why. A preparation that would read a
@@ -47,18 +56,21 @@ use crate::workbench::slots::{manual_deck_in, veriloga_compilation_in};
 use crate::workbench::state::Workspace;
 use crate::workbench::workflows::netlist_workflow::record_include_resolutions;
 use rspice_app_runs::simulation::ManualDeckCopy;
-use rspice_app_runs::workbench::slots::runs::PreparingDeck;
+use rspice_app_runs::workbench::slots::runs::{DiskWait, PreparingDeck};
 use rspice_app_runs::workbench::waiting;
 use rspice_simulation::execution::run_memory::MemoryWarning;
 use rspice_simulation::preparation::PreparationError;
 
-/// Take the deck Run runs as it stands: its files looked at on disk, and
-/// those holding edits as the press took them, to be saved before the deck
-/// is prepared. `None` when there is no deck to take, or its files held the
-/// press, which the notices have said; an empty deck is not taken either,
-/// and the notice says it is empty.
+/// Take the deck Run runs as it stands for `action`: its files looked at on
+/// disk when `look`, and those holding edits as the press took them, to be
+/// saved before the deck is prepared. `None` when there is no deck to take,
+/// or its files held the press, which the notices have said, or the press
+/// waits for them on disk; an empty deck is not taken either, and the
+/// notice says it is empty.
 fn take_deck(
     cx: &mut Cx<'_, SourceFeature>,
+    action: DeckAction,
+    look: bool,
 ) -> Option<(ManualDeckCopy, Vec<deck_files::EditedFile>)> {
     // A deck still being read is the deck Run runs once it is read.
     if let Some(refusal) = land_deck_read(cx) {
@@ -68,21 +80,35 @@ fn take_deck(
     if cx.wb.workspace != Workspace::Netlist && !bring_project_deck(cx) {
         return None;
     }
-    // A file changed on disk under edits holds the press until the reader
+    // A file whose length or time moved since it was read holds the press
+    // until it is read, and one changed on disk under edits until the reader
     // answers for it.
-    let edited =
-        match deck_files::sync_before_run(cx.model, &mut cx.state.netlist, cx.wb.messages()) {
-            Ok(deck_files::BeforeRun { notices, edited }) => {
-                for notice in notices {
-                    cx.wb.prompt(notice);
-                }
-                edited
+    let edited = match deck_files::sync_before_run(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.disk_looks,
+        look,
+        cx.wb.messages(),
+    ) {
+        Ok(deck_files::BeforeRun {
+            notices,
+            edited,
+            waits,
+        }) => {
+            for notice in notices {
+                cx.wb.prompt(notice);
             }
-            Err(why) => {
-                cx.wb.prompt(why);
+            if let Some(waits) = waits {
+                wait_on_disk(cx, action, waits);
                 return None;
             }
-        };
+            edited
+        }
+        Err(why) => {
+            cx.wb.prompt(why);
+            return None;
+        }
+    };
     // The deck's text is shared with the deck, not copied.
     let deck = manual_deck_in(&cx.state.netlist).map(ManualDeckCopy::of)?;
     // An empty deck has nothing to read: it comes to the front and the
@@ -100,6 +126,43 @@ fn take_deck(
         return None;
     }
     Some((deck, edited))
+}
+
+/// Hold the press of `action` on the deck Run runs until what it waits for
+/// on the deck's files on disk is answered: it waits where a deck being
+/// prepared waits, nothing of it prepared and Stop dropping it, and
+/// [`poll_deck_run`] presses again once the reads are taken in or the reader
+/// has answered. A file changed on disk under edits says so now.
+fn wait_on_disk(
+    cx: &mut Cx<'_, SourceFeature>,
+    action: DeckAction,
+    waits: deck_files::WaitsOnDisk,
+) {
+    let Some(id) = cx.state.netlist.open_deck.as_ref().map(|deck| deck.id) else {
+        return;
+    };
+    let Some(ManualDeckCopy { name, text, .. }) =
+        manual_deck_in(&cx.state.netlist).map(ManualDeckCopy::of)
+    else {
+        return;
+    };
+    let disk = match waits {
+        deck_files::WaitsOnDisk::Reading => DiskWait::Reading(id),
+        deck_files::WaitsOnDisk::Answer(why) => {
+            cx.wb.prompt(why);
+            DiskWait::Answer(id)
+        }
+    };
+    cx.runs.preparing_deck = Some(PreparingDeck {
+        name,
+        text,
+        action,
+        memory: None,
+        disk: Some(disk),
+    });
+    if action == DeckAction::Run {
+        cx.wb.run_press_route = Some(cx.wb.current_route());
+    }
 }
 
 /// Whether `text` holds nothing but blanks, read a line at a time from its
@@ -230,6 +293,20 @@ fn save_before_preparing(
     }
 }
 
+/// Take in the looks at the deck's files on disk that have ended: a file
+/// changed on disk is read again into a tab with no edits, or shown on one
+/// holding edits, as when the page is shown, and the notice says so.
+fn land_disk_looks(cx: &mut Cx<'_, SourceFeature>) {
+    for notice in deck_files::land_disk_looks(
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.disk_looks,
+        cx.wb.messages(),
+    ) {
+        cx.wb.prompt(notice);
+    }
+}
+
 /// Take in what the saves of decks' files made before their preparation
 /// came to: the files are held to what was written, and a save that failed
 /// says why, as a save does.
@@ -246,7 +323,14 @@ fn land_deck_saves(cx: &mut Cx<'_, SourceFeature>) {
 /// how its preparation ends. Where the deck is prepared in the press, that
 /// is now.
 fn press(cx: &mut Cx<'_, SourceFeature>, action: DeckAction) {
-    let Some((deck, edited)) = take_deck(cx) else {
+    press_looking(cx, action, true);
+}
+
+/// [`press`], the deck's files looked at on disk when `look`; else a file
+/// whose length or time moved since it was read is taken as its tab holds
+/// it.
+fn press_looking(cx: &mut Cx<'_, SourceFeature>, action: DeckAction, look: bool) {
+    let Some((deck, edited)) = take_deck(cx, action, look) else {
         return;
     };
     let before = save_before_preparing(cx, edited);
@@ -274,6 +358,7 @@ fn press(cx: &mut Cx<'_, SourceFeature>, action: DeckAction) {
         text,
         action,
         memory: None,
+        disk: None,
     });
     if action == DeckAction::Run {
         cx.wb.run_press_route = Some(cx.wb.current_route());
@@ -303,11 +388,18 @@ pub fn check_deck(cx: &mut Cx<'_, SourceFeature>) {
 /// Take how the deck's preparation ended, once it has: Run's run starts,
 /// Check says what it found, or the deck comes to the front and the notice
 /// says why it cannot run, as when the press prepared it. Called once per
-/// frame; takes in the saves made before preparations, and does nothing more
-/// while nothing is prepared or the preparation goes on, or while a run
-/// prepared waits for the reader to run it anyway.
+/// frame; takes in the saves made before preparations and the looks at the
+/// disk that ended, presses again for a press that waited on disk once it
+/// is answered, and does nothing more while nothing is prepared or the
+/// preparation goes on, or while a run prepared waits for the reader to run
+/// it anyway.
 pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
     land_deck_saves(cx);
+    land_disk_looks(cx);
+    if let Some(disk) = cx.runs.preparing_deck.as_ref().and_then(|deck| deck.disk) {
+        answer_disk_wait(cx, disk);
+        return;
+    }
     if cx
         .runs
         .preparing_deck
@@ -396,6 +488,33 @@ pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
     bring_findings_current(cx);
 }
 
+/// Press again for the press that waits on the deck's files on disk
+/// (`disk`) once it is answered: the reads were taken in, a file that did
+/// not read taken as its tab holds it, or the reader reloaded the file or
+/// kept theirs, and the disk is looked at again. A press whose deck is no
+/// longer open is dropped.
+fn answer_disk_wait(cx: &mut Cx<'_, SourceFeature>, disk: DiskWait) {
+    let (deck, answered, look) = match disk {
+        DiskWait::Reading(deck) => (deck, cx.state.disk_looks.is_empty(), false),
+        DiskWait::Answer(deck) => (deck, !deck_files::waits_for_answer(&cx.state.netlist), true),
+    };
+    let open = cx
+        .state
+        .netlist
+        .open_deck
+        .as_ref()
+        .is_some_and(|open| open.id == deck);
+    if open && !answered {
+        return;
+    }
+    let Some(PreparingDeck { action, .. }) = cx.runs.preparing_deck.take() else {
+        return;
+    };
+    if open {
+        press_looking(cx, action, look);
+    }
+}
+
 /// Hold the run of the deck `name`, prepared from `text` and retained, which
 /// needs more memory than the machine has free (`warning`): it waits where a
 /// run being prepared waits, and nothing of it dispatches until the reader
@@ -417,6 +536,7 @@ fn hold_for_memory(
         text,
         action: DeckAction::Run,
         memory: Some(warning),
+        disk: None,
     });
     if cx.wb.workspace != Workspace::Netlist {
         cx.execute(crate::workbench::framework::command_registry::ids::NETLIST_WORKSPACE);

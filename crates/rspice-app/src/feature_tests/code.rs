@@ -10,6 +10,7 @@ use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_so
 
 mod deck_dialects;
 mod deck_disk;
+mod deck_disk_away;
 #[cfg(not(target_arch = "wasm32"))]
 mod deck_in_front;
 mod deck_read_away;

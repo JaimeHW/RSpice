@@ -39,6 +39,9 @@ pub struct SourceState {
     /// The saves of the deck's files a run or a check made before preparing
     /// it, until the frame loop takes each in.
     pub deck_saves: crate::workbench::documents::deck_files::DeckSaves,
+    /// The deck's files being read away from the frame to tell whether
+    /// their text changed on disk, until the frame loop takes each answer in.
+    pub disk_looks: crate::workbench::documents::deck_files::DiskLooks,
 }
 
 impl SourceState {

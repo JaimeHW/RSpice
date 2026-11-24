@@ -433,6 +433,7 @@ fn disk_stamp(path: &Path, text: &str) -> DiskStamp {
 
 /// What a look at the disk found for one open file.
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
 enum OnDisk {
     /// What the session last read or wrote.
     Same,
@@ -444,26 +445,42 @@ enum OnDisk {
     Gone,
 }
 
-/// Look at the file on disk: same length and time means unchanged, else its
-/// text decides.
+/// What the file's length and time on disk say of it.
 #[cfg(not(target_arch = "wasm32"))]
-fn look_at_disk(file: &OpenFile, messages: MessageCatalog) -> OnDisk {
+enum ByMetadata<'a> {
+    /// Enough: the file is as last read or written, or not there.
+    Settled(OnDisk),
+    /// They moved since `stamp` was taken: the file's text decides.
+    Moved(&'a DiskStamp),
+}
+
+/// Look at the file's length and time on disk: the same as when it was
+/// last read or written means unchanged. Nothing of the file is read.
+#[cfg(not(target_arch = "wasm32"))]
+fn by_metadata(file: &OpenFile) -> ByMetadata<'_> {
     let Some(stamp) = &file.disk else {
-        return OnDisk::Same;
+        return ByMetadata::Settled(OnDisk::Same);
     };
     let Ok(metadata) = std::fs::metadata(&file.path) else {
-        return OnDisk::Gone;
+        return ByMetadata::Settled(OnDisk::Gone);
     };
     if metadata.len() == stamp.len && metadata.modified().ok() == stamp.modified {
-        return OnDisk::Same;
+        return ByMetadata::Settled(OnDisk::Same);
     }
-    let Ok(read) = read_file(&file.path, messages) else {
+    ByMetadata::Moved(stamp)
+}
+
+/// Read the file at `path` and tell its text against `since`, what was
+/// last read from or written to it.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_against(path: &Path, since: &DiskStamp, messages: MessageCatalog) -> OnDisk {
+    let Ok(read) = read_file(path, messages) else {
         return OnDisk::Gone;
     };
     let Some(now) = read.disk else {
         return OnDisk::Gone;
     };
-    if now.digest == stamp.digest {
+    if now.digest == since.digest {
         return OnDisk::Touched(now);
     }
     OnDisk::Changed(DiskChange {
@@ -472,6 +489,16 @@ fn look_at_disk(file: &OpenFile, messages: MessageCatalog) -> OnDisk {
         line_ending: read.line_ending,
         stamp: now,
     })
+}
+
+/// Look at the file on disk: same length and time means unchanged, else its
+/// text decides.
+#[cfg(not(target_arch = "wasm32"))]
+fn look_at_disk(file: &OpenFile, messages: MessageCatalog) -> OnDisk {
+    match by_metadata(file) {
+        ByMetadata::Settled(found) => found,
+        ByMetadata::Moved(since) => read_against(&file.path, since, messages),
+    }
 }
 
 /// The open deck's files, the deck first, each with the include key it goes
@@ -490,37 +517,98 @@ fn deck_file_keys(netlist: &NetlistDocumentState) -> Vec<Option<String>> {
         .unwrap_or_default()
 }
 
-/// Look at the disk for every file of the open deck. A file changed on disk
-/// whose tab holds no edits is read again, as an edit Undo takes back; one
-/// whose tab holds edits keeps them and its tab shows the change. The
-/// notices to show: one for each file read again.
+/// The looks at the disk under way: each a file of the open deck whose
+/// length or time moved since it was read, read away from the frame to
+/// tell whether its text changed, until the frame loop takes the answer in
+/// ([`land_disk_looks`]).
+#[derive(Debug, Clone, Default)]
+pub struct DiskLooks {
+    #[cfg(not(target_arch = "wasm32"))]
+    looks: Vec<DiskLook>,
+}
+
+impl DiskLooks {
+    /// Whether no look at the disk is under way.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.looks.is_empty()
+        }
+        #[cfg(target_arch = "wasm32")]
+        true
+    }
+}
+
+/// One file's look at the disk, away from the frame.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+struct DiskLook {
+    /// The include the file is, or `None` for the deck.
+    include: Option<String>,
+    path: PathBuf,
+    /// What was last read from or written to the file as the look started:
+    /// an answer for a file read, written or reloaded since is not taken.
+    since: DiskStamp,
+    read: ReadAway<OnDisk>,
+}
+
+/// Look at the disk for every file of the open deck: by its length and time
+/// on the frame, and a file whose length or time moved since it was read is
+/// read to tell whether its text changed, away from the frame where decks
+/// are read away from it, its answer taken in by a later frame
+/// ([`land_disk_looks`]). A file changed on disk whose tab holds no edits
+/// is read again, as an edit Undo takes back; one whose tab holds edits
+/// keeps them and its tab shows the change. The notices to show now: one
+/// for each file read again.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn check_disk(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    looks: &mut DiskLooks,
     messages: crate::workbench::MessageCatalog,
 ) -> Vec<String> {
     let mut notices = Vec::new();
     for include in deck_file_keys(netlist) {
         let Some(file) = netlist
             .open_deck
-            .as_mut()
-            .and_then(|deck| deck.file_mut(include.as_deref()))
+            .as_ref()
+            .and_then(|deck| deck.file(include.as_deref()))
         else {
             continue;
         };
-        match look_at_disk(file, messages) {
-            OnDisk::Same | OnDisk::Gone => {}
-            OnDisk::Touched(stamp) => file.disk = Some(stamp),
-            OnDisk::Changed(change) if file.dirty => file.disk_change = Some(Box::new(change)),
-            OnDisk::Changed(change) => {
-                let name = file.name();
-                take_disk_text(model, netlist, include.as_deref(), change);
-                notices.push(
-                    messages.format(MessageId::NetlistDeckReloadedChanged, &[("name", &name)]),
-                );
-            }
+        let ByMetadata::Moved(since) = by_metadata(file) else {
+            continue;
+        };
+        // A file already being looked at is answered by that look.
+        if looks.looks.iter().any(|look| look.path == file.path) {
+            continue;
         }
+        let (path, since) = (file.path.clone(), since.clone());
+        let found = if reads_away() {
+            let (from, stamp) = (path.clone(), since.clone());
+            match ReadAway::start(move || read_against(&from, &stamp, messages)) {
+                Ok(read) => {
+                    looks.looks.push(DiskLook {
+                        include,
+                        path,
+                        since,
+                        read,
+                    });
+                    continue;
+                }
+                Err(_) => read_against(&path, &since, messages),
+            }
+        } else {
+            read_against(&path, &since, messages)
+        };
+        notices.extend(take_look(
+            model,
+            netlist,
+            include.as_deref(),
+            found,
+            messages,
+        ));
     }
     notices
 }
@@ -530,9 +618,113 @@ pub fn check_disk(
 pub fn check_disk(
     _model: &mut Model,
     _netlist: &mut NetlistDocumentState,
+    _looks: &mut DiskLooks,
     _messages: crate::workbench::MessageCatalog,
 ) -> Vec<String> {
     Vec::new()
+}
+
+/// Take in the looks at the disk that have ended, as [`check_disk`] takes
+/// what it finds: each for a file of the open deck still as it was when its
+/// look started; a file read, written or reloaded since keeps what that
+/// gave it. The notices to show: one for each file read again.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn land_disk_looks(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    looks: &mut DiskLooks,
+    messages: crate::workbench::MessageCatalog,
+) -> Vec<String> {
+    if looks.looks.is_empty() {
+        return Vec::new();
+    }
+    let mut notices = Vec::new();
+    for look in std::mem::take(&mut looks.looks) {
+        let found = match look.read.landed(false) {
+            Landed::Reading => {
+                looks.looks.push(look);
+                continue;
+            }
+            Landed::Read(found) => found,
+            Landed::Lost => continue,
+        };
+        let current = netlist
+            .open_deck
+            .as_ref()
+            .and_then(|deck| deck.file(look.include.as_deref()))
+            .is_some_and(|file| file.path == look.path && file.disk.as_ref() == Some(&look.since));
+        if current {
+            notices.extend(take_look(
+                model,
+                netlist,
+                look.include.as_deref(),
+                found,
+                messages,
+            ));
+        }
+    }
+    notices
+}
+
+/// Where there is no file system, no look at the disk is under way.
+#[cfg(target_arch = "wasm32")]
+pub fn land_disk_looks(
+    _model: &mut Model,
+    _netlist: &mut NetlistDocumentState,
+    _looks: &mut DiskLooks,
+    _messages: crate::workbench::MessageCatalog,
+) -> Vec<String> {
+    Vec::new()
+}
+
+/// Take what a look at the disk found for the file `include` names (the
+/// deck for `None`): the stamp of the same text written again; a change on
+/// disk read into a tab with no edits, or shown on one holding edits. The
+/// notice to show for a file read again.
+#[cfg(not(target_arch = "wasm32"))]
+fn take_look(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    include: Option<&str>,
+    found: OnDisk,
+    messages: crate::workbench::MessageCatalog,
+) -> Option<String> {
+    let file = netlist
+        .open_deck
+        .as_mut()
+        .and_then(|deck| deck.file_mut(include))?;
+    match found {
+        OnDisk::Same | OnDisk::Gone => None,
+        OnDisk::Touched(stamp) => {
+            file.disk = Some(stamp);
+            None
+        }
+        OnDisk::Changed(change) if file.dirty => {
+            file.disk_change = Some(Box::new(change));
+            None
+        }
+        OnDisk::Changed(change) => {
+            let name = file.name();
+            take_disk_text(model, netlist, include, change);
+            Some(messages.format(MessageId::NetlistDeckReloadedChanged, &[("name", &name)]))
+        }
+    }
+}
+
+/// The open deck's file that changed on disk while its tab held edits, and
+/// waits for the reader to reload it or keep theirs.
+fn changed_under_edits(netlist: &NetlistDocumentState) -> Option<&OpenFile> {
+    let deck = netlist.open_deck.as_ref()?;
+    std::iter::once(&deck.root)
+        .chain(&deck.includes)
+        .find(|file| file.disk_change.is_some())
+}
+
+/// Whether a file of the open deck changed on disk while its tab held
+/// edits, and waits for the reader to reload it or keep theirs.
+#[must_use]
+pub fn waits_for_answer(netlist: &NetlistDocumentState) -> bool {
+    changed_under_edits(netlist).is_some()
 }
 
 /// Put what is on disk in the tab of the file `include` names (the deck for
@@ -1233,20 +1425,23 @@ pub fn deck_from_generated(source: &str, design: &str, when: &str) -> String {
     deck
 }
 
-/// Before a run of the open deck: look at the disk, and take each of its
-/// files that holds edits as it stands, to be saved before the deck is
-/// prepared ([`save_edited_files`]), so the run reads what its tabs show.
-/// Until that save is taken in ([`land_saved_before_run`]) a file being
-/// saved is not looked at on disk. What the look found, or why the run
-/// waits.
+/// Before a run of the open deck: look at the disk ([`check_disk`]) when
+/// `look`, and take each of its files that holds edits as it stands, to be
+/// saved before the deck is prepared ([`save_edited_files`]), so the run
+/// reads what its tabs show. Until that save is taken in
+/// ([`land_saved_before_run`]) a file being saved is not looked at on disk.
+/// What the look found, and what the run waits for on disk, when it waits,
+/// with no file taken; or why it does not run.
 pub fn sync_before_run(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
+    looks: &mut DiskLooks,
+    look: bool,
     messages: crate::workbench::MessageCatalog,
 ) -> Result<BeforeRun, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (model, netlist, messages);
+        let _ = (model, netlist, looks, look, messages);
         Ok(BeforeRun::default())
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -1260,22 +1455,32 @@ pub fn sync_before_run(
                 ],
             ));
         }
-        let notices = check_disk(model, netlist, messages);
-        let Some(deck) = netlist.open_deck.as_mut().filter(|deck| !deck.is_stored()) else {
+        let notices = if look {
+            check_disk(model, netlist, looks, messages)
+        } else {
+            Vec::new()
+        };
+        let waits = if looks.is_empty() {
+            changed_under_edits(netlist).map(|changed| {
+                WaitsOnDisk::Answer(messages.format(
+                    MessageId::NetlistRunWaitsOnDisk,
+                    &[("name", &changed.name())],
+                ))
+            })
+        } else {
+            Some(WaitsOnDisk::Reading)
+        };
+        let Some(deck) = netlist
+            .open_deck
+            .as_mut()
+            .filter(|deck| waits.is_none() && !deck.is_stored())
+        else {
             return Ok(BeforeRun {
                 notices,
                 edited: Vec::new(),
+                waits,
             });
         };
-        if let Some(changed) = std::iter::once(&deck.root)
-            .chain(&deck.includes)
-            .find(|file| file.disk_change.is_some())
-        {
-            return Err(messages.format(
-                MessageId::NetlistRunWaitsOnDisk,
-                &[("name", &changed.name())],
-            ));
-        }
         let edited = std::iter::once((None, &mut deck.root))
             .chain(
                 deck.includes
@@ -1293,17 +1498,37 @@ pub fn sync_before_run(
                 disk: file.disk.take(),
             })
             .collect();
-        Ok(BeforeRun { notices, edited })
+        Ok(BeforeRun {
+            notices,
+            edited,
+            waits: None,
+        })
     }
 }
 
 /// What a run or check of the open deck finds before it starts: the notices
 /// looking at the disk gave, and the files holding edits, as the press took
-/// them, which are saved before the deck is prepared.
+/// them, which are saved before the deck is prepared; or what it waits for
+/// on disk first.
 #[derive(Debug, Default)]
 pub struct BeforeRun {
     pub notices: Vec<String>,
     pub edited: Vec<EditedFile>,
+    /// What the run waits for on the deck's files on disk before the deck
+    /// is prepared, when it waits; no file is taken then.
+    pub waits: Option<WaitsOnDisk>,
+}
+
+/// What a run waits for on the deck's files on disk before the deck is
+/// prepared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitsOnDisk {
+    /// The read, away from the frame, of files whose length or time moved
+    /// since they were read.
+    Reading,
+    /// The reader's answer for a file changed on disk while its tab held
+    /// edits, to reload it or keep theirs: why the run waits, in words.
+    Answer(String),
 }
 
 /// A file of the open deck holding edits, as a press took it: what saving it

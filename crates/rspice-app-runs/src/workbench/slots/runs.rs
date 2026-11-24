@@ -25,8 +25,9 @@ pub struct RunsState {
     /// Verilog-A compile to end. Runtime only.
     pub waiting: crate::workbench::waiting::WaitingPreparations,
     /// The deck whose run is being prepared away from the frame, as the Run
-    /// press took it, and the run that waits there for more memory than is
-    /// free. Runtime only.
+    /// press took it, the press that waits there on the deck's files on
+    /// disk, and the run that waits there for more memory than is free.
+    /// Runtime only.
     pub preparing_deck: Option<PreparingDeck>,
 }
 
@@ -42,7 +43,22 @@ pub struct PreparingDeck {
     /// Run anyway and Stop, and nothing of it dispatches until the reader
     /// runs it anyway. The status line and the band above the deck say it.
     pub memory: Option<rspice_simulation::execution::run_memory::MemoryWarning>,
+    /// What the press waits for on the deck's files on disk before the
+    /// deck is prepared, when it waits: nothing of it is prepared until
+    /// then, and Stop drops it.
+    pub disk: Option<DiskWait>,
     pub action: crate::simulation::controller::DeckAction,
+}
+
+/// What a press waits for on the files of the deck it took, on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskWait {
+    /// Their read, away from the frame: a file whose length or time moved
+    /// since it was read is read to tell whether its text changed.
+    Reading(rspice_app_state::state::DeckId),
+    /// The reader's answer for a file changed on disk while its tab held
+    /// edits: Reload or Keep mine above the deck.
+    Answer(rspice_app_state::state::DeckId),
 }
 
 impl PreparingDeck {

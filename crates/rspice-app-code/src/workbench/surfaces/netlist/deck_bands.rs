@@ -23,7 +23,12 @@ use crate::workbench::{MessageCatalog, MessageId};
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     let messages = cx.wb.messages();
     if disk_moment(ui) {
-        for notice in deck_files::check_disk(cx.model, &mut cx.state.netlist, messages) {
+        for notice in deck_files::check_disk(
+            cx.model,
+            &mut cx.state.netlist,
+            &mut cx.state.disk_looks,
+            messages,
+        ) {
             cx.wb.prompt(notice);
         }
     }

@@ -55,6 +55,7 @@ fn edited_then_changed_on_disk(path: &std::path::Path) -> AppState {
         deck_files::check_disk(
             &mut state.model,
             &mut state.code.netlist,
+            &mut state.code.disk_looks,
             state.workbench.messages()
         ),
         Vec::<String>::new()
@@ -255,6 +256,7 @@ fn comparing_an_include_with_its_file_names_the_include_on_the_tab() {
     let _ = deck_files::check_disk(
         &mut state.model,
         &mut state.code.netlist,
+        &mut state.code.disk_looks,
         state.workbench.messages(),
     );
     let key = state
