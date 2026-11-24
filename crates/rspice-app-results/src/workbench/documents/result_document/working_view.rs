@@ -81,6 +81,10 @@ pub(crate) struct QuickViewBinding {
     /// signals among it: it is drawn from the view again, whether or not
     /// the view took the change.
     retake: Option<Vec<SourceWaveformPresentationKey>>,
+    /// The view took the reader's ticks as drawn, in a pane with markers:
+    /// a marker sits on its signal only while the signal is drawn, so the
+    /// markers are drawn from the view again, and nothing else.
+    remark: bool,
 }
 
 /// Whose working view draws `run`.
@@ -292,28 +296,12 @@ pub fn capture(state: &mut ResultsParts<'_>) {
     } = capture_edits(state, &binding, ticks.as_deref());
     let view = binding.view;
     // Only ticks the view takes as they stand leave the quick view drawing
-    // what it draws: the view's change is the reader's, and nothing else is
-    // drawn from it (a marker on a signal taken off loses its anchor).
+    // what it draws: the view's change is the reader's, and nothing but
+    // the markers it moves on or off their signals is drawn from it.
     let normalize = normalize.filter(|_| {
-        held && state
-            .model
-            .workspace
-            .content
-            .visualization_document(view)
-            .is_some_and(|document| {
-                edits.iter().all(|edit| match edit {
-                    DocumentEdit::SetSignalsPlotted {
-                        pane_id,
-                        plotted: false,
-                        ..
-                    } => !document
-                        .markers()
-                        .iter()
-                        .any(|marker| marker.pane_id == *pane_id),
-                    DocumentEdit::SetSignalsPlotted { .. } => true,
-                    _ => false,
-                })
-            })
+        held && edits
+            .iter()
+            .all(|edit| matches!(edit, DocumentEdit::SetSignalsPlotted { .. }))
     });
     let making: usize = new.iter().map(|(_, names)| names.len()).sum();
     let preparations = (making > FRAME_TRACES)
@@ -749,6 +737,23 @@ fn keep(
             .visualization_document(view)
             .map(|document| (document.revision(), document.generation()))
     };
+    // A marker sits on its signal while the signal is drawn: ticks in a
+    // pane with markers draw the markers again.
+    let remark = normalize.is_some()
+        && edits.as_ref().is_ok_and(|edits| {
+            let document = state.model.workspace.content.visualization_document(view);
+            edits.iter().any(|edit| match edit {
+                DocumentEdit::SetSignalsPlotted { pane_id, .. } => {
+                    document.is_some_and(|document| {
+                        document
+                            .markers()
+                            .iter()
+                            .any(|marker| marker.pane_id == *pane_id)
+                    })
+                }
+                _ => false,
+            })
+        });
     let mut drawn = false;
     match edits {
         Ok(edits) if edits.is_empty() => {
@@ -776,6 +781,7 @@ fn keep(
     if let Some(normalize) = normalize {
         if let (Some(binding), Some((_, generation))) = (binding.as_deref_mut(), stands(state)) {
             binding.generation = generation;
+            binding.remark |= remark;
         }
         for (key, set, visible) in normalize {
             // A tick the reader set again since is theirs, kept next.
@@ -1389,7 +1395,9 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
     let drawn = held.filter(|binding| {
         binding.runs == runs || (binding.signals.is_some() && binding.signals == signals)
     });
-    if drawn.is_some_and(|binding| binding.generation == generation && binding.retake.is_none()) {
+    if drawn.is_some_and(|binding| {
+        binding.generation == generation && binding.retake.is_none() && !binding.remark
+    }) {
         let results = &mut *state.results;
         if let Some(binding) = results.working_view.as_deref_mut() {
             binding.runs = runs;
@@ -1705,6 +1713,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         signals,
         redraw: false,
         retake: None,
+        remark: false,
     }));
 }
 
