@@ -660,10 +660,7 @@ impl<T: Identified + Clone + PartialEq> EntityList<T, Unindexed> {
         self.items
             .iter_mut()
             .filter(move |item| pick(item))
-            .map(move |item| {
-                keep_present(journal, item);
-                item
-            })
+            .inspect(move |item| keep_present(journal, item))
     }
 }
 
