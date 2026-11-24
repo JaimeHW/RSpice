@@ -211,6 +211,13 @@ impl RunEventSink for ResultsParts<'_> {
             RunEvent::CompletionsCollected => self
                 .analysis
                 .synchronize_specialized_viewer_cache_authority(self.model),
+            RunEvent::AnalysisLookedOver {
+                analysis,
+                index,
+                verdict,
+            } => self
+                .results
+                .adopt_looked_over(&self.model.simulation, analysis, index, verdict),
         }
     }
 }

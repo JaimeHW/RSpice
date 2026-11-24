@@ -5,9 +5,13 @@
 //! event before the report returns, so code that reads a viewer after
 //! reporting to it sees the event's effect.
 
+use std::sync::Arc;
+
+use rspice_results::result_presentation::AnalysisPresentationKey;
 use rspice_results_ui::bode::BodeData;
 use rspice_results_ui::eye_diagram::{EyeData, EyeTimebaseProvenance};
 use rspice_results_ui::fft::{FftInputError, PreparedFftInput};
+use rspice_results_ui::signal_index::SignalIndex;
 
 use super::{ActiveViewer, SpecializedViewerCacheProvenance};
 
@@ -58,6 +62,16 @@ pub enum RunEvent {
     /// The run tier finished collecting this frame's completions, which may
     /// have changed the active result.
     CompletionsCollected,
+    /// A finished analysis was looked over away from the frame as it was
+    /// converted: `index` finds its signals by name, and `verdict`, when
+    /// there is one, is what validating its evidence answers. Both are of the
+    /// analysis `analysis` names as the retained runs stand when this is
+    /// reported, and hold until the runs change.
+    AnalysisLookedOver {
+        analysis: AnalysisPresentationKey,
+        index: Arc<SignalIndex>,
+        verdict: Option<Result<(), Arc<str>>>,
+    },
 }
 
 /// Where the run tier reports. The implementor applies each event before

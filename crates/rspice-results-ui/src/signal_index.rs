@@ -200,6 +200,25 @@ impl SignalIndices {
                 .or_insert_with(|| Arc::new(SignalIndex::of(analysis))),
         ))
     }
+
+    /// Hold `index`, made elsewhere, as the index of the analysis `key` names
+    /// among the retained runs at `revision`: asked for at that revision, it
+    /// is not made again. A run that finished is indexed as it is converted,
+    /// away from the frame that first shows it.
+    pub fn adopt(
+        &self,
+        revision: &SourceRevision,
+        key: AnalysisPresentationKey,
+        index: Arc<SignalIndex>,
+    ) {
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.as_ref().is_none_or(|(at, _)| at != revision) {
+            *held = Some((revision.clone(), HashMap::new()));
+        }
+        if let Some((_, indices)) = held.as_mut() {
+            indices.insert(key, index);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -252,5 +271,34 @@ mod tests {
             index.first_columns(&analysis, &names),
             vec![None, Some(3), Some(0), Some(1), Some(3)]
         );
+    }
+
+    /// An index made elsewhere is the one asked for while the runs stand as
+    /// it was held at, and one made afresh once they change.
+    #[test]
+    fn an_adopted_index_is_answered_until_the_runs_change() {
+        let analysis = analysis(&[("V(a)", true), ("V(b)", false)]);
+        let key =
+            AnalysisPresentationKey::new(rspice_vocabulary::product::DatasetId::new(), &analysis);
+        let indices = SignalIndices::default();
+        let mut revision = SourceRevision::default();
+        let adopted = Arc::new(SignalIndex::of(&analysis));
+        indices.adopt(&revision, key, Arc::clone(&adopted));
+        let asked = indices
+            .index(&revision, key, &analysis)
+            .expect("a finished analysis is indexed");
+        assert!(
+            Arc::ptr_eq(&asked, &adopted),
+            "the adopted index is answered"
+        );
+        revision.advance();
+        let asked = indices
+            .index(&revision, key, &analysis)
+            .expect("a finished analysis is indexed");
+        assert!(
+            !Arc::ptr_eq(&asked, &adopted),
+            "runs that changed are indexed again"
+        );
+        assert_eq!(asked.column(&analysis, "V(b)"), Some(1));
     }
 }

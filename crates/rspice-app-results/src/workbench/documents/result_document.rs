@@ -1467,6 +1467,32 @@ fn retained_evidence_verdict_in(
     )
 }
 
+impl ResultsState {
+    /// Hold what looking `analysis` over away from the frame found, as the
+    /// retained runs stand now: the index of its signals and, when there is
+    /// one, the validator's verdict on its evidence. Neither is worked out
+    /// again while the runs stand.
+    pub(crate) fn adopt_looked_over(
+        &mut self,
+        simulation: &crate::state::SimulationState,
+        analysis: AnalysisPresentationKey,
+        index: std::sync::Arc<rspice_results_ui::signal_index::SignalIndex>,
+        verdict: Option<Result<(), std::sync::Arc<str>>>,
+    ) {
+        let source = (
+            simulation.retained.runs.revision(),
+            simulation.view.data_version,
+        );
+        self.session
+            .signal_indices
+            .adopt(&source.0, analysis, index);
+        if let Some(verdict) = verdict {
+            self.retained_evidence_validity
+                .insert(simulation, &source, analysis, verdict);
+        }
+    }
+}
+
 pub(crate) use rspice_results::renderability::StructuralGate;
 
 /// One structural gate answered by walking the evidence, for callers that

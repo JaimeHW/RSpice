@@ -1,7 +1,7 @@
 //! What a manual deck's run plots: the outputs the deck names with `.probe`, `.save`, `.print`
 //! or `.plot`, ticked in the data browser and drawn, and nothing else. A deck that names none
 //! plots nothing: every signal waits unticked in the data browser, and the plot says how to
-//! plot one.
+//! plot one. Either way the run's results show once it ends.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -11,6 +11,9 @@ use egui::accesskit::{Role, Toggled, TreeUpdate};
 use egui::{Context, Pos2, Rect, vec2};
 
 use crate::workbench::RSpiceApp;
+use rspice_app_results::workbench::documents::result_document::frame_work::{
+    DatasetWalk, WorkCounts,
+};
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -145,4 +148,76 @@ fn a_deck_that_names_no_output_plots_nothing_and_offers_every_signal() {
         "nothing is ticked: {ticks:?}"
     );
     assert!(nothing_plotted, "the plot says nothing is plotted");
+}
+
+/// A run's results show once it ends, in Results open while it runs: the output the deck names
+/// is drawn, nothing says the results failed validation, and neither the frame that keeps them
+/// nor the frames after it validate them again, which the run did as it converted them.
+#[test]
+fn a_run_shows_its_results_once_it_ends_without_the_frame_validating_them() {
+    let root = unique_temp_dir("deck-run-end");
+    let deck = root.join("outputs.cir");
+    std::fs::write(&deck, format!("{DECK}.probe V(b)\n.end\n")).expect("the deck is written");
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        app.state.open_deck_at(&deck, true),
+        "the deck opens: {:?}",
+        app.state.prompt_text()
+    );
+    let ctx = Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut window = Window {
+        ctx,
+        app,
+        frame: eframe::Frame::_new_kittest(),
+        time: 0.0,
+    };
+    window.app.state.workbench.activate(Workspace::Netlist);
+    window.frame();
+    window.app.execute_command_key(SimulateCommand::Run.key());
+    window.app.state.workbench.activate(Workspace::Results);
+    let deadline = Instant::now() + Duration::from_secs(120);
+    // The frame the run ends on keeps its results; what that frame validates is counted.
+    let ending = loop {
+        let counted = WorkCounts::reset();
+        window.frame();
+        let execution = &window.app.state.model.simulation.execution;
+        if !execution.has_active_execution() && !execution.trigger_simulation {
+            break counted.since();
+        }
+        assert!(Instant::now() < deadline, "the deck's run ends");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let after = WorkCounts::reset();
+    let mut tree = None;
+    for _ in 0..3 {
+        tree = window.frame().platform_output.accesskit_update.or(tree);
+    }
+    let after = after.since();
+    let _ = std::fs::remove_dir_all(&root);
+    let tree = tree.expect("the frame publishes its tree");
+    let (ticks, nothing_plotted) = read(&tree);
+    assert!(
+        ticks.contains(&("B".to_owned(), true)),
+        "the named output is ticked: {ticks:?}"
+    );
+    assert!(!nothing_plotted, "the named output is drawn");
+    let failed = tree.nodes.iter().any(|(_, node)| {
+        [node.label(), node.value()]
+            .into_iter()
+            .flatten()
+            .any(|text| text.contains("failed validation"))
+    });
+    assert!(!failed, "nothing says the results failed validation");
+    assert_eq!(
+        (
+            ending.get(DatasetWalk::EvidenceValidation),
+            after.get(DatasetWalk::EvidenceValidation)
+        ),
+        (0, 0),
+        "the run's frames validate its kept results again: {:?} then {:?}",
+        ending.nonzero(),
+        after.nonzero()
+    );
 }

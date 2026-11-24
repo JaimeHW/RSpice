@@ -237,6 +237,10 @@ pub struct SimulationController {
     point_families: crate::simulation::point_family::PointFamilyRegistry,
     /// The completion whose result is being converted away from the frame.
     finishing: Option<completion::Finishing>,
+    /// What looking a result over away from the frame found of the analysis
+    /// a completion kept it as, told to the viewers at the end of the update
+    /// that kept it, once the runs have changed for the last time.
+    looked_over: Option<RunEvent>,
     /// The run whose last completion left the view showing it as it is kept.
     view_current_for: Option<u64>,
     /// Current analysis index (1-based for display: "Analysis 2/4")
@@ -316,6 +320,7 @@ impl SimulationController {
             execution_artifacts: HashMap::new(),
             point_families: crate::simulation::point_family::PointFamilyRegistry::default(),
             finishing: None,
+            looked_over: None,
             view_current_for: None,
             current_analysis_idx: 0,
             total_analyses: 0,
@@ -446,6 +451,12 @@ impl SimulationController {
             execution.live_preview_note = None;
         }
         execution.is_running = is_running;
+
+        // The runs stand as the viewers will next read them: what the
+        // analysis kept this frame was found to hold is theirs while they do.
+        if let Some(looked_over) = self.looked_over.take() {
+            state.apply_run_event(looked_over);
+        }
     }
 
     pub fn engine_availability(&self) -> super::status::EngineAvailability {
@@ -1311,7 +1322,7 @@ impl SimulationController {
             .retained
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("run {run_id} is no longer in the result history"))?;
-        self.retain_analysis_under_current_policy(run, analysis)?;
+        let replaced = self.retain_analysis_under_current_policy(run, analysis)?;
         if succeeded {
             self.successful_analysis_instances
                 .insert(completed_instance);
@@ -1321,6 +1332,9 @@ impl SimulationController {
             run.id,
             run.analyses.len()
         );
+        // The provisional result of a large run holds as many signals as the
+        // result: it is let go of off the frame.
+        self.release(replaced);
         Ok(succeeded)
     }
 
@@ -1421,12 +1435,14 @@ impl SimulationController {
     }
 
     /// Adopt one terminal result only when the complete retained run remains
-    /// inside the ceiling authenticated by its prepared snapshot.
+    /// inside the ceiling authenticated by its prepared snapshot. The
+    /// provisional result it replaced comes back, for the caller to let go
+    /// of.
     fn retain_analysis_under_current_policy(
         &self,
         run: &mut crate::state::SimulationRun,
         mut analysis: AnalysisResult,
-    ) -> Result<(), String> {
+    ) -> Result<Option<AnalysisResult>, String> {
         // Terminal conversion must keep the last admitted journal, including
         // on abort/error. Match the complete prepared identity, not a label.
         self.preserve_live_checkpoints(run, &mut analysis);
@@ -1454,8 +1470,7 @@ impl SimulationController {
             checkpoint.validate_for((&analysis).into())?;
         }
         self.validate_analysis_retention(run, &analysis)?;
-        run.replace_live_or_add_analysis(analysis);
-        Ok(())
+        Ok(run.replace_live_or_add_analysis(analysis))
     }
 
     fn preserve_live_checkpoints(

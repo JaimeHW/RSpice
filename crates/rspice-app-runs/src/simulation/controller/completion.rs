@@ -1,6 +1,8 @@
 //! Application reaction to a completed simulation task.
 
 use super::*;
+use rspice_results::result_presentation::AnalysisPresentationKey;
+use rspice_results_ui::signal_index::SignalIndex;
 use std::sync::Arc;
 
 impl SimulationController {
@@ -125,6 +127,7 @@ impl SimulationController {
             deck_outputs: self
                 .previews_every_column()
                 .then(|| self.current_deck_outputs.clone()),
+            provenance: self.current_provenance.clone(),
         }
     }
 
@@ -492,6 +495,7 @@ impl SimulationController {
         let Converted {
             analysis: mut analysis_result,
             shown,
+            looked_over,
         } = converted;
         // The Console has had the prose as the engine logged it; the
         // run's batch gets the conditions, one record each for the
@@ -607,6 +611,14 @@ impl SimulationController {
                             })
                         })
                 });
+                // What looking the result over found is the kept analysis's;
+                // the viewers are told once this frame has changed the runs
+                // for the last time.
+                if let (Some(index), Some(looked_over)) = (index, looked_over)
+                    && let Some(run) = state.model().simulation.retained.run_by_sequence(run_id)
+                {
+                    self.looked_over = Some(looked_over.found_of(run, index));
+                }
                 match (index, shown) {
                     (Some(index), Some(shown)) => {
                         let previous = state
@@ -756,16 +768,100 @@ pub(super) struct Conversion {
     contracts: Vec<PreparedSavedOutput>,
     /// The outputs a manual deck plots, when it plots only those.
     deck_outputs: Option<crate::simulation::execution::DeckOutputs>,
+    /// The task the result is of, which the run keeps it as.
+    provenance: Option<AnalysisResultProvenance>,
 }
 
-/// A converted result, and the view's copy of its waveforms when that copy
-/// is what the run will keep.
+/// A converted result, the view's copy of its waveforms when that copy is
+/// what the run will keep, and what looking it over away from the frame
+/// found.
 pub(super) struct Converted {
     analysis: AnalysisResult,
     shown: Option<ShownWaveforms>,
+    looked_over: Option<LookedOver>,
+}
+
+/// What the frames that show a finished result would otherwise work out of
+/// every signal it has, worked out as it is converted.
+struct LookedOver {
+    /// Its signals by name.
+    index: Arc<SignalIndex>,
+    /// What validating its evidence answers. None for a result whose
+    /// samples the run has still to store, or an imported one, which the
+    /// validator reads otherwise once it is kept.
+    verdict: Option<Result<(), Arc<str>>>,
+    /// The task it was validated as, and whether it held a transient and a
+    /// Monte Carlo checkpoint then: kept otherwise, the verdict is not the
+    /// kept result's.
+    provenance: AnalysisResultProvenance,
+    checkpoints: (bool, bool),
+}
+
+impl LookedOver {
+    /// Look over `analysis`, the result of the task `provenance` names,
+    /// whose samples are all `stored` or not.
+    fn of(
+        analysis: &mut AnalysisResult,
+        provenance: AnalysisResultProvenance,
+        stored: bool,
+    ) -> Self {
+        let index = Arc::new(SignalIndex::of(&analysis.data));
+        // The run keeps the result as its task's: validated as it is kept.
+        analysis.data.provenance = Some(provenance.clone());
+        let verdict = (stored && analysis.import_source.is_none())
+            .then(|| {
+                analysis
+                    .validate_retained_evidence()
+                    .map_err(Arc::<str>::from)
+            })
+            // A verdict that waits on reading a stored trace is asked again.
+            .filter(|verdict| {
+                !verdict
+                    .as_ref()
+                    .is_err_and(|cause| rspice_results::waveform::is_pending_read(cause))
+            });
+        let checkpoints = (
+            analysis.transient_checkpoint.is_some(),
+            analysis.monte_carlo_checkpoint.is_some(),
+        );
+        Self {
+            index,
+            verdict,
+            provenance,
+            checkpoints,
+        }
+    }
+
+    /// What was found, told to the viewers, of the analysis at `index` of
+    /// `run`, which the run kept this result as.
+    fn found_of(self, run: &crate::state::SimulationRun, index: usize) -> RunEvent {
+        let kept = &run.analyses[index];
+        let as_validated = kept.provenance() == Some(&self.provenance)
+            && (
+                kept.transient_checkpoint.is_some(),
+                kept.monte_carlo_checkpoint.is_some(),
+            ) == self.checkpoints;
+        RunEvent::AnalysisLookedOver {
+            analysis: AnalysisPresentationKey::new(run.dataset_id, kept),
+            index: self.index,
+            verdict: self.verdict.filter(|_| as_validated),
+        }
+    }
 }
 
 impl Conversion {
+    /// [`Self::convert`], and the result looked over as the run keeps it,
+    /// for a conversion away from the frame.
+    fn convert_and_look_over(mut self) -> Converted {
+        let provenance = self.provenance.take();
+        let mut converted = self.convert(|_| {});
+        converted.looked_over = provenance.map(|provenance| {
+            let stored = converted.shown.is_some();
+            LookedOver::of(&mut converted.analysis, provenance, stored)
+        });
+        converted
+    }
+
     /// The run's analysis of the result, `capture` reading it before the
     /// task's saved-output policy prunes it.
     fn convert(self, capture: impl FnOnce(&AnalysisResult)) -> Converted {
@@ -802,7 +898,11 @@ impl Conversion {
         // keeps them, so a copy of them now is not what the view would show.
         let shown = (!crate::state::run_store::holds_samples_in_memory(&analysis.data))
             .then(|| ShownWaveforms::new(analysis.waveforms.clone()));
-        Converted { analysis, shown }
+        Converted {
+            analysis,
+            shown,
+            looked_over: None,
+        }
     }
 }
 
@@ -838,7 +938,7 @@ fn convert_off_frame(
                 .ok()
                 .and_then(|mut job| job.take())
                 .expect("a started thread holds its conversion");
-            conversion.convert(|_| {})
+            conversion.convert_and_look_over()
         });
     spawned.map_err(|_| {
         job.lock()

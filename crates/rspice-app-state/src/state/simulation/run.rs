@@ -237,7 +237,14 @@ impl SimulationRun {
     /// run holds windows of it and a saved project names the segment. A
     /// store that cannot take them leaves them in memory, said in the log,
     /// and the next save tries again.
-    pub fn replace_live_or_add_analysis(&mut self, mut analysis: AnalysisResult) {
+    ///
+    /// The provisional result it replaced comes back, for the caller to let
+    /// go of where its size costs no frame.
+    #[must_use = "the replaced provisional result is let go of away from the frame"]
+    pub fn replace_live_or_add_analysis(
+        &mut self,
+        mut analysis: AnalysisResult,
+    ) -> Option<AnalysisResult> {
         if let Err(error) = super::run_store::store_analysis(&mut analysis.data) {
             log::warn!("{}: {error}", analysis.label);
         }
@@ -255,9 +262,10 @@ impl SimulationRun {
             if !analysis.success {
                 self.success = false;
             }
-            self.analyses[index] = analysis;
+            Some(std::mem::replace(&mut self.analyses[index], analysis))
         } else {
             self.add_analysis(analysis);
+            None
         }
     }
 
