@@ -265,6 +265,38 @@ fn an_arriving_picture_keeps_its_envelopes_without_the_frame_touching_each() {
     assert_eq!((asked.hits, asked.rebuilds), (300, 0));
 }
 
+/// A picture whose envelopes fill the cache's budget is kept: it counts
+/// each envelope as the cache counts it, so what it keeps fits, and the next
+/// picture of the same curves reads every envelope it kept.
+#[test]
+fn a_picture_filling_the_budget_is_kept() {
+    let (x, y) = sine(40_000);
+    let curve = (&WaveformValues::from(x), &WaveformValues::from(y));
+    let size = egui::vec2(900.0, 400.0);
+    // The points each envelope of this picture holds.
+    let ctx = context();
+    let mut cache = DecimationCache::default();
+    frame(&ctx, &mut cache, curve, 300, 10.0, size);
+    arrival(&ctx, &mut cache, curve, 300, (10.0, 1.5), size);
+    let points = cache.kept_sets()[0].points()[0];
+    // A budget of a hundred envelopes' points alone: a hundred envelopes
+    // counted without what keeping each costs filled it, and came to more.
+    let ctx = context();
+    let mut cache = DecimationCache::with_byte_capacity(100 * points * size_of::<[f64; 2]>());
+    frame(&ctx, &mut cache, curve, 300, 10.0, size);
+    arrival(&ctx, &mut cache, curve, 300, (10.0, 1.5), size);
+    let kept = cache
+        .kept_sets()
+        .first()
+        .map_or(0, |kept| kept.points().len());
+    assert!(kept > 0, "the picture filling the budget was let go");
+    let (asked, _) = frame_over(&ctx, &mut cache, curve, 300, (10.0, 3.0), size);
+    assert_eq!(
+        asked.hits, kept as u64,
+        "the next picture reads every envelope the last one kept"
+    );
+}
+
 fn nothing_drawn() -> Built {
     Built {
         drawing: Drawing::Shapes(Vec::new()),

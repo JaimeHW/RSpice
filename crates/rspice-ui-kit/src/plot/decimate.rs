@@ -93,6 +93,12 @@ impl Kept {
         self.bytes = self.bytes.saturating_add(bytes);
     }
 
+    /// The points of each envelope kept.
+    #[cfg(test)]
+    pub(super) fn points(&self) -> Vec<usize> {
+        self.map.values().map(|envelope| envelope.len()).collect()
+    }
+
     /// Keep everything `other` keeps too.
     pub(super) fn extend(&mut self, mut other: Self) {
         if other.map.len() > self.map.len() {
@@ -105,7 +111,7 @@ impl Kept {
 }
 
 /// What one envelope of `points` kept with a picture holds the cache to.
-const fn kept_bytes(points: usize) -> usize {
+pub(super) const fn kept_bytes(points: usize) -> usize {
     points * size_of::<[f64; 2]>() + size_of::<(CacheKey, Arc<[[f64; 2]]>)>()
 }
 
@@ -280,6 +286,15 @@ impl Default for DecimationCache {
 }
 
 impl DecimationCache {
+    /// A cache holding its envelopes to `bytes`.
+    #[cfg(test)]
+    pub(super) fn with_byte_capacity(bytes: usize) -> Self {
+        Self {
+            byte_capacity: bytes,
+            ..Self::default()
+        }
+    }
+
     /// Everything the cache has done since it was made.
     #[cfg(any(test, feature = "test-support"))]
     pub fn work(&self) -> DecimationWork {

@@ -1092,8 +1092,10 @@ fn draw_run(
         complete &= done;
         if let Some(envelope_key) = envelope_key {
             // The frame's cache keeps what fits its budget, the first
-            // envelopes drawn; the rest are not held on to.
-            let bytes = envelope.len() * size_of::<[f64; 2]>();
+            // envelopes drawn; the rest are not held on to. Each is counted
+            // as the cache counts it: counted short, a picture filling the
+            // budget came to more than it, and the frame let all of it go.
+            let bytes = decimate::kept_bytes(envelope.len());
             if kept_bytes.fetch_add(bytes, Ordering::Relaxed) + bytes <= job.keep_budget {
                 kept.keep(envelope_key, Arc::clone(&envelope));
             }
