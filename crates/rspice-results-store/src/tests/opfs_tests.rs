@@ -114,7 +114,7 @@ fn a_segment_through_a_sync_access_handle_is_the_one_memory_holds() {
         file.flushes.get() > 0,
         "the writer's syncs reach the handle"
     );
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     assert_eq!(reader.rows(), 300);
     assert_eq!(reader.digest().unwrap(), expected.digest);
     drop(reader);

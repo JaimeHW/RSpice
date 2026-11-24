@@ -137,7 +137,7 @@ fn held_digest(
     path: &Path,
     progress: &mut dyn FnMut(u64, u64) -> bool,
 ) -> Option<Result<Digest, StoreError>> {
-    let mut reader = match FileIo::open(path)
+    let reader = match FileIo::open(path)
         .map_err(StoreError::from)
         .and_then(SegmentReader::open)
     {

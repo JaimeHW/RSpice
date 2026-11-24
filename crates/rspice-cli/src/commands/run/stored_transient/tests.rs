@@ -105,7 +105,7 @@ fn a_command_line_run_whose_storage_fills_exports_what_it_kept_and_exits_86_sayi
 
     // The store beside the output closed over its whole chunks.
     let store = dir.join("out.rsr");
-    let mut reader =
+    let reader =
         SegmentReader::open(FileIo::open(&store.join(StoreDir::segment_name(0))).unwrap()).unwrap();
     assert!(matches!(
         reader.state(),
@@ -221,7 +221,7 @@ fn a_completed_run_whose_output_fills_the_disk_keeps_its_whole_store_and_exits_8
 
     // The store beside the output holds the whole completed run.
     let store = dir.join("out.rsr");
-    let mut reader =
+    let reader =
         SegmentReader::open(FileIo::open(&store.join(StoreDir::segment_name(0))).unwrap()).unwrap();
     assert!(matches!(
         reader.state(),
@@ -344,7 +344,7 @@ fn a_resume_whose_storage_fills_keeps_the_store_it_appended_to() {
     .expect("the first segment runs");
     let segment = dir.join("out.rsr").join(StoreDir::segment_name(0));
     let (first_rows, first_bytes) = {
-        let mut reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
+        let reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
         let rows = reader.rows();
         assert_eq!(reader.read_x(rows - 1, 1).unwrap()[0], 20e-6);
         (rows, std::fs::metadata(&segment).unwrap().len())
@@ -361,7 +361,7 @@ fn a_resume_whose_storage_fills_keeps_the_store_it_appended_to() {
     let error = ended.expect_err("the resumed run stops when its storage fills");
     assert_eq!(error.exit_code(), ExitCode::StoppedStorageFull, "{error}");
 
-    let mut reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
+    let reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
     assert!(matches!(
         reader.state(),
         SegmentState::Complete {

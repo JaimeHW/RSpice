@@ -82,7 +82,7 @@ impl Segment {
     /// Run `read` with the segment's reader.
     pub fn with_reader<T>(
         &self,
-        read: impl FnOnce(&mut SegmentReader<SegmentBytes>) -> Result<T, StoreError>,
+        read: impl FnOnce(&SegmentReader<SegmentBytes>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
         self.reader.with_reader(read)
     }

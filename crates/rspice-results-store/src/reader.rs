@@ -220,8 +220,13 @@ pub struct SegmentReader<I: SegmentIo> {
     column_digests: Vec<Digest>,
     /// Why the `END` the superblock names was refused, for a segment recovered without it.
     end_damage: Option<StoreError>,
-    planes: Vec<u8>,
-    block: Vec<u8>,
+}
+
+thread_local! {
+    /// Each thread's room to read a block's bytes into and decode its planes in: a segment is
+    /// read through `&self`, so threads that read one segment at once share only its bytes.
+    static DECODING: std::cell::RefCell<(Vec<u8>, Vec<u8>)> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
 }
 
 fn u64_at(bytes: &[u8], at: usize) -> u64 {
@@ -271,8 +276,6 @@ impl<I: SegmentIo> SegmentReader<I> {
             annotations: Vec::new(),
             column_digests: Vec::new(),
             end_damage: None,
-            planes: Vec::new(),
-            block: Vec::new(),
         };
         let (header, payload) = reader.read_frame(SUPERBLOCK_LEN)?;
         if header.kind != FrameKind::Schema {
@@ -988,7 +991,7 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// Decode block `block` (0 is x, `1 + slot` a value slot) of `chunk` into `out`.
     pub(crate) fn decode_block(
-        &mut self,
+        &self,
         chunk: &ChunkRef,
         block: usize,
         out: &mut [f64],
@@ -1009,15 +1012,18 @@ impl<I: SegmentIo> SegmentReader<I> {
                 "a block runs past the end of the segment",
             ));
         }
-        self.block.resize(len, 0);
-        self.io.read_at(block_at, &mut self.block)?;
-        if crc32fast::hash(&self.block) != crc {
-            return Err(StoreError::corrupt(
-                block_at,
-                "a block's checksum does not match",
-            ));
-        }
-        codec::decode_f64(codec, &self.block, out, &mut self.planes, block_at)
+        DECODING.with(|room| {
+            let (bytes, planes) = &mut *room.borrow_mut();
+            bytes.resize(len, 0);
+            self.io.read_at(block_at, bytes)?;
+            if crc32fast::hash(bytes) != crc {
+                return Err(StoreError::corrupt(
+                    block_at,
+                    "a block's checksum does not match",
+                ));
+            }
+            codec::decode_f64(codec, bytes, out, planes, block_at)
+        })
     }
 
     pub(crate) fn chunk_containing(&self, row: u64) -> usize {
@@ -1027,7 +1033,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     }
 
     fn read_block_range(
-        &mut self,
+        &self,
         block: usize,
         first: u64,
         count: usize,
@@ -1059,17 +1065,12 @@ impl<I: SegmentIo> SegmentReader<I> {
     }
 
     /// x of rows `first .. first + count`.
-    pub fn read_x(&mut self, first: u64, count: usize) -> Result<Vec<f64>, StoreError> {
+    pub fn read_x(&self, first: u64, count: usize) -> Result<Vec<f64>, StoreError> {
         self.read_block_range(0, first, count)
     }
 
     /// One value slot of rows `first .. first + count`.
-    pub fn read_slot(
-        &mut self,
-        slot: usize,
-        first: u64,
-        count: usize,
-    ) -> Result<Vec<f64>, StoreError> {
+    pub fn read_slot(&self, slot: usize, first: u64, count: usize) -> Result<Vec<f64>, StoreError> {
         if slot >= self.slots {
             return Err(StoreError::OutOfRange(format!(
                 "slot {slot} of a {}-slot schema",
@@ -1101,13 +1102,13 @@ impl<I: SegmentIo> SegmentReader<I> {
     }
 
     /// x of every row of chunk `chunk`, into `out`, resized to the chunk's rows.
-    pub fn read_chunk_x(&mut self, chunk: usize, out: &mut Vec<f64>) -> Result<(), StoreError> {
+    pub fn read_chunk_x(&self, chunk: usize, out: &mut Vec<f64>) -> Result<(), StoreError> {
         self.read_chunk_block(chunk, 0, out)
     }
 
     /// Value slot `slot` of every row of chunk `chunk`, into `out`, resized to the chunk's rows.
     pub fn read_chunk_slot(
-        &mut self,
+        &self,
         chunk: usize,
         slot: usize,
         out: &mut Vec<f64>,
@@ -1122,7 +1123,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     }
 
     fn read_chunk_block(
-        &mut self,
+        &self,
         chunk: usize,
         block: usize,
         out: &mut Vec<f64>,
@@ -1140,7 +1141,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     /// Recompute the logical digest from the readable data, reading every block and summary
     /// against its CRC; equal to `END`'s for a complete segment that holds the bytes its run
     /// wrote.
-    pub fn digest(&mut self) -> Result<Digest, StoreError> {
+    pub fn digest(&self) -> Result<Digest, StoreError> {
         Ok(self
             .digest_with(&mut |_, _| true)?
             .expect("a digest nobody stops runs to its end"))
@@ -1149,7 +1150,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     /// [`Self::digest`], telling `progress` the chunks and event signals read of all of them
     /// after each one. `None` when `progress` answered `false`: it stopped the read.
     pub fn digest_with(
-        &mut self,
+        &self,
         progress: &mut dyn FnMut(u64, u64) -> bool,
     ) -> Result<Option<Digest>, StoreError> {
         Ok(self.held_digests(progress)?.map(|(digest, _)| digest))
@@ -1157,7 +1158,7 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// [`Self::digest_with`], and the digest each column's rows hash to, the run's x first.
     pub(crate) fn held_digests(
-        &mut self,
+        &self,
         progress: &mut dyn FnMut(u64, u64) -> bool,
     ) -> Result<Option<(Digest, Vec<Digest>)>, StoreError> {
         let mut digest =
@@ -1272,12 +1273,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     }
 
     /// The changes of event signal `signal` with time in `t0 ..= t1`, in commit order.
-    pub fn events(
-        &mut self,
-        signal: usize,
-        t0: f64,
-        t1: f64,
-    ) -> Result<Vec<EventChange>, StoreError> {
+    pub fn events(&self, signal: usize, t0: f64, t1: f64) -> Result<Vec<EventChange>, StoreError> {
         let position = self
             .event_position(signal as u32)
             .ok_or_else(|| Self::not_event(signal))?;
@@ -1312,12 +1308,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     /// before `t0` and the first after `t1`: what a view of that window shows, the value held
     /// into it and the change that ends it. Reads the frames over the window and at most one
     /// frame on each side of it.
-    pub fn events_around(
-        &mut self,
-        signal: usize,
-        t0: f64,
-        t1: f64,
-    ) -> Result<EventSpan, StoreError> {
+    pub fn events_around(&self, signal: usize, t0: f64, t1: f64) -> Result<EventSpan, StoreError> {
         let within = self.events(signal, t0, t1)?;
         let (kind, frames) = self.event_frame_refs(signal)?;
         // A signal's frames are in commit order and its times never fall, so the last change
@@ -1351,7 +1342,7 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// How many changes of event signal `signal` come before time `t`, reading at most the one
     /// frame that spans `t`.
-    pub fn events_before(&mut self, signal: usize, t: f64) -> Result<u64, StoreError> {
+    pub fn events_before(&self, signal: usize, t: f64) -> Result<u64, StoreError> {
         let (kind, frames) = self.event_frame_refs(signal)?;
         let mut count = 0;
         let mut decoded = Vec::new();

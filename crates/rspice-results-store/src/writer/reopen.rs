@@ -41,7 +41,7 @@ impl<I: SegmentIo> Encoder<I> {
         chunk_rows: Option<usize>,
         compress: bool,
     ) -> Result<(Self, Kept), StoreError> {
-        let mut reader = SegmentReader::open(io)?;
+        let reader = SegmentReader::open(io)?;
         let chunk_rows = chunk_rows.unwrap_or_else(|| super::chunk_rows(reader.slots()));
         let no_row = StoreError::NoRowAt {
             x_bits: through.to_bits(),

@@ -49,7 +49,7 @@ impl<I: SegmentIo> StoredTransientRun<I> {
 
     fn open_filling(
         io: I,
-        fill: fn(&mut SegmentReader<I>, &mut TransientResult) -> Result<(), StoreError>,
+        fill: fn(&SegmentReader<I>, &mut TransientResult) -> Result<(), StoreError>,
     ) -> Result<Self, StoreError> {
         let mut reader = SegmentReader::open(io)?;
         let mut shell = match reader.annotation(TRANSIENT_SHELL_ANNOTATION) {
@@ -244,7 +244,7 @@ impl SlotTarget {
 /// Read the run's event signals back into the traces the result names: its digital and real
 /// event traces and its impulse traces, each of which the run moved to the store as it went.
 pub fn fill_events<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     shell: &mut TransientResult,
 ) -> Result<(), StoreError> {
     fill_events_of(reader, shell, |_| true)
@@ -253,7 +253,7 @@ pub fn fill_events<I: SegmentIo>(
 /// [`fill_events`] of the impulse traces alone. The digital and real event traces stay in the
 /// store, for [`StoreEvents`] to read or [`fill_event_traces`] to read back.
 pub fn fill_impulses<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     shell: &mut TransientResult,
 ) -> Result<(), StoreError> {
     fill_events_of(reader, shell, |quantity| !is_event_trace(quantity))
@@ -261,7 +261,7 @@ pub fn fill_impulses<I: SegmentIo>(
 
 /// [`fill_events`] of the digital and real event traces alone.
 pub fn fill_event_traces<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     shell: &mut TransientResult,
 ) -> Result<(), StoreError> {
     fill_events_of(reader, shell, is_event_trace)
@@ -274,7 +274,7 @@ fn is_event_trace(quantity: &str) -> bool {
 
 /// [`fill_events`] of the event signals whose quantity `read` takes.
 fn fill_events_of<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     shell: &mut TransientResult,
     read: impl Fn(&str) -> bool,
 ) -> Result<(), StoreError> {
@@ -716,7 +716,7 @@ pub fn instance_parameters<I: SegmentIo>(reader: &SegmentReader<I>) -> Vec<(Stri
 
 /// Move rows `first .. first + count` into `result`'s time and saved columns.
 pub fn fill_rows<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     targets: &[SlotTarget],
     result: &mut TransientResult,
     first: u64,
@@ -735,7 +735,7 @@ pub fn fill_rows<I: SegmentIo>(
 /// Move the first and last rows into `result`'s time and saved columns: what a statement that
 /// reads only event operands reads of the run, and the row a PARAM reads.
 pub fn fill_span<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     targets: &[SlotTarget],
     result: &mut TransientResult,
 ) -> Result<(), StoreError> {
@@ -746,7 +746,7 @@ pub fn fill_span<I: SegmentIo>(
 /// seconds to read even this much: false, with the columns read so far, once it says the reader
 /// stopped.
 pub fn fill_span_unless_stopped<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     targets: &[SlotTarget],
     result: &mut TransientResult,
     stopped: &dyn Fn() -> bool,
@@ -787,7 +787,7 @@ pub fn clear_rows(targets: &[SlotTarget], result: &mut TransientResult) {
 /// and device values are not checked, as the in-memory check reads the saved waveforms and
 /// parameters only.
 pub fn first_non_finite<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     targets: &[SlotTarget],
 ) -> Result<Option<(usize, u64, f64)>, StoreError> {
     let mut first: Vec<Option<(u64, f64)>> = vec![None; targets.len()];

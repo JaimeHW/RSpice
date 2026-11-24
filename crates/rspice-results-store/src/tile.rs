@@ -156,20 +156,14 @@ impl BlockCache for NoBlockCache {
 
 impl<I: SegmentIo> SegmentReader<I> {
     /// Per-pixel min/max (or the rows themselves) of analog signal `signal` over `x0 ..= x1`.
-    pub fn tile(
-        &mut self,
-        signal: usize,
-        x0: f64,
-        x1: f64,
-        pixels: usize,
-    ) -> Result<Tile, StoreError> {
+    pub fn tile(&self, signal: usize, x0: f64, x1: f64, pixels: usize) -> Result<Tile, StoreError> {
         let rows = 0..self.rows();
         self.tile_in(signal, rows, x0, x1, pixels, &mut NoBlockCache)
     }
 
     /// [`Self::tile`] of the rows in `rows` alone, reading each block through `cache`.
     pub fn tile_in(
-        &mut self,
+        &self,
         signal: usize,
         rows: Range<u64>,
         x0: f64,
@@ -217,7 +211,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     /// cursor reads `x` from them as it would from the whole column (a cubic reads two either
     /// side).
     pub fn rows_around(
-        &mut self,
+        &self,
         signal: usize,
         rows: Range<u64>,
         x: f64,
@@ -272,10 +266,10 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// The block `key`, from `cache` or by `read`, which fills the vector it is given.
     fn cached(
-        &mut self,
+        &self,
         cache: &mut dyn BlockCache,
         key: BlockKey,
-        read: impl FnOnce(&mut Self, &mut Vec<f64>) -> Result<(), StoreError>,
+        read: impl FnOnce(&Self, &mut Vec<f64>) -> Result<(), StoreError>,
     ) -> Result<Arc<[f64]>, StoreError> {
         if let Some(block) = cache.get(&key) {
             return Ok(block);
@@ -289,7 +283,7 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// x and the drawn value (|z| for a complex signal) of every row of `chunk`.
     fn drawn_blocks(
-        &mut self,
+        &self,
         chunk: &ChunkRef,
         column: Column,
         cache: &mut dyn BlockCache,
@@ -321,7 +315,7 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// The row at `row`: (x, drawn value).
     fn drawn_row(
-        &mut self,
+        &self,
         row: u64,
         column: Column,
         cache: &mut dyn BlockCache,
@@ -334,7 +328,7 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// Few enough rows to decode: exact samples, or an exact per-row envelope.
     fn raw_tile(
-        &mut self,
+        &self,
         column: Column,
         rows: Range<u64>,
         x0: f64,
@@ -407,7 +401,7 @@ impl<I: SegmentIo> SegmentReader<I> {
 
     /// Offer rows `r0 .. r1` to the view as units of `level`, refining where a unit is too wide.
     fn units(
-        &mut self,
+        &self,
         level: u8,
         r0: u64,
         r1: u64,

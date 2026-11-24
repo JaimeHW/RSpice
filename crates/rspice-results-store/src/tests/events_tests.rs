@@ -200,7 +200,7 @@ fn event_changes_read_back_with_x_z_and_strength() {
     let (receipt, io) = write(writer(64), &steps, &after, usize::MAX, usize::MAX);
     let total: usize = steps.iter().map(|step| step.changes.len()).sum::<usize>() + after.len();
     assert_eq!(receipt.events, total as u64);
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     assert_eq!(reader.rows(), 1000);
     for signal in EVENT_SIGNALS {
         let written = stream(&steps, &after, signal);
@@ -234,7 +234,7 @@ fn event_changes_read_back_with_x_z_and_strength() {
 fn a_window_reads_the_changes_on_each_side_of_it_and_counts_those_before_it_as_brute_force() {
     let (steps, after) = run(1000, 5000, 11);
     let (_, io) = write(writer(64), &steps, &after, usize::MAX, usize::MAX);
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     let x = |row: usize| steps[row].x;
     let windows = [
         (x(0), x(0)),
@@ -349,7 +349,7 @@ fn the_digest_does_not_depend_on_codec_or_chunk_rows() {
                 .unwrap();
         let (receipt, io) = write(writer, &steps, &after, usize::MAX, usize::MAX);
         sizes.push(receipt.bytes);
-        let mut reader = SegmentReader::open(io).unwrap();
+        let reader = SegmentReader::open(io).unwrap();
         assert_eq!(reader.digest().unwrap(), receipt.digest);
         digests.push(receipt.digest);
     }
@@ -398,7 +398,7 @@ impl Written {
     /// prefixes of what was written. Returns the readable rows, then the readable changes per
     /// signal; the values are decoded only when those counts differ from `previous`.
     fn prefix(&self, bytes: &[u8], previous: Option<&Vec<u64>>) -> Option<Vec<u64>> {
-        let mut reader = SegmentReader::open(MemoryIo::from_bytes(bytes.to_vec())).ok()?;
+        let reader = SegmentReader::open(MemoryIo::from_bytes(bytes.to_vec())).ok()?;
         let mut counts = vec![reader.rows()];
         for (signal, _) in &self.streams {
             counts.push(reader.event_count(*signal as usize).unwrap());
@@ -550,7 +550,7 @@ fn changes_that_do_not_fit_the_schema_are_refused_whole() {
     writer.push_events(std::slice::from_ref(&good)).unwrap();
     let (receipt, io) = writer.finish(RunStatus::Completed).unwrap();
     assert_eq!(receipt.events, 1);
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     assert_eq!(
         keys(&reader.events(1, -1.0, 1.0).unwrap()),
         vec![key(&good)]

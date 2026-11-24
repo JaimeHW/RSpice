@@ -39,7 +39,7 @@ impl StoredTransient {
 }
 
 fn check_run<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     targets: &[SlotTarget],
     shell: &mut TransientResult,
     netlist: &rspice_core::Netlist,

@@ -109,6 +109,102 @@ fn the_tile_cache_keeps_its_budget_by_dropping_the_least_recently_used_block() {
     assert!(cache.get(&key(0)).is_none());
 }
 
+/// Threads that read one segment file at once each get what one thread reading it alone gets:
+/// exact ranges, tiles through the shared cache and the rows around a cursor, of every signal.
+#[cfg(any(unix, windows))]
+#[test]
+fn threads_reading_one_segment_at_once_read_what_one_thread_reads() {
+    use rspice_results_store::FileIo;
+
+    const SIGNALS: usize = 48;
+    const ROWS: usize = 20_000;
+    let root = std::env::temp_dir().join(format!("rspice-results-threads-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: (0..SIGNALS)
+            .map(|signal| Signal::new(format!("v({signal})"), "V", SignalKind::Real))
+            .collect(),
+    };
+    let x: Vec<f64> = (0..ROWS).map(|row| row as f64 / 1000.0).collect();
+    let values: Vec<f64> = x
+        .iter()
+        .flat_map(|&t| (0..SIGNALS).map(move |signal| (t * (signal + 1) as f64).sin()))
+        .collect();
+    let path = root.join("transient-0.rsr");
+    let mut writer =
+        SegmentWriter::create(FileIo::create(&path).unwrap(), &schema, &RunMeta::default())
+            .unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    writer.finish(RunStatus::Completed).unwrap();
+
+    // Every read of every signal, as one thread answers it from a reader of its own.
+    type Answer = (Vec<f64>, Tile, Tile, (u64, Vec<(f64, f64)>));
+    let read_all = |reader: &StoreReader, signal: usize| -> Answer {
+        let mut range = vec![0.0; 3_000];
+        reader
+            .read(Some(signal), (signal * 300) as u64, &mut range)
+            .unwrap();
+        let whole = reader.tile(signal, 0..ROWS as u64, 0.0, 20.0, 400).unwrap();
+        let narrow = reader.tile(signal, 1_000..9_000, 2.5, 2.9, 300).unwrap();
+        let around = reader
+            .rows_around(signal, 0..ROWS as u64, signal as f64 * 0.37)
+            .unwrap();
+        (range, whole, narrow, around)
+    };
+    let alone = StoreReader::open_file(&path).unwrap();
+    let expected: Vec<Answer> = (0..SIGNALS)
+        .map(|signal| read_all(&alone, signal))
+        .collect();
+    for (signal, (range, ..)) in expected.iter().enumerate() {
+        let first = signal * 300;
+        let wanted: Vec<f64> = (first..first + 3_000)
+            .map(|row| values[row * SIGNALS + signal])
+            .collect();
+        assert_eq!(*range, wanted, "signal {signal} reads back as written");
+    }
+
+    // A second reader, so every thread misses the cache at first and fills it beside the others.
+    let shared = StoreReader::open_file(&path).unwrap();
+    let threads = 8;
+    let answers: Vec<Vec<(usize, Answer)>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..threads)
+            .map(|thread| {
+                let shared = &shared;
+                let read_all = &read_all;
+                scope.spawn(move || {
+                    // Each thread walks the signals from a place of its own.
+                    (0..SIGNALS)
+                        .map(|step| {
+                            let signal = (step + thread * 7) % SIGNALS;
+                            (signal, read_all(shared, signal))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect()
+    });
+    for (thread, answers) in answers.iter().enumerate() {
+        for (signal, answer) in answers {
+            assert_eq!(
+                *answer, expected[*signal],
+                "thread {thread} read signal {signal} as one thread does"
+            );
+        }
+    }
+    alone.close();
+    shared.close();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// Two open segments of one digest (two runs that solved the same rows) each serve a reader of
 /// it: the one opened second closing leaves the first found by its digest.
 #[cfg(any(unix, windows))]

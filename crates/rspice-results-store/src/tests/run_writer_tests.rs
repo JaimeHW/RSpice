@@ -194,7 +194,7 @@ fn a_timed_flush_makes_the_open_rows_durable() {
     assert_eq!(rows, 11);
     let (receipt, _) = writer.finish(RunStatus::Completed).unwrap();
     assert_eq!(receipt.rows, 11);
-    let mut reader = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
+    let reader = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
     assert_eq!(reader.read_slot(0, 3, 1).unwrap(), [0.5]);
 }
 
@@ -261,7 +261,7 @@ fn a_full_disk_with_room_to_close_ends_the_segment_over_its_whole_chunks() {
         ..SharedIo::default()
     };
     let rows = fill_then_end(io.clone(), &steps, RunStatus::Stopped(StopReason::DiskFull)).unwrap();
-    let mut reader = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
+    let reader = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
     assert!(matches!(
         reader.state(),
         SegmentState::Complete {

@@ -259,7 +259,7 @@ fn a_resume_keeps_exactly_the_changes_up_to_its_row() {
     let (receipt, io) = writer.finish(RunStatus::Completed).unwrap();
     assert_eq!(receipt.rows, through as u64 + 1);
     assert_eq!(receipt.events, changes_through(&steps, through) as u64);
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     let expected: Vec<&EventChange> = steps[..=through]
         .iter()
         .flat_map(|step| step.changes.iter())

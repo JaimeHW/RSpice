@@ -5,12 +5,13 @@
 //! the rows either side of a cursor, and the changes of an event signal over a window. Views
 //! read the segment's summary pyramid a block at a time, and the blocks they decode stay in one
 //! process-wide [`TileCache`] under a byte budget, so a pan or a zoom over rows already drawn
-//! reads none of them again.
+//! reads none of them again. Any number of threads read one segment at once: each read names the
+//! offsets it reads, and the cache is held only to take or keep a block, never across a read.
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use rspice_results_store::{
     BlockCache, BlockKey, Digest, EventChange, RunMeta, Schema, SegmentIo, SegmentReader,
@@ -51,15 +52,16 @@ const TILE_CACHE_BYTES: usize = 256 << 20;
 #[cfg(target_arch = "wasm32")]
 const TILE_CACHE_BYTES: usize = 32 << 20;
 
-/// A segment's own bytes, read at offsets.
-pub type SegmentBytes = Box<dyn SegmentIo + Send>;
+/// A segment's own bytes, read at offsets, from any number of threads at once.
+pub type SegmentBytes = Box<dyn SegmentIo + Send + Sync>;
 
 static NEXT_READER: AtomicU64 = AtomicU64::new(1);
 static TILE_CACHE: Mutex<TileCache> = Mutex::new(TileCache::new(TILE_CACHE_BYTES));
 
 /// One open segment, shared by the waveforms that read it.
 pub struct StoreReader {
-    reader: Mutex<Option<SegmentReader<SegmentBytes>>>,
+    /// Read by any number of threads at once; taken only to close it.
+    reader: RwLock<Option<SegmentReader<SegmentBytes>>>,
     /// The cache's name for this reader's blocks.
     id: u64,
     rows: u64,
@@ -115,7 +117,7 @@ impl StoreReader {
             slot_signals,
             digest,
             column_digests,
-            reader: Mutex::new(Some(reader)),
+            reader: RwLock::new(Some(reader)),
         }
     }
 
@@ -150,13 +152,13 @@ impl StoreReader {
         self.with_reader(|reader| Ok(reader.annotation(key).map(<[u8]>::to_vec)))
     }
 
-    /// Run `read` with the segment's reader.
+    /// Run `read` with the segment's reader, beside whatever other threads read it.
     pub fn with_reader<T>(
         &self,
-        read: impl FnOnce(&mut SegmentReader<SegmentBytes>) -> Result<T, StoreError>,
+        read: impl FnOnce(&SegmentReader<SegmentBytes>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut reader = self.reader.lock().unwrap_or_else(|p| p.into_inner());
-        let reader = reader.as_mut().ok_or_else(|| StoreError::Io {
+        let reader = self.reader.read().unwrap_or_else(|p| p.into_inner());
+        let reader = reader.as_ref().ok_or_else(|| StoreError::Io {
             kind: std::io::ErrorKind::Other,
             message: "the results segment was closed".to_owned(),
         })?;
@@ -166,7 +168,12 @@ impl StoreReader {
     /// Close the segment: every read after this fails. A host closes a segment before it deletes
     /// or moves its file, which some hosts refuse while it is open.
     pub fn close(&self) {
-        drop(self.reader.lock().unwrap_or_else(|p| p.into_inner()).take());
+        drop(
+            self.reader
+                .write()
+                .unwrap_or_else(|p| p.into_inner())
+                .take(),
+        );
         lock_cache().forget(self.id);
     }
 
@@ -215,12 +222,14 @@ impl StoreReader {
     ) -> Result<Tile, StoreError> {
         let signal = self.signal_of(slot)?;
         self.with_reader(|reader| {
-            let mut cache = lock_cache();
-            let mut blocks = Blocks {
-                cache: &mut cache,
-                reader: self.id,
-            };
-            reader.tile_in(signal, rows, x0, x1, pixels, &mut blocks)
+            reader.tile_in(
+                signal,
+                rows,
+                x0,
+                x1,
+                pixels,
+                &mut Blocks { reader: self.id },
+            )
         })
     }
 
@@ -234,12 +243,7 @@ impl StoreReader {
     ) -> Result<(u64, Vec<(f64, f64)>), StoreError> {
         let signal = self.signal_of(slot)?;
         self.with_reader(|reader| {
-            let mut cache = lock_cache();
-            let mut blocks = Blocks {
-                cache: &mut cache,
-                reader: self.id,
-            };
-            reader.rows_around(signal, rows, x, &mut blocks)
+            reader.rows_around(signal, rows, x, &mut Blocks { reader: self.id })
         })
     }
 
@@ -309,19 +313,20 @@ fn lock_cache() -> MutexGuard<'static, TileCache> {
     TILE_CACHE.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// One reader's view of the cache.
-struct Blocks<'a> {
-    cache: &'a mut TileCache,
+/// One reader's view of the cache, which it takes only to find or keep a block: a block is read
+/// with the cache let go of, so a thread reading one block holds up no other. Two threads that
+/// miss one block at once both read it, and the second keeps the same block again.
+struct Blocks {
     reader: u64,
 }
 
-impl BlockCache for Blocks<'_> {
+impl BlockCache for Blocks {
     fn get(&mut self, key: &BlockKey) -> Option<Arc<[f64]>> {
-        self.cache.get(&(self.reader, *key))
+        lock_cache().get(&(self.reader, *key))
     }
 
     fn put(&mut self, key: BlockKey, block: Arc<[f64]>) {
-        self.cache.put((self.reader, key), block);
+        lock_cache().put((self.reader, key), block);
     }
 }
 

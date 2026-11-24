@@ -265,7 +265,7 @@ fn bad_tile_requests_are_refused() {
     let mut writer = SegmentWriter::create(MemoryIo::new(), &schema, &meta()).unwrap();
     writer.push_row(0.0, &[1.0; 4]).unwrap();
     let (_, io) = writer.finish(RunStatus::Completed).unwrap();
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     assert!(reader.tile(0, 0.0, 1.0, 0).is_err());
     assert!(reader.tile(0, 1.0, 0.0, 10).is_err());
     assert!(reader.tile(9, 0.0, 1.0, 10).is_err());
@@ -345,7 +345,7 @@ fn the_rows_around_a_cursor_are_two_at_or_before_it_and_two_after() {
     let mut writer = SegmentWriter::create(MemoryIo::new(), &schema, &meta()).unwrap();
     writer.push_rows(&x, &values).unwrap();
     let (_, io) = writer.finish(RunStatus::Completed).unwrap();
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     let mut rng = Rng(9);
     for (r0, r1) in [(0, 20_000), (4_000, 9_000), (8_191, 8_193), (300, 300)] {
         for signal in [1, 2] {
@@ -408,8 +408,8 @@ fn a_signal_after_event_signals_tiles_its_own_column() {
         writer.push_row(t, &[t, 3.0, 4.0 + t, 100.0 + t]).unwrap();
     }
     let (_, io) = writer.finish(RunStatus::Completed).unwrap();
-    let mut reader = SegmentReader::open(io).unwrap();
-    let mut drawn = |signal| match reader.tile(signal, 0.0, 9.0, 100).unwrap() {
+    let reader = SegmentReader::open(io).unwrap();
+    let drawn = |signal| match reader.tile(signal, 0.0, 9.0, 100).unwrap() {
         Tile::Samples { y, .. } => y,
         other => panic!("ten rows over a hundred pixels are drawn as rows, not {other:?}"),
     };

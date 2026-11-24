@@ -51,7 +51,7 @@ struct LeadRow {
 
 impl LeadRow {
     fn read<I: SegmentIo>(
-        reader: &mut SegmentReader<I>,
+        reader: &SegmentReader<I>,
         targets: &[SlotTarget],
         shell: &mut TransientResult,
         window: &OutputWindow,
@@ -116,7 +116,7 @@ impl ChunkWindow {
 /// The window's rows `chunk` holds into `shell`'s time and saved columns, after its lead row
 /// when that comes first.
 fn fill_chunk<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     targets: &[SlotTarget],
     shell: &mut TransientResult,
     chunk: ChunkWindow,
@@ -155,7 +155,7 @@ pub(super) fn stream_column(shell: &TransientResult, target: SlotTarget) -> Opti
 }
 
 fn measure_window<I: SegmentIo>(
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     targets: &[SlotTarget],
     shell: &mut TransientResult,
     netlist: &rspice_core::Netlist,

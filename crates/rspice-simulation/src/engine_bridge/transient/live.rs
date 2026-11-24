@@ -43,7 +43,7 @@ pub struct LiveRows {
 pub fn open_live_rows(path: &Path) -> Result<Option<LiveRows>, String> {
     let failed = |error: rspice_results_store::StoreError| format!("{}: {error}", path.display());
     let io = FileIo::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let mut reader = SegmentReader::open(Box::new(io) as SegmentBytes).map_err(failed)?;
+    let reader = SegmentReader::open(Box::new(io) as SegmentBytes).map_err(failed)?;
     let rows = reader.rows();
     let Some((last_chunk, tail)) = reader.chunk_spans().enumerate().last() else {
         return Ok(None);

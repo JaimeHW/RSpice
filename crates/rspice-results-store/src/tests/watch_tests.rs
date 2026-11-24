@@ -94,7 +94,7 @@ fn a_run_whose_storage_fills_stops_typed_with_its_whole_chunks_equal_to_the_run_
     );
 
     // The reserve left room to close the segment over its whole chunks.
-    let mut reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
+    let reader = SegmentReader::open(FileIo::open(&segment).unwrap()).unwrap();
     assert!(matches!(
         reader.state(),
         SegmentState::Complete {
@@ -380,7 +380,7 @@ fn fill(io: WatchedIo<Volume>, schema: &crate::Schema, events: u32) -> (u64, Vec
         receipt.bytes,
         "nothing held past the tail"
     );
-    let mut reader = SegmentReader::open(MemoryIo::from_bytes(bytes.clone())).unwrap();
+    let reader = SegmentReader::open(MemoryIo::from_bytes(bytes.clone())).unwrap();
     let SegmentState::Complete { status, digest } = reader.state().clone() else {
         panic!("END was written");
     };

@@ -75,7 +75,7 @@ fn rows_events_and_an_amended_row_zero_read_back_from_the_segment() {
     let store_receipt = store.receipt().cloned().unwrap();
     assert_eq!(receipt.digest, Some(store_receipt.digest.0));
 
-    let mut reader = SegmentReader::open(store.into_io().unwrap()).unwrap();
+    let reader = SegmentReader::open(store.into_io().unwrap()).unwrap();
     assert_eq!(
         reader.state(),
         &SegmentState::Complete {
@@ -264,7 +264,7 @@ fn a_read_the_host_cannot_hold_is_refused_typed_with_its_bytes() {
         store.events(&[change]).unwrap();
     }
     store.end(sink::RunStatus::Completed).unwrap();
-    let mut reader = SegmentReader::open(store.into_io().unwrap()).unwrap();
+    let reader = SegmentReader::open(store.into_io().unwrap()).unwrap();
     crate::error::read_budget::BYTES.with(|cell| cell.set(Some(1024)));
     let rows = reader.read_x(0, 1000);
     let events = reader.events(1, f64::NEG_INFINITY, f64::INFINITY);

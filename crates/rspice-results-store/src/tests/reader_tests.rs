@@ -68,7 +68,7 @@ fn bits(values: &[f64]) -> Vec<u64> {
 
 /// Open `bytes` and check that every readable row is the row written at that position.
 fn readable_prefix(bytes: &[u8], x: &[f64], values: &[f64], slots: usize) -> Option<u64> {
-    let mut reader = SegmentReader::open(MemoryIo::from_bytes(bytes.to_vec())).ok()?;
+    let reader = SegmentReader::open(MemoryIo::from_bytes(bytes.to_vec())).ok()?;
     let rows = reader.rows();
     let count = rows as usize;
     assert!(
@@ -98,7 +98,7 @@ fn every_row_reads_back_bit_for_bit_with_the_status_and_digest() {
     let status = RunStatus::Stopped(StopReason::Failed("timestep too small".into()));
     let (receipt, io) = writer.finish(status.clone()).unwrap();
     let bytes = io.bytes().to_vec();
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     assert_eq!(
         reader.state(),
         &SegmentState::Complete {
@@ -135,7 +135,7 @@ fn chunk_by_chunk_reads_cover_every_row_once_bit_for_bit() {
     let mut writer = SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), 64).unwrap();
     writer.push_rows(&x, &values).unwrap();
     let (_, io) = writer.finish(RunStatus::Completed).unwrap();
-    let mut reader = SegmentReader::open(io).unwrap();
+    let reader = SegmentReader::open(io).unwrap();
     let spans = reader.chunk_spans().collect::<Vec<_>>();
     assert_eq!(spans.len(), 1000usize.div_ceil(64));
     let (mut chunk_x, mut chunk_slot) = (Vec::new(), Vec::new());

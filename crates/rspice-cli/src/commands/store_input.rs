@@ -379,7 +379,7 @@ fn write_json(
 /// times all lie outside the range is not read.
 fn kept_rows<I: SegmentIo>(
     path: &Path,
-    reader: &mut SegmentReader<I>,
+    reader: &SegmentReader<I>,
     slots: &[usize],
     lo: f64,
     hi: f64,

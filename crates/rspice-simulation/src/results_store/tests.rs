@@ -285,7 +285,7 @@ fn a_segment_left_without_its_end_closes_again_on_its_rows_and_states_its_digest
     }
     // The run stops here: the rows of its whole chunks are on disk, its `END` is not.
     drop(writer);
-    let mut recovered = SegmentReader::open(FileIo::open(&path).unwrap()).unwrap();
+    let recovered = SegmentReader::open(FileIo::open(&path).unwrap()).unwrap();
     assert_eq!(
         *recovered.state(),
         rspice_results_store::SegmentState::Recovered

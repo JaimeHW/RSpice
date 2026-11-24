@@ -87,7 +87,7 @@ fn a_flipped_block_byte_is_refused_at_its_block_and_never_read_as_numbers() {
         let len = u32_at(&clean, entry + 4);
         let mut bytes = clean.clone();
         bytes[block_at + len / 2] ^= 0x01;
-        let mut reader = open(bytes);
+        let reader = open(bytes);
         assert!(
             matches!(reader.state(), SegmentState::Complete { .. }),
             "END is intact"
@@ -138,7 +138,7 @@ fn a_flipped_summary_bit_is_refused_and_never_drawn_as_a_peak() {
         let mut bytes = clean.clone();
         // An exponent bit: 0.99... becomes 1.99...
         bytes[at + 6] ^= 0x10;
-        let mut reader = open(bytes.clone());
+        let reader = open(bytes.clone());
         let refused = reader.tile(0, 0.0, ROWS as f64 * 1e-8, pixels).unwrap_err();
         assert_eq!(damaged_at(refused), column_start as u64);
         assert_eq!(
@@ -149,7 +149,7 @@ fn a_flipped_summary_bit_is_refused_and_never_drawn_as_a_peak() {
     }
     assert!(peaks.iter().all(|&peak| peak > 1.5), "{peaks:?}");
     // The clean segment draws the sine's envelope at both levels.
-    let mut reader = open(clean);
+    let reader = open(clean);
     for pixels in [100, 5] {
         let Tile::Envelope { max, .. } = reader.tile(0, 0.0, ROWS as f64 * 1e-8, pixels).unwrap()
         else {
@@ -173,7 +173,7 @@ fn the_digest_covers_the_summaries_so_a_rewritten_one_fails_verification() {
     bytes[table..table + 4].copy_from_slice(&crc.to_le_bytes());
     reseal(&mut bytes, frame_at);
 
-    let mut reader = open(bytes);
+    let reader = open(bytes);
     let SegmentState::Complete { digest, .. } = reader.state().clone() else {
         panic!("END is intact");
     };

@@ -3066,7 +3066,7 @@ fn stopped_run(
             Ok(reader)
         });
     // A disk that filled before the segment held a readable chunk kept nothing.
-    let Ok(mut reader) = kept else {
+    let Ok(reader) = kept else {
         let free = free();
         store.discard();
         return storage_full(None, SinkReceipt::default(), None, free);
