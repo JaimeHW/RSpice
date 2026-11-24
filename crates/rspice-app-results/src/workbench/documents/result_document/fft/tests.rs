@@ -101,10 +101,12 @@ fn the_spectrum_is_of_the_first_voltage_plotted_and_reads_the_store_by_windows()
 
     let run = state.model.simulation.active_run().expect("a run");
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    state.results.results.session.waveform_visibility.insert(
-        SourceWaveformPresentationKey::new(key, "V(a)".to_owned()),
-        true,
-    );
+    state
+        .results
+        .results
+        .session
+        .waveform_visibility
+        .insert(SourceWaveformPresentationKey::new(key, "V(a)"), true);
     open_spectrum(&mut state, &mut controller);
     assert_eq!(
         state.results.analysis.fft_state.selected_source.as_deref(),

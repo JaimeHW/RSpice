@@ -184,7 +184,7 @@ fn a_two_port_amplifier_opens_on_the_s_parameter_sheet_with_s21_in_decibels() {
         );
     }
     let key = analysis_key(&state);
-    let noise_figure = SourceWaveformPresentationKey::new(key, "F".to_owned());
+    let noise_figure = SourceWaveformPresentationKey::new(key, "F");
     let ticked = |state: &ResultsTestHost| {
         super::super::waveform_plotted(
             &state.model,

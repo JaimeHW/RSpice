@@ -18,7 +18,7 @@ fn signal(host: &ResultsTestHost, name: &str) -> SourceWaveformPresentationKey {
     let run = host.model.simulation.active_run().expect("a run");
     SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
-        name.to_owned(),
+        name,
     )
 }
 

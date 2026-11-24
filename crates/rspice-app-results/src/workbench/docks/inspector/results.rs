@@ -497,10 +497,8 @@ fn trace_style_rows(
                 .map(|held| held.source_name().to_owned()),
         )
         .collect();
-    let key = rspice_results::result_presentation::SourceWaveformPresentationKey::new(
-        analysis,
-        signal.to_owned(),
-    );
+    let key =
+        rspice_results::result_presentation::SourceWaveformPresentationKey::new(analysis, signal);
     let look = state
         .results
         .session

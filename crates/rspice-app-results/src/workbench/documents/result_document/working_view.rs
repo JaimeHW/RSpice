@@ -1984,7 +1984,7 @@ fn project_traces(
                 || {
                     results
                         .session
-                        .waveform_visibility(&SourceWaveformPresentationKey::new(key, &name), false)
+                        .waveform_visibility(&SourceWaveformPresentationKey::new(key, name), false)
                 },
                 |listed| listed.contains(name),
             );
@@ -2111,7 +2111,7 @@ fn project_history_nets(
     };
     for name in names.history_only() {
         results.project_waveform_visible(
-            &SourceWaveformPresentationKey::new(key, &name),
+            &SourceWaveformPresentationKey::new(key, name),
             listed.contains(name).then_some(true),
         );
     }
