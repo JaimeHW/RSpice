@@ -181,8 +181,8 @@ pub struct PreflightDialogState {
     /// without its origin naming the workflow.
     pub run_and_queue_requested: bool,
     /// A pass whose run is still being prepared and checked, off the UI
-    /// thread.
-    pub checking: Option<PreflightCheck>,
+    /// thread. Boxed: the runs' state is built and cloned by value.
+    pub checking: Option<Box<PreflightCheck>>,
     /// The reader stopped that pass. The frame loop cancels it before it
     /// looks for the pass's verdict, so a verdict that lands in between
     /// authorizes nothing.

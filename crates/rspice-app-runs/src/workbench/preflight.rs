@@ -209,11 +209,11 @@ pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, qu
                     .model()
                     .dispatch_inputs_at_press(state.slot_facts())
                     .ok();
-                state.runs_mut().preflight.checking = Some(PreflightCheck {
+                state.runs_mut().preflight.checking = Some(Box::new(PreflightCheck {
                     report,
                     queue,
                     inputs_at_press,
-                });
+                }));
                 return;
             }
             Err(error) => report.blockers.push(preparation_issue(state, &error)),
@@ -337,7 +337,12 @@ pub fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
         mut report,
         queue,
         inputs_at_press,
-    }) = state.runs_mut().preflight.checking.take()
+    }) = state
+        .runs_mut()
+        .preflight
+        .checking
+        .take()
+        .map(|check| *check)
     else {
         return;
     };

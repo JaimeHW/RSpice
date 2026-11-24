@@ -153,13 +153,13 @@ fn wait_on_disk(
             DiskWait::Answer(id)
         }
     };
-    cx.runs.preparing_deck = Some(PreparingDeck {
+    cx.runs.preparing_deck = Some(Box::new(PreparingDeck {
         name,
         text,
         action,
         memory: None,
         disk: Some(disk),
-    });
+    }));
     if action == DeckAction::Run {
         cx.wb.run_press_route = Some(cx.wb.current_route());
     }
@@ -353,13 +353,13 @@ fn press_looking(cx: &mut Cx<'_, SourceFeature>, action: DeckAction, look: bool)
             .start_deck_preparation(&host, deck.clone(), action, before);
     }
     let ManualDeckCopy { name, text, .. } = deck;
-    cx.runs.preparing_deck = Some(PreparingDeck {
+    cx.runs.preparing_deck = Some(Box::new(PreparingDeck {
         name,
         text,
         action,
         memory: None,
         disk: None,
-    });
+    }));
     if action == DeckAction::Run {
         cx.wb.run_press_route = Some(cx.wb.current_route());
     }
@@ -421,7 +421,7 @@ pub fn poll_deck_run(cx: &mut Cx<'_, SourceFeature>) {
     };
     let Some(PreparingDeck {
         name, text, action, ..
-    }) = cx.runs.preparing_deck.take()
+    }) = cx.runs.preparing_deck.take().map(|deck| *deck)
     else {
         return;
     };
@@ -507,7 +507,7 @@ fn answer_disk_wait(cx: &mut Cx<'_, SourceFeature>, disk: DiskWait) {
     if open && !answered {
         return;
     }
-    let Some(PreparingDeck { action, .. }) = cx.runs.preparing_deck.take() else {
+    let Some(PreparingDeck { action, .. }) = cx.runs.preparing_deck.take().map(|deck| *deck) else {
         return;
     };
     if open {
@@ -531,13 +531,13 @@ fn hold_for_memory(
         LogSource::Run,
         format!("{name}: {}", warning.message()),
     );
-    cx.runs.preparing_deck = Some(PreparingDeck {
+    cx.runs.preparing_deck = Some(Box::new(PreparingDeck {
         name,
         text,
         action: DeckAction::Run,
         memory: Some(warning),
         disk: None,
-    });
+    }));
     if cx.wb.workspace != Workspace::Netlist {
         cx.execute(crate::workbench::framework::command_registry::ids::NETLIST_WORKSPACE);
     }
@@ -548,8 +548,11 @@ fn hold_for_memory(
 /// autosave as this returns, before the run dispatches. Whether a run was
 /// held.
 pub fn run_anyway(cx: &mut Cx<'_, SourceFeature>) -> bool {
-    let Some(PreparingDeck { name, .. }) =
-        cx.runs.preparing_deck.take_if(|deck| deck.memory.is_some())
+    let Some(PreparingDeck { name, .. }) = cx
+        .runs
+        .preparing_deck
+        .take_if(|deck| deck.memory.is_some())
+        .map(|deck| *deck)
     else {
         return false;
     };

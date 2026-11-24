@@ -27,8 +27,8 @@ pub struct RunsState {
     /// The deck whose run is being prepared away from the frame, as the Run
     /// press took it, the press that waits there on the deck's files on
     /// disk, and the run that waits there for more memory than is free.
-    /// Runtime only.
-    pub preparing_deck: Option<PreparingDeck>,
+    /// Runtime only, and boxed so the state stays small to build and clone.
+    pub preparing_deck: Option<Box<PreparingDeck>>,
 }
 
 /// A deck being prepared: what the press took, which names the deck in what
@@ -98,7 +98,7 @@ impl RunsState {
         if deck.memory.is_some() {
             controller.clear_prepared_run();
         }
-        Some(deck)
+        Some(*deck)
     }
 
     /// What the deck's run, prepared and waiting for Run anyway, needs
