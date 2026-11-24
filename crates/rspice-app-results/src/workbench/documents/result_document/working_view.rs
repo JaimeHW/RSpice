@@ -206,14 +206,15 @@ pub fn sync(state: &mut ResultsParts<'_>) {
 /// Make or find the shown run's view and follow the run with it, noting
 /// what it was followed from when that changed nothing.
 fn follow_shown(state: &mut ResultsParts<'_>) -> Option<ResultDocumentId> {
-    let run = state.model.simulation.active_run().cloned()?;
-    let view = ensure(state, &run);
+    // Each step reads the run where it is kept: a copy is every signal.
+    let shown = state.model.simulation.active_run()?.dataset_id;
+    let view = ensure(state, shown);
     let before = followed_at(state.results_reads(), view);
     if let Some(view) = view {
-        follow_a_new_run(state, view, &run);
-        follow(state, view, &run);
-        reread_grown(state, view, &run);
-        plot_marked_outputs(state, view, &run);
+        follow_a_new_run(state, view, shown);
+        follow(state, view, shown);
+        reread_grown(state, view, shown);
+        plot_marked_outputs(state, view, shown);
     }
     let after = followed_at(state.results_reads(), view);
     state.results.working_view_followed = after.filter(|after| before.as_ref() == Some(after));
@@ -633,7 +634,8 @@ fn prune(state: &mut ResultsParts<'_>) {
 
 /// The working view `run` is drawn through, made the first time a run of
 /// its plan, or the imported run itself, is shown.
-fn ensure(state: &mut ResultsParts<'_>, run: &SimulationRun) -> Option<ResultDocumentId> {
+fn ensure(state: &mut ResultsParts<'_>, shown: DatasetId) -> Option<ResultDocumentId> {
+    let run = retained_run(state.model, shown)?;
     let source = source_of(run);
     if let Some(view) = view_of(state.results_reads(), source) {
         return Some(view);
@@ -690,8 +692,11 @@ fn ensure(state: &mut ResultsParts<'_>, run: &SimulationRun) -> Option<ResultDoc
 /// while it was still running. A signal the reader took off keeps its
 /// hidden trace and stays off. The view does this of itself: no step of the
 /// reader's to undo.
-fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
-    let Some(document) = state.model.workspace.content.visualization_document(view) else {
+fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: DatasetId) {
+    let (Some(document), Some(run)) = (
+        state.model.workspace.content.visualization_document(view),
+        retained_run(state.model, shown),
+    ) else {
         return;
     };
     let mut edits = Vec::new();
@@ -729,11 +734,9 @@ fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, run
         return;
     }
     let revision = document.revision();
+    let label = run.label.clone();
     if let Err(error) = view_edits::apply_following(state, view, revision, edits) {
-        state.prompt(format!(
-            "The view could not plot what {} plots: {error}",
-            run.label
-        ));
+        state.prompt(format!("The view could not plot what {label} plots: {error}"));
     }
 }
 
@@ -746,14 +749,21 @@ fn first_plotted(
     analysis: &crate::state::AnalysisResult,
 ) -> Vec<String> {
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    // What the reader set of the analysis, by signal: a signal with nothing
+    // set plots as the run plots it.
+    let set: HashMap<&str, bool> = session
+        .waveform_visibility
+        .iter()
+        .filter(|(signal, _)| signal.analysis() == key)
+        .map(|(signal, visible)| (signal.source_name(), *visible))
+        .collect();
     analysis
         .waveforms
         .iter()
         .filter(|waveform| {
-            session.waveform_visibility(
-                &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
-                waveform.visible,
-            )
+            set.get(waveform.name.as_str())
+                .copied()
+                .unwrap_or(waveform.visible)
         })
         .map(|waveform| waveform.name.clone())
         .collect()
@@ -794,8 +804,10 @@ fn newest_run_of_plan(
 /// turns to the history a run makes: a view kept on an earlier run follows
 /// the plan's newest again once the newest is the run shown. The view
 /// changes itself here, so the reader has no step to undo.
-fn follow_a_new_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: &SimulationRun) {
-    let source = source_of(shown);
+fn follow_a_new_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: DatasetId) {
+    let Some(source) = retained_run(state.model, shown).map(source_of) else {
+        return;
+    };
     let WorkingViewSource::Plan { .. } = source else {
         return;
     };
@@ -807,11 +819,11 @@ fn follow_a_new_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown:
         .panes()
         .iter()
         .filter_map(|pane| pane.binding)
-        .any(|binding| binding.dataset.dataset_id == shown.dataset_id);
+        .any(|binding| binding.dataset.dataset_id == shown);
     if tracking.mode != ResultDocumentTrackingMode::Pinned
         || reads_shown
         || newest_run_of_plan(state.results_reads(), source).map(|run| run.dataset_id)
-            != Some(shown.dataset_id)
+            != Some(shown)
     {
         return;
     }
@@ -823,32 +835,34 @@ fn follow_a_new_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown:
         revision,
         vec![DocumentEdit::SetTracking(tracking)],
     ) {
-        state.prompt(format!(
-            "The view could not follow {}: {error}",
-            shown.label
-        ));
+        let label = retained_run(state.model, shown).map_or_else(String::new, |run| run.label.clone());
+        state.prompt(format!("The view could not follow {label}: {error}"));
     }
 }
 
 /// Move a view that follows its plan onto the plan's newest run.
-fn follow(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: &SimulationRun) {
-    let source = source_of(shown);
+fn follow(state: &mut ResultsParts<'_>, view: ResultDocumentId, shown: DatasetId) {
+    let Some(source) = retained_run(state.model, shown).map(source_of) else {
+        return;
+    };
     let Some(document) = state.model.workspace.content.visualization_document(view) else {
         return;
     };
     if document.tracking().mode != ResultDocumentTrackingMode::Latest {
         return;
     }
-    let Some(newest) = newest_run_of_plan(state.results_reads(), source).cloned() else {
+    let Some(newest) =
+        newest_run_of_plan(state.results_reads(), source).map(|run| run.dataset_id)
+    else {
         return;
     };
-    show_run(state, view, &newest);
+    show_run(state, view, newest);
 }
 
 /// Read `run` again through `view` when the view reads it and it grew since
 /// (it was shown while still running), whether the view follows its plan or
 /// stays on this run.
-fn reread_grown(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
+fn reread_grown(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: DatasetId) {
     let reads_run = state
         .model
         .workspace
@@ -859,7 +873,7 @@ fn reread_grown(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simu
                 .panes()
                 .iter()
                 .filter_map(|pane| pane.binding)
-                .any(|binding| binding.dataset.dataset_id == run.dataset_id)
+                .any(|binding| binding.dataset.dataset_id == run)
         });
     if reads_run {
         show_run(state, view, run);
@@ -868,14 +882,22 @@ fn reread_grown(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simu
 
 /// Read `run` through `view`: each pane onto the same analysis of `run`, and
 /// a pane for each analysis of `run` the view does not draw yet.
-fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &SimulationRun) {
-    let finished = if run.lifecycle.is_terminal() {
-        state.results.read_while_running.remove(&run.dataset_id)
+fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: DatasetId) {
+    let Some(terminal) =
+        retained_run(state.model, dataset).map(|run| run.lifecycle.is_terminal())
+    else {
+        return;
+    };
+    let finished = if terminal {
+        state.results.read_while_running.remove(&dataset)
     } else {
-        state.results.read_while_running.insert(run.dataset_id);
+        state.results.read_while_running.insert(dataset);
         false
     };
-    let Some(document) = state.model.workspace.content.visualization_document(view) else {
+    let (Some(document), Some(run)) = (
+        state.model.workspace.content.visualization_document(view),
+        retained_run(state.model, dataset),
+    ) else {
         return;
     };
     let reads_run = document
@@ -961,11 +983,9 @@ fn show_run(state: &mut ResultsParts<'_>, view: ResultDocumentId, run: &Simulati
         // next one to yet; each new pane goes after the view's last.
         anchor = last_pane;
     }
+    let label = run.label.clone();
     if let Err(error) = view_edits::apply(state, view, revision, edits) {
-        state.prompt(format!(
-            "The view could not move onto {}: {error}",
-            run.label
-        ));
+        state.prompt(format!("The view could not move onto {label}: {error}"));
     }
 }
 
@@ -994,10 +1014,10 @@ pub fn choose_run(
             .runs
             .iter()
             .find(|run| run.dataset_id == dataset_id && source_of(run) == source)
-            .cloned()
+            .map(|run| run.dataset_id)
             .ok_or_else(|| "That run is not a run of this view's plan.".to_owned())?,
         None => newest_run_of_plan(state.results_reads(), source)
-            .cloned()
+            .map(|run| run.dataset_id)
             .ok_or_else(|| "The plan has no retained run to follow.".to_owned())?,
     };
     if let WorkingViewSource::Plan { .. } = source {
@@ -1017,13 +1037,13 @@ pub fn choose_run(
             .map_err(|error| error.to_string())?;
         }
     }
-    show_run(state, view, &target);
+    show_run(state, view, target);
     let simulation = &mut state.model.simulation;
     if let Some(index) = simulation
         .retained
         .runs
         .iter()
-        .position(|run| run.dataset_id == target.dataset_id)
+        .position(|run| run.dataset_id == target)
     {
         simulation.select_run(index);
         super::open_shown_run(state);
