@@ -2,7 +2,10 @@
 //! samples, with what the reader made of them. A run is immutable once
 //! written, so a history holding a million-signal run digests in what its
 //! runs' headers weigh, and a record holding only those headers digests as
-//! the whole record does.
+//! the whole record does. Each view stands in it by its content digest,
+//! which the view keeps for the content it holds: a view of a hundred
+//! thousand traces is written out once per change of it, not once per
+//! check.
 
 use std::cell::RefCell;
 
@@ -38,7 +41,8 @@ impl ResultFingerprintCache {
         // These owners are still mutable without revisions. Compare their
         // exact canonical encoding, including signed zero, before reusing a
         // digest that includes them. Retained samples are absent from this key.
-        let presentation = super::digest(&(reports, visualizations, signal_sets))?;
+        let views = view_digests(visualizations)?;
+        let presentation = super::digest(&(reports, &views, signal_sets))?;
         let mut cache = self.0.borrow_mut();
         if let Some(held) = cache.as_ref()
             && held.results.shares_content_with(results)
@@ -46,7 +50,7 @@ impl ResultFingerprintCache {
         {
             return Ok(held.digest);
         }
-        let digest = digest(results, reports, visualizations, signal_sets)?;
+        let digest = digest_of_views(results, reports, &views, signal_sets)?;
         *cache = Some(CachedFingerprint {
             results: results.clone(),
             presentation,
@@ -58,23 +62,47 @@ impl ResultFingerprintCache {
 
 /// The result history's fingerprint: the retained runs by identity
 /// ([`crate::results::ProjectSimulationResultsData::identity`]), the reports,
-/// the views (what the reader made of the runs among them) and the saved
-/// signal sets.
+/// the views (what the reader made of the runs among them) by their content
+/// digests, and the saved signal sets.
 pub fn digest(
     results: &ProjectSimulationResults,
     reports: &[ReportDocument],
     visualizations: &[VisualizationDocument],
     signal_sets: &[SignalSet],
 ) -> Result<ContentDigest, String> {
+    digest_of_views(
+        results,
+        reports,
+        &view_digests(visualizations)?,
+        signal_sets,
+    )
+}
+
+fn digest_of_views(
+    results: &ProjectSimulationResults,
+    reports: &[ReportDocument],
+    views: &[ContentDigest],
+    signal_sets: &[SignalSet],
+) -> Result<ContentDigest, String> {
     #[cfg(any(test, feature = "document-fingerprint-observation"))]
     super::fingerprints::observe(&RESULT_FINGERPRINT_PASSES);
     super::digest(&(
-        "result-history-v3",
+        "result-history-v4",
         results.identity(),
         reports,
-        visualizations,
+        views,
         signal_sets,
     ))
+}
+
+/// Each view's content digest, in the project's order. A view keeps the
+/// digest of the content it holds, so only a view changed since it was last
+/// asked is written out.
+fn view_digests(visualizations: &[VisualizationDocument]) -> Result<Vec<ContentDigest>, String> {
+    visualizations
+        .iter()
+        .map(|view| view.content_digest().map_err(|error| error.to_string()))
+        .collect()
 }
 
 #[cfg(test)]
