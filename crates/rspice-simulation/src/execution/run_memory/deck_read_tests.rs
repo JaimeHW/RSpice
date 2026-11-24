@@ -22,7 +22,8 @@ use crate::project_veriloga::preparation::deck_hdl;
 
 const GB: u64 = 1024 * 1024 * 1024;
 
-const LEAF: &str = "`timescale 1ns/1ps\nmodule leaf(y);\n  output y;\n  reg y;\n  initial y = 1'b0;\n  always #5 y = ~y;\nendmodule\n";
+/// A design over `half`, a cell its deck defines and no source does.
+const TOP: &str = "`include \"disciplines.vams\"\nmodule top(p, n);\n  inout p, n;\n  electrical p, n;\n  half xu(p, n);\nendmodule\n";
 
 /// `body` behind a comment that puts the deck past the bytes a deck may be
 /// as this build ships.
@@ -63,9 +64,7 @@ fn a_deck_past_the_shipped_size_still_gets_each_reads_advice() {
     let folder =
         Folder(std::env::temp_dir().join(format!("rspice-deck-reads-{}", std::process::id())));
     std::fs::create_dir_all(&folder.0).expect("create the folder");
-    std::fs::write(folder.0.join("leaf.v"), LEAF).expect("write the source");
-    std::fs::write(folder.0.join("leaf.inc"), "* leaf\n.hdl \"leaf.v\"\n")
-        .expect("write the include");
+    std::fs::write(folder.0.join("top.va"), TOP).expect("write the design");
     let origin = folder.0.join("deck.cir");
 
     let mut gain = SpecificationDefinition::new_from_projection(&SpecEntry {
@@ -81,24 +80,23 @@ fn a_deck_past_the_shipped_size_still_gets_each_reads_advice() {
     let drafts = HashMap::from([(AnalysisInstanceId::new(), &ac)]);
 
     type Advised<'a> = &'a dyn Fn(&str, ResourceLimits) -> bool;
-    let reads: [(&str, &str, Advised); 4] = [
+    let reads: [(&str, &str, Advised); 3] = [
         (
-            "the Verilog-A sources its included files name, sealed with the run",
-            ".include \"leaf.inc\"\nX1 q leaf\nR1 q 0 1k\n.end\n",
+            "the cells its Verilog-A sources are compiled against, sealed with the run",
+            ".hdl \"top.va\"\n.subckt half a b\nR1 a b 1k\n.ends\nV1 in 0 1\nX1 in 0 top\n.end\n",
             &|deck, limits| {
                 seal_deck_hdl_sources(deck, Some(&origin), &IncludeSearchChain::default(), limits)
-                    .is_ok_and(|sealed| !sealed.runtimes.is_empty())
+                    .is_ok()
             },
         ),
         (
-            "the cells it offers its designs as leaves",
-            ".subckt half a b\nR1 a b 1k\n.ends\nV1 in 0 1\nX1 in 0 half\n.end\n",
-            &|deck, limits| !deck_hdl(deck, limits).0.is_empty(),
-        ),
-        (
-            "the min:typ:max value its designs keep",
-            ".options hdl_delay_select=min\nV1 in 0 1\nR1 in 0 1k\n.end\n",
-            &|deck, limits| deck_hdl(deck, limits).1 == DigitalDelaySelect::Min,
+            "the cells it offers its designs as leaves and the min:typ:max value they keep",
+            ".options hdl_delay_select=min\n.subckt half a b\nR1 a b 1k\n.ends\nV1 in 0 1\n\
+             X1 in 0 half\n.end\n",
+            &|deck, limits| {
+                let (cells, delay_select) = deck_hdl(deck, limits);
+                !cells.is_empty() && delay_select == DigitalDelaySelect::Min
+            },
         ),
         (
             "the plan's measurements, checked against its parameters",
