@@ -19,6 +19,7 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::mem::MaybeUninit;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 
@@ -1300,6 +1301,71 @@ fn joined(text: Cow<'_, str>) -> Cow<'_, str> {
         out.push_str(rest);
     }
     Cow::Owned(out)
+}
+
+// ---------------------------------------------------------------------------
+// Letting go of the index.
+
+/// What lets go of a large index's pages: shown each table of a page as the
+/// page is freed, and told when it is.
+///
+/// A large deck's index holds thousands of tables of tens of kilobytes.
+/// Whoever frees them can hand their memory back to the system before the
+/// heap takes them, and pause between pages.
+pub trait PageRelease {
+    /// One table of a page about to be freed: its bytes, which nothing reads
+    /// again.
+    fn release(&mut self, table: &mut [MaybeUninit<u8>]);
+
+    /// A page was freed.
+    fn page_freed(&mut self);
+}
+
+/// The bytes `table` holds, written or not.
+fn table_bytes<T: Copy>(table: &mut Vec<T>) -> &mut [MaybeUninit<u8>] {
+    let len = table.capacity() * std::mem::size_of::<T>();
+    // SAFETY: the buffer holds `capacity` elements, so `len` bytes from its
+    // start, all of them readable as `MaybeUninit<u8>`, and the slice
+    // borrows the vector mutably for as long as it lives.
+    unsafe { std::slice::from_raw_parts_mut(table.as_mut_ptr().cast::<MaybeUninit<u8>>(), len) }
+}
+
+impl Page {
+    /// Show `release` each of the page's tables, before they are freed.
+    fn release_tables(&mut self, release: &mut dyn PageRelease) {
+        release.release(table_bytes(&mut self.line_starts));
+        release.release(table_bytes(&mut self.cards));
+        release.release(table_bytes(&mut self.symbols));
+        release.release(table_bytes(&mut self.reads));
+        release.release(table_bytes(&mut self.nodes));
+        release.release(table_bytes(&mut self.includes));
+        release.release(table_bytes(&mut self.comments));
+        release.release(table_bytes(&mut self.spectre_lines));
+        release.release(table_bytes(&mut self.definitions));
+        release.release(table_bytes(&mut self.globals));
+        release.release(table_bytes(&mut self.section_openers));
+        release.release(table_bytes(&mut self.opened_scopes));
+        release.release(table_bytes(&mut self.opened_sections));
+        release.release(table_bytes(&mut self.symbols_by_place));
+        release.release(table_bytes(&mut self.reads_by_target));
+        release.release(table_bytes(&mut self.instance_reads));
+    }
+}
+
+impl DeckIndex {
+    /// Let go of the index page by page through `release`: each page it
+    /// holds the last share of is shown to `release` table by table, then
+    /// freed; a page another index still shares is left to that index.
+    pub fn let_go(self, release: &mut dyn PageRelease) {
+        let mut pages = self.pages;
+        while let Some(slot) = pages.pop() {
+            if let Some(mut page) = Arc::into_inner(slot.page) {
+                page.release_tables(release);
+                drop(page);
+                release.page_freed();
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

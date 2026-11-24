@@ -115,10 +115,12 @@ pub(crate) struct NetlistProjectIndex {
 }
 
 /// The index of a large deck holds large tables: whoever lets go of it last,
-/// it is freed away from that thread.
+/// it is freed away from that thread, a page at a time.
 impl Drop for NetlistProjectIndex {
     fn drop(&mut self) {
-        rspice_design::freed_away::free_away(self);
+        rspice_design::freed_away::free_away_with(self, |index, release| {
+            std::mem::take(&mut index.deck).let_go(release);
+        });
     }
 }
 
@@ -147,6 +149,17 @@ pub(crate) struct ProjectTables {
     /// names ignoring case, so the names a prefix starts are found by a
     /// search.
     nodes_by_name: Vec<Vec<u32>>,
+}
+
+/// The tables share the index of their revision with the project index:
+/// whichever lets go of it last, its pages are freed away from that thread,
+/// a page at a time.
+impl Drop for ProjectTables {
+    fn drop(&mut self) {
+        rspice_design::freed_away::free_away_with(self, |tables, release| {
+            std::mem::take(&mut tables.deck).let_go(release);
+        });
+    }
 }
 
 /// The tables of the latest revision worked out, shared by the indexes of
@@ -266,7 +279,8 @@ impl ProjectTables {
             nodes_by_name: nodes_by_name(&deck),
             deck,
             files,
-            ..Self::default()
+            hierarchy: Vec::new(),
+            hierarchy_truncated: false,
         };
         tables.expand_hierarchy();
         tables

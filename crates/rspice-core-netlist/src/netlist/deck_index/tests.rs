@@ -952,3 +952,55 @@ fn the_change_between_two_texts_never_splits_a_character() {
         }
     }
 }
+
+/// Counts what letting go of an index shows it.
+#[derive(Default)]
+struct Counted {
+    tables: usize,
+    pages: usize,
+}
+
+impl PageRelease for Counted {
+    fn release(&mut self, _: &mut [MaybeUninit<u8>]) {
+        self.tables += 1;
+    }
+
+    fn page_freed(&mut self) {
+        self.pages += 1;
+    }
+}
+
+/// Letting go of an index frees, page by page, every page it holds the
+/// last share of; a page another index still shares is freed by that one.
+#[test]
+fn letting_go_of_an_index_frees_every_page_it_holds_the_last_share_of() {
+    let deck = (0..20_000)
+        .map(|at| format!("R{at} node_{at} node_{} 1k\n", at + 1))
+        .collect::<String>();
+    let index = index(&deck);
+    let pages = index
+        .pages
+        .iter()
+        .map(|slot| Arc::downgrade(&slot.page))
+        .collect::<Vec<_>>();
+    assert!(pages.len() > 1, "the deck spans pages");
+    let shared = index.clone();
+
+    let mut first = Counted::default();
+    index.let_go(&mut first);
+    assert_eq!(first.pages, 0, "the clone shares every page");
+    assert!(pages.iter().all(|page| page.strong_count() == 1));
+
+    let mut last = Counted::default();
+    shared.let_go(&mut last);
+    assert_eq!(last.pages, pages.len(), "each page is freed once");
+    assert_eq!(
+        last.tables,
+        pages.len() * 16,
+        "every table of a page is shown"
+    );
+    assert!(
+        pages.iter().all(|page| page.strong_count() == 0),
+        "every page is freed"
+    );
+}

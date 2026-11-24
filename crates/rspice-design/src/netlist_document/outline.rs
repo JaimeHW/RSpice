@@ -897,10 +897,12 @@ impl Default for NetlistSourceIndex {
 }
 
 /// The index of a large deck holds large tables: whoever lets go of it last,
-/// it is freed away from that thread.
+/// it is freed away from that thread, a page at a time.
 impl Drop for NetlistSourceIndex {
     fn drop(&mut self) {
-        crate::freed_away::free_away(self);
+        crate::freed_away::free_away_with(self, |index, release| {
+            std::mem::take(&mut index.outline.deck).let_go(release);
+        });
     }
 }
 
