@@ -317,6 +317,10 @@ impl<const N: usize> PartialEq<[usize; N]> for PaneTraces {
     }
 }
 
+/// What a control acting on each pane of a strip calls it, by the pane's
+/// slot and unit.
+pub(crate) type PaneNames = Vec<((usize, String), Option<String>)>;
+
 /// One strip (== one analysis of the active run).
 pub struct StripModel {
     pub analysis_index: usize,
@@ -420,7 +424,7 @@ pub struct StripModel {
     pub(crate) trace_facts: std::sync::OnceLock<TraceFacts>,
     /// What a control acting on each pane calls it, by the pane's slot and
     /// unit, found once a revision (see [`stack::pane_name`]).
-    pub(crate) pane_names: std::sync::OnceLock<Vec<((usize, String), Option<String>)>>,
+    pub(crate) pane_names: std::sync::OnceLock<PaneNames>,
     /// What each unit's pane may plot its curves against, by the unit,
     /// found once a revision (see [`stack::abscissa_menu`]).
     pub(crate) abscissa_signals: std::sync::OnceLock<Vec<(String, Arc<[String]>)>>,
