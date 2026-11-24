@@ -242,8 +242,7 @@ pub(crate) fn convert_streamed(
         return Ok(false);
     }
     let probe = reader.chunk_spans().next().map_or(0, |span| span.1);
-    fill_rows(&mut reader, &targets, &mut shell, 0, probe)
-        .map_err(|error| read_error(path, error))?;
+    fill_rows(&reader, &targets, &mut shell, 0, probe).map_err(|error| read_error(path, error))?;
     let Ok(mut signals) = signals(path, &shell, limits) else {
         return Ok(false);
     };
@@ -287,7 +286,7 @@ pub(crate) fn convert_streamed(
             Column::Digital(_) | Column::Real(_) | Column::Derived(_) => None,
         })
         .collect::<Vec<_>>();
-    let Some((first, points)) = kept_rows(path, &mut reader, &slots, lo, hi)? else {
+    let Some((first, points)) = kept_rows(path, &reader, &slots, lo, hi)? else {
         return Ok(false);
     };
     if let Some(keep) = keep {

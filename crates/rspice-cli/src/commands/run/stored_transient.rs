@@ -349,7 +349,7 @@ pub(super) fn run_with<T: StoreRunEnd>(
             store.save_manifest(&reader)?;
             Ok(reader)
         });
-    let mut reader = match opened {
+    let reader = match opened {
         Ok(reader) => reader,
         Err(error) => {
             let failure = store_error(&store.dir, error);
@@ -368,7 +368,7 @@ pub(super) fn run_with<T: StoreRunEnd>(
     let mut shell = shell;
     // The digital and real event histories stay in the store until an output reads them there
     // or asks for them in memory ([`StoredTransient::hold_events`]).
-    if let Err(error) = fill_impulses(&mut reader, &mut shell) {
+    if let Err(error) = fill_impulses(&reader, &mut shell) {
         let failure = store_error(&store.dir, error);
         drop(reader);
         store.discard();
@@ -562,7 +562,7 @@ impl StoredTransient {
     /// caller of a run it hands back.
     pub(super) fn hold_events(&mut self) -> Result<(), CliError> {
         if !self.rows.events_held {
-            fill_event_traces(&mut self.rows.reader, &mut self.shell)
+            fill_event_traces(&self.rows.reader, &mut self.shell)
                 .map_err(|error| store_error(&self.rows.store.dir, error))?;
             self.rows.events_held = true;
         }
@@ -1908,7 +1908,7 @@ impl StoredRows {
         let count = usize::try_from(count).map_err(|_| CliError::InternalError {
             message: "a transient store holds more rows than this host can address".to_owned(),
         })?;
-        fill_rows(&mut self.reader, &self.targets, result, first, count)
+        fill_rows(&self.reader, &self.targets, result, first, count)
             .map_err(|error| store_error(&self.store.dir, error))?;
         self.record_lead_power(result);
         Ok(())
@@ -1917,7 +1917,7 @@ impl StoredRows {
     /// Move the first and last rows into `result`'s time and saved columns: what a statement
     /// that reads only event operands reads of the run, and the row a PARAM reads.
     fn fill_span(&mut self, result: &mut TransientResult) -> Result<(), CliError> {
-        fill_span(&mut self.reader, &self.targets, result)
+        fill_span(&self.reader, &self.targets, result)
             .map_err(|error| store_error(&self.store.dir, error))?;
         self.record_lead_power(result);
         Ok(())
@@ -1971,7 +1971,7 @@ impl StoredRows {
             return Ok(());
         }
         let rows = self.rows();
-        let Some((slot, point, value)) = first_non_finite(&mut self.reader, &self.targets)
+        let Some((slot, point, value)) = first_non_finite(&self.reader, &self.targets)
             .map_err(|error| store_error(&self.store.dir, error))?
         else {
             return Ok(());

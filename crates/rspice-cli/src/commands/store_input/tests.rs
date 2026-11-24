@@ -338,7 +338,7 @@ fn a_range_reads_only_its_own_chunks_and_kept_columns() {
     let store = dir.join("run.rsr");
     let bytes = std::fs::read(store.join(rspice_results_store::StoreDir::segment_name(0))).unwrap();
     let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let mut reader = rspice_results_store::SegmentReader::open(CountedIo {
+    let reader = rspice_results_store::SegmentReader::open(CountedIo {
         bytes,
         reads: reads.clone(),
     })
@@ -352,7 +352,7 @@ fn a_range_reads_only_its_own_chunks_and_kept_columns() {
     let slot = reader.slots() - 1;
     reads.store(0, Relaxed);
     assert_eq!(
-        super::kept_rows(&store, &mut reader, &[slot], lo, hi).unwrap(),
+        super::kept_rows(&store, &reader, &[slot], lo, hi).unwrap(),
         Some((start, rows as u64))
     );
     let window = reads.swap(0, Relaxed);
