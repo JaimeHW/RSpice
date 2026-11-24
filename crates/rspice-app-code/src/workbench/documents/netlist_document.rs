@@ -930,7 +930,7 @@ impl NetlistDocumentState {
     /// hover, go to definition, completion and the check of the deck and its
     /// includes build no index until the reader asks for them.
     #[must_use]
-    pub fn language_off(&self) -> Option<super::deck_memory::LanguageOff> {
+    pub(crate) fn language_off(&self) -> Option<super::deck_memory::LanguageOff> {
         let off = self.language_off?;
         self.open_deck
             .as_ref()
