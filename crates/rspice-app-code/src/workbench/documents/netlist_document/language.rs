@@ -164,6 +164,25 @@ struct TablesState {
     /// The deck and files of the newest revision, when it came while
     /// another's tables were being worked out.
     pending: Option<(DeckIndex, Vec<IndexedFile>)>,
+    /// What wakes the frame once the tables are worked out: the last wake a
+    /// frame gave, kept for an edit an action follows, which has none.
+    wake: Option<TablesWake>,
+}
+
+/// Wakes the frame that shows the tables.
+#[derive(Clone)]
+struct TablesWake(Arc<dyn Fn() + Send + Sync>);
+
+impl TablesWake {
+    fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
+        Self(Arc::new(wake))
+    }
+}
+
+impl std::fmt::Debug for TablesWake {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("TablesWake")
+    }
 }
 
 impl TablesCell {
@@ -174,6 +193,7 @@ impl TablesCell {
                 latest: Some(Arc::new(ProjectTables::of(deck.clone(), files.to_vec()))),
                 building: false,
                 pending: None,
+                wake: None,
             }),
         }
     }
@@ -183,16 +203,20 @@ impl TablesCell {
     }
 
     /// Work out the tables of `deck` away from this thread, after those
-    /// being worked out; `wake` once they are.
+    /// being worked out; `wake` once they are, or without one, the last
+    /// wake given.
     fn refresh(
         self: &Arc<Self>,
         deck: DeckIndex,
         files: Vec<IndexedFile>,
-        wake: impl Fn() + Send + 'static,
+        wake: Option<TablesWake>,
     ) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
+        if wake.is_some() {
+            state.wake = wake;
+        }
         if state.building {
             state.pending = Some((deck, files));
             return;
@@ -204,6 +228,7 @@ impl TablesCell {
         let spawned = std::thread::Builder::new()
             .name("netlist-tables".to_owned())
             .spawn(move || {
+                let mut wake = None;
                 while let Some((deck, files)) = next.take() {
                     let tables = Arc::new(ProjectTables::of(deck, files));
                     let Ok(mut state) = cell.state.lock() else {
@@ -220,9 +245,12 @@ impl TablesCell {
                     next = state.pending.take();
                     if next.is_none() {
                         state.building = false;
+                        wake = state.wake.clone();
                     }
                 }
-                wake();
+                if let Some(TablesWake(wake)) = wake {
+                    wake();
+                }
             });
         if spawned.is_err()
             && let Ok(mut state) = self.state.lock()
@@ -515,12 +543,7 @@ impl NetlistProjectIndex {
     /// touched is read again and the rest shared, the definitions keep their
     /// order, and the tables follow away from this thread; else it is built
     /// anew.
-    fn edited(
-        &self,
-        root: NetlistRoot,
-        texts: &[IndexText],
-        wake: impl Fn() + Send + 'static,
-    ) -> Self {
+    fn edited(&self, root: NetlistRoot, texts: &[IndexText], wake: Option<TablesWake>) -> Self {
         let same_files = self.files.len() == texts.len()
             && self.files.iter().zip(texts).all(|(file, text)| {
                 file.root == root && file.dependency_identity == text.dependency_identity
@@ -1172,7 +1195,11 @@ pub(crate) fn project_index_in(
         netlist.project_index.start(
             key,
             move || match last {
-                Some(last) => last.edited(root, &texts, move || wake_tables.request_repaint()),
+                Some(last) => last.edited(
+                    root,
+                    &texts,
+                    Some(TablesWake::new(move || wake_tables.request_repaint())),
+                ),
                 None => NetlistProjectIndex::build(root, &texts),
             },
             move || wake.request_repaint(),
@@ -1183,7 +1210,10 @@ pub(crate) fn project_index_in(
 }
 
 /// The project index of the root the editor shows as it stands, waiting for
-/// its build to finish: what an action answers from.
+/// its build to finish: what an action answers from. An action pressed
+/// before the frame started that build reads the text from the index of the
+/// same root built last, again only where the edit since touched it, so a
+/// key and the action after it cost what the key touched.
 pub(crate) fn project_index_now(
     model: &Model,
     netlist: &mut NetlistDocumentState,
@@ -1192,7 +1222,16 @@ pub(crate) fn project_index_now(
     if let Some(index) = netlist.project_index.wait_for(|built| *built == key) {
         return Some(index);
     }
-    let index = NetlistProjectIndex::build(root, &index_texts_in(model, netlist, root)?);
+    let texts = index_texts_in(model, netlist, root)?;
+    let last = netlist
+        .project_index
+        .built()
+        .filter(|(built, _)| built.0 == key.0)
+        .map(|(_, index)| index);
+    let index = match last {
+        Some(last) => last.edited(root, &texts, None),
+        None => NetlistProjectIndex::build(root, &texts),
+    };
     Some(netlist.project_index.store(key, index))
 }
 
