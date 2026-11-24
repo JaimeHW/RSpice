@@ -140,7 +140,7 @@ fn a_stepped_dc_sweep_keeps_one_id_vds_curve_per_gate_voltage() {
             curve.label
         );
     }
-    assert_eq!(curves[1].label, "DC Sweep · vgs = 2");
+    assert_eq!(curves[1].label, "DC Sweep · vgs=2");
 }
 
 const RC_FAMILY: &str = "rc low-pass family\n\

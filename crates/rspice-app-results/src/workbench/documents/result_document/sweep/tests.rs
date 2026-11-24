@@ -1,3 +1,6 @@
+//! The Sweep sheet's plan over a retained family: what it reads from a
+//! stepped run, and the analyses it refuses as no sweep.
+
 use super::*;
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;

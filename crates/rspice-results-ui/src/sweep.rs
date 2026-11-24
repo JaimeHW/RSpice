@@ -424,7 +424,7 @@ fn draw_plot(
             .collect::<Vec<_>>()
     };
     let drawn = plot::show(ui, &spec, cache, None, Some(&readout));
-    response.view = drawn.view.clone();
+    response.view = drawn.view;
     if let Some(caption) = drawn.x_label_rect {
         response.x = swap_menu(ui, caption, table, x);
     }
