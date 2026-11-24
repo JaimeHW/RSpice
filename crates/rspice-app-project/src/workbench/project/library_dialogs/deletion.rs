@@ -637,7 +637,7 @@ fn can_delete(
             .collect::<Vec<_>>()
             .join(", ");
         return Err(format!(
-            "Configuration set roots still reference this {} ({names}). Rebind or remove those configurations first.",
+            "Configurations start at this {} ({names}). Give them another top cell on Configuration, or delete them, before deleting it.",
             target.kind_label().to_ascii_lowercase()
         ));
     }

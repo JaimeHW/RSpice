@@ -1,6 +1,6 @@
 //! Libraries kept in folders of their own, on the pages: Attach library…,
-//! the commands Library actions and the Dependencies rows offer over them,
-//! Refresh…, the choice a cellview that changed on disk since editing began
+//! the commands a library's row offers over them in Library Manager and on
+//! Dependencies, Refresh…, the choice a cellview that changed on disk since editing began
 //! asks for, Detach library…, Break lock…, a relink to a folder that holds
 //! the library under another identity, and the cellviews a publication
 //! restore found moved on. Each acts through the model's library-file
@@ -241,7 +241,7 @@ pub fn library_file_label(intent: &LibraryFileIntent) -> &'static str {
     }
 }
 
-/// The commands Library actions offers over `library`, in order: for one
+/// The commands a library's row menu offers over `library`, in order: for one
 /// kept in a folder of its own its mode, Refresh…, Embed in project and
 /// Detach library…; for one held in the project, Move to its own folder….
 pub fn library_file_intents(model: &Model, library: &str) -> Vec<LibraryFileIntent> {
@@ -792,7 +792,7 @@ fn attach_dialog(
         .primary_enabled(preview.is_ok())
         .status(error.as_deref().map_or(
             Ok(Some(
-                "It opens read-only; make it editable from Library actions.",
+                "It opens read-only; Make editable on its row's menu in Library Manager changes that.",
             )),
             Err,
         ))

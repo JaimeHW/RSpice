@@ -393,6 +393,6 @@ pub(crate) fn require_no_configuration_roots(
     }
     let listed = names.join(", ");
     Err(format!(
-        "Configuration set roots still reference {scope} ({listed}). Rebind or remove those configurations first."
+        "Configurations start at a cell of {scope} ({listed}). Give them another top cell on Configuration, or delete them, first."
     ))
 }

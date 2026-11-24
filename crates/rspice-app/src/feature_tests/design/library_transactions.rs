@@ -934,7 +934,7 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         .delete_library("user")
         .expect_err("a configuration root cannot be left dangling");
     assert!(
-        configuration_error.contains("Configuration set roots still reference"),
+        configuration_error.contains("Configurations start at a cell of library 'user'"),
         "{configuration_error}"
     );
 
