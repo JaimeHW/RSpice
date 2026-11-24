@@ -1,6 +1,7 @@
 //! A run of any size has a working view, and the view keeps every tick: all
 //! the signals of a run of a hundred thousand stay plotted through a save
-//! and a reopen, and taking them all off is one step to undo. The view of a
+//! and a reopen, and taking them all off is one step to undo, which puts
+//! them back in their order even straight after the gesture. The view of a
 //! run of a million signals names the signals it plots and none of the rest,
 //! so it saves in a few kilobytes. A new document of a run, and a pane added
 //! to one, plot what the run's deck names and nothing else.
@@ -16,6 +17,7 @@ use rspice_app_results::workbench::documents::result_document::create_document;
 use rspice_app_results::workbench::documents::result_document::document_edit::{
     add_pane_choices, commit_open_dialog, open_add_pane,
 };
+use rspice_app_results::workbench::documents::result_document::working_view;
 use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
 use rspice_app_state::product::ResultDocumentId;
 use rspice_app_state::state::RetainedTrace;
@@ -163,6 +165,65 @@ fn a_hundred_thousand_signals_ticked_at_once_undo_and_redo_as_one_step() {
         ticked_and_plotted(&app.state),
         (SIGNALS, SIGNALS),
         "one redo puts every signal back"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_hundred_thousand_signals_taken_off_at_once_come_back_in_order_on_undo() {
+    const SIGNALS: usize = 100_000;
+    let mut app = app_on_the_plan();
+    run_plan_with(&mut app.state, signals(SIGNALS));
+    assert!(select_result_dataset(&mut app.state.results_parts(), 0));
+    quick_frame(&mut app.state);
+    let analysis = shown_analysis(&app.state);
+    let names = every_signal(&app.state);
+    let keys: Vec<_> = names
+        .iter()
+        .map(|name| {
+            ResultBrowserSelectionKey::Waveform(SourceWaveformPresentationKey::new(analysis, name))
+        })
+        .collect();
+    set_result_quantities_ticked(&mut app.state.results_parts(), &keys, true);
+    quick_frame(&mut app.state);
+
+    // Untick all, in one gesture, and the frame it is made in, as the
+    // stage draws it; Undo straight after.
+    set_result_quantities_ticked(&mut app.state.results_parts(), &keys, false);
+    {
+        let mut parts = app.state.results_parts();
+        working_view::sync(&mut parts);
+        working_view::capture_at_frame_end(&mut parts);
+    }
+    assert_eq!(ticked_and_plotted(&app.state).0, 0, "every tick is off");
+    assert!(app.command_key_available(WorkbenchCommand::Undo.key()));
+    app.execute_command_key(WorkbenchCommand::Undo.key());
+    quick_frame(&mut app.state);
+
+    assert_eq!(
+        ticked_and_plotted(&app.state),
+        (SIGNALS, SIGNALS),
+        "one undo puts every tick back"
+    );
+    let view = plan_view(&app.state);
+    let traces: Vec<(&str, bool)> = app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_document(view)
+        .expect("the plan's view")
+        .traces()
+        .iter()
+        .map(|trace| (trace.label.as_str(), trace.visible))
+        .collect();
+    assert_eq!(
+        traces,
+        names
+            .iter()
+            .map(|name| (name.as_str(), true))
+            .collect::<Vec<_>>(),
+        "the view plots them in the order the run lists them"
     );
 }
 
