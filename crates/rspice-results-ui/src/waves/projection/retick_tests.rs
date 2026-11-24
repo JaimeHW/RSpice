@@ -185,9 +185,12 @@ fn built(
     built
 }
 
-/// What a strip draws: each curve's signal, palette place, colour and
-/// whether it is drawn, and its X extent.
-fn drawn(model: &StripModel) -> (Vec<(String, Option<usize>, egui::Color32, bool)>, String) {
+/// One curve as a strip draws it: its signal, palette place, colour and
+/// whether it is drawn.
+type DrawnCurve = (String, Option<usize>, egui::Color32, bool);
+
+/// What a strip draws: each curve, and its X extent.
+fn drawn(model: &StripModel) -> (Vec<DrawnCurve>, String) {
     let curves = model
         .traces
         .iter()
