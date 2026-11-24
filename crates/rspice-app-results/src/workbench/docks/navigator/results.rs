@@ -61,10 +61,7 @@ pub(in crate::workbench) fn results(
         state.results.session.clear_checked_signals();
     }
     let query = BrowserQuery::parse(state.workbench.navigator_filter());
-    let kept = ticked_quantities(ui.ctx(), state);
-    let ticked = &*kept.ticked;
-    let ticked_ordered = &*kept.ordered;
-    let ticked_facts = kept.facts.clone();
+    let ticked = ticked_quantities(ui.ctx(), state);
     let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/layout read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
@@ -478,7 +475,7 @@ pub(in crate::workbench) fn results(
             order,
             scope,
         },
-        (tab == ResultsBrowserTab::Signals).then_some(ticked_ordered.as_slice()),
+        (tab == ResultsBrowserTab::Signals).then_some(&ticked),
         count_copy.as_deref(),
     );
     // What a batch action acts on: the ticked quantities, which for a
@@ -488,20 +485,6 @@ pub(in crate::workbench) fn results(
     // unticked what had just been ticked.
     if tab == ResultsBrowserTab::Signals && !ticked.is_empty() {
         let t = Tokens::get(ui.ctx());
-        let checked = &ticked;
-        let checked_ordered = ticked_ordered;
-        let TickedFacts {
-            exact_validation_error,
-            clipboard_sample_count,
-            datasets,
-            names,
-        } = ticked_facts;
-        let exact_evidence_available = exact_validation_error.is_none();
-        let clipboard_exact_available = exact_evidence_available
-            && !checked_ordered.is_empty()
-            && clipboard_sample_count <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
-        let compare_selection_compatible =
-            exact_evidence_available && checked_ordered.len() >= 2 && datasets >= 2 && names == 1;
         egui::Panel::bottom("workbench.results.selection-bar")
             .resizable(false)
             .show_separator_line(false)
@@ -521,7 +504,7 @@ pub(in crate::workbench) fn results(
                         ui.spacing_mut().item_spacing.x = 0.0;
                         ui.add_space(PANEL_SEARCH_MARGIN_X);
                         ui.label(
-                            egui::RichText::new(format!("{} ticked", checked.len()))
+                            egui::RichText::new(format!("{} ticked", ticked.len()))
                                 .font(theme::sans(tokens::FS_0, FontWeight::Medium))
                                 .color(t.color.text),
                         );
@@ -541,7 +524,8 @@ pub(in crate::workbench) fn results(
                             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear ticks")
                         });
                         if clear.clicked() {
-                        set_result_quantities_ticked(state, checked_ordered, false);
+                        let ordered = ticked.ordered(state);
+                        set_result_quantities_ticked(state, ordered, false);
                         state.results.session.clear_checked_signals();
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -550,6 +534,20 @@ pub(in crate::workbench) fn results(
                                 .menu()
                                 .show(ui);
                             button_menu(&actions, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                // What the actions need to know of the ticked quantities is
+                // read while the menu is open, not on every frame.
+                let TickedFacts {
+                    exact_validation_error,
+                    clipboard_sample_count,
+                    datasets,
+                    names,
+                } = ticked.facts(state).clone();
+                let exact_evidence_available = exact_validation_error.is_none();
+                let clipboard_exact_available = exact_evidence_available
+                    && !ticked.is_empty()
+                    && clipboard_sample_count <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
+                let compare_selection_compatible =
+                    exact_evidence_available && ticked.len() >= 2 && datasets >= 2 && names == 1;
                 if ui
                     .add_enabled(
                         signal_list.has_quantities(),
@@ -566,12 +564,13 @@ pub(in crate::workbench) fn results(
                 }
                 if ui
                     .add_enabled(
-                        !checked_ordered.is_empty(),
+                        !ticked.is_empty(),
                         egui::Button::new("Copy names"),
                     )
                     .clicked()
                 {
-                    let result = checked_ordered
+                    let result = ticked
+                        .ordered(state)
                         .iter()
                         .map(|key| {
                             crate::workbench::documents::result_document::result_browser_selection_canonical_name(
@@ -591,7 +590,7 @@ pub(in crate::workbench) fn results(
                     clipboard_exact_available,
                     egui::Button::new("Copy data"),
                 );
-                if !checked_ordered.is_empty() && !clipboard_exact_available {
+                if !ticked.is_empty() && !clipboard_exact_available {
                     copy_exact.clone().on_disabled_hover_text(
                         exact_validation_error.clone().unwrap_or_else(|| format!(
                             "The waveform portion holds {clipboard_sample_count} samples; clipboard copy is limited to {RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT}. Export it instead."
@@ -600,7 +599,7 @@ pub(in crate::workbench) fn results(
                 }
                 if copy_exact.clicked() {
                     match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
-                        checked_ordered,
+                        ticked.ordered(state),
                         &state.model.simulation.retained.runs,
                     ) {
                         Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
@@ -615,16 +614,17 @@ pub(in crate::workbench) fn results(
                     ui.close();
                 }
                 let export_exact = ui.add_enabled(
-                    exact_evidence_available && !checked_ordered.is_empty(),
+                    exact_evidence_available && !ticked.is_empty(),
                     egui::Button::new("Export\u{2026}"),
                 );
                 if let Some(error) = exact_validation_error.as_deref() {
                     export_exact.clone().on_disabled_hover_text(error);
                 }
                 if export_exact.clicked() {
+                    let ordered = ticked.ordered(state).to_vec();
                     state.workbench
                         .outbox
-                        .push(ExportResultQuantities(checked_ordered.clone()));
+                        .push(ExportResultQuantities(ordered));
                     ui.close();
                 }
                 ui.separator();
@@ -633,7 +633,7 @@ pub(in crate::workbench) fn results(
                         && compare_enabled(state),
                     egui::Button::new("Compare across datasets\u{2026}"),
                 );
-                if !checked_ordered.is_empty() && !compare_selection_compatible {
+                if !ticked.is_empty() && !compare_selection_compatible {
                     compare.clone().on_disabled_hover_text(
                         exact_validation_error.as_deref().unwrap_or(
                             "Select the same signal in at least two runs.",
@@ -641,7 +641,7 @@ pub(in crate::workbench) fn results(
                     );
                 }
                 if compare.clicked() {
-                    if let Some(first) = checked_ordered.first()
+                    if let Some(first) = ticked.ordered(state).first()
                         && select_result_browser_key(state, first)
                     {
                         execute(state, ResultsCommand::CompareResultDatasets.key());
@@ -650,7 +650,7 @@ pub(in crate::workbench) fn results(
                 }
                 ui.separator();
                 rspice_ui_kit::widgets::menu_button(ui, "Save ticked as set\u{2026}", |ui| {
-                    save_ticked_as_set(ui, state, checked_ordered);
+                    save_ticked_as_set(ui, state, &ticked);
                 });
                             });
                         });
@@ -669,7 +669,7 @@ pub(in crate::workbench) fn results(
             selected_trace.as_ref(),
             selected_artifact.as_ref(),
             &visible_result_keys,
-            (ticked, ticked_ordered),
+            &ticked,
             !query.is_empty(),
             kind,
             scope,
@@ -896,67 +896,257 @@ pub(in crate::workbench) fn results(
         });
 }
 
-/// The ticked quantities, the order the runs hold them in, and what the band
-/// of batch actions needs to know of them, kept between frames with what
-/// they were read from: reading them walks every signal of the active run.
+/// The ticked quantities, kept between frames with what they were read
+/// from: reading them walks every signal ticked, so a tick changes them by
+/// the signals it edited instead. The order the runs hold them in, and what
+/// the band of batch actions needs to know of them, are read when an action
+/// asks for them, never on the frame a tick changes them.
 #[derive(Clone)]
-struct TickedQuantities {
+pub(super) struct TickedQuantities {
     revision: crate::state::RunHistoryRevision,
     /// The reader's visibility overrides, compared by revision.
     visibility: rspice_vocabulary::source_revision::SourceRevision,
     fingerprint: u64,
-    ticked: std::sync::Arc<std::collections::HashSet<ResultBrowserSelectionKey>>,
-    ordered: std::sync::Arc<Vec<ResultBrowserSelectionKey>>,
+    pub(super) ticked: std::sync::Arc<std::collections::HashSet<ResultBrowserSelectionKey>>,
+    /// Read the first time an action asks after the ticks changed.
+    listed: std::sync::Arc<std::sync::OnceLock<TickedList>>,
+}
+
+/// The ticked quantities in the order the runs hold them, each resolved
+/// once, and what the band of batch actions needs to know of them.
+struct TickedList {
+    ordered: Vec<ResultBrowserSelectionKey>,
     facts: TickedFacts,
 }
 
-/// The ticked quantities, read again only when the retained runs or
+impl TickedQuantities {
+    pub(super) fn len(&self) -> usize {
+        self.ticked.len()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.ticked.is_empty()
+    }
+
+    pub(super) fn contains(&self, key: &ResultBrowserSelectionKey) -> bool {
+        self.ticked.contains(key)
+    }
+
+    /// The ticked quantities in the order the runs hold them: what a set
+    /// saves and the band's actions act on.
+    pub(super) fn ordered(&self, state: &ResultsParts<'_>) -> &[ResultBrowserSelectionKey] {
+        &self.listed(state).ordered
+    }
+
+    fn facts(&self, state: &ResultsParts<'_>) -> &TickedFacts {
+        &self.listed(state).facts
+    }
+
+    fn listed(&self, state: &ResultsParts<'_>) -> &TickedList {
+        self.listed.get_or_init(|| {
+            let selection =
+                crate::workbench::documents::result_document::resolve_result_browser_selection(
+                    &self.ticked,
+                    &state.model.simulation.retained.runs,
+                    (&state.results.session.signal_indices, &self.revision),
+                );
+            let facts = TickedFacts::of(&selection, state);
+            TickedList {
+                ordered: selection.into_iter().map(|(key, _)| key).collect(),
+                facts,
+            }
+        })
+    }
+}
+
+/// The ticked quantities, read again whole only when the retained runs or
 /// something else they are read from changed since the frame that last read
-/// them.
-fn ticked_quantities(ctx: &egui::Context, state: &ResultsParts<'_>) -> TickedQuantities {
+/// them, or the reader's ticks changed in ways no longer known; otherwise
+/// changed by the signals whose ticks were edited since.
+pub(super) fn ticked_quantities(ctx: &egui::Context, state: &ResultsParts<'_>) -> TickedQuantities {
     let id = egui::Id::new("rspice.results.browser.ticked");
     let revision = state.model.simulation.retained.runs.revision();
     let visibility = state.results.session.waveform_visibility.revision();
     let fingerprint = ticked_fingerprint(state);
-    if let Some(kept) = ctx.data(|data| data.get_temp::<TickedQuantities>(id))
-        && kept.revision == revision
-        && kept.visibility == visibility
-        && kept.fingerprint == fingerprint
-    {
-        return kept;
-    }
+    // Taken out of the frames' memory, so an edit changes the set they hold
+    // in place rather than a copy of it.
+    let kept = ctx
+        .data_mut(|data| {
+            data.get_temp_mut_or_default::<Option<TickedQuantities>>(id)
+                .take()
+        })
+        .filter(|kept| kept.revision == revision && kept.fingerprint == fingerprint);
+    let kept = match kept {
+        Some(kept) if kept.visibility == visibility => kept,
+        Some(kept) => follow_ticks(kept, state, visibility.clone())
+            .unwrap_or_else(|| read_ticked(state, revision, visibility, fingerprint)),
+        None => read_ticked(state, revision, visibility, fingerprint),
+    };
+    ctx.data_mut(|data| data.insert_temp(id, Some(kept.clone())));
+    kept
+}
+
+/// Every ticked quantity, read whole.
+pub(super) fn read_ticked(
+    state: &ResultsParts<'_>,
+    revision: crate::state::RunHistoryRevision,
+    visibility: rspice_vocabulary::source_revision::SourceRevision,
+    fingerprint: u64,
+) -> TickedQuantities {
     let mut ticked = ticked_result_quantities(state.model, state.results);
     // An event net's or a bus's row is ticked while its lane is on the plot,
     // as a curve's row is while the curve is.
     ticked.extend(plotted_event_rows(state));
-    // What a set saves and the band's actions act on: the ticked quantities in
-    // the order the runs hold them, each resolved once.
-    let (ordered, facts) = {
-        let selection =
-            crate::workbench::documents::result_document::resolve_result_browser_selection(
-                &ticked,
-                &state.model.simulation.retained.runs,
-                (&state.results.session.signal_indices, &revision),
-            );
-        let facts = TickedFacts::of(&selection, state);
-        (
-            selection
-                .into_iter()
-                .map(|(key, _)| key)
-                .collect::<Vec<_>>(),
-            facts,
-        )
-    };
-    let kept = TickedQuantities {
+    TickedQuantities {
         revision,
         visibility,
         fingerprint,
         ticked: std::sync::Arc::new(ticked),
-        ordered: std::sync::Arc::new(ordered),
-        facts,
-    };
-    ctx.data_mut(|data| data.insert_temp(id, kept.clone()));
-    kept
+        listed: std::sync::Arc::default(),
+    }
+}
+
+/// `kept`, changed by the reader's ticks of the signals edited since it was
+/// read: each edited signal of the active run is ticked again as a whole
+/// read ticks it, with the curves it overlays on the runs overlaid, and an
+/// event analysis an edit touched has its rows read again. `None` when the
+/// edits are no longer known or an edited analysis has no index yet: only a
+/// whole read follows.
+pub(super) fn follow_ticks(
+    mut kept: TickedQuantities,
+    state: &ResultsParts<'_>,
+    visibility: rspice_vocabulary::source_revision::SourceRevision,
+) -> Option<TickedQuantities> {
+    use std::collections::HashSet;
+    let edited: HashSet<&SourceWaveformPresentationKey> = state
+        .results
+        .session
+        .waveform_visibility
+        .edits_since(&kept.visibility)?
+        .collect();
+    let simulation = &state.model.simulation;
+    let checked = &state.results.session.checked_result_quantities;
+    if let Some(active) = simulation.active_run() {
+        let revision = simulation.retained.runs.revision();
+        let indices = &state.results.session.signal_indices;
+        let overlaid = simulation
+            .view
+            .overlay_dataset_ids
+            .iter()
+            .filter_map(|dataset| simulation.retained.run_by_dataset_id(*dataset))
+            .collect::<Vec<_>>();
+        // Each analysis of the active run, with the analyses of the runs
+        // overlaid on it, as a whole read pairs them.
+        let analyses = active
+            .analyses
+            .iter()
+            .map(|analysis| {
+                let overlays = overlaid
+                    .iter()
+                    .filter_map(|run| {
+                        let other = rspice_results_ui::waves::matching_overlay_analysis(
+                            analysis.as_ref(),
+                            run,
+                        )?;
+                        Some((AnalysisPresentationKey::new(run.dataset_id, other), other))
+                    })
+                    .collect::<Vec<_>>();
+                (
+                    AnalysisPresentationKey::new(active.dataset_id, analysis),
+                    analysis,
+                    overlays,
+                )
+            })
+            .collect::<Vec<_>>();
+        // Whether a whole read ticks the signal `name` of the active run's
+        // analysis `at`: one of its columns of that name is on the plot.
+        let plotted = |at: usize, name: &str| -> Option<bool> {
+            let (key, analysis, _) = &analyses[at];
+            let index = indices.index(&revision, *key, &analysis.data)?;
+            let signal = SourceWaveformPresentationKey::new(*key, name);
+            Some(index.columns_named(&analysis.data, name).any(|column| {
+                let waveform = &analysis.waveforms[column];
+                crate::workbench::documents::result_document::waveform_plotted(
+                    state.model,
+                    state.results,
+                    &signal,
+                    &waveform.name,
+                    waveform.visible,
+                )
+            }))
+        };
+        let ticked = std::sync::Arc::make_mut(&mut kept.ticked);
+        let mut events = HashSet::new();
+        for signal in edited {
+            let Some(at) = analyses
+                .iter()
+                .position(|(key, ..)| *key == signal.analysis())
+            else {
+                // Another run's ticks: a whole read reads the active run's.
+                continue;
+            };
+            let (_, analysis, overlays) = &analyses[at];
+            if matches!(
+                analysis.result_payload,
+                Some(crate::state::AnalysisResultPayload::TransientEvents { .. })
+            ) {
+                events.insert(at);
+            }
+            let name = signal.source_name();
+            let on = plotted(at, name)?;
+            let own = ResultBrowserSelectionKey::Waveform(signal.clone());
+            if on {
+                ticked.insert(own);
+            } else if !checked.contains(&own) {
+                ticked.remove(&own);
+            }
+            for (other_key, other) in overlays {
+                let overlays = match indices.index(&revision, *other_key, other) {
+                    Some(index) => index.columns_named(other, name).next().is_some(),
+                    None => other.waveforms.iter().any(|waveform| waveform.name == name),
+                };
+                if !overlays {
+                    continue;
+                }
+                let overlay = ResultBrowserSelectionKey::Waveform(
+                    SourceWaveformPresentationKey::new(*other_key, name),
+                );
+                // Another analysis of the active run on the same overlaid
+                // one may still plot the signal there.
+                let still = on
+                    || checked.contains(&overlay)
+                    || analyses.iter().enumerate().any(|(place, (_, _, others))| {
+                        place != at
+                            && others.iter().any(|(key, _)| key == other_key)
+                            && plotted(place, name) == Some(true)
+                    });
+                if still {
+                    ticked.insert(overlay);
+                } else {
+                    ticked.remove(&overlay);
+                }
+            }
+        }
+        // An event analysis's rows are read again as a whole read reads
+        // them: an edit of a net may tick or untick a bus that holds it.
+        for at in events {
+            let (key, analysis, _) = &analyses[at];
+            for artifact in retained_result_artifacts(analysis, *key) {
+                if !is_plottable_artifact(artifact.identity.canonical_name()) {
+                    continue;
+                }
+                let row = ResultBrowserSelectionKey::Artifact(artifact.identity);
+                if result_quantity_ticked(state, &row) || checked.contains(&row) {
+                    ticked.insert(row);
+                } else {
+                    ticked.remove(&row);
+                }
+            }
+        }
+    }
+    kept.visibility = visibility;
+    kept.listed = std::sync::Arc::default();
+    Some(kept)
 }
 
 /// Everything besides the retained runs themselves that what is ticked is
@@ -1489,7 +1679,7 @@ fn results_browser_toolbar(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     facets: BrowserFacets,
-    signals: Option<&[ResultBrowserSelectionKey]>,
+    signals: Option<&TickedQuantities>,
     count: Option<&str>,
 ) {
     let t = Tokens::get(ui.ctx());

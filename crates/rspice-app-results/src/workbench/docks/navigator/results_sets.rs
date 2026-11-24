@@ -274,7 +274,7 @@ fn forget_draft(ui: &Ui, id: egui::Id) {
 pub(super) fn signal_sets_menu(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
-    ticked: &[ResultBrowserSelectionKey],
+    ticked: &super::results::TickedQuantities,
     width: f32,
 ) {
     let count = state.results.signal_sets.len();
@@ -303,7 +303,7 @@ pub(super) fn signal_sets_menu(
 pub(super) fn save_ticked_as_set(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
-    ticked: &[ResultBrowserSelectionKey],
+    ticked: &super::results::TickedQuantities,
 ) -> bool {
     let new_id = draft_id("new");
     let mut draft = take_draft(ui, new_id, "");
@@ -330,7 +330,8 @@ pub(super) fn save_ticked_as_set(
         save |= button.clicked();
     });
     if save {
-        match save_signal_set(state, &draft, ticked) {
+        let ordered = ticked.ordered(state);
+        match save_signal_set(state, &draft, ordered) {
             Ok(message) => {
                 state.workbench.prompt(message);
                 forget_draft(ui, new_id);
@@ -347,7 +348,7 @@ pub(super) fn save_ticked_as_set(
 fn signal_sets_menu_body(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
-    ticked: &[ResultBrowserSelectionKey],
+    ticked: &super::results::TickedQuantities,
 ) {
     let t = Tokens::get(ui.ctx());
     ui.set_min_width(220.0);
@@ -379,7 +380,7 @@ fn signal_sets_menu_body(
 fn signal_set_submenu(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
-    ticked: &[ResultBrowserSelectionKey],
+    ticked: &super::results::TickedQuantities,
     index: usize,
     name: &str,
 ) {
@@ -398,7 +399,8 @@ fn signal_set_submenu(
         egui::Button::new(format!("Add the {} ticked", ticked.len())),
     );
     if add.clicked() {
-        let message = add_to_signal_set(state, index, ticked).unwrap_or_else(|error| error);
+        let ordered = ticked.ordered(state);
+        let message = add_to_signal_set(state, index, ordered).unwrap_or_else(|error| error);
         state.workbench.prompt(message);
         ui.close();
         return;

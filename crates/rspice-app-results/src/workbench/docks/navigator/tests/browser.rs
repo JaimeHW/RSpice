@@ -6,10 +6,11 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, ResultsTestHost, set_result_quantity_ticked, test_fixtures,
+    AnalysisPresentationKey, ResultsTestHost, set_result_quantities_ticked,
+    set_result_quantity_ticked, test_fixtures,
 };
 
-use super::super::results::results;
+use super::super::results::{follow_ticks, read_ticked, results, ticked_quantities};
 
 /// A transient run of a small hierarchical design: two top-level nets, an
 /// instance `x1` holding a voltage, a current and a nested instance, and a
@@ -664,4 +665,71 @@ fn the_flat_list_sorts_in_run_order_and_by_unit() {
     let amps = by_unit.iter().position(|name| name == "I(X1.V1)").unwrap();
     let first_volt = by_unit.iter().position(|name| name == "V(in)").unwrap();
     assert!(amps < first_volt, "A before V: {by_unit:?}");
+}
+
+/// One tick while hundreds are ticked changes the kept ticks by the signal
+/// it ticks, here and on the run overlaid, and leaves them what reading every
+/// tick again reads.
+#[test]
+fn one_tick_among_many_leaves_the_ticks_a_whole_read_reads() {
+    let names = (0..600).map(|n| format!("V(n{n})")).collect::<Vec<_>>();
+    let mut host = ResultsTestHost::default();
+    for _ in 0..2 {
+        let run = host.model.simulation.start_run();
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(
+                names
+                    .iter()
+                    .map(|name| RetainedTrace::new(name, vec![0.0, 1.0], vec![0.0, 1.0], "#fff"))
+                    .collect(),
+            ),
+        );
+        run.mark_running().expect("the run starts");
+        run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+            .expect("the run finishes");
+        for waveform in &mut run.analyses[0].waveforms {
+            waveform.visible = false;
+        }
+    }
+    let simulation = &mut host.model.simulation;
+    let earlier = simulation.retained.runs[1].dataset_id;
+    simulation.view.overlay_dataset_ids.push(earlier);
+    let active = &simulation.retained.runs[0];
+    let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
+    let key = |n: usize| {
+        ResultBrowserSelectionKey::Waveform(
+            rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+                analysis,
+                names[n].as_str(),
+            ),
+        )
+    };
+    let ctx = egui::Context::default();
+    let mut state = host.results_parts();
+    let many = (0..500).map(key).collect::<Vec<_>>();
+    set_result_quantities_ticked(&mut state, &many, true);
+    let kept = ticked_quantities(&ctx, &state);
+    assert_eq!(
+        kept.len(),
+        1000,
+        "each tick, and its curve on the run overlaid"
+    );
+
+    set_result_quantity_ticked(&mut state, &key(550), true);
+    set_result_quantity_ticked(&mut state, &key(3), false);
+    let visibility = state.results.session.waveform_visibility.revision();
+    let revision = state.model.simulation.retained.runs.revision();
+    let whole = read_ticked(&state, revision, visibility.clone(), 0);
+    assert_eq!(whole.len(), 1000);
+    assert!(whole.contains(&key(550)) && !whole.contains(&key(3)));
+    let followed = follow_ticks(kept, &state, visibility).expect("the edits are known");
+    assert_eq!(
+        *followed.ticked, *whole.ticked,
+        "the ticks follow the edits"
+    );
+    assert_eq!(
+        *ticked_quantities(&ctx, &state).ticked,
+        *whole.ticked,
+        "the frame's ticks follow them too"
+    );
 }

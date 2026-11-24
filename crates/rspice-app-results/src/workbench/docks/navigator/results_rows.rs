@@ -998,10 +998,7 @@ pub(super) fn show_virtualized_result_signals(
     selected_trace: Option<&rspice_results_ui::selection::SelectedResultTrace>,
     selected_artifact: Option<&ResultArtifactPresentationKey>,
     ordered_visible: &VisibleKeys<'_>,
-    (ticked_set, ticked): (
-        &std::collections::HashSet<ResultBrowserSelectionKey>,
-        &[ResultBrowserSelectionKey],
-    ),
+    ticked: &super::results::TickedQuantities,
     filtering: bool,
     kind: ResultsBrowserKind,
     scope: ResultsBrowserScope,
@@ -1245,7 +1242,7 @@ pub(super) fn show_virtualized_result_signals(
                             });
                             // The tick is read as the row is drawn, so ticking
                             // a signal leaves the row model as it was.
-                            let signal_ticked = ticked_set.contains(
+                            let signal_ticked = ticked.contains(
                                 &ResultBrowserSelectionKey::Waveform(signal.identity.clone()),
                             );
                             let responses = result_quantity_row(
@@ -1271,6 +1268,7 @@ pub(super) fn show_virtualized_result_signals(
                                     ui.ctx(),
                                     ResultBrowserSelectionKey::Waveform(signal.identity.clone()),
                                     ticked,
+                                    state,
                                 );
                             }
                             if responses.check.clicked() {
@@ -1358,12 +1356,12 @@ pub(super) fn show_virtualized_result_signals(
                                 // The tick is the one the count above reads: an
                                 // event net's or a bus's row is ticked while its
                                 // lane is plotted, however it got there.
-                                ticked_set.contains(&selection_key),
+                                ticked.contains(&selection_key),
                             );
                             if responses.selection.drag_started()
                                 && is_plottable_artifact(artifact.identity.canonical_name())
                             {
-                                start_browser_drag(ui.ctx(), selection_key.clone(), ticked);
+                                start_browser_drag(ui.ctx(), selection_key.clone(), ticked, state);
                             }
                             if responses.check.clicked() {
                                 update_result_browser_multi_selection(state,
@@ -1649,10 +1647,11 @@ fn instance_row(
 fn start_browser_drag(
     ctx: &egui::Context,
     key: ResultBrowserSelectionKey,
-    ticked: &[ResultBrowserSelectionKey],
+    ticked: &super::results::TickedQuantities,
+    state: &ResultsParts<'_>,
 ) {
     let keys = if ticked.len() > 1 && ticked.contains(&key) {
-        ticked.to_vec()
+        ticked.ordered(state).to_vec()
     } else {
         vec![key]
     };
